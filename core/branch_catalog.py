@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unidecode import unidecode
+
 from core.models import Sucursal, sucursales_operativas_q
 
 EXCLUDED_BRANCH_CODES: tuple[str, ...] = ("TMP1", "MATRIZDBG")
@@ -64,3 +66,48 @@ def eligible_operational_branch_qs(reference_date=None):
         .exclude(codigo__in=EXCLUDED_BRANCH_CODES)
         .order_by("codigo")
     )
+
+
+def _normalizar_texto_sucursal(texto: str | None) -> str:
+    if not texto:
+        return ""
+    return " ".join(unidecode(str(texto)).lower().split())
+
+
+def indice_sucursales_por_texto(sucursal_qs=None) -> dict[str, "Sucursal"]:
+    """Índice de sucursales activas por nombre/código normalizado.
+
+    Fuente única para resolver texto libre (p.ej. `Empleado.sucursal`) a una
+    Sucursal, sin depender de igualdad exacta: tolerante al prefijo 'Sucursal ',
+    a los acentos y a los separadores del código. `sucursal_qs` permite pasar el
+    modelo histórico desde una migración de datos.
+    """
+    qs = sucursal_qs if sucursal_qs is not None else Sucursal.objects.filter(activa=True)
+    indice: dict[str, Sucursal] = {}
+    for sucursal in qs:
+        nombre_norm = _normalizar_texto_sucursal(sucursal.nombre)
+        claves = {
+            nombre_norm,
+            _normalizar_texto_sucursal(sucursal.codigo),
+            _normalizar_texto_sucursal((sucursal.codigo or "").replace("_", " ")),
+        }
+        if nombre_norm.startswith("sucursal "):
+            claves.add(nombre_norm[len("sucursal "):])
+        for clave in claves:
+            if clave:
+                indice.setdefault(clave, sucursal)
+    return indice
+
+
+def resolver_sucursal_por_texto(texto: str | None, indice: dict | None = None, sucursal_qs=None) -> "Sucursal | None":
+    """Resuelve texto libre de sucursal a una Sucursal por nombre/código normalizado."""
+    objetivo = _normalizar_texto_sucursal(texto)
+    if not objetivo:
+        return None
+    if indice is None:
+        indice = indice_sucursales_por_texto(sucursal_qs)
+    if objetivo in indice:
+        return indice[objetivo]
+    if objetivo.startswith("sucursal "):
+        return indice.get(objetivo[len("sucursal "):])
+    return None

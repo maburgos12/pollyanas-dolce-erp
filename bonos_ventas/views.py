@@ -59,39 +59,10 @@ class ConfigBonoVentasPeriodoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="inicializar-bonos")
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
-        empleados = empleados_elegibles_bonos_ventas()
-        sucursal_matriz = Sucursal.objects.filter(nombre__iexact="matriz", activa=True).first()
-        creados = 0
-        sin_sucursal = []
-        for empleado in empleados:
-            sucursal_nombre = (empleado.sucursal or "").strip()
-            if not sucursal_nombre:
-                if sucursal_matriz and (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR":
-                    sucursal_obj = sucursal_matriz
-                else:
-                    sin_sucursal.append(empleado.nombre)
-                    continue
-            else:
-                try:
-                    sucursal_obj = Sucursal.objects.get(nombre__iexact=sucursal_nombre, activa=True)
-                except Sucursal.DoesNotExist:
-                    sin_sucursal.append(f"{empleado.nombre} (sucursal desconocida: {sucursal_nombre!r})")
-                    continue
-            _, created = BonoVentasEmpleado.objects.get_or_create(
-                periodo=periodo,
-                empleado=empleado,
-                defaults={"sucursal": sucursal_obj},
-            )
-            if created:
-                creados += 1
-        return Response(
-            {
-                "creados": creados,
-                "total_ventas": empleados.count(),
-                "sin_sucursal": sin_sucursal,
-            },
-            status=status.HTTP_200_OK,
-        )
+        # Fuente única compartida con el dashboard (resuelve sucursal por FK/normalización).
+        from .views_html import _inicializar_bonos
+
+        return Response(_inicializar_bonos(periodo), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="sync-checador")
     def sync_checador(self, request, pk=None):
