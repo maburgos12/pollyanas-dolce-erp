@@ -35,6 +35,18 @@ POINT_BRANCH_CODE_ALIASES = {
     "TUNEL": "EL_TUNEL",
 }
 
+POINT_BRANCH_CANONICAL_NAMES = {
+    "COLOSIO": "Sucursal Colosio",
+    "CRUCERO": "Sucursal Crucero",
+    "EL_TUNEL": "Sucursal El Túnel",
+    "GUAMUCHIL": "Sucursal Guamuchil",
+    "LAS_GLORIAS": "Sucursal Las Glorias",
+    "LEYVA": "Sucursal Leyva",
+    "MATRIZ": "Sucursal Matriz",
+    "PAYAN": "Sucursal Payan",
+    "PLAZA_NIO": "Sucursal Plaza Nío",
+}
+
 
 def display_branch_name(name: str | None) -> str:
     value = (name or "").strip()
@@ -45,6 +57,14 @@ def display_branch_name(name: str | None) -> str:
 
 def display_branch(branch: Sucursal | None) -> str:
     return display_branch_name(branch.nombre if branch else "")
+
+
+def canonical_branch_catalog_name(code: str | None, name: str | None) -> str:
+    normalized_code = canonical_point_branch_code(code)
+    explicit_name = POINT_BRANCH_CANONICAL_NAMES.get(normalized_code)
+    if explicit_name:
+        return explicit_name
+    return display_branch_name(name)
 
 
 def canonical_point_active_branch_qs():

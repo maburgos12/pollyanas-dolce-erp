@@ -21,7 +21,7 @@ def asignacion_sucursal_view(request):
 def asignacion_sucursales_api(request):
     rows = list(
         Sucursal.objects.filter(activa=True)
-        .exclude(nombre__in=["Matriz", "CEDIS", "Devoluciones", "Almacén"])
+        .exclude(codigo__in=["MATRIZ", "CEDIS", "DEVOLUCIONES", "ALMACEN"])
         .order_by("nombre")
         .values("id", "nombre", "activa")
     )
