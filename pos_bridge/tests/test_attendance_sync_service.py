@@ -12,6 +12,23 @@ from pos_bridge.services.attendance_sync_service import PointAttendanceSyncServi
 from rrhh.models import AsistenciaEmpleado, Empleado, Turno
 
 
+class ResolveErpBranchTests(TestCase):
+    """FASE 2: la resolución Point->Sucursal usa el resolver canónico (no nombre exacto)."""
+
+    def test_resuelve_por_nombre_viejo_acentuado(self):
+        suc = Sucursal.objects.create(codigo="PAYAN", nombre="Sucursal Payan", activa=True)
+        # Point manda el nombre viejo/acentuado; debe resolver al catálogo renombrado.
+        self.assertEqual(PointAttendanceSyncService._resolve_erp_branch("", "Payán"), suc)
+
+    def test_resuelve_por_external_id_codigo(self):
+        suc = Sucursal.objects.create(codigo="GUAMUCHIL", nombre="Sucursal Guamuchil", activa=True)
+        self.assertEqual(PointAttendanceSyncService._resolve_erp_branch("GUAMUCHIL", ""), suc)
+
+    def test_sin_match_devuelve_none(self):
+        Sucursal.objects.create(codigo="PAYAN", nombre="Sucursal Payan", activa=True)
+        self.assertIsNone(PointAttendanceSyncService._resolve_erp_branch("", "Inexistente"))
+
+
 class FakeSettings:
     base_url = "https://app.pointmeup.test"
     timeout_ms = 30000

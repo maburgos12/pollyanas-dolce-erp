@@ -10,6 +10,7 @@ from django.core.management.base import BaseCommand
 from django.db.models import Sum
 from django.utils.text import slugify
 
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointMonthlySummary
 from reportes.models import FactVentaDiaria
@@ -44,7 +45,7 @@ class Command(BaseCommand):
         for candidate in PointBranch.objects.select_related("erp_branch").filter(erp_branch__isnull=False):
             if slugify(candidate.name or "") == normalized_branch:
                 return candidate.erp_branch
-        return Sucursal.objects.filter(nombre__iexact=summary.branch).order_by("id").first()
+        return resolver_sucursal_por_texto(summary.branch)
 
     def _classify(self, pct_diff: Decimal | None) -> str:
         if pct_diff is None:
