@@ -13,6 +13,7 @@ from django.db.models import Sum
 from django.utils.text import slugify
 from openpyxl import load_workbook
 
+from core.branch_catalog import indice_sucursales_por_texto, resolver_sucursal_por_texto
 from core.models import Sucursal
 from reportes.models import (
     AreaPresupuesto,
@@ -521,14 +522,16 @@ class PresupuestoMaestroImportService:
         raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
     def _resolve_branch(self, value: object) -> Sucursal | None:
+        # FASE 2: resolver canónico único (por nombre/código normalizado, tolerante a
+        # prefijo 'Sucursal ' y acentos), en vez de igualdad/contains de texto frágil.
+        # Índice cacheado por instancia para no re-consultar el catálogo por fila.
         raw = str(value or "").strip()
         if not raw:
             return None
-        return (
-            Sucursal.objects.filter(codigo__iexact=raw).first()
-            or Sucursal.objects.filter(nombre__iexact=raw).first()
-            or Sucursal.objects.filter(nombre__icontains=raw).first()
-        )
+        indice = getattr(self, "_branch_index", None)
+        if indice is None:
+            indice = self._branch_index = indice_sucursales_por_texto()
+        return resolver_sucursal_por_texto(raw, indice=indice)
 
     @transaction.atomic
     def import_file(

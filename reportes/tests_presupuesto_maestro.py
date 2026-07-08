@@ -16,6 +16,17 @@ from reportes.services_presupuesto_maestro import PresupuestoMaestroImportServic
 
 
 class PresupuestoMaestroTests(TestCase):
+    def test_resolve_branch_usa_resolver_canonico_pese_a_rename(self):
+        from core.models import Sucursal
+
+        payan = Sucursal.objects.create(codigo="PAYAN", nombre="Sucursal Payan", activa=True)
+        service = PresupuestoMaestroImportService()
+        # Nombre viejo/acentuado y código deben resolver al catálogo renombrado.
+        self.assertEqual(service._resolve_branch("Payán"), payan)
+        self.assertEqual(service._resolve_branch("PAYAN"), payan)
+        self.assertEqual(service._resolve_branch("Sucursal Payan"), payan)
+        self.assertIsNone(service._resolve_branch("No existe"))
+
     def _csv_file(self, rows):
         tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False, encoding="utf-8")
         writer = csv.DictWriter(
