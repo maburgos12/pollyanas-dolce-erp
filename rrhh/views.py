@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 
 from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.audit import log_event
 from core.models import Sucursal
 
@@ -1312,6 +1313,9 @@ def empleados(request):
                 empleado.telefono = (request.POST.get("telefono") or "").strip()
                 empleado.email = (request.POST.get("email") or "").strip()
                 empleado.sucursal = (request.POST.get("sucursal") or "").strip()
+                # Mantener sincronizado el FK canónico (FASE 2): editar la sucursal aquí
+                # no debe dejar sucursal_ref viejo. El texto queda como display/legacy.
+                empleado.sucursal_ref = resolver_sucursal_por_texto(empleado.sucursal)
                 empleado.activo = request.POST.get("activo") == "on"
                 try:
                     empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
