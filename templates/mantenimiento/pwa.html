@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260614-ui100-v1">
+    <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260707-mobile-operativo-v7">
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
   </head>
   <body>
@@ -33,6 +33,12 @@
         activos: [],
         sucursales: [],
         proveedores: [],
+        proveedorImportables: [],
+        planes: [],
+        planChoices: {tipos: [], estatus: []},
+        cancelaciones: {puede_resolver: false, items: []},
+        resumen: null,
+        catalogos: null,
         unidades: [],
         tiposServicio: [],
         ordenes: [],
@@ -40,6 +46,8 @@
         bandejaFiltro: "todos",
         ordenActual: null,
         filtroOrdenes: "abiertas",
+        busquedaOrdenes: "",
+        proveedorNuevo: "",
         busquedaEquipo: "",
         sucursalFiltro: "",
         equipoDraft: emptyEquipoDraft(),
@@ -167,12 +175,19 @@
       }
 
       function appGlyph(name) {
+        const lu = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
         const icons = {
-          equipo: `<svg viewBox="0 0 32 32"><path class="gold-fill" d="M10 21l3 3 9-9-3-3z"/><path class="stroke" d="M10 21l3 3 9-9-3-3-9 9Z"/><path class="gold-stroke" d="M20 7c1.6-.5 3.5-.2 4.8 1.1l-3.2 3.2 2.1 2.1 3.2-3.2c.8 2.5-.4 5.4-2.9 6.6"/><path class="stroke" d="M8 24l-2 2"/></svg>`,
-          vehiculo: `<svg viewBox="0 0 32 32"><path class="soft" d="M8 14h16v8H8z"/><path class="stroke" d="M11 23h.1M22 23h.1M11 14l2-5h7l3 5"/><path class="gold-stroke" d="M23 7l2 2-5 5-2-2 5-5Z"/></svg>`,
-          historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`,
-          registrar: `<svg viewBox="0 0 32 32"><circle class="soft" cx="16" cy="16" r="10"/><path class="gold-stroke" d="M16 11v10M11 16h10"/></svg>`,
-          bandeja: `<svg viewBox="0 0 32 32"><path class="soft" d="M8 20h16l-2-10H10z"/><path class="gold-stroke" d="M6 20h20M12 20l1-6h6l1 6"/><path class="stroke" d="M16 8v4M13 9l1.5 3M19 9l-1.5 3"/></svg>`
+          bandeja: lu(`<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>`),
+          agenda: lu(`<path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path><path d="M8 14h.01"></path><path d="M12 14h.01"></path><path d="M16 14h.01"></path><path d="M8 18h.01"></path><path d="M12 18h.01"></path><path d="M16 18h.01"></path>`),
+          ordenes: lu(`<rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M12 11h4"></path><path d="M12 16h4"></path><path d="M8 11h.01"></path><path d="M8 16h.01"></path>`),
+          buscar: lu(`<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path>`),
+          equipo: lu(`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>`),
+          registrar: lu(`<path d="m16 16 2 2 4-4"></path><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"></path><path d="m7.5 4.27 9 5.15"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><line x1="12" x2="12" y1="22" y2="12"></line>`),
+          vehiculo: lu(`<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle>`),
+          planes: lu(`<path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path><path d="m9 16 2 2 4-4"></path>`),
+          proveedores: lu(`<path d="M12 12h.01"></path><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path><path d="M22 13a18.15 18.15 0 0 1-20 0"></path><rect width="20" height="14" x="2" y="6" rx="2"></rect>`),
+          cancelaciones: lu(`<circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path>`),
+          historial: lu(`<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path>`)
         };
         return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.equipo}</span>`;
       }
@@ -182,7 +197,7 @@
         return `
           <div class="topbar">
             <div>
-              <div class="mini-brand">Pollyana's</div>
+              <img class="mini-brand-logo" src="{% static 'logistica/pwa/pollyanas-logo-header.png' %}" alt="Pollyana's Dolce">
               <p class="hello">Hola, ${nombre}</p>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
@@ -205,7 +220,7 @@
 
       function providerOptions(selected = "") {
         const selectedValue = String(selected || "");
-        return `<option value="">Sin proveedor asignado</option>${state.proveedores.map((proveedor) =>
+        return `<option value="">Sin proveedor asignado</option>${state.proveedores.filter((proveedor) => proveedor.activo !== false).map((proveedor) =>
           `<option value="${esc(proveedor.nombre)}" ${selectedValue === proveedor.nombre ? "selected" : ""}>${esc(proveedor.nombre)}</option>`
         ).join("")}`;
       }
@@ -216,6 +231,11 @@
         if (!state.perfil) await loadPerfil();
         if (name === "dashboard") return renderDashboard();
         if (name === "pendientes") return renderPendientes();
+        if (name === "agenda") return renderAgenda();
+        if (name === "ordenes") return renderOrdenes();
+        if (name === "proveedores") return renderProveedores();
+        if (name === "planes") return renderPlanes();
+        if (name === "cancelaciones") return renderCancelaciones();
         if (name === "buscar") return renderBuscarEquipo();
         if (name === "seguimiento") return renderPendientes(); // alias — misma bandeja
         if (name === "reportes") return renderHistorial();     // alias — historial
@@ -290,11 +310,52 @@
         return state.bandeja;
       }
 
+      async function loadResumen(force = false) {
+        if (state.resumen && !force) return state.resumen;
+        const res = await apiFetch("/resumen/");
+        state.resumen = res.ok ? await res.json() : null;
+        return state.resumen;
+      }
+
+      async function ensureCatalogos() {
+        if (state.catalogos) return state.catalogos;
+        const res = await apiFetch("/catalogos/");
+        state.catalogos = res.ok ? await res.json() : {};
+        return state.catalogos;
+      }
+
       async function ensureProveedores() {
         if (state.proveedores.length) return state.proveedores;
         const res = await apiFetch("/proveedores/");
         state.proveedores = res.ok ? await parseListResponse(res) : [];
         return state.proveedores;
+      }
+
+      async function loadPlanes(force = false) {
+        if (state.planes.length && !force) return state.planes;
+        const res = await apiFetch("/planes/");
+        if (res.ok) {
+          const data = await res.json();
+          state.planes = data.items || [];
+          state.planChoices = data.choices || {tipos: [], estatus: []};
+        } else {
+          state.planes = [];
+        }
+        return state.planes;
+      }
+
+      async function loadCancelaciones(force = false) {
+        if (state.cancelaciones.items.length && !force) return state.cancelaciones;
+        const res = await apiFetch("/cancelaciones/");
+        state.cancelaciones = res.ok ? await res.json() : {puede_resolver: false, items: []};
+        return state.cancelaciones;
+      }
+
+      async function loadProveedorImportables(force = false) {
+        if (state.proveedorImportables.length && !force) return state.proveedorImportables;
+        const res = await apiFetch("/proveedores/importables/");
+        state.proveedorImportables = res.ok ? await res.json() : [];
+        return state.proveedorImportables;
       }
 
       function itemAbierto(item) {
@@ -315,6 +376,50 @@
           criticas: abiertos.filter((i) => i.semaforo === "rojo").length,
           cerradas: items.filter((i) => ["cerrada", "cerrado", "CERRADA"].includes(i.estatus)).length,
         };
+      }
+
+      function formatFechaCorta(value) {
+        if (!value) return "Sin fecha";
+        const [year, month, day] = String(value).split("-");
+        if (!year || !month || !day) return value;
+        return `${day}/${month}`;
+      }
+
+      function agendaLabel(item) {
+        if (item.estado === "vencido") return `${Math.abs(item.dias)} d vencido`;
+        if (item.estado === "urgente") return item.dias === 0 ? "Hoy" : `${item.dias} d`;
+        return formatFechaCorta(item.fecha);
+      }
+
+      function agendaCard(item, compact = false) {
+        const estado = item.estado || "programado";
+        return `
+          <article class="card report-card agenda-card ${estado}">
+            <div class="card-head">
+              <div>
+                <p class="card-title">${esc(item.titulo)}</p>
+                <p class="muted">${esc(item.activo || "")} · ${esc(item.codigo || "")}</p>
+              </div>
+              <span class="status-chip ${estado}">${esc(agendaLabel(item))}</span>
+            </div>
+            <p class="muted card-copy-muted">${esc(item.sucursal || "Sin sucursal")}${item.responsable ? " · " + esc(item.responsable) : ""}</p>
+            ${compact || !item.instrucciones ? "" : `<p class="card-copy">${esc(item.instrucciones)}</p>`}
+            <div class="card-actions">
+              ${item.tipo === "plan" ? `<button onclick="ejecutarPlanAgenda(${item.id})">Marcar realizado</button>` : `<button onclick="startVehiculo()">Registrar flota</button>`}
+            </div>
+          </article>
+        `;
+      }
+
+      function quickActions() {
+        return `
+          <div class="quick-actions" aria-label="Acciones de mantenimiento">
+            <button class="quick-action primary" onclick="renderNuevaFalla()">+ Falla / imprevisto</button>
+            <button class="quick-action" onclick="renderServicioPuntual('realizado')">+ Servicio sin orden</button>
+            <button class="quick-action" onclick="renderServicioPuntual('pendiente')">+ Programar servicio</button>
+            <button class="quick-action" onclick="renderNuevoReporteUnidad()">Nuevo reporte de unidad</button>
+          </div>
+        `;
       }
 
       function bandejaItemCard(item) {
@@ -374,8 +479,12 @@
       }
 
       async function renderDashboard() {
-        await loadBandeja(true);
+        await Promise.all([loadBandeja(true), loadResumen(true)]);
         const m = metricasMantenimiento();
+        const resumen = state.resumen || {};
+        const agenda = resumen.agenda || [];
+        const agendaCounts = resumen.agenda_counts || {};
+        const proximo = agenda[0];
         const criticos = state.bandeja.filter((i) => itemAbierto(i) && i.semaforo === "rojo").length;
         render(shell(`
           <p class="screen-kicker">Bandeja de mantenimiento</p>
@@ -385,13 +494,383 @@
             <div class="summary-card"><strong>${criticos}</strong><span>Críticos</span></div>
             <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerrados</span></div>
           </div>
+          <section class="ops-strip">
+            <div><strong>${agendaCounts.vencidos || 0}</strong><span>Vencidos</span></div>
+            <div><strong>${agendaCounts.urgentes || 0}</strong><span>7 días</span></div>
+            <div><strong>${resumen.summary?.sin_asignar || 0}</strong><span>Sin asignar</span></div>
+          </section>
+          ${proximo ? `
+            <p class="section-kicker section-kicker-tight">Próximo trabajo</p>
+            ${agendaCard(proximo, true)}
+          ` : ""}
+          ${quickActions()}
           <div class="dash-grid">
             <button class="dash-btn" onclick="showScreen('pendientes')">${appGlyph("bandeja")}<span>Bandeja</span></button>
-            <button class="dash-btn" onclick="showScreen('buscar')">${appGlyph("equipo")}<span>Buscar equipo</span></button>
+            <button class="dash-btn" onclick="showScreen('agenda')">${appGlyph("agenda")}<span>Agenda</span></button>
+            <button class="dash-btn" onclick="showScreen('ordenes')">${appGlyph("ordenes")}<span>Órdenes</span></button>
+            <button class="dash-btn" onclick="showScreen('buscar')">${appGlyph("buscar")}<span>Buscar equipo</span></button>
             <button class="dash-btn" onclick="showScreen('registrar')">${appGlyph("registrar")}<span>Registrar mantenimiento de equipo</span></button>
+            <button class="dash-btn" onclick="startVehiculo()">${appGlyph("vehiculo")}<span>Flota</span></button>
+            <button class="dash-btn" onclick="showScreen('planes')">${appGlyph("planes")}<span>Planes</span></button>
+            <button class="dash-btn" onclick="showScreen('proveedores')">${appGlyph("proveedores")}<span>Proveedores</span></button>
+            <button class="dash-btn" onclick="showScreen('cancelaciones')">${appGlyph("cancelaciones")}<span>Cancelaciones</span></button>
             <button class="dash-btn" onclick="showScreen('historial')">${appGlyph("historial")}<span>Historial</span></button>
           </div>
         `));
+      }
+
+      async function renderAgenda() {
+        await loadResumen(true);
+        const resumen = state.resumen || {};
+        const agenda = resumen.agenda || [];
+        const counts = resumen.agenda_counts || {};
+        const vencidos = agenda.filter((item) => item.estado === "vencido");
+        const urgentes = agenda.filter((item) => item.estado === "urgente");
+        const proximos = agenda.filter((item) => item.estado === "programado").slice(0, 15);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Agenda móvil</h1>
+          <section class="ops-strip ops-strip-spaced">
+            <div><strong>${counts.vencidos || 0}</strong><span>Vencidos</span></div>
+            <div><strong>${counts.urgentes || 0}</strong><span>Urgentes</span></div>
+            <div><strong>${counts.programados || 0}</strong><span>Programados</span></div>
+          </section>
+          ${vencidos.length ? `<p class="section-kicker">Vencidos</p>${vencidos.map((item) => agendaCard(item)).join("")}` : ""}
+          ${urgentes.length ? `<p class="section-kicker">Esta semana</p>${urgentes.map((item) => agendaCard(item)).join("")}` : ""}
+          <p class="section-kicker">Próximos</p>
+          ${proximos.map((item) => agendaCard(item)).join("") || `<div class="empty">Sin planes próximos registrados.</div>`}
+        `));
+      }
+
+      async function ejecutarPlanAgenda(id) {
+        const notas = window.prompt("Notas del trabajo realizado", "") || "";
+        const res = await apiFetch(`/resumen/planes/${id}/ejecutar/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({notas}),
+        });
+        if (res.ok) {
+          state.resumen = null;
+          state.bandeja = [];
+          renderAgenda();
+        }
+      }
+
+      function planCard(plan) {
+        const estado = plan.estado || "programado";
+        return `
+          <article class="card report-card agenda-card ${estado}">
+            <div class="card-head">
+              <div>
+                <p class="card-title">${esc(plan.nombre)}</p>
+                <p class="muted">${esc(plan.activo)} · ${esc(plan.codigo)}</p>
+              </div>
+              <span class="status-chip ${estado}">${esc(agendaLabel(plan))}</span>
+            </div>
+            <p class="muted card-copy-muted">${esc(plan.sucursal || "Sin sucursal")} · ${esc(plan.tipo_display || plan.tipo)}</p>
+            <p class="muted card-copy-muted">Cada ${plan.frecuencia_dias} días${plan.responsable ? " · " + esc(plan.responsable) : ""}</p>
+            ${plan.instrucciones ? `<p class="card-copy">${esc(plan.instrucciones)}</p>` : ""}
+            <div class="card-actions">
+              <button onclick="renderPlanForm(${plan.id})">Editar</button>
+              <button onclick="ejecutarPlanAgenda(${plan.id})">Realizado</button>
+              <button onclick="eliminarPlanMovil(${plan.id})">Pausar</button>
+            </div>
+          </article>
+        `;
+      }
+
+      async function renderPlanes() {
+        await loadPlanes(true);
+        const activos = state.planes.filter((plan) => plan.estatus === "ACTIVO");
+        const pausados = state.planes.filter((plan) => plan.estatus !== "ACTIVO");
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Planes</h1>
+          <div class="quick-actions">
+            <button class="quick-action primary" onclick="renderPlanForm()">+ Nuevo plan</button>
+            <button class="quick-action" onclick="showScreen('agenda')">Ver agenda</button>
+          </div>
+          <p class="section-kicker">Activos</p>
+          ${activos.map(planCard).join("") || `<div class="empty">Sin planes activos.</div>`}
+          ${pausados.length ? `<p class="section-kicker">Pausados</p>${pausados.map(planCard).join("")}` : ""}
+        `));
+      }
+
+      async function renderPlanForm(id = null, error = "") {
+        await Promise.all([loadPlanes(), ensureActivos()]);
+        const plan = id ? state.planes.find((item) => item.id === id) : {};
+        const tipos = state.planChoices.tipos || [];
+        const estatus = state.planChoices.estatus || [];
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('planes')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">${id ? "Editar plan" : "Nuevo plan"}</h1>
+          <section class="card report-card">
+            <div class="field">
+              <label for="plan-activo">Activo / equipo</label>
+              <select id="plan-activo" ${id ? "disabled" : ""}>
+                <option value="">Selecciona</option>
+                ${state.activos.map((a) => `<option value="${a.id}" ${String(plan.activo_id || "") === String(a.id) ? "selected" : ""}>${esc(a.codigo)} · ${esc(a.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field"><label for="plan-nombre">Nombre del plan</label><input id="plan-nombre" value="${esc(plan.nombre || "")}" placeholder="Ej. Limpieza profunda horno"></div>
+            <div class="field">
+              <label for="plan-tipo">Tipo</label>
+              <select id="plan-tipo">${tipos.map((row) => `<option value="${row.value}" ${String(plan.tipo || "PREVENTIVO") === row.value ? "selected" : ""}>${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="plan-estatus">Estatus</label>
+              <select id="plan-estatus">${estatus.map((row) => `<option value="${row.value}" ${String(plan.estatus || "ACTIVO") === row.value ? "selected" : ""}>${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field-grid">
+              <div class="field"><label for="plan-frecuencia">Frecuencia días</label><input id="plan-frecuencia" type="number" min="1" value="${esc(plan.frecuencia_dias || 30)}"></div>
+              <div class="field"><label for="plan-tolerancia">Tolerancia días</label><input id="plan-tolerancia" type="number" min="0" value="${esc(plan.tolerancia_dias || 0)}"></div>
+            </div>
+            <div class="field-grid">
+              <div class="field"><label for="plan-ultima">Última ejecución</label><input id="plan-ultima" type="date" value="${esc(plan.ultima_ejecucion || "")}"></div>
+              <div class="field"><label for="plan-proxima">Próxima ejecución</label><input id="plan-proxima" type="date" value="${esc(plan.proxima_ejecucion || "")}"></div>
+            </div>
+            <div class="field"><label for="plan-responsable">Responsable</label><input id="plan-responsable" value="${esc(plan.responsable || "")}"></div>
+            <div class="field"><label for="plan-instrucciones">Instrucciones</label><textarea id="plan-instrucciones">${esc(plan.instrucciones || "")}</textarea></div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarPlanMovil(${id || "null"})">Guardar plan</button>
+          </section>
+        `));
+      }
+
+      async function guardarPlanMovil(id = null) {
+        const payload = {
+          activo_id: document.getElementById("plan-activo")?.value,
+          nombre: document.getElementById("plan-nombre")?.value,
+          tipo: document.getElementById("plan-tipo")?.value,
+          estatus: document.getElementById("plan-estatus")?.value,
+          frecuencia_dias: document.getElementById("plan-frecuencia")?.value,
+          tolerancia_dias: document.getElementById("plan-tolerancia")?.value,
+          ultima_ejecucion: document.getElementById("plan-ultima")?.value,
+          proxima_ejecucion: document.getElementById("plan-proxima")?.value,
+          responsable: document.getElementById("plan-responsable")?.value,
+          instrucciones: document.getElementById("plan-instrucciones")?.value,
+        };
+        const res = await apiFetch(id ? `/planes/${id}/` : "/planes/", {
+          method: id ? "PATCH" : "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return renderPlanForm(id, "Revisa equipo, nombre y fechas del plan.");
+        state.planes = [];
+        state.resumen = null;
+        showScreen("planes");
+      }
+
+      async function eliminarPlanMovil(id) {
+        if (!window.confirm("Pausar este plan de mantenimiento?")) return;
+        const res = await apiFetch(`/planes/${id}/`, {method: "DELETE"});
+        if (res.ok) {
+          state.planes = [];
+          state.resumen = null;
+          renderPlanes();
+        }
+      }
+
+      async function renderCancelaciones() {
+        await loadCancelaciones(true);
+        const data = state.cancelaciones || {puede_resolver: false, items: []};
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Cancelaciones</h1>
+          ${!data.puede_resolver ? `<div class="empty">Tu usuario puede dar seguimiento, pero no resolver cancelaciones.</div>` : ""}
+          ${(data.items || []).map((item) => `
+            <article class="card report-card">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">${esc(item.referencia)}</p>
+                  <p class="muted">${esc(item.tipo_display)} · ${esc(item.creado_en)}</p>
+                </div>
+                <span class="status-chip urgente">Pendiente</span>
+              </div>
+              <p class="muted card-copy-muted">Solicita: ${esc(item.solicitado_por || "Sin usuario")}</p>
+              <p class="card-copy">${esc(item.motivo)}</p>
+              <div class="field">
+                <label for="cancelacion-notas-${item.id}">Notas de resolución</label>
+                <textarea id="cancelacion-notas-${item.id}" placeholder="Opcional"></textarea>
+              </div>
+              <div class="card-actions">
+                <button onclick="resolverCancelacionMovil(${item.id}, 'rechazar')">Rechazar</button>
+                <button onclick="resolverCancelacionMovil(${item.id}, 'aprobar')">Aprobar y eliminar</button>
+              </div>
+            </article>
+          `).join("") || (data.puede_resolver ? `<div class="empty">Sin solicitudes pendientes.</div>` : "")}
+        `));
+      }
+
+      async function resolverCancelacionMovil(id, accion) {
+        const notas = document.getElementById(`cancelacion-notas-${id}`)?.value || "";
+        const res = await apiFetch(`/cancelaciones/${id}/resolver/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({accion, notas_resolucion: notas}),
+        });
+        if (res.ok) {
+          state.cancelaciones = {puede_resolver: false, items: []};
+          state.bandeja = [];
+          renderCancelaciones();
+        }
+      }
+
+      async function renderOrdenes() {
+        const res = await apiFetch("/ordenes/");
+        const ordenes = res.ok ? await parseListResponse(res) : [];
+        const q = state.busquedaOrdenes.toLowerCase().trim();
+        const visibles = ordenes.filter((orden) => {
+          const abierta = ordenAbierta(orden);
+          const matchEstado = state.filtroOrdenes === "todas" || (state.filtroOrdenes === "abiertas" ? abierta : !abierta);
+          const texto = `${orden.folio} ${orden.activo_nombre} ${orden.activo_codigo} ${orden.sucursal_nombre} ${orden.responsable}`.toLowerCase();
+          return matchEstado && (!q || texto.includes(q));
+        });
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Órdenes</h1>
+          <div class="search-row">
+            <label for="ordenes-buscar">Buscar orden</label>
+            <input id="ordenes-buscar" name="ordenes_buscar" type="search" placeholder="Folio, equipo, sucursal o responsable" value="${esc(state.busquedaOrdenes)}" oninput="state.busquedaOrdenes=this.value; renderOrdenes()">
+            <label for="ordenes-filtro">Estatus</label>
+            <select id="ordenes-filtro" name="ordenes_filtro" onchange="state.filtroOrdenes=this.value; renderOrdenes()">
+              <option value="abiertas" ${state.filtroOrdenes === "abiertas" ? "selected" : ""}>Abiertas</option>
+              <option value="cerradas" ${state.filtroOrdenes === "cerradas" ? "selected" : ""}>Cerradas</option>
+              <option value="todas" ${state.filtroOrdenes === "todas" ? "selected" : ""}>Todas</option>
+            </select>
+          </div>
+          ${visibles.map((orden) => ordenCard(orden)).join("") || `<div class="empty">Sin órdenes con esos filtros.</div>`}
+        `));
+      }
+
+      async function renderProveedores(error = "") {
+        await Promise.all([ensureProveedores(), loadProveedorImportables()]);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Proveedores</h1>
+          <section class="card report-card">
+            <div class="field">
+              <label for="proveedor-nuevo">Nuevo proveedor / técnico</label>
+              <input id="proveedor-nuevo" name="proveedor_nuevo" placeholder="Nombre del taller o técnico" value="${esc(state.proveedorNuevo)}" oninput="state.proveedorNuevo=this.value">
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarProveedorMovil()">Agregar proveedor</button>
+          </section>
+          ${state.proveedorImportables.length ? `
+            <section class="card report-card">
+              <p class="card-title">Importar del catálogo general</p>
+              <p class="muted card-copy-muted">Solo aparecen proveedores que aún no están ligados a mantenimiento.</p>
+              <div class="field">
+                <label for="proveedor-importar">Proveedor</label>
+                <select id="proveedor-importar" name="proveedor_importar">
+                  <option value="">Selecciona</option>
+                  ${state.proveedorImportables.map((proveedor) => `<option value="${proveedor.id}">${esc(proveedor.nombre)}</option>`).join("")}
+                </select>
+              </div>
+              <button class="secondary-btn full-width" onclick="importarProveedorMovil()">Importar proveedor</button>
+            </section>
+          ` : ""}
+          <p class="section-kicker">Activos</p>
+          ${state.proveedores.map((proveedor) => `
+            <article class="card report-card">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">${esc(proveedor.nombre)}</p>
+                  <p class="muted">${esc(proveedor.especialidad || "Sin especialidad")}</p>
+                </div>
+                <span class="status-chip ${proveedor.activo ? "activo" : "cerrada"}">${proveedor.activo ? "Activo" : "Pausado"}</span>
+              </div>
+              <p class="muted card-copy-muted">${esc([proveedor.contacto, proveedor.telefono].filter(Boolean).join(" · ") || "Sin contacto")}</p>
+              ${proveedor.notas ? `<p class="card-copy">${esc(proveedor.notas)}</p>` : ""}
+              <div class="card-actions">
+                <button onclick="renderProveedorForm(${proveedor.id})">Editar</button>
+                <button onclick="pausarProveedorMovil(${proveedor.id})">Pausar</button>
+              </div>
+            </article>
+          `).join("") || `<div class="empty">Sin proveedores registrados.</div>`}
+        `));
+      }
+
+      async function guardarProveedorMovil() {
+        const nombre = state.proveedorNuevo.trim();
+        if (!nombre) return renderProveedores("Escribe el nombre del proveedor.");
+        const res = await apiFetch("/proveedores/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({nombre}),
+        });
+        if (!res.ok) return renderProveedores("No se pudo guardar el proveedor.");
+        const proveedor = await res.json();
+        state.proveedorNuevo = "";
+        state.proveedores = [proveedor, ...state.proveedores.filter((item) => item.id !== proveedor.id)]
+          .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+        renderProveedores();
+      }
+
+      async function importarProveedorMovil() {
+        const id = document.getElementById("proveedor-importar")?.value;
+        if (!id) return renderProveedores("Selecciona el proveedor a importar.");
+        const res = await apiFetch("/proveedores/importar/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({proveedor_ids: [id]}),
+        });
+        if (!res.ok) return renderProveedores("No se pudo importar el proveedor.");
+        state.proveedores = [];
+        state.proveedorImportables = [];
+        renderProveedores();
+      }
+
+      async function renderProveedorForm(id, error = "") {
+        await ensureProveedores();
+        const proveedor = state.proveedores.find((item) => item.id === id) || {};
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('proveedores')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Editar proveedor</h1>
+          <section class="card report-card">
+            <div class="field"><label for="prov-nombre">Nombre</label><input id="prov-nombre" value="${esc(proveedor.nombre || "")}"></div>
+            <div class="field"><label for="prov-contacto">Contacto</label><input id="prov-contacto" value="${esc(proveedor.contacto || "")}"></div>
+            <div class="field"><label for="prov-telefono">Teléfono</label><input id="prov-telefono" value="${esc(proveedor.telefono || "")}"></div>
+            <div class="field"><label for="prov-especialidad">Especialidad</label><input id="prov-especialidad" value="${esc(proveedor.especialidad || "")}"></div>
+            <div class="field"><label for="prov-notas">Notas</label><textarea id="prov-notas">${esc(proveedor.notas || "")}</textarea></div>
+            <label class="check-row"><input id="prov-activo" type="checkbox" ${proveedor.activo !== false ? "checked" : ""}> Activo</label>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarProveedorDetalle(${id})">Guardar cambios</button>
+          </section>
+        `));
+      }
+
+      async function guardarProveedorDetalle(id) {
+        const payload = {
+          nombre: document.getElementById("prov-nombre")?.value,
+          contacto: document.getElementById("prov-contacto")?.value,
+          telefono: document.getElementById("prov-telefono")?.value,
+          especialidad: document.getElementById("prov-especialidad")?.value,
+          notas: document.getElementById("prov-notas")?.value,
+          activo: document.getElementById("prov-activo")?.checked,
+        };
+        const res = await apiFetch(`/proveedores/${id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return renderProveedorForm(id, "Revisa el nombre del proveedor.");
+        state.proveedores = [];
+        showScreen("proveedores");
+      }
+
+      async function pausarProveedorMovil(id) {
+        if (!window.confirm("Pausar proveedor de mantenimiento?")) return;
+        const proveedor = state.proveedores.find((item) => item.id === id);
+        const res = await apiFetch(`/proveedores/${id}/`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({nombre: proveedor?.nombre || "", activo: false}),
+        });
+        if (res.ok) {
+          state.proveedores = [];
+          renderProveedores();
+        }
       }
 
       async function renderPendientes() {
@@ -411,6 +890,7 @@
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Pendientes</h1>
+          ${quickActions()}
           <div class="toolbar">
             <button class="${filtro === "todos" ? "active" : ""}" onclick="state.bandejaFiltro='todos'; renderPendientes()">Todos (${counts.todos})</button>
             <button class="${filtro === "sucursales" ? "active" : ""}" onclick="state.bandejaFiltro='sucursales'; renderPendientes()">Sucursales (${counts.sucursales})</button>
@@ -419,6 +899,242 @@
           </div>
           ${visibles.map(bandejaItemCard).join("") || `<div class="empty">Sin pendientes en esta categoría.</div>`}
         `));
+      }
+
+      async function renderNuevaFalla(error = "") {
+        await Promise.all([ensureSucursales(), ensureActivos(), ensureCatalogos()]);
+        const c = state.catalogos || {};
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Falla / imprevisto</h1>
+          <section class="card report-card">
+            <div class="field">
+              <label for="falla-sucursal">Sucursal</label>
+              <select id="falla-sucursal" name="sucursal" onchange="filtrarActivosFalla(this.value)">
+                <option value="">Selecciona</option>
+                ${state.sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="falla-categoria">Categoría</label>
+              <select id="falla-categoria" name="categoria">
+                <option value="">Selecciona</option>
+                ${(c.categorias_falla || []).map((cat) => `<option value="${cat.id}">${esc(cat.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="falla-area">Área</label>
+              <select id="falla-area" name="area">${(c.areas_falla || []).map((row) => `<option value="${row.value}">${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="falla-prioridad">Prioridad</label>
+              <select id="falla-prioridad" name="prioridad">${(c.prioridades_falla || []).map((row) => `<option value="${row.value}">${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="falla-activo">Activo relacionado</label>
+              <select id="falla-activo" name="activo_id">
+                <option value="">Sin activo ligado</option>
+                ${opcionesActivosFalla("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="falla-titulo">Título</label>
+              <input id="falla-titulo" name="titulo" placeholder="Ej. Vitrina no enfría">
+            </div>
+            <div class="field">
+              <label for="falla-descripcion">Descripción</label>
+              <textarea id="falla-descripcion" name="descripcion" placeholder="Qué ocurre, desde cuándo y qué operación afecta"></textarea>
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarFallaMovil()">Crear reporte</button>
+          </section>
+        `));
+      }
+
+      async function guardarFallaMovil() {
+        const payload = {
+          sucursal: document.getElementById("falla-sucursal")?.value,
+          categoria: document.getElementById("falla-categoria")?.value,
+          area: document.getElementById("falla-area")?.value,
+          prioridad: document.getElementById("falla-prioridad")?.value,
+          activo_id: document.getElementById("falla-activo")?.value,
+          titulo: document.getElementById("falla-titulo")?.value,
+          descripcion: document.getElementById("falla-descripcion")?.value,
+        };
+        const res = await apiFetch("/fallas/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return renderNuevaFalla("Revisa sucursal, categoría, título y descripción.");
+        state.bandeja = [];
+        showScreen("pendientes");
+      }
+
+      function opcionesActivosFalla(sucursalId) {
+        return state.activos
+          .filter((a) => !sucursalId || String(a.sucursal || "") === String(sucursalId))
+          .map((a) => `<option value="${a.id}">${esc(a.codigo)} · ${esc(a.nombre)}</option>`)
+          .join("");
+      }
+
+      function filtrarActivosFalla(sucursalId) {
+        const select = document.getElementById("falla-activo");
+        if (!select) return;
+        select.innerHTML = `<option value="">Sin activo ligado</option>${opcionesActivosFalla(sucursalId)}`;
+      }
+
+      async function renderServicioPuntual(modo = "realizado", error = "") {
+        await Promise.all([ensureSucursales(), ensureActivos(), ensureVehiculoCatalogos(), ensureCatalogos(), ensureProveedores()]);
+        const c = state.catalogos || {};
+        const today = new Date().toISOString().slice(0, 10);
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">${modo === "pendiente" ? "Programar servicio" : "Servicio sin orden"}</h1>
+          <section class="card report-card">
+            <input id="servicio-modo" name="modo_servicio" type="hidden" value="${esc(modo)}">
+            <div class="field">
+              <label for="servicio-alcance">Aplica a</label>
+              <select id="servicio-alcance" name="alcance" onchange="actualizarAlcanceServicio(this.value)">
+                <option value="activo">Equipo / activo</option>
+                <option value="instalacion">Instalación / sucursal</option>
+                <option value="unidad">Flota</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="servicio-sucursal">Sucursal</label>
+              <select id="servicio-sucursal" name="sucursal_id">
+                <option value="">Selecciona</option>
+                ${state.sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field servicio-field servicio-activo">
+              <label for="servicio-activo">Activo / equipo</label>
+              <select id="servicio-activo" name="activo_id">
+                <option value="">Selecciona si aplica</option>
+                ${state.activos.map((a) => `<option value="${a.id}">${esc(a.codigo)} · ${esc(a.nombre)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field servicio-field servicio-unidad" hidden>
+              <label for="servicio-unidad">Unidad logística</label>
+              <select id="servicio-unidad" name="unidad_id">
+                <option value="">Selecciona si aplica</option>
+                ${state.unidades.map((u) => `<option value="${u.id}">${esc(u.codigo)} · ${esc(u.descripcion)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field servicio-field servicio-instalacion" hidden>
+              <label for="servicio-instalacion">Instalación</label>
+              <select id="servicio-instalacion" name="instalacion_categoria">${(c.instalacion_categorias || []).map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="servicio-fecha">Fecha</label>
+              <input id="servicio-fecha" name="fecha_objetivo" type="date" value="${today}">
+            </div>
+            <div class="field">
+              <label for="servicio-proveedor">Proveedor / taller</label>
+              <select id="servicio-proveedor" name="proveedor_servicio">${providerOptions("")}</select>
+            </div>
+            <div class="field">
+              <label for="servicio-descripcion">Servicio / pendiente</label>
+              <textarea id="servicio-descripcion" name="descripcion" placeholder="Trabajo realizado o pendiente a programar"></textarea>
+            </div>
+            <div class="field">
+              <label for="servicio-costo">Costo</label>
+              <input id="servicio-costo" name="costo_total" type="number" min="0" step="0.01" placeholder="0.00">
+            </div>
+            <div class="field">
+              <label for="servicio-nota">Nota de trabajo</label>
+              <textarea id="servicio-nota" name="nota_trabajo" placeholder="Resultado, condiciones o seguimiento acordado"></textarea>
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
+          </section>
+        `));
+      }
+
+      async function guardarServicioMovil() {
+        const payload = {
+          modo_servicio: document.getElementById("servicio-modo")?.value,
+          alcance: document.getElementById("servicio-alcance")?.value,
+          sucursal_id: document.getElementById("servicio-sucursal")?.value,
+          activo_id: document.getElementById("servicio-activo")?.value,
+          unidad_id: document.getElementById("servicio-unidad")?.value,
+          instalacion_categoria: document.getElementById("servicio-instalacion")?.value,
+          fecha_objetivo: document.getElementById("servicio-fecha")?.value,
+          proveedor_servicio: document.getElementById("servicio-proveedor")?.value,
+          descripcion: document.getElementById("servicio-descripcion")?.value,
+          costo_total: document.getElementById("servicio-costo")?.value,
+          nota_trabajo: document.getElementById("servicio-nota")?.value,
+        };
+        const res = await apiFetch("/servicios-puntuales/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return renderServicioPuntual(payload.modo_servicio, "Revisa alcance, sucursal, equipo/unidad y descripción.");
+        state.bandeja = [];
+        state.resumen = null;
+        showScreen("pendientes");
+      }
+
+      function actualizarAlcanceServicio(alcance) {
+        document.querySelectorAll(".servicio-field").forEach((el) => { el.hidden = true; });
+        const visible = document.querySelector(`.servicio-${alcance || "activo"}`);
+        if (visible) visible.hidden = false;
+      }
+
+      async function renderNuevoReporteUnidad(error = "") {
+        await Promise.all([ensureVehiculoCatalogos(), ensureCatalogos()]);
+        const c = state.catalogos || {};
+        render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title screen-title-spaced">Reporte de unidad</h1>
+          <section class="card report-card">
+            <div class="field">
+              <label for="unidad-reporte-unidad">Unidad</label>
+              <select id="unidad-reporte-unidad" name="unidad">
+                <option value="">Selecciona</option>
+                ${state.unidades.map((u) => `<option value="${u.id}">${esc(u.codigo)} · ${esc(u.descripcion)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="unidad-reporte-tipo">Tipo</label>
+              <select id="unidad-reporte-tipo" name="tipo">${(c.tipos_unidad || []).map((row) => `<option value="${row.value}">${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="unidad-reporte-severidad">Severidad</label>
+              <select id="unidad-reporte-severidad" name="severidad">${(c.severidades_unidad || []).map((row) => `<option value="${row.value}">${esc(row.label)}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label for="unidad-reporte-km">Kilometraje</label>
+              <input id="unidad-reporte-km" name="kilometraje" type="number" min="0" placeholder="Opcional">
+            </div>
+            <div class="field">
+              <label for="unidad-reporte-desc">Descripción</label>
+              <textarea id="unidad-reporte-desc" name="descripcion" placeholder="Qué se detectó y condiciones de la unidad"></textarea>
+            </div>
+            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            <button class="primary-btn" onclick="guardarReporteUnidadMovil()">Crear reporte</button>
+          </section>
+        `));
+      }
+
+      async function guardarReporteUnidadMovil() {
+        const payload = {
+          unidad: document.getElementById("unidad-reporte-unidad")?.value,
+          tipo: document.getElementById("unidad-reporte-tipo")?.value,
+          severidad: document.getElementById("unidad-reporte-severidad")?.value,
+          kilometraje: document.getElementById("unidad-reporte-km")?.value,
+          descripcion: document.getElementById("unidad-reporte-desc")?.value,
+        };
+        const res = await apiFetch("/reportes-unidad/", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return renderNuevoReporteUnidad("Revisa unidad, tipo y descripción.");
+        state.bandeja = [];
+        showScreen("pendientes");
       }
 
       function ubicacionesDesdeActivos() {
@@ -1094,6 +1810,7 @@
           await ensureVehiculoCatalogos();
           const lista = state.unidades.map(unidadCard).join("") || `<div class="empty">No hay unidades registradas.</div>`;
           body = `
+            <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
             <h1 class="screen-title">Seleccionar vehículo</h1>
             ${progressDots(1)}
             <div class="card-list">${lista}</div>
@@ -1333,7 +2050,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% static 'mantenimiento/sw.js' %}?v=20260707-pwa-format-v1").catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260707-mobile-operativo-v8", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

@@ -7,6 +7,7 @@ app_name = "mantenimiento"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("app/", views.pwa_mantenimiento, name="app"),
+    path("sw.js", views.pwa_sw, name="pwa-sw"),
     path("nueva-falla/", views.crear_falla, name="crear-falla"),
     path("servicios/crear/", views.crear_servicio_mantenimiento, name="crear-servicio"),
     path("reportes/unidad/nuevo/", views.crear_reporte_unidad, name="crear-reporte-unidad"),

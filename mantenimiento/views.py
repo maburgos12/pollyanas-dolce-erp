@@ -2,10 +2,13 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
+from django.contrib.staticfiles import finders
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch, Q
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from rest_framework import generics, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -16,7 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
-from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
+from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
@@ -55,6 +58,8 @@ class EsMantenimiento(BasePermission):
     GRUPOS = {"dg", "DG", "mantenimiento", "MANTENIMIENTO"}
 
     def has_permission(self, request, view):
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            return _can_write_mantenimiento(request.user)
         return _can_access_mantenimiento(request.user)
 
 
@@ -72,11 +77,34 @@ def _can_access_mantenimiento(user) -> bool:
     )
 
 
+def _can_write_mantenimiento(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    grupos = set(user.groups.values_list("name", flat=True))
+    return (
+        is_admin_or_dg(user)
+        or bool(grupos & EsMantenimiento.GRUPOS)
+        or can_manage_module(user, "mantenimiento")
+        or can_manage_submodule(user, "mantenimiento", "app")
+        or can_manage_submodule(user, "mantenimiento", "bandeja")
+        or can_manage_submodule(user, "mantenimiento", "dashboard")
+    )
+
+
 def _require_mantenimiento(user):
     if is_admin_or_dg(user):
         return
     if not _can_access_mantenimiento(user):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
+
+
+@never_cache
+def pwa_sw(request):
+    path = finders.find("mantenimiento/sw.js")
+    if not path:
+        raise Http404("Service worker de Mantenimiento no encontrado")
+    with open(path, encoding="utf-8") as service_worker:
+        return HttpResponse(service_worker.read(), content_type="application/javascript")
 
 
 def _puede_eliminar(user) -> bool:
@@ -602,12 +630,166 @@ def sucursales(request):
 @api_view(["GET"])
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
+def catalogos_movil(request):
+    return Response(
+        {
+            "categorias_falla": [
+                {"id": categoria.id, "nombre": categoria.nombre}
+                for categoria in CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
+            ],
+            "areas_falla": [{"value": value, "label": label} for value, label in ReporteFalla.AREAS],
+            "prioridades_falla": [{"value": value, "label": label} for value, label in ReporteFalla.PRIORIDAD],
+            "tipos_unidad": [{"value": value, "label": label} for value, label in ReporteUnidad.TIPO_CHOICES],
+            "severidades_unidad": [{"value": value, "label": label} for value, label in ReporteUnidad.SEVERIDAD_CHOICES],
+            "instalacion_categorias": INSTALACION_CATEGORIAS,
+        }
+    )
+
+
+@api_view(["GET", "POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
 def proveedores_servicio(request):
+    if request.method == "POST":
+        nombre = (request.data.get("nombre") or "").strip()
+        if not nombre:
+            return Response({"nombre": "El nombre del proveedor es obligatorio."}, status=400)
+        proveedor, _created = ProveedorServicio.objects.get_or_create(nombre=nombre, defaults={"activo": True})
+        for field in ["contacto", "telefono", "especialidad", "notas"]:
+            if field in request.data:
+                setattr(proveedor, field, (request.data.get(field) or "").strip())
+        proveedor.activo = request.data.get("activo", True) not in [False, "false", "0", 0]
+        proveedor.save()
+        return Response(_proveedor_payload(proveedor), status=201)
     data = [
-        {"id": proveedor.id, "nombre": proveedor.nombre}
-        for proveedor in ProveedorServicio.objects.filter(activo=True).order_by("nombre")
+        _proveedor_payload(proveedor)
+        for proveedor in ProveedorServicio.objects.order_by("nombre")
     ]
     return Response(data)
+
+
+@api_view(["PATCH", "DELETE"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def proveedor_servicio_detalle(request, pk):
+    proveedor = get_object_or_404(ProveedorServicio, pk=pk)
+    if request.method == "DELETE":
+        proveedor.delete()
+        return Response(status=204)
+    nombre = (request.data.get("nombre") or proveedor.nombre).strip()
+    if not nombre:
+        return Response({"nombre": "El nombre del proveedor es obligatorio."}, status=400)
+    proveedor.nombre = nombre
+    for field in ["contacto", "telefono", "especialidad", "notas"]:
+        if field in request.data:
+            setattr(proveedor, field, (request.data.get(field) or "").strip())
+    if "activo" in request.data:
+        proveedor.activo = request.data.get("activo") not in [False, "false", "0", 0]
+    proveedor.save()
+    return Response(_proveedor_payload(proveedor))
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def proveedores_importables_movil(request):
+    return Response([{"id": proveedor.id, "nombre": proveedor.nombre} for proveedor in _get_proveedores_importables()])
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def importar_proveedores_movil(request):
+    ids = request.data.get("proveedor_ids") or []
+    importados = []
+    for prov in Proveedor.objects.filter(id__in=ids, activo=True):
+        proveedor, created = ProveedorServicio.objects.get_or_create(nombre=prov.nombre, defaults={"activo": True})
+        if created:
+            importados.append(_proveedor_payload(proveedor))
+    return Response({"importados": importados, "total": len(importados)}, status=201)
+
+
+@api_view(["GET", "POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def planes_movil(request):
+    today = timezone.localdate()
+    if request.method == "POST":
+        activo_obj = get_object_or_404(Activo, pk=_safe_int(request.data.get("activo_id")), activo=True)
+        plan = PlanMantenimiento(activo_ref=activo_obj)
+        error = _guardar_plan_desde_data(plan, request.data)
+        if error:
+            return Response({"error": error}, status=400)
+        plan.save()
+        return Response(_plan_payload(plan, today), status=201)
+    planes = (
+        PlanMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal")
+        .filter(activo=True)
+        .order_by("proxima_ejecucion", "id")[:120]
+    )
+    return Response(
+        {
+            "choices": {
+                "tipos": [{"value": value, "label": label} for value, label in PlanMantenimiento.TIPO_CHOICES],
+                "estatus": [{"value": value, "label": label} for value, label in PlanMantenimiento.ESTATUS_CHOICES],
+            },
+            "items": [_plan_payload(plan, today) for plan in planes],
+        }
+    )
+
+
+@api_view(["PATCH", "DELETE"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def plan_movil_detalle(request, pk):
+    plan = get_object_or_404(
+        PlanMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal"),
+        pk=pk,
+    )
+    if request.method == "DELETE":
+        plan.activo = False
+        plan.save(update_fields=["activo", "actualizado_en"])
+        return Response(status=204)
+    error = _guardar_plan_desde_data(plan, request.data)
+    if error:
+        return Response({"error": error}, status=400)
+    plan.save()
+    return Response(_plan_payload(plan))
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def cancelaciones_movil(request):
+    if not _puede_eliminar(request.user):
+        return Response({"puede_resolver": False, "items": []})
+    solicitudes = SolicitudCancelacion.objects.filter(
+        estatus=SolicitudCancelacion.ESTATUS_PENDIENTE
+    ).select_related("solicitado_por")
+    return Response({"puede_resolver": True, "items": [_cancelacion_payload(s) for s in solicitudes]})
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def resolver_cancelacion_movil(request, solicitud_id):
+    if not _puede_eliminar(request.user):
+        raise PermissionDenied("Solo DG puede resolver solicitudes de cancelación.")
+    solicitud = get_object_or_404(
+        SolicitudCancelacion,
+        pk=solicitud_id,
+        estatus=SolicitudCancelacion.ESTATUS_PENDIENTE,
+    )
+    accion = (request.data.get("accion") or "").strip().lower()
+    if accion not in {"aprobar", "rechazar"}:
+        return Response({"error": "Acción no válida."}, status=400)
+    eliminado = _resolver_cancelacion_obj(
+        solicitud,
+        request.user,
+        accion,
+        (request.data.get("notas_resolucion") or "").strip(),
+    )
+    return Response({"ok": True, "estatus": solicitud.estatus, "eliminado": eliminado})
 
 
 @api_view(["GET"])
@@ -633,6 +815,398 @@ def bandeja(request):
             "items": items,
         }
     )
+
+
+def _fecha_plan_payload(fecha, today):
+    if not fecha:
+        return {"fecha": None, "dias": None, "estado": "sin_fecha"}
+    dias = (fecha - today).days
+    if dias < 0:
+        estado = "vencido"
+    elif dias <= 7:
+        estado = "urgente"
+    else:
+        estado = "programado"
+    return {"fecha": fecha.isoformat(), "dias": dias, "estado": estado}
+
+
+def _proveedor_payload(proveedor):
+    return {
+        "id": proveedor.id,
+        "nombre": proveedor.nombre,
+        "contacto": proveedor.contacto,
+        "telefono": proveedor.telefono,
+        "especialidad": proveedor.especialidad,
+        "notas": proveedor.notas,
+        "activo": proveedor.activo,
+    }
+
+
+def _plan_payload(plan, today=None):
+    today = today or timezone.localdate()
+    return {
+        "id": plan.id,
+        "activo_id": plan.activo_ref_id,
+        "activo": plan.activo_ref.nombre,
+        "codigo": plan.activo_ref.codigo,
+        "sucursal": plan.activo_ref.sucursal.nombre if plan.activo_ref.sucursal_id else "",
+        "nombre": plan.nombre,
+        "tipo": plan.tipo,
+        "tipo_display": plan.get_tipo_display(),
+        "estatus": plan.estatus,
+        "estatus_display": plan.get_estatus_display(),
+        "frecuencia_dias": plan.frecuencia_dias,
+        "tolerancia_dias": plan.tolerancia_dias,
+        "ultima_ejecucion": plan.ultima_ejecucion.isoformat() if plan.ultima_ejecucion else "",
+        "proxima_ejecucion": plan.proxima_ejecucion.isoformat() if plan.proxima_ejecucion else "",
+        "responsable": plan.responsable,
+        "instrucciones": plan.instrucciones,
+        "activo_plan": plan.activo,
+        **_fecha_plan_payload(plan.proxima_ejecucion, today),
+    }
+
+
+def _cancelacion_payload(solicitud):
+    solicitado = ""
+    if solicitud.solicitado_por_id:
+        solicitado = solicitud.solicitado_por.get_full_name() or solicitud.solicitado_por.username
+    return {
+        "id": solicitud.id,
+        "tipo": solicitud.tipo,
+        "tipo_display": solicitud.get_tipo_display(),
+        "referencia": solicitud.referencia,
+        "motivo": solicitud.motivo,
+        "estatus": solicitud.estatus,
+        "estatus_display": solicitud.get_estatus_display(),
+        "solicitado_por": solicitado,
+        "creado_en": timezone.localtime(solicitud.creado_en).strftime("%d/%m/%Y %H:%M"),
+    }
+
+
+def _guardar_plan_desde_data(plan, data):
+    from django.utils.dateparse import parse_date as _pd
+
+    nombre = (data.get("nombre") or "").strip()
+    if not nombre:
+        return "El nombre del plan es obligatorio."
+    tipo = (data.get("tipo") or PlanMantenimiento.TIPO_PREVENTIVO).strip().upper()
+    estatus = (data.get("estatus") or PlanMantenimiento.ESTATUS_ACTIVO).strip().upper()
+    plan.nombre = nombre
+    plan.tipo = tipo if tipo in {value for value, _label in PlanMantenimiento.TIPO_CHOICES} else PlanMantenimiento.TIPO_PREVENTIVO
+    plan.estatus = estatus if estatus in {value for value, _label in PlanMantenimiento.ESTATUS_CHOICES} else PlanMantenimiento.ESTATUS_ACTIVO
+    plan.frecuencia_dias = max(1, _safe_int(data.get("frecuencia_dias"), default=30))
+    plan.tolerancia_dias = max(0, _safe_int(data.get("tolerancia_dias"), default=0))
+    plan.responsable = (data.get("responsable") or "").strip()
+    plan.instrucciones = (data.get("instrucciones") or "").strip()
+    ultima = _pd((data.get("ultima_ejecucion") or "").strip())
+    proxima = _pd((data.get("proxima_ejecucion") or "").strip())
+    if ultima:
+        plan.ultima_ejecucion = ultima
+    if proxima:
+        plan.proxima_ejecucion = proxima
+    elif ultima and plan.frecuencia_dias:
+        plan.recompute_next_date()
+    plan.activo = True
+    return ""
+
+
+def _resolver_cancelacion_obj(solicitud, user, accion, notas=""):
+    solicitud.resuelto_por = user
+    solicitud.resuelto_en = timezone.now()
+    solicitud.notas_resolucion = notas
+    eliminado = False
+    if accion == "aprobar":
+        model_map = {
+            SolicitudCancelacion.TIPO_FALLA: ReporteFalla,
+            SolicitudCancelacion.TIPO_UNIDAD: ReporteUnidad,
+            SolicitudCancelacion.TIPO_ORDEN: OrdenMantenimiento,
+        }
+        model = model_map.get(solicitud.tipo)
+        obj = model.objects.filter(pk=solicitud.objeto_id).first() if model else None
+        if obj:
+            obj.delete()
+            eliminado = True
+        solicitud.estatus = SolicitudCancelacion.ESTATUS_APROBADA
+    else:
+        solicitud.estatus = SolicitudCancelacion.ESTATUS_RECHAZADA
+    solicitud.save()
+    return eliminado
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def resumen_movil(request):
+    today = timezone.localdate()
+    items = _unified_items("")
+    summary = _dashboard_summary(items)
+    planes = []
+    for plan in (
+        PlanMantenimiento.objects.filter(estatus=PlanMantenimiento.ESTATUS_ACTIVO, activo=True)
+        .select_related("activo_ref", "activo_ref__sucursal")
+        .order_by("proxima_ejecucion", "id")[:30]
+    ):
+        planes.append(
+            {
+                "id": plan.id,
+                "tipo": "plan",
+                "titulo": plan.nombre,
+                "activo": plan.activo_ref.nombre,
+                "codigo": plan.activo_ref.codigo,
+                "sucursal": plan.activo_ref.sucursal.nombre if plan.activo_ref.sucursal_id else "",
+                "responsable": plan.responsable,
+                "instrucciones": plan.instrucciones,
+                **_fecha_plan_payload(plan.proxima_ejecucion, today),
+            }
+        )
+
+    servicios = []
+    vistos = set()
+    servicios_qs = (
+        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
+        .select_related("unidad", "unidad__sucursal", "tipo_servicio")
+        .order_by("proxima_fecha", "id")
+    )
+    for servicio in servicios_qs:
+        key = (servicio.unidad_id, servicio.tipo_servicio_id)
+        if key in vistos:
+            continue
+        vistos.add(key)
+        servicios.append(
+            {
+                "id": servicio.id,
+                "tipo": "servicio_flota",
+                "titulo": servicio.tipo_servicio.nombre,
+                "activo": servicio.unidad.descripcion,
+                "codigo": servicio.unidad.codigo,
+                "sucursal": servicio.unidad.sucursal.nombre if servicio.unidad.sucursal_id else "",
+                "responsable": servicio.proveedor,
+                "instrucciones": servicio.notas,
+                "proximos_km": servicio.proximos_km,
+                **_fecha_plan_payload(servicio.proxima_fecha, today),
+            }
+        )
+        if len(servicios) >= 20:
+            break
+
+    agenda = sorted(
+        planes + servicios,
+        key=lambda row: (row["dias"] is None, row["dias"] if row["dias"] is not None else 99999, row["titulo"]),
+    )
+    return Response(
+        {
+            "fecha": today.isoformat(),
+            "summary": {
+                "total": summary["total"],
+                "fallas_activas": summary["fallas_activas"],
+                "ordenes_abiertas": summary["ordenes_abiertas"],
+                "reparaciones_flota": summary["reparaciones_flota"],
+                "criticas": summary["criticas"],
+                "rojos": summary["rojos"],
+                "sin_asignar": summary["sin_asignar"],
+                "tiempo_promedio": summary["tiempo_promedio"],
+                "activos_registrados": summary["activos_registrados"],
+                "unidades_activas": summary["unidades_activas"],
+                "costo_30d": str(summary["costo_30d"]),
+            },
+            "agenda": agenda[:40],
+            "agenda_counts": {
+                "vencidos": sum(1 for row in agenda if row["estado"] == "vencido"),
+                "urgentes": sum(1 for row in agenda if row["estado"] == "urgente"),
+                "programados": sum(1 for row in agenda if row["estado"] == "programado"),
+            },
+        }
+    )
+
+
+def _registrar_plan(plan, user, fecha, notas):
+    plan.ultima_ejecucion = fecha
+    plan.recompute_next_date()
+    plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
+    orden = OrdenMantenimiento.objects.create(
+        activo_ref=plan.activo_ref,
+        plan_ref=plan,
+        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
+        prioridad=OrdenMantenimiento.PRIORIDAD_BAJA,
+        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+        fecha_programada=fecha,
+        fecha_inicio=fecha,
+        fecha_cierre=fecha,
+        responsable=user.get_full_name() or user.username,
+        descripcion=notas or f"Ejecución de plan: {plan.nombre}",
+        origen=OrdenMantenimiento.ORIGEN_PLAN,
+        creado_por=user,
+    )
+    BitacoraMantenimiento.objects.create(
+        orden=orden,
+        usuario=user,
+        accion="Ejecución registrada",
+        comentario=notas or f"Registrado desde bandeja de mantenimiento. Plan: {plan.nombre}",
+    )
+    return orden
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def ejecutar_plan_movil(request, pk):
+    plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
+    from django.utils.dateparse import parse_date
+
+    fecha = parse_date((request.data.get("fecha_ejecucion") or "").strip()) or timezone.localdate()
+    notas = (request.data.get("notas") or "").strip()
+    orden = _registrar_plan(plan, request.user, fecha, notas)
+    return Response(
+        {
+            "ok": True,
+            "orden": OrdenMantenimientoListSerializer(orden).data,
+            "proxima_ejecucion": plan.proxima_ejecucion.isoformat() if plan.proxima_ejecucion else None,
+        }
+    )
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def crear_falla_movil(request):
+    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal")), activa=True)
+    categoria = get_object_or_404(CategoriaFalla, pk=_safe_int(request.data.get("categoria")), activo=True)
+    titulo = (request.data.get("titulo") or "").strip()
+    descripcion = (request.data.get("descripcion") or "").strip()
+    if not titulo or not descripcion:
+        return Response({"error": "Título y descripción son obligatorios."}, status=400)
+    activo_obj = None
+    activo_id = _safe_int(request.data.get("activo_id"))
+    if activo_id:
+        activo_obj = Activo.objects.filter(pk=activo_id, activo=True, sucursal=sucursal).first()
+        if not activo_obj:
+            return Response({"error": "El activo no corresponde a la sucursal seleccionada."}, status=400)
+    reporte = ReporteFalla.objects.create(
+        sucursal=sucursal,
+        categoria=categoria,
+        area=(request.data.get("area") or ReporteFalla.AREA_GENERAL).strip(),
+        titulo=titulo,
+        descripcion=descripcion,
+        prioridad=(request.data.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA).strip(),
+        activo_relacionado=activo_obj,
+        reportado_por=request.user,
+        estatus=ReporteFalla.ESTATUS_ABIERTO,
+    )
+    BitacoraFalla.objects.create(
+        reporte=reporte,
+        usuario=request.user,
+        estatus_anterior="",
+        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+        comentario="Reporte creado desde app móvil de mantenimiento.",
+    )
+    return Response(_branch_falla_item(reporte), status=201)
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def crear_servicio_movil(request):
+    from django.utils.dateparse import parse_date
+
+    modo = (request.data.get("modo_servicio") or "realizado").strip().lower()
+    alcance = (request.data.get("alcance") or "activo").strip().lower()
+    descripcion = (request.data.get("descripcion") or "").strip()
+    if modo not in {"realizado", "pendiente"}:
+        modo = "realizado"
+    if alcance == "flota":
+        alcance = "unidad"
+    if alcance not in {"activo", "unidad", "instalacion"} or not descripcion:
+        return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
+
+    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal_id")), activa=True)
+    fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
+    if not fecha_objetivo:
+        fecha_objetivo = timezone.localdate()
+    proveedor_nombre = (request.data.get("proveedor_servicio") or "").strip()
+    responsable = (request.data.get("responsable") or "").strip() or proveedor_nombre
+    nota_trabajo = (request.data.get("nota_trabajo") or "").strip()
+    costo_total = _parse_decimal(request.data.get("costo_total")) or Decimal("0")
+
+    if alcance == "unidad":
+        unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad_id")), activa=True, sucursal=sucursal)
+        tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
+            nombre=descripcion[:100],
+            defaults={"tipo_intervalo": TipoServicioUnidad.INTERVALO_TIEMPO, "activo": True},
+        )
+        servicio = ServicioRealizadoUnidad.objects.create(
+            unidad=unidad,
+            tipo_servicio=tipo_servicio,
+            fecha_servicio=timezone.localdate() if modo == "pendiente" else fecha_objetivo,
+            proveedor=proveedor_nombre or responsable,
+            costo=None if modo == "pendiente" else costo_total,
+            notas=nota_trabajo or descripcion,
+            registrado_por=request.user,
+            proxima_fecha=fecha_objetivo if modo == "pendiente" else None,
+        )
+        return Response(ServicioListSerializer(servicio).data, status=201)
+
+    proveedor_obj = _ensure_provider(proveedor_nombre)
+    if alcance == "instalacion":
+        activo_obj = _get_installation_asset(
+            sucursal,
+            (request.data.get("instalacion_categoria") or INSTALACION_CATEGORIAS[0]).strip(),
+            proveedor_obj,
+        )
+    else:
+        activo_obj = get_object_or_404(Activo, pk=_safe_int(request.data.get("activo_id")), activo=True, sucursal=sucursal)
+    orden = OrdenMantenimiento.objects.create(
+        activo_ref=activo_obj,
+        tipo=(request.data.get("tipo") or OrdenMantenimiento.TIPO_CORRECTIVO).strip().upper(),
+        prioridad=(request.data.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper(),
+        estatus=OrdenMantenimiento.ESTATUS_PENDIENTE if modo == "pendiente" else OrdenMantenimiento.ESTATUS_EN_PROCESO,
+        fecha_programada=fecha_objetivo,
+        fecha_inicio=None if modo == "pendiente" else fecha_objetivo,
+        responsable=responsable,
+        descripcion=descripcion,
+        costo_otros=Decimal("0") if modo == "pendiente" else costo_total,
+        origen=OrdenMantenimiento.ORIGEN_INICIATIVA if modo == "pendiente" else OrdenMantenimiento.ORIGEN_EMERGENCIA,
+        nota_trabajo=nota_trabajo,
+        proveedor_servicio=proveedor_obj,
+        creado_por=request.user,
+    )
+    BitacoraMantenimiento.objects.create(
+        orden=orden,
+        usuario=request.user,
+        accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
+        comentario=nota_trabajo or descripcion,
+    )
+    return Response(OrdenMantenimientoListSerializer(orden).data, status=201)
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def crear_reporte_unidad_movil(request):
+    unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad")), activa=True)
+    tipo = (request.data.get("tipo") or "").strip()
+    severidad = (request.data.get("severidad") or ReporteUnidad.SEVERIDAD_INFORMATIVO).strip()
+    descripcion = (request.data.get("descripcion") or "").strip()
+    if tipo not in {value for value, _label in ReporteUnidad.TIPO_CHOICES} or not descripcion:
+        return Response({"error": "Tipo y descripción son obligatorios."}, status=400)
+    reporte = ReporteUnidad.objects.create(
+        unidad=unidad,
+        tipo=tipo,
+        severidad=severidad,
+        descripcion=descripcion,
+        kilometraje=_safe_int(request.data.get("kilometraje")) or None,
+        ip_reporte=request.META.get("REMOTE_ADDR"),
+        estatus=ReporteUnidad.ESTATUS_ABIERTO,
+        asignado_a=request.user,
+        notas_compras="Reporte levantado desde app móvil de mantenimiento.",
+    )
+    log_event(
+        request.user,
+        "CREATE",
+        "logistica.ReporteUnidad",
+        str(reporte.id),
+        {"unidad": reporte.unidad.codigo, "tipo": reporte.tipo, "severidad": reporte.severidad, "origen": "mantenimiento_app"},
+    )
+    return Response(_logistica_item(reporte), status=201)
 
 
 @api_view(["POST"])
@@ -1579,30 +2153,6 @@ def registrar_ejecucion_plan(request, pk):
     except Exception:
         fecha = timezone.localdate()
 
-    plan.ultima_ejecucion = fecha
-    plan.recompute_next_date()
-    plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
-
-    # Crear orden de mantenimiento preventivo cerrada para trazabilidad
-    orden = OrdenMantenimiento.objects.create(
-        activo_ref=plan.activo_ref,
-        plan_ref=plan,
-        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
-        prioridad=OrdenMantenimiento.PRIORIDAD_BAJA,
-        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
-        fecha_programada=fecha,
-        fecha_inicio=fecha,
-        fecha_cierre=fecha,
-        responsable=request.user.get_full_name() or request.user.username,
-        descripcion=notas or f"Ejecución de plan: {plan.nombre}",
-        origen=OrdenMantenimiento.ORIGEN_PLAN,
-        creado_por=request.user,
-    )
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        usuario=request.user,
-        accion="Ejecución registrada",
-        comentario=notas or f"Registrado desde bandeja de mantenimiento. Plan: {plan.nombre}",
-    )
+    _registrar_plan(plan, request.user, fecha, notas)
     msg.success(request, f"Plan '{plan.nombre}' ejecutado. Próxima: {plan.proxima_ejecucion}")
     return redirect("mantenimiento:dashboard")

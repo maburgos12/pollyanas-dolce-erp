@@ -165,7 +165,7 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
                 title="Rutas",
                 detail="Planeación y entregas del día.",
                 href="/logistica/app/?pantalla=ruta_activa",
-                icon="entrega",
+                icon="ruta",
                 area="Logística",
             )
         )

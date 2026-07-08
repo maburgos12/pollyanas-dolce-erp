@@ -11,6 +11,7 @@ from logistica.models import Repartidor, Unidad
 from mermas.models import PersonalEnviosSucursal
 from recetas.models import Receta
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
+from operacion.services import build_operacion_context
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -67,11 +68,11 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
-        self.assertContains(response, "20260707-session-chip-v1")
+        self.assertContains(response, "20260707-react-icons-v3")
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
-        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-pwa-v1"')
+        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-react-icons-v4"')
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
@@ -108,7 +109,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v1", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v4-react-icons", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5", body)
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
@@ -244,8 +245,12 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "/logistica/app/?pantalla=mis_reportes")
         self.assertContains(response, "/logistica/app/?pantalla=inspeccion_vehiculo")
         self.assertContains(response, "/logistica/app/?pantalla=ruta_activa")
+        self.assertContains(response, 'class="glyph route-glyph"')
+        self.assertContains(response, 'd="M416 320h-96c-17.6 0-32-14.4')
         self.assertNotContains(response, "Logística móvil")
         self.assertNotContains(response, "Registrar merma")
+        rutas_tile = next(tile for tile in build_operacion_context(user)["tiles"] if tile["key"] == "logistica_rutas")
+        self.assertEqual(rutas_tile["icon"], "ruta")
 
     def test_logistica_view_only_user_does_not_see_management_only_tiles(self):
         user = self._user("logistica.lectura")
