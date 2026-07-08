@@ -2016,15 +2016,26 @@ def planes(request):
             plan.nombre = nombre
             plan.tipo = tipo if tipo in {x[0] for x in PlanMantenimiento.TIPO_CHOICES} else plan.tipo
             plan.estatus = estatus_val if estatus_val in {x[0] for x in PlanMantenimiento.ESTATUS_CHOICES} else plan.estatus
+            frecuencia_previa = plan.frecuencia_dias
+            ultima_previa = plan.ultima_ejecucion
+            proxima_previa = plan.proxima_ejecucion
             plan.frecuencia_dias = max(1, _safe_int(request.POST.get("frecuencia_dias"), default=plan.frecuencia_dias))
             plan.tolerancia_dias = max(0, _safe_int(request.POST.get("tolerancia_dias"), default=plan.tolerancia_dias))
             nueva_ultima = _parse_date(request.POST.get("ultima_ejecucion"))
             nueva_proxima = _parse_date(request.POST.get("proxima_ejecucion"))
             if nueva_ultima:
                 plan.ultima_ejecucion = nueva_ultima
-            if nueva_proxima:
+            # La próxima ejecución se respeta como override manual sólo si el usuario
+            # realmente la cambió; el form la reenvía prellenada. Si no cambió y sí
+            # cambió la frecuencia o la última ejecución, se recalcula para no dejar
+            # el mantenimiento agendado en una fecha vieja.
+            if nueva_proxima and nueva_proxima != proxima_previa:
                 plan.proxima_ejecucion = nueva_proxima
-            elif nueva_ultima and plan.frecuencia_dias:
+            elif plan.ultima_ejecucion and plan.frecuencia_dias and (
+                plan.frecuencia_dias != frecuencia_previa
+                or plan.ultima_ejecucion != ultima_previa
+                or not plan.proxima_ejecucion
+            ):
                 plan.recompute_next_date()
             plan.responsable = (request.POST.get("responsable") or "").strip()
             plan.save()

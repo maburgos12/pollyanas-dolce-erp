@@ -701,6 +701,73 @@ class ActivosFlowsTests(TestCase):
         self.assertEqual(nueva.folio, "OM-RETRY-TEST-1")
         self.assertEqual(OrdenMantenimiento.objects.filter(activo_ref=activo).count(), 2)
 
+    def test_edit_plan_recomputes_proxima_when_frecuencia_changes(self):
+        # Bajar la frecuencia debe adelantar la próxima ejecución aunque el form
+        # reenvíe la proxima anterior prellenada (no es override manual real).
+        self.client.force_login(self.admin)
+        ultima = timezone.localdate() - timedelta(days=5)
+        activo = Activo.objects.create(nombre="Horno recalculo", categoria="Hornos")
+        plan = PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan recalculo",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            frecuencia_dias=30,
+            ultima_ejecucion=ultima,
+            proxima_ejecucion=ultima + timedelta(days=30),
+        )
+        response = self.client.post(
+            reverse("activos:planes"),
+            {
+                "action": "edit_plan",
+                "plan_id": str(plan.id),
+                "nombre": plan.nombre,
+                "tipo": plan.tipo,
+                "estatus": plan.estatus,
+                "frecuencia_dias": "7",
+                "ultima_ejecucion": str(ultima),
+                "proxima_ejecucion": str(ultima + timedelta(days=30)),
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        plan.refresh_from_db()
+        self.assertEqual(plan.frecuencia_dias, 7)
+        self.assertEqual(plan.proxima_ejecucion, ultima + timedelta(days=7))
+
+    def test_edit_plan_honors_manual_proxima_override(self):
+        # Si el usuario captura una proxima distinta, se respeta (no se recalcula).
+        self.client.force_login(self.admin)
+        ultima = timezone.localdate() - timedelta(days=5)
+        activo = Activo.objects.create(nombre="Horno override", categoria="Hornos")
+        plan = PlanMantenimiento.objects.create(
+            activo_ref=activo,
+            nombre="Plan override",
+            estatus=PlanMantenimiento.ESTATUS_ACTIVO,
+            activo=True,
+            frecuencia_dias=30,
+            ultima_ejecucion=ultima,
+            proxima_ejecucion=ultima + timedelta(days=30),
+        )
+        manual = timezone.localdate() + timedelta(days=100)
+        response = self.client.post(
+            reverse("activos:planes"),
+            {
+                "action": "edit_plan",
+                "plan_id": str(plan.id),
+                "nombre": plan.nombre,
+                "tipo": plan.tipo,
+                "estatus": plan.estatus,
+                "frecuencia_dias": "30",
+                "ultima_ejecucion": str(ultima),
+                "proxima_ejecucion": str(manual),
+            },
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        plan.refresh_from_db()
+        self.assertEqual(plan.proxima_ejecucion, manual)
+
     @staticmethod
     def _build_bitacora_upload(filename: str) -> SimpleUploadedFile:
         wb = Workbook()
