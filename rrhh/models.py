@@ -159,6 +159,15 @@ class Empleado(models.Model):
     def __str__(self) -> str:
         return f"{self.codigo} · {self.nombre}" if self.codigo else self.nombre
 
+    @property
+    def sucursal_display(self) -> str:
+        """Nombre canónico de la sucursal para mostrar (FK); cae al texto legacy.
+        Usar en payloads/UI en vez de `sucursal` (texto) para evitar nombres viejos.
+        Prefetch/select_related `sucursal_ref` cuando se itere sobre muchos."""
+        if self.sucursal_ref_id:
+            return self.sucursal_ref.nombre
+        return self.sucursal or ""
+
     def _generate_codigo(self) -> str:
         yymm = timezone.localdate().strftime("%y%m")
         prefix = f"EMP-{yymm}-"

@@ -296,7 +296,7 @@ def _build_reporte_asistencia(
                     "nombre": empleado.nombre,
                     "codigo": empleado.codigo,
                     "puesto": empleado.puesto,
-                    "sucursal": empleado.sucursal,
+                    "sucursal": empleado.sucursal_display,
                     "departamento": empleado.get_departamento_display() if empleado.departamento else "",
                 },
                 "resumen": resumen,

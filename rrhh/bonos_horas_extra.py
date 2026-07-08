@@ -77,7 +77,7 @@ def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool 
         "empleado_nombre": hora_extra.empleado.nombre,
         "area": hora_extra.empleado.area,
         "puesto": hora_extra.empleado.puesto,
-        "sucursal_nombre": hora_extra.empleado.sucursal,
+        "sucursal_nombre": hora_extra.empleado.sucursal_display,
         "fecha": hora_extra.fecha.isoformat(),
         "horas": str(hora_extra.horas),
         "monto_calculado": str(hora_extra.monto_calculado or "0"),
@@ -116,13 +116,13 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             "empleado_nombre": empleado.nombre,
             "area": empleado.area,
             "puesto": empleado.puesto,
-            "sucursal_nombre": empleado.sucursal,
+            "sucursal_nombre": empleado.sucursal_display,
         }
 
     def _horas_extra(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
-            HoraExtra.objects.select_related("empleado", "jefe_directo", "autorizado_por")
+            HoraExtra.objects.select_related("empleado__sucursal_ref", "jefe_directo", "autorizado_por")
             .filter(empleado_id__in=empleado_ids)
             .order_by("-fecha", "-id")
         )

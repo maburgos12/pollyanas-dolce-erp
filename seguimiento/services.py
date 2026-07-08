@@ -98,7 +98,7 @@ def _score_empleado_para_usuario(empleado: Empleado, user, user_tokens: set[str]
     if empleado_tokens == user_tokens:
         score += 50
 
-    area_tokens = _tokens(f"{empleado.area} {empleado.puesto} {empleado.sucursal}")
+    area_tokens = _tokens(f"{empleado.area} {empleado.puesto} {empleado.sucursal_display}")
     if area_hints and area_tokens.intersection(area_hints):
         score += 20
     return score

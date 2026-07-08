@@ -111,7 +111,7 @@ def _empleado_payload(empleado: Empleado) -> dict:
         "empleado_nombre": empleado.nombre,
         "area": empleado.area,
         "puesto": empleado.puesto,
-        "sucursal_nombre": empleado.sucursal,
+        "sucursal_nombre": empleado.sucursal_display,
     }
 
 
@@ -123,7 +123,7 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "empleado_nombre": permiso.empleado.nombre,
         "area": permiso.empleado.area,
         "puesto": permiso.empleado.puesto,
-        "sucursal_nombre": permiso.empleado.sucursal,
+        "sucursal_nombre": permiso.empleado.sucursal_display,
         "tipo": permiso.tipo,
         "tipo_label": TIPO_LABELS.get(permiso.tipo, permiso.tipo),
         "fecha_inicio": permiso.fecha_inicio.isoformat(),
@@ -159,7 +159,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
     def _permisos(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
-            PermisoSalida.objects.select_related("empleado", "autorizado_jefe_por", "autorizado_por")
+            PermisoSalida.objects.select_related("empleado__sucursal_ref", "autorizado_jefe_por", "autorizado_por")
             .filter(empleado_id__in=empleado_ids)
             .order_by("-fecha_inicio", "-id")
         )

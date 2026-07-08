@@ -382,7 +382,7 @@ def capital_humano_me(request):
             "empleado": empleado.id,
             "nombre": empleado.nombre,
             "codigo": empleado.codigo,
-            "sucursal": empleado.sucursal,
+            "sucursal": empleado.sucursal_display,
             "puede_gestionar": can_manage_rrhh(request.user),
         }
     )
@@ -409,6 +409,6 @@ def mi_perfil(request):
             "puesto": empleado.puesto or "",
             "area": empleado.area or "",
             "codigo": empleado.codigo or "",
-            "sucursal": str(empleado.sucursal) if empleado.sucursal else "",
+            "sucursal": empleado.sucursal_display,
         }
     )
