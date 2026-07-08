@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from control.models import MermaPOS
 from core.audit import log_event
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, PointPendingMatch
@@ -74,14 +75,16 @@ class PointMovementSyncService:
         if external_id:
             match = Sucursal.objects.filter(codigo__iexact=external_id).first()
         if match is None and name:
-            match = Sucursal.objects.filter(nombre__iexact=name).first()
+            # Resolver canónico (FASE 2): nombre/código normalizado, tolerante a prefijo 'Sucursal ' y acentos.
+            match = resolver_sucursal_por_texto(name)
         if match is None and name:
+            # Respaldo difuso: coincidencia parcial única (comportamiento previo preservado).
             normalized = normalize_text(name)
-            branches = list(Sucursal.objects.all().only("id", "nombre"))
-            for branch in branches:
-                if normalize_text(branch.nombre) == normalized:
-                    return branch
-            matches = [branch for branch in branches if normalized and normalized in normalize_text(branch.nombre)]
+            matches = [
+                branch
+                for branch in Sucursal.objects.all().only("id", "nombre")
+                if normalized and normalized in normalize_text(branch.nombre)
+            ]
             if len(matches) == 1:
                 return matches[0]
         return match

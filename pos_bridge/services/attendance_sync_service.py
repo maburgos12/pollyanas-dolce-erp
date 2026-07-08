@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_time
 
 from core.audit import log_event
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.models import PointBranch, PointExtractionLog, PointSyncJob
@@ -132,13 +133,8 @@ class PointAttendanceSyncService:
         if external_id:
             match = Sucursal.objects.filter(codigo__iexact=external_id).first()
         if match is None and name:
-            match = Sucursal.objects.filter(nombre__iexact=name).first()
-            match = match or Sucursal.objects.filter(codigo__iexact=name).first()
-        if match is None and name:
-            normalized = normalize_text(name)
-            for sucursal in Sucursal.objects.all().only("id", "nombre", "codigo"):
-                if normalize_text(sucursal.nombre) == normalized or normalize_text(sucursal.codigo) == normalized:
-                    return sucursal
+            # Resolver canónico (FASE 2): nombre/código normalizado, tolerante a prefijo 'Sucursal ' y acentos.
+            match = resolver_sucursal_por_texto(name)
         return match
 
     def _upsert_branch(self, branch: PointAttendanceBranch) -> PointBranch:

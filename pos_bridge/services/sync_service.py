@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from core.cache_versions import bump_cache_scopes
 from core.audit import log_event
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import (
@@ -74,18 +75,18 @@ class PointSyncService:
         if external_id:
             match = Sucursal.objects.filter(codigo__iexact=external_id).first()
         if match is None and name:
-            match = Sucursal.objects.filter(nombre__iexact=name).first()
+            # Resolver canónico (FASE 2): nombre/código normalizado, tolerante a prefijo 'Sucursal ' y acentos.
+            match = resolver_sucursal_por_texto(name)
         if match is None and name:
+            # Respaldo difuso: coincidencia parcial única (comportamiento previo preservado).
             normalized = normalize_text(name)
-            branches = list(Sucursal.objects.all().only("id", "nombre"))
-            for branch in branches:
-                if normalize_text(branch.nombre) == normalized:
-                    match = branch
-                    break
-            if match is None:
-                matches = [branch for branch in branches if normalized and normalized in normalize_text(branch.nombre)]
-                if len(matches) == 1:
-                    match = matches[0]
+            matches = [
+                branch
+                for branch in Sucursal.objects.all().only("id", "nombre")
+                if normalized and normalized in normalize_text(branch.nombre)
+            ]
+            if len(matches) == 1:
+                match = matches[0]
         if match is None and name:
             alias_ids = set(
                 PointBranch.objects.filter(
