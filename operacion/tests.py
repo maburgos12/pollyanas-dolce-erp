@@ -68,11 +68,11 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
-        self.assertContains(response, "20260707-react-icons-v3")
+        self.assertContains(response, "20260708-safe-area-v1")
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
-        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260707-operativa-react-icons-v4"')
+        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260708-operativa-safe-area-v1"')
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
@@ -105,12 +105,15 @@ class OperacionAppTests(TestCase):
 
     def test_operational_app_serves_own_service_worker(self):
         response = self.client.get("/app/sw.js")
+        root = Path(__file__).resolve().parents[1]
+        css = (root / "static/css/template_modules/templates-operacion-app-home.css").read_text(encoding="utf-8")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v4-react-icons", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v5-safe-area", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5", body)
+        self.assertIn("env(safe-area-inset-top)", css)
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)
