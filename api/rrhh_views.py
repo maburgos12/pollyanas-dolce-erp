@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
+from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
@@ -44,6 +45,7 @@ class RRHHEmpleadosView(_RRHHBaseView):
         activo_raw = (request.query_params.get("activo") or "").strip().lower()
         area = (request.query_params.get("area") or "").strip()
         sucursal = (request.query_params.get("sucursal") or "").strip()
+        sucursal_id = (request.query_params.get("sucursal_id") or "").strip()
         sin_sucursal = (request.query_params.get("sin_sucursal") or "").strip()
         limit = self._bounded_int(request.query_params.get("limit"), default=50, min_value=1, max_value=500)
         offset = self._bounded_int(request.query_params.get("offset"), default=0, min_value=0, max_value=100000)
@@ -56,9 +58,16 @@ class RRHHEmpleadosView(_RRHHBaseView):
             qs = Empleado.objects.filter(activo=True)
         if area:
             qs = qs.filter(area__iexact=area)
-        if sucursal:
-            qs = qs.filter(sucursal__iexact=sucursal)
+        # Filtrado canónico por FK (FASE 2). `sucursal_id` es la vía preferida; `sucursal`
+        # (nombre) se conserva por compat resolviéndolo al id, sin igualdad exacta de texto.
+        if sucursal_id.isdigit():
+            qs = qs.filter(sucursal_ref_id=int(sucursal_id))
+        elif sucursal:
+            resuelta = resolver_sucursal_por_texto(sucursal)
+            qs = qs.filter(sucursal_ref=resuelta) if resuelta else qs.filter(sucursal__iexact=sucursal)
         if sin_sucursal == "1":
+            # Compat: lista general por texto (la usa el tab Producción). El "pendiente"
+            # canónico de Ventas vive en el endpoint sin-asignar (por FK).
             qs = qs.filter(Q(sucursal="") | Q(sucursal__isnull=True))
         if q:
             qs = qs.filter(
@@ -108,7 +117,9 @@ class RRHHEmpleadosSinAsignarView(_RRHHBaseView):
             return Response({"detail": "No tienes permisos para consultar RRHH."}, status=status.HTTP_403_FORBIDDEN)
 
         area = (request.query_params.get("area") or "").strip()
-        qs = Empleado.objects.filter(activo=True).filter(Q(sucursal="") | Q(sucursal__isnull=True))
+        # Pendiente = sin vínculo canónico por id (incluye los que tienen texto pero
+        # aún sin FK). Fuente única de "por asignar".
+        qs = Empleado.objects.filter(activo=True, sucursal_ref__isnull=True)
         if area:
             qs = qs.filter(area__iexact=area)
         else:
@@ -132,21 +143,33 @@ class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
 
         empleado = get_object_or_404(Empleado, pk=empleado_id, activo=True)
         sucursal_nombre = (request.data.get("sucursal") or "").strip()
+        sucursal_id = request.data.get("sucursal_id")
         area_detalle = (request.data.get("area_detalle") or "").strip().upper()
         update_fields = ["updated_at"]
 
-        if "sucursal" in request.data:
-            if sucursal_nombre:
-                sucursal = Sucursal.objects.filter(nombre__iexact=sucursal_nombre, activa=True).first()
+        # Este módulo es la FUENTE canónica: escribe el FK `sucursal_ref` (id estable)
+        # y mantiene el texto `sucursal` sólo como display/legacy. Acepta sucursal_id
+        # (preferido) o nombre (resuelto por el resolver canónico, sin match exacto).
+        if "sucursal_id" in request.data or "sucursal" in request.data:
+            if sucursal_id in (None, "", 0, "0") and not sucursal_nombre:
+                sucursal = None
+            elif sucursal_id not in (None, "", 0, "0"):
+                sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+                if not sucursal:
+                    return Response(
+                        {"error": f"Sucursal id={sucursal_id} no encontrada o inactiva"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                sucursal = resolver_sucursal_por_texto(sucursal_nombre)
                 if not sucursal:
                     return Response(
                         {"error": f"Sucursal '{sucursal_nombre}' no encontrada o inactiva"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-                empleado.sucursal = sucursal.nombre
-            else:
-                empleado.sucursal = ""
-            update_fields.append("sucursal")
+            empleado.sucursal_ref = sucursal
+            empleado.sucursal = sucursal.nombre if sucursal else ""
+            update_fields.extend(["sucursal_ref", "sucursal"])
 
         if area_detalle:
             if area_detalle not in self.AREAS_PRODUCCION:

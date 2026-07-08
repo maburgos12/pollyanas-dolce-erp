@@ -6,6 +6,10 @@ from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriod
 
 
 class RRHHEmpleadoSerializer(serializers.ModelSerializer):
+    # Fuente canónica de sucursal por id (FASE 1/2). `sucursal` (texto) es legacy/display.
+    sucursal_ref = serializers.IntegerField(source="sucursal_ref_id", read_only=True)
+    sucursal_ref_nombre = serializers.CharField(source="sucursal_ref.nombre", read_only=True, default="")
+
     class Meta:
         model = Empleado
         fields = [
@@ -23,6 +27,8 @@ class RRHHEmpleadoSerializer(serializers.ModelSerializer):
             "telefono",
             "email",
             "sucursal",
+            "sucursal_ref",
+            "sucursal_ref_nombre",
             "activo",
             "created_at",
             "updated_at",
