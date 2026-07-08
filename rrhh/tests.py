@@ -1818,6 +1818,18 @@ class RRHHViewsTests(TestCase):
         self.assertIn("executive_radar_rows", resp.context)
         self.assertIn("erp_command_center", resp.context)
 
+    def test_empleados_muestra_sucursal_como_select_de_catalogo(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Sucursal", sucursal="Matriz", sucursal_ref=sucursal)
+
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '<select id="sucursal" class="input-field" name="sucursal_id">', html=False)
+        self.assertContains(resp, f'<option value="{sucursal.id}">{sucursal.nombre}</option>', html=False)
+        self.assertContains(resp, f'<select id="edit_sucursal_{empleado.id}" class="input-field" name="sucursal_id">', html=False)
+        self.assertContains(resp, f'<option value="{sucursal.id}" selected>{sucursal.nombre}</option>', html=False)
+
     def test_empleados_crea_y_edita_codigo_operativo(self):
         resp = self.client.post(
             reverse("rrhh:empleados"),
@@ -1850,6 +1862,63 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         empleado.refresh_from_db()
         self.assertEqual(empleado.codigo, "00346")
+
+    def test_empleados_crea_sucursal_desde_catalogo_y_guarda_nombre_canonico(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "Empleado Catalogo Sucursal",
+                "sucursal_id": str(sucursal.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado = Empleado.objects.get(nombre="Empleado Catalogo Sucursal")
+        self.assertEqual(empleado.sucursal, "Sucursal Matriz")
+        self.assertEqual(empleado.sucursal_ref_id, sucursal.id)
+
+    def test_empleados_update_sucursal_desde_catalogo_canoniza_texto_legacy(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        empleado = Empleado.objects.create(nombre="Empleado Legacy Matriz", sucursal="Matriz", salario_diario="300.00")
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "update",
+                "empleado_id": str(empleado.id),
+                "nombre": empleado.nombre,
+                "sucursal_id": str(sucursal.id),
+                "salario_diario": "300.00",
+                "activo": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.sucursal, "Sucursal Matriz")
+        self.assertEqual(empleado.sucursal_ref_id, sucursal.id)
+
+    def test_empleados_rechaza_sucursal_fuera_de_catalogo(self):
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "Empleado Sucursal Invalida",
+                "sucursal": "Sucursal Inventada",
+                "salario_diario": "300.00",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Selecciona una sucursal válida del catálogo.")
+        self.assertFalse(Empleado.objects.filter(nombre="Empleado Sucursal Invalida").exists())
 
     def test_empleados_liga_usuario_repartidor_y_crea_identidad_logistica(self):
         from logistica.models import Repartidor
