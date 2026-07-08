@@ -93,6 +93,19 @@ class BonosVentasTests(TestCase):
         # Repartidor sin sucursal cae a Matriz aunque el catálogo se llame 'Sucursal Matriz'.
         self.assertEqual(BonoVentasEmpleado.objects.get(periodo=periodo, empleado=repartidor).sucursal_id, matriz.id)
 
+    def test_inicializar_bonos_prefiere_sucursal_ref_sobre_texto(self):
+        # FASE 1: si el empleado ya tiene FK, se usa esa aunque el texto esté vacío o mal.
+        real = Sucursal.objects.create(codigo="LEYVA", nombre="Sucursal Leyva", activa=True)
+        empleado = Empleado.objects.create(
+            nombre="Vendedora Leyva", area="VENTAS", sucursal="texto viejo que no macha", sucursal_ref=real, activo=True
+        )
+        periodo = ConfigBonoVentasPeriodo.objects.create(mes=7, anio=2026)
+
+        result = _inicializar_bonos(periodo)
+
+        self.assertEqual(result["sin_sucursal"], [])
+        self.assertEqual(BonoVentasEmpleado.objects.get(periodo=periodo, empleado=empleado).sucursal_id, real.id)
+
     def test_inicializar_bonos_es_idempotente_y_no_pisa_ajustes(self):
         # Re-inicializar no debe duplicar ni tocar bono_extra/ajustes ya capturados.
         colosio = Sucursal.objects.create(codigo="COLOSIO", nombre="Sucursal Colosio", activa=True)

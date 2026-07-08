@@ -102,6 +102,15 @@ class Empleado(models.Model):
     telefono = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
     sucursal = models.CharField(max_length=120, blank=True, default="")
+    # Fuente única por id (FASE 1). `sucursal` (texto) se conserva como legacy/display
+    # mientras los demás consumidores migran a este FK. No emparejar por nombre.
+    sucursal_ref = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="empleados",
+    )
     departamento_origen = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     departamento = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
