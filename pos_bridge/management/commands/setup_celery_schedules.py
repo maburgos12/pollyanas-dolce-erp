@@ -782,4 +782,23 @@ class Command(BaseCommand):
             },
         )
 
+        bonos_reconcile_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="40",
+            hour="7-23",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="bonos: reconciliar asistencia periodo actual",
+            defaults={
+                "task": "rrhh.tasks.reconciliar_bonos_asistencia_periodo_actual",
+                "crontab": bonos_reconcile_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         self.stdout.write(self.style.SUCCESS("Schedules operativos registrados en django-celery-beat."))
