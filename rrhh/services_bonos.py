@@ -127,6 +127,22 @@ def _bono_produccion_tiene_captura(bono) -> bool:
     return any(getattr(bono, campo) for campo in campos)
 
 
+def _bono_produccion_captura_manual(bono) -> bool:
+    """Captura REAL que un cambio de área NO debe pisar: producción/premio embetunado,
+    ajustes manuales o bono ya cerrado. La asistencia (registros/dias_*/monto_*) es
+    derivada y área-agnóstica, así que NO bloquea el re-clasificado del área."""
+    if bono.estatus != "BORRADOR":
+        return True
+    campos = (
+        "total_embetunados",
+        "gano_premio_embetunado",
+        "ajuste_positivo",
+        "ajuste_negativo",
+        "bono_extra",
+    )
+    return any(getattr(bono, campo) for campo in campos)
+
+
 def _bono_ventas_tiene_captura(bono) -> bool:
     if bono.estatus != "BORRADOR" or bono.registros.exists():
         return True
@@ -179,9 +195,12 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
                 empleado=empleado,
                 defaults={"area": area},
             )
-            if not created and bono.area != area and not _bono_produccion_tiene_captura(bono):
+            if not created and bono.area != area and not _bono_produccion_captura_manual(bono):
+                # Re-clasificar el área al editar el empleado, aunque ya haya asistencia
+                # sincronizada. Recalcular para que el monto refleje la nueva área.
                 bono.area = area
-                bono.save(update_fields=["area", "actualizado_en"])
+                bono.recalcular()
+                bono.save()
         else:
             for bono in bonos:
                 if bono.estatus == BonoProduccionEmpleado.ESTATUS_BORRADOR:
