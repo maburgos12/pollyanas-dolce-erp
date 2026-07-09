@@ -15,10 +15,11 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v5">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260708-mobile-polish-v4">
-  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260708-mobile-polish-v4">
+  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260709-pull-refresh-v1">
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-mobile-polish-v4">
 </head>
 <body class="operacion-app-body">
+  <div class="pull-refresh" aria-hidden="true">Actualizar</div>
   <svg class="sr-symbols" aria-hidden="true">
     <symbol id="icon-merma" viewBox="0 0 24 24"><path d="m15 11-1 9"/><path d="m19 11-4-7"/><path d="M2 11h20"/><path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"/><path d="M4.5 15.5h15"/><path d="m5 11 4-7"/><path d="m9 11 1 9"/></symbol>
     <symbol id="icon-reporte" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
@@ -91,8 +92,44 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260708-mobile-polish-v4", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260709-pull-refresh-v1", { scope: "/app/" }).catch(function () {});
     }
+    (function () {
+      var startY = 0;
+      var distance = 0;
+      var pulling = false;
+      var threshold = 74;
+      var indicator = document.querySelector(".pull-refresh");
+      if (!indicator) return;
+
+      window.addEventListener("touchstart", function (event) {
+        if (window.scrollY > 0 || event.touches.length !== 1) return;
+        startY = event.touches[0].clientY;
+        distance = 0;
+      }, { passive: true });
+
+      window.addEventListener("touchmove", function (event) {
+        if (!startY || window.scrollY > 0 || event.touches.length !== 1) return;
+        distance = event.touches[0].clientY - startY;
+        if (distance <= 0) return;
+        pulling = true;
+        indicator.classList.toggle("is-ready", distance > threshold);
+        indicator.style.transform = "translate(-50%, " + Math.min(distance * 0.45 - 44, 24) + "px)";
+      }, { passive: true });
+
+      window.addEventListener("touchend", function () {
+        if (pulling && distance > threshold) {
+          indicator.textContent = "Actualizando";
+          window.location.reload();
+          return;
+        }
+        startY = 0;
+        distance = 0;
+        pulling = false;
+        indicator.classList.remove("is-ready");
+        indicator.style.transform = "";
+      }, { passive: true });
+    })();
   </script>
 </body>
 </html>
