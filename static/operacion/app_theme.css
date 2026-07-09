@@ -777,3 +777,8 @@ tr.log-overdue td,
     margin-right: -2px !important;
   }
 }
+
+html.operacion-app-html,
+body.operacion-app-body {
+  background: #fff !important;
+}
