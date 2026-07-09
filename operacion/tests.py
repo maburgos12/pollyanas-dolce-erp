@@ -68,6 +68,8 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
+        self.assertContains(response, "App Operativa")
+        self.assertNotContains(response, "App<br>Operativa")
         self.assertContains(response, "20260708-mobile-polish-v4")
         self.assertContains(response, 'class="operacion-app-html"')
         self.assertContains(response, 'class="operacion-app-body"')
