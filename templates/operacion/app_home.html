@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v5">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260708-mobile-polish-v4">
-  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260709-pull-refresh-v1">
+  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260709-pull-refresh-v2">
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-mobile-polish-v4">
 </head>
 <body class="operacion-app-body">
@@ -92,7 +92,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260709-pull-refresh-v1", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260709-pull-refresh-v2", { scope: "/app/" }).catch(function () {});
     }
     (function () {
       var startY = 0;
@@ -101,21 +101,26 @@
       var threshold = 74;
       var indicator = document.querySelector(".pull-refresh");
       if (!indicator) return;
+      function currentScrollTop() {
+        return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      }
 
       window.addEventListener("touchstart", function (event) {
-        if (window.scrollY > 0 || event.touches.length !== 1) return;
+        if (currentScrollTop() > 0 || event.touches.length !== 1) return;
         startY = event.touches[0].clientY;
         distance = 0;
+        pulling = false;
       }, { passive: true });
 
       window.addEventListener("touchmove", function (event) {
-        if (!startY || window.scrollY > 0 || event.touches.length !== 1) return;
+        if (!startY || currentScrollTop() > 0 || event.touches.length !== 1) return;
         distance = event.touches[0].clientY - startY;
         if (distance <= 0) return;
+        event.preventDefault();
         pulling = true;
         indicator.classList.toggle("is-ready", distance > threshold);
         indicator.style.transform = "translate(-50%, " + Math.min(distance * 0.45 - 44, 24) + "px)";
-      }, { passive: true });
+      }, { passive: false });
 
       window.addEventListener("touchend", function () {
         if (pulling && distance > threshold) {
@@ -126,6 +131,7 @@
         startY = 0;
         distance = 0;
         pulling = false;
+        indicator.textContent = "Actualizar";
         indicator.classList.remove("is-ready");
         indicator.style.transform = "";
       }, { passive: true });
