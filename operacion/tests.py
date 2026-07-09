@@ -118,8 +118,10 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v10-mobile-polish", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v11-network-first", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
+        self.assertNotIn('"/app/"', body)
+        self.assertIn('event.request.mode === "navigate"', body)
         self.assertIn("env(safe-area-inset-top)", css)
         self.assertIn("calc(6px + env(safe-area-inset-top))", css)
 
