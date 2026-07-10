@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from maestros.models import Insumo
-from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
+from reportes.models import RecetaAreaProduccion
 
 
 class ManoObraAreaViewsRBACTests(TestCase):
@@ -67,15 +67,13 @@ class ManoObraAreaViewsRBACTests(TestCase):
         self.assertEqual(bloque_hornos["hoy"].pct_aprovechamiento, Decimal("0"))
 
 
-class ClasificacionAreaProduccionTests(TestCase):
+class ClasificacionProductosTests(TestCase):
     def setUp(self):
         self.user_model = get_user_model()
         self.superuser = self.user_model.objects.create_superuser(
             username="moa_super2", email="moa_super2@example.com", password="pass12345",
         )
         self.client.force_login(self.superuser)
-        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
-        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Grande", grupo="Pastel")
 
     def test_toggle_familia_crea_y_quita(self):
         url = reverse("reportes:mano_obra_area_clasificacion")
@@ -86,26 +84,15 @@ class ClasificacionAreaProduccionTests(TestCase):
         self.client.post(url, {"accion": "toggle_familia", "familia": "Pastel", "area": "HORNOS"})
         self.assertFalse(RecetaAreaProduccion.objects.filter(familia="Pastel", area="HORNOS").exists())
 
-    def test_toggle_familia_variante_guarda_grupo_canonico(self):
-        # El formulario puede enviar cualquier familia real de Point que
-        # pertenezca al grupo (ej. "Pastel Chico"); se persiste el grupo
-        # canónico ("Pastel"), no el texto crudo del formulario.
-        url = reverse("reportes:mano_obra_area_clasificacion")
-
-        self.client.post(url, {"accion": "toggle_familia", "familia": "Pastel Chico", "area": "EMBETUNADO"})
-
-        self.assertTrue(RecetaAreaProduccion.objects.filter(familia="Pastel", area="EMBETUNADO").exists())
-        self.assertFalse(RecetaAreaProduccion.objects.filter(familia="Pastel Chico", area="EMBETUNADO").exists())
-
-    def test_clasificacion_agrega_variantes_de_pastel_en_una_sola_tarjeta(self):
+    def test_clasificacion_agrupa_sabores_fusionados_en_una_sola_tarjeta(self):
         from uuid import uuid4
 
         from recetas.models import Receta
 
-        for nombre, familia in [
-            ("Pastel Chico Fresa", "Pastel Chico"),
-            ("Pastel Grande Chocolate", "Pastel Grande"),
-            ("Pastel Tres Leches", "Pastel"),
+        for nombre, familia, grupo in [
+            ("Pastel Chico Fresa", "Pastel Chico", "Pastel"),
+            ("Pastel Grande Chocolate", "Pastel Grande", "Pastel"),
+            ("Pastel Tres Leches", "Pastel", "Pastel"),
         ]:
             Receta.objects.create(
                 nombre=nombre,
@@ -113,6 +100,7 @@ class ClasificacionAreaProduccionTests(TestCase):
                 tipo=Receta.TIPO_PRODUCTO_FINAL,
                 modo_costeo=Receta.MODO_COSTEO_FABRICADO,
                 familia=familia,
+                grupo_mano_obra=grupo,
                 hash_contenido=f"h-{uuid4()}",
             )
 
@@ -122,15 +110,35 @@ class ClasificacionAreaProduccionTests(TestCase):
         familias_ctx = response.context["familias"]
         grupo_pastel = next(entrada for entrada in familias_ctx if entrada["nombre"] == "Pastel")
 
-        self.assertEqual(grupo_pastel["cantidad"], 3)
-        self.assertEqual(
-            grupo_pastel["familias_reales"], ["Pastel", "Pastel Chico", "Pastel Grande"]
-        )
-        self.assertContains(response, "Incluye de Point:")
-        # No debe aparecer una tarjeta separada por cada variante cruda.
+        self.assertEqual(grupo_pastel["miembros"], ["Pastel Chico Fresa", "Pastel Grande Chocolate", "Pastel Tres Leches"])
+        self.assertContains(response, "Ver los 3 productos")
+        # No debe aparecer una tarjeta separada por cada sabor fusionado.
         nombres = [entrada["nombre"] for entrada in familias_ctx]
-        self.assertNotIn("Pastel Chico", nombres)
-        self.assertNotIn("Pastel Grande", nombres)
+        self.assertNotIn("Pastel Chico Fresa", nombres)
+        self.assertNotIn("Pastel Grande Chocolate", nombres)
+
+    def test_dos_sabores_no_fusionados_aparecen_en_tarjetas_separadas(self):
+        from uuid import uuid4
+
+        from recetas.models import Receta
+
+        Receta.objects.create(
+            nombre="Pan Vainilla", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="PAN", hash_contenido=f"h-{uuid4()}",
+        )
+        Receta.objects.create(
+            nombre="Pan Chocolate", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="PAN", hash_contenido=f"h-{uuid4()}",
+        )
+
+        url = reverse("reportes:mano_obra_area_clasificacion")
+        response = self.client.get(url)
+
+        nombres = [entrada["nombre"] for entrada in response.context["familias"]]
+        self.assertIn("Pan Vainilla", nombres)
+        self.assertIn("Pan Chocolate", nombres)
 
     def test_capturar_lote_calcula_minutos_estandar_pieza(self):
         url = reverse("reportes:mano_obra_area_clasificacion")
@@ -150,42 +158,33 @@ class ClasificacionAreaProduccionTests(TestCase):
         self.assertEqual(fila.lote_piezas, 30)
         self.assertEqual(fila.minutos_estandar_pieza, Decimal("40") / Decimal("30"))
 
-    def test_fusionar_grupo_cambia_grupo_sin_tocar_codigo(self):
-        # Simula el caso real encontrado: "RELLENOS Y CREMAS" es una
-        # familia real nueva de Point que Carolina fusiona a un grupo ya
-        # existente, sin depender de un cambio de código.
-        FamiliaGrupoManoObra.objects.create(familia_real="RELLENOS Y CREMAS", grupo="RELLENOS Y CREMAS")
-        url = reverse("reportes:mano_obra_area_clasificacion")
-
-        self.client.post(url, {
-            "accion": "fusionar_grupo",
-            "familia_real": "RELLENOS Y CREMAS",
-            "grupo_destino": "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
-        })
-
-        fila = FamiliaGrupoManoObra.objects.get(familia_real="RELLENOS Y CREMAS")
-        self.assertEqual(fila.grupo, "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)")
-
-    def test_agregar_y_quitar_excepcion(self):
+    def test_fusionar_producto_propaga_a_grupo_ya_fusionado(self):
         from uuid import uuid4
 
         from recetas.models import Receta
 
-        receta = Receta.objects.create(
-            nombre="Pay Especial",
-            codigo_point=f"COD-{uuid4().hex[:6]}",
-            tipo=Receta.TIPO_PRODUCTO_FINAL,
-            modo_costeo=Receta.MODO_COSTEO_FABRICADO,
-            familia="Pay",
-            hash_contenido=f"h-{uuid4()}",
+        pastel_chico = Receta.objects.create(
+            nombre="Pastel Chico Fresa", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="Pastel Chico", grupo_mano_obra="Pastel", hash_contenido=f"h-{uuid4()}",
+        )
+        pastel_grande = Receta.objects.create(
+            nombre="Pastel Grande Chocolate", codigo_point=f"COD-{uuid4().hex[:6]}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+            familia="Pastel Grande", grupo_mano_obra="Pastel", hash_contenido=f"h-{uuid4()}",
         )
         url = reverse("reportes:mano_obra_area_clasificacion")
 
-        self.client.post(url, {"accion": "agregar_excepcion", "receta_id": receta.id, "area": "EMBETUNADO"})
-        fila = RecetaAreaProduccion.objects.get(receta=receta, area="EMBETUNADO")
+        self.client.post(url, {
+            "accion": "fusionar_producto",
+            "grupo_actual": "Pastel",
+            "grupo_destino": "Pastel General",
+        })
 
-        self.client.post(url, {"accion": "quitar_excepcion", "fila_id": fila.id})
-        self.assertFalse(RecetaAreaProduccion.objects.filter(id=fila.id).exists())
+        pastel_chico.refresh_from_db()
+        pastel_grande.refresh_from_db()
+        self.assertEqual(pastel_chico.grupo_mano_obra, "Pastel General")
+        self.assertEqual(pastel_grande.grupo_mano_obra, "Pastel General")
 
 
 class ClasificacionCatalogosTests(TestCase):

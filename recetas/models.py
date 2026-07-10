@@ -48,6 +48,11 @@ class Receta(models.Model):
     )
     familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
     categoria = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    # Grupo canónico de calibración de mano de obra (reportes/services_mano_obra_diaria_area.py).
+    # En blanco = "su grupo es su propio nombre" — mismo patrón que
+    # Insumo.grupo_mano_obra (maestros/models.py), cada receta se calibra
+    # por sabor específico, fusionable si comparte proceso con otra.
+    grupo_mano_obra = models.CharField(max_length=250, blank=True, default="")
     temporalidad = models.CharField(
         max_length=20,
         choices=TEMPORALIDAD_CHOICES,

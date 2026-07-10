@@ -7,10 +7,9 @@ from django.test import TestCase
 from maestros.models import Insumo
 from pos_bridge.models import PointBranch, PointProductionLine
 from recetas.models import Receta
-from reportes.models import FamiliaGrupoManoObra, RecetaAreaProduccion
+from reportes.models import RecetaAreaProduccion
 from reportes.services_mano_obra_diaria_area import (
-    _grupos_insumo_por_area,
-    _recetas_minutos_por_area,
+    _minutos_por_grupo,
     area_produccion_empleado,
     calcular_costo_diario_area,
     costo_mano_obra_diario_receta,
@@ -83,13 +82,14 @@ class UnidadesAreaDiaTests(TestCase):
     def setUp(self):
         self.branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
 
-    def _receta(self, *, nombre, familia):
+    def _receta(self, *, nombre, familia, grupo_mano_obra=""):
         return Receta.objects.create(
             nombre=nombre,
             codigo_point=f"COD-{uuid4().hex[:6]}",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             modo_costeo=Receta.MODO_COSTEO_FABRICADO,
             familia=familia,
+            grupo_mano_obra=grupo_mano_obra,
             hash_contenido=f"h-{uuid4()}",
         )
 
@@ -103,29 +103,31 @@ class UnidadesAreaDiaTests(TestCase):
             source_hash=str(uuid4()),
         )
 
-    def test_excepcion_de_receta_tiene_prioridad_sobre_familia(self):
+    def test_receta_con_grupo_propio_no_comparte_area_con_otras_de_la_misma_familia_vieja(self):
+        # Antes las recetas se agrupaban por familia; ahora cada una tiene
+        # su propio grupo_mano_obra (autocontenido por default) — una
+        # receta que necesita un área distinta se fusiona a su PROPIO
+        # grupo, no depende de una "excepción" separada.
         pastel_normal = self._receta(nombre="Pastel Normal", familia="Pastel")
-        pastel_excepcion = self._receta(nombre="Pastel Sin Embetunado", familia="Pastel")
-        RecetaAreaProduccion.objects.create(familia="Pastel", area="EMBETUNADO")
-        RecetaAreaProduccion.objects.create(receta=pastel_excepcion, area="HORNOS")
+        pastel_especial = self._receta(
+            nombre="Pastel Sin Embetunado", familia="Pastel", grupo_mano_obra="Pastel Sin Embetunado"
+        )
+        RecetaAreaProduccion.objects.create(familia="Pastel Normal", area="EMBETUNADO")
+        RecetaAreaProduccion.objects.create(familia="Pastel Sin Embetunado", area="HORNOS")
 
         self._produccion(receta=pastel_normal, cantidad=10, fecha=date(2026, 6, 1))
-        self._produccion(receta=pastel_excepcion, cantidad=5, fecha=date(2026, 6, 1))
+        self._produccion(receta=pastel_especial, cantidad=5, fecha=date(2026, 6, 1))
 
-        # pastel_normal cuenta para EMBETUNADO (via familia); pastel_excepcion NO
-        # (tiene su propia excepcion que solo lo pone en HORNOS)
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("10"))
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("5"))
 
     def test_produccion_ligada_a_insumo_interno_tambien_cuenta(self):
         # ~51% de la produccion real en Point se liga a Insumo (masas,
-        # betunes, rellenos), no a Receta. Insumo.categoria usa las mismas
-        # etiquetas que Receta.familia (verificado en produccion: PAN,
-        # GALLETAS, MASAS, etc.).
-        RecetaAreaProduccion.objects.create(familia="MASAS", area="ARMADO")
+        # betunes, rellenos), no a Receta.
         masa_hojaldre = Insumo.objects.create(
             nombre="Masa Hojaldre", tipo_item=Insumo.TIPO_INTERNO, categoria="MASAS",
         )
+        RecetaAreaProduccion.objects.create(familia="Masa Hojaldre", area="ARMADO", es_grupo_insumo=True)
         PointProductionLine.objects.create(
             branch=self.branch, insumo=masa_hojaldre, item_name="Masa Hojaldre",
             produced_quantity=Decimal("40"), production_date=date(2026, 6, 1),
@@ -135,10 +137,10 @@ class UnidadesAreaDiaTests(TestCase):
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("40"))
 
     def test_insumo_materia_prima_no_cuenta_como_produccion_interna(self):
-        RecetaAreaProduccion.objects.create(familia="MASAS", area="ARMADO")
         harina = Insumo.objects.create(
             nombre="Harina", tipo_item=Insumo.TIPO_MATERIA_PRIMA, categoria="MASAS",
         )
+        RecetaAreaProduccion.objects.create(familia="Harina", area="ARMADO", es_grupo_insumo=True)
         PointProductionLine.objects.create(
             branch=self.branch, insumo=harina, item_name="Harina",
             produced_quantity=Decimal("40"), production_date=date(2026, 6, 1),
@@ -160,41 +162,15 @@ class UnidadesAreaDiaTests(TestCase):
 
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("0"))
 
-    def test_clasificar_grupo_pastel_incluye_variantes_de_tamano(self):
-        # RecetaAreaProduccion guarda el GRUPO canónico "Pastel", pero Point
-        # trae la producción real bajo familias distintas por tamaño
-        # (Pastel Chico/Grande/Mediano/Mini) — decisión de negocio confirmada
-        # por Mauricio de fusionar por tamaño, no una fusión de texto genérica.
-        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
-        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Grande", grupo="Pastel")
+    def test_fusionar_dos_sabores_bajo_un_grupo_agrega_sus_unidades(self):
+        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico", grupo_mano_obra="Pastel")
+        pastel_grande = self._receta(nombre="Pastel Grande Chocolate", familia="Pastel Grande", grupo_mano_obra="Pastel")
         RecetaAreaProduccion.objects.create(familia="Pastel", area="EMBETUNADO")
-        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
-        pastel_grande = self._receta(nombre="Pastel Grande Chocolate", familia="Pastel Grande")
 
         self._produccion(receta=pastel_chico, cantidad=6, fecha=date(2026, 6, 1))
         self._produccion(receta=pastel_grande, cantidad=4, fecha=date(2026, 6, 1))
 
         self.assertEqual(unidades_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("10"))
-
-    def test_clasificar_grupo_betun_incluye_familia_original_de_point(self):
-        # "Betún y Rellenos" y "Betún, Cremas, Rellenos (INSUMO PRODUCIDO)"
-        # son, confirmado por Mauricio, el mismo grupo de producción.
-        FamiliaGrupoManoObra.objects.create(
-            familia_real="Betún y Rellenos", grupo="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)"
-        )
-        RecetaAreaProduccion.objects.create(
-            familia="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)", area="ARMADO"
-        )
-        betun_original = Insumo.objects.create(
-            nombre="Betún de Vainilla", tipo_item=Insumo.TIPO_INTERNO, categoria="Betún y Rellenos",
-        )
-        PointProductionLine.objects.create(
-            branch=self.branch, insumo=betun_original, item_name="Betún de Vainilla",
-            produced_quantity=Decimal("15"), production_date=date(2026, 6, 1),
-            source_hash=str(uuid4()),
-        )
-
-        self.assertEqual(unidades_area_dia(date(2026, 6, 1), "ARMADO"), Decimal("15"))
 
 
 class MinutosEstandarPiezaTests(TestCase):
@@ -219,20 +195,21 @@ class MinutosAreaDiaTests(TestCase):
     def setUp(self):
         self.branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
 
-    def _receta(self, *, nombre, familia):
+    def _receta(self, *, nombre, familia, grupo_mano_obra=""):
         return Receta.objects.create(
             nombre=nombre,
             codigo_point=f"COD-{uuid4().hex[:6]}",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             modo_costeo=Receta.MODO_COSTEO_FABRICADO,
             familia=familia,
+            grupo_mano_obra=grupo_mano_obra,
             hash_contenido=f"h-{uuid4()}",
         )
 
     def test_receta_calibrada_aporta_piezas_por_minuto_pieza(self):
         receta = self._receta(nombre="Pastel Grande Fresa", familia="Pastel")
         RecetaAreaProduccion.objects.create(
-            familia="Pastel", area="EMBETUNADO",
+            familia="Pastel Grande Fresa", area="EMBETUNADO",
             lote_personas=1, lote_minutos=Decimal("20"), lote_piezas=10,
         )  # 2 min/pieza
         PointProductionLine.objects.create(
@@ -245,7 +222,7 @@ class MinutosAreaDiaTests(TestCase):
 
     def test_receta_clasificada_sin_calibrar_no_aporta(self):
         receta = self._receta(nombre="Pay de Queso", familia="Pay")
-        RecetaAreaProduccion.objects.create(familia="Pay", area="HORNOS")  # sin lote capturado
+        RecetaAreaProduccion.objects.create(familia="Pay de Queso", area="HORNOS")  # sin lote capturado
         PointProductionLine.objects.create(
             branch=self.branch, receta=receta, item_name=receta.nombre,
             produced_quantity=Decimal("20"), production_date=date(2026, 6, 1),
@@ -253,6 +230,54 @@ class MinutosAreaDiaTests(TestCase):
         )
 
         self.assertEqual(minutos_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("0"))
+
+    def test_dos_sabores_fusionados_agregan_minutos_bajo_el_mismo_grupo(self):
+        pan_chico = self._receta(nombre="Pan Vainilla Chico", familia="PAN", grupo_mano_obra="Pan Vainilla Dawn")
+        pan_grande = self._receta(nombre="Pan Vainilla Grande", familia="PAN", grupo_mano_obra="Pan Vainilla Dawn")
+        RecetaAreaProduccion.objects.create(
+            familia="Pan Vainilla Dawn", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=5,
+        )  # 2 min/pieza
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=pan_chico, item_name=pan_chico.nombre,
+            produced_quantity=Decimal("10"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=pan_grande, item_name=pan_grande.nombre,
+            produced_quantity=Decimal("5"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        # (10 + 5) piezas * 2 min/pieza = 30
+        self.assertEqual(minutos_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("30"))
+
+    def test_dos_sabores_distintos_de_la_misma_familia_no_comparten_minuto_por_default(self):
+        # El punto central de esta vuelta: sin fusionar explícitamente, dos
+        # sabores de la misma familia vieja ya NO comparten calibración.
+        pan_vainilla = self._receta(nombre="Pan Vainilla", familia="PAN")
+        pan_chocolate = self._receta(nombre="Pan Chocolate", familia="PAN")
+        RecetaAreaProduccion.objects.create(
+            familia="Pan Vainilla", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=10,
+        )  # 1 min/pieza
+        RecetaAreaProduccion.objects.create(
+            familia="Pan Chocolate", area="HORNOS",
+            lote_personas=1, lote_minutos=Decimal("40"), lote_piezas=10,
+        )  # 4 min/pieza
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=pan_vainilla, item_name=pan_vainilla.nombre,
+            produced_quantity=Decimal("10"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=pan_chocolate, item_name=pan_chocolate.nombre,
+            produced_quantity=Decimal("10"), production_date=date(2026, 6, 1),
+            source_hash=str(uuid4()),
+        )
+
+        # 10*1 + 10*4 = 50, NO 10*(1+4)/2*2 ni ningún promedio compartido
+        self.assertEqual(minutos_area_dia(date(2026, 6, 1), "HORNOS"), Decimal("50"))
 
 
 class GruposInsumoPorAreaTests(TestCase):
@@ -274,7 +299,7 @@ class GruposInsumoPorAreaTests(TestCase):
             lote_personas=1, lote_minutos=Decimal("30"), lote_piezas=10,
         )  # 3 min/kg
 
-        minutos = _grupos_insumo_por_area("EMBETUNADO")
+        minutos = _minutos_por_grupo("EMBETUNADO", True, Insumo.objects.filter(tipo_item=Insumo.TIPO_INTERNO))
 
         self.assertEqual(minutos[betun.id], Decimal("3"))
 
@@ -292,16 +317,14 @@ class GruposInsumoPorAreaTests(TestCase):
             lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=5,
         )  # 2 min/pieza
 
-        minutos = _grupos_insumo_por_area("HORNOS")
+        minutos = _minutos_por_grupo("HORNOS", True, Insumo.objects.filter(tipo_item=Insumo.TIPO_INTERNO))
 
         self.assertEqual(minutos[pan_chico.id], Decimal("2"))
         self.assertEqual(minutos[pan_grande.id], Decimal("2"))
 
     def test_preparaciones_distintas_no_comparten_minuto_aunque_compartan_categoria(self):
         # Caso real: "Betún, Cremas, Rellenos" mezcla KG (Betún Dream Whip)
-        # y Litro (Mezcla 3 Leches) — antes de esta vuelta ambos compartían
-        # el minuto/unidad de la categoria completa, lo cual mezclaba
-        # unidades incompatibles.
+        # y Litro (Mezcla 3 Leches) — cada preparación se calibra aparte.
         betun = Insumo.objects.create(
             nombre="Betún Dream Whip Pastel", tipo_item=Insumo.TIPO_INTERNO,
             categoria="Betún, Cremas, Rellenos (INSUMO PRODUCIDO)",
@@ -333,10 +356,13 @@ class GruposInsumoPorAreaTests(TestCase):
         self.assertEqual(minutos_area_dia(date(2026, 6, 1), "EMBETUNADO"), Decimal("110"))
 
     def test_familia_receta_y_grupo_insumo_con_mismo_texto_no_colisionan(self):
+        # Misma "familia"/nombre de grupo ("Tres Leches") usada tanto por
+        # una receta de venta como por una preparación de insumo — nunca
+        # deben cruzarse, cada una resuelve solo en su propio namespace.
         receta = Receta.objects.create(
-            nombre="Pastel Tres Leches", codigo_point=f"COD-{uuid4().hex[:6]}",
+            nombre="Tres Leches", codigo_point=f"COD-{uuid4().hex[:6]}",
             tipo=Receta.TIPO_PRODUCTO_FINAL, modo_costeo=Receta.MODO_COSTEO_FABRICADO,
-            familia="Tres Leches", hash_contenido=f"h-{uuid4()}",
+            familia="Pastel", hash_contenido=f"h-{uuid4()}",
         )
         insumo = Insumo.objects.create(
             nombre="Tres Leches", tipo_item=Insumo.TIPO_INTERNO, categoria="MASAS",
@@ -344,19 +370,19 @@ class GruposInsumoPorAreaTests(TestCase):
         RecetaAreaProduccion.objects.create(
             familia="Tres Leches", area="HORNOS", es_grupo_insumo=False,
             lote_personas=1, lote_minutos=Decimal("10"), lote_piezas=10,
-        )  # 1 min/pieza, receta
+        )  # 1 min/pieza, Productos
         RecetaAreaProduccion.objects.create(
             familia="Tres Leches", area="ARMADO", es_grupo_insumo=True,
             lote_personas=1, lote_minutos=Decimal("20"), lote_piezas=10,
-        )  # 2 min/unidad, insumo
+        )  # 2 min/unidad, Catálogos
 
-        # La fila de receta (HORNOS) no debe aparecer al resolver insumos,
-        # y viceversa — cada namespace se resuelve por separado aunque
-        # compartan el mismo texto en "familia".
-        self.assertEqual(_recetas_minutos_por_area("HORNOS"), {receta.id: Decimal("1")})
-        self.assertEqual(_grupos_insumo_por_area("HORNOS"), {})
-        self.assertEqual(_recetas_minutos_por_area("ARMADO"), {})
-        self.assertEqual(_grupos_insumo_por_area("ARMADO"), {insumo.id: Decimal("2")})
+        receta_qs = Receta.objects.all()
+        insumo_qs = Insumo.objects.filter(tipo_item=Insumo.TIPO_INTERNO)
+
+        self.assertEqual(_minutos_por_grupo("HORNOS", False, receta_qs), {receta.id: Decimal("1")})
+        self.assertEqual(_minutos_por_grupo("HORNOS", True, insumo_qs), {})
+        self.assertEqual(_minutos_por_grupo("ARMADO", False, receta_qs), {})
+        self.assertEqual(_minutos_por_grupo("ARMADO", True, insumo_qs), {insumo.id: Decimal("2")})
 
 
 class CalcularCostoDiarioAreaTests(TestCase):
@@ -370,13 +396,14 @@ class CalcularCostoDiarioAreaTests(TestCase):
             salario_diario=Decimal("400.00"),
         )
 
-    def _receta(self, *, nombre, familia):
+    def _receta(self, *, nombre, familia, grupo_mano_obra=""):
         return Receta.objects.create(
             nombre=nombre,
             codigo_point=f"COD-{uuid4().hex[:6]}",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             modo_costeo=Receta.MODO_COSTEO_FABRICADO,
             familia=familia,
+            grupo_mano_obra=grupo_mano_obra,
             hash_contenido=f"h-{uuid4()}",
         )
 
@@ -404,7 +431,7 @@ class CalcularCostoDiarioAreaTests(TestCase):
         branch = PointBranch.objects.create(external_id=f"B-{uuid4().hex[:6]}", name="Sucursal Test")
         receta = self._receta(nombre="Pan Blanco", familia="PAN")
         RecetaAreaProduccion.objects.create(
-            familia="PAN", area="HORNOS",
+            familia="Pan Blanco", area="HORNOS",
             lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
         )  # 1 min/pieza
         PointProductionLine.objects.create(
@@ -432,21 +459,21 @@ class CalcularCostoDiarioAreaTests(TestCase):
     def test_costo_mano_obra_diario_receta_declara_area_faltante(self):
         # El costo de un área es un fondo compartido entre TODAS las recetas
         # que le pertenecen ese día, no algo aislado por receta. Ambas
-        # familias están calibradas (con minutos) — lo que falta es
-        # producción real en ARMADO ese día, no calibración.
+        # están calibradas (con minutos) — lo que falta es producción real
+        # en ARMADO ese día, no calibración.
         pan_base = self._receta(nombre="Pan Base", familia="PAN")
         RecetaAreaProduccion.objects.create(
-            familia="PAN", area="HORNOS",
+            familia="Pan Base", area="HORNOS",
             lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
         )
 
         pastel_test = self._receta(nombre="Pastel Test", familia="Pastel Especial")
         RecetaAreaProduccion.objects.create(
-            familia="Pastel Especial", area="HORNOS",
+            familia="Pastel Test", area="HORNOS",
             lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
         )
         RecetaAreaProduccion.objects.create(
-            familia="Pastel Especial", area="ARMADO",
+            familia="Pastel Test", area="ARMADO",
             lote_personas=1, lote_minutos=Decimal("50"), lote_piezas=50,
         )
 
@@ -472,12 +499,11 @@ class CalcularCostoDiarioAreaTests(TestCase):
         self.assertNotIn("HORNOS", resultado["areas_faltantes"])
         self.assertIsNone(resultado["costo_total"])
 
-    def test_receta_con_familia_variante_resuelve_por_grupo_canonico(self):
-        # La receta trae la familia real de Point ("Pastel Chico"), pero la
-        # clasificación (con minutos calibrados) se guardó contra el grupo
-        # canónico ("Pastel").
-        FamiliaGrupoManoObra.objects.create(familia_real="Pastel Chico", grupo="Pastel")
-        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico")
+    def test_receta_fusionada_resuelve_por_grupo_canonico(self):
+        # La receta trae su propia familia ("Pastel Chico"), pero fue
+        # fusionada a un grupo distinto ("Pastel") donde sí hay minutos
+        # capturados.
+        pastel_chico = self._receta(nombre="Pastel Chico Fresa", familia="Pastel Chico", grupo_mano_obra="Pastel")
         RecetaAreaProduccion.objects.create(
             familia="Pastel", area="HORNOS",
             lote_personas=1, lote_minutos=Decimal("100"), lote_piezas=100,
@@ -505,9 +531,9 @@ class CalcularCostoDiarioAreaTests(TestCase):
     def test_receta_clasificada_sin_calibrar_declara_area_faltante(self):
         # Distinto del caso "sin producción": aquí SÍ hubo producción y
         # nómina ese día, pero nadie ha capturado los minutos de esta
-        # familia todavía — no se inventa un costo.
+        # receta todavía — no se inventa un costo.
         receta = self._receta(nombre="Pay de Queso", familia="Pay")
-        RecetaAreaProduccion.objects.create(familia="Pay", area="HORNOS")  # sin lote
+        RecetaAreaProduccion.objects.create(familia="Pay de Queso", area="HORNOS")  # sin lote
 
         empleado_hornos = self._empleado(puesto_operativo="HORNOS")
         periodo = NominaPeriodo.objects.create(

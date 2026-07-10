@@ -11,13 +11,16 @@
 
 <section class="card">
   <div class="card-header">Productos</div>
-  <p class="muted">Marca qué área(s) requiere cada familia. Una familia puede pasar por varias — ej. Pastel lleva Hornos, Armado y Embetunado. Para cada área marcada, captura un lote típico (personas, minutos activos, piezas) para calcular el minuto estándar por pieza — minutos de horno/reposo pasivo NO se capturan aquí.</p>
+  <p class="muted">Cada receta se calibra por su propio sabor/variante — fusiona con otra solo si comparten proceso (ej. tamaños de un mismo pan). Para cada área marcada, captura un lote típico (personas, minutos activos, piezas) para calcular el minuto estándar por pieza — minutos de horno/reposo pasivo NO se capturan aquí.</p>
   <div class="dashboard-grid">
     {% for familia in familias %}
     <div class="card">
-      <div class="card-header">{{ familia.nombre }} <span class="muted" style="font-size:12px;">{{ familia.cantidad }} recetas</span></div>
-      {% if familia.familias_reales|length > 1 %}
-      <p class="muted" style="font-size:11.5px;">Incluye de Point: {{ familia.familias_reales|join:", " }}</p>
+      <div class="card-header">{{ familia.nombre }} <span class="muted" style="font-size:12px;">{{ familia.miembros|length }} productos</span></div>
+      {% if familia.miembros|length > 1 %}
+      <details style="margin-bottom:8px;">
+        <summary class="muted" style="font-size:11.5px; cursor:pointer;">Ver los {{ familia.miembros|length }} productos</summary>
+        <p class="muted" style="font-size:11.5px;">{{ familia.miembros|join:", " }}</p>
+      </details>
       {% endif %}
       <form method="post" style="display:flex; gap:8px; flex-wrap:wrap;">
         {% csrf_token %}
@@ -51,8 +54,8 @@
 
       <form method="post" style="display:flex; gap:6px; align-items:center; margin-top:10px;">
         {% csrf_token %}
-        <input type="hidden" name="accion" value="fusionar_grupo">
-        <input type="hidden" name="familia_real" value="{{ familia.nombre }}">
+        <input type="hidden" name="accion" value="fusionar_producto">
+        <input type="hidden" name="grupo_actual" value="{{ familia.nombre }}">
         <span class="muted" style="font-size:11.5px;">Fusionar con:</span>
         <input class="input-field" size="28" type="text" name="grupo_destino" list="grupos-existentes" placeholder="nombre del grupo destino">
         <button type="submit" class="btn btn-secondary btn-sm">Fusionar</button>
@@ -75,9 +78,9 @@
   <div class="dashboard-grid">
     {% for catalogo in catalogos %}
     <div class="card">
-      <div class="card-header">{{ catalogo.nombre }} <span class="muted" style="font-size:12px;">{{ catalogo.insumos_reales|length }} preparaciones</span></div>
-      {% if catalogo.insumos_reales|length > 1 %}
-      <p class="muted" style="font-size:11.5px;">Incluye: {{ catalogo.insumos_reales|join:", " }}</p>
+      <div class="card-header">{{ catalogo.nombre }} <span class="muted" style="font-size:12px;">{{ catalogo.miembros|length }} preparaciones</span></div>
+      {% if catalogo.miembros|length > 1 %}
+      <p class="muted" style="font-size:11.5px;">Incluye: {{ catalogo.miembros|join:", " }}</p>
       {% endif %}
       <form method="post" style="display:flex; gap:8px; flex-wrap:wrap;">
         {% csrf_token %}
@@ -129,66 +132,6 @@
     <option value="{{ grupo }}"></option>
     {% endfor %}
   </datalist>
-</section>
-
-<section class="card">
-  <div class="card-header">Excepciones por receta</div>
-  <p class="muted">Cuando una receta puntual no sigue el patrón de su familia — ej. un Pay que sí lleva embetunado.</p>
-
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr><th>Receta</th><th>Familia</th><th>Áreas</th><th></th></tr>
-      </thead>
-      <tbody>
-        {% for entrada in excepciones %}
-        <tr>
-          <td>{{ entrada.receta.nombre }}</td>
-          <td class="muted">{{ entrada.receta.familia }}</td>
-          <td>
-            {% for value, label in areas %}
-              {% if value in entrada.areas %}<span class="badge bg-primary">{{ label }}</span>{% endif %}
-            {% endfor %}
-          </td>
-          <td>
-            {% for area_valor, fila_id in entrada.filas.items %}
-            <form method="post" style="display:inline;">
-              {% csrf_token %}
-              <input type="hidden" name="accion" value="quitar_excepcion">
-              <input type="hidden" name="fila_id" value="{{ fila_id }}">
-              <button type="submit" class="btn btn-secondary btn-sm">Quitar {{ area_valor }}</button>
-            </form>
-            {% endfor %}
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="4" class="muted">Sin excepciones capturadas.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card" style="margin-top:16px;">
-    <div class="card-header">Agregar excepción</div>
-    <form method="post" class="form-grid-2">
-      {% csrf_token %}
-      <input type="hidden" name="accion" value="agregar_excepcion">
-      <div class="form-group">
-        <label for="id_receta_id">ID de receta <span class="text-danger">*</span></label>
-        <input class="input-field" id="id_receta_id" name="receta_id" type="number" required>
-        <p class="muted">Por ahora se captura por ID — se puede mejorar con buscador después.</p>
-      </div>
-      <div class="form-group">
-        <label for="id_area">Área <span class="text-danger">*</span></label>
-        <select class="input-field" id="id_area" name="area" required>
-          {% for value, label in areas %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="form-group full">
-        <button class="btn btn-primary" style="background:var(--vino);border-color:var(--vino);" type="submit">Agregar</button>
-      </div>
-    </form>
-  </div>
 </section>
 
 {% endblock %}

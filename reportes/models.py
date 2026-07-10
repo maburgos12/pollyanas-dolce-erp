@@ -1322,8 +1322,10 @@ class DgOperacionSnapshot(models.Model):
 
 
 class RecetaAreaProduccion(models.Model):
-    """Qué área(s) de producción (Hornos/Armado/Embetunado) requiere una
-    familia de recetas, o una receta puntual como excepción a su familia.
+    """Qué área(s) de producción (Hornos/Armado/Embetunado) requiere un
+    grupo de mano de obra — un grupo de Receta (Productos) o de Insumo
+    (Catálogos), cada uno autocontenido por default (su propio nombre) y
+    fusionable con otros que compartan proceso.
 
     Reutiliza las mismas constantes de área que bonos_produccion (no las
     redefine) — son las mismas 3 áreas de producción que ya clasifican a
@@ -1339,18 +1341,10 @@ class RecetaAreaProduccion(models.Model):
     ]
 
     familia = models.CharField(max_length=120, blank=True, default="", db_index=True)
-    receta = models.ForeignKey(
-        "recetas.Receta",
-        null=True,
-        blank=True,
-        on_delete=models.CASCADE,
-        related_name="areas_produccion",
-    )
     area = models.CharField(max_length=20, choices=AREA_CHOICES, db_index=True)
-    # Cuando familia está poblado, distingue si ese texto resuelve contra
-    # Receta.familia (False, comportamiento existente) o contra
-    # Insumo.grupo_mano_obra/nombre (True) — Productos vs Catálogos de
-    # Point, namespaces separados que nunca se cruzan.
+    # Distingue si "familia" resuelve contra Receta.grupo_mano_obra/nombre
+    # (False, Productos) o Insumo.grupo_mano_obra/nombre (True, Catálogos)
+    # — namespaces separados que nunca se cruzan.
     es_grupo_insumo = models.BooleanField(default=False)
     # Captura por lote típico (no por pieza directa): cuántas personas y
     # minutos ACTIVOS toma un lote y cuántas piezas salen de él. Minutos de
@@ -1369,44 +1363,16 @@ class RecetaAreaProduccion(models.Model):
         return None
 
     class Meta:
-        verbose_name = "Área de producción por receta/familia"
-        verbose_name_plural = "Áreas de producción por receta/familia"
+        verbose_name = "Área de producción por grupo de mano de obra"
+        verbose_name_plural = "Áreas de producción por grupo de mano de obra"
         constraints = [
-            models.CheckConstraint(
-                check=(
-                    models.Q(familia__gt="", receta__isnull=True)
-                    | models.Q(familia="", receta__isnull=False)
-                ),
-                name="rap_familia_xor_receta",
-            ),
             models.UniqueConstraint(
                 fields=["familia", "area", "es_grupo_insumo"], name="rap_familia_area_unico"
             ),
-            models.UniqueConstraint(fields=["receta", "area"], name="rap_receta_area_unico"),
         ]
 
     def __str__(self) -> str:
-        origen = self.receta.nombre if self.receta_id else self.familia
-        return f"{origen} · {self.get_area_display()}"
-
-
-class FamiliaGrupoManoObra(models.Model):
-    """Point trae familias/categorías reales con texto duplicado o casi
-    idéntico (ej. variantes de tamaño de Pastel, "Betún y Rellenos" vs
-    "Betún, Cremas, Rellenos"). En vez de un mapeo fijo en código, esta
-    tabla es editable desde la pantalla de clasificación por quien conozca
-    el negocio (Carolina) — cada familia real apunta a un grupo canónico,
-    por default ella misma."""
-
-    familia_real = models.CharField(max_length=120, unique=True, db_index=True)
-    grupo = models.CharField(max_length=120, db_index=True)
-
-    class Meta:
-        verbose_name = "Grupo de familia para mano de obra"
-        verbose_name_plural = "Grupos de familia para mano de obra"
-
-    def __str__(self) -> str:
-        return f"{self.familia_real} → {self.grupo}"
+        return f"{self.familia} · {self.get_area_display()}"
 
 
 class CostoManoObraDiarioArea(models.Model):
