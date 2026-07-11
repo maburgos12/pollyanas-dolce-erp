@@ -121,10 +121,14 @@ CALCULO_INSUMOS_MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 CALCULO_INSUMOS_MAX_ROWS = 2000
 CALCULO_INSUMOS_EXCLUDED_TEMPLATE_FAMILY_TOKENS = {
     "accesorio",
+    "caja",
     "desechable",
+    "empaque",
+    "extra ",
     "letrero",
     "plastico",
     "regalo",
+    "tarjeta",
     "vela",
 }
 
@@ -134,9 +138,45 @@ def _calculo_insumos_excluded_template_family(value: str) -> bool:
     return any(token in normalized for token in CALCULO_INSUMOS_EXCLUDED_TEMPLATE_FAMILY_TOKENS)
 
 
+def _calculo_insumos_template_presentation(
+    family: str, category: str, product_name: str
+) -> str:
+    clean_family = " ".join((family or "").split())
+    clean_category = " ".join((category or "").split())
+    product_key = " ".join(unidecode(product_name or "").lower().split())
+    product_words = product_key.replace("-", " ").split()
+    for token, label in (
+        ("media plancha", "Media Plancha"),
+        ("rebanada", "Rebanada"),
+        ("individual", "Individual"),
+        ("mini", "Mini"),
+        ("chico", "Chico"),
+        ("mediano", "Mediano"),
+        ("grande", "Grande"),
+    ):
+        if token in product_key:
+            return label
+    if product_words:
+        abbreviated = {"m": "Mediano", "g": "Grande", "r": "Rebanada"}
+        if product_words[-1] in abbreviated:
+            return abbreviated[product_words[-1]]
+    family_key = unidecode(clean_family).lower()
+    category_key = unidecode(clean_category).lower()
+    if family_key and category_key.startswith(f"{family_key} "):
+        return clean_category[len(clean_family) :].strip()
+    return clean_category or clean_family
+
+
 def _calculo_insumos_template_products() -> list[dict[str, str]]:
+    latest_sale = PointDailySale.objects.aggregate(max_date=Max("sale_date")).get("max_date")
+    if latest_sale is None:
+        return []
+    sale_cutoff = latest_sale - timedelta(days=90)
+    sold_product_ids = PointDailySale.objects.filter(sale_date__gte=sale_cutoff).values_list(
+        "product_id", flat=True
+    )
     point_products = list(
-        PointProduct.objects.filter(active=True)
+        PointProduct.objects.filter(active=True, id__in=sold_product_ids)
         .exclude(sku="")
         .only("sku", "name", "category")
     )
@@ -149,39 +189,31 @@ def _calculo_insumos_template_products() -> list[dict[str, str]]:
         for receta in recipes.exclude(codigo_point="")
         if normalizar_codigo_point(receta.codigo_point)
     }
-    aliases = (
-        RecetaCodigoPointAlias.objects.filter(
-            activo=True,
-            receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
-            receta__modo_costeo=Receta.MODO_COSTEO_FABRICADO,
-        )
-        .select_related("receta")
-    )
-    recipes_by_alias = {
-        alias.codigo_point_normalizado: alias.receta
-        for alias in aliases
-        if alias.codigo_point_normalizado
-    }
     products = []
     seen_codes = set()
     for point_product in point_products:
         code_key = normalizar_codigo_point(point_product.sku)
         if not code_key or code_key in seen_codes:
             continue
-        receta = recipes_by_code.get(code_key) or recipes_by_alias.get(code_key)
+        receta = recipes_by_code.get(code_key)
         if receta is None:
             continue
         family = receta.familia or point_product.category or "Sin familia"
         if _calculo_insumos_excluded_template_family(
             family
-        ) or _calculo_insumos_excluded_template_family(point_product.category):
+        ) or _calculo_insumos_excluded_template_family(
+            point_product.category
+        ) or _calculo_insumos_excluded_template_family(point_product.name):
             continue
         seen_codes.add(code_key)
         products.append(
             {
                 "familia": family,
                 "codigo_point": point_product.sku,
-                "producto": receta.nombre,
+                "producto": point_product.name,
+                "presentacion": _calculo_insumos_template_presentation(
+                    family, point_product.category, point_product.name
+                ),
             }
         )
     return sorted(
@@ -16761,7 +16793,7 @@ def calculo_insumos_plantilla(request: HttpRequest) -> HttpResponse:
                 product["familia"],
                 product["codigo_point"],
                 product["producto"],
-                "",
+                product["presentacion"],
                 None,
                 None,
             ]
