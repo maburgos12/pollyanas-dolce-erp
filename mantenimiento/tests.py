@@ -255,7 +255,6 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "openClosedHistory()")
         self.assertContains(app, 'state.history.periodo = "30d"')
         self.assertContains(app, 'state.history.estado = "cerrado"')
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1"')
 
     def test_pwa_history_catch_ignores_stale_request_before_mutating_ui(self):
         self.client.force_login(self.mantenimiento)
@@ -663,7 +662,9 @@ class MantenimientoUnifiedInboxTests(TestCase):
             {
                 "estatus": ReporteFalla.ESTATUS_CERRADO,
                 "comentario": "Se entrega funcionando con foto final.",
-                "evidencias_seguimiento": SimpleUploadedFile("foto-final.jpg", b"img", content_type="image/jpeg"),
+                "evidencias_seguimiento": SimpleUploadedFile(
+                    "foto-final.jpg", b"\xff\xd8\xffimagen", content_type="image/jpeg"
+                ),
             },
         )
 

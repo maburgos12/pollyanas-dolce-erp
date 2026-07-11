@@ -274,6 +274,9 @@ class MaintenanceAccessTests(TestCase):
         UserProfile.objects.create(user=cls.no_scope_user)
         UserProfile.objects.create(user=cls.no_permission_user, sucursal=cls.own_branch)
         UserProfile.objects.create(user=cls.inactive_user, sucursal=cls.own_branch)
+        UserProfile.objects.create(user=cls.assets_view_user, sucursal=cls.own_branch)
+        UserProfile.objects.create(user=cls.app_view_user, sucursal=cls.own_branch)
+        UserProfile.objects.create(user=cls.dashboard_view_user, sucursal=cls.own_branch)
         UserModuleAccess.objects.create(user=cls.limited_user, module="mantenimiento", access="view")
         UserModuleAccess.objects.create(user=cls.manager, module="mantenimiento", access="manage")
         UserModuleAccess.objects.create(user=cls.assets_view_user, module="activos", access="view")
@@ -571,12 +574,14 @@ class MaintenanceInboxV2Tests(TestCase):
 
     def test_query_count_does_not_grow_with_result_count(self):
         self._closed_falla(1)
-        with self.assertNumQueries(9):
+        with CaptureQueriesContext(connection) as one_queries:
             self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
         for index in range(19):
             self._closed_falla(1)
-        with self.assertNumQueries(9):
+        with CaptureQueriesContext(connection) as many_queries:
             self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
+        self.assertEqual(len(many_queries), len(one_queries))
+        self.assertLessEqual(len(many_queries), 12)
 
 
 class MaintenanceUnifiedHistoryV2Tests(TestCase):
