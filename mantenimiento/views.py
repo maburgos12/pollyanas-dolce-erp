@@ -152,7 +152,8 @@ def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
                 estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO, comentario=comentario,
             )
     except Exception:
-        if reporte.foto_evidencia and reporte.foto_evidencia.name:
+        if (reporte.foto_evidencia and reporte.foto_evidencia.name
+                and getattr(reporte.foto_evidencia, "_committed", False)):
             reporte.foto_evidencia.delete(save=False)
         raise
     return reporte
@@ -160,7 +161,7 @@ def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
 
 def _eliminar_archivos_evidencias(evidencias):
     for evidencia in evidencias:
-        if evidencia.archivo:
+        if evidencia.archivo and getattr(evidencia.archivo, "_committed", False):
             evidencia.archivo.delete(save=False)
 
 

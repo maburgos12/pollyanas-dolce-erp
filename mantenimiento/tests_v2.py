@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.storage import default_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -164,6 +165,20 @@ class EvidenceWritePathTests(TestCase):
             self.assertEqual(ReporteFalla.objects.count(), before_rows)
             current_files = set(media.rglob("*")) if media.exists() else set()
             self.assertEqual({path for path in current_files if path.is_file()}, {path for path in before_files if path.is_file()})
+
+    def test_storage_failure_does_not_delete_preexisting_homonymous_blob(self):
+        existing_name = default_storage.save("fallas/evidencias/segura.jpg", ContentFile(b"existente"))
+        before_rows = ReporteFalla.objects.count()
+        payload = {"sucursal": self.branch.pk, "categoria": self.category.pk, "titulo": "Nueva", "descripcion": "Descripción"}
+        photo = SimpleUploadedFile("segura.jpg", b"\xff\xd8\xffnueva", content_type="image/jpeg")
+        storage_class = default_storage._wrapped.__class__
+        with patch.object(storage_class, "save", side_effect=OSError("storage no disponible")):
+            with self.assertRaises(OSError):
+                self.client.post("/mantenimiento/nueva-falla/", {**payload, "foto_evidencia": photo})
+        self.assertEqual(ReporteFalla.objects.count(), before_rows)
+        self.assertTrue(default_storage.exists(existing_name))
+        self.assertEqual(default_storage.open(existing_name).read(), b"existente")
+        default_storage.delete(existing_name)
 
 
 class MaintenanceHistoryDomainTests(SimpleTestCase):
