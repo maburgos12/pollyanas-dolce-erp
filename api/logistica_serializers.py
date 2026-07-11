@@ -581,17 +581,26 @@ class ParadaEntregaConfirmarSerializer(serializers.Serializer):
             raise serializers.ValidationError({"client_context": f"Campos no permitidos: {', '.join(sorted(extra))}."})
         if len(json.dumps(client_context, default=str)) > 2048:
             raise serializers.ValidationError({"client_context": "El contexto excede el tamaño permitido."})
-        for key in ("causa", "client_timestamp", "client_version"):
-            value = client_context.get(key)
-            if value is not None and (not isinstance(value, str) or len(value) > 120):
-                raise serializers.ValidationError({"client_context": f"{key} debe ser texto de máximo 120 caracteres."})
-        for key in ("latitud", "longitud", "precision_metros", "distancia_metros"):
-            value = client_context.get(key)
-            if value is not None:
+        validators = {
+            "causa": serializers.ChoiceField(choices=[
+                "GPS_SIN_SENAL", "FUERA_DE_RADIO", "DENTRO_GEOFENCE",
+                "AJUSTE_ADMINISTRATIVO", "GEOFENCE_LEGACY_NO_CONFIABLE",
+                "PRECISION_INSUFICIENTE", "UBICACION_TARDIA", "SALTO_IMPOSIBLE",
+                "SUCURSAL_SIN_COORDENADAS", "GPS_DENEGADO",
+            ]),
+            "latitud": serializers.DecimalField(max_digits=9, decimal_places=6, min_value=Decimal("-90"), max_value=Decimal("90")),
+            "longitud": serializers.DecimalField(max_digits=9, decimal_places=6, min_value=Decimal("-180"), max_value=Decimal("180")),
+            "precision_metros": serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("999999.99")),
+            "distancia_metros": serializers.IntegerField(min_value=0, max_value=10_000_000),
+            "client_timestamp": serializers.DateTimeField(),
+            "client_version": serializers.CharField(max_length=120),
+        }
+        for key, field in validators.items():
+            if key in client_context and client_context[key] is not None:
                 try:
-                    Decimal(str(value))
-                except (ValueError, TypeError, ArithmeticError):
-                    raise serializers.ValidationError({"client_context": f"{key} debe ser numérico."})
+                    client_context[key] = field.run_validation(client_context[key])
+                except serializers.ValidationError as exc:
+                    raise serializers.ValidationError({"client_context": {key: exc.detail}})
         client_event_id = (attrs.get("client_event_id") or "").strip()
         if not client_event_id and evidencias:
             client_event_id = str(evidencias[0].get("client_event_id") or "").strip()

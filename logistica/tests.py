@@ -492,6 +492,30 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
 
+    def test_client_context_rechaza_limites_numericos_y_timestamp_invalido(self):
+        invalidos = [
+            {"causa": "FUERA_DE_RADIO", "latitud": "999999999999999999999"},
+            {"causa": "FUERA_DE_RADIO", "longitud": "181"},
+            {"causa": "GPS_SIN_SENAL", "precision_metros": "-1"},
+            {"causa": "FUERA_DE_RADIO", "distancia_metros": -1},
+            {"causa": "GPS_SIN_SENAL", "client_timestamp": "ayer"},
+            {"causa": "CORREO_CLIENTE"},
+        ]
+        for index, contexto in enumerate(invalidos):
+            contexto.setdefault("client_timestamp", timezone.now().isoformat())
+            contexto.setdefault("client_version", "pwa-v60")
+            response = self.client.post(
+                self.url,
+                json.dumps(self._payload(client_event_id=f"limite-contexto-{index}", client_context=contexto)),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400, contexto)
+
+    def test_integrity_error_no_relacionado_no_se_reporta_como_colision_idempotente(self):
+        with patch("api.logistica_views.confirmar_entrega_parada", side_effect=IntegrityError("otra restricción")):
+            with self.assertRaises(IntegrityError):
+                self.client.post(self.url, json.dumps(self._payload()), content_type="application/json")
+
     def test_colision_client_event_id_secundario_devuelve_409_y_revierte(self):
         ParadaEntregaEvidencia.objects.create(
             ruta=self.ruta,

@@ -60,6 +60,7 @@ from logistica.services_carga_ruta import (
 )
 from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_entregas import (
+    EntregaEvidenciaIdConflicto,
     EntregaIdempotenciaConflicto,
     confirmar_entrega_parada,
     guardar_respuesta_idempotente,
@@ -1518,9 +1519,9 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             )
         except EntregaIdempotenciaConflicto as exc:
             return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
-        except IntegrityError:
+        except EntregaEvidenciaIdConflicto as exc:
             return Response(
-                {"detail": "client_event_id ya fue usado por otra evidencia."},
+                {"detail": exc.messages[0]},
                 status=status.HTTP_409_CONFLICT,
             )
         except (ValidationError, PermissionDenied) as exc:

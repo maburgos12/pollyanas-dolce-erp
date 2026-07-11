@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.access import can_manage_submodule
@@ -16,6 +16,10 @@ from rrhh.services_identidad import nombre_operativo_usuario
 
 class EntregaIdempotenciaConflicto(ValidationError):
     """El identificador del cliente ya fue usado con otro payload."""
+
+
+class EntregaEvidenciaIdConflicto(ValidationError):
+    """Un identificador secundario de evidencia ya fue utilizado."""
 
 
 @dataclass(frozen=True)
@@ -363,24 +367,29 @@ def confirmar_entrega_parada(
     evidencias_creadas = []
     for index, item in enumerate(filas_evidencia):
         item = dict(item)
-        evidencia_item = ParadaEntregaEvidencia.objects.create(
-            ruta=ruta,
-            parada=parada,
-            linea_carga_id=item.get("linea_carga_id"),
-            tipo=item.get("tipo") or ParadaEntregaEvidencia.TIPO_CONFIRMACION,
-            cantidad_entregada=item.get("cantidad_entregada"),
-            comentario=item.get("comentario") or str(motivo).strip(),
-            latitud=item.get("latitud") or datos_revision.get("latitud"),
-            longitud=item.get("longitud") or datos_revision.get("longitud"),
-            precision_metros=item.get("precision_metros") or datos_revision.get("precision_metros"),
-            client_event_id=(client_event_id if index == 0 else item.get("client_event_id") or ""),
-            capturado_por=actor,
-            metadata={
-                "payload_hash": payload_hash if index == 0 else "",
-                "evento_id": evento.id,
-                "origen": "servicio_entregas",
-            },
-        )
+        evidencia_client_id = client_event_id if index == 0 else item.get("client_event_id") or ""
+        if index > 0 and evidencia_client_id and ParadaEntregaEvidencia.objects.filter(
+            ruta=ruta, capturado_por=actor, client_event_id=evidencia_client_id
+        ).exists():
+            raise EntregaEvidenciaIdConflicto("client_event_id secundario ya fue usado por otra evidencia.")
+        try:
+            with transaction.atomic():
+                evidencia_item = ParadaEntregaEvidencia.objects.create(
+                    ruta=ruta, parada=parada, linea_carga_id=item.get("linea_carga_id"),
+                    tipo=item.get("tipo") or ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                    cantidad_entregada=item.get("cantidad_entregada"),
+                    comentario=item.get("comentario") or str(motivo).strip(),
+                    latitud=item.get("latitud") or datos_revision.get("latitud"),
+                    longitud=item.get("longitud") or datos_revision.get("longitud"),
+                    precision_metros=item.get("precision_metros") or datos_revision.get("precision_metros"),
+                    client_event_id=evidencia_client_id, capturado_por=actor,
+                    metadata={"payload_hash": payload_hash if index == 0 else "", "evento_id": evento.id, "origen": "servicio_entregas"},
+                )
+        except IntegrityError as exc:
+            constraint = getattr(getattr(exc, "__cause__", None), "diag", None)
+            if getattr(constraint, "constraint_name", None) == "paradaevidencia_evento_cliente_unico":
+                raise EntregaEvidenciaIdConflicto("client_event_id ya fue usado por otra evidencia.") from exc
+            raise
         if evidencia is None:
             evidencia = evidencia_item
         evidencias_creadas.append(evidencia_item)
