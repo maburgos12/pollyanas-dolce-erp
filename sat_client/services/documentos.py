@@ -12,12 +12,14 @@ def solicitar_documento_sat(*, tipo: str, usuario) -> SolicitudDocumentoSat:
     try:
         get_sat_credentials()
     except SatConfigurationError as exc:
+        estado = SolicitudDocumentoSat.ESTADO_ERROR
         mensaje = str(exc)
     else:
+        estado = SolicitudDocumentoSat.ESTADO_PENDIENTE
         mensaje = "Conector de portal SAT pendiente: este documento no se obtiene por descarga masiva CFDI."
     return SolicitudDocumentoSat.objects.create(
         tipo=tipo,
-        estado=SolicitudDocumentoSat.ESTADO_ERROR,
+        estado=estado,
         mensaje=mensaje,
         solicitado_por=None if isinstance(usuario, AnonymousUser) else usuario,
     )
