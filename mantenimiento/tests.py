@@ -305,6 +305,36 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertIn("state.evidenceBlobCache.clear()", source)
         self.assertIn('window.addEventListener("pagehide", clearEvidenceCache)', source)
 
+    def test_pwa_inbox_thumbnails_use_authenticated_blob_pipeline(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        card_start = source.index("function bandejaItemCard")
+        card_end = source.index("function statusClass", card_start)
+        card_source = source[card_start:card_end]
+        self.assertIn("loadProtectedThumbnail", card_source)
+        self.assertNotIn('src="${esc(item.foto_inicial.url)}"', card_source)
+
+        thumbnail_start = source.index("async function loadProtectedThumbnail")
+        thumbnail_end = source.index("function revokeEvidenceUrls", thumbnail_start)
+        thumbnail_source = source[thumbnail_start:thumbnail_end]
+        self.assertIn("await evidenceBlob(url)", thumbnail_source)
+        self.assertIn("generation !== state.evidenceGeneration", thumbnail_source)
+        self.assertIn("URL.createObjectURL(blob)", thumbnail_source)
+        self.assertIn("state.evidenceObjectUrls.add(objectUrl)", thumbnail_source)
+
+    def test_pwa_detail_return_refinds_current_trigger_by_uid(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        return_start = source.index("async function returnFromDetail")
+        return_end = source.index("function invalidateDetail", return_start)
+        return_source = source[return_start:return_end]
+        self.assertIn("await showScreen(target)", return_source)
+        self.assertIn("state.detailReturn.uid", return_source)
+        self.assertIn('document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus()', return_source)
+        self.assertNotIn("detailReturn.focus", return_source)
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):

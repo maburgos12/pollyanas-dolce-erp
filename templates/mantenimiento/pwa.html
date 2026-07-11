@@ -52,7 +52,7 @@
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
         history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1, results: [], hasNext: false},
         detailCache: new Map(),
-        detailReturn: {screen: "pendientes", focus: null},
+        detailReturn: {screen: "pendientes", uid: null},
         requestGeneration: {inbox: 0, history: 0, detail: 0},
         historyLoading: false,
         evidenceObjectUrls: new Set(),
@@ -456,9 +456,14 @@
         const badge = esLogistica
           ? `<span class="status-chip origen-flota">Flota</span>`
           : `<span class="status-chip origen-sucursal">Sucursal</span>`;
+        const thumbnailId = `inbox-thumb-${Math.random().toString(36).slice(2)}`;
+        const thumbnailGeneration = state.evidenceGeneration;
+        if (item.foto_inicial?.url) {
+          window.setTimeout(() => loadProtectedThumbnail(thumbnailId, item.foto_inicial.url, `Foto inicial de ${item.titulo || "mantenimiento"}`, thumbnailGeneration), 0);
+        }
         return `
           <article class="card report-card compact-item ${item.foto_inicial?.url ? "" : "no-thumb"}">
-            ${item.foto_inicial?.url ? `<img class="compact-thumb" src="${esc(item.foto_inicial.url)}" alt="Foto inicial de ${esc(item.titulo || "mantenimiento")}" loading="lazy" onerror="this.remove();this.parentElement.classList.add('no-thumb')">` : ""}
+            ${item.foto_inicial?.url ? `<span id="${thumbnailId}" class="compact-thumb skeleton" aria-label="Cargando foto inicial"></span>` : ""}
             <div>
             <div class="card-head">
               <div>
@@ -2176,6 +2181,30 @@
         }
       }
 
+      async function loadProtectedThumbnail(containerId, url, alt, generation) {
+        let container = document.getElementById(containerId);
+        if (!container) return;
+        try {
+          const blob = await evidenceBlob(url);
+          container = document.getElementById(containerId);
+          if (!container || generation !== state.evidenceGeneration) return;
+          const objectUrl = URL.createObjectURL(blob);
+          state.evidenceObjectUrls.add(objectUrl);
+          const image = document.createElement("img");
+          image.className = "compact-thumb";
+          image.alt = alt;
+          image.loading = "lazy";
+          image.src = objectUrl;
+          container.replaceWith(image);
+        } catch (error) {
+          container = document.getElementById(containerId);
+          if (!container || generation !== state.evidenceGeneration) return;
+          const card = container.closest(".compact-item");
+          container.remove();
+          card?.classList.add("no-thumb");
+        }
+      }
+
       function revokeEvidenceUrls() {
         state.evidenceGeneration += 1;
         state.evidenceObjectUrls.forEach(url => URL.revokeObjectURL(url));
@@ -2191,7 +2220,7 @@
         const [tipo, id] = String(uid).split(":");
         const generation = ++state.requestGeneration.detail;
         state.viewerReturnFocus = trigger || document.activeElement;
-        state.detailReturn = {screen: trigger?.closest("#app")?.querySelector(".history-filters") ? "historial" : "pendientes", focus: trigger || null};
+        state.detailReturn = {screen: trigger?.closest("#app")?.querySelector(".history-filters") ? "historial" : "pendientes", uid};
         render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
         let data = state.detailCache.get(uid);
         if (!data) {
@@ -2212,10 +2241,12 @@
           <h2>Evidencias iniciales</h2>${evidenceGallery(initialEvidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
       }
 
-      function returnFromDetail() {
+      async function returnFromDetail() {
         const target = state.detailReturn.screen || "pendientes";
-        showScreen(target);
-        window.setTimeout(() => state.detailReturn.focus?.focus?.(), 0);
+        await showScreen(target);
+        const uid = state.detailReturn.uid;
+        if (!uid) return;
+        document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus();
       }
 
       function invalidateDetail(uid) { if (uid) state.detailCache.delete(uid); }
