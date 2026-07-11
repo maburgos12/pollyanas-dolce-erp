@@ -1,4 +1,6 @@
-const CACHE_NAME = "pollyanas-mantenimiento-pwa-v20-20260711-paridad-v1";
+const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";
+const CACHE_VERSION = "20260711-paridad-v1";
+const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   "/mantenimiento/app/",
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
@@ -18,7 +20,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
       ))
       .then(() => self.clients.claim())
   );
@@ -31,11 +35,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const isCacheableRequest =
+    event.request.method === "GET" &&
+    url.origin === self.location.origin &&
+    (url.pathname.startsWith("/mantenimiento/") || url.pathname.startsWith("/static/")) &&
+    !event.request.headers.has("Authorization");
+
+  if (!isCacheableRequest) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((response) => {
-        if (event.request.method === "GET" && response.ok) {
+        if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }

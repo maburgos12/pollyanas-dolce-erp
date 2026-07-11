@@ -82,12 +82,24 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
-        self.assertIn("pollyanas-mantenimiento-pwa-v20-20260711-paridad-v1", worker_source)
+        self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
+        self.assertIn('const CACHE_VERSION = "20260711-paridad-v1";', worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;", worker_source)
+        registration_source = app.content.decode()
+        self.assertIn(f"sw.js?v=20260711-paridad-v1", registration_source)
+        self.assertIn("key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME", worker_source)
         self.assertIn('url.pathname.startsWith("/api/")', worker_source)
         self.assertIn('url.pathname.startsWith("/media/")', worker_source)
         self.assertIn("event.respondWith(fetch(event.request));", worker_source)
         protected_branch = worker_source.split('url.pathname.startsWith("/api/")', 1)[1].split("return;", 1)[0]
         self.assertNotIn("caches.match", protected_branch)
+        self.assertIn('url.origin === self.location.origin', worker_source)
+        self.assertIn('url.pathname.startsWith("/mantenimiento/")', worker_source)
+        self.assertIn('url.pathname.startsWith("/static/")', worker_source)
+        self.assertIn('!event.request.headers.has("Authorization")', worker_source)
+        activation_branch = worker_source.split('self.addEventListener("activate"', 1)[1].split('self.addEventListener("fetch"', 1)[0]
+        self.assertIn("key.startsWith(CACHE_PREFIX)", activation_branch)
+        self.assertNotIn("keys.filter((key) => key !== CACHE_NAME)", activation_branch)
 
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
