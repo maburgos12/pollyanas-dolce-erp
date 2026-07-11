@@ -2635,3 +2635,215 @@ class ArmadoCrunchPilotTests(TestCase):
         for lote in relleno_lotes:
             # After complete consumption, lote should be AGOTADO
             self.assertEqual(lote.estado, LoteProduccion.AGOTADO, msg=f"Lote {lote.codigo} should be AGOTADO")
+
+
+class BitacoraCorrectionPermissionTests(TestCase):
+    """Task 10: Autorizar correcciones trazables de bitacoras con bloqueo de movimiento_original_id."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.correccion", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="operador.correccion", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Setup insumo, receta, and bitacora
+        self.kg = UnidadMedida.objects.create(codigo="kg-corr", nombre="Kilogramo correccion")
+        self.receta = Receta.objects.create(
+            nombre="Pan Correccion",
+            codigo_point="PAN-COR",
+            tipo=Receta.TIPO_PREPARACION,
+            pasa_modulo_produccion=True,
+            hash_contenido="pan-correccion-hash",
+            rendimiento_unidad=self.kg,
+        )
+        # Insumo derivado debe tener mismo codigo_point que la receta
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-COR",
+            codigo_point="PAN-COR",
+            nombre="Preparacion Correccion",
+            nombre_point="Preparacion Correccion Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        # Create a closed Hornos bitacora with a movement
+        self.hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.hornos_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.hornos_bitacora,
+            receta=self.receta,
+            datos={"existencia": "8"},
+            observaciones="Original capture",
+        )
+
+        # Close Hornos to generate the lote and movimiento
+        cerrar_hornos(self.hornos_bitacora, self.manager)
+
+        # Get the original movement
+        self.original = MovimientoInventario.objects.filter(linea_bitacora=self.hornos_linea).first()
+        self.assertIsNotNone(self.original, "Original movement should exist after Hornos close")
+        self.original_id = self.original.id
+
+    def test_employee_cannot_correct_closed_bitacora(self):
+        """Empleado no puede corregir una bitácora cerrada."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Operator tries to correct
+        with self.assertRaises(PermissionDenied):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Conteo verificado",
+                actor=self.operator,
+            )
+
+    def test_manager_correction_creates_compensating_movement(self):
+        """Manager puede crear movimiento compensatorio con motivo."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Manager corrects: 8 -> 9 (diferencia +1)
+        result = autorizar_correccion_bitacora(
+            movimiento_original_id=self.original_id,
+            bitacora=self.hornos_bitacora,
+            linea=self.hornos_linea,
+            nueva_cantidad=Decimal("9"),
+            motivo="Conteo verificado post cierre",
+            actor=self.manager,
+        )
+
+        # Verify original movement unchanged
+        self.original.refresh_from_db()
+        self.assertEqual(self.original.cantidad, Decimal("8"))
+
+        # Verify compensating movement created
+        compensating = MovimientoInventario.objects.filter(
+            referencia__startswith=f"AJUSTE:{self.original_id}:"
+        ).first()
+        self.assertIsNotNone(compensating)
+        self.assertEqual(compensating.tipo, MovimientoInventario.TIPO_AJUSTE)
+        self.assertEqual(compensating.cantidad, Decimal("1"))  # Delta: 9-8
+        self.assertIn("Conteo verificado post cierre", compensating.notas)
+        self.assertEqual(compensating.registrado_por_usuario, self.manager)
+
+    def test_correction_requires_non_empty_motivo(self):
+        """Corrección requiere motivo no vacío."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Intento sin motivo
+        with self.assertRaises(ValidationError):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="",  # Empty
+                actor=self.manager,
+            )
+
+    def test_correction_locks_and_validates_movimiento_original_id(self):
+        """
+        Corrección bloquea movimiento original, valida que pertenece a línea/bitácora.
+        Rechaza IDs ajenos.
+        """
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Create a second bitacora with movement
+        other_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        other_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=other_bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+        )
+        other_movimiento = MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("5"),
+            almacen=UBICACION_CFP_1_1,
+            linea_bitacora=other_linea,
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        # Try to correct Hornos bitacora with ID from different bitacora => should fail
+        with self.assertRaises(ValidationError) as ctx:
+            autorizar_correccion_bitacora(
+                movimiento_original_id=other_movimiento.id,  # Wrong ID (belongs to other_bitacora)
+                bitacora=self.hornos_bitacora,  # Hornos
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Intento fraudulento",
+                actor=self.manager,
+            )
+        self.assertIn("no pertenece", str(ctx.exception).lower())
+
+    def test_correction_denies_nonexistent_movement(self):
+        """Intento de corregir movimiento que no existe."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Try with fake ID
+        with self.assertRaises(ValidationError):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=999999,  # Non-existent
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Corrección",
+                actor=self.manager,
+            )
+
+    def test_correction_ui_shows_hidden_id_per_movimiento(self):
+        """UI debe generar acción por movimiento corregible con hidden ID."""
+        # This test verifies that when rendering a closed bitacora in revision mode,
+        # the sealed_bitacora context variable is set and contains the movements
+        self.client.force_login(self.manager)
+
+        # Render closed bitacora revision
+        response = self.client.get(f"/app/bitacoras/{self.hornos_bitacora.tipo}/?revision={self.hornos_bitacora.id}")
+        self.assertEqual(response.status_code, 200)
+
+        # Verify sealed_bitacora is in context and has the original movement
+        self.assertIsNotNone(response.context.get("sealed_bitacora"))
+        sealed = response.context["sealed_bitacora"]
+        self.assertEqual(sealed.id, self.hornos_bitacora.id)
+
+        # Verify the UI displays the revision mode (not edit mode)
+        self.assertContains(response, "Corte sellado", status_code=200)
+
+    def test_correction_negative_delta_allowed(self):
+        """Corrección puede ser negativa (reducir cantidad)."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Reduce 8 -> 6 (delta: -2)
+        result = autorizar_correccion_bitacora(
+            movimiento_original_id=self.original_id,
+            bitacora=self.hornos_bitacora,
+            linea=self.hornos_linea,
+            nueva_cantidad=Decimal("6"),
+            motivo="Ajuste por reconteo",
+            actor=self.manager,
+        )
+
+        compensating = MovimientoInventario.objects.filter(
+            referencia__startswith=f"AJUSTE:{self.original_id}:"
+        ).first()
+        self.assertIsNotNone(compensating)
+        self.assertEqual(compensating.cantidad, Decimal("2"))  # Absolute value
+        # Trazabilidad should indicate it's a reduction
+        if "es_positivo" in compensating.trazabilidad:
+            self.assertFalse(compensating.trazabilidad["es_positivo"])

@@ -90,6 +90,60 @@
             {% endfor %}
           </section>
 
+          {# Sección de correcciones trazables por movimiento (para cualquier tipo cerrado) #}
+          {% if sealed_bitacora %}
+            {% with movimientos=sealed_bitacora.lineas.all|dictsort:"id" %}
+              {% for linea in sealed_bitacora.lineas.all %}
+                {% for mov in linea.movimientos_inventario.all %}
+                  {% if mov.tipo in "ENTRADA,SALIDA" %}
+                    {% if forloop.first %}
+                      <section class="panel">
+                        <h2 style="margin: 0; color: #8b2252; font-size: 1rem;">Autorizar correcciones</h2>
+                    {% endif %}
+                    <form method="post">
+                      {% csrf_token %}
+                      <div style="padding: 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fbf7f9; display: grid; gap: 10px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 9px;">
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Tipo</div>
+                            <div>{{ mov.get_tipo_display }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Insumo</div>
+                            <div>{{ mov.insumo.nombre }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Cantidad original</div>
+                            <div>{{ mov.cantidad }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Ubicación</div>
+                            <div>{{ mov.almacen }}</div>
+                          </div>
+                        </div>
+
+                        <input type="hidden" name="movimiento_original_id" value="{{ mov.id }}">
+
+                        <label>Nueva cantidad
+                          <input type="number" step="0.001" inputmode="decimal" name="cantidad_corregida" placeholder="Ingresa la cantidad corregida">
+                        </label>
+
+                        <label>Motivo de la corrección
+                          <textarea name="motivo_correccion" placeholder="Explica por qué se corrige este movimiento" style="min-height: 60px;"></textarea>
+                        </label>
+
+                        <button type="submit" name="accion" value="corregir" style="background: #a0365f;">Registrar corrección</button>
+                      </div>
+                    </form>
+                    {% if forloop.last %}
+                      </section>
+                    {% endif %}
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            {% endwith %}
+          {% endif %}
+
           <form method="post" class="panel">
             {% csrf_token %}
             <h3 style="margin: 0; color: #8b2252; font-size: 0.95rem;">Transferir a Armado</h3>

@@ -603,6 +603,108 @@ def entregar_a_armado(
         return EntregarArmadoResult(asignaciones=asignaciones)
 
 
+def autorizar_correccion_bitacora(
+    *,
+    movimiento_original_id: int,
+    bitacora: BitacoraOperativa,
+    linea: BitacoraOperativaLinea,
+    nueva_cantidad,
+    motivo: str,
+    actor,
+):
+    """
+    Crea un movimiento compensatorio para corregir un movimiento de bitácora cerrada.
+
+    - Requiere acceso manage a Produccion
+    - Bloquea movimiento_original con select_for_update y valida que pertenece a línea/bitácora
+    - Rechaza IDs ajenos
+    - Exige motivo no vacío
+    - No modifica el movimiento original, solo crea ajuste trazable
+    """
+    if not can_manage_module(actor, "produccion"):
+        raise PermissionDenied("Se requiere permiso de gestión de Producción.")
+
+    motivo_limpio = (motivo or "").strip()
+    if not motivo_limpio:
+        raise ValidationError("El motivo de la corrección es obligatorio.")
+
+    nueva_cantidad_decimal = _cantidad_positiva(nueva_cantidad)
+
+    with transaction.atomic():
+        # Bloquear y validar movimiento original
+        try:
+            movimiento_original = (
+                MovimientoInventario.objects
+                .select_for_update()
+                .get(id=movimiento_original_id)
+            )
+        except MovimientoInventario.DoesNotExist:
+            raise ValidationError("El movimiento a corregir no existe.")
+
+        # Validar que el movimiento pertenece a la línea/bitácora indicada
+        if movimiento_original.linea_bitacora_id != linea.id:
+            raise ValidationError(
+                "El movimiento no pertenece a esta línea de bitácora. No se puede corregir."
+            )
+        if movimiento_original.linea_bitacora.bitacora_id != bitacora.id:
+            raise ValidationError(
+                "El movimiento no pertenece a esta bitácora. No se permite corregir IDs ajenos."
+            )
+
+        # Validar que es un movimiento de bitácora corregible (tipos permitidos)
+        # Permite ENTRADA y SALIDA que provengan de operación
+        if movimiento_original.tipo not in (
+            MovimientoInventario.TIPO_ENTRADA,
+            MovimientoInventario.TIPO_SALIDA,
+        ):
+            raise ValidationError(
+                f"Movimientos de tipo {movimiento_original.tipo} no pueden corregirse."
+            )
+
+        # Calcular delta
+        cantidad_original = movimiento_original.cantidad
+        delta = nueva_cantidad_decimal - cantidad_original
+
+        if delta == Decimal("0"):
+            raise ValidationError("La nueva cantidad debe ser diferente de la original.")
+
+        # Crear movimiento compensatorio (ajuste)
+        es_positivo = delta > 0
+        referencia = f"AJUSTE:{movimiento_original.id}:{linea.id}"
+
+        ajuste_hash = sha256(referencia.encode("utf-8")).hexdigest()
+
+        MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_AJUSTE,
+            insumo=movimiento_original.insumo,
+            cantidad=abs(delta),
+            almacen=movimiento_original.almacen,
+            referencia=referencia,
+            notas=motivo_limpio,
+            registrado_por=actor.get_username(),
+            registrado_por_usuario=actor,
+            source_hash=ajuste_hash,
+            lote=movimiento_original.lote,
+            linea_bitacora=movimiento_original.linea_bitacora,
+            trazabilidad={
+                "evento": "correccion_bitacora",
+                "movimiento_original_id": movimiento_original.id,
+                "cantidad_original": str(cantidad_original),
+                "cantidad_corregida": str(nueva_cantidad_decimal),
+                "es_positivo": es_positivo,
+                "motivo": motivo_limpio,
+            },
+        )
+
+        # Aplicar el delta al stock (suma el ajuste, puede ser negativo)
+        aplicar_delta(
+            movimiento_original.insumo,
+            movimiento_original.almacen,
+            delta,
+        )
+
+
 def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
     """
     Atomically close Armado bitacora: consume real lots, create finished product lot.

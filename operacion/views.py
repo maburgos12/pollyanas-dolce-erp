@@ -29,6 +29,7 @@ from .services_bitacoras_inventory import (
     cerrar_armado,
     guardar_corte_ciego,
     entregar_a_armado,
+    autorizar_correccion_bitacora,
 )
 
 
@@ -293,6 +294,51 @@ def bitacora_captura(request, tipo):
                 observaciones=observaciones,
             )
         accion = request.POST.get("accion") or ""
+
+        # Acción de corrección: requiere movimiento_original_id bloqueado + validaciones
+        if accion == "corregir":
+            try:
+                movimiento_original_id = request.POST.get("movimiento_original_id")
+                if not movimiento_original_id:
+                    raise ValidationError("ID del movimiento a corregir es obligatorio.")
+                movimiento_original_id = int(movimiento_original_id)
+
+                nueva_cantidad_raw = (request.POST.get("cantidad_corregida") or "").strip()
+                if not nueva_cantidad_raw:
+                    raise ValidationError("Ingresa la cantidad corregida.")
+
+                motivo = (request.POST.get("motivo_correccion") or "").strip()
+                if not motivo:
+                    raise ValidationError("El motivo de la corrección es obligatorio.")
+
+                # Obtener la línea desde el movimiento original para validación
+                from inventario.models import MovimientoInventario
+                try:
+                    mov_original = MovimientoInventario.objects.get(id=movimiento_original_id)
+                except MovimientoInventario.DoesNotExist:
+                    raise ValidationError("Movimiento a corregir no encontrado.")
+
+                linea = mov_original.linea_bitacora
+                if not linea or linea.bitacora_id != bitacora.id:
+                    raise ValidationError("El movimiento no pertenece a esta bitácora.")
+
+                autorizar_correccion_bitacora(
+                    movimiento_original_id=movimiento_original_id,
+                    bitacora=bitacora,
+                    linea=linea,
+                    nueva_cantidad=nueva_cantidad_raw,
+                    motivo=motivo,
+                    actor=request.user,
+                )
+                messages.success(request, "Corrección registrada y auditable.")
+                return redirect(f"{request.path}?revision={bitacora.id}")
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if exc.messages else str(exc))
+                return redirect("operacion:bitacoras_home")
+            except PermissionDenied as exc:
+                messages.error(request, str(exc))
+                return redirect("operacion:bitacoras_home")
+
         if accion == "guardar_existencia":
             if tipo == BitacoraOperativa.TIPO_CFP11:
                 guardar_corte_ciego(bitacora, request.user)
