@@ -54,7 +54,6 @@ from .services_carga_ruta import (
     confirmar_checklist_carga_manual,
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
-    ruta_tiene_paradas_entregables_pendientes,
     registrar_recarga_cedis,
     ruta_tiene_movimiento_point_nuevo,
     sincronizar_checklist_carga_desde_point,
@@ -62,7 +61,7 @@ from .services_carga_ruta import (
     validar_linea_carga,
 )
 from .services_rutas_control import distancia_metros, resumen_control_rutas
-from .services_entregas import confirmar_entrega_parada
+from .services_entregas import confirmar_entrega_parada, revisar_entrega_excepcional
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
@@ -2049,11 +2048,31 @@ def ruta_detail(request, pk: int):
         action = (request.POST.get("action") or "").strip().lower()
         ruta_cerrada = ruta.estatus in {RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
         estructura_actions = {"update_plan", "move_parada", "add_entrega", "entrega_status", "delete_entrega"}
-        if ruta_cerrada and action not in {"ruta_status", "sync_recepcion_point"}:
+        if ruta_cerrada and action not in {"ruta_status", "sync_recepcion_point", "revisar_entrega"}:
             messages.error(request, "La ruta ya está cerrada o cancelada; no se puede editar su planeación ni evidencia.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
         if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and action in estructura_actions:
             messages.error(request, "La ruta ya está en seguimiento; la planeación queda congelada para conservar evidencia.")
+            return redirect("logistica:ruta_detail", pk=ruta.id)
+
+        if action == "revisar_entrega":
+            parada_id = (request.POST.get("parada_id") or "").strip()
+            parada = get_object_or_404(
+                ParadaRuta.objects.select_related("ruta"),
+                pk=int(parada_id) if parada_id.isdigit() else 0,
+                ruta=ruta,
+            )
+            try:
+                revisar_entrega_excepcional(
+                    parada=parada,
+                    actor=request.user,
+                    decision=(request.POST.get("decision") or "").strip().upper(),
+                    motivo=request.POST.get("motivo_revision"),
+                )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            else:
+                messages.success(request, "Revisión de entrega registrada con evidencia de auditoría.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "add_entrega":
@@ -2531,7 +2550,10 @@ def ruta_detail(request, pk: int):
                     if not ruta.repartidor_id or not ruta.unidad_operativa_id or not ruta.paradas.exists():
                         messages.error(request, "No se puede completar la ruta: falta repartidor, unidad o paradas.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta_tiene_paradas_entregables_pendientes(ruta):
+                    if ruta.paradas.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(
+                        estado=ParadaRuta.ESTADO_PENDIENTE,
+                        entrega_estado=ParadaRuta.ENTREGA_PENDIENTE,
+                    ).exists():
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta_tiene_entregas_pendientes(ruta):
@@ -2756,6 +2778,24 @@ def ruta_detail(request, pk: int):
         and not ruta_tiene_entregas_pendientes(ruta)
         and ruta_tiene_diferencias_entrega(ruta)
     )
+    revisiones_entrega = list(
+        ruta.paradas.exclude(revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA)
+        .select_related(
+            "punto",
+            "entrega_confirmada_por",
+            "entrega_confirmada_por__empleado_rrhh",
+            "revision_entrega_revisada_por",
+            "revision_entrega_revisada_por__empleado_rrhh",
+        )
+        .prefetch_related("evidencias_entrega")
+        .order_by("revision_entrega_estado", "orden", "id")
+    )
+    revisiones_pendientes_count = sum(
+        parada.revision_entrega_estado == ParadaRuta.REVISION_PENDIENTE for parada in revisiones_entrega
+    )
+    revisiones_rechazadas_count = sum(
+        parada.revision_entrega_estado == ParadaRuta.REVISION_RECHAZADA for parada in revisiones_entrega
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2776,6 +2816,12 @@ def ruta_detail(request, pk: int):
         "recarga_cedis_disponible": recarga_cedis_disponible,
         "diferencia_carga_pendiente_autorizar": diferencia_carga_pendiente_autorizar,
         "cierre_diferencia_disponible": cierre_diferencia_disponible,
+        "revisiones_entrega": revisiones_entrega,
+        "revisiones_pendientes_count": revisiones_pendientes_count,
+        "revisiones_rechazadas_count": revisiones_rechazadas_count,
+        "cierre_administrativo_pendiente": bool(
+            revisiones_pendientes_count or revisiones_rechazadas_count
+        ),
         "recepcion_point_rows": recepcion_point_rows,
         "recepcion_point_totales": recepcion_point_totales,
         "captura_erp_disponible": captura_erp_disponible,

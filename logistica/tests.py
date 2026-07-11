@@ -841,6 +841,190 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
+class LogisticaRevisionEntregaTests(TestCase):
+    def setUp(self):
+        self.repartidor_user = User.objects.create_user(username="repartidor.revision", password="pass123")
+        self.jefe = User.objects.create_user(
+            username="jefe.revision",
+            first_name="Laura",
+            last_name="Jefa",
+            password="pass123",
+        )
+        self.consulta = User.objects.create_user(username="consulta.revision", password="pass123")
+        UserModuleAccess.objects.create(
+            user=self.jefe,
+            module="logistica.rutas",
+            access=ACCESS_MANAGE,
+            updated_by=self.jefe,
+        )
+        UserModuleAccess.objects.create(
+            user=self.consulta,
+            module="logistica.rutas",
+            access=ACCESS_VIEW,
+            updated_by=self.jefe,
+        )
+        UserModuleAccess.objects.create(
+            user=self.repartidor_user,
+            module="logistica.rutas",
+            access=ACCESS_VIEW,
+            updated_by=self.jefe,
+        )
+        self.sucursal = Sucursal.objects.create(codigo="REV-LOG", nombre="Sucursal revisión", activa=True)
+        self.unidad = Unidad.objects.create(codigo="REV-01", descripcion="Unidad revisión", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(
+            user=self.repartidor_user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+        )
+        self.repartidor_user.is_staff = True
+        self.repartidor_user.save(update_fields=["is_staff"])
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta revisión de entregas",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        self.punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal revisión",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        self.parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=1)
+        confirmar_entrega_parada(
+            ruta=self.ruta,
+            parada=self.parada,
+            actor=self.repartidor_user,
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            motivo="GPS sin señal; entrega confirmada con foto.",
+            client_event_id="revision-ui-1",
+            ubicacion={
+                "causa": "GPS_SIN_SENAL",
+                "latitud": "25.571000",
+                "longitud": "-108.471000",
+                "precision_metros": "45.50",
+                "distancia_metros": 184,
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v60",
+            },
+            evidencias=[{"comentario": "Foto de mostrador", "tipo": ParadaEntregaEvidencia.TIPO_FOTO_ENTREGA}],
+        )
+        self.url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
+
+    def test_ruta_detail_muestra_cola_pendiente_y_evidencia_operativa(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["revisiones_pendientes_count"], 1)
+        self.assertTrue(response.context["cierre_administrativo_pendiente"])
+        self.assertContains(response, "Cierre administrativo pendiente")
+        self.assertContains(response, "GPS_SIN_SENAL")
+        self.assertContains(response, "184")
+        self.assertContains(response, "25.571000")
+        self.assertContains(response, "45.50")
+        self.assertContains(response, "repartidor.revision")
+        self.assertContains(response, "GPS sin señal; entrega confirmada con foto.")
+        self.assertContains(response, "Foto de mostrador")
+        self.assertContains(response, "Autorizar")
+        self.assertContains(response, "Rechazar")
+
+    def test_jefe_autoriza_con_motivo_y_conserva_hecho_fisico_y_evidencia(self):
+        self.client.force_login(self.jefe)
+        evidencia = self.parada.evidencias_entrega.get()
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "revisar_entrega",
+                "parada_id": self.parada.id,
+                "decision": "AUTORIZADA",
+                "motivo_revision": "Foto y llamada verificadas.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_AUTORIZADA)
+        self.assertEqual(self.parada.revision_entrega_revisada_por, self.jefe)
+        self.assertEqual(self.parada.revision_entrega_resolucion, "Foto y llamada verificadas.")
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertTrue(ParadaEntregaEvidencia.objects.filter(pk=evidencia.pk).exists())
+
+    def test_jefe_rechaza_en_ruta_completada_y_la_resolucion_sigue_visible(self):
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "revisar_entrega",
+                "parada_id": self.parada.id,
+                "decision": "RECHAZADA",
+                "motivo_revision": "La evidencia no identifica la sucursal.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_RECHAZADA)
+        page = self.client.get(self.url)
+        self.assertContains(page, "Rechazada")
+        self.assertContains(page, "Laura Jefa")
+        self.assertContains(page, "La evidencia no identifica la sucursal.")
+        self.assertTrue(page.context["cierre_administrativo_pendiente"])
+
+    def test_motivo_es_obligatorio_y_revision_permanece_pendiente(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {"action": "revisar_entrega", "parada_id": self.parada.id, "decision": "AUTORIZADA", "motivo_revision": "   "},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+
+    def test_repartidor_y_usuario_de_consulta_no_pueden_resolver(self):
+        for usuario in (self.repartidor_user, self.consulta):
+            with self.subTest(usuario=usuario.username):
+                self.client.force_login(usuario)
+                response = self.client.post(
+                    self.url,
+                    {
+                        "action": "revisar_entrega",
+                        "parada_id": self.parada.id,
+                        "decision": "AUTORIZADA",
+                        "motivo_revision": "Intento sin permiso",
+                    },
+                )
+                self.assertEqual(response.status_code, 403)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+
+    def test_cierre_operativo_permite_revision_pendiente_y_la_contabiliza(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {"action": "ruta_status", "estatus": RutaEntrega.ESTATUS_COMPLETADA},
+            follow=True,
+        )
+
+        self.ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertEqual(response.context["revisiones_pendientes_count"], 1)
+        self.assertContains(response, "Cierre administrativo pendiente")
+
+
 class LogisticaEmailTemplateTests(SimpleTestCase):
     def test_email_sources_do_not_use_manual_inline_styles(self):
         email_dir = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "emails"
