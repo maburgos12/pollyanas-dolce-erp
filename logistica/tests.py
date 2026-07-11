@@ -942,6 +942,18 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertContains(response, "Autorizar")
         self.assertContains(response, "Rechazar")
 
+    def test_formulario_revision_asocia_label_visible_con_motivo_requerido(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.get(self.url)
+
+        field_id = f"motivo-revision-{self.parada.id}"
+        self.assertContains(response, f'for="{field_id}"')
+        self.assertContains(response, "Motivo de la resolución")
+        self.assertContains(response, f'id="{field_id}"')
+        self.assertContains(response, 'name="motivo_revision"')
+        self.assertContains(response, "required")
+
     def test_jefe_autoriza_con_motivo_y_conserva_hecho_fisico_y_evidencia(self):
         self.client.force_login(self.jefe)
         evidencia = self.parada.evidencias_entrega.get()

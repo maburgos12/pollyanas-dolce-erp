@@ -472,7 +472,8 @@
                   {% csrf_token %}
                   <input type="hidden" name="action" value="revisar_entrega">
                   <input type="hidden" name="parada_id" value="{{ parada.id }}">
-                  <textarea class="input-field" name="motivo_revision" required placeholder="Motivo obligatorio de la resolución"></textarea>
+                  <label for="motivo-revision-{{ parada.id }}"><strong>Motivo de la resolución</strong></label>
+                  <textarea class="input-field" id="motivo-revision-{{ parada.id }}" name="motivo_revision" required placeholder="Describe la evidencia revisada y la decisión"></textarea>
                   <div class="route-action-row">
                     <button class="btn btn-primary btn-small" type="submit" name="decision" value="AUTORIZADA">Autorizar</button>
                     <button class="btn btn-danger btn-small" type="submit" name="decision" value="RECHAZADA">Rechazar</button>
