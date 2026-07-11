@@ -7,6 +7,12 @@
   <title>Bitácoras · App Operativa</title>
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
   <style>
+    /* Responsive layout semantics */
+    [data-layout="mobile-line"] .grid { grid-template-columns: 1fr; }
+    [data-layout="tablet-grid"] .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-layout="desktop-table"] .grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  </style>
+  <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #f6f1f4; color: #2b1722; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .page { min-height: 100vh; padding: 16px; }
@@ -38,7 +44,7 @@
     @media (max-width: 620px) { .fields { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body>
+<body data-layout="mobile-line">
   <main class="page">
     <section class="shell">
       <header class="top">

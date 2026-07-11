@@ -37,13 +37,27 @@
     .cfp-sealed-info .field-box { padding: 10px; border: 1px solid #eadde4; border-radius: 8px; background: #fbf7f9; }
     .cfp-sealed-info .field-label { font-size: .75rem; color: #705d68; font-weight: 800; }
     .cfp-sealed-info .field-value { font-size: 1rem; margin-top: 4px; }
+    /* Responsive data-capture-state blind: hide summary before seal */
+    [data-capture-state="blind"] .cfp-sealed-info { display: none; }
+    /* Responsive layout breakpoints */
+    [data-layout="mobile-line"] .meta { grid-template-columns: 1fr; }
+    [data-layout="tablet-grid"] .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-layout="desktop-table"] .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     @media (max-width: 640px) {
       .page { padding: 12px 12px 88px; }
       .meta, .actions-inner { grid-template-columns: 1fr; }
     }
+    @media (min-width: 641px) and (max-width: 1024px) {
+      .page { padding: 14px; }
+    }
+    @media (min-width: 1025px) {
+      .page { padding: 16px; }
+    }
   </style>
 </head>
-<body>
+<body data-capture-state="{% if sealed_bitacora %}sealed{% else %}blind{% endif %}"
+      data-layout="{% if sealed_bitacora %}desktop-table{% else %}mobile-line{% endif %}"
+>
   {% if sealed_bitacora %}
     {# Modo revisión sellada #}
     <div class="page revision-mode">
@@ -187,9 +201,7 @@
 
         <section class="panel">
           <div class="meta">
-            <label>Fecha
-              <input type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
-            </label>
+            <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
             <label>Área / sucursal
               <select name="sucursal">
                 <option value="">CEDIS / Producción</option>

@@ -352,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v14-pull-refresh-stable", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v22-trazabilidad-responsive", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -1067,7 +1067,7 @@ class OperacionAppTests(TestCase):
         for template in templates:
             html = (root / template).read_text(encoding="utf-8")
             self.assertIn("app-home-link", html, template)
-            self.assertIn('aria-label="Menú principal"', html, template)
+            self.assertIn('Menú principal', html, template)
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
@@ -2860,3 +2860,177 @@ class BitacoraCorrectionPermissionTests(TestCase):
 
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("0"))
+
+
+class ResponsiveDesignAndContentTests(TestCase):
+    """Tests for Step1 responsive design, data attributes, and content visibility."""
+
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.responsive", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.responsive", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+        self.sucursal = Sucursal.objects.create(codigo="TEST", nombre="Sucursal Test", activa=True)
+        self.unidad = UnidadMedida.objects.create(codigo="kg-test", nombre="Kilogramo")
+        self.insumo = Insumo.objects.create(
+            codigo="TEST:INSUMO:RESP",
+            codigo_point="RP-001",
+            nombre="Test Insumo Responsive",
+            nombre_point="Test Insumo Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Test Receta Responsive",
+            codigo_point="RP-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="test-responsive-receta",
+            pasa_modulo_produccion=True,
+        )
+
+    def test_captura_page_before_seal_has_blind_state(self):
+        """Before CFP seal, page has data-capture-state="blind" hiding summary."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-capture-state="blind"', response.content.decode())
+        # Before seal, summary fields should not be visible
+        self.assertNotIn("Existencia esperada", response.content.decode())
+
+    def test_captura_page_before_seal_has_mobile_layout(self):
+        """Before CFP seal, page uses data-layout="mobile-line" for mobile-first."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-layout="mobile-line"', response.content.decode())
+
+    def test_sealed_bitacora_has_sealed_state(self):
+        """After CFP seal, page has data-capture-state="sealed" revealing summary."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        # Create and seal a bitacora
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5.5", "esperado": "5.5"},
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-capture-state="sealed"', response.content.decode())
+        # After seal, summary should be visible
+        self.assertIn("Existencia esperada", response.content.decode())
+
+    def test_sealed_bitacora_shows_review_section(self):
+        """After seal, review section (Resultados del conteo) is visible."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={
+                "existencia_fisica": "5.5",
+                "esperado": "5.5",
+                "diferencia": "0",
+            },
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+        content = response.content.decode()
+
+        self.assertIn("Resultados del conteo", content)
+        self.assertIn("Existencia física", content)
+        self.assertIn("5.5", content)
+
+    def test_date_picker_not_editable_on_capture(self):
+        """Date field is hidden (type=hidden) on daily capture, not editable."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Date should be submitted as hidden, not visible for editing
+        self.assertIn('type="hidden" name="fecha"', content)
+        # Old editable date input should not exist
+        self.assertNotIn('type="date" name="fecha"', content)
+
+    def test_sealed_bitacora_has_desktop_layout(self):
+        """After seal, page uses data-layout="desktop-table" for review."""
+        self.client.login(username="jefatura.responsive", password="test12345")
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5.5"},
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        from django.urls import reverse
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-layout="desktop-table"', response.content.decode())
+
+    def test_bitacoras_home_has_responsive_layout(self):
+        """Bitácoras home page has responsive semantic attributes."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacoras_home")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Should use responsive viewport meta
+        self.assertIn('viewport-fit=cover', content)
+        # Should have data-layout attribute
+        self.assertIn('data-layout="mobile-line"', content)
+
+    def test_service_worker_version_updated_in_sw_js(self):
+        """Service worker cache name includes v22-trazabilidad-responsive."""
+        from django.contrib.staticfiles import finders
+        sw_path = finders.find("operacion/sw.js")
+        self.assertIsNotNone(sw_path, "Service worker file not found")
+
+        with open(sw_path, encoding="utf-8") as f:
+            sw_content = f.read()
+
+        self.assertIn("v22-trazabilidad-responsive", sw_content)
+        self.assertNotIn("v21-", sw_content)
