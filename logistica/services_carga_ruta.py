@@ -961,7 +961,6 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
     paradas_actualizadas = 0
     lineas_recibidas = 0
     lineas_pendientes_point = 0
-    touched_paradas: set[int] = set()
 
     for linea in checklist.lineas.select_related("parada").order_by("parada__orden", "id"):
         point_line = point_lines.get(linea.source_hash)
@@ -1017,68 +1016,6 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
             evidencia.capturado_en = received_at
             evidencia.metadata = metadata
             evidencia.save(update_fields=["cantidad_entregada", "capturado_por", "capturado_en", "metadata"])
-        touched_paradas.add(linea.parada_id)
-
-    for parada in ruta.paradas.filter(id__in=touched_paradas).order_by("orden", "id"):
-        if _tiene_cierre_local(parada):
-            continue
-        lineas = list(checklist.lineas.filter(parada=parada).select_related("point_transfer_line"))
-        if not lineas:
-            continue
-        confirmacion_pwa = _confirmacion_completa_parada(parada)
-        recibidas = [linea for linea in lineas if _cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) is not None]
-        if not recibidas:
-            continue
-
-        todas_recibidas = len(recibidas) == len(lineas)
-        recibido_total = sum(
-            (_cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) or Decimal("0") for linea in recibidas),
-            Decimal("0"),
-        )
-        esperado_total = sum((_cantidad_referencia_entrega(linea) for linea in lineas), Decimal("0"))
-        cantidades_cuadran = todas_recibidas and all(
-            _cantidad_recibida_con_respaldo_pwa(linea, confirmacion_pwa) == _cantidad_referencia_entrega(linea)
-            for linea in lineas
-        )
-        if not todas_recibidas:
-            entrega_estado = ParadaRuta.ENTREGA_PENDIENTE
-        elif recibido_total == 0:
-            entrega_estado = ParadaRuta.ENTREGA_NO_ENTREGADA
-        elif cantidades_cuadran:
-            entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
-        else:
-            entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
-
-        received_at_values = [linea.point_transfer_line.received_at for linea in recibidas if linea.point_transfer_line and linea.point_transfer_line.received_at]
-        entrega_confirmada_en = max(received_at_values) if received_at_values else (confirmacion_pwa.capturado_en if confirmacion_pwa else timezone.now())
-        update_fields = [
-            "estado",
-            "hora_llegada_real",
-            "hora_salida_real",
-            "entrega_estado",
-            "entrega_confirmada_en",
-            "entrega_confirmada_por",
-            "entrega_notas",
-            "actualizado_en",
-        ]
-        parada.estado = ParadaRuta.ESTADO_VISITADA
-        parada.hora_llegada_real = parada.hora_llegada_real or entrega_confirmada_en
-        parada.hora_salida_real = parada.hora_salida_real or entrega_confirmada_en
-        parada.entrega_estado = entrega_estado
-        parada.entrega_confirmada_en = entrega_confirmada_en
-        parada.entrega_confirmada_por = user
-        parada.entrega_notas = (
-            f"Recepción Point: {lineas_recibidas} línea(s) recibidas. "
-            f"Esperado/cargado {esperado_total}, recibido {recibido_total}."
-            + ("" if todas_recibidas else " Pendiente de sincronizar recepción completa.")
-        )
-        parada.save(update_fields=update_fields)
-        paradas_actualizadas += 1
-
-    if paradas_actualizadas:
-        ruta.recompute_route_control()
-        ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-
     return RecepcionPointResumen(
         ruta=ruta,
         evidencias_creadas=evidencias_creadas,

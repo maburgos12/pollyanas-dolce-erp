@@ -1363,6 +1363,20 @@ class LogisticaControlRutasTests(TestCase):
         parada = ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
         return ruta, parada
 
+    def _registrar_llegada_geocerca(self, parada=None):
+        parada = parada or self.parada
+        parada.estado = ParadaRuta.ESTADO_VISITADA
+        parada.hora_llegada_real = timezone.now()
+        parada.distancia_llegada_metros = 0
+        parada.save(update_fields=["estado", "hora_llegada_real", "distancia_llegada_metros", "actualizado_en"])
+        return EventoRuta.objects.create(
+            ruta=parada.ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            descripcion=f"Llegada detectada en {parada.punto_nombre_snapshot}.",
+            creado_por=self.user,
+        )
+
     def test_distancia_metros_detecta_punto_cercano(self):
         self.assertLess(distancia_metros("25.570010", "-108.470010", self.punto.latitud, self.punto.longitud), 5)
 
@@ -3022,6 +3036,7 @@ class LogisticaControlRutasTests(TestCase):
 
     def test_api_confirma_entrega_de_parada_con_evidencia_idempotente(self):
         self.client.force_login(self.user)
+        self._registrar_llegada_geocerca()
         checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
         linea = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
@@ -3066,10 +3081,18 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_confirmada_por, self.user)
         self.assertEqual(ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="evt-entrega-1").count(), 1)
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
-        self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 1)
+        self.assertEqual(
+            EventoRuta.objects.filter(
+                ruta=self.ruta,
+                parada=self.parada,
+                descripcion__startswith="Entrega de parada confirmada",
+            ).count(),
+            1,
+        )
 
     def test_api_confirma_entrega_guarda_evidencia_por_producto(self):
         self.client.force_login(self.user)
+        self._registrar_llegada_geocerca()
         checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
         linea_1 = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
@@ -3198,6 +3221,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("recarga CEDIS", response.json()["detail"])
         parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
         parada_cedis.save(update_fields=["estado", "actualizado_en"])
+        self._registrar_llegada_geocerca()
         response = self.client.post(
             url,
             json.dumps(
@@ -3322,7 +3346,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
-    def test_sincronizar_recepcion_desde_point_confirma_parada_recibida(self):
+    def test_sincronizar_recepcion_desde_point_registra_evidencia_sin_confirmar_visita(self):
         self._crear_linea_carga_con_transferencia_recibida()
 
         resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
@@ -3330,11 +3354,11 @@ class LogisticaControlRutasTests(TestCase):
         self.parada.refresh_from_db()
         self.ruta.refresh_from_db()
         self.assertEqual(resumen.evidencias_creadas, 1)
-        self.assertEqual(resumen.paradas_actualizadas, 1)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
-        self.assertEqual(self.parada.entrega_confirmada_por, self.user)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
-        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
+        self.assertEqual(resumen.paradas_actualizadas, 0)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertIsNone(self.parada.entrega_confirmada_por)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("0.00"))
         evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
         self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
         self.assertEqual(evidencia.metadata["origen"], "point_transfer")
@@ -3367,14 +3391,14 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
         self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
 
-    def test_sincronizar_recepcion_desde_point_marca_diferencia_si_recibido_no_cuadra(self):
+    def test_sincronizar_recepcion_desde_point_no_marca_diferencia_si_recibido_no_cuadra(self):
         self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
 
         resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
 
         self.parada.refresh_from_db()
         self.assertEqual(resumen.evidencias_creadas, 1)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_CON_DIFERENCIA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
     def test_sincronizar_recepcion_parcial_point_deja_entrega_pendiente(self):
         checklist, _, _ = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="5.000")
@@ -3401,9 +3425,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.evidencias_creadas, 1)
         self.assertEqual(resumen.lineas_pendientes_point, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
-        self.assertIn("Pendiente de sincronizar recepción completa", self.parada.entrega_notas)
+        self.assertEqual(self.parada.entrega_notas, "")
 
-    def test_sincronizar_recepcion_respeta_confirmacion_pwa_para_lineas_sin_point(self):
+    def test_sincronizar_recepcion_no_infiere_confirmacion_pwa_desde_evidencia_aislada(self):
         checklist, _, _ = self._crear_linea_carga_con_transferencia_recibida(
             source_hash="transfer-mixta-point",
             loaded_quantity="5.000",
@@ -3438,8 +3462,8 @@ class LogisticaControlRutasTests(TestCase):
 
         self.parada.refresh_from_db()
         self.assertEqual(resumen.evidencias_creadas, 1)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
-        self.assertIn("Esperado/cargado 7.000, recibido 7.000", self.parada.entrega_notas)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertEqual(self.parada.entrega_notas, "")
 
     def test_sincronizar_recepcion_no_reabre_entrega_pwa_con_point_pendiente(self):
         self._crear_linea_carga_con_transferencia_recibida(is_received=False, received_quantity="0.000")
@@ -3549,7 +3573,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resumen.evidencias_creadas, 0)
         self.assertEqual(resumen.evidencias_existentes, 1)
         self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
     def test_api_sincroniza_recepcion_point_y_devuelve_parada_actualizada(self):
         self.client.force_login(self.user)
@@ -3567,12 +3591,12 @@ class LogisticaControlRutasTests(TestCase):
 
         self.parada.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["paradas_actualizadas"], 1)
+        self.assertEqual(response.json()["paradas_actualizadas"], 0)
         self.assertEqual(response.json()["lineas_recibidas"], 1)
-        self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_ENTREGADA)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(response.json()["paradas"][0]["entrega_estado"], ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
-    def test_api_confirmar_entrega_marca_parada_visitada_si_gps_no_la_detecto(self):
+    def test_api_confirmar_entrega_rechaza_parada_sin_llegada_por_geocerca(self):
         self.client.force_login(self.user)
         self.parada.estado = ParadaRuta.ESTADO_PENDIENTE
         self.parada.hora_llegada_real = None
@@ -3589,10 +3613,11 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.parada.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
-        self.assertIsNotNone(self.parada.hora_llegada_real)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("geocerca", response.json()["detail"].lower())
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
 
     def test_ruta_detail_muestra_carga_esperada_por_producto(self):
         self.client.force_login(self.user)
@@ -3657,8 +3682,8 @@ class LogisticaControlRutasTests(TestCase):
 
         self.parada.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
         self.assertContains(response, "Recepción Point sincronizada")
         self.assertContains(response, "Recibido correcto")
 
@@ -3680,7 +3705,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.parada.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
         self.assertContains(response, "Recepción Point sincronizada")
 
     def test_ruta_detail_actualiza_carga_point_con_sync_externo(self):
@@ -4386,7 +4411,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.point_transfer_line, transferencia)
         self.assertEqual(parada.evidencias_entrega.get().cantidad_entregada, linea.cantidad_enviada_esperada)
         self.assertEqual(parada.evidencias_entrega.get().metadata["source_hashes"], [transferencia.source_hash])
-        self.assertEqual(ruta.cumplimiento_porcentaje, Decimal("100.00"))
+        self.assertEqual(ruta.cumplimiento_porcentaje, Decimal("0.00"))
 
     def test_recepcion_point_resuelve_ambiguo_por_cantidad_recibida(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
