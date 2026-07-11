@@ -138,33 +138,25 @@ def _calculo_insumos_excluded_template_family(value: str) -> bool:
     return any(token in normalized for token in CALCULO_INSUMOS_EXCLUDED_TEMPLATE_FAMILY_TOKENS)
 
 
-def _calculo_insumos_template_presentation(
-    family: str, category: str, product_name: str
-) -> str:
-    clean_family = " ".join((family or "").split())
-    clean_category = " ".join((category or "").split())
-    product_key = " ".join(unidecode(product_name or "").lower().split())
-    product_words = product_key.replace("-", " ").split()
-    for token, label in (
-        ("media plancha", "Media Plancha"),
-        ("rebanada", "Rebanada"),
-        ("individual", "Individual"),
-        ("mini", "Mini"),
-        ("chico", "Chico"),
-        ("mediano", "Mediano"),
-        ("grande", "Grande"),
-    ):
-        if token in product_key:
-            return label
-    if product_words:
-        abbreviated = {"m": "Mediano", "g": "Grande", "r": "Rebanada"}
-        if product_words[-1] in abbreviated:
-            return abbreviated[product_words[-1]]
-    family_key = unidecode(clean_family).lower()
-    category_key = unidecode(clean_category).lower()
-    if family_key and category_key.startswith(f"{family_key} "):
-        return clean_category[len(clean_family) :].strip()
-    return clean_category or clean_family
+def _calculo_insumos_template_production_family(
+    recipe_family: str, category: str, product_name: str
+) -> str | None:
+    normalized = " ".join(
+        unidecode(f"{recipe_family} {category} {product_name}").lower().split()
+    )
+    if "pastel" in normalized:
+        return "Pastel"
+    if "cheesecake" in normalized:
+        return "Cheesecake"
+    if "bollo" in normalized:
+        return "Bollos"
+    if "galleta" in normalized or "bolitas de nuez" in normalized:
+        return "Galletas"
+    if "pay" in normalized:
+        return "Pay"
+    if "fresas con crema" in normalized or "vaso con crema" in normalized:
+        return "Fresas con crema"
+    return None
 
 
 def _calculo_insumos_template_products() -> list[dict[str, str]]:
@@ -198,7 +190,11 @@ def _calculo_insumos_template_products() -> list[dict[str, str]]:
         receta = recipes_by_code.get(code_key)
         if receta is None:
             continue
-        family = receta.familia or point_product.category or "Sin familia"
+        family = _calculo_insumos_template_production_family(
+            receta.familia, point_product.category, point_product.name
+        )
+        if family is None:
+            continue
         if _calculo_insumos_excluded_template_family(
             family
         ) or _calculo_insumos_excluded_template_family(
@@ -209,17 +205,16 @@ def _calculo_insumos_template_products() -> list[dict[str, str]]:
         products.append(
             {
                 "familia": family,
+                "categoria": point_product.category or "Sin categoría",
                 "codigo_point": point_product.sku,
                 "producto": point_product.name,
-                "presentacion": _calculo_insumos_template_presentation(
-                    family, point_product.category, point_product.name
-                ),
             }
         )
     return sorted(
         products,
         key=lambda row: (
             unidecode(row["familia"]).lower(),
+            unidecode(row["categoria"]).lower(),
             unidecode(row["producto"]).lower(),
             row["codigo_point"],
         ),
@@ -16786,14 +16781,14 @@ def calculo_insumos_plantilla(request: HttpRequest) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "Plantilla carga"
-    ws.append(["familia", "codigo_point", "producto", "presentacion", "cantidad", "notas"])
+    ws.append(["familia", "categoria", "codigo_point", "producto", "cantidad", "notas"])
     for product in _calculo_insumos_template_products():
         ws.append(
             [
                 product["familia"],
+                product["categoria"],
                 product["codigo_point"],
                 product["producto"],
-                product["presentacion"],
                 None,
                 None,
             ]

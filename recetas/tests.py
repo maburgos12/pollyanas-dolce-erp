@@ -4126,6 +4126,12 @@ class SolicitudVentasForecastTests(TestCase):
             familia="Otros postres",
         )
         self._crear_producto_plantilla(
+            nombre="Capuchino",
+            codigo="CAFE-01",
+            familia="Bebidas",
+            categoria_point="Café",
+        )
+        self._crear_producto_plantilla(
             nombre="Servicio Accesorio",
             codigo="SERV-01",
             familia="Pasteles",
@@ -4157,23 +4163,11 @@ class SolicitudVentasForecastTests(TestCase):
             [
                 {
                     "familia": "Pastel",
+                    "categoria": "Pastel Mediano",
                     "codigo_point": "PASTEL-01",
                     "producto": "Pastel Vendible",
-                    "presentacion": "Mediano",
                 }
             ],
-        )
-
-    def test_calculo_insumos_plantilla_infiere_presentacion_del_producto_antes_que_categoria(self):
-        from recetas.views.plan import _calculo_insumos_template_presentation
-
-        self.assertEqual(
-            _calculo_insumos_template_presentation(
-                "Vasos Preparados",
-                "Vasos Grande",
-                "Vaso Fresas con Crema Chico",
-            ),
-            "Chico",
         )
 
     def test_calculo_insumos_plantilla_xlsx_precarga_catalogo_vendible(self):
@@ -4202,8 +4196,8 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(
             list(ws.values),
             [
-                ("familia", "codigo_point", "producto", "presentacion", "cantidad", "notas"),
-                ("Pastel", "PASTEL-01", "Pastel Vendible", "Mediano", None, None),
+                ("familia", "categoria", "codigo_point", "producto", "cantidad", "notas"),
+                ("Pastel", "Pastel Mediano", "PASTEL-01", "Pastel Vendible", None, None),
             ],
         )
 
