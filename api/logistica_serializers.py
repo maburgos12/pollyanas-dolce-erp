@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -27,7 +28,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
-from logistica.services_entregas import tiene_llegada_geocerca_confiable
+from logistica.services_entregas import geocercas_confiables_por_parada, tiene_llegada_geocerca_confiable
 from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -273,6 +274,13 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         return nombre_operativo_usuario(obj.entrega_confirmada_por)
 
     def get_geocerca_confiable(self, obj):
+        root_instance = getattr(self.root, "instance", None)
+        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
+            cache = self.context.get("_geocercas_confiables")
+            if cache is None:
+                cache = geocercas_confiables_por_parada(root_instance)
+                self.context["_geocercas_confiables"] = cache
+            return obj.id in cache
         return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
 
     def get_revision_entrega_revisada_por_nombre(self, obj):
@@ -556,13 +564,34 @@ class ParadaEntregaConfirmarSerializer(serializers.Serializer):
     entrega_estado = serializers.ChoiceField(choices=ParadaRuta.ENTREGA_ESTADO_CHOICES)
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
-    client_context = serializers.JSONField(required=False, default=dict)
+    client_context = serializers.DictField(required=False, default=dict)
     evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
         entrega_estado = attrs["entrega_estado"]
         notas = (attrs.get("notas") or "").strip()
         evidencias = attrs.get("evidencias") or []
+        client_context = attrs.get("client_context") or {}
+        allowed_context = {
+            "causa", "latitud", "longitud", "precision_metros", "distancia_metros",
+            "client_timestamp", "client_version",
+        }
+        extra = set(client_context) - allowed_context
+        if extra:
+            raise serializers.ValidationError({"client_context": f"Campos no permitidos: {', '.join(sorted(extra))}."})
+        if len(json.dumps(client_context, default=str)) > 2048:
+            raise serializers.ValidationError({"client_context": "El contexto excede el tamaño permitido."})
+        for key in ("causa", "client_timestamp", "client_version"):
+            value = client_context.get(key)
+            if value is not None and (not isinstance(value, str) or len(value) > 120):
+                raise serializers.ValidationError({"client_context": f"{key} debe ser texto de máximo 120 caracteres."})
+        for key in ("latitud", "longitud", "precision_metros", "distancia_metros"):
+            value = client_context.get(key)
+            if value is not None:
+                try:
+                    Decimal(str(value))
+                except (ValueError, TypeError, ArithmeticError):
+                    raise serializers.ValidationError({"client_context": f"{key} debe ser numérico."})
         client_event_id = (attrs.get("client_event_id") or "").strip()
         if not client_event_id and evidencias:
             client_event_id = str(evidencias[0].get("client_event_id") or "").strip()

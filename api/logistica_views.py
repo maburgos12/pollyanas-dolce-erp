@@ -1447,7 +1447,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     "revision_entrega_resolucion": "",
                     "distancia_llegada_metros": evento_original.distancia_metros,
                 }
-            evidencias_originales = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).order_by("id")
+            evidencias_originales = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
             respuesta_reconstruida = {
                 "parada": parada_data,
                 "evidencias": ParadaEntregaEvidenciaSerializer(
@@ -1518,6 +1518,11 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             )
         except EntregaIdempotenciaConflicto as exc:
             return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
+        except IntegrityError:
+            return Response(
+                {"detail": "client_event_id ya fue usado por otra evidencia."},
+                status=status.HTTP_409_CONFLICT,
+            )
         except (ValidationError, PermissionDenied) as exc:
             detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
             return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
@@ -1526,7 +1531,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta.recompute_route_control()
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
         evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
-        evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).order_by("id")
+        evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
 
         log_event(
             request.user,
@@ -1633,7 +1638,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"), many=True).data,
                 "ultima_ubicacion": UbicacionRutaSerializer(ultima_ubicacion).data if ultima_ubicacion else None,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
                 "checklist_carga": RutaCargaChecklistSerializer(
@@ -1749,7 +1754,7 @@ class LogisticaRutaRecepcionPointSyncView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(resumen.ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"), many=True).data,
                 "evidencias_creadas": resumen.evidencias_creadas,
                 "evidencias_existentes": resumen.evidencias_existentes,
                 "paradas_actualizadas": resumen.paradas_actualizadas,
@@ -1847,7 +1852,7 @@ class LogisticaRutaTrackingView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh"), many=True).data,
                 "ubicaciones": UbicacionRutaSerializer(ruta.ubicaciones.select_related("repartidor__user", "unidad")[:200], many=True).data,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:200], many=True).data,
             },

@@ -140,30 +140,55 @@ def _geocerca_real(*, ruta: RutaEntrega, parada: ParadaRuta) -> EventoRuta | Non
             latitud__isnull=False,
             longitud__isnull=False,
         )
-        .select_related("ubicacion")
+        .select_related("ubicacion", "ubicacion__repartidor")
         .order_by("-creado_en", "-id")
     )
     for evento in eventos:
-        ubicacion = evento.ubicacion
-        metadata = evento.metadata or {}
-        if metadata.get("origen_servicio") != "registrar_ubicacion_ruta":
-            continue
-        if metadata.get("ubicacion_confiable") is not True:
-            continue
-        if metadata.get("ruta_id") != ruta.id or ubicacion.ruta_id != ruta.id:
-            continue
-        if metadata.get("repartidor_id") != ruta.repartidor_id or ubicacion.repartidor_id != ruta.repartidor_id:
-            continue
-        if metadata.get("unidad_id") != ruta.unidad_operativa_id or ubicacion.unidad_id != ruta.unidad_operativa_id:
-            continue
-        if evento.creado_por_id != getattr(ruta.repartidor, "user_id", None):
-            continue
-        if evento.latitud != ubicacion.latitud or evento.longitud != ubicacion.longitud:
-            continue
-        if evento.distancia_metros is None or evento.distancia_metros > parada.radio_geocerca_metros:
-            continue
-        return evento
+        if _evento_geocerca_es_confiable(evento=evento, ruta=ruta, parada=parada):
+            return evento
     return None
+
+
+def _evento_geocerca_es_confiable(*, evento, ruta, parada):
+    ubicacion = evento.ubicacion
+    metadata = evento.metadata or {}
+    return bool(
+        metadata.get("origen_servicio") == "registrar_ubicacion_ruta"
+        and metadata.get("ubicacion_confiable") is True
+        and metadata.get("ruta_id") == ruta.id
+        and ubicacion.ruta_id == ruta.id
+        and metadata.get("repartidor_id") == ruta.repartidor_id
+        and ubicacion.repartidor_id == ruta.repartidor_id
+        and metadata.get("unidad_id") == ruta.unidad_operativa_id
+        and ubicacion.unidad_id == ruta.unidad_operativa_id
+        and evento.creado_por_id == ubicacion.repartidor.user_id
+        and evento.latitud == ubicacion.latitud
+        and evento.longitud == ubicacion.longitud
+        and evento.distancia_metros is not None
+        and evento.distancia_metros <= parada.radio_geocerca_metros
+    )
+
+
+def geocercas_confiables_por_parada(paradas) -> set[int]:
+    paradas = list(paradas)
+    if not paradas:
+        return set()
+    por_id = {parada.id: parada for parada in paradas}
+    eventos = EventoRuta.objects.filter(
+        parada_id__in=por_id,
+        tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+        ubicacion__isnull=False,
+        latitud__isnull=False,
+        longitud__isnull=False,
+    ).select_related("ubicacion", "ubicacion__repartidor").order_by("-creado_en", "-id")
+    confiables = set()
+    for evento in eventos:
+        parada = por_id[evento.parada_id]
+        if evento.parada_id not in confiables and _evento_geocerca_es_confiable(
+            evento=evento, ruta=parada.ruta, parada=parada
+        ):
+            confiables.add(evento.parada_id)
+    return confiables
 
 
 def tiene_llegada_geocerca_confiable(*, ruta: RutaEntrega, parada: ParadaRuta) -> bool:

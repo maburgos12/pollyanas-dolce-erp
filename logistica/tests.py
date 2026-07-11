@@ -475,6 +475,66 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("client_event_id", response.json())
 
+    def test_client_context_rechaza_tipos_claves_y_tamano_no_aprobados(self):
+        invalidos = [
+            [],
+            "GPS sin señal",
+            123,
+            {"causa": "GPS_SIN_SENAL", "correo_cliente": "persona@example.com"},
+            {"causa": "X" * 201},
+        ]
+        for index, contexto in enumerate(invalidos):
+            with self.subTest(contexto=contexto):
+                response = self.client.post(
+                    self.url,
+                    json.dumps(self._payload(client_event_id=f"contexto-invalido-{index}", client_context=contexto)),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+
+    def test_colision_client_event_id_secundario_devuelve_409_y_revierte(self):
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            capturado_por=self.user,
+            client_event_id="secundario-ocupado",
+            comentario="Evento anterior",
+        )
+        payload = self._payload(
+            client_event_id="confirmacion-nueva",
+            evidencias=[
+                {"comentario": "Primaria"},
+                {"comentario": "Secundaria", "client_event_id": "secundario-ocupado"},
+            ],
+        )
+
+        response = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertFalse(ParadaEntregaEvidencia.objects.filter(client_event_id="confirmacion-nueva").exists())
+
+    def test_serializer_coleccion_geocerca_tiene_presupuesto_constante_de_queries(self):
+        for orden in range(2, 7):
+            punto = PuntoLogistico.objects.create(
+                sucursal=self.sucursal,
+                nombre=f"Sucursal API {orden}",
+                tipo=PuntoLogistico.TIPO_SUCURSAL,
+                latitud="25.570000",
+                longitud="-108.470000",
+                radio_geocerca_metros=120,
+            )
+            ParadaRuta.objects.create(ruta=self.ruta, punto=punto, orden=orden)
+        paradas = self.ruta.paradas.select_related(
+            "ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "revision_entrega_revisada_por"
+        ).order_by("orden")
+
+        with self.assertNumQueries(2):
+            data = ParadaRutaSerializer(paradas, many=True).data
+
+        self.assertEqual(len(data), 6)
+
     def test_retry_exacto_devuelve_original_y_payload_divergente_da_409(self):
         payload = self._payload()
         primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
