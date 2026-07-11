@@ -4163,7 +4163,7 @@ class SolicitudVentasForecastTests(TestCase):
             [
                 {
                     "familia": "Pastel",
-                    "categoria": "Pastel Mediano",
+                    "categoria": "Mediano",
                     "codigo_point": "PASTEL-01",
                     "producto": "Pastel Vendible",
                 }
@@ -4197,7 +4197,7 @@ class SolicitudVentasForecastTests(TestCase):
             list(ws.values),
             [
                 ("familia", "categoria", "codigo_point", "producto", "cantidad", "notas"),
-                ("Pastel", "Pastel Mediano", "PASTEL-01", "Pastel Vendible", None, None),
+                ("Pastel", "Mediano", "PASTEL-01", "Pastel Vendible", None, None),
             ],
         )
 

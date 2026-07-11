@@ -159,6 +159,34 @@ def _calculo_insumos_template_production_family(
     return None
 
 
+def _calculo_insumos_template_category(
+    family: str, point_category: str, product_name: str
+) -> str:
+    product_key = " ".join(unidecode(product_name or "").lower().split())
+    product_words = product_key.replace("-", " ").split()
+    for token, label in (
+        ("media plancha", "Media Plancha"),
+        ("rebanada", "Rebanada"),
+        ("individual", "Individual"),
+        ("mini", "Mini"),
+        ("chico", "Chico"),
+        ("mediano", "Mediano"),
+        ("grande", "Grande"),
+    ):
+        if token in product_key:
+            return label
+    if product_words:
+        abbreviated = {"m": "Mediano", "g": "Grande", "r": "Rebanada"}
+        if product_words[-1] in abbreviated:
+            return abbreviated[product_words[-1]]
+    clean_category = " ".join((point_category or "").split())
+    family_key = unidecode(family).lower()
+    category_key = unidecode(clean_category).lower()
+    if family_key and category_key.startswith(f"{family_key} "):
+        return clean_category[len(family) :].strip()
+    return clean_category or family
+
+
 def _calculo_insumos_template_products() -> list[dict[str, str]]:
     latest_sale = PointDailySale.objects.aggregate(max_date=Max("sale_date")).get("max_date")
     if latest_sale is None:
@@ -205,7 +233,9 @@ def _calculo_insumos_template_products() -> list[dict[str, str]]:
         products.append(
             {
                 "familia": family,
-                "categoria": point_product.category or "Sin categoría",
+                "categoria": _calculo_insumos_template_category(
+                    family, point_product.category, point_product.name
+                ),
                 "codigo_point": point_product.sku,
                 "producto": point_product.name,
             }
