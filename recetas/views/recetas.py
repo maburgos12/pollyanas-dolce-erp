@@ -1389,6 +1389,8 @@ def _recipe_is_excluded_point_category(receta: Receta, excluded_codes: set[str])
 def _recipe_counts_as_bom_pending(receta: Receta, excluded_point_category_codes: set[str]) -> bool:
     if receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
         return False
+    if receta.modo_costeo != Receta.MODO_COSTEO_FABRICADO:
+        return False
     if _recipe_is_excluded_point_category(receta, excluded_point_category_codes):
         return False
     return not _recipe_has_effective_bom(receta)
