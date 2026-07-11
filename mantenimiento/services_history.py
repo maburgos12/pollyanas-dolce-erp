@@ -34,7 +34,7 @@ STATUS_MAP = {
 
 
 def canonical_status(source, value):
-    return STATUS_MAP[source][value]
+    return STATUS_MAP[source][value.upper()]
 
 
 def period_bounds(period, *, now=None):
@@ -140,6 +140,101 @@ def inbox_rows(user, *, period, origin):
                     subject_id=row["unidad_id"], subject=row["unidad__codigo"],
                 ))
     return rows
+
+
+def _history_actor(user_id, full_name, username):
+    if not user_id:
+        return {"id": None, "label": "Sin autor registrado"}
+    return {"id": user_id, "label": (full_name or username or "Usuario")}
+
+
+def unified_history_rows(user, *, period):
+    """Normalize authorized maintenance facts; one database row becomes one UID."""
+    start, end = period_bounds(period)
+    rows = []
+
+    fallas = authorized_fallas(user).select_related("reportado_por").values(
+        "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre",
+        "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
+        "reportado_por_id", "reportado_por__first_name", "reportado_por__last_name", "reportado_por__username",
+    )
+    falla_states = {
+        ReporteFalla.ESTATUS_ABIERTO: "abierto", ReporteFalla.ESTATUS_REVISION: "en_proceso",
+        ReporteFalla.ESTATUS_PROCESO: "en_proceso", ReporteFalla.ESTATUS_RESUELTO: "cerrado",
+        ReporteFalla.ESTATUS_CERRADO: "cerrado", ReporteFalla.ESTATUS_CANCELADO: "cancelado",
+    }
+    for item in fallas:
+        state = falla_states[item["estatus"]]
+        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["fecha_reporte"]
+        if _in_period(event, start, end):
+            rows.append(_history_payload(
+                uid=f"falla:{item['id']}", event=event, kind="reporte", state=state,
+                branch_id=item["sucursal_id"], branch=item["sucursal__nombre"],
+                subject_id=item["activo_relacionado_id"], subject=item["activo_relacionado__nombre"] or "",
+                actor=_history_actor(item["reportado_por_id"], " ".join(filter(None, [item["reportado_por__first_name"], item["reportado_por__last_name"]])), item["reportado_por__username"]),
+                origin="falla", title=item["titulo"], description=item["descripcion"],
+                asset_id=item["activo_relacionado_id"],
+            ))
+
+    orders = authorized_orders(user).select_related("creado_por").values(
+        "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id",
+        "activo_ref_id", "activo_ref__nombre", "activo_ref__sucursal_id", "activo_ref__sucursal__nombre",
+        "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
+    )
+    from activos.models import SolicitudFalla
+    linked_order_ids = set(SolicitudFalla.objects.filter(orden_atencion_id__in=[x["id"] for x in orders]).values_list("orden_atencion_id", flat=True))
+    for item in orders:
+        state = canonical_status("orden", item["estatus"])
+        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["creado_en"]
+        if _in_period(event, start, end):
+            unreported = item["origen"] in {OrdenMantenimiento.ORIGEN_EMERGENCIA, OrdenMantenimiento.ORIGEN_INICIATIVA} and not item["plan_ref_id"] and item["id"] not in linked_order_ids
+            rows.append(_history_payload(
+                uid=f"orden:{item['id']}", event=event, kind="orden", state=state,
+                branch_id=item["activo_ref__sucursal_id"], branch=item["activo_ref__sucursal__nombre"],
+                subject_id=item["activo_ref_id"], subject=item["activo_ref__nombre"],
+                actor=_history_actor(item["creado_por_id"], " ".join(filter(None, [item["creado_por__first_name"], item["creado_por__last_name"]])), item["creado_por__username"]),
+                origin="sin_reporte" if unreported else item["origen"].lower(), title=item["folio"],
+                description=item["descripcion"], asset_id=item["activo_ref_id"],
+            ))
+
+    reports = authorized_unit_reports(user).values(
+        "id", "tipo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre", "repartidor__user_id",
+        "repartidor__user__first_name", "repartidor__user__last_name", "repartidor__user__username",
+        "unidad_id", "unidad__codigo", "unidad__sucursal_id", "unidad__sucursal__nombre",
+    )
+    for item in reports:
+        state = canonical_status("reporte_unidad", item["estatus"])
+        if state == "programado": state = "en_proceso"
+        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["fecha_reporte"]
+        if _in_period(event, start, end):
+            rows.append(_history_payload(uid=f"reporte_unidad:{item['id']}", event=event, kind="reporte", state=state,
+                branch_id=item["unidad__sucursal_id"], branch=item["unidad__sucursal__nombre"], subject_id=item["unidad_id"], subject=item["unidad__codigo"],
+                actor=_history_actor(item["repartidor__user_id"], " ".join(filter(None, [item["repartidor__user__first_name"], item["repartidor__user__last_name"]])), item["repartidor__user__username"]),
+                origin="reporte_unidad", title=item["tipo"], description=item["descripcion"], unit_id=item["unidad_id"]))
+
+    for kind, queryset, date_field in (("reparacion", authorized_repairs(user), "fecha_ingreso"), ("servicio_unidad", authorized_unit_services(user), "fecha_servicio")):
+        queryset = queryset.select_related("registrado_por", "unidad", "unidad__sucursal")
+        for obj in queryset:
+            event = getattr(obj, date_field)
+            if not _in_period(event, start, end): continue
+            is_service = kind == "servicio_unidad"
+            rows.append(_history_payload(uid=f"{kind}:{obj.pk}", event=event, kind=kind, state="cerrado",
+                branch_id=obj.unidad.sucursal_id, branch=obj.unidad.sucursal.nombre, subject_id=obj.unidad_id, subject=obj.unidad.codigo,
+                actor=_history_actor(obj.registrado_por_id, obj.registrado_por.get_full_name() if obj.registrado_por else "", obj.registrado_por.get_username() if obj.registrado_por else ""),
+                origin=kind, parent_uid=(f"reporte_unidad:{obj.reporte_origen_id}" if kind == "reparacion" and obj.reporte_origen_id else None),
+                title=(obj.tipo_servicio.nombre if is_service else obj.descripcion_falla), description=(obj.notas or ("" if is_service else obj.descripcion_reparacion)),
+                unit_id=obj.unidad_id, direct=is_service, invoice=(obj.archivo_factura.name if obj.archivo_factura else "")))
+    return rows
+
+
+def _history_payload(*, uid, event, kind, state, branch_id, branch, subject_id, subject, actor, origin,
+                     title, description, asset_id=None, unit_id=None, parent_uid=None, direct=False, invoice=""):
+    return {"uid": uid, "fecha_evento": _aware_date(event), "tipo": kind, "estado": state,
+            "sucursal": {"id": branch_id, "label": branch or ""},
+            "sujeto": ({"id": subject_id, "label": subject or ""} if subject_id else None), "actor": actor,
+            "origen": origin, "parent_uid": parent_uid, "captura_directa": direct,
+            "titulo": title or "", "descripcion": description or "", "activo_id": asset_id,
+            "unidad_id": unit_id, "factura": invoice or ""}
 
 
 def _row_payload(*, uid, pk, kind, origin, state, critical, event, title, description,

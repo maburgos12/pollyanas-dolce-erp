@@ -577,6 +577,80 @@ class MaintenanceInboxV2Tests(TestCase):
             self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
 
 
+class MaintenanceUnifiedHistoryV2Tests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_superuser("history-admin", "history@example.com", "test")
+        cls.actor = get_user_model().objects.create_user("history-actor", first_name="Isaac")
+        cls.branch = Sucursal.objects.create(codigo="HIS", nombre="Historial")
+        cls.asset = Activo.objects.create(nombre="Horno historial", sucursal=cls.branch)
+        cls.unit = Unidad.objects.create(codigo="HIS-01", descripcion="Camioneta historial", sucursal=cls.branch)
+        cls.category = CategoriaFalla.objects.create(nombre="Historial")
+        cls.service_type = TipoServicioUnidad.objects.create(nombre="Afinación")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_unifies_all_sources_without_duplicate_uids_and_keeps_real_relationships(self):
+        falla = ReporteFalla.objects.create(
+            sucursal=self.branch, categoria=self.category, titulo="Falla", descripcion="x",
+            reportado_por=self.actor, foto_evidencia="fallas/evidencias/history.jpg",
+        )
+        order = OrdenMantenimiento.objects.create(
+            activo_ref=self.asset, origen=OrdenMantenimiento.ORIGEN_EMERGENCIA,
+            creado_por=self.actor, descripcion="Emergencia",
+        )
+        report = ReporteUnidad.objects.create(unidad=self.unit, tipo="falla", descripcion="Motor")
+        repair = ReparacionUnidad.objects.create(
+            unidad=self.unit, reporte_origen=report, fecha_ingreso=timezone.localdate(),
+            descripcion_falla="Motor", registrado_por=self.actor,
+        )
+        service = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type, fecha_servicio=timezone.localdate(),
+            registrado_por=None, archivo_factura="servicios_unidad/factura.pdf",
+        )
+
+        payload = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo"}).json()
+
+        rows = {row["uid"]: row for row in payload["results"]}
+        self.assertEqual(len(rows), payload["pagination"]["total"])
+        self.assertTrue({f"falla:{falla.pk}", f"orden:{order.pk}", f"reporte_unidad:{report.pk}",
+                         f"reparacion:{repair.pk}", f"servicio_unidad:{service.pk}"}.issubset(rows))
+        self.assertEqual(rows[f"orden:{order.pk}"]["origen"], "sin_reporte")
+        self.assertFalse(rows[f"orden:{order.pk}"]["captura_directa"])
+        self.assertEqual(rows[f"reparacion:{repair.pk}"]["parent_uid"], f"reporte_unidad:{report.pk}")
+        self.assertEqual(rows[f"servicio_unidad:{service.pk}"]["actor"], {"id": None, "label": "Sin autor registrado"})
+        self.assertTrue(rows[f"servicio_unidad:{service.pk}"]["factura"])
+
+    def test_filters_type_state_scope_search_period_and_stable_pagination(self):
+        recent = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate() - timedelta(days=29), registrado_por=self.actor,
+        )
+        ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate() - timedelta(days=31), registrado_por=self.actor,
+        )
+        first = self.client.get("/api/mantenimiento/v2/historial/", {
+            "tipo": "servicio_unidad", "estado": "cerrado", "periodo": "30d",
+            "sucursal": self.branch.pk, "unidad": self.unit.pk, "q": "afinación",
+            "page": 1, "page_size": 1,
+        }).json()
+        second = self.client.get("/api/mantenimiento/v2/historial/", {
+            "tipo": "servicio_unidad", "estado": "cerrado", "periodo": "30d",
+            "sucursal": self.branch.pk, "unidad": self.unit.pk, "q": "afinación",
+            "page": 1, "page_size": 1,
+        }).json()
+        self.assertEqual(first["pagination"]["total"], 1)
+        self.assertEqual(first["results"][0]["uid"], f"servicio_unidad:{recent.pk}")
+        self.assertEqual(first["results"], second["results"])
+
+    def test_rejects_invalid_history_filters(self):
+        for key, value in (("tipo", "x"), ("estado", "x"), ("periodo", "x"), ("page", "0")):
+            with self.subTest(key=key):
+                self.assertEqual(self.client.get("/api/mantenimiento/v2/historial/", {key: value}).status_code, 400)
+
+
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
 class MaintenanceDetailV2Tests(TestCase):
     @classmethod

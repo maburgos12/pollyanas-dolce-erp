@@ -9,7 +9,8 @@ from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services,
 )
-from mantenimiento.services_history import inbox_rows, item_detail
+from mantenimiento.services_history import inbox_rows, item_detail, unified_history_rows
+from mantenimiento.serializers import MaintenanceHistoryEventSerializer
 from mantenimiento.views import AUTH, EsMantenimiento
 
 
@@ -17,6 +18,12 @@ ALLOWED = {
     "estado": {"abiertos", "cerrados", "todos"},
     "periodo": {"semana", "mes", "30d", "90d", "todo"},
     "origen": {"sucursales", "logistica", "todos"},
+}
+
+HISTORY_ALLOWED = {
+    "tipo": {"todo", "reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"},
+    "estado": {"todo", "abierto", "en_proceso", "cerrado", "cancelado"},
+    "periodo": {"semana", "mes", "30d", "90d", "todo"},
 }
 
 
@@ -71,6 +78,38 @@ def bandeja_v2(request):
             "has_next": start + page_size < total,
         },
     })
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def historial_v2(request):
+    filters = {name: (request.query_params.get(name) or "todo").lower() for name in HISTORY_ALLOWED}
+    if any(value not in HISTORY_ALLOWED[name] for name, value in filters.items()):
+        return Response({"error": "Filtro no válido."}, status=400)
+    page = _positive_int(request.query_params.get("page"), 1)
+    page_size = _positive_int(request.query_params.get("page_size"), 25)
+    if page is None or page_size is None:
+        return Response({"error": "Paginación no válida."}, status=400)
+    page_size = min(page_size, 100)
+    rows = unified_history_rows(request.user, period=filters["periodo"])
+    tipo = filters["tipo"]
+    if tipo != "todo":
+        rows = [row for row in rows if (row["origen"] == "sin_reporte" if tipo == "sin_reporte" else row["tipo"] == tipo)]
+    if filters["estado"] != "todo": rows = [row for row in rows if row["estado"] == filters["estado"]]
+    for key, field in (("sucursal", "sucursal"), ("activo", "activo_id"), ("unidad", "unidad_id")):
+        raw = request.query_params.get(key)
+        if raw:
+            try: wanted = int(raw)
+            except ValueError: return Response({"error": f"{key.capitalize()} no válido."}, status=400)
+            rows = [row for row in rows if (row[field]["id"] if field == "sucursal" else row[field]) == wanted]
+    query = (request.query_params.get("q") or "").strip().casefold()
+    if query:
+        rows = [row for row in rows if query in " ".join((row["titulo"], row["descripcion"], (row["sujeto"] or {}).get("label", ""), row["actor"]["label"])).casefold()]
+    rows.sort(key=lambda row: (row["fecha_evento"], row["uid"]), reverse=True)
+    total = len(rows); start = (page - 1) * page_size
+    results = MaintenanceHistoryEventSerializer(rows[start:start + page_size], many=True).data
+    return Response({"schema_version": 2, "results": results, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": start + page_size < total}})
 
 
 @api_view(["GET"])
