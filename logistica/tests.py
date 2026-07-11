@@ -1,4 +1,5 @@
 import json
+import importlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time
 from decimal import Decimal
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.conf import settings
+from django.apps import apps as django_apps
 from django.contrib.auth.models import Group, User
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -693,9 +695,63 @@ class LogisticaAuditoriaEntregaTests(TestCase):
         primero.refresh_from_db()
         segundo.refresh_from_db()
         self.assertEqual(resultado["alertas_creadas"], 0)
-        self.assertEqual(primero.clave_auditoria, clave)
+        self.assertLessEqual(len(primero.clave_auditoria), 255)
+        self.assertRegex(
+            primero.clave_auditoria,
+            rf"^ENTREGADA_SIN_GEOFENCE_O_REVISION:{self.ruta.id}:{parada.id}:[0-9a-f]{{64}}$",
+        )
         self.assertIsNone(segundo.clave_auditoria)
         self.assertEqual(EventoRuta.objects.filter(parada=parada).count(), 2)
+
+    def test_confirmaciones_masivas_producen_clave_acotada_y_una_alerta(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        parada = self._parada(1)
+        for numero in range(180):
+            self._evento(
+                parada,
+                EventoRuta.TIPO_ENTREGA if numero % 2 == 0 else EventoRuta.TIPO_ENTREGA_EXCEPCIONAL,
+            )
+
+        primero = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+        segundo = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+
+        alerta = EventoRuta.objects.get(
+            parada=parada,
+            metadata__regla="CONFIRMACION_DUPLICADA_O_INCOMPATIBLE",
+        )
+        self.assertLessEqual(len(alerta.clave_auditoria), 255)
+        self.assertRegex(
+            alerta.clave_auditoria,
+            rf"^CONFIRMACION_DUPLICADA_O_INCOMPATIBLE:{self.ruta.id}:{parada.id}:[0-9a-f]{{64}}$",
+        )
+        self.assertEqual(primero["alertas_creadas"], 1)
+        self.assertEqual(segundo["alertas_creadas"], 0)
+
+    def test_backfill_normaliza_clave_legacy_larga_y_adopta_duplicado_mas_antiguo(self):
+        parada = self._parada(1)
+        hecho = "eventos-" + "-".join(str(numero) for numero in range(500))
+        metadata = {
+            "regla": "CONFIRMACION_DUPLICADA_O_INCOMPATIBLE",
+            "ruta_id": self.ruta.id,
+            "parada_id": parada.id,
+            "hecho": hecho,
+            "clave": f"CONFIRMACION_DUPLICADA_O_INCOMPATIBLE:{self.ruta.id}:{parada.id}:{hecho}",
+        }
+        primero = self._evento(parada, EventoRuta.TIPO_INCONSISTENCIA_ENTREGA, metadata=metadata)
+        segundo = self._evento(parada, EventoRuta.TIPO_INCONSISTENCIA_ENTREGA, metadata=metadata)
+        migration = importlib.import_module("logistica.migrations.0034_eventoruta_clave_auditoria")
+
+        migration.adoptar_claves_legacy(django_apps, None)
+
+        primero.refresh_from_db()
+        segundo.refresh_from_db()
+        self.assertLessEqual(len(primero.clave_auditoria), 255)
+        self.assertRegex(
+            primero.clave_auditoria,
+            rf"^CONFIRMACION_DUPLICADA_O_INCOMPATIBLE:{self.ruta.id}:{parada.id}:[0-9a-f]{{64}}$",
+        )
+        self.assertIsNone(segundo.clave_auditoria)
 
     def test_tarea_celery_ejecuta_auditoria_segura(self):
         from logistica.tasks import auditar_entregas_ruta_task

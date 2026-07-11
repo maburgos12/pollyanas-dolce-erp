@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date
 
@@ -25,6 +26,33 @@ ORIGENES_HORAS_NO_GPS = {"point_transfer", "admin_operativo", "sync_operativo"}
 CAMPOS_HORARIOS = {"hora_llegada_real", "hora_salida_real"}
 
 
+def construir_clave_auditoria(*, regla, ruta_id, parada_id, hecho) -> str:
+    regla_legible = str(regla or "LEGACY").strip()[:100] or "LEGACY"
+    hecho_canonico = str(hecho or "")
+    digest = hashlib.sha256(hecho_canonico.encode("utf-8")).hexdigest()
+    return f"{regla_legible}:{ruta_id}:{parada_id}:{digest}"
+
+
+def _normalizar_metadata_legacy(evento: EventoRuta) -> str | None:
+    metadata = evento.metadata or {}
+    clave_legacy = str(metadata.get("clave") or "").strip()
+    if not clave_legacy:
+        return None
+    partes = clave_legacy.split(":", 3)
+    regla = metadata.get("regla") or (partes[0] if partes else "LEGACY")
+    ruta_id = metadata.get("ruta_id") or (partes[1] if len(partes) > 1 else evento.ruta_id)
+    parada_id = metadata.get("parada_id") or (partes[2] if len(partes) > 2 else evento.parada_id)
+    hecho = metadata.get("hecho")
+    if hecho is None:
+        hecho = partes[3] if len(partes) > 3 else clave_legacy
+    return construir_clave_auditoria(
+        regla=regla,
+        ruta_id=ruta_id,
+        parada_id=parada_id,
+        hecho=hecho,
+    )
+
+
 @dataclass(frozen=True)
 class HallazgoEntrega:
     regla: str
@@ -35,7 +63,12 @@ class HallazgoEntrega:
 
     @property
     def clave(self) -> str:
-        return f"{self.regla}:{self.ruta_id}:{self.parada_id}:{self.hecho}"
+        return construir_clave_auditoria(
+            regla=self.regla,
+            ruta_id=self.ruta_id,
+            parada_id=self.parada_id,
+            hecho=self.hecho,
+        )
 
 
 def _rutas_queryset():
@@ -187,10 +220,16 @@ def _hallazgos_parada(parada: ParadaRuta) -> list[HallazgoEntrega]:
 def _registrar_alerta(ruta: RutaEntrega, parada: ParadaRuta, hallazgo: HallazgoEntrega) -> bool:
     if EventoRuta.objects.filter(clave_auditoria=hallazgo.clave).exists():
         return False
-    legacy = EventoRuta.objects.filter(
+    legacies = EventoRuta.objects.filter(
         tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
-        metadata__clave=hallazgo.clave,
-    ).order_by("id").first()
+        ruta=ruta,
+        parada=parada,
+        clave_auditoria__isnull=True,
+    ).order_by("id")
+    legacy = next(
+        (evento for evento in legacies if _normalizar_metadata_legacy(evento) == hallazgo.clave),
+        None,
+    )
     if legacy:
         try:
             with transaction.atomic():
