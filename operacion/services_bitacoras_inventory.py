@@ -7,7 +7,13 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.access import can_manage_module
-from inventario.models import ALMACEN_LABELS, LoteProduccion, MovimientoInventario, normalizar_codigo_lote
+from inventario.models import (
+    ALMACEN_LABELS,
+    ExistenciaInsumo,
+    LoteProduccion,
+    MovimientoInventario,
+    normalizar_codigo_lote,
+)
 from inventario.services_existencias import aplicar_delta
 from maestros.models import Insumo, UnidadMedida
 from recetas.models import Receta
@@ -30,9 +36,13 @@ def _fecha_operativa(fecha_elaboracion: date | datetime | None) -> tuple[datetim
     if isinstance(fecha_elaboracion, datetime):
         value = timezone.make_aware(fecha_elaboracion) if timezone.is_naive(fecha_elaboracion) else fecha_elaboracion
         normalized = value.astimezone(timezone.get_current_timezone())
+        if normalized.date() > timezone.localdate():
+            raise ValidationError("La fecha de elaboración no puede ser futura.")
         return normalized, normalized.isoformat()
     if not isinstance(fecha_elaboracion, date):
         raise ValidationError("La fecha de elaboración no es válida.")
+    if fecha_elaboracion > timezone.localdate():
+        raise ValidationError("La fecha de elaboración no puede ser futura.")
     value = timezone.make_aware(datetime.combine(fecha_elaboracion, time(hour=12)))
     return value, value.isoformat()
 
@@ -46,6 +56,7 @@ def _validar_apertura_existente(
     movimiento: MovimientoInventario,
     *,
     receta: Receta,
+    insumo: Insumo,
     cantidad: Decimal,
     unidad: UnidadMedida,
     observaciones: str,
@@ -54,6 +65,11 @@ def _validar_apertura_existente(
     lote = movimiento.lote
     if not lote or any(
         (
+            not lote.es_apertura,
+            lote.insumo_id != insumo.pk,
+            movimiento.insumo_id != insumo.pk,
+            movimiento.tipo != MovimientoInventario.TIPO_ENTRADA,
+            movimiento.almacen != movimiento.trazabilidad.get("ubicacion"),
             lote.receta_id != receta.pk,
             lote.cantidad_inicial != cantidad,
             lote.unidad_id != unidad.pk,
@@ -101,6 +117,7 @@ def registrar_apertura_inicial(
         return _validar_apertura_existente(
             movimiento_existente,
             receta=receta,
+            insumo=insumo,
             cantidad=cantidad_decimal,
             unidad=unidad,
             observaciones=observaciones_limpias,
@@ -109,6 +126,29 @@ def registrar_apertura_inicial(
 
     try:
         with transaction.atomic():
+            movimiento_existente = (
+                MovimientoInventario.objects.select_for_update()
+                .filter(source_hash=source_hash)
+                .first()
+            )
+            if movimiento_existente:
+                return _validar_apertura_existente(
+                    movimiento_existente,
+                    receta=receta,
+                    insumo=insumo,
+                    cantidad=cantidad_decimal,
+                    unidad=unidad,
+                    observaciones=observaciones_limpias,
+                    fecha_normalizada=fecha_normalizada,
+                )
+            existencia, _ = ExistenciaInsumo.objects.select_for_update().get_or_create(
+                insumo=insumo,
+                almacen=ubicacion,
+            )
+            if Decimal(str(existencia.stock_actual or 0)) != Decimal("0"):
+                raise ValidationError(
+                    "La ubicación ya tiene saldo; primero debes conciliarlo o registrar un ajuste autorizado."
+                )
             lote = LoteProduccion.objects.create(
                 insumo=insumo,
                 receta=receta,
@@ -143,13 +183,19 @@ def registrar_apertura_inicial(
             )
             aplicar_delta(insumo, ubicacion, cantidad_decimal)
             return lote
-    except IntegrityError:
-        movimiento = MovimientoInventario.objects.select_related("lote").get(source_hash=source_hash)
-        return _validar_apertura_existente(
-            movimiento,
-            receta=receta,
-            cantidad=cantidad_decimal,
-            unidad=unidad,
-            observaciones=observaciones_limpias,
-            fecha_normalizada=fecha_normalizada,
-        )
+    except IntegrityError as original_error:
+        movimiento = MovimientoInventario.objects.select_related("lote").filter(source_hash=source_hash).first()
+        if movimiento is None:
+            raise
+        try:
+            return _validar_apertura_existente(
+                movimiento,
+                receta=receta,
+                insumo=insumo,
+                cantidad=cantidad_decimal,
+                unidad=unidad,
+                observaciones=observaciones_limpias,
+                fecha_normalizada=fecha_normalizada,
+            )
+        except ValidationError:
+            raise original_error

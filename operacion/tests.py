@@ -1,17 +1,20 @@
 from pathlib import Path
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROLE_REPARTIDOR
 from core.models import Sucursal, UserModuleAccess, UserProfile
-from inventario.models import LoteProduccion, MovimientoInventario, UBICACION_CFP_1_1
-from inventario.services_existencias import stock_ubicacion
+from inventario.models import ExistenciaInsumo, LoteProduccion, MovimientoInventario, UBICACION_CFP_1_1
+from inventario.services_existencias import establecer_stock, stock_ubicacion
 from logistica.models import Repartidor, Unidad
 from maestros.models import Insumo, UnidadMedida
 from mermas.models import PersonalEnviosSucursal
@@ -100,6 +103,49 @@ class AperturaInicialLotesTests(TestCase):
         self.assertEqual(MovimientoInventario.objects.count(), 1)
         self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
 
+    def test_opening_rejects_preexisting_stock_without_creating_history(self):
+        establecer_stock(self.insumo, UBICACION_CFP_1_1, Decimal("1.250"))
+
+        with self.assertRaisesMessage(ValidationError, "conciliar"):
+            self._registrar()
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("1.250"))
+
+    def test_opening_rejects_future_operational_date(self):
+        future_date = timezone.localdate() + timedelta(days=1)
+
+        with self.assertRaisesMessage(ValidationError, "futura"):
+            self._registrar(fecha_elaboracion=future_date)
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+
+    def test_unrelated_integrity_error_is_not_treated_as_idempotence(self):
+        original_error = IntegrityError("conflicto ajeno a source_hash")
+
+        with patch("operacion.services_bitacoras_inventory.LoteProduccion.objects.create", side_effect=original_error):
+            with self.assertRaises(IntegrityError) as raised:
+                self._registrar()
+
+        self.assertIs(raised.exception, original_error)
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_opening_rolls_back_lot_and_movement_when_stock_update_fails(self):
+        with patch(
+            "operacion.services_bitacoras_inventory.aplicar_delta",
+            side_effect=ValidationError("fallo de saldo"),
+        ):
+            with self.assertRaisesMessage(ValidationError, "fallo de saldo"):
+                self._registrar()
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=self.insumo).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
     def test_opening_requires_production_manage_permission(self):
         with self.assertRaises(PermissionDenied):
             self._registrar(actor=self.operator)
@@ -161,6 +207,28 @@ class AperturaInicialLotesTests(TestCase):
         get_response = self.client.get("/app/bitacoras/apertura/")
         self.assertContains(get_response, lote.codigo)
         self.assertNotContains(get_response, "Editar")
+
+    def test_opening_page_rejects_future_date_and_limits_date_input(self):
+        self.client.force_login(self.manager)
+        future_date = timezone.localdate() + timedelta(days=1)
+
+        response = self.client.post(
+            "/app/bitacoras/apertura/",
+            {
+                "insumo": str(self.insumo.id),
+                "cantidad": "2.500",
+                "unidad": str(self.unidad.id),
+                "ubicacion": UBICACION_CFP_1_1,
+                "fecha_elaboracion": future_date.isoformat(),
+                "observaciones": "Conteo con fecha futura",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La fecha de elaboración no puede ser futura.")
+        self.assertContains(response, f'max="{timezone.localdate().isoformat()}"')
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

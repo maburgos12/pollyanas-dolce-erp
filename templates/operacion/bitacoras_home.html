@@ -86,7 +86,7 @@
               </select>
             </label>
             <label>Fecha de elaboración conocida
-              <input name="fecha_elaboracion" type="date">
+              <input name="fecha_elaboracion" type="date" max="{% now 'Y-m-d' %}">
             </label>
           </div>
           <label>Observación
