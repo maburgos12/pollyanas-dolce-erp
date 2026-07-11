@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
@@ -120,23 +121,25 @@ class EvidenceWritePathTests(TestCase):
         self.assertEqual(ReporteFalla.objects.count(), before)
 
     def test_second_evidence_failure_rolls_back_database_and_removes_first_blob(self):
-        original_create = EvidenciaSeguimientoFalla.objects.create
+        original_save = EvidenciaSeguimientoFalla.save
         calls = 0
         first_blob = None
-        def fail_second(**kwargs):
+        def fail_second(instance, *args, **kwargs):
             nonlocal calls, first_blob
             calls += 1
             if calls == 2:
+                instance.archivo.save(instance.archivo.name, instance.archivo.file, save=False)
                 raise RuntimeError("fallo inyectado")
-            created = original_create(**kwargs)
-            first_blob = created.archivo
-            return created
+            try:
+                return original_save(instance, *args, **kwargs)
+            finally:
+                first_blob = instance.archivo
         files = [
             SimpleUploadedFile("uno.jpg", b"\xff\xd8\xffuno", content_type="image/jpeg"),
             SimpleUploadedFile("dos.jpg", b"\xff\xd8\xffdos", content_type="image/jpeg"),
         ]
         before_rows = BitacoraFalla.objects.filter(reporte=self.report).count()
-        with patch.object(EvidenciaSeguimientoFalla.objects, "create", side_effect=fail_second):
+        with patch.object(EvidenciaSeguimientoFalla, "save", new=fail_second):
             with self.assertRaises(RuntimeError):
                 self.client.post(f"/api/mantenimiento/bandeja/falla/{self.report.pk}/actualizar/", {
                     "estatus": ReporteFalla.ESTATUS_RESUELTO, "evidencias_seguimiento": files,
@@ -147,6 +150,20 @@ class EvidenceWritePathTests(TestCase):
         self.assertFalse(EvidenciaSeguimientoFalla.objects.filter(bitacora__reporte=self.report).exists())
         self.assertIsNotNone(first_blob)
         self.assertFalse(first_blob.name)
+
+    def test_initial_photo_is_removed_when_bitacora_creation_fails_in_form_and_api(self):
+        payload = {"sucursal": self.branch.pk, "categoria": self.category.pk, "titulo": "Nueva", "descripcion": "Descripción"}
+        media = Path("/tmp/mantenimiento-evidence-validation")
+        before_files = set(media.rglob("*")) if media.exists() else set()
+        for url in ("/mantenimiento/nueva-falla/", "/api/mantenimiento/fallas/"):
+            photo = SimpleUploadedFile("atomica.jpg", b"\xff\xd8\xfffoto", content_type="image/jpeg")
+            before_rows = ReporteFalla.objects.count()
+            with patch.object(BitacoraFalla.objects, "create", side_effect=RuntimeError("bitácora falla")):
+                with self.assertRaises(RuntimeError):
+                    self.client.post(url, {**payload, "foto_evidencia": photo})
+            self.assertEqual(ReporteFalla.objects.count(), before_rows)
+            current_files = set(media.rglob("*")) if media.exists() else set()
+            self.assertEqual({path for path in current_files if path.is_file()}, {path for path in before_files if path.is_file()})
 
 
 class MaintenanceHistoryDomainTests(SimpleTestCase):

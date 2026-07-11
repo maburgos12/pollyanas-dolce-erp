@@ -130,15 +130,32 @@ def _guardar_evidencias_falla(bitacora, archivos, user):
         for archivo in archivos:
             if not archivo:
                 continue
-            evidencia = EvidenciaSeguimientoFalla.objects.create(
+            evidencia = EvidenciaSeguimientoFalla(
                 bitacora=bitacora, archivo=archivo,
                 nombre=getattr(archivo, "name", "")[:255], subido_por=user,
             )
             creadas.append(evidencia)
+            evidencia.save()
     except Exception:
         _eliminar_archivos_evidencias(creadas)
         raise
     return creadas
+
+
+def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
+    reporte = ReporteFalla(**reporte_kwargs)
+    try:
+        with transaction.atomic():
+            reporte.save()
+            BitacoraFalla.objects.create(
+                reporte=reporte, usuario=usuario, estatus_anterior="",
+                estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO, comentario=comentario,
+            )
+    except Exception:
+        if reporte.foto_evidencia and reporte.foto_evidencia.name:
+            reporte.foto_evidencia.delete(save=False)
+        raise
+    return reporte
 
 
 def _eliminar_archivos_evidencias(evidencias):
@@ -1110,7 +1127,7 @@ def crear_falla_movil(request):
         activo_obj = Activo.objects.filter(pk=activo_id, activo=True, sucursal=sucursal).first()
         if not activo_obj:
             return Response({"error": "El activo no corresponde a la sucursal seleccionada."}, status=400)
-    reporte = ReporteFalla.objects.create(
+    reporte = _crear_reporte_falla_atomico(reporte_kwargs=dict(
         sucursal=sucursal,
         categoria=categoria,
         area=(request.data.get("area") or ReporteFalla.AREA_GENERAL).strip(),
@@ -1121,14 +1138,7 @@ def crear_falla_movil(request):
         reportado_por=request.user,
         estatus=ReporteFalla.ESTATUS_ABIERTO,
         foto_evidencia=fotos[0] if fotos else None,
-    )
-    BitacoraFalla.objects.create(
-        reporte=reporte,
-        usuario=request.user,
-        estatus_anterior="",
-        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
-        comentario="Reporte creado desde app móvil de mantenimiento.",
-    )
+    ), usuario=request.user, comentario="Reporte creado desde app móvil de mantenimiento.")
     return Response(_branch_falla_item(reporte), status=201)
 
 
@@ -1399,7 +1409,7 @@ def crear_falla(request):
             msg.error(request, error)
         return redirect("mantenimiento:dashboard")
     foto = validated_photos[0] if validated_photos else None
-    reporte = ReporteFalla(
+    reporte_kwargs = dict(
         sucursal=sucursal,
         categoria=categoria,
         area=area,
@@ -1411,14 +1421,9 @@ def crear_falla(request):
         estatus=ReporteFalla.ESTATUS_ABIERTO,
     )
     if foto:
-        reporte.foto_evidencia = foto
-    reporte.save()
-
-    BitacoraFalla.objects.create(
-        reporte=reporte,
-        usuario=request.user,
-        estatus_anterior="",
-        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+        reporte_kwargs["foto_evidencia"] = foto
+    reporte = _crear_reporte_falla_atomico(
+        reporte_kwargs=reporte_kwargs, usuario=request.user,
         comentario="Reporte creado desde panel de Mantenimiento.",
     )
     msg.success(request, f"Falla #{reporte.id} creada: {titulo}")
