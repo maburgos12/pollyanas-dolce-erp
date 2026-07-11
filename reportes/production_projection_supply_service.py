@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 from django.db.models import Q
 from django.utils import timezone
@@ -744,8 +744,9 @@ def build_projection_supply_context(
             # el consumo real requerido por rebanar piezas enteras.
             if component_id in derivada_map:
                 parent_id, units_per_parent = derivada_map[component_id]
+                whole_parent_units = (component_units / units_per_parent).to_integral_value(rounding=ROUND_CEILING)
                 for parent_line in _load_recipe_lines(parent_id):
-                    gross_required = component_units * _to_decimal(parent_line.cantidad) / units_per_parent
+                    gross_required = whole_parent_units * _to_decimal(parent_line.cantidad)
                     if gross_required > ZERO:
                         bom_lines_to_explode.append(
                             (

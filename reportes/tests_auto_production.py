@@ -22,7 +22,7 @@ from pos_bridge.models import (
     PointRecipeNode,
     PointSyncJob,
 )
-from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaCostoVersion
+from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon, RecetaCostoVersion, RecetaPresentacionDerivada
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
 from reportes.auto_production_service import (
     approve_production_order,
@@ -533,6 +533,57 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertEqual(context["mode"], "PROJECTION_EVENT")
         self.assertFalse(context["uses_stock"])
         self.assertEqual(context["summary"]["projected_products"], 1)
+
+    def test_projection_supply_rounds_derived_slices_up_to_whole_parent(self):
+        parent = Receta.objects.create(
+            nombre="Pay entero Proyección",
+            codigo_point="PAY-PARENT-PRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pay-parent-projection",
+        )
+        child = Receta.objects.create(
+            nombre="Pay rebanada Proyección",
+            codigo_point="PAY-SLICE-PRJ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-pay-slice-projection",
+        )
+        LineaReceta.objects.create(
+            receta=parent,
+            posicion=1,
+            insumo=self.insumo,
+            insumo_texto=self.insumo.nombre,
+            cantidad=Decimal("2"),
+            unidad_texto="kg",
+            unidad=self.unit_kg,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        RecetaPresentacionDerivada.objects.create(
+            receta_padre=parent,
+            receta_derivada=child,
+            codigo_point_derivado=child.codigo_point,
+            unidades_por_padre=Decimal("8"),
+            activo=True,
+        )
+
+        context = build_projection_supply_context(
+            target_date=self.target_date,
+            forecast_context={
+                "target_label": "Rebanadas con entero redondeado",
+                "summary": {"forecast_units": Decimal("9")},
+                "rows": [{
+                    "branch_id": self.branch.id,
+                    "branch_code": self.branch.codigo,
+                    "branch_name": self.branch.nombre,
+                    "recipe_id": child.id,
+                    "recipe_name": child.nombre,
+                    "forecast_qty": Decimal("9"),
+                    "buffer_units": Decimal("0"),
+                }],
+            },
+        )
+
+        purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        self.assertEqual(purchase_by_name[self.insumo.nombre]["required_gross_qty"], Decimal("4.000"))
         self.assertEqual(context["summary"]["projected_insumos"], 1)
         product_row = context["products"][0]
         insumo_row = context["insumos"][0]
