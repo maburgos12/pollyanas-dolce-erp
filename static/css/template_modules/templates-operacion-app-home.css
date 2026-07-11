@@ -41,7 +41,7 @@
       padding: 5px 12px;
       font-size: 12px;
       font-weight: 850;
-      pointer-events: none;
+      pointer-events: auto;
       transition: transform .18s ease, color .18s ease, border-color .18s ease;
     }
     .pull-refresh.is-ready {
