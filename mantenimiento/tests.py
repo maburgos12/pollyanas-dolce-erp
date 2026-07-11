@@ -198,6 +198,33 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "creado_por_nombre")
         self.assertContains(app, "ejecutado_por_nombre")
 
+    def test_pwa_consumes_v2_inbox_history_and_lazy_detail_contracts(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(app, 'const API_V2 = `${API}/v2`;')
+        self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
+        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1')
+        self.assertContains(app, "detailCache: new Map()")
+        self.assertContains(app, "requestGeneration: 0")
+        self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
+        self.assertContains(app, 'periodo=${encodeURIComponent(state.history.periodo)}')
+        self.assertContains(app, "Cargar más")
+        self.assertContains(app, 'event.key === "Escape"')
+        self.assertContains(app, 'aria-label="Cerrar imagen"')
+        self.assertContains(app, 'prefers-reduced-motion: reduce')
+
+    def test_pwa_closed_kpi_opens_30_day_history_and_does_not_bump_worker(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(app, "openClosedHistory()")
+        self.assertContains(app, 'state.history.periodo = "30d"')
+        self.assertContains(app, 'state.history.estado = "cerrado"')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1"')
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):

@@ -18,11 +18,15 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260707-mobile-operativo-v7">
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
+    <style>
+      .compact-item{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:start}.compact-item.no-thumb{grid-template-columns:1fr}.compact-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;background:#eee}.kpi-button{border:0;background:transparent;width:100%;font:inherit;color:inherit;cursor:pointer}.history-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.history-filters label{font-size:.8rem;font-weight:700}.history-filters select{width:100%;margin-top:4px}.detail-list{display:grid;gap:8px;margin:16px 0}.detail-row{display:grid;grid-template-columns:minmax(100px,35%) 1fr;gap:10px}.timeline{list-style:none;padding:0}.timeline li{padding:0 0 16px 18px;border-left:2px solid #ddd;position:relative}.timeline li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:#8b2252}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gallery button{border:0;padding:0;background:none}.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.image-viewer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.94);display:grid;place-items:center;padding:56px 12px 12px}.image-viewer img{max-width:100%;max-height:100%;object-fit:contain}.viewer-close{position:absolute;right:8px;top:max(8px,env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;border:0;font-size:28px}.error-state{padding:20px;text-align:center}.skeleton{min-height:100px;background:#eee;animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.55}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+    </style>
   </head>
   <body>
     <div id="app"></div>
     <script>
       const API = "/api/mantenimiento";
+      const API_V2 = `${API}/v2`;
       const AUTH_API = "/api/logistica";
       const app = document.getElementById("app");
       const state = {
@@ -44,6 +48,11 @@
         ordenes: [],
         bandeja: [],
         bandejaFiltro: "todos",
+        counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
+        history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1, results: [], hasNext: false},
+        detailCache: new Map(),
+        requestGeneration: 0,
+        viewerReturnFocus: null,
         ordenActual: null,
         filtroOrdenes: "abiertas",
         busquedaOrdenes: "",
@@ -151,6 +160,10 @@
           throw new Error("Sesion expirada");
         }
         return res;
+      }
+
+      async function apiV2Fetch(path, options = {}) {
+        return apiFetch(path.startsWith("http") ? path : `${API_V2}${path}`, options);
       }
 
       function esc(value) {
@@ -300,10 +313,13 @@
 
       async function loadBandeja(force = false) {
         if (state.bandeja.length && !force) return state.bandeja;
-        const res = await apiFetch("/bandeja/");
+        const generation = ++state.requestGeneration;
+        const res = await apiV2Fetch("/bandeja/?estado=todos&periodo=30d&page_size=100");
+        if (generation !== state.requestGeneration) return state.bandeja;
         if (res.ok) {
           const data = await res.json();
-          state.bandeja = data.items || [];
+          state.bandeja = data.results || [];
+          state.counts = data.counts || state.counts;
         } else {
           state.bandeja = [];
         }
@@ -359,7 +375,7 @@
       }
 
       function itemAbierto(item) {
-        const e = String(item.estatus || "").toLowerCase();
+        const e = String(item.estado || item.estatus || "").toLowerCase();
         return !["cerrada", "cancelada", "cerrado", "cancelado", "resuelto"].includes(e);
       }
 
@@ -368,13 +384,11 @@
       }
 
       function metricasMantenimiento() {
-        const items = state.bandeja || [];
-        const abiertos = items.filter(itemAbierto);
         return {
-          abiertas: abiertos.length,
-          proceso: items.filter((i) => ["en_proceso", "EN_PROCESO"].includes(i.estatus)).length,
-          criticas: abiertos.filter((i) => i.semaforo === "rojo").length,
-          cerradas: items.filter((i) => ["cerrada", "cerrado", "CERRADA"].includes(i.estatus)).length,
+          abiertas: state.counts.abiertos || 0,
+          proceso: state.counts.en_proceso || 0,
+          criticas: state.counts.criticos || 0,
+          cerradas: state.counts.cerrados || 0,
         };
       }
 
@@ -425,27 +439,30 @@
       function bandejaItemCard(item) {
         const abierto = itemAbierto(item);
         const esLogistica = item.origen === "logistica";
-        const semClass = item.semaforo === "rojo" ? "alta" : item.semaforo === "amarillo" ? "media" : "baja";
+        const semClass = item.critico ? "alta" : item.estado === "en_proceso" ? "media" : "baja";
         const badge = esLogistica
           ? `<span class="status-chip origen-flota">Flota</span>`
           : `<span class="status-chip origen-sucursal">Sucursal</span>`;
         return `
-          <article class="card report-card">
+          <article class="card report-card compact-item ${item.foto_inicial?.url ? "" : "no-thumb"}">
+            ${item.foto_inicial?.url ? `<img class="compact-thumb" src="${esc(item.foto_inicial.url)}" alt="Foto inicial de ${esc(item.titulo || "mantenimiento")}" loading="lazy" onerror="this.remove();this.parentElement.classList.add('no-thumb')">` : ""}
+            <div>
             <div class="card-head">
               <div>
                 <p class="card-title">${esc(item.titulo || item.activo || "Sin título")}</p>
-                <p class="muted">${esc(item.referencia || "")} · ${esc(item.ubicacion || item.area || "")}</p>
+                <p class="muted">${esc(item.sucursal?.nombre || "Sin sucursal")} · ${esc(item.sujeto?.nombre || item.tipo || "")}</p>
               </div>
               <div class="chip-stack">
                 ${badge}
-                <span class="status-chip ${semClass}">${esc(item.estatus_display || item.estatus)}</span>
+                <span class="status-chip ${semClass}">${esc(item.estado || "Sin estado")}</span>
               </div>
             </div>
             <p class="muted card-copy-muted">${esc(item.descripcion || "Sin descripción")}</p>
             ${item.dias_abierto > 0 ? `<p class="muted card-meta-line">${item.dias_abierto} días abierto</p>` : ""}
             <div class="card-actions">
-              <button onclick="abrirBandejaItemPorUid('${esc(item.uid)}')">Ver y seguir</button>
+              <button onclick="openItemDetail('${esc(item.uid)}', this)">Ver detalle</button>
               ${abierto && item.tipo === "orden" && item.estatus !== "EN_PROCESO" ? `<button onclick="actualizarOrdenRapida(${item.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
+            </div>
             </div>
           </article>
         `;
@@ -485,14 +502,14 @@
         const agenda = resumen.agenda || [];
         const agendaCounts = resumen.agenda_counts || {};
         const proximo = agenda[0];
-        const criticos = state.bandeja.filter((i) => itemAbierto(i) && i.semaforo === "rojo").length;
+        const criticos = state.counts.criticos || 0;
         render(shell(`
           <p class="screen-kicker">Bandeja de mantenimiento</p>
           <div class="summary-grid">
             <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertos</span></div>
             <div class="summary-card"><strong>${m.proceso}</strong><span>En proceso</span></div>
             <div class="summary-card"><strong>${criticos}</strong><span>Críticos</span></div>
-            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerrados</span></div>
+            <div class="summary-card"><button class="kpi-button" onclick="openClosedHistory()"><strong>${m.cerradas}</strong><span>Cerrados</span></button></div>
           </div>
           <section class="ops-strip">
             <div><strong>${agendaCounts.vencidos || 0}</strong><span>Vencidos</span></div>
@@ -879,13 +896,13 @@
         const filtro = state.bandejaFiltro;
         const visibles = filtro === "sucursales" ? todos.filter((i) => i.origen === "sucursales")
           : filtro === "logistica" ? todos.filter((i) => i.origen === "logistica")
-          : filtro === "criticos" ? todos.filter((i) => i.semaforo === "rojo")
+          : filtro === "criticos" ? todos.filter((i) => i.critico)
           : todos;
         const counts = {
           todos: todos.length,
           sucursales: todos.filter((i) => i.origen === "sucursales").length,
           logistica: todos.filter((i) => i.origen === "logistica").length,
-          criticos: todos.filter((i) => i.semaforo === "rojo").length,
+          criticos: todos.filter((i) => i.critico).length,
         };
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
@@ -2022,42 +2039,87 @@
         `));
       }
 
-      async function renderHistorial() {
-        const [resOrdenes, resRep, resSvc] = await Promise.all([
-          apiFetch("/ordenes/"),
-          apiFetch("/reparaciones/"),
-          apiFetch("/servicios/"),
-        ]);
-        const ordenes = resOrdenes.ok ? await parseListResponse(resOrdenes) : [];
-        const reparaciones = resRep.ok ? await parseListResponse(resRep) : [];
-        const servicios = resSvc.ok ? await parseListResponse(resSvc) : [];
-        const cardOrdenes = ordenes.slice(0, 5).map((orden) => `
-          <article class="card report-card">
-            <p class="card-title">${esc(orden.activo_nombre)}</p>
-            <p class="muted">${esc(orden.tipo_display)} · ${esc(orden.estatus_display)}</p>
-            ${orden.costo_total ? `<p class="muted">$${Number(orden.costo_total).toLocaleString("es-MX")}</p>` : ""}
-          </article>
-        `).join("") || `<div class="empty">Sin órdenes recientes.</div>`;
-        const vehiculos = [
-          ...reparaciones.slice(0, 3).map((item) => ({...item, kind: "Reparación"})),
-          ...servicios.slice(0, 3).map((item) => ({...item, kind: item.tipo_nombre || "Servicio"})),
-        ];
-        const cardVehiculos = vehiculos.map((item) => `
-          <article class="card report-card">
-            <p class="card-title">${esc(item.unidad_descripcion)}</p>
-            <p class="muted">${esc(item.kind)}</p>
-            ${item.costo ? `<p class="muted">$${Number(item.costo).toLocaleString("es-MX")}</p>` : ""}
-          </article>
-        `).join("") || `<div class="empty">Sin registros de flota recientes.</div>`;
-        render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
-          <h1 class="screen-title screen-title-spaced">Historial reciente</h1>
-          <p class="section-kicker section-kicker-tight">Equipos</p>
-          ${cardOrdenes}
-          <p class="section-kicker">Vehículos</p>
-          ${cardVehiculos}
-        `));
+      function openClosedHistory() {
+        state.history.periodo = "30d";
+        state.history.estado = "cerrado";
+        state.history.page = 1;
+        state.history.results = [];
+        showScreen("historial");
       }
+
+      function setHistoryFilter(name, value) {
+        state.history[name] = value;
+        state.history.page = 1;
+        state.history.results = [];
+        renderHistorial();
+      }
+
+      function historyCard(item) {
+        return `<article class="card report-card compact-item no-thumb">
+          <div><div class="card-head"><div><p class="card-title">${esc(item.titulo || "Movimiento")}</p><p class="muted">${esc(item.sucursal?.label || "Sin sucursal")} · ${esc(item.sujeto?.label || item.tipo)}</p></div><span class="status-chip">${esc(item.estado)}</span></div>
+          <p class="muted card-copy-muted">${esc(item.descripcion || "Sin descripción")}</p>
+          <div class="card-actions"><button onclick="openItemDetail('${esc(item.parent_uid || item.uid)}', this)">Ver detalle</button></div></div>
+        </article>`;
+      }
+
+      async function renderHistorial(loadMore = false) {
+        await ensureSucursales();
+        const generation = ++state.requestGeneration;
+        if (!loadMore) render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1><div class="skeleton" aria-label="Cargando historial"></div>`));
+        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${state.history.page}&page_size=25`;
+        const res = await apiV2Fetch(`/historial/?${query}`);
+        if (generation !== state.requestGeneration) return;
+        if (!res.ok) return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial()">Reintentar</button></div>`));
+        const data = await res.json();
+        state.history.results = loadMore ? [...state.history.results, ...(data.results || [])] : (data.results || []);
+        state.history.hasNext = Boolean(data.pagination?.has_next);
+        const branchOptions = state.sucursales.map(s => `<option value="${s.id}" ${String(s.id) === String(state.history.sucursal) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("");
+        render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
+          <div class="history-filters" aria-label="Filtros de historial">
+            <label>Periodo<select onchange="setHistoryFilter('periodo',this.value)">${[["30d","30 días"],["semana","Semana"],["mes","Mes"],["90d","90 días"],["todo","Todo"]].map(([v,l])=>`<option value="${v}" ${state.history.periodo===v?"selected":""}>${l}</option>`).join("")}</select></label>
+            <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
+            <label>Estado<select onchange="setHistoryFilter('estado',this.value)">${[["todo","Todos"],["abierto","Abierto"],["en_proceso","En proceso"],["cerrado","Cerrado"],["cancelado","Cancelado"]].map(([v,l])=>`<option value="${v}" ${state.history.estado===v?"selected":""}>${l}</option>`).join("")}</select></label>
+            <label>Sucursal<select onchange="setHistoryFilter('sucursal',this.value)"><option value="">Todas</option>${branchOptions}</select></label>
+          </div>${state.history.results.map(historyCard).join("") || `<div class="empty">No hay movimientos con estos filtros.</div>`}
+          ${state.history.hasNext ? `<button class="secondary-btn" onclick="state.history.page += 1; renderHistorial(true)">Cargar más</button>` : ""}`));
+      }
+
+      function detailRows(value, prefix = "") {
+        return Object.entries(value || {}).filter(([,v]) => v !== null && v !== "" && !Array.isArray(v) && typeof v !== "object").map(([k,v]) => `<div class="detail-row"><strong>${esc((prefix + k).replaceAll("_", " "))}</strong><span>${esc(v)}</span></div>`).join("");
+      }
+
+      function evidenceGallery(items) {
+        const evidence = (items || []).filter(Boolean);
+        return evidence.length ? `<div class="gallery">${evidence.map(item => `<button type="button" onclick="openImageViewer('${esc(item.url)}','${esc(item.nombre || "Evidencia de mantenimiento")}',this)"><img src="${esc(item.url)}" alt="${esc(item.nombre || "Evidencia de mantenimiento")}" loading="lazy" onerror="this.closest('button').remove()"></button>`).join("")}</div>` : `<p class="muted">Sin evidencias disponibles.</p>`;
+      }
+
+      async function openItemDetail(uid, trigger) {
+        const [tipo, id] = String(uid).split(":");
+        state.viewerReturnFocus = trigger || document.activeElement;
+        render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
+        let data = state.detailCache.get(uid);
+        if (!data) {
+          const generation = ++state.requestGeneration;
+          const res = await apiV2Fetch(`/items/${tipo}/${id}/`);
+          if (generation !== state.requestGeneration) return;
+          if (!res.ok) return render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Puede que ya no tengas acceso o el registro no exista.</p><button onclick="showScreen('pendientes')">Volver</button></div>`));
+          data = await res.json(); state.detailCache.set(uid, data);
+        }
+        const initial = data.reporte_inicial || data.detalle || {};
+        const timeline = data.seguimiento || [];
+        const evidences = [initial.foto, ...timeline.flatMap(row => row.evidencias || [])];
+        render(shell(`<button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
+          <section class="card report-card"><div class="detail-list">${detailRows(initial)}${detailRows(data.fechas,"fecha ")}${detailRows(data.responsables,"responsable ")}</div><p>${esc(initial.descripcion || "Sin descripción registrada.")}</p></section>
+          <h2>Evidencias</h2>${evidenceGallery(evidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
+      }
+
+      function openImageViewer(url, alt, trigger) {
+        state.viewerReturnFocus = trigger;
+        const viewer = document.createElement("div"); viewer.className = "image-viewer"; viewer.id = "image-viewer"; viewer.setAttribute("role","dialog"); viewer.setAttribute("aria-modal","true");
+        viewer.innerHTML = `<button class="viewer-close" aria-label="Cerrar imagen" onclick="closeImageViewer()">×</button><img src="${esc(url)}" alt="${esc(alt)}">`; document.body.appendChild(viewer); viewer.querySelector("button").focus();
+      }
+      function closeImageViewer(){ document.getElementById("image-viewer")?.remove(); state.viewerReturnFocus?.focus?.(); }
+      document.addEventListener("keydown", event => { if (event.key === "Escape" && document.getElementById("image-viewer")) closeImageViewer(); });
 
       async function boot() {
         if ("serviceWorker" in navigator) {
