@@ -52,6 +52,7 @@
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
         history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1, results: [], hasNext: false},
         detailCache: new Map(),
+        detailReturn: {screen: "pendientes", focus: null},
         requestGeneration: {inbox: 0, history: 0, detail: 0},
         historyLoading: false,
         evidenceObjectUrls: new Set(),
@@ -1561,6 +1562,7 @@
           body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_estimado: costo || null, comentario}),
         });
         if (res.ok) {
+          invalidateDetail(`falla:${id}`);
           state.bandeja = [];
           showScreen("pendientes");
         }
@@ -1618,6 +1620,7 @@
           body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_real: costo || null, comentario}),
         });
         if (res.ok) {
+          invalidateDetail(`reporte_unidad:${id}`);
           state.bandeja = [];
           showScreen("pendientes");
         }
@@ -1706,6 +1709,7 @@
           return renderOrdenDetalle(Object.values(err).flat().join(" ") || "No se pudo guardar el seguimiento.");
         }
         state.ordenActual = await res.json();
+        invalidateDetail(`orden:${state.ordenActual.id}`);
         state.ordenes = [];
         state.bandeja = [];
         renderOrdenDetalle();
@@ -1718,6 +1722,7 @@
           body: JSON.stringify({estatus, comentario: estatus === "CERRADA" ? "Cierre rápido desde bandeja." : "Inicio desde bandeja."}),
         });
         if (res.ok) {
+          invalidateDetail(`orden:${id}`);
           state.ordenes = [];
           state.bandeja = [];
           await showScreen(state.pantalla || "dashboard");
@@ -2086,8 +2091,9 @@
       async function renderHistorial(loadMore = false) {
         if (state.historyLoading) return;
         state.historyLoading = true;
-        await ensureSucursales();
         const generation = ++state.requestGeneration.history;
+        await ensureSucursales();
+        if (generation !== state.requestGeneration.history) { state.historyLoading = false; return; }
         const requestedPage = state.history.page;
         if (!loadMore) render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1><div class="skeleton" aria-label="Cargando historial"></div>`));
         const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${requestedPage}&page_size=25`;
@@ -2156,8 +2162,13 @@
           if (!container || generation !== state.evidenceGeneration) return;
           const objectUrl = URL.createObjectURL(blob);
           state.evidenceObjectUrls.add(objectUrl);
-          container.innerHTML = `<button type="button" aria-label="Ampliar ${esc(filename)}"><img src="${objectUrl}" alt="${esc(filename)}" loading="lazy"></button><figcaption>${esc(filename)}</figcaption>`;
-          container.querySelector("button").onclick = function () { openImageViewer(url, filename, this); };
+          const isPdf = blob.type === "application/pdf" || String(filename).toLowerCase().endsWith(".pdf");
+          if (isPdf) {
+            container.innerHTML = `<a href="${objectUrl}" target="_blank" rel="noopener" aria-label="Abrir documento ${esc(filename)}"><span aria-hidden="true">PDF</span> Abrir documento</a><figcaption>${esc(filename)}</figcaption>`;
+          } else {
+            container.innerHTML = `<button type="button" aria-label="Ampliar ${esc(filename)}"><img src="${objectUrl}" alt="${esc(filename)}" loading="lazy"></button><figcaption>${esc(filename)}</figcaption>`;
+            container.querySelector("button").onclick = function () { openImageViewer(url, filename, this); };
+          }
         } catch (error) {
           container = document.getElementById(containerId);
           if (!container || generation !== state.evidenceGeneration) return;
@@ -2180,6 +2191,7 @@
         const [tipo, id] = String(uid).split(":");
         const generation = ++state.requestGeneration.detail;
         state.viewerReturnFocus = trigger || document.activeElement;
+        state.detailReturn = {screen: trigger?.closest("#app")?.querySelector(".history-filters") ? "historial" : "pendientes", focus: trigger || null};
         render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
         let data = state.detailCache.get(uid);
         if (!data) {
@@ -2188,15 +2200,25 @@
           catch (error) { if (generation === state.requestGeneration.detail) render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Revisa tu conexión e intenta nuevamente.</p><button onclick="showScreen('pendientes')">Volver</button></div>`)); return; }
           if (generation !== state.requestGeneration.detail) return;
           if (!res.ok) return render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Puede que ya no tengas acceso o el registro no exista.</p><button onclick="showScreen('pendientes')">Volver</button></div>`));
-          data = await res.json(); state.detailCache.set(uid, data);
+          data = await res.json();
+          state.detailCache.delete(uid); state.detailCache.set(uid, data);
+          while (state.detailCache.size > 20) state.detailCache.delete(state.detailCache.keys().next().value);
         }
         const initial = data.reporte_inicial || data.detalle || {};
         const timeline = data.seguimiento || [];
-        const evidences = [initial.foto, ...timeline.flatMap(row => row.evidencias || [])];
-        render(shell(`<button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
+        const initialEvidences = [initial.foto, initial.factura].filter(Boolean);
+        render(shell(`<button class="secondary-btn" onclick="returnFromDetail()">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
           <section class="card report-card"><div class="detail-list">${detailRows(initial)}${detailRows(data.fechas,"fecha ")}${detailRows(data.responsables,"responsable ")}</div><p>${esc(initial.descripcion || "Sin descripción registrada.")}</p></section>
-          <h2>Evidencias</h2>${evidenceGallery(evidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
+          <h2>Evidencias iniciales</h2>${evidenceGallery(initialEvidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
       }
+
+      function returnFromDetail() {
+        const target = state.detailReturn.screen || "pendientes";
+        showScreen(target);
+        window.setTimeout(() => state.detailReturn.focus?.focus?.(), 0);
+      }
+
+      function invalidateDetail(uid) { if (uid) state.detailCache.delete(uid); }
 
       async function openImageViewer(url, alt, trigger) {
         closeImageViewer(false);
@@ -2207,7 +2229,7 @@
         catch (error) { return; }
         if (generation !== state.evidenceGeneration) { URL.revokeObjectURL(viewerUrl); return; }
         state.evidenceObjectUrls.add(viewerUrl);
-        const viewer = document.createElement("div"); viewer.className = "image-viewer"; viewer.id = "image-viewer"; viewer.setAttribute("role","dialog"); viewer.setAttribute("aria-modal","true");
+        const viewer = document.createElement("div"); viewer.className = "image-viewer"; viewer.id = "image-viewer"; viewer.setAttribute("role","dialog"); viewer.setAttribute("aria-modal","true"); viewer.setAttribute("aria-label", `Vista ampliada de ${alt}`);
         viewer.dataset.objectUrl = viewerUrl;
         viewer.innerHTML = `<button class="viewer-close" aria-label="Cerrar imagen" onclick="closeImageViewer()">×</button><img src="${viewerUrl}" alt="${esc(alt)}">`; document.body.appendChild(viewer); viewer.querySelector("button").focus();
       }

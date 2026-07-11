@@ -44,7 +44,12 @@ def authorized_branch_ids(user):
     if not can_access_mantenimiento(user):
         return []
     groups = _maintenance_group_names(user)
-    if is_admin_or_dg(user) or can_manage_module(user, "mantenimiento") or groups & MAINTENANCE_GROUPS:
+    explicit = getattr(user, "_module_access_map_cache", None)
+    if explicit is None:
+        explicit = {row.module: row.access for row in user.module_access.only("module", "access")}
+        setattr(user, "_module_access_map_cache", dict(explicit))
+    has_global_manage = explicit.get("mantenimiento") == "manage"
+    if is_admin_or_dg(user) or has_global_manage or groups & MAINTENANCE_GROUPS:
         return None
     profile = getattr(user, "userprofile", None)
     branch_id = getattr(profile, "sucursal_id", None)

@@ -88,7 +88,7 @@ def inbox_rows(user, *, period, origin):
     if origin in {"sucursales", "todos"}:
         fallas = authorized_fallas(user).exclude(estatus=ReporteFalla.ESTATUS_CANCELADO).values(
             "id", "titulo", "descripcion", "prioridad", "estatus", "fecha_reporte",
-            "fecha_resolucion", "fecha_cierre", "sucursal_id", "sucursal__nombre",
+            "fecha_resolucion", "fecha_cierre", "foto_evidencia", "sucursal_id", "sucursal__nombre",
         )
         for row in fallas:
             state = {
@@ -105,6 +105,7 @@ def inbox_rows(user, *, period, origin):
                     state=state, critical=row["prioridad"] == ReporteFalla.PRIORIDAD_CRITICA,
                     event=event, title=row["titulo"], description=row["descripcion"],
                     branch_id=row["sucursal_id"], branch_name=row["sucursal__nombre"],
+                    initial_photo=_evidence_payload("falla_inicial", row["id"], row["foto_evidencia"]),
                 ))
 
         orders = authorized_orders(user).exclude(estatus=OrdenMantenimiento.ESTATUS_CANCELADA).values(
@@ -346,7 +347,7 @@ def _invoice(kind, pk, file_value, number=""):
 
 
 def _row_payload(*, uid, pk, kind, origin, state, critical, event, title, description,
-                 branch_id, branch_name, subject_id=None, subject=""):
+                 branch_id, branch_name, subject_id=None, subject="", initial_photo=None):
     event = _aware_date(event)
     return {
         "uid": uid, "id": pk, "tipo": kind, "origen": origin,
@@ -354,6 +355,7 @@ def _row_payload(*, uid, pk, kind, origin, state, critical, event, title, descri
         "titulo": title or "", "descripcion": description or "",
         "sucursal": {"id": branch_id, "nombre": branch_name or ""},
         "sujeto": {"id": subject_id, "nombre": subject or ""} if subject_id else None,
+        "foto_inicial": initial_photo,
     }
 
 
@@ -375,7 +377,8 @@ def _evidence_payload(kind, pk, file_field, display_name=""):
         return None
     import mimetypes
     from pathlib import PurePath
-    name = PurePath(display_name or file_field.name).name
+    raw_name = getattr(file_field, "name", file_field) or ""
+    name = PurePath(display_name or raw_name).name
     return {
         "id": f"{kind}:{pk}", "nombre": name,
         "mime": mimetypes.guess_type(name)[0] or "application/octet-stream",
@@ -436,7 +439,39 @@ def item_detail(user, kind, pk):
     obj = authorize(user).select_related(*related).filter(pk=pk).first()
     if obj is None:
         raise Http404
-    return {"schema_version": 2, "uid": f"{kind}:{obj.pk}", "tipo": kind, "detalle": {
-        "id": obj.pk, "sucursal": {"id": (obj.activo_ref.sucursal_id if kind == "orden" else obj.unidad.sucursal_id),
-                                    "nombre": (obj.activo_ref.sucursal.nombre if kind == "orden" else obj.unidad.sucursal.nombre)},
-    }}
+    branch = obj.activo_ref.sucursal if kind == "orden" else obj.unidad.sucursal
+    detail = {"id": obj.pk, "sucursal": {"id": branch.pk, "nombre": branch.nombre}, "costo": None}
+    if kind == "orden":
+        detail.update({
+            "titulo": obj.folio, "descripcion": obj.descripcion or "", "estado": obj.estatus.lower(),
+            "fechas": {"creacion": _iso(obj.creado_en), "programada": _iso(obj.fecha_programada),
+                       "inicio": _iso(obj.fecha_inicio), "cierre": _iso(obj.fecha_cierre)},
+            "actor": _person(obj.creado_por), "responsable": obj.responsable or "",
+            "activo": {"id": obj.activo_ref_id, "nombre": obj.activo_ref.nombre},
+            "factura": _evidence_payload("orden_factura", obj.pk, obj.factura_archivo),
+        })
+    elif kind == "reporte_unidad":
+        detail.update({"titulo": obj.get_tipo_display(), "descripcion": obj.descripcion or "",
+                       "estado": canonical_status("reporte_unidad", obj.estatus),
+                       "fechas": {"reporte": _iso(obj.fecha_reporte), "cierre": _iso(obj.fecha_cierre)},
+                       "actor": _person(getattr(getattr(obj, "repartidor", None), "user", None)),
+                       "prioridad": obj.get_severidad_display(), "unidad": {"id": obj.unidad_id, "nombre": obj.unidad.codigo},
+                       "foto": _evidence_payload("reporte_unidad", obj.pk, obj.foto)})
+    elif kind == "reparacion":
+        detail.update({"titulo": obj.descripcion_falla or "Reparación", "descripcion": obj.descripcion_reparacion or obj.descripcion_falla or "",
+                       "estado": "cerrado", "fechas": {"ingreso": _iso(obj.fecha_ingreso), "salida": _iso(obj.fecha_entrega)},
+                       "actor": _person(obj.registrado_por), "unidad": {"id": obj.unidad_id, "nombre": obj.unidad.codigo},
+                       "factura": _evidence_payload("reparacion_factura", obj.pk, obj.archivo_factura),
+                       "foto": _evidence_payload("reparacion_foto", obj.pk, obj.foto_nota)})
+    else:
+        detail.update({"titulo": obj.tipo_servicio.nombre, "descripcion": obj.notas or "", "estado": "cerrado",
+                       "fechas": {"servicio": _iso(obj.fecha_servicio), "proximo": _iso(obj.proxima_fecha)},
+                       "actor": _person(obj.registrado_por), "unidad": {"id": obj.unidad_id, "nombre": obj.unidad.codigo},
+                       "factura": _evidence_payload("servicio_unidad_factura", obj.pk, obj.archivo_factura)})
+    from mantenimiento.services_access import can_view_costs
+    if can_view_costs(user):
+        if kind == "orden": detail["costo"] = str(obj.costo_total)
+        elif kind == "reparacion": detail["costo"] = str(obj.costo_total) if obj.costo_total is not None else None
+        elif kind == "servicio_unidad": detail["costo"] = str(obj.costo) if obj.costo is not None else None
+        else: detail["costo"] = str(obj.costo_servicio) if obj.costo_servicio is not None else None
+    return {"schema_version": 2, "uid": f"{kind}:{obj.pk}", "tipo": kind, "detalle": detail}

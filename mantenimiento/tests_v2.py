@@ -838,6 +838,40 @@ class MaintenanceDetailV2Tests(TestCase):
                 self.assertEqual(payload["uid"], f"{kind}:{obj.pk}")
                 self.assertIn("detalle", payload)
 
+    def test_non_falla_details_expose_operational_fields_and_protect_costs(self):
+        asset = Activo.objects.create(nombre="Batidora detalle", sucursal=self.branch)
+        unit = Unidad.objects.create(codigo="DET-FULL", descripcion="Unidad detalle", sucursal=self.branch)
+        service_type = TipoServicioUnidad.objects.create(nombre="Afinación completa")
+        order = OrdenMantenimiento.objects.create(
+            activo_ref=asset, descripcion="Cambio de banda", responsable="Isaac",
+            estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre="2026-07-11",
+            factura_archivo="activos/facturas/orden.pdf", costo_otros="99.00", creado_por=self.reporter,
+        )
+        report = ReporteUnidad.objects.create(
+            unidad=unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Ruido en motor",
+            severidad=ReporteUnidad.SEVERIDAD_CRITICO, estatus=ReporteUnidad.ESTATUS_CERRADO,
+        )
+        repair = ReparacionUnidad.objects.create(
+            unidad=unit, fecha_ingreso="2026-07-10", descripcion_falla="Motor",
+            descripcion_reparacion="Cambio de balero", archivo_factura="reparaciones_unidad/r.pdf",
+            foto_nota="reparaciones_unidad/r.jpg", costo_total="200.00", registrado_por=self.reporter,
+        )
+        service = ServicioRealizadoUnidad.objects.create(
+            unidad=unit, tipo_servicio=service_type, fecha_servicio="2026-07-09", notas="Aceite y filtros",
+            archivo_factura="servicios_unidad/s.pdf", costo="300.00", registrado_por=self.reporter,
+        )
+        self.client.force_login(self.user)
+        for kind, obj in (("orden", order), ("reporte_unidad", report), ("reparacion", repair), ("servicio_unidad", service)):
+            with self.subTest(kind=kind):
+                detail = self.client.get(f"/api/mantenimiento/v2/items/{kind}/{obj.pk}/").json()["detalle"]
+                self.assertTrue(detail["descripcion"])
+                self.assertIn("estado", detail)
+                self.assertIn("fechas", detail)
+                self.assertIn("actor", detail)
+                self.assertIsNone(detail["costo"])
+        self.assertIn("/evidencias/orden_factura/", self.client.get(f"/api/mantenimiento/v2/items/orden/{order.pk}/").json()["detalle"]["factura"]["url"])
+        self.assertIn("/evidencias/reparacion_foto/", self.client.get(f"/api/mantenimiento/v2/items/reparacion/{repair.pk}/").json()["detalle"]["foto"]["url"])
+
     def test_multiple_timeline_rows_keep_fixed_query_budget(self):
         self.client.force_login(self.user)
         with self.assertNumQueries(10):
@@ -848,6 +882,63 @@ class MaintenanceDetailV2Tests(TestCase):
         with self.assertNumQueries(10):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
 
+
+class MaintenanceWriteScopeRegressionTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.own = Sucursal.objects.create(codigo="WRITE-OWN", nombre="Propia")
+        cls.other = Sucursal.objects.create(codigo="WRITE-OTHER", nombre="Ajena")
+        cls.user = get_user_model().objects.create_user("write-limited", password="test")
+        UserProfile.objects.create(user=cls.user, sucursal=cls.own)
+        UserModuleAccess.objects.create(user=cls.user, module="mantenimiento.app", access="manage")
+        cls.category = CategoriaFalla.objects.create(nombre="Scope write")
+        cls.other_asset = Activo.objects.create(nombre="Activo ajeno", sucursal=cls.other)
+        cls.other_unit = Unidad.objects.create(codigo="WRITE-U", descripcion="Ajena", sucursal=cls.other)
+        cls.other_report = ReporteFalla.objects.create(
+            sucursal=cls.other, categoria=cls.category, titulo="Ajena", descripcion="Original", reportado_por=cls.user,
+        )
+        cls.other_unit_report = ReporteUnidad.objects.create(
+            unidad=cls.other_unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Original",
+        )
+        cls.other_order = OrdenMantenimiento.objects.create(activo_ref=cls.other_asset, descripcion="Original")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_cross_branch_writes_are_rejected_without_mutation(self):
+        attempts = [
+            (f"/api/mantenimiento/bandeja/falla/{self.other_report.pk}/actualizar/", {"comentario": "mutado"}),
+            (f"/api/mantenimiento/bandeja/unidad/{self.other_unit_report.pk}/actualizar/", {"comentario": "mutado"}),
+            (f"/api/mantenimiento/bandeja/orden/{self.other_order.pk}/actualizar/", {"comentario": "mutado"}),
+            ("/api/mantenimiento/fallas/", {"sucursal": self.other.pk, "categoria": self.category.pk, "titulo": "Nueva", "descripcion": "Ajena"}),
+            ("/api/mantenimiento/reportes-unidad/", {"unidad": self.other_unit.pk, "tipo": ReporteUnidad.TIPO_FALLA, "descripcion": "Ajena"}),
+        ]
+        before = (ReporteFalla.objects.count(), ReporteUnidad.objects.count(), BitacoraFalla.objects.count())
+        for url, payload in attempts:
+            with self.subTest(url=url):
+                self.assertIn(self.client.post(url, payload).status_code, {400, 404})
+        self.assertEqual((ReporteFalla.objects.count(), ReporteUnidad.objects.count(), BitacoraFalla.objects.count()), before)
+
+
+class MaintenanceInboxIndependentCountsTests(TestCase):
+    def test_counts_keep_old_open_and_recent_closed_independent_of_result_state(self):
+        user = get_user_model().objects.create_superuser("counts-independent", "c@example.com", "test")
+        branch = Sucursal.objects.create(codigo="CNT-I", nombre="Conteos")
+        category = CategoriaFalla.objects.create(nombre="Conteos independientes")
+        old_open = ReporteFalla.objects.create(sucursal=branch, categoria=category, titulo="Vieja", descripcion="Abierta", reportado_por=user)
+        ReporteFalla.objects.filter(pk=old_open.pk).update(fecha_reporte=timezone.now() - timedelta(days=180))
+        recent_closed = ReporteFalla.objects.create(
+            sucursal=branch, categoria=category, titulo="Cerrada", descripcion="Atendida",
+            estatus=ReporteFalla.ESTATUS_CERRADO, fecha_cierre=timezone.now() - timedelta(days=2), reportado_por=user,
+        )
+        self.client.force_login(user)
+        opened = self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "abiertos", "periodo": "30d"}).json()
+        closed = self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"}).json()
+        self.assertEqual(opened["counts"], closed["counts"])
+        self.assertEqual(opened["counts"]["abiertos"], 1)
+        self.assertEqual(opened["counts"]["cerrados"], 1)
+        self.assertEqual([row["uid"] for row in opened["results"]], [f"falla:{old_open.pk}"])
+        self.assertEqual([row["uid"] for row in closed["results"]], [f"falla:{recent_closed.pk}"])
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
 class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):

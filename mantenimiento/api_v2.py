@@ -52,18 +52,25 @@ def bandeja_v2(request):
         return Response({"error": "Paginación no válida."}, status=400)
     page_size = min(page_size, 100)
 
-    rows = inbox_rows(request.user, period=period, origin=origin)
+    period_rows = inbox_rows(request.user, period=period, origin=origin)
+    open_rows = inbox_rows(request.user, period="todo", origin=origin)
+    closed_rows = period_rows
+    counts = {
+        "abiertos": sum(row["estado"] in {"abierto", "en_proceso", "programado"} for row in open_rows),
+        "en_proceso": sum(row["estado"] == "en_proceso" for row in open_rows),
+        "criticos": (sum(row["critico"] and row["estado"] in {"abierto", "en_proceso", "programado"} for row in open_rows)
+                     + sum(row["critico"] and row["estado"] == "cerrado" for row in closed_rows)),
+        "cerrados": sum(row["estado"] == "cerrado" for row in closed_rows),
+    }
+    rows = period_rows
     if state == "abiertos":
-        rows = [row for row in rows if row["estado"] in {"abierto", "en_proceso", "programado"}]
+        rows = [row for row in open_rows if row["estado"] in {"abierto", "en_proceso", "programado"}]
     elif state == "cerrados":
         rows = [row for row in rows if row["estado"] == "cerrado"]
+    else:
+        rows = ([row for row in open_rows if row["estado"] in {"abierto", "en_proceso", "programado"}]
+                + [row for row in closed_rows if row["estado"] == "cerrado"])
     rows.sort(key=lambda row: (row["fecha_evento"] is not None, row["fecha_evento"] or "", row["uid"]), reverse=True)
-    counts = {
-        "abiertos": sum(row["estado"] in {"abierto", "en_proceso", "programado"} for row in rows),
-        "en_proceso": sum(row["estado"] == "en_proceso" for row in rows),
-        "criticos": sum(row["critico"] for row in rows),
-        "cerrados": sum(row["estado"] == "cerrado" for row in rows),
-    }
     total = len(rows)
     start = (page - 1) * page_size
     results = rows[start:start + page_size]

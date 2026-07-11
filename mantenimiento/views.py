@@ -24,7 +24,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
-from mantenimiento.services_access import can_access_mantenimiento
+from mantenimiento.services_access import (
+    authorized_branch_ids, authorized_fallas, authorized_orders, authorized_unit_reports,
+    can_access_mantenimiento,
+)
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -1092,7 +1095,11 @@ def _registrar_plan(plan, user, fecha, notas):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def ejecutar_plan_movil(request, pk):
-    plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
+    branch_ids = authorized_branch_ids(request.user)
+    plans = PlanMantenimiento.objects.filter(activo=True)
+    if branch_ids is not None:
+        plans = plans.filter(activo_ref__sucursal_id__in=branch_ids)
+    plan = get_object_or_404(plans, pk=pk)
     from django.utils.dateparse import parse_date
 
     fecha = parse_date((request.data.get("fecha_ejecucion") or "").strip()) or timezone.localdate()
@@ -1111,7 +1118,11 @@ def ejecutar_plan_movil(request, pk):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def crear_falla_movil(request):
-    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal")))
     categoria = get_object_or_404(CategoriaFalla, pk=_safe_int(request.data.get("categoria")), activo=True)
     titulo = (request.data.get("titulo") or "").strip()
     descripcion = (request.data.get("descripcion") or "").strip()
@@ -1159,7 +1170,11 @@ def crear_servicio_movil(request):
     if alcance not in {"activo", "unidad", "instalacion"} or not descripcion:
         return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
 
-    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal_id")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
     if not fecha_objetivo:
         fecha_objetivo = timezone.localdate()
@@ -1223,7 +1238,11 @@ def crear_servicio_movil(request):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def crear_reporte_unidad_movil(request):
-    unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    unidades = Unidad.objects.filter(activa=True)
+    if branch_ids is not None:
+        unidades = unidades.filter(sucursal_id__in=branch_ids)
+    unidad = get_object_or_404(unidades, pk=_safe_int(request.data.get("unidad")))
     tipo = (request.data.get("tipo") or "").strip()
     severidad = (request.data.get("severidad") or ReporteUnidad.SEVERIDAD_INFORMATIVO).strip()
     descripcion = (request.data.get("descripcion") or "").strip()
@@ -1269,7 +1288,7 @@ def actualizar_item(request, tipo, pk):
                 {"error": "No se pudieron adjuntar las evidencias.", "evidencias": exc.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        reporte = get_object_or_404(ReporteFalla, pk=pk)
+        reporte = get_object_or_404(authorized_fallas(request.user), pk=pk)
         estatus_anterior = reporte.estatus
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteFalla.ESTATUS}:
@@ -1289,7 +1308,9 @@ def actualizar_item(request, tipo, pk):
             reporte.proveedor_servicio = proveedor
         activo_id = request.data.get("activo_id")
         if activo_id:
-            reporte.activo_relacionado = get_object_or_404(Activo, pk=activo_id, activo=True)
+            reporte.activo_relacionado = get_object_or_404(
+                Activo, pk=activo_id, activo=True, sucursal_id=reporte.sucursal_id
+            )
         else:
             nuevo_activo = _create_asset_from_followup(request.data, reporte.sucursal, proveedor_obj)
             if nuevo_activo:
@@ -1317,7 +1338,7 @@ def actualizar_item(request, tipo, pk):
         return _update_response(request, _branch_falla_item(reporte))
 
     if tipo == "unidad":
-        reporte = get_object_or_404(ReporteUnidad, pk=pk)
+        reporte = get_object_or_404(authorized_unit_reports(request.user), pk=pk)
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteUnidad.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
@@ -1335,7 +1356,7 @@ def actualizar_item(request, tipo, pk):
         return _update_response(request, _logistica_item(reporte))
 
     if tipo == "orden":
-        orden = get_object_or_404(OrdenMantenimiento, pk=pk)
+        orden = get_object_or_404(authorized_orders(request.user), pk=pk)
         estatus = (request.data.get("estatus") or orden.estatus).strip().upper()
         if estatus not in {value for value, _label in OrdenMantenimiento.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
