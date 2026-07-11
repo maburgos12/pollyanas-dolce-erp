@@ -148,13 +148,13 @@ def _history_actor(user_id, full_name, username):
     return {"id": user_id, "label": (full_name or username or "Usuario")}
 
 
-def unified_history_rows(user, *, period):
+def unified_history_rows(user, *, period, include_costs=False):
     """Normalize authorized maintenance facts; one database row becomes one UID."""
     start, end = period_bounds(period)
     rows = []
 
     fallas = authorized_fallas(user).select_related("reportado_por").values(
-        "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre",
+        "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_resolucion", "fecha_cierre",
         "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
         "reportado_por_id", "reportado_por__first_name", "reportado_por__last_name", "reportado_por__username",
     )
@@ -165,7 +165,8 @@ def unified_history_rows(user, *, period):
     }
     for item in fallas:
         state = falla_states[item["estatus"]]
-        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["fecha_reporte"]
+        event = ((item["fecha_cierre"] or item.get("fecha_resolucion"))
+                 if state == "cerrado" else item["fecha_reporte"])
         if _in_period(event, start, end):
             rows.append(_history_payload(
                 uid=f"falla:{item['id']}", event=event, kind="reporte", state=state,
@@ -177,7 +178,7 @@ def unified_history_rows(user, *, period):
             ))
 
     orders = authorized_orders(user).select_related("creado_por").values(
-        "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id",
+        "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id", "numero_factura", "factura_archivo", "costo_repuestos", "costo_mano_obra", "costo_otros",
         "activo_ref_id", "activo_ref__nombre", "activo_ref__sucursal_id", "activo_ref__sucursal__nombre",
         "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
     )
@@ -194,7 +195,9 @@ def unified_history_rows(user, *, period):
                 subject_id=item["activo_ref_id"], subject=item["activo_ref__nombre"],
                 actor=_history_actor(item["creado_por_id"], " ".join(filter(None, [item["creado_por__first_name"], item["creado_por__last_name"]])), item["creado_por__username"]),
                 origin="sin_reporte" if unreported else item["origen"].lower(), title=item["folio"],
-                description=item["descripcion"], asset_id=item["activo_ref_id"],
+                description=item["descripcion"], asset_id=item["activo_ref_id"], direct=unreported,
+                invoice=_invoice("orden_factura", item["id"], item["factura_archivo"], item["numero_factura"]),
+                cost=((item["costo_repuestos"] or 0) + (item["costo_mano_obra"] or 0) + (item["costo_otros"] or 0)) if include_costs else None,
             ))
 
     reports = authorized_unit_reports(user).values(
@@ -223,18 +226,28 @@ def unified_history_rows(user, *, period):
                 actor=_history_actor(obj.registrado_por_id, obj.registrado_por.get_full_name() if obj.registrado_por else "", obj.registrado_por.get_username() if obj.registrado_por else ""),
                 origin=kind, parent_uid=(f"reporte_unidad:{obj.reporte_origen_id}" if kind == "reparacion" and obj.reporte_origen_id else None),
                 title=(obj.tipo_servicio.nombre if is_service else obj.descripcion_falla), description=(obj.notas or ("" if is_service else obj.descripcion_reparacion)),
-                unit_id=obj.unidad_id, direct=is_service, invoice=(obj.archivo_factura.name if obj.archivo_factura else "")))
+                unit_id=obj.unidad_id, direct=(is_service or (kind == "reparacion" and not obj.reporte_origen_id)),
+                invoice=_invoice(f"{kind}_factura" if kind == "reparacion" else "servicio_unidad_factura", obj.pk, obj.archivo_factura),
+                cost=((obj.costo if is_service else obj.costo_total) if include_costs else None)))
     return rows
 
 
 def _history_payload(*, uid, event, kind, state, branch_id, branch, subject_id, subject, actor, origin,
-                     title, description, asset_id=None, unit_id=None, parent_uid=None, direct=False, invoice=""):
+                     title, description, asset_id=None, unit_id=None, parent_uid=None, direct=False, invoice=None, cost=None):
     return {"uid": uid, "fecha_evento": _aware_date(event), "tipo": kind, "estado": state,
             "sucursal": {"id": branch_id, "label": branch or ""},
             "sujeto": ({"id": subject_id, "label": subject or ""} if subject_id else None), "actor": actor,
             "origen": origin, "parent_uid": parent_uid, "captura_directa": direct,
             "titulo": title or "", "descripcion": description or "", "activo_id": asset_id,
-            "unidad_id": unit_id, "factura": invoice or ""}
+            "unidad_id": unit_id, "factura": invoice, "costo": cost}
+
+
+def _invoice(kind, pk, file_value, number=""):
+    name = getattr(file_value, "name", file_value) or ""
+    if not name:
+        return None
+    return {"numero": number or "", "nombre": name.rsplit("/", 1)[-1],
+            "url": f"/api/mantenimiento/v2/evidencias/{kind}/{pk}/"}
 
 
 def _row_payload(*, uid, pk, kind, origin, state, critical, event, title, description,

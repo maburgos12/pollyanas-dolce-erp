@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from fallas.models import EvidenciaSeguimientoFalla
 from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
-    authorized_unit_services,
+    authorized_unit_services, can_view_costs,
 )
 from mantenimiento.services_history import inbox_rows, item_detail, unified_history_rows
 from mantenimiento.serializers import MaintenanceHistoryEventSerializer
@@ -92,7 +92,7 @@ def historial_v2(request):
     if page is None or page_size is None:
         return Response({"error": "Paginación no válida."}, status=400)
     page_size = min(page_size, 100)
-    rows = unified_history_rows(request.user, period=filters["periodo"])
+    rows = unified_history_rows(request.user, period=filters["periodo"], include_costs=can_view_costs(request.user))
     tipo = filters["tipo"]
     if tipo != "todo":
         rows = [row for row in rows if (row["origen"] == "sin_reporte" if tipo == "sin_reporte" else row["tipo"] == tipo)]

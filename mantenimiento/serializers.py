@@ -29,7 +29,8 @@ class MaintenanceHistoryEventSerializer(serializers.Serializer):
     descripcion = serializers.CharField()
     activo_id = serializers.IntegerField(allow_null=True)
     unidad_id = serializers.IntegerField(allow_null=True)
-    factura = serializers.CharField(allow_blank=True)
+    factura = serializers.DictField(allow_null=True)
+    costo = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
 
 
 class ActivoListSerializer(serializers.ModelSerializer):

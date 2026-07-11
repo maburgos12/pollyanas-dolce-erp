@@ -598,12 +598,14 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         )
         order = OrdenMantenimiento.objects.create(
             activo_ref=self.asset, origen=OrdenMantenimiento.ORIGEN_EMERGENCIA,
-            creado_por=self.actor, descripcion="Emergencia",
+            creado_por=self.actor, descripcion="Emergencia", numero_factura="OM-FACT",
+            factura_archivo="activos/facturas/orden.pdf", costo_otros="120.00",
         )
         report = ReporteUnidad.objects.create(unidad=self.unit, tipo="falla", descripcion="Motor")
         repair = ReparacionUnidad.objects.create(
             unidad=self.unit, reporte_origen=report, fecha_ingreso=timezone.localdate(),
             descripcion_falla="Motor", registrado_por=self.actor,
+            archivo_factura="reparaciones_unidad/reparacion.pdf", costo_total="250.00",
         )
         service = ServicioRealizadoUnidad.objects.create(
             unidad=self.unit, tipo_servicio=self.service_type, fecha_servicio=timezone.localdate(),
@@ -612,15 +614,38 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
 
         payload = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo"}).json()
 
+        uids = [row["uid"] for row in payload["results"]]
+        self.assertEqual(len(uids), len(set(uids)))
         rows = {row["uid"]: row for row in payload["results"]}
         self.assertEqual(len(rows), payload["pagination"]["total"])
         self.assertTrue({f"falla:{falla.pk}", f"orden:{order.pk}", f"reporte_unidad:{report.pk}",
                          f"reparacion:{repair.pk}", f"servicio_unidad:{service.pk}"}.issubset(rows))
         self.assertEqual(rows[f"orden:{order.pk}"]["origen"], "sin_reporte")
-        self.assertFalse(rows[f"orden:{order.pk}"]["captura_directa"])
+        self.assertTrue(rows[f"orden:{order.pk}"]["captura_directa"])
         self.assertEqual(rows[f"reparacion:{repair.pk}"]["parent_uid"], f"reporte_unidad:{report.pk}")
+        self.assertFalse(rows[f"reparacion:{repair.pk}"]["captura_directa"])
         self.assertEqual(rows[f"servicio_unidad:{service.pk}"]["actor"], {"id": None, "label": "Sin autor registrado"})
-        self.assertTrue(rows[f"servicio_unidad:{service.pk}"]["factura"])
+        for uid, kind in ((f"orden:{order.pk}", "orden_factura"),
+                          (f"reparacion:{repair.pk}", "reparacion_factura"),
+                          (f"servicio_unidad:{service.pk}", "servicio_unidad_factura")):
+            self.assertIn(f"/evidencias/{kind}/", rows[uid]["factura"]["url"])
+        self.assertEqual(rows[f"orden:{order.pk}"]["costo"], "120.00")
+
+        direct_repair = ReparacionUnidad.objects.create(
+            unidad=self.unit, fecha_ingreso=timezone.localdate(), descripcion_falla="Directa",
+            registrado_por=None,
+        )
+        payload = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo"}).json()
+        direct = next(row for row in payload["results"] if row["uid"] == f"reparacion:{direct_repair.pk}")
+        self.assertTrue(direct["captura_directa"])
+        self.assertIsNone(direct["parent_uid"])
+
+        limited = get_user_model().objects.create_user("history-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=self.branch)
+        UserModuleAccess.objects.create(user=limited, module="mantenimiento", access="view")
+        self.client.force_login(limited)
+        hidden = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo"}).json()
+        self.assertTrue(all(row["costo"] is None for row in hidden["results"]))
 
     def test_filters_type_state_scope_search_period_and_stable_pagination(self):
         recent = ServicioRealizadoUnidad.objects.create(
