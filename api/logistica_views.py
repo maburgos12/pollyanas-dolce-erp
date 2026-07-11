@@ -1381,6 +1381,7 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
 
 
 class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
+    @transaction.atomic
     def post(self, request, ruta_id: int, parada_id: int):
         if not _can_operate_pwa(request.user) and not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para confirmar entregas de ruta."}, status=status.HTTP_403_FORBIDDEN)
@@ -1399,7 +1400,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         motivo = payload.get("notas") or "Entrega confirmada por repartidor."
         evidencias_servicio = [dict(item) for item in evidencias_payload]
         try:
-            respuesta_idempotente = obtener_respuesta_idempotente(
+            replay_idempotente = obtener_respuesta_idempotente(
                 ruta=ruta,
                 parada=parada,
                 actor=request.user,
@@ -1411,8 +1412,44 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             )
         except EntregaIdempotenciaConflicto as exc:
             return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
-        if respuesta_idempotente is not None:
-            return Response(respuesta_idempotente, status=status.HTTP_200_OK)
+        if replay_idempotente is not None:
+            if replay_idempotente.respuesta is not None:
+                return Response(replay_idempotente.respuesta, status=status.HTTP_200_OK)
+            evento_original = EventoRuta.objects.get(pk=replay_idempotente.evidencia.metadata["evento_id"])
+            requiere_revision = bool(evento_original.metadata.get("requiere_revision"))
+            parada_data = dict(ParadaRutaSerializer(parada).data)
+            parada_data.update(
+                {
+                    "geocerca_confiable": not requiere_revision,
+                    "revision_entrega_estado": (
+                        ParadaRuta.REVISION_PENDIENTE if requiere_revision else ParadaRuta.REVISION_NO_REQUERIDA
+                    ),
+                    "revision_entrega_revisada_en": None,
+                    "revision_entrega_revisada_por": None,
+                    "revision_entrega_revisada_por_nombre": "",
+                    "revision_entrega_resolucion": "",
+                }
+            )
+            evidencias_originales = parada.evidencias_entrega.all().order_by("id")
+            respuesta_reconstruida = {
+                "parada": parada_data,
+                "evidencias": ParadaEntregaEvidenciaSerializer(
+                    evidencias_originales,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "requiere_revision": requiere_revision,
+                "warning": (
+                    "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
+                    if requiere_revision
+                    else ""
+                ),
+            }
+            guardar_respuesta_idempotente(
+                evidencia=replay_idempotente.evidencia,
+                respuesta=respuesta_reconstruida,
+            )
+            return Response(respuesta_reconstruida, status=status.HTTP_200_OK)
 
         if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
             return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)

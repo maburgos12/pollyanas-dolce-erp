@@ -32,6 +32,12 @@ class RevisionEntregaResultado:
     idempotente: bool = False
 
 
+@dataclass(frozen=True)
+class ReplayConfirmacionResultado:
+    evidencia: ParadaEntregaEvidencia
+    respuesta: dict | None
+
+
 def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
 
@@ -116,7 +122,10 @@ def obtener_respuesta_idempotente(
         return None
     if existente.parada_id != parada.id or existente.metadata.get("payload_hash") != payload_hash:
         raise EntregaIdempotenciaConflicto("client_event_id ya fue usado con un payload diferente.")
-    return existente.metadata.get("respuesta_api")
+    return ReplayConfirmacionResultado(
+        evidencia=existente,
+        respuesta=existente.metadata.get("respuesta_api"),
+    )
 
 
 def guardar_respuesta_idempotente(*, evidencia: ParadaEntregaEvidencia, respuesta):

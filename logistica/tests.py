@@ -545,6 +545,41 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(retry.json(), primero.json())
 
+    def test_fallo_guardando_snapshot_revierte_entrega_evento_y_evidencia(self):
+        with patch("api.logistica_views.guardar_respuesta_idempotente", side_effect=RuntimeError("fallo snapshot")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(self.url, json.dumps(self._payload()), content_type="application/json")
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
+        self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
+        self.assertFalse(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).exists())
+
+    def test_retry_reconstruye_snapshot_faltante_sin_usar_estado_mutable(self):
+        payload = self._payload(client_event_id="api-retry-snapshot-faltante")
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        evidencia = ParadaEntregaEvidencia.objects.get(client_event_id="api-retry-snapshot-faltante")
+        metadata = dict(evidencia.metadata)
+        metadata.pop("respuesta_api")
+        evidencia.metadata = metadata
+        evidencia.save(update_fields=["metadata"])
+        jefe = User.objects.create_user(username="jefe.retry.snapshot.faltante", password="pass123")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_AUTORIZADA,
+            motivo="Revisión posterior",
+        )
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+
     def test_ajuste_erp_no_fabrica_visita_hora_ni_geocerca(self):
         jefe = User.objects.create_user(username="jefe.api.entregas", password="pass123")
         UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
