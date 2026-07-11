@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Case, F, IntegerField, When
 from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
@@ -15,6 +16,7 @@ from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, R
 logger = logging.getLogger(__name__)
 
 GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
+RUTA_NOCTURNA_HORA_CORTE = 22
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,42 @@ class GeocercaResultado:
     parada: ParadaRuta | None
     distancia_metros: int | None
     dentro: bool
+
+
+def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
+    hoy = hoy or timezone.localdate()
+    if ruta.fecha_ruta == hoy:
+        return True
+    ayer = hoy - timedelta(days=1)
+    if ruta.fecha_ruta != ayer:
+        return False
+    corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
+    return ruta.created_at >= corte
+
+
+def ruta_operativa_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
+    hoy = timezone.localdate()
+    rutas = (
+        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        .filter(
+            repartidor=repartidor,
+            estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
+        )
+        .order_by(
+            Case(
+                When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+            "-id",
+        )
+    )
+    ruta_hoy = rutas.filter(fecha_ruta=hoy).first()
+    if ruta_hoy:
+        return ruta_hoy
+    ayer = hoy - timedelta(days=1)
+    corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
+    return rutas.filter(fecha_ruta=ayer, created_at__gte=corte).first()
 
 
 def _decimal(value, field_name: str) -> Decimal:
@@ -234,7 +272,7 @@ def _salto_fisico_confiable(ruta: RutaEntrega, latitud, longitud, timestamp_disp
 def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_registro: str | None = None) -> UbicacionRuta:
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         raise ValidationError("La ruta debe estar en estatus En ruta para registrar seguimiento.")
-    if ruta.fecha_ruta != timezone.localdate():
+    if not ruta_es_operativa_hoy(ruta):
         raise ValidationError("La ruta activa no corresponde al día operativo actual.")
     if not ruta.repartidor_id:
         raise ValidationError("La ruta debe tener un repartidor asignado antes de aceptar seguimiento.")

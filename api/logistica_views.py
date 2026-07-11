@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -50,6 +50,7 @@ from logistica.tasks import auditar_ticket_combustible
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
     obtener_checklist_carga_detallado,
+    registrar_recarga_cedis,
     registrar_evento_checklist_confirmado,
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
@@ -58,7 +59,7 @@ from logistica.services_carga_ruta import (
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
 )
-from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
+from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas, ruta_operativa_para_repartidor
 from logistica.services_entregas import (
     EntregaEvidenciaIdConflicto,
     EntregaIdempotenciaConflicto,
@@ -272,30 +273,7 @@ def _ruta_activa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | No
 
 
 def _ruta_operativa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
-    today = timezone.localdate()
-    rutas_operativas = (
-        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
-        .filter(
-            repartidor=repartidor,
-            estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
-        )
-        .order_by(
-            models.Case(
-                models.When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
-                default=1,
-                output_field=models.IntegerField(),
-            ),
-            "-id",
-        )
-    )
-    ruta_hoy = rutas_operativas.filter(fecha_ruta=today).first()
-    if ruta_hoy:
-        return ruta_hoy
-
-    previous_day = today - timedelta(days=1)
-    # ponytail: fallback acotado para rutas planeadas de noche que operativamente salen al día siguiente.
-    night_cutoff = timezone.make_aware(datetime.combine(previous_day, time(hour=22)))
-    return rutas_operativas.filter(fecha_ruta=previous_day, created_at__gte=night_cutoff).first()
+    return ruta_operativa_para_repartidor(repartidor)
 
 
 def _gas_rank(value: str | None) -> int | None:
@@ -1572,35 +1550,23 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
         if parada.punto.tipo != PuntoLogistico.TIPO_CEDIS:
             return Response({"detail": "Esta acción solo aplica a paradas CEDIS."}, status=status.HTTP_400_BAD_REQUEST)
 
-        with transaction.atomic():
-            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
-            created_event = False
-            if parada.estado != ParadaRuta.ESTADO_VISITADA:
-                now = timezone.now()
-                parada.estado = ParadaRuta.ESTADO_VISITADA
-                parada.hora_llegada_real = parada.hora_llegada_real or now
-                parada.hora_salida_real = parada.hora_salida_real or now
-                parada.notas = (request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip()
-                parada.save(update_fields=["estado", "hora_llegada_real", "hora_salida_real", "notas", "actualizado_en"])
-                EventoRuta.objects.create(
-                    ruta=ruta,
-                    parada=parada,
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                    severidad=EventoRuta.SEVERIDAD_INFO,
-                    descripcion="Recarga CEDIS registrada por repartidor en PWA.",
-                    metadata={"tipo": "recarga_cedis_pwa"},
-                    creado_por=request.user,
-                )
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-                created_event = True
+        try:
+            evento = registrar_recarga_cedis(
+                ruta=ruta,
+                parada=parada,
+                user=request.user,
+                notas=(request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip(),
+            )
+        except ValidationError as exc:
+            return Response({"detail": "; ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        parada.refresh_from_db()
 
         log_event(
             request.user,
             "CREATE",
             "logistica.EventoRuta",
             str(parada.id),
-            {"ruta": ruta.folio, "parada": parada.id, "tipo": "recarga_cedis_pwa", "created": created_event},
+            {"ruta": ruta.folio, "parada": parada.id, "tipo": EventoRuta.TIPO_RECARGA_CEDIS, "evento": evento.id},
         )
         return Response({"parada": ParadaRutaSerializer(parada).data}, status=status.HTTP_200_OK)
 

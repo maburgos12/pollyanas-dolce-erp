@@ -450,6 +450,7 @@ class RutaCargaChecklistLinea(models.Model):
     ESTATUS_FALTANTE = "FALTANTE"
     ESTATUS_SOBRANTE = "SOBRANTE"
     ESTATUS_NO_APLICA = "NO_APLICA"
+    ESTATUS_ZERO_EXPECTED = "ZERO_EXPECTED"
     ESTATUS_CHOICES = [
         (ESTATUS_PENDIENTE, "Pendiente"),
         (ESTATUS_CARGADA, "Cargada"),
@@ -457,6 +458,7 @@ class RutaCargaChecklistLinea(models.Model):
         (ESTATUS_FALTANTE, "Faltante"),
         (ESTATUS_SOBRANTE, "Sobrante"),
         (ESTATUS_NO_APLICA, "No aplica"),
+        (ESTATUS_ZERO_EXPECTED, "Enviado cero"),
     ]
 
     MOTIVO_STOCK_LIMITADO = "stock_limitado"
@@ -674,6 +676,7 @@ class EventoRuta(models.Model):
     TIPO_ENTREGA_AUTORIZADA = "ENTREGA_AUTORIZADA"
     TIPO_ENTREGA_RECHAZADA = "ENTREGA_RECHAZADA"
     TIPO_INCONSISTENCIA_ENTREGA = "INCONSISTENCIA_ENTREGA"
+    TIPO_RECARGA_CEDIS = "RECARGA_CEDIS"
     TIPO_CHOICES = [
         (TIPO_SALIDA, "Salida"),
         (TIPO_LLEGADA_GEOFENCE, "Llegada a geocerca"),
@@ -690,6 +693,7 @@ class EventoRuta(models.Model):
         (TIPO_ENTREGA_AUTORIZADA, "Entrega excepcional autorizada"),
         (TIPO_ENTREGA_RECHAZADA, "Entrega excepcional rechazada"),
         (TIPO_INCONSISTENCIA_ENTREGA, "Inconsistencia de entrega"),
+        (TIPO_RECARGA_CEDIS, "Recarga CEDIS"),
     ]
 
     SEVERIDAD_INFO = "info"

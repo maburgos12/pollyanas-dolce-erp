@@ -208,13 +208,6 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     cedis_line = existing
                     break
         if cedis_line:
-            if cedis_line.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
-                omitidas += 1
-                continue
-            if cantidad_esperada <= 0:
-                cedis_line.delete()
-                omitidas += 1
-                continue
             cedis_line.point_transfer_line = line
             cedis_line.transfer_external_id = line.transfer_external_id
             cedis_line.detail_external_id = line.detail_external_id
@@ -222,7 +215,17 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             cedis_line.erp_origin_branch = line.erp_origin_branch
             cedis_line.erp_destination_branch = line.erp_destination_branch
             cedis_line.cantidad_enviada_esperada = cantidad_esperada
-            cedis_line.notas = "" if cantidad_esperada > 0 else POINT_PENDIENTE_ENVIO_NOTA
+            if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE and cantidad_esperada <= 0:
+                cedis_line.cantidad_cargada = Decimal("0")
+                cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+                cedis_line.notas = "Point confirmó enviado final en cero; no requiere captura."
+            elif cedis_line.estatus in {
+                RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            }:
+                cedis_line.cantidad_cargada = None
+                cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+                cedis_line.notas = ""
             cedis_line.save(
                 update_fields=[
                     "point_transfer_line",
@@ -232,25 +235,15 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     "erp_origin_branch",
                     "erp_destination_branch",
                     "cantidad_enviada_esperada",
+                    "cantidad_cargada",
+                    "estatus",
                     "notas",
                     "actualizado_en",
                 ]
             )
             actualizadas += 1
             continue
-        if cantidad_esperada <= 0:
-            # ponytail: Point Enviado=0 significa que no hay nada que cargar de esa línea.
-            RutaCargaChecklistLinea.objects.filter(
-                checklist=checklist,
-                source_hash=line.source_hash,
-                estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-            ).delete()
-            omitidas += 1
-            continue
         existing = RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).first()
-        if existing and existing.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
-            omitidas += 1
-            continue
         defaults = {
             "parada": parada,
             "point_transfer_line": line,
@@ -263,8 +256,33 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "erp_destination_branch": line.erp_destination_branch,
             "cantidad_solicitada": line.requested_quantity,
             "cantidad_enviada_esperada": cantidad_esperada,
-            "notas": "",
+            "notas": "Point confirmó enviado final en cero; no requiere captura." if cantidad_esperada <= 0 else "",
         }
+        if existing and existing.estatus not in {
+            RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        }:
+            existing.point_transfer_line = line
+            existing.cantidad_solicitada = line.requested_quantity
+            existing.cantidad_enviada_esperada = cantidad_esperada
+            existing.save(
+                update_fields=[
+                    "point_transfer_line",
+                    "cantidad_solicitada",
+                    "cantidad_enviada_esperada",
+                    "actualizado_en",
+                ]
+            )
+            actualizadas += 1
+            continue
+        defaults.update(
+            cantidad_cargada=Decimal("0") if cantidad_esperada <= 0 else None,
+            estatus=(
+                RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+                if cantidad_esperada <= 0
+                else RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+            ),
+        )
         _, created = RutaCargaChecklistLinea.objects.update_or_create(
             checklist=checklist,
             source_hash=line.source_hash,
@@ -509,6 +527,17 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
         elif checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
             checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
             checklist.save(update_fields=["estatus", "actualizado_en"])
+        elif not checklist.lineas.exclude(
+            estatus__in=[
+                RutaCargaChecklistLinea.ESTATUS_CARGADA,
+                RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
+                RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            ]
+        ).exists():
+            checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+            checklist.confirmado_por = user
+            checklist.confirmado_en = timezone.now()
+            checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
         checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
@@ -595,7 +624,11 @@ def validar_linea_carga(
     estatus_previo = checklist.estatus
     pendientes = checklist.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
     diferencias = checklist.lineas.exclude(
-        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+        estatus__in=[
+            RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        ]
     ).exists()
     if pendientes:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
@@ -690,20 +723,32 @@ def autorizar_diferencia_checklist_carga(*, ruta: RutaEntrega, user, autorizado:
 
 
 @transaction.atomic
-def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> EventoRuta:
+def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada: ParadaRuta | None = None) -> EventoRuta:
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La recarga CEDIS solo aplica a rutas planeadas o en ruta.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
-    if not checklist or not checklist.lineas.exists():
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA and (not checklist or not checklist.lineas.exists()):
         raise ValidationError("La ruta no tiene carga esperada para registrar recarga CEDIS.")
     cedis_punto = PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_CEDIS).order_by("id").first()
     if not cedis_punto:
         raise ValidationError("No hay punto logístico CEDIS configurado para registrar la recarga.")
+    if parada is not None and parada.estado == ParadaRuta.ESTADO_VISITADA:
+        existente = EventoRuta.objects.filter(
+            ruta=ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+        ).order_by("id").first()
+        if existente:
+            return existente
 
     lineas_tramo = lineas_tramo_operativo_actual(ruta, checklist=checklist)
     pendientes = lineas_tramo.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
     diferencias = lineas_tramo.exclude(
-        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+        estatus__in=[
+            RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        ]
     ).count()
     if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
         if pendientes:
@@ -714,7 +759,7 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
         checklist.save(update_fields=["motivo_override", "actualizado_en"])
 
     numero = (
-        EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo="recarga_cedis").count()
+        EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count()
         + 1
     )
     parada_cedis = (
@@ -723,6 +768,8 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
         .order_by("orden", "id")
         .first()
     )
+    if parada is not None and (not parada_cedis or parada_cedis.id != parada.id):
+        raise ValidationError("La recarga CEDIS no corresponde al siguiente tramo de la ruta.")
     if not parada_cedis:
         ultimo_orden = ruta.paradas.order_by("-orden").values_list("orden", flat=True).first() or 0
         parada_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis_punto, orden=ultimo_orden + 1)
@@ -738,7 +785,7 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "") -> Even
     return EventoRuta.objects.create(
         ruta=ruta,
         parada=parada_cedis,
-        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        tipo=EventoRuta.TIPO_RECARGA_CEDIS,
         severidad=EventoRuta.SEVERIDAD_INFO,
         descripcion=f"Recarga CEDIS {numero} registrada por logística.",
         metadata={
@@ -893,7 +940,11 @@ def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = ""
             ]
         )
     diferencias = checklist.lineas.exclude(
-        estatus__in=[RutaCargaChecklistLinea.ESTATUS_CARGADA, RutaCargaChecklistLinea.ESTATUS_NO_APLICA]
+        estatus__in=[
+            RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        ]
     ).exists()
     checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA if diferencias else RutaCargaChecklist.ESTATUS_CONFIRMADA
     checklist.confirmado_por = None if diferencias else user

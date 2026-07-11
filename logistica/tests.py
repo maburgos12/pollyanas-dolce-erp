@@ -1046,6 +1046,181 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertContains(response, "Cierre administrativo pendiente")
 
 
+class LogisticaReglasAdyacentesStabilizationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="reglas.adyacentes", password="pass123")
+        self.user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        self.sucursal = Sucursal.objects.create(codigo="ADY-LOG", nombre="Reglas adyacentes", activa=True)
+        self.unidad = Unidad.objects.create(codigo="ADY-01", descripcion="Unidad reglas", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(
+            user=self.user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+        )
+        self.bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", b"gif", content_type="image/gif"),
+        )
+        self.punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal reglas",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+
+    def _crear_ruta(self, *, fecha=None, estatus=RutaEntrega.ESTATUS_PLANEADA):
+        ruta = RutaEntrega.objects.create(
+            nombre=f"Ruta reglas {RutaEntrega.objects.count() + 1}",
+            fecha_ruta=fecha or timezone.localdate(),
+            estatus=estatus,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+            bitacora_salida=self.bitacora if estatus == RutaEntrega.ESTATUS_EN_RUTA else None,
+            hora_inicio_real=timezone.now() if estatus == RutaEntrega.ESTATUS_EN_RUTA else None,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+        return ruta, parada
+
+    def _crear_transferencia(self, *, requested="5.000", sent="0.000", source_hash="ady-zero"):
+        origin = PointBranch.objects.create(external_id=f"CEDIS-{source_hash}", name="CEDIS")
+        destination = PointBranch.objects.create(
+            external_id=f"SUC-{source_hash}",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        return PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_destination_branch=self.sucursal,
+            transfer_external_id=f"T-{source_hash}",
+            detail_external_id=f"D-{source_hash}",
+            source_hash=source_hash,
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Pastel enviado cero",
+            item_code="ZERO-01",
+            unit="pz",
+            requested_quantity=requested,
+            sent_quantity=sent,
+            received_quantity="0.000",
+            is_open=True,
+        )
+
+    def test_solicitado_positivo_enviado_cero_permanece_visible_y_resuelto(self):
+        ruta, _ = self._crear_ruta()
+        transferencia = self._crear_transferencia()
+
+        resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea = resumen.checklist.lineas.get(source_hash=transferencia.source_hash)
+        self.assertEqual(linea.cantidad_solicitada, Decimal("5.000"))
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("0.000"))
+        self.assertEqual(linea.cantidad_cargada, Decimal("0.000"))
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertIsNone(linea.validado_por)
+        self.assertEqual(linea.client_event_id, "")
+        self.assertFalse(linea.evidencias_entrega.exists())
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def test_cambios_de_enviado_preservan_linea_y_reflejan_el_valor_real(self):
+        ruta, _ = self._crear_ruta()
+        transferencia = self._crear_transferencia(sent="4.000", source_hash="ady-changes")
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea = RutaCargaChecklistLinea.objects.get(source_hash=transferencia.source_hash)
+        linea.cantidad_cargada = Decimal("4.000")
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_CARGADA
+        linea.validado_por = self.user
+        linea.validado_en = timezone.now()
+        linea.save(update_fields=["cantidad_cargada", "estatus", "validado_por", "validado_en", "actualizado_en"])
+
+        transferencia.sent_quantity = Decimal("2.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea.refresh_from_db()
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("2.000"))
+        self.assertEqual(linea.cantidad_cargada, Decimal("4.000"))
+        self.assertEqual(linea.validado_por, self.user)
+
+        transferencia.sent_quantity = Decimal("0.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        linea.refresh_from_db()
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("0.000"))
+        self.assertEqual(linea.cantidad_cargada, Decimal("4.000"))
+        self.assertEqual(linea.validado_por, self.user)
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def test_ruta_nocturna_reconocida_por_api_acepta_tracking_y_vencida_no(self):
+        ayer = timezone.localdate() - timezone.timedelta(days=1)
+        with patch("api.logistica_views.timezone.now") as now_mock:
+            now_mock.return_value = timezone.make_aware(datetime.combine(ayer, time(hour=23)))
+            ruta, _ = self._crear_ruta(fecha=ayer, estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        self.client.force_login(self.user)
+
+        activa = self.client.get(reverse("api_logistica_ruta_activa"))
+        self.assertEqual(activa.status_code, 200)
+        self.assertEqual(activa.data["ruta"]["id"], ruta.id)
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=ruta,
+            payload={"latitud": "25.570000", "longitud": "-108.470000", "precision_metros": "10"},
+        )
+        self.assertEqual(ubicacion.ruta, ruta)
+
+        ruta.created_at = timezone.make_aware(datetime.combine(ayer, time(hour=20)))
+        ruta.save(update_fields=["created_at"])
+        with self.assertRaisesMessage(ValidationError, "día operativo actual"):
+            registrar_ubicacion_ruta(
+                user=self.user,
+                ruta=ruta,
+                payload={"latitud": "25.570000", "longitud": "-108.470000"},
+            )
+
+    def test_recarga_cedis_usa_operacion_y_evento_propios_sin_entrega_ni_geocerca(self):
+        ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS reglas",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.580000",
+            longitud="-108.480000",
+        )
+        parada_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=2)
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=ruta.paradas.get(orden=1),
+            transfer_external_id="T-CEDIS",
+            detail_external_id="D-CEDIS",
+            source_hash="linea-cedis-reglas",
+            item_name="Carga tramo",
+            cantidad_solicitada="1",
+            cantidad_enviada_esperada="1",
+            cantidad_cargada="1",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_recarga_cedis", kwargs={"ruta_id": ruta.id, "parada_id": parada_cedis.id}),
+            {"notas": "Recarga del segundo tramo"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        parada_cedis.refresh_from_db()
+        self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertEqual(parada_cedis.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        evento = EventoRuta.objects.get(ruta=ruta, parada=parada_cedis)
+        self.assertEqual(evento.tipo, EventoRuta.TIPO_RECARGA_CEDIS)
+        self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
+        self.assertFalse(parada_cedis.evidencias_entrega.exists())
+
+
 class LogisticaEmailTemplateTests(SimpleTestCase):
     def test_email_sources_do_not_use_manual_inline_styles(self):
         email_dir = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "emails"
@@ -4264,7 +4439,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIsNotNone(parada_cedis.hora_salida_real)
         self.assertEqual(parada_cedis.notas, "Llegué a CEDIS para recargar.")
         self.assertEqual(
-            EventoRuta.objects.filter(ruta=self.ruta, parada=parada_cedis, metadata__tipo="recarga_cedis_pwa").count(),
+            EventoRuta.objects.filter(ruta=self.ruta, parada=parada_cedis, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(),
             1,
         )
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("50.00"))
@@ -5089,7 +5264,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
         self.assertIn("Point", checklist_bloquea_salida(ruta))
 
-    def test_checklist_carga_omite_linea_point_sin_enviado_si_mismo_producto_ya_tiene_enviado(self):
+    def test_checklist_carga_mantiene_linea_point_sin_enviado_aunque_mismo_producto_tenga_enviado(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         sin_enviado = self._crear_transferencia_point_abierta(
             item_name="Crema Para Fresas",
@@ -5105,11 +5280,13 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=sin_enviado.source_hash).exists())
+        linea_cero = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=sin_enviado.source_hash)
+        self.assertEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(linea_cero.cantidad_enviada_esperada, Decimal("0.000"))
         linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=enviado.source_hash)
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
 
-    def test_checklist_carga_omite_linea_point_reducida_a_cero_si_transferencia_ya_fue_enviada(self):
+    def test_checklist_carga_mantiene_linea_point_reducida_a_cero_si_transferencia_ya_fue_enviada(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         reducida = self._crear_transferencia_point_abierta(
             item_name="Crema Para Fresas",
@@ -5121,9 +5298,10 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=reducida.source_hash).exists())
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=reducida.source_hash)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
 
-    def test_checklist_carga_omite_linea_cero_si_mismo_folio_ya_tiene_enviados(self):
+    def test_checklist_carga_mantiene_linea_cero_si_mismo_folio_ya_tiene_enviados(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         reducida = self._crear_transferencia_point_abierta(
             item_name="Galleta Lotus",
@@ -5143,7 +5321,10 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=reducida.source_hash).exists())
+        self.assertEqual(
+            RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=reducida.source_hash).estatus,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=enviada.source_hash).exists())
 
     def test_checklist_carga_no_genera_lineas_para_parada_cedis(self):
@@ -5216,7 +5397,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(point_line.point_transfer_line, segunda)
         self.assertEqual(point_line.cantidad_enviada_esperada, Decimal("6.000"))
 
-    def test_checklist_carga_point_en_cero_no_genera_carga(self):
+    def test_checklist_carga_point_en_cero_genera_linea_visible_resuelta(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-enviado-cero")
@@ -5226,9 +5407,11 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.checklist.lineas.count(), 0)
+        self.assertEqual(resumen.checklist.lineas.count(), 1)
         self.assertIsNone(checklist_bloquea_salida(ruta))
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
+        linea = resumen.checklist.lineas.get()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(linea.cantidad_cargada, Decimal("0.000"))
 
     def test_sync_carga_regresa_a_revision_si_quedan_lineas_pendientes(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
@@ -5243,7 +5426,8 @@ class LogisticaControlRutasTests(TestCase):
 
         segundo = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertFalse(segundo.checklist.lineas.exists())
+        self.assertTrue(segundo.checklist.lineas.exists())
+        self.assertEqual(segundo.checklist.lineas.get().estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
         self.assertIsNone(checklist_bloquea_salida(ruta))
 
     def test_checklist_carga_cedis_no_pisa_linea_validada_con_point(self):
@@ -5262,9 +5446,9 @@ class LogisticaControlRutasTests(TestCase):
 
         linea.refresh_from_db()
         self.assertEqual(segundo.creadas, 0)
-        self.assertEqual(segundo.actualizadas, 0)
-        self.assertEqual(linea.point_transfer_line_id, None)
-        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
+        self.assertEqual(segundo.actualizadas, 1)
+        self.assertEqual(linea.point_transfer_line, transferencia)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
         self.assertEqual(linea.cantidad_cargada, Decimal("5.000"))
 
     def test_checklist_carga_sincroniza_point_con_ruta_en_ruta(self):
@@ -5482,8 +5666,8 @@ class LogisticaControlRutasTests(TestCase):
 
         linea.refresh_from_db()
         self.assertEqual(segundo.creadas, 0)
-        self.assertEqual(segundo.actualizadas, 0)
-        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
+        self.assertEqual(segundo.actualizadas, 1)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
 
     def test_checklist_carga_se_genera_desde_transferencia_point_abierta(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -5499,7 +5683,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal(str(transferencia.sent_quantity)))
         self.assertEqual(linea.source_hash, transferencia.source_hash)
 
-    def test_checklist_carga_omite_transferencia_abierta_sin_enviado(self):
+    def test_checklist_carga_mantiene_transferencia_abierta_sin_enviado_visible(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-sin-enviado")
         transferencia.sent_quantity = Decimal("0.000")
@@ -5508,11 +5692,12 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.creadas, 0)
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist=resumen.checklist, source_hash=transferencia.source_hash).exists())
+        self.assertEqual(resumen.creadas, 1)
+        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=transferencia.source_hash)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
         self.assertIsNone(checklist_bloquea_salida(ruta))
 
-    def test_checklist_carga_point_cero_omite_solicitud_cedis(self):
+    def test_checklist_carga_point_cero_resuelve_solicitud_cedis_visible(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-cero-cancela-carga")
@@ -5522,8 +5707,10 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.checklist.lineas.count(), 0)
-        self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
+        self.assertEqual(resumen.checklist.lineas.count(), 1)
+        linea = resumen.checklist.lineas.get()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(linea.cantidad_solicitada, Decimal("5.000"))
 
     def test_checklist_carga_incluye_transferencia_del_dia_anterior(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -5752,7 +5939,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
 
-    def test_ruta_detail_rechaza_captura_manual_si_point_no_ha_enviado(self):
+    def test_ruta_detail_no_requiere_captura_manual_si_point_envio_cero(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         ruta, _ = self._crear_ruta_planeada_para_carga()
@@ -5776,9 +5963,9 @@ class LogisticaControlRutasTests(TestCase):
 
         linea.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Point")
-        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIsNone(linea.cantidad_cargada)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(linea.cantidad_cargada, Decimal("0.000"))
+        self.assertIsNone(checklist_bloquea_salida(ruta))
 
     def test_ruta_detail_muestra_captura_erp_en_ruta(self):
         self.client.force_login(self.user)
