@@ -97,17 +97,27 @@ class MaintenanceAccessTests(TestCase):
         cls.no_permission_user = user_model.objects.create_user("no-permission", password="test")
         cls.inactive_user = user_model.objects.create_user("inactive", password="test", is_active=False)
         cls.manager = user_model.objects.create_user("manager", password="test")
+        cls.maintenance_group_user = user_model.objects.create_user("maintenance-group", password="test")
+        cls.assets_view_user = user_model.objects.create_user("assets-view", password="test")
+        cls.inbox_manage_user = user_model.objects.create_user("inbox-manage", password="test")
+        cls.app_view_user = user_model.objects.create_user("app-view", password="test")
+        cls.dashboard_view_user = user_model.objects.create_user("dashboard-view", password="test")
         cls.dg_user = user_model.objects.create_user("dg-user", password="test")
         cls.admin_group_user = user_model.objects.create_user("admin-group-user", password="test")
         cls.admin = user_model.objects.create_superuser("global", "global@example.com", "test")
         cls.dg_user.groups.add(Group.objects.create(name="DG"))
         cls.admin_group_user.groups.add(Group.objects.create(name="ADMIN"))
+        cls.maintenance_group_user.groups.add(Group.objects.create(name="mantenimiento"))
         UserProfile.objects.create(user=cls.limited_user, sucursal=cls.own_branch)
         UserProfile.objects.create(user=cls.no_scope_user)
         UserProfile.objects.create(user=cls.no_permission_user, sucursal=cls.own_branch)
         UserProfile.objects.create(user=cls.inactive_user, sucursal=cls.own_branch)
         UserModuleAccess.objects.create(user=cls.limited_user, module="mantenimiento", access="view")
         UserModuleAccess.objects.create(user=cls.manager, module="mantenimiento", access="manage")
+        UserModuleAccess.objects.create(user=cls.assets_view_user, module="activos", access="view")
+        UserModuleAccess.objects.create(user=cls.inbox_manage_user, module="mantenimiento.bandeja", access="manage")
+        UserModuleAccess.objects.create(user=cls.app_view_user, module="mantenimiento.app", access="view")
+        UserModuleAccess.objects.create(user=cls.dashboard_view_user, module="mantenimiento.dashboard", access="view")
 
         category = CategoriaFalla.objects.create(nombre="General")
         cls.own_report = ReporteFalla.objects.create(
@@ -155,18 +165,36 @@ class MaintenanceAccessTests(TestCase):
                 self.assertEqual(authorized_repairs(user).count(), 2)
                 self.assertEqual(authorized_unit_services(user).count(), 2)
 
-    def test_user_without_canonical_branch_scope_sees_nothing(self):
-        self.assertFalse(authorized_fallas(self.no_scope_user).exists())
-        self.assertFalse(authorized_orders(self.no_scope_user).exists())
-        self.assertFalse(authorized_unit_reports(self.no_scope_user).exists())
-        self.assertFalse(authorized_repairs(self.no_scope_user).exists())
-        self.assertFalse(authorized_unit_services(self.no_scope_user).exists())
+    def test_authorized_user_without_branch_scope_sees_global_data(self):
+        self.assertEqual(authorized_fallas(self.no_scope_user).count(), 2)
+        self.assertEqual(authorized_orders(self.no_scope_user).count(), 2)
+        self.assertEqual(authorized_unit_reports(self.no_scope_user).count(), 2)
 
     def test_user_with_branch_but_without_mantenimiento_permission_sees_nothing(self):
         self._assert_no_authorized_objects(self.no_permission_user)
 
     def test_inactive_user_with_branch_sees_nothing(self):
         self._assert_no_authorized_objects(self.inactive_user)
+
+    def test_every_real_read_gate_returns_endpoint_data(self):
+        users = (
+            self.maintenance_group_user,
+            self.assets_view_user,
+            self.inbox_manage_user,
+            self.app_view_user,
+            self.dashboard_view_user,
+        )
+        for user in users:
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get("/api/mantenimiento/v2/bandeja/", {"periodo": "todo"})
+                self.assertEqual(response.status_code, 200)
+                self.assertGreater(response.json()["pagination"]["total"], 0)
+
+    def test_user_without_any_real_read_gate_gets_403(self):
+        self.client.force_login(self.no_permission_user)
+        response = self.client.get("/api/mantenimiento/v2/bandeja/")
+        self.assertEqual(response.status_code, 403)
 
     def _assert_no_authorized_objects(self, user):
         self.assertFalse(authorized_fallas(user).exists())
@@ -298,6 +326,22 @@ class MaintenanceInboxV2Tests(TestCase):
         report.save(update_fields=["estatus", "actualizado_en"])
         report.refresh_from_db()
         self.assertIsNone(report.fecha_cierre)
+
+    def test_stale_instance_saving_other_field_does_not_reopen_or_clear_close_date(self):
+        report = ReporteUnidad.objects.create(
+            unidad=self.unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Original",
+        )
+        stale = ReporteUnidad.objects.get(pk=report.pk)
+        report.estatus = ReporteUnidad.ESTATUS_CERRADO
+        report.save(update_fields=["estatus", "actualizado_en"])
+        close_date = report.fecha_cierre
+
+        stale.descripcion = "Edición concurrente"
+        stale.save(update_fields=["descripcion", "actualizado_en"])
+
+        stale.refresh_from_db()
+        self.assertEqual(stale.estatus, ReporteUnidad.ESTATUS_CERRADO)
+        self.assertEqual(stale.fecha_cierre, close_date)
 
     def test_maintenance_write_path_persists_real_unit_close_date(self):
         report = ReporteUnidad.objects.create(

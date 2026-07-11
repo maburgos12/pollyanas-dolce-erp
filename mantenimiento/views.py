@@ -22,6 +22,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
+from mantenimiento.services_access import can_access_mantenimiento
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -67,17 +68,7 @@ class EsMantenimiento(BasePermission):
 
 
 def _can_access_mantenimiento(user) -> bool:
-    if not user or not user.is_authenticated:
-        return False
-    grupos = set(user.groups.values_list("name", flat=True))
-    return (
-        user.is_superuser
-        or bool(grupos & EsMantenimiento.GRUPOS)
-        or can_view_module(user, "activos")
-        or can_manage_submodule(user, "mantenimiento", "bandeja")
-        or can_view_submodule(user, "mantenimiento", "app")
-        or can_view_submodule(user, "mantenimiento", "dashboard")
-    )
+    return can_access_mantenimiento(user)
 
 
 def _can_write_mantenimiento(user) -> bool:

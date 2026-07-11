@@ -1,20 +1,54 @@
 """Object-level access policy shared by Mantenimiento v2 queries."""
 
 from activos.models import OrdenMantenimiento
-from core.access import can_manage_module, can_view_module, is_admin_or_dg
+from core.access import (
+    can_manage_module,
+    can_manage_submodule,
+    can_view_module,
+    can_view_submodule,
+    is_admin_or_dg,
+)
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
 
 
+MAINTENANCE_GROUPS = {"dg", "mantenimiento"}
+
+
+def _maintenance_group_names(user):
+    cached = getattr(user, "_maintenance_group_names_cache", None)
+    if cached is None:
+        cached = frozenset(name.lower() for name in user.groups.values_list("name", flat=True))
+        setattr(user, "_maintenance_group_names_cache", cached)
+    return cached
+
+
+def can_access_mantenimiento(user):
+    """Single read gate for Mantenimiento UI, API permissions, and query scope."""
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    groups = _maintenance_group_names(user)
+    return (
+        is_admin_or_dg(user)
+        or bool(groups & MAINTENANCE_GROUPS)
+        or can_manage_module(user, "mantenimiento")
+        or can_view_module(user, "activos")
+        or can_manage_submodule(user, "mantenimiento", "bandeja")
+        or can_view_submodule(user, "mantenimiento", "app")
+        or can_view_submodule(user, "mantenimiento", "dashboard")
+    )
+
+
 def authorized_branch_ids(user):
     """Return ``None`` for global scope, otherwise canonical branch PKs."""
-    if is_admin_or_dg(user) or can_manage_module(user, "mantenimiento"):
-        return None
-    if not can_view_module(user, "mantenimiento"):
+    if not can_access_mantenimiento(user):
         return []
+    groups = _maintenance_group_names(user)
+    if is_admin_or_dg(user) or can_manage_module(user, "mantenimiento") or groups & MAINTENANCE_GROUPS:
+        return None
     profile = getattr(user, "userprofile", None)
     branch_id = getattr(profile, "sucursal_id", None)
-    return [branch_id] if branch_id else []
+    return [branch_id] if branch_id else None
 
 
 def _authorized_queryset(user, queryset, branch_lookup):

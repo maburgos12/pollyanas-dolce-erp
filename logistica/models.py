@@ -941,6 +941,10 @@ class ReporteUnidad(models.Model):
         return f"{self.unidad.codigo} · {self.get_tipo_display()} · {self.get_estatus_display()}"
 
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        tracks_status = update_fields is None or "estatus" in update_fields
+        if not tracks_status:
+            return super().save(*args, **kwargs)
         previous_status = None
         if self.pk:
             previous_status = type(self).objects.filter(pk=self.pk).values_list("estatus", flat=True).first()
@@ -951,7 +955,6 @@ class ReporteUnidad(models.Model):
         elif reopening:
             self.fecha_cierre = None
         if closing or reopening:
-            update_fields = kwargs.get("update_fields")
             if update_fields is not None:
                 kwargs["update_fields"] = set(update_fields) | {"fecha_cierre"}
         super().save(*args, **kwargs)
