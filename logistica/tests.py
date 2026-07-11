@@ -113,7 +113,12 @@ class LogisticaEntregaDomainTests(TestCase):
             "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
             "motivo": "GPS sin señal",
             "client_event_id": "entrega-excepcional-1",
-            "ubicacion": {"causa": "GPS_SIN_SENAL"},
+            "ubicacion": {
+                "causa": "GPS_SIN_SENAL",
+                "client_timestamp": "2026-07-10T12:00:00-07:00",
+                "client_version": "pwa-v60",
+            },
+            "origen": "PWA",
         }
         payload.update(overrides)
         return confirmar_entrega_parada(**payload)
@@ -175,8 +180,8 @@ class LogisticaEntregaDomainTests(TestCase):
         self.assertIsNone(self.parada.hora_llegada_real)
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA).count(), 1)
 
-    def test_muestra_gps_confiable_actualiza_llegada_legacy_sin_duplicarla(self):
-        EventoRuta.objects.create(
+    def test_muestra_gps_confiable_conserva_llegada_legacy_y_crea_evento_nuevo(self):
+        legacy = EventoRuta.objects.create(
             ruta=self.ruta,
             parada=self.parada,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
@@ -198,8 +203,10 @@ class LogisticaEntregaDomainTests(TestCase):
         self.assertIsNone(self.parada.hora_llegada_real)
         self.assertEqual(
             EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).count(),
-            1,
+            2,
         )
+        legacy.refresh_from_db()
+        self.assertIsNone(legacy.ubicacion_id)
         self.assertEqual(llegada.metadata["origen_servicio"], "registrar_ubicacion_ruta")
         self.assertIsNotNone(llegada.ubicacion_id)
 
@@ -918,7 +925,7 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA).count(), 1)
 
-    def test_excepcion_exige_motivo_y_contexto_cliente(self):
+    def test_excepcion_exige_motivo_y_acepta_cola_legacy_sin_contexto(self):
         sin_motivo = self.client.post(self.url, json.dumps(self._payload(notas="")), content_type="application/json")
         sin_contexto = self.client.post(
             self.url,
@@ -927,8 +934,10 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         )
 
         self.assertEqual(sin_motivo.status_code, 400)
-        self.assertEqual(sin_contexto.status_code, 400)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertEqual(sin_contexto.status_code, 200)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+        self.assertEqual(self.parada.revision_entrega_causa, "CLIENTE_LEGACY")
 
     def test_confirmacion_exige_client_event_id(self):
         response = self.client.post(
@@ -1376,6 +1385,7 @@ class LogisticaRevisionEntregaTests(TestCase):
                 "client_version": "pwa-v60",
             },
             evidencias=[{"comentario": "Foto de mostrador", "tipo": ParadaEntregaEvidencia.TIPO_FOTO_ENTREGA}],
+            origen="PWA",
         )
         self.url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
 
@@ -1509,6 +1519,132 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
         self.assertEqual(response.context["revisiones_pendientes_count"], 1)
         self.assertContains(response, "Cierre administrativo pendiente")
+
+    def test_jefe_corrige_rechazo_con_motivo_y_evidencia_sin_borrar_entrega(self):
+        evidencia = self.parada.evidencias_entrega.get()
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=self.jefe,
+            decision=ParadaRuta.REVISION_RECHAZADA,
+            motivo="La foto no identifica el local.",
+        )
+
+        resultado = revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=self.jefe,
+            decision=ParadaRuta.REVISION_CORREGIDA,
+            motivo="Se verificó llamada con la encargada y folio 443.",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_CORREGIDA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertTrue(ParadaEntregaEvidencia.objects.filter(pk=evidencia.pk).exists())
+        self.assertEqual(resultado.evento.metadata["decision"], ParadaRuta.REVISION_CORREGIDA)
+        self.client.force_login(self.jefe)
+        page = self.client.get(self.url)
+        self.assertFalse(page.context["cierre_administrativo_pendiente"])
+
+    def test_bandeja_global_incluye_pendiente_rechazada_y_alerta_historica_no_requerida(self):
+        historica = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=2)
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=historica,
+            tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            severidad=EventoRuta.SEVERIDAD_ALERTA,
+            descripcion="Entrega histórica sin geocerca.",
+            clave_auditoria=f"hist-{historica.id}",
+            metadata={"regla": "ENTREGADA_SIN_GEOFENCE_O_REVISION"},
+        )
+        self.client.force_login(self.jefe)
+
+        response = self.client.get(reverse("logistica:revisiones_entrega"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.ruta.folio)
+        self.assertContains(response, "GPS_SIN_SENAL")
+        self.assertContains(response, "Entrega histórica sin geocerca")
+        self.assertContains(response, "repartidor.revision")
+        self.assertTrue(Notificacion.objects.filter(usuario=self.jefe, url="/logistica/rutas/revisiones/").exists())
+        control = self.client.get(reverse("logistica:control_rutas"))
+        self.assertContains(control, "Abrir bandeja de revisiones")
+        self.assertGreaterEqual(control.context["revisiones_globales_count"], 2)
+
+
+class LogisticaEntregaContratoFinalTests(LogisticaEntregaDomainTests):
+    def test_servicio_exige_origen_estructurado(self):
+        with self.assertRaisesMessage(ValidationError, "origen"):
+            confirmar_entrega_parada(
+                ruta=self.ruta, parada=self.parada, actor=self.user,
+                entrega_estado=ParadaRuta.ENTREGA_ENTREGADA, motivo="Prueba",
+                client_event_id="sin-origen", ubicacion={},
+            )
+
+    def test_ajuste_admin_siempre_requiere_revision_aun_con_geocerca(self):
+        self._registrar_geocerca_real()
+        resultado = self._confirmar(
+            origen="AJUSTE_ADMIN",
+            ubicacion={
+                "causa": "AJUSTE_ADMINISTRATIVO",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "erp-ruta-detail",
+            },
+        )
+        self.parada.refresh_from_db()
+        self.assertTrue(resultado.requiere_revision)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+        self.assertEqual(resultado.evento.metadata["origen_confirmacion"], "AJUSTE_ADMIN")
+
+    def test_excepcion_pwa_exige_contexto_completo_y_causa_permitida(self):
+        with self.assertRaises(ValidationError):
+            self._confirmar(origen="PWA", ubicacion={"causa": "INVENTADA"})
+
+    def test_cliente_v59_sin_contexto_se_conserva_como_legacy_revisable(self):
+        resultado = self._confirmar(
+            origen="PWA",
+            client_event_id="cola-v59-evidencia-1",
+            ubicacion={},
+            evidencias=[{"client_event_id": "cola-v59-evidencia-1", "comentario": "cola offline"}],
+        )
+        self.parada.refresh_from_db()
+        self.assertTrue(resultado.requiere_revision)
+        self.assertEqual(self.parada.revision_entrega_causa, "CLIENTE_LEGACY")
+
+    def test_gps_nuevo_no_reescribe_evento_legacy(self):
+        legacy_actor = User.objects.create_user(username="legacy.actor")
+        legacy_fecha = timezone.now() - timezone.timedelta(hours=2)
+        legacy = EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            descripcion="Legacy",
+            creado_por=legacy_actor,
+        )
+        EventoRuta.objects.filter(pk=legacy.pk).update(creado_en=legacy_fecha)
+        self._registrar_geocerca_real()
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.creado_por, legacy_actor)
+        self.assertEqual(legacy.creado_en, legacy_fecha)
+        self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).count(), 2)
+
+
+class LogisticaGuardEscritoresTests(SimpleTestCase):
+    def test_guard_detecta_asignacion_y_update_directos(self):
+        from logistica.checks import critical_parada_writes_in_source
+        source = "parada.entrega_estado = 'ENTREGADA'\nParadaRuta.objects.filter(pk=1).update(estado='VISITADA')"
+        self.assertEqual(len(critical_parada_writes_in_source(source, "logistica/views_nueva.py")), 2)
+
+    @patch("logistica.tasks.auditar_entregas_ruta")
+    def test_auditor_programado_cubre_hoy_y_dia_operativo_anterior(self, auditar):
+        from logistica.tasks import auditar_entregas_ruta_task
+        auditar.side_effect = [
+            {"rutas_revisadas": 1, "paradas_revisadas": 2, "hallazgos": [], "alertas_creadas": 0, "dry_run": False},
+            {"rutas_revisadas": 3, "paradas_revisadas": 4, "hallazgos": [], "alertas_creadas": 1, "dry_run": False},
+        ]
+        result = auditar_entregas_ruta_task.run()
+        self.assertEqual(auditar.call_count, 2)
+        self.assertEqual(result["rutas_revisadas"], 4)
+        self.assertEqual(result["alertas_creadas"], 1)
 
 
 class LogisticaReglasAdyacentesStabilizationTests(TestCase):

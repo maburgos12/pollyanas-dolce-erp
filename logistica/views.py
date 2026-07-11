@@ -244,6 +244,7 @@ def _module_tabs(active: str, user=None) -> list[dict]:
         {"key": "bitacoras", "label": "Bitácoras", "url_name": "logistica:bitacoras_lista", "active": active == "bitacoras"},
         {"key": "rutas", "label": "Rutas", "url_name": "logistica:rutas", "active": active == "rutas"},
         {"key": "control_rutas", "permission_key": "rutas", "label": "Control rutas", "url_name": "logistica:control_rutas", "active": active == "control_rutas"},
+        {"key": "revisiones_entrega", "permission_key": "rutas", "label": "Revisiones", "url_name": "logistica:revisiones_entrega", "active": active == "revisiones_entrega"},
         {"key": "puntos_logisticos", "permission_key": "rutas", "label": "Puntos", "url_name": "logistica:puntos_logisticos", "active": active == "puntos_logisticos"},
         {"key": "unidades", "label": "Unidades", "url_name": "logistica:unidades_list", "active": active == "unidades"},
         {"key": "capturas", "label": "Capturas PWA", "url_name": "logistica:capturas_pwa", "active": active == "capturas"},
@@ -1267,6 +1268,7 @@ def control_rutas(request):
     geocercas_visitadas = sum(row["paradas_visitadas"] for row in rutas_control)
     context = {
         "module_tabs": _module_tabs("control_rutas", request.user),
+        "revisiones_globales_count": _revisiones_globales_count(),
         "fecha": fecha,
         "fecha_iso": fecha.isoformat(),
         "control": {**control, "rutas": rutas_control},
@@ -1290,6 +1292,34 @@ def control_rutas(request):
     return render(request, "logistica/control_rutas.html", context)
 
 
+@login_required
+def revisiones_entrega(request):
+    if not can_manage_submodule(request.user, "logistica", "rutas"):
+        raise PermissionDenied("No tienes permisos para revisar entregas de Logística")
+    estados = {ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA}
+    paradas = list(
+        ParadaRuta.objects.filter(revision_entrega_estado__in=estados)
+        .select_related("ruta", "ruta__repartidor__user", "punto", "entrega_confirmada_por")
+        .order_by("-entrega_confirmada_en", "-id")
+    )
+    alertas = list(
+        EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA)
+        .exclude(parada__revision_entrega_estado__in=estados)
+        .select_related("ruta", "ruta__repartidor__user", "parada", "parada__punto")
+        .order_by("-creado_en", "-id")
+    )
+    return render(
+        request,
+        "logistica/revisiones_entrega.html",
+        {
+            "module_tabs": _module_tabs("revisiones_entrega", request.user),
+            "paradas_revision": paradas,
+            "alertas_historicas": alertas,
+            "revisiones_count": len(paradas) + len(alertas),
+        },
+    )
+
+
 def _coord_float(value):
     if value is None:
         return None
@@ -1297,6 +1327,19 @@ def _coord_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _revisiones_globales_count():
+    return (
+        ParadaRuta.objects.filter(
+            revision_entrega_estado__in=[ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA]
+        ).count()
+        + EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA)
+        .exclude(
+            parada__revision_entrega_estado__in=[ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA]
+        )
+        .count()
+    )
 
 
 GPS_TRACE_GAP_SECONDS = 3 * 60
@@ -1947,6 +1990,7 @@ def rutas(request):
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
+        "revisiones_globales_count": _revisiones_globales_count(),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
         "rutas": rutas_qs.annotate(
             paradas_entrega_total=Count("paradas", filter=~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS), distinct=True),
@@ -2249,6 +2293,7 @@ def ruta_detail(request, pk: int):
                         "client_timestamp": timezone.now().isoformat(),
                         "client_version": "erp-ruta-detail",
                     },
+                    origen="AJUSTE_ADMIN",
                 )
             except (ValidationError, PermissionDenied) as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))

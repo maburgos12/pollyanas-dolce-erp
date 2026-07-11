@@ -1377,6 +1377,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         evidencias_payload = payload.get("evidencias") or []
         client_context = payload.get("client_context") or {}
         motivo = payload.get("notas") or "Entrega confirmada por repartidor."
+        origen_confirmacion = "AJUSTE_ADMIN" if can_manage_rutas else "PWA"
         evidencias_servicio = [dict(item) for item in evidencias_payload]
         try:
             replay_idempotente = obtener_respuesta_idempotente(
@@ -1388,6 +1389,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 client_event_id=payload.get("client_event_id"),
                 evidencias=evidencias_servicio,
                 ubicacion=client_context,
+                origen=origen_confirmacion,
             )
         except EntregaIdempotenciaConflicto as exc:
             return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
@@ -1475,7 +1477,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
         tiene_geocerca_confiable = tiene_llegada_geocerca_confiable(ruta=ruta, parada=parada)
-        if not tiene_geocerca_confiable:
+        es_legacy_v59 = not client_context
+        if not tiene_geocerca_confiable and not es_legacy_v59:
             if not (payload.get("notas") or "").strip():
                 return Response({"notas": ["Explica el motivo de la entrega sin geocerca."]}, status=status.HTTP_400_BAD_REQUEST)
             if not client_context.get("causa") or not client_context.get("client_timestamp") or not client_context.get("client_version"):
@@ -1494,6 +1497,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 client_event_id=payload["client_event_id"],
                 evidencias=evidencias_servicio,
                 ubicacion=client_context,
+                origen=origen_confirmacion,
             )
         except EntregaIdempotenciaConflicto as exc:
             return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)

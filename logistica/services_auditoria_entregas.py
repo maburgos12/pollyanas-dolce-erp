@@ -10,7 +10,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
 
 from .models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
-from .services_entregas import _evento_geocerca_es_confiable
+from .services_entregas import _evento_geocerca_es_confiable, _notificar_revision
 
 
 EVENTOS_AUDITORIA = {
@@ -257,6 +257,8 @@ def _registrar_alerta(ruta: RutaEntrega, parada: ParadaRuta, hallazgo: HallazgoE
                 },
             },
         )
+        if creada:
+            _notificar_revision(parada=parada, actor=None, causa=hallazgo.regla)
         return creada
     except IntegrityError:
         return False

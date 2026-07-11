@@ -313,11 +313,13 @@ class ParadaRuta(models.Model):
     REVISION_PENDIENTE = "PENDIENTE"
     REVISION_AUTORIZADA = "AUTORIZADA"
     REVISION_RECHAZADA = "RECHAZADA"
+    REVISION_CORREGIDA = "CORREGIDA"
     REVISION_CHOICES = [
         (REVISION_NO_REQUERIDA, "No requerida"),
         (REVISION_PENDIENTE, "Pendiente"),
         (REVISION_AUTORIZADA, "Autorizada"),
         (REVISION_RECHAZADA, "Rechazada"),
+        (REVISION_CORREGIDA, "Corregida"),
     ]
 
     ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="paradas")

@@ -102,8 +102,22 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
     max_retries=3,
 )
 def auditar_entregas_ruta_task(ruta_id: int | None = None, fecha: str | None = None):
-    fecha_ruta = date.fromisoformat(fecha) if fecha else timezone.localdate()
-    return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
+    if ruta_id is not None or fecha:
+        fecha_ruta = date.fromisoformat(fecha) if fecha else None
+        return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
+    hoy = timezone.localdate()
+    resultados = [
+        auditar_entregas_ruta(fecha=hoy - timedelta(days=1)),
+        auditar_entregas_ruta(fecha=hoy),
+    ]
+    return {
+        "rutas_revisadas": sum(row["rutas_revisadas"] for row in resultados),
+        "paradas_revisadas": sum(row["paradas_revisadas"] for row in resultados),
+        "hallazgos": [item for row in resultados for item in row["hallazgos"]],
+        "alertas_creadas": sum(row["alertas_creadas"] for row in resultados),
+        "dry_run": False,
+        "ventana_fechas": [(hoy - timedelta(days=1)).isoformat(), hoy.isoformat()],
+    }
 
 
 @shared_task

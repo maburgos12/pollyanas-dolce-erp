@@ -53,6 +53,13 @@
     {% endfor %}
   </section>
 
+  {% if can_manage_logistica and revisiones_globales_count %}
+  <section class="route-create-note">
+    {{ revisiones_globales_count }} entrega{{ revisiones_globales_count|pluralize }} pendiente{{ revisiones_globales_count|pluralize }} de revisión.
+    <a href="{% url 'logistica:revisiones_entrega' %}">Abrir bandeja global</a>
+  </section>
+  {% endif %}
+
   <section class="ops-topline">
     <article class="ops-stat"><span>Rutas</span><strong>{{ totales.rutas }}</strong><div class="muted">Rutas visibles en operación.</div></article>
     <article class="ops-stat"><span>Hoy</span><strong>{{ totales.hoy }}</strong><div class="muted">Programación del día.</div></article>

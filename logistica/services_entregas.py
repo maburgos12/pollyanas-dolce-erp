@@ -6,12 +6,46 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.access import can_manage_submodule
+from core.models import Notificacion
+from core.notificaciones import crear_notificaciones
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
 from rrhh.services_identidad import nombre_operativo_usuario
+
+
+ORIGEN_PWA = "PWA"
+ORIGEN_AJUSTE_ADMIN = "AJUSTE_ADMIN"
+ORIGEN_SISTEMA = "SISTEMA"
+ORIGENES_CONFIRMACION = {ORIGEN_PWA, ORIGEN_AJUSTE_ADMIN, ORIGEN_SISTEMA}
+CAUSAS_EXCEPCION = {
+    "GPS_SIN_SENAL", "FUERA_DE_RADIO", "AJUSTE_ADMINISTRATIVO",
+    "GEOFENCE_LEGACY_NO_CONFIABLE", "PRECISION_INSUFICIENTE", "UBICACION_TARDIA",
+    "SALTO_IMOSIBLE", "SALTO_IMPOSIBLE", "SUCURSAL_SIN_COORDENADAS", "GPS_DENEGADO",
+    "CLIENTE_LEGACY", "SIN_GEOFENCE_VALIDADA",
+}
+
+
+def _notificar_revision(*, parada, actor, causa):
+    destinatarios = [
+        user for user in get_user_model().objects.filter(is_active=True)
+        if can_manage_submodule(user, "logistica", "rutas")
+    ]
+    crear_notificaciones(
+        destinatarios,
+        titulo=f"Entrega por revisar: {parada.ruta.folio}",
+        mensaje=f"{parada.punto_nombre_snapshot}: {causa}. Revisa la evidencia y autoriza o rechaza.",
+        url="/logistica/rutas/revisiones/",
+        tipo=Notificacion.TIPO_SISTEMA,
+        prioridad=Notificacion.PRIORIDAD_ALTA,
+        actor=actor,
+        objeto_tipo="logistica.ParadaRuta",
+        objeto_id=parada.id,
+        excluir=actor,
+    )
 
 
 class EntregaIdempotenciaConflicto(ValidationError):
@@ -114,12 +148,13 @@ def _snapshot_dominio_parada(*, parada: ParadaRuta, geocerca_confiable: bool) ->
     )
 
 
-def _payload_hash(*, entrega_estado, motivo, ubicacion, evidencias) -> str:
+def _payload_hash(*, entrega_estado, motivo, ubicacion, evidencias, origen=None) -> str:
     payload = {
         "entrega_estado": entrega_estado,
         "motivo": motivo,
         "ubicacion": ubicacion or {},
         "evidencias": list(evidencias or ()),
+        "origen": origen,
     }
     serializado = json.dumps(_json_safe(payload), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
@@ -200,7 +235,7 @@ def tiene_llegada_geocerca_confiable(*, ruta: RutaEntrega, parada: ParadaRuta) -
 
 
 def obtener_respuesta_idempotente(
-    *, ruta, parada, actor, entrega_estado, motivo, client_event_id, evidencias=(), ubicacion=None
+    *, ruta, parada, actor, entrega_estado, motivo, client_event_id, evidencias=(), ubicacion=None, origen=None
 ):
     if not getattr(actor, "pk", None) or not str(client_event_id or "").strip():
         return None
@@ -209,6 +244,7 @@ def obtener_respuesta_idempotente(
         motivo=motivo,
         ubicacion=ubicacion,
         evidencias=evidencias,
+        origen=origen,
     )
     existente = ParadaEntregaEvidencia.objects.filter(
         ruta=ruta,
@@ -270,6 +306,7 @@ def confirmar_entrega_parada(
     client_event_id,
     evidencias=(),
     ubicacion=None,
+    origen=None,
 ):
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
@@ -278,6 +315,7 @@ def confirmar_entrega_parada(
         motivo=motivo,
         ubicacion=ubicacion,
         evidencias=evidencias,
+        origen=origen,
     )
     existente = None
     if getattr(actor, "pk", None) and str(client_event_id or "").strip():
@@ -306,14 +344,31 @@ def confirmar_entrega_parada(
         motivo=motivo,
         client_event_id=client_event_id,
     )
+    if origen not in ORIGENES_CONFIRMACION:
+        raise ValidationError("El origen estructurado de la confirmación es obligatorio.")
 
     if parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
         raise ValidationError("La parada ya tiene una confirmación de entrega distinta.")
 
     llegada = _geocerca_real(ruta=ruta, parada=parada)
-    requiere_revision = llegada is None
+    requiere_revision = llegada is None or origen == ORIGEN_AJUSTE_ADMIN
     datos_revision = _json_safe(dict(ubicacion or {}))
-    causa = str(datos_revision.get("causa") or "SIN_GEOFENCE_VALIDADA") if requiere_revision else ""
+    if requiere_revision:
+        legacy_v59 = origen == ORIGEN_PWA and not datos_revision
+        if legacy_v59:
+            datos_revision = {
+                "causa": "CLIENTE_LEGACY",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v59-offline",
+            }
+        causa = str(datos_revision.get("causa") or "SIN_GEOFENCE_VALIDADA")
+        if causa not in CAUSAS_EXCEPCION:
+            raise ValidationError("La causa excepcional no pertenece al catálogo permitido.")
+        requeridos = {"causa", "client_timestamp", "client_version"}
+        if not requeridos.issubset(datos_revision):
+            raise ValidationError("La excepción requiere causa, client_timestamp y client_version.")
+    else:
+        causa = ""
     now = timezone.now()
     parada.entrega_estado = entrega_estado
     parada.entrega_confirmada_en = now
@@ -358,6 +413,7 @@ def confirmar_entrega_parada(
             "requiere_revision": requiere_revision,
             "causa": causa,
             "origen": "servicio_entregas",
+            "origen_confirmacion": origen,
         },
         creado_por=actor,
     )
@@ -401,6 +457,8 @@ def confirmar_entrega_parada(
     metadata_evidencia["evidencia_ids"] = [fila.id for fila in evidencias_creadas]
     evidencia.metadata = metadata_evidencia
     evidencia.save(update_fields=["metadata"])
+    if requiere_revision:
+        _notificar_revision(parada=parada, actor=actor, causa=causa)
     return ConfirmacionEntregaResultado(
         parada=parada,
         evento=evento,
@@ -414,8 +472,8 @@ def revisar_entrega_excepcional(*, parada, actor, decision, motivo):
     parada = ParadaRuta.objects.select_for_update().select_related("ruta").get(pk=parada.pk)
     if not can_manage_submodule(actor, "logistica", "rutas"):
         raise PermissionDenied("No tienes permiso para revisar entregas excepcionales.")
-    if decision not in {ParadaRuta.REVISION_AUTORIZADA, ParadaRuta.REVISION_RECHAZADA}:
-        raise ValidationError("La decisión debe ser AUTORIZADA o RECHAZADA.")
+    if decision not in {ParadaRuta.REVISION_AUTORIZADA, ParadaRuta.REVISION_RECHAZADA, ParadaRuta.REVISION_CORREGIDA}:
+        raise ValidationError("La decisión debe ser AUTORIZADA, RECHAZADA o CORREGIDA.")
     motivo = str(motivo or "").strip()
     if not motivo:
         raise ValidationError("El motivo de resolución es obligatorio.")
@@ -429,7 +487,11 @@ def revisar_entrega_excepcional(*, parada, actor, decision, motivo):
             ),
         ).latest("creado_en")
         return RevisionEntregaResultado(parada=parada, evento=evento, idempotente=True)
-    if parada.revision_entrega_estado != ParadaRuta.REVISION_PENDIENTE:
+    estado_origen_valido = (
+        parada.revision_entrega_estado == ParadaRuta.REVISION_PENDIENTE
+        or (parada.revision_entrega_estado == ParadaRuta.REVISION_RECHAZADA and decision == ParadaRuta.REVISION_CORREGIDA)
+    )
+    if not estado_origen_valido:
         raise ValidationError("La entrega no tiene una revisión excepcional pendiente.")
 
     parada.revision_entrega_estado = decision

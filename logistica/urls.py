@@ -17,6 +17,7 @@ urlpatterns = [
     path("domicilios-ecommerce/", views.domicilios_ecommerce, name="domicilios_ecommerce"),
     path("domicilios-generales/", views.domicilios_generales, name="domicilios_generales"),
     path("rutas/control/", views.control_rutas, name="control_rutas"),
+    path("rutas/revisiones/", views.revisiones_entrega, name="revisiones_entrega"),
     path("rutas/puntos/", views.puntos_logisticos, name="puntos_logisticos"),
     path("rutas/puntos/<int:pk>/editar/", views.punto_logistico_edit, name="punto_logistico_edit"),
     path("rutas/puntos/<int:pk>/toggle/", views.punto_logistico_toggle, name="punto_logistico_toggle"),

@@ -406,28 +406,25 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                     parada=resultado.parada,
                     tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
                     creado_en__gte=timezone.now() - timezone.timedelta(minutes=60),
+                    metadata__origen_servicio="registrar_ubicacion_ruta",
+                    metadata__ubicacion_confiable=True,
                 )
                 .order_by("-creado_en", "-id")
                 .first()
             )
-            if evento_llegada and evento_llegada.metadata.get("origen_servicio") != "registrar_ubicacion_ruta":
-                evento_llegada.ubicacion = ubicacion
-                evento_llegada.latitud = ubicacion.latitud
-                evento_llegada.longitud = ubicacion.longitud
-                evento_llegada.distancia_metros = resultado.distancia_metros
-                evento_llegada.metadata = metadata_llegada
-                evento_llegada.creado_por = user
-                evento_llegada.creado_en = timezone.now()
-                evento_llegada.save(
-                    update_fields=[
-                        "ubicacion",
-                        "latitud",
-                        "longitud",
-                        "distancia_metros",
-                        "metadata",
-                        "creado_por",
-                        "creado_en",
-                    ]
+            if evento_llegada is None:
+                evento_llegada = EventoRuta.objects.create(
+                    ruta=ruta,
+                    parada=resultado.parada,
+                    ubicacion=ubicacion,
+                    tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+                    severidad=EventoRuta.SEVERIDAD_OK,
+                    descripcion=f"Llegada detectada en {resultado.parada.punto_nombre_snapshot}.",
+                    latitud=ubicacion.latitud,
+                    longitud=ubicacion.longitud,
+                    distancia_metros=resultado.distancia_metros,
+                    metadata=metadata_llegada,
+                    creado_por=user,
                 )
         if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
             _marcar_visitada_por_permanencia(
