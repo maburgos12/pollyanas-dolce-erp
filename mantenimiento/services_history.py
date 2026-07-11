@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import Http404
 
 from activos.models import OrdenMantenimiento
@@ -148,16 +148,23 @@ def _history_actor(user_id, full_name, username):
     return {"id": user_id, "label": (full_name or username or "Usuario")}
 
 
-def unified_history_rows(user, *, period, include_costs=False):
+def unified_history_rows(user, *, period, include_costs=False, filters=None, candidate_limit=None):
     """Normalize authorized maintenance facts; one database row becomes one UID."""
     start, end = period_bounds(period)
+    filters = filters or {}
     rows = []
 
-    fallas = authorized_fallas(user).select_related("reportado_por").values(
+    fallas = authorized_fallas(user).select_related("reportado_por")
+    if filters.get("tipo") not in {None, "todo", "reporte"}:
+        fallas = fallas.none()
+    if filters.get("sucursal"): fallas = fallas.filter(sucursal_id=filters["sucursal"])
+    if filters.get("activo"): fallas = fallas.filter(activo_relacionado_id=filters["activo"])
+    if filters.get("q"): fallas = fallas.filter(Q(titulo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]))
+    fallas = fallas.values(
         "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_resolucion", "fecha_cierre",
         "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
         "reportado_por_id", "reportado_por__first_name", "reportado_por__last_name", "reportado_por__username",
-    )
+    )[:candidate_limit]
     falla_states = {
         ReporteFalla.ESTATUS_ABIERTO: "abierto", ReporteFalla.ESTATUS_REVISION: "en_proceso",
         ReporteFalla.ESTATUS_PROCESO: "en_proceso", ReporteFalla.ESTATUS_RESUELTO: "cerrado",
@@ -177,11 +184,16 @@ def unified_history_rows(user, *, period, include_costs=False):
                 asset_id=item["activo_relacionado_id"],
             ))
 
-    orders = authorized_orders(user).select_related("creado_por").values(
+    orders = authorized_orders(user).select_related("creado_por")
+    if filters.get("tipo") not in {None, "todo", "orden", "sin_reporte"}: orders = orders.none()
+    if filters.get("sucursal"): orders = orders.filter(activo_ref__sucursal_id=filters["sucursal"])
+    if filters.get("activo"): orders = orders.filter(activo_ref_id=filters["activo"])
+    if filters.get("q"): orders = orders.filter(Q(folio__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(activo_ref__nombre__icontains=filters["q"]))
+    orders = orders.values(
         "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id", "numero_factura", "factura_archivo", "costo_repuestos", "costo_mano_obra", "costo_otros",
         "activo_ref_id", "activo_ref__nombre", "activo_ref__sucursal_id", "activo_ref__sucursal__nombre",
         "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
-    )
+    )[:candidate_limit]
     from activos.models import SolicitudFalla
     scoped_order_ids = authorized_orders(user).values_list("id", flat=True)
     linked_order_ids = set(SolicitudFalla.objects.filter(
@@ -203,11 +215,16 @@ def unified_history_rows(user, *, period, include_costs=False):
                 cost=((item["costo_repuestos"] or 0) + (item["costo_mano_obra"] or 0) + (item["costo_otros"] or 0)) if include_costs else None,
             ))
 
-    reports = authorized_unit_reports(user).values(
+    reports = authorized_unit_reports(user)
+    if filters.get("tipo") not in {None, "todo", "reporte"}: reports = reports.none()
+    if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
+    if filters.get("unidad"): reports = reports.filter(unidad_id=filters["unidad"])
+    if filters.get("q"): reports = reports.filter(Q(tipo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+    reports = reports.values(
         "id", "tipo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre", "repartidor__user_id",
         "repartidor__user__first_name", "repartidor__user__last_name", "repartidor__user__username",
         "unidad_id", "unidad__codigo", "unidad__sucursal_id", "unidad__sucursal__nombre",
-    )
+    )[:candidate_limit]
     for item in reports:
         state = canonical_status("reporte_unidad", item["estatus"])
         if state == "programado": state = "en_proceso"
@@ -219,7 +236,18 @@ def unified_history_rows(user, *, period, include_costs=False):
                 origin="reporte_unidad", title=item["tipo"], description=item["descripcion"], unit_id=item["unidad_id"]))
 
     for kind, queryset, date_field in (("reparacion", authorized_repairs(user), "fecha_ingreso"), ("servicio_unidad", authorized_unit_services(user), "fecha_servicio")):
+        if filters.get("tipo") not in {None, "todo", kind}:
+            continue
+        if filters.get("sucursal"): queryset = queryset.filter(unidad__sucursal_id=filters["sucursal"])
+        if filters.get("unidad"): queryset = queryset.filter(unidad_id=filters["unidad"])
+        if filters.get("q"):
+            if kind == "reparacion": queryset = queryset.filter(Q(descripcion_falla__icontains=filters["q"]) | Q(descripcion_reparacion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+            else: queryset = queryset.filter(Q(tipo_servicio__nombre__icontains=filters["q"]) | Q(notas__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+        if start: queryset = queryset.filter(**{f"{date_field}__gte": start.date()})
+        queryset = queryset.filter(**{f"{date_field}__lt": end.date()})
         queryset = queryset.select_related("registrado_por", "unidad", "unidad__sucursal")
+        if kind == "servicio_unidad": queryset = queryset.select_related("tipo_servicio")
+        queryset = queryset.order_by(f"-{date_field}", "-id")[:candidate_limit]
         for obj in queryset:
             event = getattr(obj, date_field)
             if not _in_period(event, start, end): continue
@@ -233,6 +261,32 @@ def unified_history_rows(user, *, period, include_costs=False):
                 invoice=_invoice(f"{kind}_factura" if kind == "reparacion" else "servicio_unidad_factura", obj.pk, obj.archivo_factura),
                 cost=((obj.costo if is_service else obj.costo_total) if include_costs else None)))
     return rows
+
+
+def filtered_history_count(user, *, period, filters):
+    """Count a single concrete source without materializing its rows."""
+    kind = filters.get("tipo")
+    definitions = {
+        "servicio_unidad": (authorized_unit_services(user), "fecha_servicio", "tipo_servicio__nombre", "notas"),
+        "reparacion": (authorized_repairs(user), "fecha_ingreso", "descripcion_falla", "descripcion_reparacion"),
+    }
+    if kind not in definitions:
+        return None
+    queryset, date_field, title_field, description_field = definitions[kind]
+    start, end = period_bounds(period)
+    if filters.get("sucursal"): queryset = queryset.filter(unidad__sucursal_id=filters["sucursal"])
+    if filters.get("unidad"): queryset = queryset.filter(unidad_id=filters["unidad"])
+    if start: queryset = queryset.filter(**{f"{date_field}__gte": start.date()})
+    queryset = queryset.filter(**{f"{date_field}__lt": end.date()})
+    if filters.get("q"):
+        queryset = queryset.filter(
+            Q(**{f"{title_field}__icontains": filters["q"]}) |
+            Q(**{f"{description_field}__icontains": filters["q"]}) |
+            Q(unidad__codigo__icontains=filters["q"])
+        )
+    if filters.get("estado") not in {None, "todo", "cerrado"}:
+        return 0
+    return queryset.count()
 
 
 def _history_payload(*, uid, event, kind, state, branch_id, branch, subject_id, subject, actor, origin,

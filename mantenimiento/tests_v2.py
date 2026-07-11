@@ -690,10 +690,10 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
             unidad=other_unit, tipo_servicio=self.service_type, fecha_servicio=timezone.localdate(),
             registrado_por=None,
         )
-        for days in range(7):
+        for index in range(120):
             ServicioRealizadoUnidad.objects.create(
                 unidad=self.unit, tipo_servicio=self.service_type,
-                fecha_servicio=timezone.localdate() - timedelta(days=days), registrado_por=None,
+                fecha_servicio=timezone.localdate() - timedelta(days=index % 29), registrado_por=None,
             )
         limited = get_user_model().objects.create_user("history-page-limited", password="test")
         UserProfile.objects.create(user=limited, sucursal=self.branch)
@@ -715,12 +715,14 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         self.assertFalse(typed_uids["orden"] & typed_uids["reporte"])
         self.assertFalse(typed_uids["sin_reporte"] & typed_uids["orden"])
 
-        params = {"tipo": "servicio_unidad", "periodo": "todo", "page_size": 3}
+        params = {"tipo": "servicio_unidad", "periodo": "todo", "page_size": 25}
         page1 = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 1}).json()
         page2 = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 2}).json()
         uids1 = [row["uid"] for row in page1["results"]]
         uids2 = [row["uid"] for row in page2["results"]]
-        self.assertEqual(page1["pagination"]["total"], 7)
+        self.assertEqual(page1["pagination"]["total"], 120)
+        self.assertEqual(len(uids1), 25)
+        self.assertEqual(len(uids2), 25)
         self.assertFalse(set(uids1) & set(uids2))
         self.assertEqual(uids1, [row["uid"] for row in self.client.get(
             "/api/mantenimiento/v2/historial/", {**params, "page": 1}

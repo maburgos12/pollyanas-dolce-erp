@@ -9,7 +9,7 @@ from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services, can_view_costs,
 )
-from mantenimiento.services_history import inbox_rows, item_detail, unified_history_rows
+from mantenimiento.services_history import filtered_history_count, inbox_rows, item_detail, unified_history_rows
 from mantenimiento.serializers import MaintenanceHistoryEventSerializer
 from mantenimiento.views import AUTH, EsMantenimiento
 
@@ -92,7 +92,19 @@ def historial_v2(request):
     if page is None or page_size is None:
         return Response({"error": "Paginación no válida."}, status=400)
     page_size = min(page_size, 100)
-    rows = unified_history_rows(request.user, period=filters["periodo"], include_costs=can_view_costs(request.user))
+    sql_filters = {
+        "tipo": filters["tipo"], "estado": filters["estado"],
+        "sucursal": request.query_params.get("sucursal"), "activo": request.query_params.get("activo"),
+        "unidad": request.query_params.get("unidad"), "q": (request.query_params.get("q") or "").strip(),
+    }
+    for key in ("sucursal", "activo", "unidad"):
+        if sql_filters[key]:
+            try: sql_filters[key] = int(sql_filters[key])
+            except ValueError: return Response({"error": f"{key.capitalize()} no válido."}, status=400)
+    rows = unified_history_rows(
+        request.user, period=filters["periodo"], include_costs=can_view_costs(request.user),
+        filters=sql_filters, candidate_limit=page * page_size,
+    )
     tipo = filters["tipo"]
     if tipo != "todo":
         rows = [row for row in rows if row["tipo"] == tipo]
@@ -106,8 +118,12 @@ def historial_v2(request):
     query = (request.query_params.get("q") or "").strip().casefold()
     if query:
         rows = [row for row in rows if query in " ".join((row["titulo"], row["descripcion"], (row["sujeto"] or {}).get("label", ""), row["actor"]["label"])).casefold()]
-    rows.sort(key=lambda row: (row["fecha_evento"], row["uid"]), reverse=True)
-    total = len(rows); start = (page - 1) * page_size
+    rows.sort(key=lambda row: (
+        row["fecha_evento"], row["uid"].split(":", 1)[0], int(row["uid"].split(":", 1)[1])
+    ), reverse=True)
+    counted_total = filtered_history_count(request.user, period=filters["periodo"], filters=sql_filters)
+    total = counted_total if counted_total is not None else len(rows)
+    start = (page - 1) * page_size
     results = MaintenanceHistoryEventSerializer(rows[start:start + page_size], many=True).data
     return Response({"schema_version": 2, "results": results, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": start + page_size < total}})
 
