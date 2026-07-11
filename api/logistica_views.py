@@ -1417,20 +1417,37 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 return Response(replay_idempotente.respuesta, status=status.HTTP_200_OK)
             evento_original = EventoRuta.objects.get(pk=replay_idempotente.evidencia.metadata["evento_id"])
             requiere_revision = bool(evento_original.metadata.get("requiere_revision"))
-            parada_data = dict(ParadaRutaSerializer(parada).data)
-            parada_data.update(
-                {
+            metadata_replay = replay_idempotente.evidencia.metadata or {}
+            parada_data = metadata_replay.get("snapshot_dominio")
+            evidencia_ids = metadata_replay.get("evidencia_ids") or [replay_idempotente.evidencia.id]
+            replay_recuperado = parada_data is None
+            if replay_recuperado:
+                parada_data = {
+                    "id": replay_idempotente.evidencia.parada_id,
+                    "ruta": replay_idempotente.evidencia.ruta_id,
+                    "punto": None,
+                    "estado": None,
+                    "estado_display": "No recuperable",
+                    "hora_llegada_real": None,
+                    "hora_salida_real": None,
+                    "entrega_estado": evento_original.metadata.get("entrega_estado"),
+                    "entrega_estado_display": evento_original.metadata.get("entrega_estado"),
+                    "entrega_confirmada_en": replay_idempotente.evidencia.capturado_en.isoformat(),
+                    "entrega_confirmada_por_nombre": nombre_operativo_usuario(request.user),
+                    "entrega_notas": replay_idempotente.evidencia.comentario,
                     "geocerca_confiable": not requiere_revision,
                     "revision_entrega_estado": (
                         ParadaRuta.REVISION_PENDIENTE if requiere_revision else ParadaRuta.REVISION_NO_REQUERIDA
                     ),
+                    "revision_entrega_causa": evento_original.metadata.get("causa", ""),
+                    "revision_entrega_datos": {},
                     "revision_entrega_revisada_en": None,
                     "revision_entrega_revisada_por": None,
                     "revision_entrega_revisada_por_nombre": "",
                     "revision_entrega_resolucion": "",
+                    "distancia_llegada_metros": evento_original.distancia_metros,
                 }
-            )
-            evidencias_originales = parada.evidencias_entrega.all().order_by("id")
+            evidencias_originales = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).order_by("id")
             respuesta_reconstruida = {
                 "parada": parada_data,
                 "evidencias": ParadaEntregaEvidenciaSerializer(
@@ -1445,6 +1462,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     else ""
                 ),
             }
+            if replay_recuperado:
+                respuesta_reconstruida["replay_recuperado"] = True
             guardar_respuesta_idempotente(
                 evidencia=replay_idempotente.evidencia,
                 respuesta=respuesta_reconstruida,
@@ -1506,7 +1525,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         parada = resultado.parada
         ruta.recompute_route_control()
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-        evidencias = parada.evidencias_entrega.all().order_by("id")
+        evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
+        evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).order_by("id")
 
         log_event(
             request.user,
@@ -1516,7 +1536,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": evidencias.count()},
         )
         respuesta = {
-            "parada": ParadaRutaSerializer(parada).data,
+            "parada": resultado.evidencia.metadata["snapshot_dominio"],
             "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
             "requiere_revision": resultado.requiere_revision,
             "warning": (

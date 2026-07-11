@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -10,6 +11,7 @@ from django.utils import timezone
 
 from core.access import can_manage_submodule
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
+from rrhh.services_identidad import nombre_operativo_usuario
 
 
 class EntregaIdempotenciaConflicto(ValidationError):
@@ -40,6 +42,72 @@ class ReplayConfirmacionResultado:
 
 def _json_safe(value):
     return json.loads(json.dumps(value, default=str))
+
+
+def _datetime_api(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return timezone.localtime(value).isoformat()
+    return value.isoformat()
+
+
+def _snapshot_dominio_parada(*, parada: ParadaRuta, geocerca_confiable: bool) -> dict:
+    punto = parada.punto
+    return _json_safe(
+        {
+            "id": parada.id,
+            "ruta": parada.ruta_id,
+            "punto": {
+                "id": punto.id,
+                "sucursal": punto.sucursal_id,
+                "sucursal_nombre": punto.sucursal.nombre if punto.sucursal_id else "",
+                "nombre": punto.nombre,
+                "tipo": punto.tipo,
+                "tipo_display": punto.get_tipo_display(),
+                "latitud": str(punto.latitud) if punto.latitud is not None else None,
+                "longitud": str(punto.longitud) if punto.longitud is not None else None,
+                "radio_geocerca_metros": punto.radio_geocerca_metros,
+                "activo": punto.activo,
+                "notas": punto.notas,
+            },
+            "orden": parada.orden,
+            "punto_nombre_snapshot": parada.punto_nombre_snapshot,
+            "latitud_geocerca": str(parada.latitud_geocerca) if parada.latitud_geocerca is not None else None,
+            "longitud_geocerca": str(parada.longitud_geocerca) if parada.longitud_geocerca is not None else None,
+            "radio_geocerca_metros": parada.radio_geocerca_metros,
+            "hora_estimada": _datetime_api(parada.hora_estimada),
+            "hora_llegada_real": _datetime_api(parada.hora_llegada_real),
+            "hora_salida_real": _datetime_api(parada.hora_salida_real),
+            "estado": parada.estado,
+            "estado_display": parada.get_estado_display(),
+            "entrega_estado": parada.entrega_estado,
+            "entrega_estado_display": parada.get_entrega_estado_display(),
+            "entrega_confirmada_en": _datetime_api(parada.entrega_confirmada_en),
+            "entrega_confirmada_por_nombre": (
+                nombre_operativo_usuario(parada.entrega_confirmada_por)
+                if parada.entrega_confirmada_por_id
+                else ""
+            ),
+            "entrega_notas": parada.entrega_notas,
+            "geocerca_confiable": geocerca_confiable,
+            "revision_entrega_estado": parada.revision_entrega_estado,
+            "revision_entrega_causa": parada.revision_entrega_causa,
+            "revision_entrega_datos": parada.revision_entrega_datos,
+            "revision_entrega_revisada_en": _datetime_api(parada.revision_entrega_revisada_en),
+            "revision_entrega_revisada_por": parada.revision_entrega_revisada_por_id,
+            "revision_entrega_revisada_por_nombre": (
+                nombre_operativo_usuario(parada.revision_entrega_revisada_por)
+                if parada.revision_entrega_revisada_por_id
+                else ""
+            ),
+            "revision_entrega_resolucion": parada.revision_entrega_resolucion,
+            "distancia_llegada_metros": (
+                str(parada.distancia_llegada_metros) if parada.distancia_llegada_metros is not None else None
+            ),
+            "notas": parada.notas,
+        }
+    )
 
 
 def _payload_hash(*, entrega_estado, motivo, ubicacion, evidencias) -> str:
@@ -267,6 +335,7 @@ def confirmar_entrega_parada(
     evidencias_payload = list(evidencias or ())
     filas_evidencia = evidencias_payload or [{}]
     evidencia = None
+    evidencias_creadas = []
     for index, item in enumerate(filas_evidencia):
         item = dict(item)
         evidencia_item = ParadaEntregaEvidencia.objects.create(
@@ -289,6 +358,15 @@ def confirmar_entrega_parada(
         )
         if evidencia is None:
             evidencia = evidencia_item
+        evidencias_creadas.append(evidencia_item)
+    metadata_evidencia = dict(evidencia.metadata or {})
+    metadata_evidencia["snapshot_dominio"] = _snapshot_dominio_parada(
+        parada=parada,
+        geocerca_confiable=not requiere_revision,
+    )
+    metadata_evidencia["evidencia_ids"] = [fila.id for fila in evidencias_creadas]
+    evidencia.metadata = metadata_evidencia
+    evidencia.save(update_fields=["metadata"])
     return ConfirmacionEntregaResultado(
         parada=parada,
         evento=evento,

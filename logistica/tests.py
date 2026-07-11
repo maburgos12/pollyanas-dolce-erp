@@ -580,6 +580,88 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(retry.json(), primero.json())
 
+    def test_retry_sin_respuesta_api_usa_snapshot_inmutable_y_excluye_evidencia_posterior(self):
+        payload = self._payload(client_event_id="api-retry-snapshot-inmutable")
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        evidencia = ParadaEntregaEvidencia.objects.get(client_event_id="api-retry-snapshot-inmutable")
+        self.assertIn("snapshot_dominio", evidencia.metadata)
+        self.assertEqual(evidencia.metadata["evidencia_ids"], [evidencia.id])
+        metadata = dict(evidencia.metadata)
+        metadata.pop("respuesta_api")
+        evidencia.metadata = metadata
+        evidencia.save(update_fields=["metadata"])
+
+        self._registrar_geocerca_real()
+        llegada = EventoRuta.objects.get(
+            parada=self.parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
+        )
+        EventoRuta.objects.filter(pk=llegada.pk).update(creado_en=timezone.now() - timezone.timedelta(minutes=10))
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570000",
+                "longitud": "-108.470000",
+                "precision_metros": "8.00",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=ParadaEntregaEvidencia.TIPO_INCIDENCIA,
+            comentario="Evidencia administrativa posterior",
+            capturado_por=self.user,
+            client_event_id="evidencia-posterior",
+            metadata={"origen": "point_posterior"},
+        )
+        jefe = User.objects.create_user(username="jefe.retry.inmutable", password="pass123")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_RECHAZADA,
+            motivo="Revisión posterior al hecho",
+        )
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+        self.assertEqual([row["id"] for row in retry.json()["evidencias"]], [evidencia.id])
+
+    def test_retry_legacy_sin_snapshot_declara_recuperacion_limitada(self):
+        payload = self._payload(client_event_id="api-retry-legacy-sin-snapshot")
+        self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        evidencia = ParadaEntregaEvidencia.objects.get(client_event_id="api-retry-legacy-sin-snapshot")
+        metadata = dict(evidencia.metadata)
+        metadata.pop("respuesta_api")
+        metadata.pop("snapshot_dominio")
+        metadata.pop("evidencia_ids")
+        evidencia.metadata = metadata
+        evidencia.save(update_fields=["metadata"])
+        jefe = User.objects.create_user(username="jefe.retry.legacy", password="pass123")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_AUTORIZADA,
+            motivo="Cambio posterior no recuperable",
+        )
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.assertEqual(retry.status_code, 200)
+        self.assertTrue(retry.json()["replay_recuperado"])
+        self.assertEqual(retry.json()["parada"]["revision_entrega_estado"], ParadaRuta.REVISION_PENDIENTE)
+        self.assertIsNone(retry.json()["parada"]["revision_entrega_revisada_por"])
+        self.assertEqual([row["id"] for row in retry.json()["evidencias"]], [evidencia.id])
+
     def test_ajuste_erp_no_fabrica_visita_hora_ni_geocerca(self):
         jefe = User.objects.create_user(username="jefe.api.entregas", password="pass123")
         UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
