@@ -1989,9 +1989,13 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
             .annotate(total=Sum("cantidad"))
         )
     }
-    existencia_map = {
-        int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+    stock_total_map = {
+        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
 
     aggregated: dict[int, dict[str, object]] = {}
@@ -2028,8 +2032,7 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
         insumo = payload["insumo"]
         required_qty = Decimal(str(payload["required_qty"] or 0))
         historico_units = Decimal(str(payload["historico_units"] or 0))
-        existencia = existencia_map.get(int(insumo.id))
-        stock_actual = Decimal(str(getattr(existencia, "stock_actual", 0) or 0))
+        stock_actual = stock_total_map.get(int(insumo.id), Decimal("0"))
         shortage = max(required_qty - stock_actual, Decimal("0"))
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])

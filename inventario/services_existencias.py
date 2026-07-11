@@ -13,7 +13,7 @@ ALMACEN_DEFAULT = "ALMACEN_1"
 
 
 def get_or_create_existencia(insumo: Insumo, almacen: str = ALMACEN_DEFAULT):
-    return ExistenciaInsumo.objects.get_or_create(insumo=insumo, almacen=almacen)
+    return ExistenciaInsumo.objects.get_or_create(insumo=insumo, almacen=almacen)[0]
 
 
 @transaction.atomic

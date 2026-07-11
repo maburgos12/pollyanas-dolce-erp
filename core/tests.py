@@ -36,7 +36,16 @@ from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, 
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
 from core.hallmark_ui_audit import new_issues_against_baseline, scan_hallmark_ui
-from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
+from core.views import (
+    _build_canonical_inventory_dashboard_metrics,
+    _build_dashboard_daily_sales_snapshot,
+    _build_dashboard_sales_history_summary,
+    _build_dashboard_supply_watchlist,
+    _compute_budget_semaforo,
+    _compute_plan_forecast_semaforo,
+    _sales_previous_dates,
+    _sales_source_context,
+)
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
@@ -934,6 +943,68 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertEqual(response.context["inventario_total_count"], 1)
         self.assertEqual(response.context["alertas_count"], 1)
         self.assertEqual(response.context["bajo_reorden_count"], 1)
+
+    def test_dashboard_inventory_metrics_suma_stock_multiubicacion(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-dash-multi",
+            nombre="Kilogramo Dashboard Multi",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo Dashboard Multi",
+            codigo_point="DASH-MULTI-001",
+            unidad_base=unidad,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("2"),
+            stock_minimo=Decimal("3"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("2"),
+            stock_minimo=Decimal("3"),
+        )
+
+        metrics = _build_canonical_inventory_dashboard_metrics()
+
+        self.assertEqual(metrics["stock_bajo_min_count"], 0)
+
+    def test_dashboard_supply_watchlist_suma_stock_multiubicacion(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-supply-multi",
+            nombre="Kilogramo Supply Multi",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo Supply Multi",
+            codigo_point="SUPPLY-MULTI-001",
+            unidad_base=unidad,
+            activo=True,
+        )
+        receta = Receta.objects.create(nombre="Receta Supply Multi", hash_contenido="supply-multi")
+        LineaReceta.objects.create(
+            receta=receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto=insumo.nombre,
+            cantidad=Decimal("10"),
+            unidad=unidad,
+            unidad_texto=unidad.codigo,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        plan = PlanProduccion.objects.create(nombre="Plan Supply Multi", fecha_produccion=timezone.localdate())
+        PlanProduccionItem.objects.create(plan=plan, receta=receta, cantidad=Decimal("1"))
+        ExistenciaInsumo.objects.create(insumo=insumo, almacen="ALMACEN_1", stock_actual=Decimal("4"))
+        ExistenciaInsumo.objects.create(insumo=insumo, almacen="ARMADO", stock_actual=Decimal("3"))
+
+        context = _build_dashboard_supply_watchlist()
+
+        self.assertEqual(context["rows"][0]["stock_actual"], Decimal("7"))
+        self.assertEqual(context["rows"][0]["shortage"], Decimal("3"))
 
     def test_dashboard_shows_enterprise_governance_cards(self):
         response = self.client.get(reverse("dashboard"))

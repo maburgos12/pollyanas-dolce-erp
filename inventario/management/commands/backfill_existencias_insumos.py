@@ -38,10 +38,8 @@ class Command(BaseCommand):
         created = 0
         with transaction.atomic():
             for insumo in missing_qs.iterator():
-                _, was_created = get_or_create_existencia(
-                    insumo,
-                    "ALMACEN_1",
-                )
+                was_created = not insumo.existencias.filter(almacen="ALMACEN_1").exists()
+                get_or_create_existencia(insumo, "ALMACEN_1")
                 if was_created:
                     created += 1
 

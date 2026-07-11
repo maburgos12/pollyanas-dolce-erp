@@ -30,6 +30,7 @@ from reportes.models import (
 )
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from reportes.views import _sales_refresh_status
+from reportes.daily_operational_closure_service import _inventory_discrepancies
 from recetas.models import Receta
 from ventas.models import VentaAutoritativaPoint
 
@@ -673,6 +674,19 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Insumos sin traza")
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
+
+    def test_inventory_discrepancies_suma_stock_multiubicacion(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("3"),
+        )
+
+        rows = _inventory_discrepancies(self.target_date)
+        fact = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo)
+
+        self.assertEqual(rows[0]["visible_stock"], Decimal("15"))
+        self.assertEqual(rows[0]["difference"], Decimal("15") - fact.stock_final)
 
     def test_cierre_operativo_uses_branch_indicator_tickets_when_sales_facts_have_zero(self):
         FactVentaDiaria.objects.filter(fecha=self.target_date).update(tickets=0)

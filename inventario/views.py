@@ -5040,7 +5040,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
 
         insumo = canonical_insumo_by_id(request.POST.get("insumo_id"))
         if insumo:
-            existencia, _ = get_or_create_existencia(insumo, "ALMACEN_1")
+            existencia = get_or_create_existencia(insumo, "ALMACEN_1")
             prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
             prev_minimo = existencia.stock_minimo
@@ -5418,7 +5418,7 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "La cantidad del movimiento debe ser mayor a cero.")
                 return redirect("inventario:movimientos")
 
-            existencia, _ = get_or_create_existencia(insumo, "ALMACEN_1")
+            existencia = get_or_create_existencia(insumo, "ALMACEN_1")
             if tipo in {MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO} and existencia.stock_actual < cantidad:
                 messages.error(
                     request,

@@ -1746,6 +1746,7 @@ class ReportesBITests(TestCase):
         )
         PlanProduccionItem.objects.create(plan=plan, receta=receta, cantidad=Decimal("4"))
         ExistenciaInsumo.objects.create(insumo=insumo, stock_actual=Decimal("1"), punto_reorden=Decimal("2"))
+        ExistenciaInsumo.objects.create(insumo=insumo, almacen="ARMADO", stock_actual=Decimal("3"))
         VentaHistorica.objects.create(
             receta=receta,
             sucursal=sucursal,
@@ -1762,6 +1763,8 @@ class ReportesBITests(TestCase):
         self.assertTrue(resp.context["supply_watchlist"])
         self.assertEqual(resp.context["supply_watchlist"]["plan_nombre"], "Plan BI Supply")
         self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["insumo_nombre"], "Chocolate BI Supply")
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual"], Decimal("4"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage"], Decimal("4"))
 
     def test_bi_production_summary_uses_bulk_recipe_cost_map(self):
         target_date = timezone.localdate()

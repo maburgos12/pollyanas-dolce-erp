@@ -7,11 +7,16 @@ from django.utils import timezone
 from maestros.models import Insumo
 
 
+UBICACION_CFP_1_1 = "CFP_1_1"
+UBICACION_ARMADO = "ARMADO"
+UBICACION_CFP_1 = "CFP_1"
+
+
 ALMACEN_CHOICES = [
     ("ALMACEN_1", "Almacén 1 (principal)"),
-    ("CFP_1_1", "CFP 1.1"),
-    ("ARMADO", "Armado"),
-    ("CFP_1", "CFP 1"),
+    (UBICACION_CFP_1_1, "CFP 1.1"),
+    (UBICACION_ARMADO, "Armado"),
+    (UBICACION_CFP_1, "CFP 1"),
     ("ALMACEN_CASA_1", "Almacén Casa 1"),
     ("ALMACEN_CASA_2", "Almacén Casa 2"),
     ("CUARTO_FRIO", "Cuarto Frío"),

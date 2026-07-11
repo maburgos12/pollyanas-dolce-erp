@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.cache import cache
 from django.db import DatabaseError, connection, transaction
-from django.db.models import Count, F
+from django.db.models import Count, F, Sum
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from rest_framework import status
@@ -154,22 +154,30 @@ class PublicInsumosView(APIView):
             if cost.insumo_id not in latest_cost_by_insumo:
                 latest_cost_by_insumo[cost.insumo_id] = cost
 
-        existencias_by_insumo = {
+        stock_total_by_insumo = {
+            row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
+            for row in (
+                ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+                .values("insumo_id")
+                .annotate(stock_total=Sum("stock_actual"))
+            )
+        }
+        almacen_principal_by_insumo = {
             row.insumo_id: row
-            for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+            for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids, almacen="ALMACEN_1")
         }
 
         data = []
         for insumo in rows:
             costo = latest_cost_by_insumo.get(insumo.id)
-            ex = existencias_by_insumo.get(insumo.id)
+            ex = almacen_principal_by_insumo.get(insumo.id)
             data.append(
                 {
                     "id": insumo.id,
                     "nombre": insumo.nombre,
                     "categoria": insumo.categoria,
                     "unidad": insumo.unidad_base.codigo if insumo.unidad_base else "",
-                    "stock_actual": str(ex.stock_actual) if ex else "0",
+                    "stock_actual": str(stock_total_by_insumo.get(insumo.id, Decimal("0"))),
                     "punto_reorden": str(ex.punto_reorden) if ex else "0",
                     "costo_unitario": str(costo.costo_unitario) if costo else "0",
                     "costo_fecha": costo.fecha.isoformat() if costo else None,

@@ -2580,6 +2580,11 @@ class InventarioUbicacionTests(TestCase):
         )
 
     def test_mismo_insumo_tiene_stock_independiente_por_ubicacion(self):
+        from inventario.models import UBICACION_ARMADO, UBICACION_CFP_1, UBICACION_CFP_1_1
+
+        self.assertEqual(UBICACION_CFP_1_1, "CFP_1_1")
+        self.assertEqual(UBICACION_ARMADO, "ARMADO")
+        self.assertEqual(UBICACION_CFP_1, "CFP_1")
         ExistenciaInsumo.objects.create(
             insumo=self.insumo,
             almacen="CFP_1_1",
@@ -2603,6 +2608,14 @@ class InventarioUbicacionTests(TestCase):
             ExistenciaInsumo.objects.get(insumo=self.insumo, almacen="ARMADO").stock_actual,
             Decimal("2"),
         )
+
+    def test_get_or_create_existencia_devuelve_instancia(self):
+        from inventario.services_existencias import get_or_create_existencia
+
+        existencia = get_or_create_existencia(self.insumo, "ARMADO")
+
+        self.assertIsInstance(existencia, ExistenciaInsumo)
+        self.assertEqual(existencia.almacen, "ARMADO")
 
     def test_aplicar_delta_negativo_conserva_saldo(self):
         existencia = ExistenciaInsumo.objects.create(

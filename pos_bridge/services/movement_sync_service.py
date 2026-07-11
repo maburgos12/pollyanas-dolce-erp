@@ -11,7 +11,7 @@ from control.models import MermaPOS
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
-from inventario.models import MovimientoInventario
+from inventario.models import ALMACEN_CHOICES, MovimientoInventario
 from inventario.services_existencias import aplicar_delta
 from maestros.models import Insumo, PointPendingMatch
 from pos_bridge.config import load_point_bridge_settings
@@ -155,7 +155,28 @@ class PointMovementSyncService:
         _, created = MermaPOS.objects.update_or_create(source_hash=line.source_hash, defaults=defaults)
         return created
 
-    def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str = "ALMACEN_1") -> None:
+    def _point_inventory_location(self, branch: PointBranch | None) -> str | None:
+        if branch is None:
+            return None
+        metadata = dict(branch.metadata or {})
+        candidates = [
+            metadata.get("inventario_ubicacion"),
+            metadata.get("inventory_location"),
+            metadata.get("almacen"),
+            metadata.get("ubicacion"),
+            branch.name,
+        ]
+        normalized_locations: dict[str, str] = {}
+        for code, label in ALMACEN_CHOICES:
+            normalized_locations[normalize_text(code.replace("_", " "))] = code
+            normalized_locations[normalize_text(label)] = code
+        for candidate in candidates:
+            location = normalized_locations.get(normalize_text(str(candidate or "").replace("_", " ")))
+            if location:
+                return location
+        return None
+
+    def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str) -> None:
         aplicar_delta(insumo, almacen, delta)
 
     def _apply_cedis_delta(self, *, receta, delta: Decimal) -> None:
@@ -163,47 +184,54 @@ class PointMovementSyncService:
         inventario.stock_actual = Decimal(str(inventario.stock_actual or 0)) + delta
         inventario.save(update_fields=["stock_actual", "actualizado_en"])
 
+    @transaction.atomic
     def _upsert_inventory_movement(self, *, line: PointProductionLine) -> bool:
+        almacen = "CUARTO_FRIO"
         defaults = {
             "fecha": datetime.combine(line.production_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()),
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
+            "almacen": almacen,
             "cantidad": line.produced_quantity,
             "referencia": f"POINT-PROD:{line.production_external_id}",
         }
-        existing = MovimientoInventario.objects.filter(source_hash=line.source_hash).first()
+        existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
         if existing is None:
-            movement = MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
+            MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
             self._apply_inventory_delta(
                 insumo=line.insumo,
                 delta=Decimal(str(line.produced_quantity or 0)),
-                almacen=movement.almacen or "ALMACEN_1",
+                almacen=almacen,
             )
             return True
         new_qty = Decimal(str(line.produced_quantity or 0))
         old_qty = Decimal(str(existing.cantidad or 0))
-        if existing.insumo_id == line.insumo_id and old_qty == new_qty:
+        old_almacen = existing.almacen or almacen
+        if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
+            if existing.almacen != almacen:
+                existing.almacen = almacen
+                existing.save(update_fields=["almacen"])
             return False
-        if existing.insumo_id == line.insumo_id:
+        if existing.insumo_id == line.insumo_id and old_almacen == almacen:
             self._apply_inventory_delta(
                 insumo=line.insumo,
                 delta=new_qty - old_qty,
-                almacen=existing.almacen or "ALMACEN_1",
+                almacen=almacen,
             )
         else:
             self._apply_inventory_delta(
                 insumo=existing.insumo,
                 delta=-old_qty,
-                almacen=existing.almacen or "ALMACEN_1",
+                almacen=old_almacen,
             )
             self._apply_inventory_delta(
                 insumo=line.insumo,
                 delta=new_qty,
-                almacen=existing.almacen or "ALMACEN_1",
+                almacen=almacen,
             )
         for field, value in defaults.items():
             setattr(existing, field, value)
-        existing.save(update_fields=["fecha", "tipo", "insumo", "cantidad", "referencia"])
+        existing.save(update_fields=["fecha", "tipo", "insumo", "almacen", "cantidad", "referencia"])
         return False
 
     def _upsert_cedis_movement(self, *, line: PointProductionLine) -> bool:
@@ -237,8 +265,11 @@ class PointMovementSyncService:
     def _upsert_transfer_inventory_movement(self, *, line: PointTransferLine) -> bool:
         movement_at = line.received_at or line.sent_at or line.registered_at
         existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
-        existing_almacen = (existing.almacen or "ALMACEN_1") if existing else "ALMACEN_1"
-        almacen = getattr(line, "almacen", None) or existing_almacen
+        derived_almacen = self._point_inventory_location(line.destination_branch)
+        existing_almacen = existing.almacen if existing and existing.almacen else None
+        almacen = derived_almacen or existing_almacen
+        if not almacen:
+            raise ValueError("La transferencia Point no tiene una ubicación de inventario derivable.")
         defaults = {
             "fecha": movement_at,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
@@ -257,7 +288,7 @@ class PointMovementSyncService:
             return True
         new_qty = Decimal(str(line.received_quantity or 0))
         old_qty = Decimal(str(existing.cantidad or 0))
-        old_almacen = existing_almacen
+        old_almacen = existing_almacen or almacen
         if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
             if existing.almacen != almacen:
                 existing.almacen = almacen
@@ -506,6 +537,9 @@ class PointMovementSyncService:
                 skipped_non_storage += 1
                 continue
             if line.is_insumo and line.insumo is not None:
+                if self._point_inventory_location(destination_branch) is None:
+                    skipped_non_storage += 1
+                    continue
                 created_entry = self._upsert_transfer_inventory_movement(line=line)
                 if created_entry:
                     inventory_entries_created += 1

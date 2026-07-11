@@ -484,14 +484,24 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
         .select_related("insumo")
         .order_by("insumo__nombre")
     )
-    visible_map = {
-        int(row.insumo_id): row
-        for row in ExistenciaInsumo.objects.filter(insumo_id__in=[fact.insumo_id for fact in fact_rows]).select_related("insumo")
+    insumo_ids = [fact.insumo_id for fact in fact_rows]
+    visible_stock_map = {
+        int(row["insumo_id"]): _to_decimal(row["stock_total"])
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
+    visible_map: dict[int, ExistenciaInsumo] = {}
+    for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids).order_by(
+        "insumo_id", "-actualizado_en", "-id"
+    ):
+        visible_map.setdefault(int(row.insumo_id), row)
     rows: list[dict[str, object]] = []
     for fact in fact_rows:
         visible = visible_map.get(int(fact.insumo_id))
-        visible_stock = _to_decimal(getattr(visible, "stock_actual", ZERO))
+        visible_stock = visible_stock_map.get(int(fact.insumo_id), ZERO)
         diff = visible_stock - _to_decimal(fact.stock_final)
         if diff == ZERO:
             continue

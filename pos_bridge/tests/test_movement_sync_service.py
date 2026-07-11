@@ -208,7 +208,8 @@ class PointMovementSyncServiceTests(TestCase):
         movimiento = MovimientoInventario.objects.get(source_hash="prod-insumo-1")
         self.assertEqual(movimiento.insumo, insumo)
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
-        existencia = ExistenciaInsumo.objects.get(insumo=insumo)
+        self.assertEqual(movimiento.almacen, "CUARTO_FRIO")
+        existencia = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO")
         self.assertEqual(existencia.stock_actual, Decimal("167.340"))
 
     def test_actualiza_transferencia_en_ubicacion_existente_no_default(self):
@@ -244,6 +245,7 @@ class PointMovementSyncServiceTests(TestCase):
             insumo_id=insumo.id,
             received_quantity=Decimal("5"),
             transfer_external_id="TR-ARMADO-001",
+            destination_branch=SimpleNamespace(name="ARMADO", metadata={}),
         )
 
         PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
@@ -289,6 +291,10 @@ class PointMovementSyncServiceTests(TestCase):
             insumo_id=insumo.id,
             received_quantity=Decimal("6"),
             transfer_external_id="TR-VACIO-001",
+            destination_branch=SimpleNamespace(
+                name="CEDIS",
+                metadata={"inventario_ubicacion": "ALMACEN_1"},
+            ),
         )
 
         PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
@@ -331,6 +337,10 @@ class PointMovementSyncServiceTests(TestCase):
             insumo_id=insumo.id,
             received_quantity=Decimal("4"),
             transfer_external_id="TR-NOOP-001",
+            destination_branch=SimpleNamespace(
+                name="CEDIS",
+                metadata={"inventario_ubicacion": "ALMACEN_1"},
+            ),
         )
 
         PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
@@ -384,7 +394,12 @@ class PointMovementSyncServiceTests(TestCase):
         )
         transfer_line = FakeTransferLine(
             origin_branch={"external_id": "10", "name": "Produccion Crucero", "status": "ACTIVE", "metadata": {}},
-            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            destination_branch={
+                "external_id": "8",
+                "name": "CEDIS",
+                "status": "ACTIVE",
+                "metadata": {"inventario_ubicacion": "ALMACEN_1"},
+            },
             transfer_external_id="32292",
             detail_external_id="474444",
             registered_at=datetime(2026, 3, 20, 8, 0, tzinfo=timezone.utc),
