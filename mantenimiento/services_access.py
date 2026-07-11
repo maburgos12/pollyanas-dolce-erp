@@ -49,7 +49,13 @@ def authorized_branch_ids(user):
         explicit = {row.module: row.access for row in user.module_access.only("module", "access")}
         setattr(user, "_module_access_map_cache", dict(explicit))
     has_global_manage = explicit.get("mantenimiento") == "manage"
-    if is_admin_or_dg(user) or has_global_manage or groups & MAINTENANCE_GROUPS:
+    has_global_inbox_manage = explicit.get("mantenimiento.bandeja") == "manage"
+    if (
+        is_admin_or_dg(user)
+        or has_global_manage
+        or has_global_inbox_manage
+        or groups & MAINTENANCE_GROUPS
+    ):
         return None
     profile = getattr(user, "userprofile", None)
     branch_id = getattr(profile, "sucursal_id", None)
