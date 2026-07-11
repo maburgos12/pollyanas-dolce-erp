@@ -15,7 +15,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="{% static 'operacion/app-icon-192.png' %}?v=20260707-workflow-icon-v5">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260708-mobile-polish-v4">
-  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260709-pull-refresh-v2">
+  <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260711-pull-refresh-v3">
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-mobile-polish-v4">
 </head>
 <body class="operacion-app-body">
@@ -92,7 +92,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260709-pull-refresh-v2", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260711-pull-refresh-v3", { scope: "/app/" }).catch(function () {});
     }
     (function () {
       var startY = 0;
@@ -104,15 +104,29 @@
       function currentScrollTop() {
         return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
       }
+      function resetPull() {
+        startY = 0;
+        distance = 0;
+        pulling = false;
+        indicator.textContent = "Actualizar";
+        indicator.classList.remove("is-ready");
+        indicator.style.transform = "";
+      }
+      function reloadApp() {
+        indicator.textContent = "Actualizando";
+        var url = new URL(window.location.href);
+        url.searchParams.set("_refresh", Date.now());
+        window.location.href = url.toString();
+      }
 
-      window.addEventListener("touchstart", function (event) {
+      document.addEventListener("touchstart", function (event) {
         if (currentScrollTop() > 0 || event.touches.length !== 1) return;
         startY = event.touches[0].clientY;
         distance = 0;
         pulling = false;
-      }, { passive: true });
+      }, { passive: true, capture: true });
 
-      window.addEventListener("touchmove", function (event) {
+      document.addEventListener("touchmove", function (event) {
         if (!startY || currentScrollTop() > 0 || event.touches.length !== 1) return;
         distance = event.touches[0].clientY - startY;
         if (distance <= 0) return;
@@ -120,21 +134,17 @@
         pulling = true;
         indicator.classList.toggle("is-ready", distance > threshold);
         indicator.style.transform = "translate(-50%, " + Math.min(distance * 0.45 - 44, 24) + "px)";
-      }, { passive: false });
+      }, { passive: false, capture: true });
 
-      window.addEventListener("touchend", function () {
+      document.addEventListener("touchend", function () {
         if (pulling && distance > threshold) {
-          indicator.textContent = "Actualizando";
-          window.location.reload();
+          reloadApp();
           return;
         }
-        startY = 0;
-        distance = 0;
-        pulling = false;
-        indicator.textContent = "Actualizar";
-        indicator.classList.remove("is-ready");
-        indicator.style.transform = "";
-      }, { passive: true });
+        resetPull();
+      }, { passive: true, capture: true });
+      document.addEventListener("touchcancel", resetPull, { passive: true, capture: true });
+      indicator.addEventListener("click", reloadApp);
     })();
   </script>
 </body>
