@@ -97,6 +97,11 @@ def _require_mantenimiento(user):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
 
 
+def _require_write_mantenimiento(user):
+    if not _can_write_mantenimiento(user):
+        raise PermissionDenied("No tienes permisos para modificar Mantenimiento.")
+
+
 @never_cache
 def pwa_sw(request):
     path = finders.find("mantenimiento/sw.js") or settings.BASE_DIR / "static" / "mantenimiento" / "sw.js"
@@ -1386,7 +1391,7 @@ def actualizar_item(request, tipo, pk):
 @login_required
 def crear_falla(request):
     """Crea un ReporteFalla directamente desde el panel de mantenimiento (sin PWA)."""
-    _require_mantenimiento(request.user)
+    _require_write_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
 
@@ -1415,13 +1420,22 @@ def crear_falla(request):
         return redirect("mantenimiento:dashboard")
 
     from core.models import Sucursal
-    sucursal = Sucursal.objects.filter(pk=sucursal_id).first()
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = sucursales.filter(pk=sucursal_id).first()
     categoria = CategoriaFalla.objects.filter(pk=categoria_id, activo=True).first()
     if not sucursal or not categoria:
         msg.error(request, "Sucursal o categoría no válida.")
         return redirect("mantenimiento:dashboard")
 
-    activo_obj = Activo.objects.filter(pk=activo_id, activo=True).first() if activo_id else None
+    activo_obj = None
+    if activo_id:
+        activo_obj = Activo.objects.filter(pk=activo_id, activo=True, sucursal=sucursal).first()
+        if not activo_obj:
+            msg.error(request, "El activo no pertenece a una sucursal autorizada.")
+            return redirect("mantenimiento:dashboard")
 
     foto = request.FILES.get("foto_evidencia")
     try:
@@ -1455,7 +1469,7 @@ def crear_falla(request):
 @login_required
 def crear_servicio_mantenimiento(request):
     """Registra un servicio realizado o programa una orden puntual sin reporte previo."""
-    _require_mantenimiento(request.user)
+    _require_write_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
 
@@ -1511,13 +1525,17 @@ def crear_servicio_mantenimiento(request):
         msg.error(request, "El archivo supera el límite de 30 MB.")
         return redirect("mantenimiento:dashboard")
 
-    sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = sucursales.filter(pk=sucursal_id).first()
     if not sucursal:
         msg.error(request, "Selecciona una sucursal válida.")
         return redirect("mantenimiento:dashboard")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True, sucursal=sucursal)
         if unidad.sucursal_id != sucursal.id:
             msg.error(request, "La unidad logística no pertenece a la sucursal seleccionada.")
             return redirect("mantenimiento:dashboard")

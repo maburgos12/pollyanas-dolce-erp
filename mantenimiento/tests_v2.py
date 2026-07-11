@@ -12,6 +12,7 @@ from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.urls import resolve
 
 from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
 from core.models import Sucursal, UserModuleAccess, UserProfile
@@ -69,6 +70,91 @@ class EvidenceValidationTests(SimpleTestCase):
         uploaded = self.upload(f"{'a' * 300}.jpeg")
         self.assertEqual(len(validate_evidence_files([uploaded])[0].name), 255)
         self.assertTrue(uploaded.name.endswith(".jpeg"))
+
+
+class MaintenanceHtmlWriteScopeTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.own_branch = Sucursal.objects.create(codigo="WRO", nombre="Propia")
+        cls.other_branch = Sucursal.objects.create(codigo="WRT", nombre="Ajena")
+        cls.category = CategoriaFalla.objects.create(nombre="Scope HTML", tipo=CategoriaFalla.TIPO_EQUIPO)
+        cls.own_asset = Activo.objects.create(nombre="Activo propio", sucursal=cls.own_branch)
+        cls.other_asset = Activo.objects.create(nombre="Activo ajeno", sucursal=cls.other_branch)
+        cls.other_unit = Unidad.objects.create(codigo="UNIT-WRT", descripcion="Unidad ajena", sucursal=cls.other_branch)
+
+        cls.writer = get_user_model().objects.create_user("html-writer", password="test")
+        UserProfile.objects.create(user=cls.writer, sucursal=cls.own_branch)
+        UserModuleAccess.objects.create(
+            user=cls.writer, module="mantenimiento.dashboard", access=UserModuleAccess.ACCESS_MANAGE,
+        )
+        cls.viewer = get_user_model().objects.create_user("html-viewer", password="test")
+        UserProfile.objects.create(user=cls.viewer, sucursal=cls.own_branch)
+        UserModuleAccess.objects.create(
+            user=cls.viewer, module="mantenimiento.dashboard", access=UserModuleAccess.ACCESS_VIEW,
+        )
+
+    def test_view_only_user_cannot_post_html_creators(self):
+        self.client.force_login(self.viewer)
+        for url in ("/mantenimiento/nueva-falla/", "/mantenimiento/servicios/crear/"):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.post(url, {}).status_code, 403)
+
+    def test_falla_rejects_other_branch_and_cross_branch_asset(self):
+        self.client.force_login(self.writer)
+        common = {
+            "categoria": self.category.pk, "titulo": "Intento", "descripcion": "No crear",
+        }
+        response = self.client.post(
+            "/mantenimiento/nueva-falla/", {**common, "sucursal": self.other_branch.pk},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ReporteFalla.objects.filter(titulo="Intento").exists())
+
+        response = self.client.post(
+            "/mantenimiento/nueva-falla/",
+            {**common, "sucursal": self.own_branch.pk, "activo_id": self.other_asset.pk},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ReporteFalla.objects.filter(titulo="Intento").exists())
+
+    def test_servicio_rejects_other_branch_asset_and_unit(self):
+        self.client.force_login(self.writer)
+        initial_orders = OrdenMantenimiento.objects.count()
+        initial_services = ServicioRealizadoUnidad.objects.count()
+        response = self.client.post(
+            "/mantenimiento/servicios/crear/",
+            {
+                "modo_servicio": "realizado", "alcance": "activo", "sucursal": self.own_branch.pk,
+                "activo_id": self.other_asset.pk, "descripcion": "No crear",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(OrdenMantenimiento.objects.count(), initial_orders)
+
+        response = self.client.post(
+            "/mantenimiento/servicios/crear/",
+            {
+                "modo_servicio": "realizado", "alcance": "unidad", "sucursal": self.own_branch.pk,
+                "unidad_id": self.other_unit.pk, "descripcion": "No crear",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(ServicioRealizadoUnidad.objects.count(), initial_services)
+
+    @override_settings(DEBUG=False)
+    def test_sensitive_legacy_media_routes_are_blocked_in_production(self):
+        sensitive_paths = [
+            "/media/fallas/evidencias/2026/07/foto.jpg",
+            "/media/fallas/seguimiento/2026/07/nota.pdf",
+            "/media/activos/facturas/2026/07/factura.pdf",
+            "/media/logistica/reportes/foto.jpg",
+            "/media/servicios_unidad/factura.pdf",
+            "/media/reparaciones_unidad/nota.jpg",
+        ]
+        for path in sensitive_paths:
+            with self.subTest(path=path):
+                self.assertEqual(resolve(path).func.__name__, "serve_private_maintenance_media")
+                self.assertEqual(self.client.get(path).status_code, 404)
 
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-evidence-validation")
