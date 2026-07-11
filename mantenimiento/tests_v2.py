@@ -93,6 +93,8 @@ class MaintenanceAccessTests(TestCase):
         cls.other_branch = Sucursal.objects.create(codigo="OTHER", nombre="Ajena")
         cls.limited_user = user_model.objects.create_user("limited", password="test")
         cls.no_scope_user = user_model.objects.create_user("no-scope", password="test")
+        cls.no_permission_user = user_model.objects.create_user("no-permission", password="test")
+        cls.inactive_user = user_model.objects.create_user("inactive", password="test", is_active=False)
         cls.manager = user_model.objects.create_user("manager", password="test")
         cls.dg_user = user_model.objects.create_user("dg-user", password="test")
         cls.admin_group_user = user_model.objects.create_user("admin-group-user", password="test")
@@ -101,6 +103,9 @@ class MaintenanceAccessTests(TestCase):
         cls.admin_group_user.groups.add(Group.objects.create(name="ADMIN"))
         UserProfile.objects.create(user=cls.limited_user, sucursal=cls.own_branch)
         UserProfile.objects.create(user=cls.no_scope_user)
+        UserProfile.objects.create(user=cls.no_permission_user, sucursal=cls.own_branch)
+        UserProfile.objects.create(user=cls.inactive_user, sucursal=cls.own_branch)
+        UserModuleAccess.objects.create(user=cls.limited_user, module="mantenimiento", access="view")
         UserModuleAccess.objects.create(user=cls.manager, module="mantenimiento", access="manage")
 
         category = CategoriaFalla.objects.create(nombre="General")
@@ -156,6 +161,19 @@ class MaintenanceAccessTests(TestCase):
         self.assertFalse(authorized_repairs(self.no_scope_user).exists())
         self.assertFalse(authorized_unit_services(self.no_scope_user).exists())
 
+    def test_user_with_branch_but_without_mantenimiento_permission_sees_nothing(self):
+        self._assert_no_authorized_objects(self.no_permission_user)
+
+    def test_inactive_user_with_branch_sees_nothing(self):
+        self._assert_no_authorized_objects(self.inactive_user)
+
+    def _assert_no_authorized_objects(self, user):
+        self.assertFalse(authorized_fallas(user).exists())
+        self.assertFalse(authorized_orders(user).exists())
+        self.assertFalse(authorized_unit_reports(user).exists())
+        self.assertFalse(authorized_repairs(user).exists())
+        self.assertFalse(authorized_unit_services(user).exists())
+
     def test_only_global_or_mantenimiento_manager_can_view_costs(self):
         self.assertTrue(can_view_costs(self.admin))
         self.assertTrue(can_view_costs(self.dg_user))
@@ -163,3 +181,5 @@ class MaintenanceAccessTests(TestCase):
         self.assertTrue(can_view_costs(self.manager))
         self.assertFalse(can_view_costs(self.limited_user))
         self.assertFalse(can_view_costs(self.no_scope_user))
+        self.assertFalse(can_view_costs(self.no_permission_user))
+        self.assertFalse(can_view_costs(self.inactive_user))

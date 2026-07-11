@@ -1,7 +1,7 @@
 """Object-level access policy shared by Mantenimiento v2 queries."""
 
 from activos.models import OrdenMantenimiento
-from core.access import can_manage_module, is_admin_or_dg
+from core.access import can_manage_module, can_view_module, is_admin_or_dg
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
 
@@ -10,6 +10,8 @@ def authorized_branch_ids(user):
     """Return ``None`` for global scope, otherwise canonical branch PKs."""
     if is_admin_or_dg(user) or can_manage_module(user, "mantenimiento"):
         return None
+    if not can_view_module(user, "mantenimiento"):
+        return []
     profile = getattr(user, "userprofile", None)
     branch_id = getattr(profile, "sucursal_id", None)
     return [branch_id] if branch_id else []
