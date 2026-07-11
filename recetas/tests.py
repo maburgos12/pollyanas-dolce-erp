@@ -4811,6 +4811,19 @@ class SolicitudVentasForecastTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def test_calculo_insumos_export_no_bloquea_renglones_sin_cantidad(self):
+        from recetas.views.plan import _calculo_insumos_blocking_observations
+
+        blockers = _calculo_insumos_blocking_observations(
+            {
+                "unresolved_rows": [],
+                "skipped_rows": [{"codigo_point": "NO-USADO", "motivo": "Cantidad vacía o menor o igual a cero"}],
+            },
+            {"issues": []},
+        )
+
+        self.assertEqual(blockers, [])
+
     def test_comparativo_pronostico_vs_solicitud_escenario_bajo(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026

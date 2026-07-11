@@ -13129,14 +13129,6 @@ def _calculo_insumos_blocking_observations(payload: dict[str, Any], supply: dict
                 "producto": row.get("codigo_point") or row.get("producto") or row.get("presentacion") or "",
             }
         )
-    for row in payload.get("skipped_rows") or []:
-        blockers.append(
-            {
-                "tipo": "RENGLON_OMITIDO",
-                "detalle": row.get("motivo") or "Renglón omitido.",
-                "producto": row.get("codigo_point") or row.get("producto") or row.get("presentacion") or "",
-            }
-        )
     for row in (supply or {}).get("issues") or []:
         if str(row.get("severity") or "").lower() == "error":
             blockers.append(
