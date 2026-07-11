@@ -110,6 +110,7 @@ urlpatterns = [
     path("api/bonos-ventas/", include("bonos_ventas.urls")),
     path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
     path("api/mantenimiento/", include(("mantenimiento.api_urls", "mantenimiento_api"), namespace="mantenimiento_api")),
+    path("api/mantenimiento/v2/", include(("mantenimiento.api_v2_urls", "mantenimiento_api_v2"), namespace="mantenimiento_api_v2")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 

@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento
 from core.models import Sucursal, UserModuleAccess, UserProfile
@@ -183,3 +184,133 @@ class MaintenanceAccessTests(TestCase):
         self.assertFalse(can_view_costs(self.no_scope_user))
         self.assertFalse(can_view_costs(self.no_permission_user))
         self.assertFalse(can_view_costs(self.inactive_user))
+
+
+@override_settings(TIME_ZONE="America/Mazatlan")
+class MaintenanceInboxV2Tests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.branch = Sucursal.objects.create(codigo="V2", nombre="Sucursal V2")
+        cls.other_branch = Sucursal.objects.create(codigo="V2-OTHER", nombre="Sucursal ajena")
+        cls.user = user_model.objects.create_superuser("v2-admin", "v2@example.com", "test")
+        cls.reporter = user_model.objects.create_user("v2-reporter", password="test")
+        cls.category = CategoriaFalla.objects.create(nombre="General V2")
+        cls.asset = Activo.objects.create(nombre="Horno V2", sucursal=cls.branch)
+        cls.other_asset = Activo.objects.create(nombre="Horno ajeno V2", sucursal=cls.other_branch)
+        cls.unit = Unidad.objects.create(codigo="U-V2", descripcion="Unidad V2", sucursal=cls.branch)
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def _closed_falla(self, days_ago, *, branch=None, priority=ReporteFalla.PRIORIDAD_MEDIA):
+        event = timezone.now() - timedelta(days=days_ago)
+        report = ReporteFalla.objects.create(
+            sucursal=branch or self.branch,
+            categoria=self.category,
+            titulo=f"Falla {days_ago}",
+            descripcion="x",
+            prioridad=priority,
+            estatus=ReporteFalla.ESTATUS_CERRADO,
+            foto_evidencia=f"fallas/evidencias/{days_ago}.jpg",
+            reportado_por=self.reporter,
+            fecha_cierre=event,
+        )
+        ReporteFalla.objects.filter(pk=report.pk).update(fecha_reporte=event)
+        return report
+
+    def _closed_order(self, days_ago):
+        event = timezone.localdate() - timedelta(days=days_ago)
+        return OrdenMantenimiento.objects.create(
+            activo_ref=self.asset,
+            estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+            fecha_cierre=event,
+            descripcion=f"Orden {days_ago}",
+        )
+
+    def _closed_unit_report(self, days_ago):
+        report = ReporteUnidad.objects.create(
+            unidad=self.unit,
+            tipo=ReporteUnidad.TIPO_FALLA,
+            descripcion=f"Unidad {days_ago}",
+            estatus=ReporteUnidad.ESTATUS_CERRADO,
+        )
+        ReporteUnidad.objects.filter(pk=report.pk).update(fecha_reporte=timezone.now() - timedelta(days=days_ago))
+        return report
+
+    def test_closed_count_is_independent_from_page_size_and_includes_all_sources(self):
+        self._closed_falla(2)
+        self._closed_order(3)
+        self._closed_unit_report(4)
+
+        response = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d", "page_size": 1,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["counts"]["cerrados"], 3)
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["pagination"]["total"], 3)
+        self.assertTrue(payload["pagination"]["has_next"])
+
+    def test_30d_includes_29_days_but_excludes_31_days_cancelled_and_other_branch(self):
+        included = self._closed_falla(29)
+        self._closed_falla(31)
+        cancelled = self._closed_falla(2)
+        ReporteFalla.objects.filter(pk=cancelled.pk).update(estatus=ReporteFalla.ESTATUS_CANCELADO)
+        self._closed_falla(2, branch=self.other_branch)
+        limited = get_user_model().objects.create_user("v2-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=self.branch)
+        UserModuleAccess.objects.create(user=limited, module="mantenimiento", access="view")
+        self.client.force_login(limited)
+
+        payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d",
+        }).json()
+
+        self.assertEqual(payload["counts"]["cerrados"], 1)
+        self.assertEqual([row["uid"] for row in payload["results"]], [f"falla:{included.pk}"])
+
+    def test_counts_are_for_filtered_unpaginated_set(self):
+        self._closed_falla(1, priority=ReporteFalla.PRIORIDAD_CRITICA)
+        ReporteFalla.objects.create(
+            sucursal=self.branch, categoria=self.category, titulo="Abierta", descripcion="x",
+            prioridad=ReporteFalla.PRIORIDAD_CRITICA, foto_evidencia="fallas/evidencias/open.jpg",
+            reportado_por=self.reporter, estatus=ReporteFalla.ESTATUS_PROCESO,
+        )
+
+        payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "todos", "periodo": "30d", "page_size": 1,
+        }).json()
+
+        self.assertEqual(payload["counts"], {"abiertos": 1, "en_proceso": 1, "criticos": 2, "cerrados": 1})
+        self.assertEqual(payload["pagination"]["total"], 2)
+
+    def test_invalid_enums_and_pagination_are_rejected(self):
+        cases = [("estado", "x"), ("periodo", "x"), ("origen", "x"), ("page", "0"), ("page_size", "0")]
+        for key, value in cases:
+            with self.subTest(key=key):
+                response = self.client.get("/api/mantenimiento/v2/bandeja/", {key: value})
+                self.assertEqual(response.status_code, 400)
+
+    def test_page_size_is_capped_and_results_have_deterministic_order(self):
+        first = self._closed_falla(1)
+        second = self._closed_falla(1)
+
+        payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d", "page_size": 500,
+        }).json()
+
+        self.assertEqual(payload["pagination"]["page_size"], 100)
+        self.assertEqual([row["uid"] for row in payload["results"]], [f"falla:{second.pk}", f"falla:{first.pk}"])
+
+    def test_query_count_does_not_grow_with_result_count(self):
+        self._closed_falla(1)
+        with self.assertNumQueries(9):
+            self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
+        for index in range(19):
+            self._closed_falla(1)
+        with self.assertNumQueries(9):
+            self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
