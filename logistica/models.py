@@ -309,6 +309,16 @@ class ParadaRuta(models.Model):
         (ENTREGA_CON_DIFERENCIA, "Con diferencia"),
         (ENTREGA_NO_ENTREGADA, "No entregada"),
     ]
+    REVISION_NO_REQUERIDA = "NO_REQUERIDA"
+    REVISION_PENDIENTE = "PENDIENTE"
+    REVISION_AUTORIZADA = "AUTORIZADA"
+    REVISION_RECHAZADA = "RECHAZADA"
+    REVISION_CHOICES = [
+        (REVISION_NO_REQUERIDA, "No requerida"),
+        (REVISION_PENDIENTE, "Pendiente"),
+        (REVISION_AUTORIZADA, "Autorizada"),
+        (REVISION_RECHAZADA, "Rechazada"),
+    ]
 
     ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="paradas")
     punto = models.ForeignKey(PuntoLogistico, on_delete=models.PROTECT, related_name="paradas_ruta")
@@ -331,6 +341,22 @@ class ParadaRuta(models.Model):
         related_name="paradas_logistica_confirmadas",
     )
     entrega_notas = models.TextField(blank=True, default="")
+    revision_entrega_estado = models.CharField(
+        max_length=20,
+        choices=REVISION_CHOICES,
+        default=REVISION_NO_REQUERIDA,
+    )
+    revision_entrega_causa = models.CharField(max_length=40, blank=True)
+    revision_entrega_datos = models.JSONField(default=dict, blank=True)
+    revision_entrega_revisada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="entregas_logistica_revisadas",
+    )
+    revision_entrega_revisada_en = models.DateTimeField(null=True, blank=True)
+    revision_entrega_resolucion = models.TextField(blank=True)
     distancia_llegada_metros = models.PositiveIntegerField(null=True, blank=True)
     notas = models.TextField(blank=True, default="")
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -643,6 +669,11 @@ class EventoRuta(models.Model):
     TIPO_SALTO_IMPOSIBLE = "SALTO_IMPOSIBLE"
     TIPO_INCIDENCIA_MANUAL = "INCIDENCIA_MANUAL"
     TIPO_CIERRE = "CIERRE"
+    TIPO_ENTREGA = "ENTREGA"
+    TIPO_ENTREGA_EXCEPCIONAL = "ENTREGA_EXCEPCIONAL"
+    TIPO_ENTREGA_AUTORIZADA = "ENTREGA_AUTORIZADA"
+    TIPO_ENTREGA_RECHAZADA = "ENTREGA_RECHAZADA"
+    TIPO_INCONSISTENCIA_ENTREGA = "INCONSISTENCIA_ENTREGA"
     TIPO_CHOICES = [
         (TIPO_SALIDA, "Salida"),
         (TIPO_LLEGADA_GEOFENCE, "Llegada a geocerca"),
@@ -654,6 +685,11 @@ class EventoRuta(models.Model):
         (TIPO_SALTO_IMPOSIBLE, "Salto GPS imposible"),
         (TIPO_INCIDENCIA_MANUAL, "Incidencia manual"),
         (TIPO_CIERRE, "Cierre"),
+        (TIPO_ENTREGA, "Entrega"),
+        (TIPO_ENTREGA_EXCEPCIONAL, "Entrega excepcional"),
+        (TIPO_ENTREGA_AUTORIZADA, "Entrega excepcional autorizada"),
+        (TIPO_ENTREGA_RECHAZADA, "Entrega excepcional rechazada"),
+        (TIPO_INCONSISTENCIA_ENTREGA, "Inconsistencia de entrega"),
     ]
 
     SEVERIDAD_INFO = "info"

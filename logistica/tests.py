@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import Group, User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, OperationalError, transaction
@@ -48,6 +48,11 @@ from logistica.services_carga_ruta import (
     validar_linea_carga,
 )
 from logistica.services_google_roads import snap_gps_path_to_roads
+from logistica.services_entregas import (
+    EntregaIdempotenciaConflicto,
+    confirmar_entrega_parada,
+    revisar_entrega_excepcional,
+)
 from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
@@ -57,6 +62,194 @@ from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedi
 from rentabilidad.models_rentabilidad import SucursalRentabilidad
 from reportes.models import FactProduccionDiaria
 from rrhh.models import Empleado
+
+
+class LogisticaEntregaDomainTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="repartidor.entregas", password="pass123")
+        self.user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        self.sucursal = Sucursal.objects.create(codigo="DOM-LOG", nombre="Dominio Logistica", activa=True)
+        self.unidad = Unidad.objects.create(codigo="DOM-01", descripcion="Unidad dominio", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal, unidad_asignada=self.unidad)
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta dominio entregas",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        self.punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal dominio",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        self.parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=1)
+        self.jefe = User.objects.create_user(username="jefe.entregas", password="pass123")
+        UserModuleAccess.objects.create(
+            user=self.jefe,
+            module="logistica.rutas",
+            access=ACCESS_MANAGE,
+            updated_by=self.jefe,
+        )
+
+    def _confirmar(self, **overrides):
+        payload = {
+            "ruta": self.ruta,
+            "parada": self.parada,
+            "actor": self.user,
+            "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+            "motivo": "GPS sin señal",
+            "client_event_id": "entrega-excepcional-1",
+            "ubicacion": {"causa": "GPS_SIN_SENAL"},
+        }
+        payload.update(overrides)
+        return confirmar_entrega_parada(**payload)
+
+    def _registrar_geocerca_real(self):
+        ubicacion = UbicacionRuta.objects.create(
+            ruta=self.ruta,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            latitud="25.570000",
+            longitud="-108.470000",
+            precision_metros="8.00",
+        )
+        return EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            ubicacion=ubicacion,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada GPS real.",
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros=0,
+            creado_por=self.user,
+        )
+
+    def test_sin_geocerca_registra_excepcion_sin_fabricar_visita(self):
+        resultado = self._confirmar()
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+        self.assertEqual(self.parada.revision_entrega_causa, "GPS_SIN_SENAL")
+        self.assertTrue(resultado.requiere_revision)
+        self.assertEqual(
+            EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).count(),
+            1,
+        )
+
+    def test_geocerca_real_no_requiere_revision(self):
+        self._registrar_geocerca_real()
+
+        resultado = self._confirmar(
+            motivo="Entrega confirmada",
+            client_event_id="entrega-geocerca-1",
+            ubicacion={"causa": "DENTRO_GEOFENCE"},
+        )
+
+        self.parada.refresh_from_db()
+        self.assertFalse(resultado.requiere_revision)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
+        self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA).count(), 1)
+
+    def test_retry_identico_es_idempotente(self):
+        primero = self._confirmar()
+        segundo = self._confirmar()
+
+        self.assertEqual(primero.evento.id, segundo.evento.id)
+        self.assertEqual(primero.evidencia.id, segundo.evidencia.id)
+        self.assertEqual(
+            EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).count(),
+            1,
+        )
+        self.assertEqual(
+            ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="entrega-excepcional-1").count(),
+            1,
+        )
+
+    def test_retry_con_payload_distinto_es_conflicto(self):
+        self._confirmar()
+
+        with self.assertRaises(EntregaIdempotenciaConflicto):
+            self._confirmar(entrega_estado=ParadaRuta.ENTREGA_NO_ENTREGADA)
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+
+    def test_point_no_es_actor_autorizado(self):
+        point_user = User.objects.create_user(username="point.sync")
+
+        with self.assertRaises(PermissionDenied):
+            self._confirmar(actor=point_user, client_event_id="point-no-autorizado")
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
+    def test_otro_repartidor_no_puede_confirmar(self):
+        otro = User.objects.create_user(username="otro.repartidor")
+        otro.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        Repartidor.objects.create(user=otro, sucursal=self.sucursal)
+
+        with self.assertRaises(PermissionDenied):
+            self._confirmar(actor=otro, client_event_id="otro-repartidor")
+
+    def test_cedis_no_admite_confirmacion_de_entrega(self):
+        self.punto.tipo = PuntoLogistico.TIPO_CEDIS
+        self.punto.save(update_fields=["tipo"])
+
+        with self.assertRaises(ValidationError):
+            self._confirmar(client_event_id="cedis-no-entrega")
+
+    def test_autorizar_excepcion_no_fabrica_visita(self):
+        self._confirmar()
+
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=self.jefe,
+            decision=ParadaRuta.REVISION_AUTORIZADA,
+            motivo="Evidencia operativa suficiente",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_AUTORIZADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_AUTORIZADA).count(), 1)
+
+    def test_rechazar_excepcion_conserva_entrega_y_no_fabrica_visita(self):
+        self._confirmar()
+
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=self.jefe,
+            decision=ParadaRuta.REVISION_RECHAZADA,
+            motivo="Evidencia insuficiente",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_RECHAZADA)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_RECHAZADA).count(), 1)
+
+    def test_repartidor_no_puede_resolver_revision(self):
+        self._confirmar()
+
+        with self.assertRaises(PermissionDenied):
+            revisar_entrega_excepcional(
+                parada=self.parada,
+                actor=self.user,
+                decision=ParadaRuta.REVISION_AUTORIZADA,
+                motivo="Yo mismo autorizo",
+            )
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):
