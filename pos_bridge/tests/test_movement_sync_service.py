@@ -477,3 +477,230 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(movimiento.receta, receta)
         inventario = InventarioCedisProducto.objects.get(receta=receta)
         self.assertEqual(inventario.stock_actual, Decimal("24"))
+
+    def test_point_sync_links_matching_bitacora_movement_without_second_delta(self):
+        # Test exact match case: Point finds exact bitacora movement and links without creating delta
+        from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
+
+        insumo = Insumo.objects.create(
+            nombre="Relleno Crunch",
+            codigo_point="RC-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        receta = Receta.objects.create(nombre="Crunch", codigo_point="RC-001", hash_contenido="hash-rc")
+
+        # Create initial bitacora movement
+        bitacora = BitacoraOperativa.objects.create(tipo="HORNOS", fecha=date(2026, 7, 11))
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=receta,
+        )
+        bitacora_move = MovimientoInventario.objects.create(
+            linea_bitacora=linea,
+            insumo=insumo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="CFP_1_1",
+            cantidad=Decimal("8"),
+            fecha=datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc),
+            referencia=f"BITACORA:HORNOS:{linea.id}",
+            trazabilidad={},
+        )
+        from inventario.services_existencias import aplicar_delta
+        aplicar_delta(insumo, "CFP_1_1", Decimal("8"))
+
+        before = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CFP_1_1").stock_actual
+
+        # Now Point has the same entry - should link without duplicating
+        production_line = FakeProductionLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            production_external_id="21216",
+            detail_external_id="77615",
+            production_date=date(2026, 7, 11),
+            responsible="Test",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            requested_quantity=Decimal("8"),
+            produced_quantity=Decimal("8"),
+            is_insumo=True,
+            raw_payload={"detail": {}},
+            source_hash="prod-reconciled-1",
+        )
+        service = PointMovementSyncService(production_extractor=FakeProductionExtractor([production_line]))
+
+        job = service.run_production_sync(start_date=date(2026, 7, 11), end_date=date(2026, 7, 11))
+
+        # Stock should not change
+        after = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CFP_1_1").stock_actual
+        self.assertEqual(after, before, "Stock should not change on reconciliation")
+
+        # Should only have one movement
+        self.assertEqual(MovimientoInventario.objects.filter(insumo=insumo).count(), 1,
+                         "Should not create duplicate movement")
+
+        # Bitacora movement should now have reconciliation marks
+        bitacora_move.refresh_from_db()
+        self.assertIn("point_source_hash", bitacora_move.trazabilidad)
+        self.assertEqual(bitacora_move.trazabilidad.get("point_source_hash"), "prod-reconciled-1")
+
+    def test_point_sync_creates_entry_when_no_bitacora_match(self):
+        # Test zero matches: Point creates normal entry when no bitacora found
+        insumo = Insumo.objects.create(
+            nombre="Betún Dream Whip",
+            codigo_point="01DW01",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        production_line = FakeProductionLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            production_external_id="21216",
+            detail_external_id="77615",
+            production_date=date(2026, 7, 11),
+            responsible="Test",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="KG",
+            unit_cost=Decimal("91.5"),
+            requested_quantity=Decimal("50"),
+            produced_quantity=Decimal("50"),
+            is_insumo=True,
+            raw_payload={"detail": {}},
+            source_hash="prod-new-entry-1",
+        )
+        service = PointMovementSyncService(production_extractor=FakeProductionExtractor([production_line]))
+
+        job = service.run_production_sync(start_date=date(2026, 7, 11), end_date=date(2026, 7, 11))
+
+        self.assertEqual(job.status, "SUCCESS")
+        movimiento = MovimientoInventario.objects.get(source_hash="prod-new-entry-1")
+        self.assertEqual(movimiento.insumo, insumo)
+        existencia = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO")
+        self.assertEqual(existencia.stock_actual, Decimal("50"))
+
+    def test_point_sync_creates_pending_match_on_quantity_discrepancy(self):
+        # Test discrepancy: Point finds bitacora but quantity doesn't match
+        from maestros.models import PointPendingMatch
+        from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
+
+        insumo = Insumo.objects.create(
+            nombre="Relleno Discrepancia",
+            codigo_point="RD-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        receta = Receta.objects.create(nombre="Test", codigo_point="RD-001", hash_contenido="hash-rd")
+
+        # Create bitacora entry with quantity 5
+        bitacora = BitacoraOperativa.objects.create(tipo="HORNOS", fecha=date(2026, 7, 11))
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=receta,
+        )
+        MovimientoInventario.objects.create(
+            linea_bitacora=linea,
+            insumo=insumo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="CFP_1_1",
+            cantidad=Decimal("5"),
+            fecha=datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc),
+            referencia=f"BITACORA:HORNOS:{linea.id}",
+            trazabilidad={},
+        )
+        from inventario.services_existencias import aplicar_delta
+        aplicar_delta(insumo, "CFP_1_1", Decimal("5"))
+
+        # Point has different quantity (8 instead of 5)
+        production_line = FakeProductionLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            production_external_id="21216",
+            detail_external_id="77615",
+            production_date=date(2026, 7, 11),
+            responsible="Test",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            requested_quantity=Decimal("8"),
+            produced_quantity=Decimal("8"),
+            is_insumo=True,
+            raw_payload={"detail": {}},
+            source_hash="prod-discrepancy-1",
+        )
+        service = PointMovementSyncService(production_extractor=FakeProductionExtractor([production_line]))
+
+        job = service.run_production_sync(start_date=date(2026, 7, 11), end_date=date(2026, 7, 11))
+
+        # Should create PointPendingMatch for reconciliation
+        pending = PointPendingMatch.objects.filter(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo=insumo.codigo_point,
+            method="BITACORA_MOVEMENT_RECONCILIATION"
+        ).first()
+        self.assertIsNotNone(pending, "Should create PointPendingMatch for quantity discrepancy")
+
+        # Stock should not change
+        existencia = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CFP_1_1")
+        self.assertEqual(existencia.stock_actual, Decimal("5"), "Stock should remain unchanged on discrepancy")
+
+    def test_point_sync_retries_dont_duplicate_pending_match(self):
+        # Test retries: repeated calls don't create multiple pending matches
+        from maestros.models import PointPendingMatch
+        from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
+
+        insumo = Insumo.objects.create(
+            nombre="Relleno Retry",
+            codigo_point="RR-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        receta = Receta.objects.create(nombre="Retry", codigo_point="RR-001", hash_contenido="hash-rr")
+
+        bitacora = BitacoraOperativa.objects.create(tipo="HORNOS", fecha=date(2026, 7, 11))
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=receta,
+        )
+        MovimientoInventario.objects.create(
+            linea_bitacora=linea,
+            insumo=insumo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="CFP_1_1",
+            cantidad=Decimal("3"),
+            fecha=datetime(2026, 7, 11, 12, 0, tzinfo=timezone.utc),
+            referencia=f"BITACORA:HORNOS:{linea.id}",
+            trazabilidad={},
+        )
+        from inventario.services_existencias import aplicar_delta
+        aplicar_delta(insumo, "CFP_1_1", Decimal("3"))
+
+        production_line = FakeProductionLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            production_external_id="21216",
+            detail_external_id="77615",
+            production_date=date(2026, 7, 11),
+            responsible="Test",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            requested_quantity=Decimal("7"),
+            produced_quantity=Decimal("7"),
+            is_insumo=True,
+            raw_payload={"detail": {}},
+            source_hash="prod-retry-1",
+        )
+        service = PointMovementSyncService(production_extractor=FakeProductionExtractor([production_line]))
+
+        # Run twice
+        job1 = service.run_production_sync(start_date=date(2026, 7, 11), end_date=date(2026, 7, 11))
+        job2 = service.run_production_sync(start_date=date(2026, 7, 11), end_date=date(2026, 7, 11))
+
+        # Should still only have one PointPendingMatch
+        pending_count = PointPendingMatch.objects.filter(
+            tipo=PointPendingMatch.TIPO_INSUMO,
+            point_codigo=insumo.codigo_point,
+            method="BITACORA_MOVEMENT_RECONCILIATION"
+        ).count()
+        self.assertEqual(pending_count, 1, "Retries should not duplicate PointPendingMatch")

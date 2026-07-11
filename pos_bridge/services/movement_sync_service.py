@@ -11,7 +11,7 @@ from control.models import MermaPOS
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
-from inventario.models import ALMACEN_CHOICES, MovimientoInventario
+from inventario.models import ALMACEN_CHOICES, MovimientoInventario, UBICACION_CFP_1_1
 from inventario.services_existencias import aplicar_delta
 from maestros.models import Insumo, PointPendingMatch
 from pos_bridge.config import load_point_bridge_settings
@@ -129,14 +129,14 @@ class PointMovementSyncService:
             return timezone.localtime(dt_value).date()
         return dt_value.date()
 
-    def _upsert_pending_match(self, *, tipo: str, codigo: str, nombre: str, payload: dict) -> None:
+    def _upsert_pending_match(self, *, tipo: str, codigo: str, nombre: str, payload: dict, method: str = "POINT_BRIDGE_MOVEMENTS") -> None:
         PointPendingMatch.objects.update_or_create(
             tipo=tipo,
             point_codigo=(codigo or "").strip(),
             point_nombre=(nombre or "").strip()[:250],
             defaults={
                 "payload": payload,
-                "method": "POINT_BRIDGE_MOVEMENTS",
+                "method": method,
             },
         )
 
@@ -178,6 +178,56 @@ class PointMovementSyncService:
             return "CUARTO_FRIO"
         return None
 
+    def _find_matching_bitacora_movement(
+        self,
+        *,
+        insumo: Insumo,
+        cantidad: Decimal,
+        fecha: datetime,
+        almacen: str,
+        unidad_point: str,
+    ) -> dict:
+        """
+        Search for unconsolidated bitacora movement with exact match criteria.
+        Returns dict with: 'movement': MovimientoInventario or None, 'count': int, 'reason': str
+        """
+        fecha_date = fecha.date() if hasattr(fecha, "date") else fecha
+        current_tz = timezone.get_current_timezone()
+        start_of_day = timezone.make_aware(datetime.combine(fecha_date, datetime.min.time()), current_tz)
+        end_of_day = timezone.make_aware(datetime.combine(fecha_date, datetime.max.time()), current_tz)
+        ubicaciones_equivalentes = {almacen}
+        if almacen == "CUARTO_FRIO":
+            ubicaciones_equivalentes.add(UBICACION_CFP_1_1)
+
+        candidates = list(MovimientoInventario.objects.select_for_update().filter(
+            insumo=insumo,
+            almacen__in=ubicaciones_equivalentes,
+            linea_bitacora__isnull=False,  # Must have bitacora origin
+            fecha__gte=start_of_day,
+            fecha__lte=end_of_day,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+        ))
+        candidates = [
+            movement
+            for movement in candidates
+            if not (movement.trazabilidad or {}).get("point_source_hash")
+        ]
+        if not candidates:
+            return {'movement': None, 'count': 0, 'reason': 'No bitacora match found'}
+
+        unidad_erp = normalize_text(getattr(insumo.unidad_base, "codigo", ""))
+        unidad_point_normalizada = normalize_text(unidad_point or "")
+        exact = [
+            movement
+            for movement in candidates
+            if Decimal(str(movement.cantidad)) == Decimal(str(cantidad))
+            and (not unidad_point_normalizada or unidad_erp == unidad_point_normalizada)
+        ]
+        if len(exact) == 1:
+            return {'movement': exact[0], 'count': 1, 'reason': 'Exact match found'}
+        reason = "Quantity or unit discrepancy" if not exact else f"Multiple exact matches found ({len(exact)})"
+        return {'movement': None, 'count': max(len(candidates), len(exact)), 'reason': reason}
+
     def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str) -> None:
         aplicar_delta(insumo, almacen, delta)
 
@@ -189,8 +239,9 @@ class PointMovementSyncService:
     @transaction.atomic
     def _upsert_inventory_movement(self, *, line: PointProductionLine) -> bool:
         almacen = "CUARTO_FRIO"
+        fecha = datetime.combine(line.production_date, datetime.min.time(), tzinfo=timezone.get_current_timezone())
         defaults = {
-            "fecha": datetime.combine(line.production_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()),
+            "fecha": fecha,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
             "almacen": almacen,
@@ -199,6 +250,44 @@ class PointMovementSyncService:
         }
         existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
         if existing is None:
+            reconciled = [
+                movement
+                for movement in MovimientoInventario.objects.select_for_update().filter(insumo=line.insumo)
+                if (movement.trazabilidad or {}).get("point_source_hash") == line.source_hash
+            ]
+            if reconciled:
+                return False
+            # Try to reconcile with bitacora movement
+            reconciliation = self._find_matching_bitacora_movement(
+                insumo=line.insumo,
+                cantidad=line.produced_quantity,
+                fecha=fecha,
+                almacen=almacen,
+                unidad_point=line.unit,
+            )
+
+            if reconciliation['movement'] is not None:
+                # Exact match: link to bitacora movement, don't apply delta
+                bitacora_mov = reconciliation['movement']
+                bitacora_mov.trazabilidad = {
+                    **(bitacora_mov.trazabilidad or {}),
+                    "point_source_hash": line.source_hash,
+                    "point_external_id": line.production_external_id,
+                    "conciliado_en": timezone.now().isoformat(),
+                }
+                bitacora_mov.save(update_fields=["trazabilidad"])
+                return False  # Don't count as new
+            elif reconciliation['count'] > 0:
+                # Multiple matches: create pending match, don't apply delta
+                self._upsert_pending_match(
+                    tipo=PointPendingMatch.TIPO_INSUMO,
+                    codigo=line.item_code,
+                    nombre=line.item_name,
+                    payload={"reason": reconciliation['reason'], **line.raw_payload},
+                    method="BITACORA_MOVEMENT_RECONCILIATION",
+                )
+                return False  # Don't count as new
+            # Zero matches: proceed with normal Point entry
             MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
             self._apply_inventory_delta(
                 insumo=line.insumo,
