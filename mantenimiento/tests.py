@@ -234,6 +234,21 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, 'state.history.estado = "cerrado"')
         self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1"')
 
+    def test_pwa_history_catch_ignores_stale_request_before_mutating_ui(self):
+        self.client.force_login(self.mantenimiento)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+        catch_start = source.index("catch (error) {", source.index("async function renderHistorial"))
+        catch_end = source.index("}", source.index("return render(shell", catch_start))
+        catch_source = source[catch_start:catch_end]
+
+        guard = "if (generation !== state.requestGeneration.history) return;"
+        mutation = "state.historyLoading = false;"
+        render_error = "return render(shell"
+        self.assertIn(guard, catch_source)
+        self.assertLess(catch_source.index(guard), catch_source.index(mutation))
+        self.assertLess(catch_source.index(guard), catch_source.index(render_error))
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):

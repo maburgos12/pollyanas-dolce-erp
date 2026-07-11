@@ -2091,7 +2091,11 @@
         const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${requestedPage}&page_size=25`;
         let res;
         try { res = await apiV2Fetch(`/historial/?${query}`); }
-        catch (error) { state.historyLoading = false; return render(shell(`<div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial(${loadMore})">Reintentar</button></div>`)); }
+        catch (error) {
+          if (generation !== state.requestGeneration.history) return;
+          state.historyLoading = false;
+          return render(shell(`<div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial(${loadMore})">Reintentar</button></div>`));
+        }
         if (generation !== state.requestGeneration.history) { state.historyLoading = false; return; }
         if (!res.ok) { state.historyLoading = false; return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial(${loadMore})">Reintentar</button></div>`)); }
         const data = await res.json();
