@@ -1776,3 +1776,369 @@ class CfpBlindCountTests(TestCase):
 
         with self.assertRaises(ValidationError):
             guardar_corte_ciego(bitacora_negative, self.manager)
+
+
+class CfpFifoTransferTests(TestCase):
+    """Test FIFO transfer from CFP 1.1 to Armado."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefe.cfp", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="op.cfp", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Create product and recipe
+        self.unidad = UnidadMedida.objects.create(codigo="kg-cfp", nombre="Kilogramo CFP")
+        self.insumo = Insumo.objects.create(
+            codigo="PREP:CRUNCH:FIFO",
+            codigo_point="RC-FIFO-001",
+            nombre="Preparacion Crunch FIFO",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Preparacion Crunch FIFO",
+            codigo_point="RC-FIFO-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="fifo-crunch-test",
+        )
+
+        # Create two bitacoras with lines, then close them to generate lots via cerrar_hornos
+        bitacora1 = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),  # Older date
+            creado_por=self.manager,
+        )
+        linea1 = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora1,
+            receta=self.receta,
+            datos={"existencia": "5"},
+            observaciones="Lote antiguo",
+        )
+
+        bitacora2 = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 9),  # Newer date
+            creado_por=self.manager,
+        )
+        linea2 = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora2,
+            receta=self.receta,
+            datos={"existencia": "5"},
+            observaciones="Lote nuevo",
+        )
+
+        # Close bitacoras to generate lots
+        cerrar_hornos(bitacora1, self.manager)
+        cerrar_hornos(bitacora2, self.manager)
+
+        # Get the lots created
+        self.lote_antiguo = LoteProduccion.objects.filter(
+            insumo=self.insumo,
+            linea_origen=linea1,
+        ).first()
+        self.lote_nuevo = LoteProduccion.objects.filter(
+            insumo=self.insumo,
+            linea_origen=linea2,
+        ).first()
+
+        # Create a bitacora line for transfers (in CFP11)
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "10"},
+            observaciones="Test transfer line",
+        )
+
+    def test_transfer_uses_oldest_available_lot_first(self):
+        """Test that FIFO selects oldest lot first."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Should use 5 from oldest lot and 1 from new lot
+        self.assertEqual(len(result.asignaciones), 2)
+        self.assertEqual(result.asignaciones[0][0], self.lote_antiguo.id)
+        self.assertEqual(result.asignaciones[0][1], Decimal("5"))
+        self.assertEqual(result.asignaciones[1][0], self.lote_nuevo.id)
+        self.assertEqual(result.asignaciones[1][1], Decimal("1"))
+
+        # Check CFP_1_1 stock reduced
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("4"))
+
+        # Check ARMADO stock increased
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("6"))
+
+    def test_transfer_rejects_insufficient_stock(self):
+        """Test that transfer is rejected when insufficient stock."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("11"),  # Only 10 available total
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Verify no movements created (rollback)
+        exit_movements = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+        )
+        self.assertEqual(exit_movements.count(), 0)
+
+        # Stock unchanged
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("10"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("0"))
+
+    def test_transfer_is_idempotent(self):
+        """Test that running transfer twice doesn't duplicate movements."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result1 = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Verify movements created
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+                almacen="CFP_1_1",
+            ).count(),
+            2,
+        )
+
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+                almacen="ARMADO",
+            ).count(),
+            2,
+        )
+
+        # Try again with same parameters - should be idempotent via source_hash
+        # (same result, no duplicates)
+        result2 = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Should still have same number of movements
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+                almacen="CFP_1_1",
+            ).count(),
+            2,
+        )
+
+    def test_transfer_creates_two_leg_movements(self):
+        """Test that each lot assignment creates SALIDA and ENTRADA with distinct hashes."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Check movements for oldest lot
+        salida_antiguo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_antiguo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(salida_antiguo)
+        self.assertEqual(salida_antiguo.cantidad, Decimal("5"))
+
+        entrada_antiguo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_antiguo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(entrada_antiguo)
+        self.assertEqual(entrada_antiguo.cantidad, Decimal("5"))
+
+        # Hashes must be different
+        self.assertNotEqual(salida_antiguo.source_hash, entrada_antiguo.source_hash)
+
+        # Check movements for new lot
+        salida_nuevo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_nuevo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(salida_nuevo)
+        self.assertEqual(salida_nuevo.cantidad, Decimal("1"))
+
+        entrada_nuevo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_nuevo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(entrada_nuevo)
+        self.assertEqual(entrada_nuevo.cantidad, Decimal("1"))
+
+    def test_transfer_updates_stock_by_location_once(self):
+        """Test that stock is updated exactly once per location."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Check ExistenciaInsumo records
+        cfp_existe = ExistenciaInsumo.objects.filter(
+            insumo=self.insumo,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(cfp_existe)
+        self.assertEqual(cfp_existe.stock_actual, Decimal("4"))
+
+        armado_existe = ExistenciaInsumo.objects.filter(
+            insumo=self.insumo,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(armado_existe)
+        self.assertEqual(armado_existe.stock_actual, Decimal("6"))
+
+    def test_transfer_requires_production_manage_permission(self):
+        """Test that only managers can perform transfers."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        with self.assertRaises(PermissionDenied):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("3"),
+                linea=self.linea,
+                actor=self.operator,
+            )
+
+    def test_transfer_fifo_exception_requires_motivo(self):
+        """Test that FIFO exception requires non-empty motivo."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Try without motivo
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("3"),
+                linea=self.linea,
+                actor=self.manager,
+                lote_excepcion=self.lote_nuevo,  # Out of order
+                motivo_excepcion_fifo="",
+            )
+
+        # Try with motivo - should succeed
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("3"),
+            linea=self.linea,
+            actor=self.manager,
+            lote_excepcion=self.lote_nuevo,  # Out of order
+            motivo_excepcion_fifo="Especial request",
+        )
+        self.assertIsNotNone(result)
+
+    def test_transfer_fifo_exception_requires_manage_permission(self):
+        """Test that only managers can use FIFO exception."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        with self.assertRaises(PermissionDenied):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("3"),
+                linea=self.linea,
+                actor=self.operator,
+                lote_excepcion=self.lote_nuevo,
+                motivo_excepcion_fifo="Especial request",
+            )
+
+    def test_transfer_rollback_on_insufficient_total(self):
+        """Test complete rollback when total available is insufficient."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Try to transfer more than available
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("15"),  # Only 10 available
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Verify no movements created and stock unchanged
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+            ).count(),
+            0,
+        )
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("10"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("0"))
+
+    def test_transfer_validates_positive_finite_quantity(self):
+        """Test quantity validation."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Zero quantity
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("0"),
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Negative quantity
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("-5"),
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Non-numeric
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad="abc",
+                linea=self.linea,
+                actor=self.manager,
+            )

@@ -89,6 +89,17 @@
               </div>
             {% endfor %}
           </section>
+
+          <form method="post" class="panel">
+            {% csrf_token %}
+            <h3 style="margin: 0; color: #8b2252; font-size: 0.95rem;">Transferir a Armado</h3>
+            <label>Cantidad
+              <input type="number" step="0.001" inputmode="decimal" name="cantidad_entregar" placeholder="Ej: 5.5">
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button type="submit" name="accion" value="entregar_armado" style="grid-column: 1 / -1;">Transferir FIFO</button>
+            </div>
+          </form>
         {% endif %}
       </section>
 

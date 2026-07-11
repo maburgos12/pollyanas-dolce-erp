@@ -23,7 +23,7 @@ from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
-from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos, guardar_corte_ciego
+from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos, guardar_corte_ciego, entregar_a_armado
 
 
 PRODUCTION_BITACORA_TYPES = {
@@ -294,6 +294,35 @@ def bitacora_captura(request, tipo):
                 return redirect(f"{request.path}?revision={bitacora.id}")
             else:
                 messages.error(request, "Esta acción solo aplica a CFP 1.1.")
+                return redirect("operacion:bitacoras_home")
+        if accion == "entregar_armado":
+            if tipo == BitacoraOperativa.TIPO_CFP11 and bitacora.conteo_guardado_en:
+                # Minimal transfer action: get first line for transfer context
+                linea = bitacora.lineas.first()
+                if linea and linea.receta:
+                    try:
+                        insumo_resuelto = resolve_preparation_recipe_for_insumo(linea.receta)
+                        if insumo_resuelto:
+                            cantidad_raw = (request.POST.get("cantidad_entregar") or "").strip()
+                            if cantidad_raw:
+                                entregar_a_armado(
+                                    insumo=insumo_resuelto,
+                                    cantidad=cantidad_raw,
+                                    linea=linea,
+                                    actor=request.user,
+                                )
+                                messages.success(request, "Lotes transferidos a Armado.")
+                            else:
+                                messages.error(request, "Ingresa una cantidad válida.")
+                        else:
+                            messages.error(request, "No se resolvió el insumo para transferencia.")
+                    except ValidationError as exc:
+                        messages.error(request, exc.messages[0])
+                    except PermissionDenied as exc:
+                        messages.error(request, str(exc))
+                return redirect(f"{request.path}?revision={bitacora.id}")
+            else:
+                messages.error(request, "Esta acción solo aplica a CFP 1.1 sellada.")
                 return redirect("operacion:bitacoras_home")
         cerrar_accion = accion == "cerrar_produccion" or request.POST.get("cerrar") == "1"
         if cerrar_accion:
