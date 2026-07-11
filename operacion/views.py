@@ -15,45 +15,9 @@ from core.access import can_view_module, can_view_submodule
 from core.models import Sucursal
 from recetas.models import Receta
 
+from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
-
-
-BITACORA_CONFIG = {
-    BitacoraOperativa.TIPO_SALIDAS_CFP1: {
-        "titulo": "Salidas CFP1",
-        "ayuda": "Cantidades enviadas por producto a cada sucursal.",
-        "campos": ["cantidad"],
-        "usa_sucursales": True,
-    },
-    BitacoraOperativa.TIPO_INVENTARIO_CFP1: {
-        "titulo": "Inventario CFP1",
-        "ayuda": "Existencia CEDIS y devolución del día.",
-        "campos": ["cedis", "devolucion"],
-    },
-    BitacoraOperativa.TIPO_PLAGAS: {
-        "titulo": "Control de plagas",
-        "ayuda": "Registro de detección o aplicación.",
-        "campos": ["plaga", "area", "metodo", "fecha_deteccion"],
-        "sin_producto": True,
-    },
-    BitacoraOperativa.TIPO_CFP11: {
-        "titulo": "Inventario CFP 1.1",
-        "ayuda": "Bloques de existencia, salida y entrada.",
-        "campos": ["bloque", "tamano", "existencia", "salida", "entrada"],
-    },
-    BitacoraOperativa.TIPO_ROTACION: {
-        "titulo": "Rotación producto",
-        "ayuda": "Producto, cantidad y fecha del producto.",
-        "campos": ["cantidad", "fecha_producto"],
-    },
-    BitacoraOperativa.TIPO_REBANADO: {
-        "titulo": "Producto rebanado",
-        "ayuda": "Enteros, rebanadas y merma.",
-        "campos": ["pastel_entero", "total_rebanadas", "merma_rebanadas", "fecha_producto", "motivo_merma"],
-    },
-}
-
 
 @login_required
 def app_home(request):
@@ -90,6 +54,15 @@ def _decimal(value: str):
         return None
 
 
+def _recetas_for_config(config):
+    recetas = Receta.objects.filter(pasa_modulo_produccion=True)
+    if config.get("receta_tipo"):
+        recetas = recetas.filter(tipo=config["receta_tipo"])
+    if config.get("requiere_codigo_point"):
+        recetas = recetas.exclude(codigo_point="")
+    return recetas.order_by("nombre")
+
+
 def _lineas_from_post(request, config):
     lineas = []
     for index in range(8):
@@ -100,7 +73,7 @@ def _lineas_from_post(request, config):
             receta_id = request.POST.get(f"receta_{index}")
             if not receta_id:
                 continue
-            receta = Receta.objects.filter(pk=receta_id).first()
+            receta = _recetas_for_config(config).filter(pk=receta_id).first()
             if not receta:
                 continue
         for campo in config["campos"]:
@@ -152,7 +125,7 @@ def bitacora_captura(request, tipo):
         raise PermissionDenied
     config = BITACORA_CONFIG[tipo]
     sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
-    recetas = Receta.objects.filter(pasa_modulo_produccion=True).order_by("nombre")[:120]
+    recetas = _recetas_for_config(config)[:120]
     if request.method == "POST":
         bitacora = BitacoraOperativa.objects.create(
             tipo=tipo,

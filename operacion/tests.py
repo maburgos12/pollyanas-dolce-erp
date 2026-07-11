@@ -187,6 +187,27 @@ class OperacionAppTests(TestCase):
         self.assertEqual(linea.datos["cedis"], "4")
         self.assertEqual(linea.datos["devolucion"], "1")
 
+    def test_hornos_rows_require_point_identity(self):
+        user = self._user("produccion.hornos")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            pasa_modulo_produccion=True,
+            hash_contenido="hornos-point-identity",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/HORNOS/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<option value="{receta.id}">Pan Chocolate Chico · PAN-CHO-CH</option>',
+            html=True,
+        )
+
     def test_merma_recepcion_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")
         self._grant(user, "mermas.recepcion", ACCESS_MANAGE)

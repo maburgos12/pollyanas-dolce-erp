@@ -9,14 +9,18 @@ class BitacoraOperativa(models.Model):
     TIPO_SALIDAS_CFP1 = "SALIDAS_CFP1"
     TIPO_INVENTARIO_CFP1 = "INVENTARIO_CFP1"
     TIPO_PLAGAS = "PLAGAS"
+    TIPO_HORNOS = "HORNOS"
     TIPO_CFP11 = "CFP11"
+    TIPO_ARMADO = "ARMADO"
     TIPO_ROTACION = "ROTACION"
     TIPO_REBANADO = "REBANADO"
     TIPO_CHOICES = [
         (TIPO_SALIDAS_CFP1, "Salidas CFP1 a sucursales"),
         (TIPO_INVENTARIO_CFP1, "Inventario Diario CFP1"),
         (TIPO_PLAGAS, "Registro de control de plagas"),
+        (TIPO_HORNOS, "Control producción - Hornos"),
         (TIPO_CFP11, "Control de Inventario Diario CFP 1.1"),
+        (TIPO_ARMADO, "Control producción - Armado"),
         (TIPO_ROTACION, "Rotación de producto bitácora"),
         (TIPO_REBANADO, "Producto Rebanado"),
     ]

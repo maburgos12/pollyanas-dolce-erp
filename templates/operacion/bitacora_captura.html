@@ -76,7 +76,7 @@
               <label>Producto
                 <select name="receta_{{ index }}">
                   <option value="">Seleccionar producto</option>
-                  {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}</option>{% endfor %}
+                  {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>{% endfor %}
                 </select>
               </label>
             {% endif %}
