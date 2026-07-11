@@ -22,6 +22,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
+from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mantenimiento.services_access import can_access_mantenimiento
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
@@ -1231,6 +1232,13 @@ def actualizar_item(request, tipo, pk):
     costo_real = _parse_decimal(request.data.get("costo_real"))
 
     if tipo == "falla":
+        try:
+            evidencias = validate_evidence_files(request.FILES.getlist("evidencias_seguimiento"))
+        except EvidenceValidationError as exc:
+            return Response(
+                {"error": "No se pudieron adjuntar las evidencias.", "evidencias": exc.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         reporte = get_object_or_404(ReporteFalla, pk=pk)
         estatus_anterior = reporte.estatus
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
@@ -1275,7 +1283,7 @@ def actualizar_item(request, tipo, pk):
             estatus_nuevo=estatus if estatus != estatus_anterior else "",
             comentario=comentario or "Seguimiento actualizado desde Mantenimiento.",
         )
-        _guardar_evidencias_falla(bitacora, request.FILES.getlist("evidencias_seguimiento"), request.user)
+        _guardar_evidencias_falla(bitacora, evidencias, request.user)
         return _update_response(request, _branch_falla_item(reporte))
 
     if tipo == "unidad":
@@ -1365,6 +1373,13 @@ def crear_falla(request):
     activo_obj = Activo.objects.filter(pk=activo_id, activo=True).first() if activo_id else None
 
     foto = request.FILES.get("foto_evidencia")
+    try:
+        validated_photos = validate_evidence_files([foto] if foto else [])
+    except EvidenceValidationError as exc:
+        for error in exc.errors:
+            msg.error(request, error)
+        return redirect("mantenimiento:dashboard")
+    foto = validated_photos[0] if validated_photos else None
     reporte = ReporteFalla(
         sucursal=sucursal,
         categoria=categoria,

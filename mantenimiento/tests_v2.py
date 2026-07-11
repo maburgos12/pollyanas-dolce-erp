@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
@@ -20,6 +21,84 @@ from mantenimiento.services_access import (
     can_view_costs,
 )
 from mantenimiento.services_history import canonical_status, period_bounds
+from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
+
+
+class EvidenceValidationTests(SimpleTestCase):
+    def upload(self, name="foto.jpg", content=b"\xff\xd8\xffimagen", content_type="image/jpeg"):
+        return SimpleUploadedFile(name, content, content_type=content_type)
+
+    def test_accepts_supported_real_signatures_and_resets_stream(self):
+        files = [
+            self.upload("foto.jpg"),
+            self.upload("foto.png", b"\x89PNG\r\n\x1a\nresto", "image/png"),
+            self.upload("foto.webp", b"RIFFxxxxWEBPresto", "image/webp"),
+            self.upload("manual.pdf", b"%PDF-1.7 resto", "application/pdf"),
+        ]
+        validated = validate_evidence_files(files)
+        self.assertEqual([item.name for item in validated], ["foto.jpg", "foto.png", "foto.webp", "manual.pdf"])
+        self.assertTrue(all(item.tell() == 0 for item in validated))
+
+    def test_rejects_mime_signature_extension_size_count_and_unsafe_name(self):
+        invalid_cases = [
+            [self.upload("ataque.svg", b"<svg>", "image/svg+xml")],
+            [self.upload("pagina.jpg", b"<html>", "image/jpeg")],
+            [self.upload("foto.png", b"\xff\xd8\xffimagen", "image/png")],
+            [self.upload("foto.jpg", b"\xff\xd8\xffimagen", "application/octet-stream")],
+            [self.upload("programa.exe", b"MZ...", "application/octet-stream")],
+            [SimpleUploadedFile("grande.jpg", b"\xff\xd8\xff", content_type="image/jpeg")],
+            [self.upload(f"{index}.jpg") for index in range(6)],
+        ]
+        invalid_cases[5][0].size = 10 * 1024 * 1024 + 1
+        for files in invalid_cases:
+            with self.subTest(files=[file.name for file in files]):
+                with self.assertRaises(EvidenceValidationError):
+                    validate_evidence_files(files)
+
+        safe = self.upload("../mi foto.jpg")
+        self.assertEqual(validate_evidence_files([safe])[0].name, "mi_foto.jpg")
+
+
+@override_settings(MEDIA_ROOT="/tmp/mantenimiento-evidence-validation")
+class EvidenceWritePathTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("evidence-writer", password="test")
+        Group.objects.create(name="mantenimiento").user_set.add(cls.user)
+        cls.branch = Sucursal.objects.create(codigo="EVI", nombre="Evidencias")
+        cls.category = CategoriaFalla.objects.create(nombre="Evidencias", tipo=CategoriaFalla.TIPO_EQUIPO)
+        cls.report = ReporteFalla.objects.create(
+            sucursal=cls.branch, categoria=cls.category, titulo="Original", descripcion="Original",
+            foto_evidencia="fallas/evidencias/original.jpg", reportado_por=cls.user,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def invalid_html(self, name="ataque.jpg"):
+        return SimpleUploadedFile(name, b"<html>ataque</html>", content_type="image/jpeg")
+
+    def test_followup_api_rejects_all_files_before_updating_or_creating_rows(self):
+        before_rows = BitacoraFalla.objects.filter(reporte=self.report).count()
+        response = self.client.post(
+            f"/api/mantenimiento/bandeja/falla/{self.report.pk}/actualizar/",
+            {"estatus": ReporteFalla.ESTATUS_RESUELTO, "comentario": "No persistir", "evidencias_seguimiento": [self.invalid_html()]},
+        )
+        self.report.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json()["evidencias"])
+        self.assertEqual(self.report.estatus, ReporteFalla.ESTATUS_ABIERTO)
+        self.assertEqual(BitacoraFalla.objects.filter(reporte=self.report).count(), before_rows)
+        self.assertFalse(EvidenciaSeguimientoFalla.objects.filter(bitacora__reporte=self.report).exists())
+
+    def test_initial_form_rejects_invalid_photo_before_creating_report_and_shows_message(self):
+        before = ReporteFalla.objects.count()
+        response = self.client.post("/mantenimiento/nueva-falla/", {
+            "sucursal": self.branch.pk, "categoria": self.category.pk, "titulo": "Nueva",
+            "descripcion": "Descripción", "foto_evidencia": self.invalid_html(),
+        }, follow=True)
+        self.assertEqual(ReporteFalla.objects.count(), before)
+        self.assertContains(response, "contenido no coincide")
 
 
 class MaintenanceHistoryDomainTests(SimpleTestCase):
