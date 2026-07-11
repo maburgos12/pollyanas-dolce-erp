@@ -56,6 +56,7 @@
         historyLoading: false,
         evidenceObjectUrls: new Set(),
         evidenceBlobCache: new Map(),
+        evidenceGeneration: 0,
         viewerReturnFocus: null,
         ordenActual: null,
         filtroOrdenes: "abiertas",
@@ -131,6 +132,7 @@
       }
 
       function logout(doRender = true) {
+        clearEvidenceCache();
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
@@ -470,7 +472,7 @@
             <p class="muted card-copy-muted">${esc(item.descripcion || "Sin descripción")}</p>
             ${item.dias_abierto > 0 ? `<p class="muted card-meta-line">${item.dias_abierto} días abierto</p>` : ""}
             <div class="card-actions">
-              <button onclick="openItemDetail('${esc(item.uid)}', this)">Ver detalle</button>
+              <button data-maintenance-uid="${esc(item.uid)}">Ver detalle</button>
               ${abierto && item.tipo === "orden" && item.estatus !== "EN_PROCESO" ? `<button onclick="actualizarOrdenRapida(${item.id}, 'EN_PROCESO')">Iniciar</button>` : ""}
             </div>
             </div>
@@ -2077,7 +2079,7 @@
         return `<article class="card report-card compact-item no-thumb">
           <div><div class="card-head"><div><p class="card-title">${esc(item.titulo || "Movimiento")}</p><p class="muted">${esc(item.sucursal?.label || "Sin sucursal")} · ${esc(item.sujeto?.label || item.tipo)}</p></div><span class="status-chip">${esc(item.estado)}</span></div>
           <p class="muted card-copy-muted">${esc(item.descripcion || "Sin descripción")}</p>
-          <div class="card-actions"><button onclick="openItemDetail('${esc(item.parent_uid || item.uid)}', this)">Ver detalle</button></div></div>
+          <div class="card-actions"><button data-maintenance-uid="${esc(item.parent_uid || item.uid)}">Ver detalle</button></div></div>
         </article>`;
       }
 
@@ -2123,48 +2125,64 @@
         if (!evidence.length) return `<p class="muted">Sin evidencias disponibles.</p>`;
         const markup = evidence.map(item => {
           const key = `evidence-${Math.random().toString(36).slice(2)}`;
-          window.setTimeout(() => loadProtectedEvidence(key, item.url, item.nombre || "Evidencia de mantenimiento"), 160);
+          const generation = state.evidenceGeneration;
+          window.setTimeout(() => loadProtectedEvidence(key, item.url, item.nombre || "Evidencia de mantenimiento", generation), 160);
           return `<figure id="${key}" class="evidence-placeholder"><div class="skeleton" aria-label="Cargando evidencia"></div><figcaption>${esc(item.nombre || "Evidencia de mantenimiento")}</figcaption></figure>`;
         }).join("");
         return `<div class="gallery">${markup}</div>`;
       }
 
       async function evidenceBlob(url) {
-        if (state.evidenceBlobCache.has(url)) return state.evidenceBlobCache.get(url);
+        if (state.evidenceBlobCache.has(url)) {
+          const cached = state.evidenceBlobCache.get(url);
+          state.evidenceBlobCache.delete(url);
+          state.evidenceBlobCache.set(url, cached);
+          return cached;
+        }
         const res = await apiV2Fetch(url);
         if (!res.ok) throw new Error("Evidencia no disponible");
         const blob = await res.blob();
         state.evidenceBlobCache.set(url, blob);
+        while (state.evidenceBlobCache.size > 20) state.evidenceBlobCache.delete(state.evidenceBlobCache.keys().next().value);
         return blob;
       }
 
-      async function loadProtectedEvidence(containerId, url, filename) {
-        const container = document.getElementById(containerId);
+      async function loadProtectedEvidence(containerId, url, filename, generation) {
+        let container = document.getElementById(containerId);
         if (!container) return;
         try {
           const blob = await evidenceBlob(url);
-          if (!document.getElementById(containerId)) return;
+          container = document.getElementById(containerId);
+          if (!container || generation !== state.evidenceGeneration) return;
           const objectUrl = URL.createObjectURL(blob);
           state.evidenceObjectUrls.add(objectUrl);
           container.innerHTML = `<button type="button" aria-label="Ampliar ${esc(filename)}"><img src="${objectUrl}" alt="${esc(filename)}" loading="lazy"></button><figcaption>${esc(filename)}</figcaption>`;
           container.querySelector("button").onclick = function () { openImageViewer(url, filename, this); };
         } catch (error) {
+          container = document.getElementById(containerId);
+          if (!container || generation !== state.evidenceGeneration) return;
           container.innerHTML = `<div class="error-msg" role="status">Evidencia no disponible</div><figcaption>${esc(filename)}</figcaption>`;
         }
       }
 
       function revokeEvidenceUrls() {
+        state.evidenceGeneration += 1;
         state.evidenceObjectUrls.forEach(url => URL.revokeObjectURL(url));
         state.evidenceObjectUrls.clear();
       }
 
+      function clearEvidenceCache() {
+        revokeEvidenceUrls();
+        state.evidenceBlobCache.clear();
+      }
+
       async function openItemDetail(uid, trigger) {
         const [tipo, id] = String(uid).split(":");
+        const generation = ++state.requestGeneration.detail;
         state.viewerReturnFocus = trigger || document.activeElement;
         render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
         let data = state.detailCache.get(uid);
         if (!data) {
-          const generation = ++state.requestGeneration.detail;
           let res;
           try { res = await apiV2Fetch(`/items/${tipo}/${id}/`); }
           catch (error) { if (generation === state.requestGeneration.detail) render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Revisa tu conexión e intenta nuevamente.</p><button onclick="showScreen('pendientes')">Volver</button></div>`)); return; }
@@ -2181,17 +2199,35 @@
       }
 
       async function openImageViewer(url, alt, trigger) {
+        closeImageViewer(false);
+        const generation = state.evidenceGeneration;
         state.viewerReturnFocus = trigger;
         let viewerUrl;
         try { viewerUrl = URL.createObjectURL(await evidenceBlob(url)); }
         catch (error) { return; }
+        if (generation !== state.evidenceGeneration) { URL.revokeObjectURL(viewerUrl); return; }
         state.evidenceObjectUrls.add(viewerUrl);
         const viewer = document.createElement("div"); viewer.className = "image-viewer"; viewer.id = "image-viewer"; viewer.setAttribute("role","dialog"); viewer.setAttribute("aria-modal","true");
         viewer.dataset.objectUrl = viewerUrl;
         viewer.innerHTML = `<button class="viewer-close" aria-label="Cerrar imagen" onclick="closeImageViewer()">×</button><img src="${viewerUrl}" alt="${esc(alt)}">`; document.body.appendChild(viewer); viewer.querySelector("button").focus();
       }
-      function closeImageViewer(){ const viewer=document.getElementById("image-viewer"); const url=viewer?.dataset.objectUrl; viewer?.remove(); if(url){URL.revokeObjectURL(url);state.evidenceObjectUrls.delete(url);} state.viewerReturnFocus?.focus?.(); }
-      document.addEventListener("keydown", event => { if (event.key === "Escape" && document.getElementById("image-viewer")) closeImageViewer(); });
+      function closeImageViewer(restoreFocus = true){ const viewer=document.getElementById("image-viewer"); const url=viewer?.dataset.objectUrl; viewer?.remove(); if(url){URL.revokeObjectURL(url);state.evidenceObjectUrls.delete(url);} if(restoreFocus) state.viewerReturnFocus?.focus?.(); }
+      document.addEventListener("click", event => {
+        const detailButton = event.target.closest("[data-maintenance-uid]");
+        if (detailButton) openItemDetail(detailButton.dataset.maintenanceUid, detailButton);
+      });
+      document.addEventListener("keydown", event => {
+        const viewer = document.getElementById("image-viewer");
+        if (!viewer) return;
+        if (event.key === "Escape") { event.preventDefault(); closeImageViewer(); return; }
+        if (event.key !== "Tab") return;
+        const focusable = [...viewer.querySelectorAll('button,[href],[tabindex]:not([tabindex="-1"])')].filter(node => !node.disabled);
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+      window.addEventListener("pagehide", clearEvidenceCache);
 
       async function boot() {
         if ("serviceWorker" in navigator) {

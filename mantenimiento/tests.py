@@ -249,6 +249,40 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertLess(catch_source.index(guard), catch_source.index(mutation))
         self.assertLess(catch_source.index(guard), catch_source.index(render_error))
 
+    def test_pwa_detail_and_evidence_async_contracts_are_stale_safe(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn('data-maintenance-uid="${esc(item.uid)}"', source)
+        self.assertNotIn("onclick=\"openItemDetail('${esc(item.uid)}'", source)
+        self.assertIn('event.target.closest("[data-maintenance-uid]")', source)
+        detail_start = source.index("async function openItemDetail")
+        generation = source.index("++state.requestGeneration.detail", detail_start)
+        cache_read = source.index("state.detailCache.get(uid)", detail_start)
+        self.assertLess(generation, cache_read)
+
+        load_start = source.index("async function loadProtectedEvidence")
+        await_blob = source.index("await evidenceBlob(url)", load_start)
+        requery = source.index("container = document.getElementById(containerId)", await_blob)
+        stale_guard = source.index("generation !== state.evidenceGeneration", requery)
+        object_url = source.index("URL.createObjectURL(blob)", stale_guard)
+        self.assertLess(await_blob, requery)
+        self.assertLess(requery, stale_guard)
+        self.assertLess(stale_guard, object_url)
+
+    def test_pwa_viewer_focus_and_bounded_blob_cache_contracts(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn("closeImageViewer(false);", source)
+        self.assertIn('event.key !== "Tab"', source)
+        self.assertIn("event.shiftKey && document.activeElement === first", source)
+        self.assertIn("state.viewerReturnFocus?.focus?.()", source)
+        self.assertIn("state.evidenceBlobCache.size > 20", source)
+        self.assertIn("state.evidenceBlobCache.keys().next().value", source)
+        self.assertIn("state.evidenceBlobCache.clear()", source)
+        self.assertIn('window.addEventListener("pagehide", clearEvidenceCache)', source)
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):
