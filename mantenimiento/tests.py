@@ -1,4 +1,5 @@
 from datetime import timedelta
+import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -83,18 +84,22 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
-        self.assertIn('const CACHE_VERSION = "20260711-paridad-v1";', worker_source)
+        cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
         self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
-        self.assertIn(f"sw.js?v=20260711-paridad-v1", registration_source)
+        registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
+        self.assertEqual(cache_version, registration_version)
         self.assertIn("key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME", worker_source)
         self.assertIn('url.pathname.startsWith("/api/")', worker_source)
         self.assertIn('url.pathname.startsWith("/media/")', worker_source)
         self.assertIn("event.respondWith(fetch(event.request));", worker_source)
-        protected_branch = worker_source.split('url.pathname.startsWith("/api/")', 1)[1].split("return;", 1)[0]
+        protected_branch = worker_source.split('event.request.mode === "navigate"', 1)[1].split("return;", 1)[0]
         self.assertNotIn("caches.match", protected_branch)
+        self.assertIn('url.pathname.startsWith("/mantenimiento/")', protected_branch)
+        self.assertIn("event.respondWith(fetch(event.request));", protected_branch)
+        shell_assets = worker_source.split("const SHELL_ASSETS = [", 1)[1].split("];", 1)[0]
+        self.assertNotIn('"/mantenimiento/app/"', shell_assets)
         self.assertIn('url.origin === self.location.origin', worker_source)
-        self.assertIn('url.pathname.startsWith("/mantenimiento/")', worker_source)
         self.assertIn('url.pathname.startsWith("/static/")', worker_source)
         self.assertIn('!event.request.headers.has("Authorization")', worker_source)
         activation_branch = worker_source.split('self.addEventListener("activate"', 1)[1].split('self.addEventListener("fetch"', 1)[0]

@@ -2,7 +2,6 @@ const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";
 const CACHE_VERSION = "20260711-paridad-v1";
 const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
-  "/mantenimiento/app/",
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"
@@ -30,7 +29,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/")) {
+  if (
+    event.request.mode === "navigate" ||
+    url.pathname.startsWith("/mantenimiento/") ||
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/media/")
+  ) {
     event.respondWith(fetch(event.request));
     return;
   }
@@ -38,7 +42,7 @@ self.addEventListener("fetch", (event) => {
   const isCacheableRequest =
     event.request.method === "GET" &&
     url.origin === self.location.origin &&
-    (url.pathname.startsWith("/mantenimiento/") || url.pathname.startsWith("/static/")) &&
+    url.pathname.startsWith("/static/") &&
     !event.request.headers.has("Authorization");
 
   if (!isCacheableRequest) {
