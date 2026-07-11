@@ -1132,9 +1132,9 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertFalse(linea.evidencias_entrega.exists())
         self.assertIsNone(checklist_bloquea_salida(ruta))
 
-    def test_cambios_de_enviado_preservan_linea_y_reflejan_el_valor_real(self):
+    def _linea_validada_con_cuatro(self, *, source_hash):
         ruta, _ = self._crear_ruta()
-        transferencia = self._crear_transferencia(sent="4.000", source_hash="ady-changes")
+        transferencia = self._crear_transferencia(sent="4.000", source_hash=source_hash)
         sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
         linea = RutaCargaChecklistLinea.objects.get(source_hash=transferencia.source_hash)
         linea.cantidad_cargada = Decimal("4.000")
@@ -1142,22 +1142,55 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         linea.validado_por = self.user
         linea.validado_en = timezone.now()
         linea.save(update_fields=["cantidad_cargada", "estatus", "validado_por", "validado_en", "actualizado_en"])
+        checklist = linea.checklist
+        checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+        checklist.confirmado_por = self.user
+        checklist.confirmado_en = timezone.now()
+        checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
+        return ruta, checklist, linea, transferencia
+
+    def test_point_cambia_de_cuatro_a_dos_preserva_captura_y_marca_diferencia(self):
+        ruta, checklist, linea, transferencia = self._linea_validada_con_cuatro(source_hash="ady-change-4-2")
 
         transferencia.sent_quantity = Decimal("2.000")
         transferencia.save(update_fields=["sent_quantity", "updated_at"])
         sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
         linea.refresh_from_db()
+        checklist.refresh_from_db()
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("2.000"))
         self.assertEqual(linea.cantidad_cargada, Decimal("4.000"))
         self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SOBRANTE)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CON_INCIDENCIA)
+        self.assertIsNotNone(checklist_bloquea_salida(ruta))
+
+    def test_point_cambia_de_cuatro_a_cero_preserva_captura_y_marca_diferencia(self):
+        ruta, checklist, linea, transferencia = self._linea_validada_con_cuatro(source_hash="ady-change-4-0")
 
         transferencia.sent_quantity = Decimal("0.000")
         transferencia.save(update_fields=["sent_quantity", "updated_at"])
         sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
         linea.refresh_from_db()
+        checklist.refresh_from_db()
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("0.000"))
         self.assertEqual(linea.cantidad_cargada, Decimal("4.000"))
         self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SOBRANTE)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CON_INCIDENCIA)
+        self.assertIsNotNone(checklist_bloquea_salida(ruta))
+
+    def test_point_permanece_en_cuatro_conserva_captura_y_cargada(self):
+        ruta, checklist, linea, transferencia = self._linea_validada_con_cuatro(source_hash="ady-change-4-4")
+
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea.refresh_from_db()
+        checklist.refresh_from_db()
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("4.000"))
+        self.assertEqual(linea.cantidad_cargada, Decimal("4.000"))
+        self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
         self.assertIsNone(checklist_bloquea_salida(ruta))
 
     def test_ruta_nocturna_reconocida_por_api_acepta_tracking_y_vencida_no(self):
@@ -1269,6 +1302,75 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertEqual(evento.tipo, EventoRuta.TIPO_RECARGA_CEDIS)
         self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
         self.assertFalse(parada_cedis.evidencias_entrega.exists())
+
+    def test_recarga_cedis_con_objeto_obsoleto_retorna_el_mismo_evento(self):
+        ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS retry",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.580000",
+            longitud="-108.480000",
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=2)
+        parada_obsoleta = ParadaRuta.objects.get(pk=parada.pk)
+
+        primero = registrar_recarga_cedis(ruta=ruta, user=self.user, parada=parada, notas="Primera")
+        segundo = registrar_recarga_cedis(ruta=ruta, user=self.user, parada=parada_obsoleta, notas="Retry")
+
+        self.assertEqual(segundo.id, primero.id)
+        self.assertEqual(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(), 1)
+
+    def test_recarga_cedis_numera_despues_de_evento_historico_compatible(self):
+        ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS histórico",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.580000",
+            longitud="-108.480000",
+        )
+        historica = ParadaRuta.objects.create(
+            ruta=ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=historica,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga CEDIS histórica",
+            metadata={"tipo": "recarga_cedis"},
+        )
+        nueva = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=3)
+
+        evento = registrar_recarga_cedis(ruta=ruta, user=self.user, parada=nueva, notas="Nueva")
+
+        self.assertEqual(evento.metadata["numero"], 2)
+        self.assertEqual(EventoRuta.objects.filter(ruta=ruta).count(), 2)
+
+    def test_migracion_normaliza_recarga_historica_y_es_idempotente(self):
+        from importlib import import_module
+        from django.apps import apps
+
+        normalizar_recargas_cedis = import_module(
+            "logistica.migrations.0033_normalizar_eventos_recarga_cedis"
+        ).normalizar_recargas_cedis
+
+        ruta, parada = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        evento = EventoRuta.objects.create(
+            ruta=ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga histórica PWA",
+            metadata={"tipo": "recarga_cedis_pwa"},
+        )
+
+        normalizar_recargas_cedis(apps, None)
+        normalizar_recargas_cedis(apps, None)
+
+        evento.refresh_from_db()
+        self.assertEqual(evento.tipo, EventoRuta.TIPO_RECARGA_CEDIS)
+        self.assertEqual(EventoRuta.objects.filter(pk=evento.pk).count(), 1)
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):

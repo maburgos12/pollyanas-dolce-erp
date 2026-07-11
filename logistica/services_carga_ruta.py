@@ -83,6 +83,16 @@ def _linea_pendiente_envio_point(linea: RutaCargaChecklistLinea) -> bool:
     return linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE and Decimal(str(linea.cantidad_enviada_esperada or 0)) <= 0
 
 
+def _estatus_carga_para_cantidades(*, cargada: Decimal, esperada: Decimal) -> str:
+    if cargada == esperada:
+        return RutaCargaChecklistLinea.ESTATUS_CARGADA
+    if cargada == 0:
+        return RutaCargaChecklistLinea.ESTATUS_FALTANTE
+    if cargada < esperada:
+        return RutaCargaChecklistLinea.ESTATUS_PARCIAL
+    return RutaCargaChecklistLinea.ESTATUS_SOBRANTE
+
+
 def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     checklist, _ = RutaCargaChecklist.objects.get_or_create(
         ruta=ruta,
@@ -208,6 +218,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     cedis_line = existing
                     break
         if cedis_line:
+            esperada_anterior = Decimal(str(cedis_line.cantidad_enviada_esperada or 0))
             cedis_line.point_transfer_line = line
             cedis_line.transfer_external_id = line.transfer_external_id
             cedis_line.detail_external_id = line.detail_external_id
@@ -226,6 +237,14 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 cedis_line.cantidad_cargada = None
                 cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
                 cedis_line.notas = ""
+            elif cedis_line.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
+                cargada = Decimal(str(cedis_line.cantidad_cargada))
+                cedis_line.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
+                cedis_line.motivo_diferencia = (
+                    "" if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
+                )
+                nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
+                cedis_line.notas = " ".join(value for value in [cedis_line.notas.strip(), nota_cambio] if value)
             cedis_line.save(
                 update_fields=[
                     "point_transfer_line",
@@ -237,6 +256,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     "cantidad_enviada_esperada",
                     "cantidad_cargada",
                     "estatus",
+                    "motivo_diferencia",
                     "notas",
                     "actualizado_en",
                 ]
@@ -262,16 +282,27 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
             RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
         }:
+            esperada_anterior = Decimal(str(existing.cantidad_enviada_esperada or 0))
             existing.point_transfer_line = line
             existing.cantidad_solicitada = line.requested_quantity
             existing.cantidad_enviada_esperada = cantidad_esperada
+            update_fields = [
+                "point_transfer_line",
+                "cantidad_solicitada",
+                "cantidad_enviada_esperada",
+                "actualizado_en",
+            ]
+            if existing.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
+                cargada = Decimal(str(existing.cantidad_cargada))
+                existing.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
+                existing.motivo_diferencia = (
+                    "" if existing.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
+                )
+                nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
+                existing.notas = " ".join(value for value in [existing.notas.strip(), nota_cambio] if value)
+                update_fields.extend(["estatus", "motivo_diferencia", "notas"])
             existing.save(
-                update_fields=[
-                    "point_transfer_line",
-                    "cantidad_solicitada",
-                    "cantidad_enviada_esperada",
-                    "actualizado_en",
-                ]
+                update_fields=update_fields
             )
             actualizadas += 1
             continue
@@ -538,6 +569,14 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
             checklist.confirmado_por = user
             checklist.confirmado_en = timezone.now()
             checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
+        else:
+            checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
+            checklist.confirmado_por = None
+            checklist.confirmado_en = None
+            checklist.motivo_override = ""
+            checklist.save(
+                update_fields=["estatus", "confirmado_por", "confirmado_en", "motivo_override", "actualizado_en"]
+            )
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
         checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
@@ -724,6 +763,7 @@ def autorizar_diferencia_checklist_carga(*, ruta: RutaEntrega, user, autorizado:
 
 @transaction.atomic
 def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada: ParadaRuta | None = None) -> EventoRuta:
+    ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La recarga CEDIS solo aplica a rutas planeadas o en ruta.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
@@ -732,11 +772,14 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
     cedis_punto = PuntoLogistico.objects.filter(tipo=PuntoLogistico.TIPO_CEDIS).order_by("id").first()
     if not cedis_punto:
         raise ValidationError("No hay punto logístico CEDIS configurado para registrar la recarga.")
-    if parada is not None and parada.estado == ParadaRuta.ESTADO_VISITADA:
+    if parada is not None:
+        parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk, ruta=ruta)
         existente = EventoRuta.objects.filter(
             ruta=ruta,
             parada=parada,
-            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+        ).filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"])
         ).order_by("id").first()
         if existente:
             return existente
@@ -759,7 +802,12 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
         checklist.save(update_fields=["motivo_override", "actualizado_en"])
 
     numero = (
-        EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count()
+        EventoRuta.objects.filter(ruta=ruta)
+        .filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"])
+        )
+        .count()
         + 1
     )
     parada_cedis = (
