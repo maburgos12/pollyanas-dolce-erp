@@ -23,7 +23,7 @@ from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
-from .services_bitacoras_inventory import registrar_apertura_inicial
+from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos
 
 
 PRODUCTION_BITACORA_TYPES = {
@@ -276,9 +276,15 @@ def bitacora_captura(request, tipo):
                 datos=datos,
                 observaciones=observaciones,
             )
-        if request.POST.get("cerrar") == "1":
-            bitacora.cerrar()
-            bitacora.save(update_fields=["estatus", "cerrado_en", "actualizado_en"])
+        cerrar_accion = request.POST.get("accion") == "cerrar_produccion" or request.POST.get("cerrar") == "1"
+        if cerrar_accion:
+            if tipo == BitacoraOperativa.TIPO_HORNOS:
+                cerrar_hornos(bitacora, request.user)
+                messages.success(request, f"Hornos cerrados. Se generaron lotes de producción.")
+                return redirect(f"{request.path}?revision={bitacora.id}")
+            else:
+                bitacora.cerrar()
+                bitacora.save(update_fields=["estatus", "cerrado_en", "actualizado_en"])
         messages.success(request, "Bitácora guardada.")
         return redirect("operacion:bitacoras_home")
     return render(

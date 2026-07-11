@@ -1292,3 +1292,222 @@ class HornosLoteServiceTests(TestCase):
 
         self.assertEqual(LoteProduccion.objects.filter(linea_origen=self.linea).count(), 1)
         self.assertEqual(MovimientoInventario.objects.filter(linea_bitacora=self.linea).count(), 1)
+
+    def test_bitacora_capture_hornos_with_close_action_creates_lots_via_http(self):
+        self.client.force_login(self.manager)
+        count_before = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "10.5",
+                "observaciones_0": "Cierre HTTP de hornos",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        self.assertIn(f"?revision={bitacora.id}", response.url)
+        linea = bitacora.lineas.first()
+        lote = LoteProduccion.objects.get(linea_origen=linea)
+        self.assertEqual(lote.cantidad_inicial, Decimal("10.5"))
+        movimiento = MovimientoInventario.objects.get(lote=lote)
+        self.assertEqual(movimiento.cantidad, Decimal("10.5"))
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+
+    def test_bitacora_capture_hornos_without_close_action_saves_draft_no_lots(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "10.5",
+                "observaciones_0": "Guardado borrador sin cierre",
+                "cerrar": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/app/bitacoras/", response.url)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_BORRADOR)
+        linea = bitacora.lineas.first()
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=linea).exists())
+
+    def test_bitacora_capture_hornos_invalid_recipe_rejects_before_creating_bitacora(self):
+        self.client.force_login(self.manager)
+        count_before = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": "999999",
+                "existencia_0": "10.5",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Selecciona un producto válido con identidad Point.")
+        count_after = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+        self.assertEqual(count_before, count_after)
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen__bitacora__tipo=BitacoraOperativa.TIPO_HORNOS).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora__bitacora__tipo=BitacoraOperativa.TIPO_HORNOS).exists())
+
+    def test_close_hornos_accepts_accion_cerrar_produccion(self):
+        """Point 1: Aceptar accion=cerrar_produccion además de legacy cerrar=1."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "7.5",
+                "observaciones_0": "Cierre con accion",
+                "accion": "cerrar_produccion",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        linea = bitacora.lineas.first()
+        lote = LoteProduccion.objects.get(linea_origen=linea)
+        self.assertEqual(lote.cantidad_inicial, Decimal("7.5"))
+
+    def test_close_hornos_requires_manage_permission_even_direct_call(self):
+        """Point 2: cerrar_hornos exige permiso manage Producción incluso llamada directa."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        with self.assertRaises(PermissionDenied):
+            cerrar_hornos(self.bitacora, self.operator)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+    def test_close_hornos_quantity_must_be_positive_finite_decimal_total_rollback(self):
+        """Point 3: Cantidad Decimal positiva finita, ValidationError + rollback total."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.linea.datos = {"existencia": "0"}
+        self.linea.save(update_fields=["datos"])
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+        self.bitacora.lineas.all().delete()
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "-5"},
+            observaciones="Cantidad negativa",
+        )
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+        self.bitacora.lineas.all().delete()
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "NaN"},
+            observaciones="Cantidad NaN",
+        )
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+    def test_close_hornos_idempotent_same_call_but_rejects_incompatible_data(self):
+        """Point 4: Reintento idéntico idempotente, incompatibles rechazados."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        # Mismo cierre dos veces: idempotente
+        cerrar_hornos(self.bitacora, self.manager)
+        result2 = cerrar_hornos(self.bitacora, self.manager)
+        self.assertEqual(result2.lotes_creados, 0)
+        self.assertEqual(LoteProduccion.objects.filter(linea_origen=self.linea).count(), 1)
+        self.assertEqual(MovimientoInventario.objects.filter(linea_bitacora=self.linea).count(), 1)
+
+        # Reintentar con cantidad diferente: debe rechazarse
+        self.linea.datos = {"existencia": "15"}
+        self.linea.save(update_fields=["datos"])
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_hornos(self.bitacora, self.manager)
+        self.assertIn("incompatible", str(ctx.exception).lower())
+
+    def test_close_hornos_movement_lot_delta_atomic(self):
+        """Point 5: movimiento/lote/delta atómicos."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        with patch(
+            "operacion.services_bitacoras_inventory.aplicar_delta",
+            side_effect=ValidationError("fallo de delta"),
+        ):
+            with self.assertRaisesMessage(ValidationError, "fallo de delta"):
+                cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_close_hornos_two_lines_one_invalid_no_lot_movement_stock_or_close(self):
+        """Point 6: Dos líneas, una inválida, no dejan lote/movimiento/stock ni cierre."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        receta2 = Receta.objects.create(
+            nombre="Pan Integral Mediano",
+            codigo_point="PAN-INT-M",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hornos-pan-integral",
+            pasa_modulo_produccion=True,
+        )
+        insumo2 = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-INT-M",
+            codigo_point="PAN-INT-M",
+            nombre="Pan Integral Mediano",
+            nombre_point="Pan Integral Mediano Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+
+        linea2 = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=receta2,
+            datos={"existencia": "invalid"},
+            observaciones="Línea con cantidad inválida",
+        )
+
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        # No hay lotes ni movimientos creados
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=linea2).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=linea2).exists())
+
+        # Stock no se alteró
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+        self.assertEqual(stock_ubicacion(insumo2, UBICACION_CFP_1_1), Decimal("0"))
+
+        # Bitácora no se cerró
+        self.bitacora.refresh_from_db()
+        self.assertEqual(self.bitacora.estatus, BitacoraOperativa.ESTATUS_BORRADOR)

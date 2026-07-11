@@ -222,6 +222,8 @@ def _resolve_insumo_from_receta(receta: Receta) -> Insumo | None:
 
 
 def cerrar_hornos(bitacora: BitacoraOperativa, actor) -> CierreHornosResult:
+    if not can_manage_module(actor, "produccion"):
+        raise PermissionDenied("Se requiere permiso de gestión de Producción.")
     if bitacora.tipo != BitacoraOperativa.TIPO_HORNOS:
         raise ValidationError("La bitacora no corresponde a Hornos.")
 
@@ -240,7 +242,7 @@ def cerrar_hornos(bitacora: BitacoraOperativa, actor) -> CierreHornosResult:
             if not insumo:
                 raise ValidationError(f"No se encontró el insumo derivado de {linea.receta.nombre}.")
 
-            cantidad = Decimal(str(linea.datos.get("existencia") or 0))
+            cantidad = _cantidad_positiva(linea.datos.get("existencia"))
             source_hash = sha256(
                 f"BITACORA:HORNOS:{linea.id}:ENTRADA:{UBICACION_CFP_1_1}".encode()
             ).hexdigest()
@@ -266,7 +268,12 @@ def cerrar_hornos(bitacora: BitacoraOperativa, actor) -> CierreHornosResult:
                 },
             )
 
-            if movimiento_nuevo:
+            if not movimiento_nuevo:
+                if movimiento.cantidad != cantidad or movimiento.insumo_id != insumo.pk:
+                    raise ValidationError(
+                        "El movimiento/lote de esta línea ya existe con datos incompatibles."
+                    )
+            else:
                 lote, lote_nuevo = LoteProduccion.objects.select_for_update().get_or_create(
                     linea_origen=linea,
                     defaults={
