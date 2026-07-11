@@ -18,7 +18,15 @@
       <td>{{ alerta.ruta.folio }}</td><td>{{ alerta.parada.punto_nombre_snapshot }}</td>
       <td>{{ alerta.ruta.repartidor.user.get_full_name|default:alerta.ruta.repartidor.user.username }}</td>
       <td>{{ alerta.descripcion }} · {{ alerta.creado_en|date:"Y-m-d H:i" }}</td>
-      <td><a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' alerta.ruta_id %}#revisiones-entrega">Abrir ruta</a></td>
+      <td>
+        <a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' alerta.ruta_id %}#revisiones-entrega">Abrir ruta</a>
+        <form method="post" class="pd-u-inline">{% csrf_token %}
+          <input type="hidden" name="evento_id" value="{{ alerta.id }}">
+          <label for="motivo-alerta-{{ alerta.id }}">Motivo de resolución</label>
+          <input id="motivo-alerta-{{ alerta.id }}" name="motivo_revision" required>
+          <button class="btn btn-primary btn-small" type="submit">Marcar resuelta</button>
+        </form>
+      </td>
     </tr>{% endfor %}
     {% if not paradas_revision and not alertas_historicas %}<tr><td colspan="5" class="muted">No hay revisiones pendientes.</td></tr>{% endif %}
     </tbody>

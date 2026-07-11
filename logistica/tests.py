@@ -1,7 +1,7 @@
 import json
 import importlib
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -909,6 +909,21 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).count(), 1)
         self.assertFalse(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
 
+    def test_usuario_dual_jefe_repartidor_conserva_origen_pwa_en_endpoint(self):
+        UserModuleAccess.objects.create(
+            user=self.user, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=self.user,
+        )
+        response = self.client.post(
+            self.url,
+            json.dumps(self._payload(client_event_id="dual-role-pwa-1")),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        evento = EventoRuta.objects.get(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL)
+        self.assertEqual(evento.metadata["origen_confirmacion"], "PWA")
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_causa, "GPS_SIN_SENAL")
+
     def test_con_geocerca_confiable_confirma_normal_sin_revision(self):
         self._registrar_geocerca_real()
 
@@ -1541,6 +1556,16 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertTrue(ParadaEntregaEvidencia.objects.filter(pk=evidencia.pk).exists())
         self.assertEqual(resultado.evento.metadata["decision"], ParadaRuta.REVISION_CORREGIDA)
+        self.assertEqual(resultado.evento.tipo, EventoRuta.TIPO_ENTREGA_CORREGIDA)
+        correccion = self.parada.evidencias_entrega.get(metadata__evento_correccion_id=resultado.evento.id)
+        self.assertEqual(correccion.capturado_por, self.jefe)
+        self.assertTrue(correccion.metadata["preserva_evidencia_original"])
+        repetida = revisar_entrega_excepcional(
+            parada=self.parada, actor=self.jefe, decision=ParadaRuta.REVISION_CORREGIDA,
+            motivo="Se verificó llamada con la encargada y folio 443.",
+        )
+        self.assertTrue(repetida.idempotente)
+        self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_CORREGIDA).count(), 1)
         self.client.force_login(self.jefe)
         page = self.client.get(self.url)
         self.assertFalse(page.context["cierre_administrativo_pendiente"])
@@ -1569,6 +1594,29 @@ class LogisticaRevisionEntregaTests(TestCase):
         control = self.client.get(reverse("logistica:control_rutas"))
         self.assertContains(control, "Abrir bandeja de revisiones")
         self.assertGreaterEqual(control.context["revisiones_globales_count"], 2)
+
+    def test_jefe_resuelve_alerta_historica_con_motivo_y_sale_del_conteo(self):
+        historica = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=2)
+        alerta = EventoRuta.objects.create(
+            ruta=self.ruta, parada=historica,
+            tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            severidad=EventoRuta.SEVERIDAD_ALERTA,
+            descripcion="Entrega histórica sin geocerca.",
+            clave_auditoria=f"resolver-{historica.id}",
+            metadata={"regla": "ENTREGADA_SIN_GEOFENCE_O_REVISION"},
+        )
+        self.client.force_login(self.jefe)
+        response = self.client.post(reverse("logistica:revisiones_entrega"), {
+            "evento_id": alerta.id,
+            "motivo_revision": "Se verificó con encargada y evidencia física.",
+        })
+        self.assertEqual(response.status_code, 302)
+        alerta.refresh_from_db()
+        self.assertEqual(alerta.revision_alerta_estado, EventoRuta.REVISION_ALERTA_RESUELTA)
+        self.assertEqual(alerta.revision_alerta_resuelta_por, self.jefe)
+        self.assertIsNotNone(alerta.revision_alerta_resuelta_en)
+        bandeja = self.client.get(reverse("logistica:revisiones_entrega"))
+        self.assertNotContains(bandeja, "Entrega histórica sin geocerca.")
 
 
 class LogisticaEntregaContratoFinalTests(LogisticaEntregaDomainTests):
@@ -1628,11 +1676,22 @@ class LogisticaEntregaContratoFinalTests(LogisticaEntregaDomainTests):
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).count(), 2)
 
 
-class LogisticaGuardEscritoresTests(SimpleTestCase):
+class LogisticaGuardEscritoresTests(TestCase):
     def test_guard_detecta_asignacion_y_update_directos(self):
         from logistica.checks import critical_parada_writes_in_source
         source = "parada.entrega_estado = 'ENTREGADA'\nParadaRuta.objects.filter(pk=1).update(estado='VISITADA')"
         self.assertEqual(len(critical_parada_writes_in_source(source, "logistica/views_nueva.py")), 2)
+
+    def test_guard_detecta_setattr_bulk_update_payload_y_sql_directo(self):
+        from logistica.checks import critical_parada_writes_in_source
+        source = """
+setattr(parada, 'entrega_estado', valor)
+ParadaRuta.objects.bulk_update(paradas, ['estado', 'hora_llegada_real'])
+ParadaRuta.objects.filter(pk=1).update(**{'revision_entrega_estado': 'AUTORIZADA'})
+cursor.execute('UPDATE logistica_paradaruta SET entrega_estado = %s', ['ENTREGADA'])
+"""
+        fields = {field for _, field in critical_parada_writes_in_source(source, "api/nuevo.py")}
+        self.assertTrue({"entrega_estado", "estado", "hora_llegada_real", "revision_entrega_estado"}.issubset(fields))
 
     @patch("logistica.tasks.auditar_entregas_ruta")
     def test_auditor_programado_cubre_hoy_y_dia_operativo_anterior(self, auditar):
@@ -1645,6 +1704,35 @@ class LogisticaGuardEscritoresTests(SimpleTestCase):
         self.assertEqual(auditar.call_count, 2)
         self.assertEqual(result["rutas_revisadas"], 4)
         self.assertEqual(result["alertas_creadas"], 1)
+
+    @patch("logistica.tasks.timezone.localdate", return_value=date(2026, 7, 10))
+    @patch("logistica.tasks.auditar_entregas_ruta")
+    def test_auditor_recupera_todos_los_dias_perdidos_desde_cursor(self, auditar, _localdate):
+        from logistica.models import AuditoriaEntregaCursor
+        from logistica.tasks import auditar_entregas_ruta_task
+        AuditoriaEntregaCursor.objects.create(ultima_fecha_exitosa=date(2026, 7, 5))
+        auditar.return_value = {
+            "rutas_revisadas": 0, "paradas_revisadas": 0, "hallazgos": [],
+            "alertas_creadas": 0, "dry_run": False,
+        }
+        resultado = auditar_entregas_ruta_task.run()
+        self.assertEqual(resultado["ventana_fechas"], [
+            "2026-07-06", "2026-07-07", "2026-07-08", "2026-07-09", "2026-07-10",
+        ])
+        self.assertEqual(AuditoriaEntregaCursor.objects.get().ultima_fecha_exitosa, date(2026, 7, 10))
+
+    @patch("logistica.tasks.timezone.localdate", return_value=date(2026, 7, 10))
+    @patch("logistica.tasks.auditar_entregas_ruta")
+    def test_auditor_reanuda_en_primer_dia_no_exitoso(self, auditar, _localdate):
+        from logistica.models import AuditoriaEntregaCursor
+        from logistica.tasks import auditar_entregas_ruta_task
+        cursor = AuditoriaEntregaCursor.objects.create(ultima_fecha_exitosa=date(2026, 7, 7))
+        ok = {"rutas_revisadas": 0, "paradas_revisadas": 0, "hallazgos": [], "alertas_creadas": 0, "dry_run": False}
+        auditar.side_effect = [ok, RuntimeError("falla del 9")]
+        with self.assertRaises(RuntimeError):
+            auditar_entregas_ruta_task.run()
+        cursor.refresh_from_db()
+        self.assertEqual(cursor.ultima_fecha_exitosa, date(2026, 7, 8))
 
 
 class LogisticaReglasAdyacentesStabilizationTests(TestCase):

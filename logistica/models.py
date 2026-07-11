@@ -677,6 +677,7 @@ class EventoRuta(models.Model):
     TIPO_ENTREGA_EXCEPCIONAL = "ENTREGA_EXCEPCIONAL"
     TIPO_ENTREGA_AUTORIZADA = "ENTREGA_AUTORIZADA"
     TIPO_ENTREGA_RECHAZADA = "ENTREGA_RECHAZADA"
+    TIPO_ENTREGA_CORREGIDA = "ENTREGA_CORREGIDA"
     TIPO_INCONSISTENCIA_ENTREGA = "INCONSISTENCIA_ENTREGA"
     TIPO_RECARGA_CEDIS = "RECARGA_CEDIS"
     TIPO_CHOICES = [
@@ -694,6 +695,7 @@ class EventoRuta(models.Model):
         (TIPO_ENTREGA_EXCEPCIONAL, "Entrega excepcional"),
         (TIPO_ENTREGA_AUTORIZADA, "Entrega excepcional autorizada"),
         (TIPO_ENTREGA_RECHAZADA, "Entrega excepcional rechazada"),
+        (TIPO_ENTREGA_CORREGIDA, "Entrega excepcional corregida"),
         (TIPO_INCONSISTENCIA_ENTREGA, "Inconsistencia de entrega"),
         (TIPO_RECARGA_CEDIS, "Recarga CEDIS"),
     ]
@@ -727,6 +729,26 @@ class EventoRuta(models.Model):
         db_index=True,
         editable=False,
     )
+    REVISION_ALERTA_PENDIENTE = "PENDIENTE"
+    REVISION_ALERTA_RESUELTA = "RESUELTA"
+    REVISION_ALERTA_CHOICES = [
+        (REVISION_ALERTA_PENDIENTE, "Pendiente"),
+        (REVISION_ALERTA_RESUELTA, "Resuelta"),
+    ]
+    revision_alerta_estado = models.CharField(
+        max_length=15,
+        choices=REVISION_ALERTA_CHOICES,
+        default=REVISION_ALERTA_PENDIENTE,
+    )
+    revision_alerta_motivo = models.TextField(blank=True, default="")
+    revision_alerta_resuelta_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="alertas_logistica_resueltas",
+    )
+    revision_alerta_resuelta_en = models.DateTimeField(null=True, blank=True)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -761,6 +783,17 @@ class EventoRuta(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ruta.folio} · {self.get_tipo_display()}"
+
+
+class AuditoriaEntregaCursor(models.Model):
+    """Punto durable del ultimo dia operativo auditado completamente."""
+
+    clave = models.CharField(max_length=40, unique=True, default="entregas_ruta")
+    ultima_fecha_exitosa = models.DateField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.clave}: {self.ultima_fecha_exitosa or 'sin ejecutar'}"
 
 
 class Unidad(models.Model):

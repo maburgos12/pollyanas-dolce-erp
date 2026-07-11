@@ -1377,7 +1377,10 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         evidencias_payload = payload.get("evidencias") or []
         client_context = payload.get("client_context") or {}
         motivo = payload.get("notas") or "Entrega confirmada por repartidor."
-        origen_confirmacion = "AJUSTE_ADMIN" if can_manage_rutas else "PWA"
+        # Este endpoint representa siempre el boton de la PWA. Los permisos del
+        # usuario no cambian la procedencia del hecho (un jefe puede ser tambien
+        # repartidor). El ajuste administrativo vive en ruta_detail.
+        origen_confirmacion = "PWA"
         evidencias_servicio = [dict(item) for item in evidencias_payload]
         try:
             replay_idempotente = obtener_respuesta_idempotente(

@@ -12,28 +12,73 @@ CRITICAL_PARADA_FIELDS = {
     "estado", "entrega_estado", "entrega_confirmada_en", "entrega_confirmada_por",
     "hora_llegada_real", "hora_salida_real", "revision_entrega_estado",
 }
+# Esta lista es deliberadamente por funcion, no por archivo: agregar un helper nuevo
+# a uno de estos modulos no le concede permiso implicito para mutar estado operativo.
 ALLOWED_CRITICAL_WRITERS = {
-    "logistica/services_entregas.py",
-    "logistica/services_rutas_control.py",
-    "logistica/services_carga_ruta.py",
+    "logistica/services_entregas.py": {"confirmar_entrega_parada", "revisar_entrega_excepcional"},
+    "logistica/services_rutas_control.py": {"_marcar_visitada_por_permanencia"},
+    "logistica/services_carga_ruta.py": {"registrar_recarga_cedis"},
 }
 
 
 def critical_parada_writes_in_source(source: str, relative_path: str) -> list[tuple[int, str]]:
-    if relative_path in ALLOWED_CRITICAL_WRITERS:
-        return []
     tree = ast.parse(source, filename=relative_path)
     findings = []
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    def is_allowed(node):
+        allowed_functions = ALLOWED_CRITICAL_WRITERS.get(relative_path, set())
+        current = node
+        while current is not None:
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return current.name in allowed_functions
+            current = parents.get(current)
+        return False
+
+    def add(node, field):
+        if field in CRITICAL_PARADA_FIELDS and not is_allowed(node):
+            findings.append((node.lineno, field))
+
+    def string_values(node):
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return [item.value for item in node.elts if isinstance(item, ast.Constant) and isinstance(item.value, str)]
+        if isinstance(node, ast.Dict):
+            return [key.value for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)]
+        return []
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
-                if isinstance(target, ast.Attribute) and target.attr in CRITICAL_PARADA_FIELDS:
-                    findings.append((node.lineno, target.attr))
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update":
+                if isinstance(target, ast.Attribute):
+                    add(node, target.attr)
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 2:
+            field_arg = node.args[1]
+            if isinstance(field_arg, ast.Constant) and isinstance(field_arg.value, str):
+                add(node, field_arg.value)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "bulk_update" and len(node.args) >= 2:
+            for field in string_values(node.args[1]):
+                add(node, field)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
             for keyword in node.keywords:
-                if keyword.arg in CRITICAL_PARADA_FIELDS:
-                    findings.append((node.lineno, keyword.arg))
+                if keyword.arg:
+                    add(node, keyword.arg)
+                else:
+                    for field in string_values(keyword.value):
+                        add(node, field)
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {"execute", "executemany"} and node.args:
+            sql = node.args[0]
+            if isinstance(sql, ast.Constant) and isinstance(sql.value, str):
+                normalized = sql.value.lower()
+                if "update" in normalized and "paradaruta" in normalized:
+                    for field in CRITICAL_PARADA_FIELDS:
+                        if field.lower() in normalized:
+                            add(node, field)
     return findings
 
 

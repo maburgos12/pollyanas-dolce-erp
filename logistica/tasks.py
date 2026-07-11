@@ -12,6 +12,7 @@ from core.access import can_view_module, group_name_variants
 from core.email_rendering import render_email_to_string
 
 from .models import (
+    AuditoriaEntregaCursor,
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     ConfigAlertaFlota,
@@ -106,17 +107,30 @@ def auditar_entregas_ruta_task(ruta_id: int | None = None, fecha: str | None = N
         fecha_ruta = date.fromisoformat(fecha) if fecha else None
         return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
     hoy = timezone.localdate()
-    resultados = [
-        auditar_entregas_ruta(fecha=hoy - timedelta(days=1)),
-        auditar_entregas_ruta(fecha=hoy),
-    ]
+    with transaction.atomic():
+        cursor, _ = AuditoriaEntregaCursor.objects.select_for_update().get_or_create(clave="entregas_ruta")
+        inicio = cursor.ultima_fecha_exitosa + timedelta(days=1) if cursor.ultima_fecha_exitosa else hoy - timedelta(days=1)
+    fechas = []
+    actual = inicio
+    while actual <= hoy:
+        fechas.append(actual)
+        actual += timedelta(days=1)
+    resultados = []
+    for fecha_operativa in fechas:
+        resultado = auditar_entregas_ruta(fecha=fecha_operativa)
+        resultados.append(resultado)
+        with transaction.atomic():
+            cursor = AuditoriaEntregaCursor.objects.select_for_update().get(clave="entregas_ruta")
+            if cursor.ultima_fecha_exitosa is None or fecha_operativa > cursor.ultima_fecha_exitosa:
+                cursor.ultima_fecha_exitosa = fecha_operativa
+                cursor.save(update_fields=["ultima_fecha_exitosa", "actualizado_en"])
     return {
         "rutas_revisadas": sum(row["rutas_revisadas"] for row in resultados),
         "paradas_revisadas": sum(row["paradas_revisadas"] for row in resultados),
         "hallazgos": [item for row in resultados for item in row["hallazgos"]],
         "alertas_creadas": sum(row["alertas_creadas"] for row in resultados),
         "dry_run": False,
-        "ventana_fechas": [(hoy - timedelta(days=1)).isoformat(), hoy.isoformat()],
+        "ventana_fechas": [item.isoformat() for item in fechas],
     }
 
 

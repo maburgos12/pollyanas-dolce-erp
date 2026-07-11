@@ -61,7 +61,7 @@ from .services_carga_ruta import (
     validar_linea_carga,
 )
 from .services_rutas_control import distancia_metros, resumen_control_rutas
-from .services_entregas import confirmar_entrega_parada, revisar_entrega_excepcional
+from .services_entregas import confirmar_entrega_parada, resolver_alerta_historica, revisar_entrega_excepcional
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
@@ -1296,6 +1296,24 @@ def control_rutas(request):
 def revisiones_entrega(request):
     if not can_manage_submodule(request.user, "logistica", "rutas"):
         raise PermissionDenied("No tienes permisos para revisar entregas de Logística")
+    if request.method == "POST":
+        evento_id = (request.POST.get("evento_id") or "").strip()
+        evento = get_object_or_404(
+            EventoRuta,
+            pk=int(evento_id) if evento_id.isdigit() else 0,
+            tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+        )
+        try:
+            resolver_alerta_historica(
+                evento=evento,
+                actor=request.user,
+                motivo=request.POST.get("motivo_revision"),
+            )
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+        else:
+            messages.success(request, "Alerta histórica resuelta con trazabilidad.")
+        return redirect("logistica:revisiones_entrega")
     estados = {ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA}
     paradas = list(
         ParadaRuta.objects.filter(revision_entrega_estado__in=estados)
@@ -1303,7 +1321,10 @@ def revisiones_entrega(request):
         .order_by("-entrega_confirmada_en", "-id")
     )
     alertas = list(
-        EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA)
+        EventoRuta.objects.filter(
+            tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            revision_alerta_estado=EventoRuta.REVISION_ALERTA_PENDIENTE,
+        )
         .exclude(parada__revision_entrega_estado__in=estados)
         .select_related("ruta", "ruta__repartidor__user", "parada", "parada__punto")
         .order_by("-creado_en", "-id")
@@ -1334,7 +1355,10 @@ def _revisiones_globales_count():
         ParadaRuta.objects.filter(
             revision_entrega_estado__in=[ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA]
         ).count()
-        + EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA)
+        + EventoRuta.objects.filter(
+            tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            revision_alerta_estado=EventoRuta.REVISION_ALERTA_PENDIENTE,
+        )
         .exclude(
             parada__revision_entrega_estado__in=[ParadaRuta.REVISION_PENDIENTE, ParadaRuta.REVISION_RECHAZADA]
         )

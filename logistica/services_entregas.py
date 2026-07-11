@@ -72,6 +72,29 @@ class RevisionEntregaResultado:
     idempotente: bool = False
 
 
+@transaction.atomic
+def resolver_alerta_historica(*, evento, actor, motivo):
+    evento = EventoRuta.objects.select_for_update().get(pk=evento.pk)
+    if not can_manage_submodule(actor, "logistica", "rutas"):
+        raise PermissionDenied("No tienes permiso para resolver alertas históricas.")
+    if evento.tipo != EventoRuta.TIPO_INCONSISTENCIA_ENTREGA:
+        raise ValidationError("El evento no es una alerta histórica de entrega.")
+    motivo = str(motivo or "").strip()
+    if not motivo:
+        raise ValidationError("El motivo de resolución es obligatorio.")
+    if evento.revision_alerta_estado == EventoRuta.REVISION_ALERTA_RESUELTA:
+        return evento
+    evento.revision_alerta_estado = EventoRuta.REVISION_ALERTA_RESUELTA
+    evento.revision_alerta_motivo = motivo
+    evento.revision_alerta_resuelta_por = actor
+    evento.revision_alerta_resuelta_en = timezone.now()
+    evento.save(update_fields=[
+        "revision_alerta_estado", "revision_alerta_motivo",
+        "revision_alerta_resuelta_por", "revision_alerta_resuelta_en",
+    ])
+    return evento
+
+
 @dataclass(frozen=True)
 class ReplayConfirmacionResultado:
     evidencia: ParadaEntregaEvidencia
@@ -478,13 +501,14 @@ def revisar_entrega_excepcional(*, parada, actor, decision, motivo):
     if not motivo:
         raise ValidationError("El motivo de resolución es obligatorio.")
     if parada.revision_entrega_estado == decision:
+        tipos_por_decision = {
+            ParadaRuta.REVISION_AUTORIZADA: EventoRuta.TIPO_ENTREGA_AUTORIZADA,
+            ParadaRuta.REVISION_RECHAZADA: EventoRuta.TIPO_ENTREGA_RECHAZADA,
+            ParadaRuta.REVISION_CORREGIDA: EventoRuta.TIPO_ENTREGA_CORREGIDA,
+        }
         evento = EventoRuta.objects.filter(
             parada=parada,
-            tipo=(
-                EventoRuta.TIPO_ENTREGA_AUTORIZADA
-                if decision == ParadaRuta.REVISION_AUTORIZADA
-                else EventoRuta.TIPO_ENTREGA_RECHAZADA
-            ),
+            tipo=tipos_por_decision[decision],
         ).latest("creado_en")
         return RevisionEntregaResultado(parada=parada, evento=evento, idempotente=True)
     estado_origen_valido = (
@@ -507,18 +531,38 @@ def revisar_entrega_excepcional(*, parada, actor, decision, motivo):
             "actualizado_en",
         ]
     )
-    tipo = (
-        EventoRuta.TIPO_ENTREGA_AUTORIZADA
-        if decision == ParadaRuta.REVISION_AUTORIZADA
-        else EventoRuta.TIPO_ENTREGA_RECHAZADA
-    )
+    tipos_por_decision = {
+        ParadaRuta.REVISION_AUTORIZADA: EventoRuta.TIPO_ENTREGA_AUTORIZADA,
+        ParadaRuta.REVISION_RECHAZADA: EventoRuta.TIPO_ENTREGA_RECHAZADA,
+        ParadaRuta.REVISION_CORREGIDA: EventoRuta.TIPO_ENTREGA_CORREGIDA,
+    }
+    tipo = tipos_por_decision[decision]
     evento = EventoRuta.objects.create(
         ruta=parada.ruta,
         parada=parada,
         tipo=tipo,
-        severidad=EventoRuta.SEVERIDAD_OK if decision == ParadaRuta.REVISION_AUTORIZADA else EventoRuta.SEVERIDAD_ALERTA,
+        severidad=(
+            EventoRuta.SEVERIDAD_OK
+            if decision in {ParadaRuta.REVISION_AUTORIZADA, ParadaRuta.REVISION_CORREGIDA}
+            else EventoRuta.SEVERIDAD_ALERTA
+        ),
         descripcion=f"Entrega excepcional {decision.lower()}: {motivo}",
         metadata={"decision": decision, "motivo": motivo, "origen": "servicio_entregas"},
         creado_por=actor,
     )
+    if decision == ParadaRuta.REVISION_CORREGIDA:
+        ParadaEntregaEvidencia.objects.create(
+            ruta=parada.ruta,
+            parada=parada,
+            tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+            comentario=motivo,
+            capturado_por=actor,
+            client_event_id=f"revision-corregida-{evento.id}",
+            metadata={
+                "origen": "revision_jefe",
+                "decision": decision,
+                "evento_correccion_id": evento.id,
+                "preserva_evidencia_original": True,
+            },
+        )
     return RevisionEntregaResultado(parada=parada, evento=evento)
