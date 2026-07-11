@@ -783,6 +783,34 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
             with self.subTest(key=key):
                 self.assertEqual(self.client.get("/api/mantenimiento/v2/historial/", {key: value}).status_code, 400)
 
+    def test_search_matches_actor_even_when_content_does_not(self):
+        falla = ReporteFalla.objects.create(
+            sucursal=self.branch, categoria=self.category, titulo="Contenido neutro",
+            descripcion="Sin coincidencia", reportado_por=self.actor,
+        )
+        order = OrdenMantenimiento.objects.create(
+            activo_ref=self.asset, descripcion="Trabajo neutro", creado_por=self.actor,
+        )
+        repair = ReparacionUnidad.objects.create(
+            unidad=self.unit, fecha_ingreso=timezone.localdate(),
+            descripcion_falla="Ruido neutro", registrado_por=self.actor,
+        )
+        service = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate(), notas="Notas neutras",
+            registrado_por=self.actor,
+        )
+
+        payload = self.client.get("/api/mantenimiento/v2/historial/", {
+            "periodo": "todo", "q": "Isaac", "page_size": 100,
+        }).json()
+
+        self.assertEqual(payload["pagination"]["total"], 4)
+        self.assertEqual(
+            {row["uid"] for row in payload["results"]},
+            {f"falla:{falla.pk}", f"orden:{order.pk}", f"reparacion:{repair.pk}", f"servicio_unidad:{service.pk}"},
+        )
+
     def test_scope_linked_orders_exclusive_types_and_multi_page_stability(self):
         linked = OrdenMantenimiento.objects.create(
             activo_ref=self.asset, origen=OrdenMantenimiento.ORIGEN_EMERGENCIA,

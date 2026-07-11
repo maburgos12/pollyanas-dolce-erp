@@ -164,7 +164,14 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
         fallas = fallas.none()
     if filters.get("sucursal"): fallas = fallas.filter(sucursal_id=filters["sucursal"])
     if filters.get("activo"): fallas = fallas.filter(activo_relacionado_id=filters["activo"])
-    if filters.get("q"): fallas = fallas.filter(Q(titulo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]))
+    if filters.get("q"):
+        fallas = fallas.filter(
+            Q(titulo__icontains=filters["q"]) |
+            Q(descripcion__icontains=filters["q"]) |
+            Q(reportado_por__first_name__icontains=filters["q"]) |
+            Q(reportado_por__last_name__icontains=filters["q"]) |
+            Q(reportado_por__username__icontains=filters["q"])
+        )
     falla_statuses = {"abierto": [ReporteFalla.ESTATUS_ABIERTO], "en_proceso": [ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO], "cerrado": [ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO], "cancelado": [ReporteFalla.ESTATUS_CANCELADO]}
     if filters.get("estado") not in {None, "todo"}: fallas = fallas.filter(estatus__in=falla_statuses[filters["estado"]])
     closed = [ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO]
@@ -207,7 +214,15 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("tipo") not in {None, "todo", "orden", "sin_reporte"}: orders = orders.none()
     if filters.get("sucursal"): orders = orders.filter(activo_ref__sucursal_id=filters["sucursal"])
     if filters.get("activo"): orders = orders.filter(activo_ref_id=filters["activo"])
-    if filters.get("q"): orders = orders.filter(Q(folio__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(activo_ref__nombre__icontains=filters["q"]))
+    if filters.get("q"):
+        orders = orders.filter(
+            Q(folio__icontains=filters["q"]) |
+            Q(descripcion__icontains=filters["q"]) |
+            Q(activo_ref__nombre__icontains=filters["q"]) |
+            Q(creado_por__first_name__icontains=filters["q"]) |
+            Q(creado_por__last_name__icontains=filters["q"]) |
+            Q(creado_por__username__icontains=filters["q"])
+        )
     unreported = Q(origen__in=[OrdenMantenimiento.ORIGEN_EMERGENCIA, OrdenMantenimiento.ORIGEN_INICIATIVA], plan_ref__isnull=True, has_linked_request=False)
     if filters.get("tipo") == "sin_reporte": orders = orders.filter(unreported)
     elif filters.get("tipo") == "orden": orders = orders.exclude(unreported)
@@ -249,7 +264,15 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("tipo") not in {None, "todo", "reporte"}: reports = reports.none()
     if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
     if filters.get("unidad"): reports = reports.filter(unidad_id=filters["unidad"])
-    if filters.get("q"): reports = reports.filter(Q(tipo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+    if filters.get("q"):
+        reports = reports.filter(
+            Q(tipo__icontains=filters["q"]) |
+            Q(descripcion__icontains=filters["q"]) |
+            Q(unidad__codigo__icontains=filters["q"]) |
+            Q(repartidor__user__first_name__icontains=filters["q"]) |
+            Q(repartidor__user__last_name__icontains=filters["q"]) |
+            Q(repartidor__user__username__icontains=filters["q"])
+        )
     report_statuses = {"abierto": [ReporteUnidad.ESTATUS_ABIERTO], "en_proceso": [ReporteUnidad.ESTATUS_EN_PROCESO, ReporteUnidad.ESTATUS_PROGRAMADO], "cerrado": [ReporteUnidad.ESTATUS_CERRADO], "cancelado": []}
     if filters.get("estado") not in {None, "todo"}: reports = reports.filter(estatus__in=report_statuses[filters["estado"]])
     rcq = Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__gte=start, fecha_cierre__lt=end) if start else Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__lt=end)
@@ -280,8 +303,16 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
         if filters.get("sucursal"): queryset = queryset.filter(unidad__sucursal_id=filters["sucursal"])
         if filters.get("unidad"): queryset = queryset.filter(unidad_id=filters["unidad"])
         if filters.get("q"):
-            if kind == "reparacion": queryset = queryset.filter(Q(descripcion_falla__icontains=filters["q"]) | Q(descripcion_reparacion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
-            else: queryset = queryset.filter(Q(tipo_servicio__nombre__icontains=filters["q"]) | Q(notas__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+            actor_query = (
+                Q(registrado_por__first_name__icontains=filters["q"]) |
+                Q(registrado_por__last_name__icontains=filters["q"]) |
+                Q(registrado_por__username__icontains=filters["q"])
+            )
+            if kind == "reparacion":
+                content_query = Q(descripcion_falla__icontains=filters["q"]) | Q(descripcion_reparacion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"])
+            else:
+                content_query = Q(tipo_servicio__nombre__icontains=filters["q"]) | Q(notas__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"])
+            queryset = queryset.filter(content_query | actor_query)
         if start: queryset = queryset.filter(**{f"{date_field}__gte": start.date()})
         queryset = queryset.filter(**{f"{date_field}__lt": end.date()})
         if filters.get("estado") not in {None, "todo", "cerrado"}: queryset = queryset.none()
@@ -323,7 +354,10 @@ def filtered_history_count(user, *, period, filters):
         queryset = queryset.filter(
             Q(**{f"{title_field}__icontains": filters["q"]}) |
             Q(**{f"{description_field}__icontains": filters["q"]}) |
-            Q(unidad__codigo__icontains=filters["q"])
+            Q(unidad__codigo__icontains=filters["q"]) |
+            Q(registrado_por__first_name__icontains=filters["q"]) |
+            Q(registrado_por__last_name__icontains=filters["q"]) |
+            Q(registrado_por__username__icontains=filters["q"])
         )
     if filters.get("estado") not in {None, "todo", "cerrado"}:
         return 0
