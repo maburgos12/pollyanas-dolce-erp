@@ -57,7 +57,7 @@ def _actor_puede_confirmar(*, actor, ruta: RutaEntrega) -> bool:
 
 
 def _geocerca_real(*, ruta: RutaEntrega, parada: ParadaRuta) -> EventoRuta | None:
-    return (
+    eventos = (
         EventoRuta.objects.filter(
             ruta=ruta,
             parada=parada,
@@ -68,8 +68,28 @@ def _geocerca_real(*, ruta: RutaEntrega, parada: ParadaRuta) -> EventoRuta | Non
         )
         .select_related("ubicacion")
         .order_by("-creado_en", "-id")
-        .first()
     )
+    for evento in eventos:
+        ubicacion = evento.ubicacion
+        metadata = evento.metadata or {}
+        if metadata.get("origen_servicio") != "registrar_ubicacion_ruta":
+            continue
+        if metadata.get("ubicacion_confiable") is not True:
+            continue
+        if metadata.get("ruta_id") != ruta.id or ubicacion.ruta_id != ruta.id:
+            continue
+        if metadata.get("repartidor_id") != ruta.repartidor_id or ubicacion.repartidor_id != ruta.repartidor_id:
+            continue
+        if metadata.get("unidad_id") != ruta.unidad_operativa_id or ubicacion.unidad_id != ruta.unidad_operativa_id:
+            continue
+        if evento.creado_por_id != getattr(ruta.repartidor, "user_id", None):
+            continue
+        if evento.latitud != ubicacion.latitud or evento.longitud != ubicacion.longitud:
+            continue
+        if evento.distancia_metros is None or evento.distancia_metros > parada.radio_geocerca_metros:
+            continue
+        return evento
+    return None
 
 
 def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entrega_estado, motivo, client_event_id):
@@ -113,26 +133,19 @@ def confirmar_entrega_parada(
 ):
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
-    _validar_confirmacion(
-        ruta=ruta,
-        parada=parada,
-        actor=actor,
-        entrega_estado=entrega_estado,
-        motivo=motivo,
-        client_event_id=client_event_id,
-    )
-
     payload_hash = _payload_hash(
         entrega_estado=entrega_estado,
         motivo=motivo,
         ubicacion=ubicacion,
         evidencias=evidencias,
     )
-    existente = (
-        ParadaEntregaEvidencia.objects.select_for_update()
-        .filter(ruta=ruta, capturado_por=actor, client_event_id=client_event_id)
-        .first()
-    )
+    existente = None
+    if getattr(actor, "pk", None) and str(client_event_id or "").strip():
+        existente = (
+            ParadaEntregaEvidencia.objects.select_for_update()
+            .filter(ruta=ruta, capturado_por=actor, client_event_id=client_event_id)
+            .first()
+        )
     if existente:
         if existente.parada_id != parada.id or existente.metadata.get("payload_hash") != payload_hash:
             raise EntregaIdempotenciaConflicto("client_event_id ya fue usado con un payload diferente.")
@@ -144,6 +157,15 @@ def confirmar_entrega_parada(
             requiere_revision=parada.revision_entrega_estado != ParadaRuta.REVISION_NO_REQUERIDA,
             idempotente=True,
         )
+
+    _validar_confirmacion(
+        ruta=ruta,
+        parada=parada,
+        actor=actor,
+        entrega_estado=entrega_estado,
+        motivo=motivo,
+        client_event_id=client_event_id,
+    )
 
     if parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
         raise ValidationError("La parada ya tiene una confirmación de entrega distinta.")

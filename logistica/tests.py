@@ -109,25 +109,28 @@ class LogisticaEntregaDomainTests(TestCase):
         return confirmar_entrega_parada(**payload)
 
     def _registrar_geocerca_real(self):
-        ubicacion = UbicacionRuta.objects.create(
-            ruta=self.ruta,
+        BitacoraSalidaLlegada.objects.create(
             repartidor=self.repartidor,
             unidad=self.unidad,
-            latitud="25.570000",
-            longitud="-108.470000",
-            precision_metros="8.00",
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", b"gif", content_type="image/gif"),
         )
-        return EventoRuta.objects.create(
+        registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=self.ruta,
+            payload={
+                "latitud": "25.570000",
+                "longitud": "-108.470000",
+                "precision_metros": "8.00",
+                "timestamp_dispositivo": timezone.now(),
+                "tracking_origen": "automatico_pwa",
+            },
+        )
+        return EventoRuta.objects.get(
             ruta=self.ruta,
             parada=self.parada,
-            ubicacion=ubicacion,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
-            severidad=EventoRuta.SEVERIDAD_OK,
-            descripcion="Llegada GPS real.",
-            latitud=ubicacion.latitud,
-            longitud=ubicacion.longitud,
-            distancia_metros=0,
-            creado_por=self.user,
         )
 
     def test_sin_geocerca_registra_excepcion_sin_fabricar_visita(self):
@@ -173,6 +176,45 @@ class LogisticaEntregaDomainTests(TestCase):
             ParadaEntregaEvidencia.objects.filter(parada=self.parada, client_event_id="entrega-excepcional-1").count(),
             1,
         )
+
+    def test_retry_identico_devuelve_original_aunque_ruta_ya_este_completada(self):
+        primero = self._confirmar()
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        segundo = self._confirmar()
+
+        self.assertTrue(segundo.idempotente)
+        self.assertEqual(segundo.evento.id, primero.evento.id)
+        self.assertEqual(segundo.evidencia.id, primero.evidencia.id)
+
+    def test_evento_geocerca_fabricado_no_acredita_presencia(self):
+        ubicacion = UbicacionRuta.objects.create(
+            ruta=self.ruta,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            latitud="25.570000",
+            longitud="-108.470000",
+            precision_metros="8.00",
+        )
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            ubicacion=ubicacion,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Evento parecido construido fuera del servicio GPS.",
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros=0,
+            creado_por=self.user,
+        )
+
+        resultado = self._confirmar(client_event_id="geocerca-fabricada")
+
+        self.parada.refresh_from_db()
+        self.assertTrue(resultado.requiere_revision)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
 
     def test_retry_con_payload_distinto_es_conflicto(self):
         self._confirmar()

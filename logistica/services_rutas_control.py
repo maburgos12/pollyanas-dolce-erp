@@ -331,6 +331,14 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
             latitud=ubicacion.latitud,
             longitud=ubicacion.longitud,
             distancia_metros_value=resultado.distancia_metros,
+            metadata={
+                "origen_servicio": "registrar_ubicacion_ruta",
+                "ubicacion_confiable": True,
+                "tracking_origen": tracking_origen,
+                "ruta_id": ruta.id,
+                "repartidor_id": repartidor.id,
+                "unidad_id": unidad.id,
+            },
             ventana_minutos=60,
         )
     elif ruta.paradas.exists():
