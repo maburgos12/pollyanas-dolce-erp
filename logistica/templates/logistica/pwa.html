@@ -1359,6 +1359,7 @@
   </head>
   <body>
     <div id="app"></div>
+    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v61-v59-replay"></script>
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
@@ -2043,11 +2044,12 @@
         let failed = 0;
         for (const item of pending) {
           try {
-            const headers = cleanReplayHeaders(item.headers || {});
-            const response = await apiFetch(item.path, {
-              method: item.method,
+            const replayItem = window.PDLogisticaOfflineQueue.prepareReplay(item);
+            const headers = cleanReplayHeaders(replayItem.headers || {});
+            const response = await apiFetch(replayItem.path, {
+              method: replayItem.method,
               headers,
-              body: deserializeOfflineBody(item.body),
+              body: deserializeOfflineBody(replayItem.body),
               skipOfflineQueue: true
             });
             if (!response.ok) {
@@ -5057,7 +5059,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v60-entregas-revision", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v61-v59-replay", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

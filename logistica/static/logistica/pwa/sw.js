@@ -1,6 +1,7 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v60-entregas-revision";
+const CACHE_NAME = "pollyanas-logistica-pwa-v61-v59-replay";
 const SHELL_ASSETS = [
   "/logistica/app/",
+  "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v61-v59-replay",
   "/static/logistica/pwa/manifest.json?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"

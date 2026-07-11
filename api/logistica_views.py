@@ -1376,6 +1376,14 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
         client_context = payload.get("client_context") or {}
+        offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
+        legacy_v59_replay = bool(
+            offline_queue_id
+            and len(offline_queue_id) <= 60
+            and all(char.isalnum() or char in "._:-" for char in offline_queue_id)
+            and payload.get("client_event_id") == f"offline-v59-{offline_queue_id}"
+            and client_context.get("client_version") == "pwa-v59-offline"
+        )
         motivo = payload.get("notas") or "Entrega confirmada por repartidor."
         # Este endpoint representa siempre el boton de la PWA. Los permisos del
         # usuario no cambian la procedencia del hecho (un jefe puede ser tambien
@@ -1460,7 +1468,11 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
         if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
             return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
-        if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA and not evidencias_payload:
+        if (
+            payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA
+            and not evidencias_payload
+            and not legacy_v59_replay
+        ):
             return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
         if not payload.get("client_event_id"):
             return Response({"client_event_id": ["client_event_id es obligatorio."]}, status=status.HTTP_400_BAD_REQUEST)

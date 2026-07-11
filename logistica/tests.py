@@ -1,5 +1,6 @@
 import json
 import importlib
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -544,6 +545,52 @@ class LogisticaAuditoriaEntregaTests(TestCase):
         self.assertIn("dry-run", salida.getvalue().lower())
         self.assertFalse(EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA).exists())
 
+    def test_estados_finales_sin_geocerca_generan_alerta_determinista_y_resoluble(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+        from logistica.services_entregas import resolver_alerta_historica
+
+        estados = [
+            ParadaRuta.ENTREGA_ENTREGADA,
+            ParadaRuta.ENTREGA_CON_DIFERENCIA,
+            ParadaRuta.ENTREGA_NO_ENTREGADA,
+        ]
+        for orden, estado in enumerate(estados, start=1):
+            parada = self._parada(orden)
+            ParadaRuta.objects.filter(pk=parada.pk).update(
+                entrega_estado=estado,
+                revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+            )
+
+        primero = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+        segundo = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+        alertas = list(
+            EventoRuta.objects.filter(
+                ruta=self.ruta,
+                metadata__regla="ENTREGADA_SIN_GEOFENCE_O_REVISION",
+            ).order_by("parada_id")
+        )
+
+        self.assertEqual(primero["alertas_creadas"], 3)
+        self.assertEqual(segundo["alertas_creadas"], 0)
+        self.assertEqual([evento.metadata["hecho"] for evento in alertas], estados)
+        self.assertEqual(len({evento.clave_auditoria for evento in alertas}), 3)
+        admin = User.objects.create_user(username="admin.auditoria.estados")
+        UserModuleAccess.objects.create(
+            user=admin, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=admin,
+        )
+        for evento in alertas:
+            resolver_alerta_historica(
+                evento=evento,
+                actor=admin,
+                motivo="Hecho histórico revisado.",
+            )
+        self.assertFalse(
+            EventoRuta.objects.filter(
+                pk__in=[evento.pk for evento in alertas],
+                revision_alerta_estado=EventoRuta.REVISION_ALERTA_PENDIENTE,
+            ).exists()
+        )
+
     def test_comando_exige_alcance_y_escritura_explicitamente(self):
         from django.core.management.base import CommandError
 
@@ -964,6 +1011,117 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("client_event_id", response.json())
 
+    def test_replay_v59_sin_id_acepta_tres_estados_y_es_idempotente(self):
+        casos = [
+            ParadaRuta.ENTREGA_ENTREGADA,
+            ParadaRuta.ENTREGA_CON_DIFERENCIA,
+            ParadaRuta.ENTREGA_NO_ENTREGADA,
+        ]
+        for index, entrega_estado in enumerate(casos, start=1):
+            with self.subTest(entrega_estado=entrega_estado):
+                parada = self.parada if index == 1 else ParadaRuta.objects.create(
+                    ruta=self.ruta, punto=self.punto, orden=index,
+                )
+                url = reverse(
+                    "api_logistica_ruta_parada_entrega",
+                    kwargs={"ruta_id": self.ruta.id, "parada_id": parada.id},
+                )
+                queue_id = f"legacy-queue-{index}"
+                payload = {
+                    "entrega_estado": entrega_estado,
+                    "notas": "Confirmación recuperada de cola offline v59.",
+                    "client_event_id": f"offline-v59-{queue_id}",
+                    "client_context": {
+                        "causa": "GPS_SIN_SENAL",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "pwa-v59-offline",
+                    },
+                    "evidencias": [],
+                }
+                headers = {"HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID": queue_id}
+                primero = self.client.post(url, json.dumps(payload), content_type="application/json", **headers)
+                retry = self.client.post(url, json.dumps(payload), content_type="application/json", **headers)
+
+                self.assertEqual(primero.status_code, 200, primero.content)
+                self.assertEqual(retry.status_code, 200, retry.content)
+                self.assertEqual(retry.json(), primero.json())
+                parada.refresh_from_db()
+                self.assertEqual(parada.entrega_estado, entrega_estado)
+                self.assertEqual(parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+                self.assertEqual(
+                    ParadaEntregaEvidencia.objects.filter(
+                        parada=parada, client_event_id=f"offline-v59-{queue_id}"
+                    ).count(),
+                    1,
+                )
+
+    def test_replay_v59_posterior_a_resolucion_no_sobrescribe_revision(self):
+        queue_id = "legacy-queue-resuelto"
+        payload = {
+            "entrega_estado": ParadaRuta.ENTREGA_NO_ENTREGADA,
+            "notas": "Sucursal cerrada; cola offline v59.",
+            "client_event_id": f"offline-v59-{queue_id}",
+            "client_context": {
+                "causa": "GPS_SIN_SENAL",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v59-offline",
+            },
+            "evidencias": [],
+        }
+        headers = {"HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID": queue_id}
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json", **headers)
+        jefe = User.objects.create_user(username="jefe.v59.resuelto")
+        UserModuleAccess.objects.create(
+            user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe,
+        )
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_AUTORIZADA,
+            motivo="Incidencia validada por teléfono.",
+        )
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json", **headers)
+
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_AUTORIZADA)
+
+    def test_helper_js_reproduce_cola_v59_real_y_no_toca_payload_v60(self):
+        helper = Path(__file__).resolve().parent / "static" / "logistica" / "pwa" / "offline_queue_compat.js"
+        script = r'''
+const fs = require("fs");
+const vm = require("vm");
+const context = { console };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8"), context);
+const prepare = context.PDLogisticaOfflineQueue.prepareReplay;
+const states = ["ENTREGADA", "CON_DIFERENCIA", "NO_ENTREGADA"];
+for (const [index, state] of states.entries()) {
+  const item = {
+    id: `queue-${index}`,
+    path: "/rutas/1/paradas/2/entrega/",
+    queued_at: "2026-07-10T12:00:00.000Z",
+    headers: {"Content-Type": "application/json"},
+    body: {kind: "text", value: JSON.stringify({entrega_estado: state, evidencias: []})}
+  };
+  const first = prepare(item);
+  const second = prepare(item);
+  if (JSON.stringify(first) !== JSON.stringify(second)) throw new Error("replay no determinista");
+  const payload = JSON.parse(first.body.value);
+  if (payload.client_event_id !== `offline-v59-queue-${index}`) throw new Error("id incorrecto");
+  if (payload.client_context.client_version !== "pwa-v59-offline") throw new Error("contexto incorrecto");
+  if (first.headers["X-Logistica-Offline-Queue-Id"] !== `queue-${index}`) throw new Error("header incorrecto");
+}
+const v60 = {id:"q-new", path:"/rutas/1/paradas/2/entrega/", queued_at:"2026-07-10T12:00:00Z", headers:{}, body:{kind:"text", value:JSON.stringify({client_event_id:"v60-id", client_context:{client_version:"pwa-v60"}, evidencias:[]})}};
+if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("payload v60 modificado");
+'''
+        resultado = subprocess.run(
+            ["node", "-e", script, str(helper)], capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+
     def test_client_context_rechaza_tipos_claves_y_tamano_no_aprobados(self):
         invalidos = [
             [],
@@ -1324,9 +1482,9 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v60-entregas-revision"},
+            {"route-control-v61-v59-replay"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v60-entregas-revision", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -4307,9 +4465,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v60-entregas-revision", pwa_html)
+        self.assertIn("?v=route-control-v61-v59-replay", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v60-entregas-revision", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -4402,7 +4560,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v60-entregas-revision", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

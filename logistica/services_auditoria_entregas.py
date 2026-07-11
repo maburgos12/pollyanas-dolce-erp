@@ -154,7 +154,11 @@ def _hallazgos_parada(parada: ParadaRuta) -> list[HallazgoEntrega]:
         hallazgos.append(HallazgoEntrega(regla, parada.ruta_id, parada.id, hecho, descripcion))
 
     if (
-        parada.entrega_estado == ParadaRuta.ENTREGA_ENTREGADA
+        parada.entrega_estado in {
+            ParadaRuta.ENTREGA_ENTREGADA,
+            ParadaRuta.ENTREGA_CON_DIFERENCIA,
+            ParadaRuta.ENTREGA_NO_ENTREGADA,
+        }
         and not geocerca_confiable
         and parada.revision_entrega_estado == ParadaRuta.REVISION_NO_REQUERIDA
     ):
