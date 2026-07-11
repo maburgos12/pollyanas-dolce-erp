@@ -78,10 +78,16 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-paridad-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
-        self.assertContains(worker, "pollyanas-mantenimiento-pwa-v19-20260710-trazabilidad")
+        worker_source = worker.content.decode()
+        self.assertIn("pollyanas-mantenimiento-pwa-v20-20260711-paridad-v1", worker_source)
+        self.assertIn('url.pathname.startsWith("/api/")', worker_source)
+        self.assertIn('url.pathname.startsWith("/media/")', worker_source)
+        self.assertIn("event.respondWith(fetch(event.request));", worker_source)
+        protected_branch = worker_source.split('url.pathname.startsWith("/api/")', 1)[1].split("return;", 1)[0]
+        self.assertNotIn("caches.match", protected_branch)
 
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
