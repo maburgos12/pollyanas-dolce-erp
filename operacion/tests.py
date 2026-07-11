@@ -2036,17 +2036,18 @@ class CfpFifoTransferTests(TestCase):
         self.assertIsNotNone(armado_existe)
         self.assertEqual(armado_existe.stock_actual, Decimal("6"))
 
-    def test_transfer_requires_production_manage_permission(self):
-        """Test that only managers can perform transfers."""
+    def test_operator_can_perform_standard_fifo_transfer(self):
+        """La captura operativa puede ejecutar FIFO sin romper el orden."""
         from operacion.services_bitacoras_inventory import entregar_a_armado
 
-        with self.assertRaises(PermissionDenied):
-            entregar_a_armado(
-                insumo=self.insumo,
-                cantidad=Decimal("3"),
-                linea=self.linea,
-                actor=self.operator,
-            )
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("3"),
+            linea=self.linea,
+            actor=self.operator,
+        )
+
+        self.assertEqual(result.asignaciones, [(self.lote_antiguo.id, Decimal("3"))])
 
     def test_transfer_fifo_exception_requires_motivo(self):
         """Test that FIFO exception requires non-empty motivo."""
@@ -2142,3 +2143,37 @@ class CfpFifoTransferTests(TestCase):
                 linea=self.linea,
                 actor=self.manager,
             )
+
+    def test_distinct_lines_can_transfer_the_same_lot(self):
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        segunda_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"salida_armado": "2"},
+            observaciones="Segunda entrega",
+        )
+        entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+        entregar_a_armado(self.insumo, Decimal("2"), segunda_linea, self.manager)
+
+        transferencias = MovimientoInventario.objects.filter(
+            lote=self.lote_antiguo,
+            trazabilidad__evento__startswith="entregar_armado_",
+        )
+        self.assertEqual(transferencias.count(), 4)
+        self.assertEqual(transferencias.values("source_hash").distinct().count(), 4)
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("6"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("4"))
+
+    def test_retry_rejects_incomplete_existing_transfer(self):
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+        MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+            trazabilidad__linea_transferencia_id=self.linea.id,
+        ).delete()
+
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)

@@ -7,13 +7,14 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from core.access import can_manage_module
+from core.access import can_manage_module, can_view_module
 from inventario.models import (
     ALMACEN_LABELS,
     ExistenciaInsumo,
     LoteProduccion,
     MovimientoInventario,
     normalizar_codigo_lote,
+    UBICACION_ARMADO,
     UBICACION_CFP_1_1,
 )
 from inventario.services_existencias import aplicar_delta
@@ -443,61 +444,65 @@ def entregar_a_armado(
     - Creates SALIDA (CFP_1_1) and ENTRADA (ARMADO) movements
     - Rolls back without creating any movements if total insufficient
     - Supports FIFO exception: requires motivo_excepcion_fifo and manage permission
-    - Idempotent via source_hash: calling twice returns same result
+    - Idempotent via transfer_id_hash: calling twice returns same result
     """
-    if not can_manage_module(actor, "produccion"):
-        raise PermissionDenied("Se requiere permiso de gestión de Producción.")
+    if not can_view_module(actor, "produccion"):
+        raise PermissionDenied("Se requiere acceso a Producción.")
 
     cantidad_decimal = _cantidad_positiva(cantidad)
 
+    # Hallazgo #1: Validar parámetros ANTES de cualquier lock/transacción
     if lote_excepcion and not motivo_excepcion_fifo:
         raise ValidationError("La excepción FIFO requiere un motivo.")
 
-    if lote_excepcion and motivo_excepcion_fifo and not can_manage_module(actor, "produccion"):
+    if lote_excepcion and not can_manage_module(actor, "produccion"):
         raise PermissionDenied("La excepción FIFO requiere permiso de gestión de Producción.")
 
-    # Create deterministic transfer hash for idempotence - mark all movements in this batch with same ID
-    transfer_hash_base = f"ENTREGAR_ARMADO:TRANSFER:{insumo.id}:{cantidad_decimal}:{linea.id}"
+    # Hallazgo #2: transfer_id_hash estable: basado en parámetros que identifican UNA transferencia lógica
+    # Incluye linea.id para que cada línea de bitacora tenga su propia transferencia
+    # Idempotencia: si llamas EXACTAMENTE con mismos parámetros 2 veces, devuelve igual
+    transfer_hash_base = f"ENTREGAR_ARMADO:LINEA:{linea.id}:INSUMO:{insumo.id}:CFP_1_1->ARMADO"
     transfer_id_hash = sha256(transfer_hash_base.encode()).hexdigest()[:16]
 
     with transaction.atomic():
-        # Check if this exact transfer already happened (idempotence)
-        # by looking for SALIDA movements with our transfer ID in trazabilidad
-        # For SQLite/generic JSON filtering, check all salidas and filter in Python
-        existing_salidas = []
-        for mov in MovimientoInventario.objects.filter(
+        from operacion.models import BitacoraOperativaLinea
+
+        linea = BitacoraOperativaLinea.objects.select_for_update().get(pk=linea.pk)
+        movimientos_transferencia = [
+            mov
+            for mov in MovimientoInventario.objects.select_for_update().filter(insumo=insumo)
+            if (mov.trazabilidad or {}).get("transfer_id") == transfer_id_hash
+        ]
+        if movimientos_transferencia:
+            salidas = [m for m in movimientos_transferencia if m.tipo == MovimientoInventario.TIPO_SALIDA and m.almacen == UBICACION_CFP_1_1]
+            entradas = [m for m in movimientos_transferencia if m.tipo == MovimientoInventario.TIPO_ENTRADA and m.almacen == UBICACION_ARMADO]
+            pares_entrada = {
+                (m.lote_id, m.cantidad, (m.trazabilidad or {}).get("linea_transferencia_id"))
+                for m in entradas
+            }
+            if (
+                not salidas
+                or len(salidas) != len(entradas)
+                or sum((m.cantidad for m in salidas), Decimal("0")) != cantidad_decimal
+                or any((m.lote_id, m.cantidad, linea.id) not in pares_entrada for m in salidas)
+                or any((m.trazabilidad or {}).get("linea_transferencia_id") != linea.id for m in salidas)
+            ):
+                raise ValidationError("La transferencia existente está incompleta o no coincide con la solicitud.")
+            salidas.sort(key=lambda m: (m.lote.producido_en, m.lote_id))
+            return EntregarArmadoResult(asignaciones=[(m.lote_id, m.cantidad) for m in salidas])
+
+        lotes_query = LoteProduccion.objects.select_for_update().filter(
             insumo=insumo,
-            tipo=MovimientoInventario.TIPO_SALIDA,
-            almacen=UBICACION_CFP_1_1,
-        ):
-            if mov.trazabilidad.get("transfer_id") == transfer_id_hash:
-                existing_salidas.append(mov)
-
-        if existing_salidas:
-            # Transfer already happened, return the existing assignments
-            asignaciones = []
-            for salida in sorted(existing_salidas, key=lambda m: m.lote_id):
-                asignaciones.append((salida.lote_id, salida.cantidad))
-            return EntregarArmadoResult(asignaciones=asignaciones)
-
-        # Lock and fetch available lots in FIFO order
-        lotes_disponibles = (
-            LoteProduccion.objects
-            .select_for_update()
-            .filter(insumo=insumo, estado=LoteProduccion.DISPONIBLE)
-            .order_by("producido_en", "id")
-        )
-
-        # If FIFO exception specified, put that lot first
+            estado=LoteProduccion.DISPONIBLE,
+        ).order_by("producido_en", "id")
         if lote_excepcion:
-            lote_excepcion.refresh_from_db()
+            lote_excepcion = LoteProduccion.objects.select_for_update().get(pk=lote_excepcion.pk)
             if lote_excepcion.insumo_id != insumo.pk or lote_excepcion.estado != LoteProduccion.DISPONIBLE:
                 raise ValidationError("El lote de excepción no es válido para este insumo.")
-            lotes_disponibles = [lote_excepcion] + list(lotes_disponibles.exclude(id=lote_excepcion.id))
+            lotes_disponibles = [lote_excepcion] + list(lotes_query.exclude(pk=lote_excepcion.pk))
         else:
-            lotes_disponibles = list(lotes_disponibles)
+            lotes_disponibles = list(lotes_query)
 
-        # Calculate total available stock
         total_disponible = Decimal("0")
         lote_disponibilidades = {}
         for lote in lotes_disponibles:
@@ -525,9 +530,8 @@ def entregar_a_armado(
             asignaciones.append((lote.id, cantidad_asignar))
             faltante -= cantidad_asignar
 
-            # Create SALIDA from CFP_1_1
             salida_hash = sha256(
-                f"ENTREGAR_ARMADO:SALIDA:{lote.id}:{UBICACION_CFP_1_1}".encode()
+                f"ENTREGAR_ARMADO:SALIDA:{transfer_id_hash}:{lote.id}:{UBICACION_CFP_1_1}".encode()
             ).hexdigest()
             salida_notas = motivo_excepcion_fifo or ""
             MovimientoInventario.objects.create(
@@ -542,18 +546,19 @@ def entregar_a_armado(
                 registrado_por_usuario=actor,
                 source_hash=salida_hash,
                 lote=lote,
-                linea_bitacora=lote.linea_origen,  # Must match lote's origin line
+                linea_bitacora=lote.linea_origen,
                 trazabilidad={
                     "evento": "entregar_armado_salida",
                     "lote": lote.codigo,
                     "transfer_id": transfer_id_hash,
+                    "linea_transferencia_id": linea.id,
                     "es_excepcion_fifo": bool(lote_excepcion and lote.id == lote_excepcion.id),
                 },
             )
 
             # Create ENTRADA to ARMADO
             entrada_hash = sha256(
-                f"ENTREGAR_ARMADO:ENTRADA:{lote.id}:ARMADO".encode()
+                f"ENTREGAR_ARMADO:ENTRADA:{transfer_id_hash}:{lote.id}:{UBICACION_ARMADO}".encode()
             ).hexdigest()
             entrada_notas = motivo_excepcion_fifo or ""
             MovimientoInventario.objects.create(
@@ -561,24 +566,25 @@ def entregar_a_armado(
                 tipo=MovimientoInventario.TIPO_ENTRADA,
                 insumo=insumo,
                 cantidad=cantidad_asignar,
-                almacen="ARMADO",
+                almacen=UBICACION_ARMADO,
                 referencia=lote.codigo,
                 notas=entrada_notas,
                 registrado_por=actor.get_username(),
                 registrado_por_usuario=actor,
                 source_hash=entrada_hash,
                 lote=lote,
-                linea_bitacora=lote.linea_origen,  # Must match lote's origin line
+                linea_bitacora=lote.linea_origen,
                 trazabilidad={
                     "evento": "entregar_armado_entrada",
                     "lote": lote.codigo,
                     "transfer_id": transfer_id_hash,
+                    "linea_transferencia_id": linea.id,
                     "es_excepcion_fifo": bool(lote_excepcion and lote.id == lote_excepcion.id),
                 },
             )
 
         # Update stocks per location (once per location)
         aplicar_delta(insumo, UBICACION_CFP_1_1, -cantidad_decimal)
-        aplicar_delta(insumo, "ARMADO", cantidad_decimal)
+        aplicar_delta(insumo, UBICACION_ARMADO, cantidad_decimal)
 
         return EntregarArmadoResult(asignaciones=asignaciones)
