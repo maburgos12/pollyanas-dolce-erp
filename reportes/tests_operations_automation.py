@@ -268,6 +268,7 @@ class OperationsAutomationFlowTests(TestCase):
         response = self.client.get(reverse("reportes:production_orders"), {"fecha": self.target_date.isoformat()})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Solicitudes de compra generadas")
+
         self.assertContains(response, "Alertas críticas")
         self.assertContains(response, "Adopción del sistema")
         self.assertContains(response, "Alertas resueltas")
@@ -289,3 +290,21 @@ class OperationsAutomationFlowTests(TestCase):
         alert.refresh_from_db()
         self.assertTrue(alert.resuelta)
         self.assertEqual(alert.resolution_note, "Atendida por operación")
+
+    def test_auto_purchase_suma_stock_multiubicacion(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("2"),
+        )
+        generate_daily_production_orders(self.target_date, created_by=self.user)
+        order = ProductionOrder.objects.get()
+        approve_production_order(
+            order,
+            approved_by=self.user,
+            approved_quantities={self.recipe.id: Decimal("5")},
+        )
+
+        result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
+
+        self.assertEqual(Decimal(result["branches"][0]["lines"][0]["shortage_immediate"]), Decimal("2.000"))

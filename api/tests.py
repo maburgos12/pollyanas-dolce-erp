@@ -338,6 +338,11 @@ class RecetasCosteoApiTests(TestCase):
         plan = PlanProduccion.objects.create(nombre="Plan API", fecha_produccion=date(2026, 2, 21))
         PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=Decimal("3"))
         ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("2"))
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("3"),
+        )
 
         url = reverse("api_mrp_calcular_requerimientos")
         resp = self.client.post(url, {"plan_id": plan.id})
@@ -348,6 +353,8 @@ class RecetasCosteoApiTests(TestCase):
         self.assertGreaterEqual(payload["totales"]["insumos"], 1)
         self.assertGreaterEqual(payload["totales"]["alertas_capacidad"], 1)
         self.assertEqual(payload["items"][0]["insumo"], self.insumo.nombre)
+        self.assertEqual(Decimal(payload["items"][0]["stock_actual"]), Decimal("5"))
+        self.assertEqual(Decimal(payload["items"][0]["faltante"]), Decimal("1"))
 
     def test_endpoint_mrp_calcular_requerimientos_por_periodo_mes(self):
         plan_1 = PlanProduccion.objects.create(nombre="Plan API mes 1", fecha_produccion=date(2026, 2, 10))

@@ -1,6 +1,7 @@
 from io import BytesIO
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -25,6 +26,21 @@ from recetas.models import LineaReceta, Receta, RecetaCostoVersion, VentaHistori
 
 
 class CanonicalCatalogCacheTransactionTests(TransactionTestCase):
+    def test_reutiliza_construccion_dentro_del_mismo_atomic(self):
+        from maestros.utils import canonical_catalog
+
+        clear_canonical_catalog_runtime_caches()
+        with patch.object(
+            canonical_catalog,
+            "_build_canonicalized_active_insumos",
+            wraps=canonical_catalog._build_canonicalized_active_insumos,
+        ) as builder:
+            with transaction.atomic():
+                canonicalized_active_insumos(limit=5000)
+                canonicalized_active_insumos(limit=5000)
+
+            self.assertEqual(builder.call_count, 1)
+
     def test_rollback_no_deja_insumos_fantasma_en_cache(self):
         clear_canonical_catalog_runtime_caches()
         insumo_id = None

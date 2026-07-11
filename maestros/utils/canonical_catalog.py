@@ -9,6 +9,17 @@ from maestros.models import CostoInsumo, Insumo
 from recetas.utils.normalizacion import normalizar_nombre
 
 
+def _atomic_runtime_cache() -> dict | None:
+    if not connection.in_atomic_block or not connection.atomic_blocks:
+        return None
+    outer_atomic = connection.atomic_blocks[0]
+    cache = getattr(outer_atomic, "_canonical_catalog_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(outer_atomic, "_canonical_catalog_cache", cache)
+    return cache
+
+
 def enterprise_readiness_profile(insumo: Insumo) -> dict[str, object]:
     tipo = insumo.tipo_item
     missing: list[str] = []
@@ -166,8 +177,12 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
 
 def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
     limit_safe = max(100, min(int(limit or 1500), 5000))
-    if connection.in_atomic_block:
-        return _build_canonicalized_active_insumos(limit_safe)
+    atomic_cache = _atomic_runtime_cache()
+    if atomic_cache is not None:
+        key = ("canonicalized_active_insumos", limit_safe)
+        if key not in atomic_cache:
+            atomic_cache[key] = _build_canonicalized_active_insumos(limit_safe)
+        return atomic_cache[key]
     return get_or_set_versioned_cache(
         key_parts=("erp", "catalog", "canonicalized-insumos", f"limit{limit_safe}"),
         scopes=("insumos",),
@@ -207,8 +222,12 @@ def _cached_canonical_membership_maps(version: int) -> tuple[dict[int, int], dic
 
 
 def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
-    if connection.in_atomic_block:
-        return _build_canonical_membership_maps()
+    atomic_cache = _atomic_runtime_cache()
+    if atomic_cache is not None:
+        key = ("canonical_membership_maps", version)
+        if key not in atomic_cache:
+            atomic_cache[key] = _build_canonical_membership_maps()
+        return atomic_cache[key]
     return _cached_canonical_membership_maps(version)
 
 
@@ -226,12 +245,19 @@ def _cached_active_canonical_insumo(canonical_id: int, version: int) -> Insumo |
 
 
 def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
-    if connection.in_atomic_block:
-        return _query_active_canonical_insumo(canonical_id)
+    atomic_cache = _atomic_runtime_cache()
+    if atomic_cache is not None:
+        key = ("active_canonical_insumo", canonical_id, version)
+        if key not in atomic_cache:
+            atomic_cache[key] = _query_active_canonical_insumo(canonical_id)
+        return atomic_cache[key]
     return _cached_active_canonical_insumo(canonical_id, version)
 
 
 def clear_canonical_catalog_runtime_caches() -> None:
+    for atomic_block in connection.atomic_blocks[:1]:
+        if hasattr(atomic_block, "_canonical_catalog_cache"):
+            delattr(atomic_block, "_canonical_catalog_cache")
     bump_cache_scopes("insumos", "inventario", "dashboard")
 
 

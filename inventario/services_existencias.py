@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -14,6 +14,31 @@ ALMACEN_DEFAULT = "ALMACEN_1"
 
 def get_or_create_existencia(insumo: Insumo, almacen: str = ALMACEN_DEFAULT):
     return ExistenciaInsumo.objects.get_or_create(insumo=insumo, almacen=almacen)
+
+
+@transaction.atomic
+def establecer_stock(insumo: Insumo, almacen: str, cantidad) -> ExistenciaInsumo:
+    try:
+        cantidad_decimal = Decimal(str(cantidad))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError(
+            f"El stock de {almacen} debe ser una cantidad válida.",
+            code="stock_invalido",
+        ) from exc
+    if not cantidad_decimal.is_finite() or cantidad_decimal < 0:
+        raise ValidationError(
+            f"El stock de {almacen} debe ser una cantidad finita mayor o igual a cero.",
+            code="stock_invalido",
+        )
+
+    existencia, _ = ExistenciaInsumo.objects.select_for_update().get_or_create(
+        insumo=insumo,
+        almacen=almacen,
+    )
+    existencia.stock_actual = cantidad_decimal
+    existencia.actualizado_en = timezone.now()
+    existencia.save(update_fields=["stock_actual", "actualizado_en"])
+    return existencia
 
 
 @transaction.atomic

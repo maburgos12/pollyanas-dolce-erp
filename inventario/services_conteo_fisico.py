@@ -19,7 +19,7 @@ from .models import (
     MovimientoInventario,
 )
 from .services_auditoria_insumos import ConsumoInsumoAuditService, parse_period, period_bounds
-from .services_existencias import get_or_create_existencia
+from .services_existencias import establecer_stock
 
 
 DECIMAL_ZERO = Decimal("0")
@@ -119,10 +119,7 @@ class ConteoFisicoService:
                     if linea.insumo_id:
                         movimiento = self._crear_ajuste_insumo(linea, conteo)
                         linea.movimiento_inventario = movimiento
-                        existencia, _ = get_or_create_existencia(linea.insumo, "ALMACEN_1")
-                        existencia.stock_actual = linea.stock_contado
-                        existencia.actualizado_en = timezone.now()
-                        existencia.save(update_fields=["stock_actual", "actualizado_en"])
+                        establecer_stock(linea.insumo, "ALMACEN_1", linea.stock_contado)
                     elif linea.producto_id:
                         movimiento_producto = self._crear_ajuste_producto(linea, conteo)
                         linea.movimiento_producto_cedis = movimiento_producto

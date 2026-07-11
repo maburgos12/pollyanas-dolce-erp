@@ -2620,3 +2620,21 @@ class InventarioUbicacionTests(TestCase):
 
         existencia.refresh_from_db()
         self.assertEqual(existencia.stock_actual, Decimal("3"))
+
+    def test_establecer_stock_y_delta_se_ejecutan_en_secuencia_bajo_bloqueo(self):
+        from inventario.services_existencias import aplicar_delta, establecer_stock
+
+        establecer_stock(self.insumo, "ARMADO", Decimal("8"))
+        aplicar_delta(self.insumo, "ARMADO", Decimal("-3"))
+
+        existencia = ExistenciaInsumo.objects.get(insumo=self.insumo, almacen="ARMADO")
+        self.assertEqual(existencia.stock_actual, Decimal("5"))
+
+    def test_establecer_stock_rechaza_cantidad_no_finita_o_negativa(self):
+        from inventario.services_existencias import establecer_stock
+
+        for cantidad in (Decimal("NaN"), Decimal("Infinity"), Decimal("-1"), "no-numero"):
+            with self.subTest(cantidad=cantidad), self.assertRaises(ValidationError):
+                establecer_stock(self.insumo, "CFP_1", cantidad)
+
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=self.insumo, almacen="CFP_1").exists())

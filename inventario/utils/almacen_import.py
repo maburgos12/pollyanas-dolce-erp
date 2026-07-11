@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo, MovimientoInventario
-from inventario.services_existencias import aplicar_delta, get_or_create_existencia
+from inventario.services_existencias import aplicar_delta, establecer_stock
 from inventario.stock_trace import TRACE_IMPORTED_MOVEMENT, TRACE_IMPORT_INVENTORY, set_stock_trace
 from inventario.utils.reorder import calcular_punto_reorden
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
@@ -709,8 +709,7 @@ def import_folder(
             if dry_run:
                 continue
 
-            existencia, _ = get_or_create_existencia(match.insumo, "ALMACEN_1")
-            existencia.stock_actual = row.stock_actual
+            existencia = establecer_stock(match.insumo, "ALMACEN_1", row.stock_actual)
             if row.punto_reorden >= 0:
                 existencia.punto_reorden = row.punto_reorden
             if row.stock_minimo >= 0:
@@ -738,14 +737,12 @@ def import_folder(
             )
             existencia.save(
                 update_fields=[
-                    "stock_actual",
                     "stock_minimo",
                     "stock_maximo",
                     "inventario_promedio",
                     "punto_reorden",
                     "dias_llegada_pedido",
                     "consumo_diario_promedio",
-                    "actualizado_en",
                     "trazabilidad_stock",
                 ]
             )

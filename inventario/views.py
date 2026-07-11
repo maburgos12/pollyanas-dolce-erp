@@ -79,7 +79,7 @@ from .models import (
     MovimientoInventario,
 )
 from .services_conteo_fisico import ConteoFisicoError, ConteoFisicoService, parse_conteo_period
-from .services_existencias import aplicar_delta, get_or_create_existencia, stock_ubicacion
+from .services_existencias import aplicar_delta, establecer_stock, get_or_create_existencia, stock_ubicacion
 
 
 SOURCE_TO_FILENAME = {
@@ -538,14 +538,12 @@ def _can_approve_ajustes(user) -> bool:
 
 def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> None:
     insumo_canonical = canonical_insumo_by_id(ajuste.insumo_id) or ajuste.insumo
-    existencia, _ = get_or_create_existencia(insumo_canonical, "ALMACEN_1")
-    prev_stock = existencia.stock_actual
+    prev_stock = stock_ubicacion(insumo_canonical, "ALMACEN_1")
     delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
     if ajuste.insumo_id == insumo_canonical.id:
-        existencia.stock_actual = ajuste.cantidad_fisica
+        existencia = establecer_stock(insumo_canonical, "ALMACEN_1", ajuste.cantidad_fisica)
     else:
-        existencia.stock_actual = prev_stock + delta
-    existencia.actualizado_en = timezone.now()
+        existencia = aplicar_delta(insumo_canonical, "ALMACEN_1", delta)
     set_stock_trace(
         existencia,
         source=TRACE_INVENTORY_ADJUSTMENT,
@@ -555,7 +553,7 @@ def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> N
         user=acted_by,
         details={"ajuste_id": ajuste.id, "delta": str(delta)},
     )
-    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
+    existencia.save(update_fields=["trazabilidad_stock"])
     log_event(
         acted_by,
         "APPLY",
@@ -2147,7 +2145,7 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
             source_ex.save(update_fields=["insumo", "actualizado_en", "trazabilidad_stock"])
             existencia_merged += 1
         else:
-            target_ex.stock_actual = _to_decimal(target_ex.stock_actual) + _to_decimal(source_ex.stock_actual)
+            target_ex = aplicar_delta(target, source_ex.almacen, _to_decimal(source_ex.stock_actual))
             target_ex.punto_reorden = max(_to_decimal(target_ex.punto_reorden), _to_decimal(source_ex.punto_reorden))
             target_ex.stock_minimo = max(_to_decimal(target_ex.stock_minimo), _to_decimal(source_ex.stock_minimo))
             target_ex.stock_maximo = max(_to_decimal(target_ex.stock_maximo), _to_decimal(source_ex.stock_maximo))
@@ -2175,7 +2173,6 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
             )
             target_ex.save(
                 update_fields=[
-                    "stock_actual",
                     "punto_reorden",
                     "stock_minimo",
                     "stock_maximo",
@@ -5095,7 +5092,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Los indicadores de inventario no pueden ser negativos.")
                 return redirect("inventario:existencias")
 
-            existencia.stock_actual = new_stock
+            existencia = establecer_stock(existencia.insumo, existencia.almacen, new_stock)
             existencia.punto_reorden = new_reorden
             existencia.stock_minimo = new_minimo
             existencia.stock_maximo = new_maximo
@@ -5114,7 +5111,6 @@ def existencias(request: HttpRequest) -> HttpResponse:
             )
             existencia.save(
                 update_fields=[
-                    "stock_actual",
                     "punto_reorden",
                     "stock_minimo",
                     "stock_maximo",

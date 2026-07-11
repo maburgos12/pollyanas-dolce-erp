@@ -1449,8 +1449,12 @@ def _build_chain_purchase_summary(*, plan: PlanProduccion) -> dict[str, object]:
         }
     )
     existencias = {
-        row["insumo_id"]: Decimal(str(row["stock_actual"] or 0))
-        for row in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_member_ids).values("insumo_id", "stock_actual")
+        row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_member_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
     shortage_rows = []
     shortage_ratio_warning = Decimal("0.05")

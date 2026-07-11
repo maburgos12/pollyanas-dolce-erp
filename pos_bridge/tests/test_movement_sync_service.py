@@ -303,6 +303,45 @@ class PointMovementSyncServiceTests(TestCase):
             "ALMACEN_1",
         )
 
+    def test_normaliza_almacen_vacio_aunque_la_cantidad_no_cambie(self):
+        insumo = Insumo.objects.create(
+            nombre="Betún transferencia no-op",
+            codigo_point="TRANS-NOOP-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("4"),
+        )
+        MovimientoInventario.objects.create(
+            source_hash="transfer-almacen-vacio-noop",
+            insumo=insumo,
+            almacen="",
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            cantidad=Decimal("4"),
+        )
+        line = SimpleNamespace(
+            source_hash="transfer-almacen-vacio-noop",
+            received_at=datetime(2026, 3, 20, 15, 0, tzinfo=timezone.utc),
+            sent_at=None,
+            registered_at=datetime(2026, 3, 20, 14, 0, tzinfo=timezone.utc),
+            insumo=insumo,
+            insumo_id=insumo.id,
+            received_quantity=Decimal("4"),
+            transfer_external_id="TR-NOOP-001",
+        )
+
+        PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
+
+        movimiento = MovimientoInventario.objects.get(source_hash="transfer-almacen-vacio-noop")
+        self.assertEqual(movimiento.almacen, "ALMACEN_1")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("4"),
+        )
+
     def test_run_production_sync_creates_cedis_entry_for_finished_product(self):
         receta = Receta.objects.create(
             nombre="Pastel Fresas Con Crema Mediano",

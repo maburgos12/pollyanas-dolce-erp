@@ -259,6 +259,9 @@ class PointMovementSyncService:
         old_qty = Decimal(str(existing.cantidad or 0))
         old_almacen = existing_almacen
         if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
+            if existing.almacen != almacen:
+                existing.almacen = almacen
+                existing.save(update_fields=["almacen"])
             return False
         if existing.insumo_id == line.insumo_id and old_almacen == almacen:
             self._apply_inventory_delta(insumo=line.insumo, almacen=almacen, delta=new_qty - old_qty)
