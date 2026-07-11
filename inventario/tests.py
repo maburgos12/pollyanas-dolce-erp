@@ -15,10 +15,138 @@ from unittest.mock import patch
 
 from core.models import AuditLog
 from compras.models import SolicitudCompra
-from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from inventario.models import (
+    AjusteInventario,
+    AlmacenSyncRun,
+    ExistenciaInsumo,
+    LoteProduccion,
+    MovimientoInventario,
+)
+from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT, TRACE_RECONSTRUCTED_SYNC
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from recetas.models import LineaReceta, Receta, VentaHistorica
+
+
+class LoteProduccionTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="produccion_lotes")
+        self.unidad = UnidadMedida.objects.create(codigo="kg-lote", nombre="Kilogramo")
+        self.insumo = Insumo.objects.create(
+            codigo_point=" rc  001 / especial ",
+            nombre="Preparacion Crunch",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Preparacion Crunch",
+            codigo_point="REC-PREP-1",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="lote-preparacion",
+        )
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=datetime(2026, 7, 11).date(),
+            creado_por=self.user,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+        )
+        self.producido_en = timezone.make_aware(datetime(2026, 7, 11, 8, 30))
+
+    def crear_lote(self, **overrides):
+        values = {
+            "insumo": self.insumo,
+            "receta": self.receta,
+            "cantidad_inicial": Decimal("8"),
+            "unidad": self.unidad,
+            "producido_en": self.producido_en,
+            "linea_origen": self.linea,
+            "creado_por": self.user,
+        }
+        values.update(overrides)
+        return LoteProduccion.objects.create(**values)
+
+    def test_lote_code_uses_normalized_point_code_date_and_source_line(self):
+        lote = self.crear_lote()
+
+        self.assertEqual(
+            lote.codigo,
+            f"LOT-RC-001-ESPECIAL-20260711-{self.linea.id}",
+        )
+
+    def test_opening_lot_requires_observation_and_has_no_historical_line(self):
+        with self.assertRaises(ValidationError):
+            self.crear_lote(es_apertura=True, linea_origen=None, observaciones="")
+        with self.assertRaises(ValidationError):
+            self.crear_lote(es_apertura=True, observaciones="Conteo inicial")
+
+        lote = self.crear_lote(
+            es_apertura=True,
+            linea_origen=None,
+            observaciones="Conteo fisico de arranque",
+        )
+
+        self.assertEqual(lote.codigo, f"INI-RC-001-ESPECIAL-20260711-{lote.id}")
+
+    def test_ordinary_lot_requires_source_line(self):
+        with self.assertRaises(ValidationError):
+            self.crear_lote(linea_origen=None)
+
+    def test_preparation_requires_canonical_insumo(self):
+        with self.assertRaises(ValidationError):
+            self.crear_lote(insumo=None)
+
+    def test_finished_product_allows_no_insumo_and_uses_recipe_point_code(self):
+        receta_final = Receta.objects.create(
+            nombre="Pastel Crunch Chico",
+            codigo_point=" pt / crunch chico ",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="lote-producto-final",
+        )
+        linea_final = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=receta_final,
+        )
+
+        lote = self.crear_lote(insumo=None, receta=receta_final, linea_origen=linea_final)
+
+        self.assertEqual(
+            lote.codigo,
+            f"LOT-PT-CRUNCH-CHICO-20260711-{linea_final.id}",
+        )
+
+    def test_finished_product_requires_product_final_recipe(self):
+        with self.assertRaises(ValidationError):
+            self.crear_lote(insumo=None, receta=self.receta)
+
+    def test_lot_requires_positive_quantity_and_point_identity(self):
+        with self.assertRaises(ValidationError):
+            self.crear_lote(cantidad_inicial=Decimal("0"))
+
+        self.insumo.codigo_point = ""
+        self.insumo.save(update_fields=["codigo_point"])
+        with self.assertRaises(ValidationError):
+            self.crear_lote()
+
+    def test_inventory_movement_accepts_traceable_origin(self):
+        lote = self.crear_lote()
+
+        movimiento = MovimientoInventario.objects.create(
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("8"),
+            lote=lote,
+            linea_bitacora=self.linea,
+            registrado_por_usuario=self.user,
+            trazabilidad={"evento": "cierre_hornos"},
+        )
+
+        self.assertEqual(movimiento.lote, lote)
+        self.assertEqual(movimiento.linea_bitacora, self.linea)
+        self.assertEqual(movimiento.registrado_por_usuario, self.user)
+        self.assertEqual(movimiento.trazabilidad["evento"], "cierre_hornos")
 
 
 class InventarioAliasesPendingTests(TestCase):

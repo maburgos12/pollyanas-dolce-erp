@@ -1,8 +1,12 @@
+import re
 from decimal import Decimal
+from uuid import uuid4
 
 from django.conf import settings
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 from django.utils import timezone
+from unidecode import unidecode
 
 from maestros.models import Insumo
 
@@ -58,6 +62,106 @@ class ExistenciaInsumo(models.Model):
         return self.insumo.nombre
 
 
+def normalizar_codigo_lote(codigo_point):
+    codigo = unidecode(str(codigo_point or "")).upper().strip()
+    return re.sub(r"[^A-Z0-9]+", "-", codigo).strip("-")
+
+
+class LoteProduccion(models.Model):
+    DISPONIBLE = "DISPONIBLE"
+    AGOTADO = "AGOTADO"
+    RETENIDO = "RETENIDO"
+    CANCELADO = "CANCELADO"
+    ESTADO_CHOICES = [
+        (DISPONIBLE, "Disponible"),
+        (AGOTADO, "Agotado"),
+        (RETENIDO, "Retenido"),
+        (CANCELADO, "Cancelado"),
+    ]
+
+    codigo = models.CharField(max_length=120, unique=True, editable=False)
+    insumo = models.ForeignKey(
+        Insumo,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lotes_produccion",
+    )
+    receta = models.ForeignKey(
+        "recetas.Receta",
+        on_delete=models.PROTECT,
+        related_name="lotes_produccion",
+    )
+    cantidad_inicial = models.DecimalField(max_digits=18, decimal_places=3)
+    unidad = models.ForeignKey("maestros.UnidadMedida", on_delete=models.PROTECT)
+    producido_en = models.DateTimeField()
+    linea_origen = models.OneToOneField(
+        "operacion.BitacoraOperativaLinea",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lote_generado",
+    )
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=DISPONIBLE)
+    es_apertura = models.BooleanField(default=False)
+    observaciones = models.CharField(max_length=255, blank=True, default="")
+
+    def clean(self):
+        errors = {}
+        if self.cantidad_inicial is not None and self.cantidad_inicial <= 0:
+            errors["cantidad_inicial"] = "La cantidad inicial debe ser mayor que cero."
+
+        if self.es_apertura:
+            if self.linea_origen_id:
+                errors["linea_origen"] = "Un lote de apertura no debe inventar una linea historica."
+            if not self.observaciones.strip():
+                errors["observaciones"] = "Un lote de apertura requiere una observacion."
+        elif not self.linea_origen_id:
+            errors["linea_origen"] = "Un lote ordinario requiere una linea de bitacora de origen."
+
+        if self.receta_id:
+            from recetas.models import Receta
+
+            if self.receta.tipo == Receta.TIPO_PREPARACION and not self.insumo_id:
+                errors["insumo"] = "Una preparacion interna requiere un insumo canonico."
+            if not self.insumo_id and self.receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+                errors["receta"] = "Un lote sin insumo requiere una receta de producto final."
+
+        if self.insumo_id:
+            codigo_point = self.insumo.codigo_point
+        elif self.receta_id:
+            codigo_point = self.receta.codigo_point
+        else:
+            codigo_point = ""
+        if not normalizar_codigo_lote(codigo_point):
+            errors["codigo"] = "El lote requiere una identidad canonica de Point."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean(exclude=["codigo"] if not self.codigo else None)
+        point_code = self.insumo.codigo_point if self.insumo_id else self.receta.codigo_point
+        identity = normalizar_codigo_lote(point_code)
+        date_code = timezone.localtime(self.producido_en).strftime("%Y%m%d")
+
+        if self.es_apertura and not self.pk:
+            with transaction.atomic():
+                self.codigo = f"INI-PENDIENTE-{uuid4().hex.upper()}"
+                super().save(*args, **kwargs)
+                self.codigo = f"INI-{identity}-{date_code}-{self.pk}"
+                type(self).objects.filter(pk=self.pk).update(codigo=self.codigo)
+            return
+
+        source_id = self.pk if self.es_apertura else self.linea_origen_id
+        self.codigo = f"{'INI' if self.es_apertura else 'LOT'}-{identity}-{date_code}-{source_id}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.codigo
+
+
 class MovimientoInventario(models.Model):
     TIPO_ENTRADA = "ENTRADA"
     TIPO_SALIDA = "SALIDA"
@@ -79,6 +183,27 @@ class MovimientoInventario(models.Model):
     notas = models.CharField(max_length=255, blank=True, default="", verbose_name="Notas / destino")
     registrado_por = models.CharField(max_length=120, blank=True, default="", verbose_name="Registrado por")
     source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    lote = models.ForeignKey(
+        LoteProduccion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="movimientos",
+    )
+    linea_bitacora = models.ForeignKey(
+        "operacion.BitacoraOperativaLinea",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="movimientos_inventario",
+    )
+    registrado_por_usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    trazabilidad = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-fecha"]
