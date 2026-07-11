@@ -22,7 +22,7 @@ class EvidenceValidationError(ValueError):
         super().__init__(" ".join(errors))
 
 
-def validate_evidence_files(files):
+def validate_evidence_files(files, *, images_only=False):
     files = [file for file in files if file]
     errors = []
     if len(files) > MAX_FILES:
@@ -33,6 +33,8 @@ def validate_evidence_files(files):
         safe_name = get_valid_filename(original_name)
         extension = Path(safe_name).suffix.lower()
         rule = ALLOWED.get(extension)
+        if images_only and extension == ".pdf":
+            rule = None
         if not safe_name or not rule:
             errors.append(f"{original_name or 'Archivo'}: tipo de archivo no permitido.")
             continue
@@ -52,7 +54,9 @@ def validate_evidence_files(files):
         if not signature_matches(header):
             errors.append(f"{original_name}: el contenido no coincide con el tipo de archivo.")
             continue
-        uploaded.name = safe_name[:255]
+        stem = Path(safe_name).stem
+        suffix = Path(safe_name).suffix
+        uploaded.name = f"{stem[:255 - len(suffix)]}{suffix}"
 
     if errors:
         for uploaded in files:

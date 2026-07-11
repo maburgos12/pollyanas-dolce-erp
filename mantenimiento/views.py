@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -124,15 +125,26 @@ def _safe_int(value, default=0):
 
 
 def _guardar_evidencias_falla(bitacora, archivos, user):
-    for archivo in archivos:
-        if not archivo:
-            continue
-        EvidenciaSeguimientoFalla.objects.create(
-            bitacora=bitacora,
-            archivo=archivo,
-            nombre=getattr(archivo, "name", "")[:255],
-            subido_por=user,
-        )
+    creadas = []
+    try:
+        for archivo in archivos:
+            if not archivo:
+                continue
+            evidencia = EvidenciaSeguimientoFalla.objects.create(
+                bitacora=bitacora, archivo=archivo,
+                nombre=getattr(archivo, "name", "")[:255], subido_por=user,
+            )
+            creadas.append(evidencia)
+    except Exception:
+        _eliminar_archivos_evidencias(creadas)
+        raise
+    return creadas
+
+
+def _eliminar_archivos_evidencias(evidencias):
+    for evidencia in evidencias:
+        if evidencia.archivo:
+            evidencia.archivo.delete(save=False)
 
 
 def _ensure_provider(nombre):
@@ -1087,6 +1099,11 @@ def crear_falla_movil(request):
     descripcion = (request.data.get("descripcion") or "").strip()
     if not titulo or not descripcion:
         return Response({"error": "Título y descripción son obligatorios."}, status=400)
+    foto = request.FILES.get("foto_evidencia")
+    try:
+        fotos = validate_evidence_files([foto] if foto else [], images_only=True)
+    except EvidenceValidationError as exc:
+        return Response({"error": "La foto inicial no es válida.", "evidencias": exc.errors}, status=400)
     activo_obj = None
     activo_id = _safe_int(request.data.get("activo_id"))
     if activo_id:
@@ -1103,6 +1120,7 @@ def crear_falla_movil(request):
         activo_relacionado=activo_obj,
         reportado_por=request.user,
         estatus=ReporteFalla.ESTATUS_ABIERTO,
+        foto_evidencia=fotos[0] if fotos else None,
     )
     BitacoraFalla.objects.create(
         reporte=reporte,
@@ -1224,6 +1242,7 @@ def crear_reporte_unidad_movil(request):
 @api_view(["POST"])
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
+@transaction.atomic
 def actualizar_item(request, tipo, pk):
     tipo = (tipo or "").strip().lower()
     comentario = (request.data.get("comentario") or "").strip()
@@ -1374,7 +1393,7 @@ def crear_falla(request):
 
     foto = request.FILES.get("foto_evidencia")
     try:
-        validated_photos = validate_evidence_files([foto] if foto else [])
+        validated_photos = validate_evidence_files([foto] if foto else [], images_only=True)
     except EvidenceValidationError as exc:
         for error in exc.errors:
             msg.error(request, error)

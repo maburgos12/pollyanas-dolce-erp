@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -58,6 +59,13 @@ class EvidenceValidationTests(SimpleTestCase):
         safe = self.upload("../mi foto.jpg")
         self.assertEqual(validate_evidence_files([safe])[0].name, "mi_foto.jpg")
 
+    def test_images_only_rejects_pdf_and_long_name_keeps_extension(self):
+        with self.assertRaises(EvidenceValidationError):
+            validate_evidence_files([self.upload("manual.pdf", b"%PDF-1.7", "application/pdf")], images_only=True)
+        uploaded = self.upload(f"{'a' * 300}.jpeg")
+        self.assertEqual(len(validate_evidence_files([uploaded])[0].name), 255)
+        self.assertTrue(uploaded.name.endswith(".jpeg"))
+
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-evidence-validation")
 class EvidenceWritePathTests(TestCase):
@@ -99,6 +107,46 @@ class EvidenceWritePathTests(TestCase):
         }, follow=True)
         self.assertEqual(ReporteFalla.objects.count(), before)
         self.assertContains(response, "contenido no coincide")
+
+    def test_initial_form_and_mobile_api_reject_pdf_as_photo(self):
+        payload = {"sucursal": self.branch.pk, "categoria": self.category.pk, "titulo": "Nueva", "descripcion": "Descripción"}
+        pdf = SimpleUploadedFile("manual.pdf", b"%PDF-1.7", content_type="application/pdf")
+        before = ReporteFalla.objects.count()
+        self.client.post("/mantenimiento/nueva-falla/", {**payload, "foto_evidencia": pdf})
+        self.assertEqual(ReporteFalla.objects.count(), before)
+        pdf = SimpleUploadedFile("manual.pdf", b"%PDF-1.7", content_type="application/pdf")
+        response = self.client.post("/api/mantenimiento/fallas/", {**payload, "foto_evidencia": pdf})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ReporteFalla.objects.count(), before)
+
+    def test_second_evidence_failure_rolls_back_database_and_removes_first_blob(self):
+        original_create = EvidenciaSeguimientoFalla.objects.create
+        calls = 0
+        first_blob = None
+        def fail_second(**kwargs):
+            nonlocal calls, first_blob
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("fallo inyectado")
+            created = original_create(**kwargs)
+            first_blob = created.archivo
+            return created
+        files = [
+            SimpleUploadedFile("uno.jpg", b"\xff\xd8\xffuno", content_type="image/jpeg"),
+            SimpleUploadedFile("dos.jpg", b"\xff\xd8\xffdos", content_type="image/jpeg"),
+        ]
+        before_rows = BitacoraFalla.objects.filter(reporte=self.report).count()
+        with patch.object(EvidenciaSeguimientoFalla.objects, "create", side_effect=fail_second):
+            with self.assertRaises(RuntimeError):
+                self.client.post(f"/api/mantenimiento/bandeja/falla/{self.report.pk}/actualizar/", {
+                    "estatus": ReporteFalla.ESTATUS_RESUELTO, "evidencias_seguimiento": files,
+                })
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.estatus, ReporteFalla.ESTATUS_ABIERTO)
+        self.assertEqual(BitacoraFalla.objects.filter(reporte=self.report).count(), before_rows)
+        self.assertFalse(EvidenciaSeguimientoFalla.objects.filter(bitacora__reporte=self.report).exists())
+        self.assertIsNotNone(first_blob)
+        self.assertFalse(first_blob.name)
 
 
 class MaintenanceHistoryDomainTests(SimpleTestCase):
