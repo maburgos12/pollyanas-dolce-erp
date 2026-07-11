@@ -195,6 +195,7 @@ ACCESS_SUBMODULES = {
     ],
     "conciliacion": [
         ("bancaria", "Conciliación bancaria"),
+        ("fiscal", "SAT fiscal"),
     ],
     "auditoria": [
         ("bitacora", "Bitácora"),

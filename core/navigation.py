@@ -193,6 +193,7 @@ NAV_GROUPS = [
             ("control", "discrepancias", "Control", "/control/discrepancias/", ["/control/discrepancias/"]),
             ("control", "captura_movil", "Captura móvil", "/control/captura-movil/", ["/control/captura-movil/"]),
             ("conciliacion", "bancaria", "Conciliación bancaria", "/conciliacion/bancaria/", ["/conciliacion/bancaria/"]),
+            ("conciliacion", "fiscal", "SAT fiscal", "/sat/", ["/sat/"]),
             ("auditoria", "bitacora", "Bitácora", "/auditoria/", ["/auditoria/"]),
         ],
     },

@@ -6,6 +6,7 @@ existentes de activos y logística.
 
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -33,6 +34,7 @@ class ActivoListSerializer(serializers.ModelSerializer):
 
 class ActivoQuickCreateSerializer(serializers.ModelSerializer):
     sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True, default="")
+    creado_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = Activo
@@ -47,6 +49,7 @@ class ActivoQuickCreateSerializer(serializers.ModelSerializer):
             "estado",
             "criticidad",
             "notas",
+            "creado_por_nombre",
         ]
         read_only_fields = ["id", "codigo", "estado", "criticidad", "sucursal_nombre"]
         extra_kwargs = {
@@ -64,6 +67,7 @@ class ActivoQuickCreateSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        validated_data["creado_por"] = self.context["request"].user
         if not (validated_data.get("categoria") or "").strip():
             validated_data["categoria"] = "Infraestructura"
         validated_data["estado"] = Activo.ESTADO_OPERATIVO
@@ -71,6 +75,11 @@ class ActivoQuickCreateSerializer(serializers.ModelSerializer):
         validated_data["activo"] = True
         validated_data["codigo"] = self._next_code(validated_data["sucursal"])
         return super().create(validated_data)
+
+    def get_creado_por_nombre(self, obj):
+        if not obj.creado_por:
+            return ""
+        return obj.creado_por.get_full_name() or obj.creado_por.username
 
     def _next_code(self, sucursal):
         base = (sucursal.codigo or "SUC").upper().replace(" ", "_")[:10]
@@ -87,15 +96,19 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
     costo_real = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, write_only=True)
     proveedor_servicio = serializers.CharField(required=False, allow_blank=True, write_only=True)
     foto = serializers.ImageField(required=False, allow_null=True, write_only=True)
+    creado_por_nombre = serializers.SerializerMethodField()
+    responsable_usuario_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenMantenimiento
         fields = [
+            "id",
             "activo_ref",
             "tipo",
             "prioridad",
             "descripcion",
             "responsable",
+            "responsable_usuario",
             "costo_repuestos",
             "costo_mano_obra",
             "costo_otros",
@@ -103,7 +116,10 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
             "proveedor_servicio",
             "fecha_programada",
             "foto",
+            "creado_por_nombre",
+            "responsable_usuario_nombre",
         ]
+        read_only_fields = ["id", "creado_por_nombre", "responsable_usuario_nombre"]
         extra_kwargs = {
             "prioridad": {"required": False},
             "responsable": {"required": False, "allow_blank": True},
@@ -144,6 +160,18 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
         )
         return orden
 
+    @staticmethod
+    def _user_name(user):
+        if not user:
+            return ""
+        return user.get_full_name() or user.username
+
+    def get_creado_por_nombre(self, obj):
+        return self._user_name(obj.creado_por)
+
+    def get_responsable_usuario_nombre(self, obj):
+        return self._user_name(obj.responsable_usuario)
+
 
 class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
     activo_nombre = serializers.CharField(source="activo_ref.nombre", read_only=True)
@@ -157,6 +185,9 @@ class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
     estatus_display = serializers.CharField(source="get_estatus_display", read_only=True)
     prioridad_display = serializers.CharField(source="get_prioridad_display", read_only=True)
     costo_total = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    creado_por_nombre = serializers.SerializerMethodField()
+    responsable_usuario_nombre = serializers.SerializerMethodField()
+    ejecutado_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenMantenimiento
@@ -178,6 +209,10 @@ class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
             "estatus_display",
             "descripcion",
             "responsable",
+            "responsable_usuario",
+            "responsable_usuario_nombre",
+            "creado_por_nombre",
+            "ejecutado_por_nombre",
             "costo_repuestos",
             "costo_mano_obra",
             "costo_otros",
@@ -186,6 +221,21 @@ class OrdenMantenimientoListSerializer(serializers.ModelSerializer):
             "fecha_inicio",
             "fecha_cierre",
         ]
+
+    @staticmethod
+    def _user_name(user):
+        if not user:
+            return ""
+        return user.get_full_name() or user.username
+
+    def get_creado_por_nombre(self, obj):
+        return self._user_name(obj.creado_por)
+
+    def get_responsable_usuario_nombre(self, obj):
+        return self._user_name(obj.responsable_usuario)
+
+    def get_ejecutado_por_nombre(self, obj):
+        return self._user_name(obj.ejecutado_por)
 
 
 class BitacoraMantenimientoSerializer(serializers.ModelSerializer):
@@ -214,6 +264,11 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
     comentario = serializers.CharField(required=False, allow_blank=True)
     costo_adicional = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
     responsable = serializers.CharField(required=False, allow_blank=True)
+    responsable_usuario = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
 
     def validate(self, attrs):
         if not attrs:
@@ -226,6 +281,7 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
         cambios = []
         estatus = self.validated_data.get("estatus")
         responsable = self.validated_data.get("responsable")
+        responsable_usuario = self.validated_data.get("responsable_usuario")
         comentario = self.validated_data.get("comentario", "").strip()
         costo_adicional = self.validated_data.get("costo_adicional")
 
@@ -237,16 +293,26 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
                 orden.fecha_inicio = today
             if estatus == OrdenMantenimiento.ESTATUS_CERRADA and not orden.fecha_cierre:
                 orden.fecha_cierre = today
+                orden.ejecutado_por = request.user
 
         if responsable is not None and responsable.strip() != orden.responsable:
             orden.responsable = responsable.strip()
             cambios.append(f"Responsable: {orden.responsable or 'Sin responsable'}")
 
+        if "responsable_usuario" in self.validated_data and responsable_usuario != orden.responsable_usuario:
+            orden.responsable_usuario = responsable_usuario
+            nombre = (
+                responsable_usuario.get_full_name() or responsable_usuario.username
+                if responsable_usuario
+                else "Sin responsable"
+            )
+            cambios.append(f"Responsable interno: {nombre}")
+
         if costo_adicional:
             orden.costo_otros = (orden.costo_otros or Decimal("0")) + costo_adicional
             cambios.append(f"Costo adicional: ${costo_adicional}")
 
-        update_fields = ["estatus", "responsable", "fecha_inicio", "fecha_cierre", "costo_otros", "actualizado_en"]
+        update_fields = ["estatus", "responsable", "responsable_usuario", "fecha_inicio", "fecha_cierre", "ejecutado_por", "costo_otros", "actualizado_en"]
         orden.save(update_fields=update_fields)
 
         accion = "Seguimiento actualizado"
