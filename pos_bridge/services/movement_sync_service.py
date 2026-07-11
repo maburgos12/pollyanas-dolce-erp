@@ -237,7 +237,8 @@ class PointMovementSyncService:
     def _upsert_transfer_inventory_movement(self, *, line: PointTransferLine) -> bool:
         movement_at = line.received_at or line.sent_at or line.registered_at
         existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
-        almacen = getattr(line, "almacen", None) or (existing.almacen if existing else "ALMACEN_1")
+        existing_almacen = (existing.almacen or "ALMACEN_1") if existing else "ALMACEN_1"
+        almacen = getattr(line, "almacen", None) or existing_almacen
         defaults = {
             "fecha": movement_at,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
@@ -256,7 +257,7 @@ class PointMovementSyncService:
             return True
         new_qty = Decimal(str(line.received_quantity or 0))
         old_qty = Decimal(str(existing.cantidad or 0))
-        old_almacen = existing.almacen
+        old_almacen = existing_almacen
         if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
             return False
         if existing.insumo_id == line.insumo_id and old_almacen == almacen:
