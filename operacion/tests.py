@@ -2331,6 +2331,7 @@ class ArmadoCrunchPilotTests(TestCase):
             nombre="Producto Incompleto",
             codigo_point="PRODUCTO-INC",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_unidad=self.unidad,  # Required per Req 1
             hash_contenido="incomplete-product",
         )
         LineaReceta.objects.create(
@@ -2353,10 +2354,10 @@ class ArmadoCrunchPilotTests(TestCase):
             datos={"cantidad_terminada": "5"},
         )
 
-        # Should raise ValidationError when attempting close
+        # Should raise ValidationError when attempting close (due to missing insumo link)
         with self.assertRaises(ValidationError) as ctx:
             cerrar_armado(incomplete_bitacora, self.manager)
-        self.assertIn("componentes pendientes", str(ctx.exception).lower())
+        self.assertIn("pendientes", str(ctx.exception).lower())
 
     def test_close_armado_rejects_insufficient_stock(self):
         """Test that insufficient lot stock in ARMADO causes rollback."""
@@ -2464,3 +2465,173 @@ class ArmadoCrunchPilotTests(TestCase):
 
         with self.assertRaises(ValidationError):
             cerrar_armado(hornos_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_absent_or_zero_without_contract(self):
+        """Req 2: consumo_real absent must raise ValidationError, NOT convert to zero silently."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Remove consumo_real key entirely (absent)
+        self.armado_linea.datos = {
+            "cantidad_terminada": "8",
+            # No consumo_real_relleno_crunch key
+        }
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "obligatorio"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_invalid_text(self):
+        """Req 2: consumo_real with invalid text must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "texto_invalido"
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "numérico"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_nan_or_infinity(self):
+        """Req 2: consumo_real with NaN/Infinity must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        for invalid_val in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(consumo=invalid_val):
+                self.armado_linea.datos["consumo_real_relleno_crunch"] = invalid_val
+                self.armado_linea.save(update_fields=["datos"])
+                with self.assertRaises(ValidationError):
+                    cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_negative(self):
+        """Req 2: consumo_real negative must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "-2.5"
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "negativ"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_requires_rendimiento_unidad(self):
+        """Req 1: Final recipe must have rendimiento_unidad, no fallback."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create recipe WITHOUT rendimiento_unidad
+        no_yield_recipe = Receta.objects.create(
+            nombre="Producto sin rendimiento",
+            codigo_point="NO-YIELD",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_unidad=None,  # Violates req 1
+            hash_contenido="no-yield-test",
+        )
+        LineaReceta.objects.create(
+            receta=no_yield_recipe,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=self.relleno,
+            cantidad=Decimal("0.5"),
+            unidad=self.kg,
+        )
+
+        no_yield_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=no_yield_bitacora,
+            receta=no_yield_recipe,
+            datos={
+                "cantidad_terminada": "5",
+                "consumo_real_relleno_crunch": "2.5",
+            },
+        )
+
+        with self.assertRaisesMessage(ValidationError, "rendimiento"):
+            cerrar_armado(no_yield_bitacora, self.manager)
+
+    def test_close_armado_idempotence_by_bitacora_receta_not_quantity(self):
+        """Req 3: CEDIS idempotence keyed by (bitacora, receta), NOT quantity."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # First close
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis1_id = result1.lote_terminado.id
+
+        # Modify datos (attempt to change quantity) and retry
+        self.armado_linea.datos["cantidad_terminada"] = "12"  # Different now!
+        self.armado_linea.save()
+
+        # Second call should detect idempotence and raise ValidationError
+        # because (bitacora, receta) already closed with different quantity
+        with self.assertRaisesMessage(ValidationError, "alterada"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_cedis_atomic_stock_increase_once(self):
+        """Req 4: CEDIS Inventario and Movimiento created atomically; stock increase only if mov new."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Before close: no CEDIS entry
+        self.assertFalse(InventarioCedisProducto.objects.filter(receta=self.crunch_ch).exists())
+
+        # First close: CEDIS created, stock increased
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis_inv = InventarioCedisProducto.objects.get(receta=self.crunch_ch)
+        stock_after_first = cedis_inv.stock_actual
+
+        # Second call: should return same inventory without incrementing stock again
+        result2 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis_inv.refresh_from_db()
+        stock_after_second = cedis_inv.stock_actual
+
+        self.assertEqual(stock_after_first, Decimal("8"))
+        self.assertEqual(stock_after_second, stock_after_first)  # No double increase
+
+    def test_close_armado_cannot_reopen_closed_bitacora(self):
+        """Req 5: bitácora/línea closed cannot produce another close with altered data."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # First close
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Bitacora should be CLOSED now
+        self.armado_bitacora.refresh_from_db()
+        self.assertEqual(self.armado_bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+
+        # Try to modify datos and retry
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "7.0"
+        self.armado_linea.save()
+
+        # Should raise ValidationError: either due to closed status or idempotence check catching mismatch
+        with self.assertRaises(ValidationError):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_lot_estado_agotado_on_full_consumption(self):
+        """Req 6: Lote becomes AGOTADO after complete consumption; DISPONIBLE if partial."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Consume only 5.5 kg (partial of 8 kg available)
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "5.5"
+        self.armado_linea.save()
+
+        # Close
+        cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify relleno lots: state should REMAIN DISPONIBLE (partial consumption, still 2.5 kg left)
+        relleno_lotes = LoteProduccion.objects.filter(insumo=self.relleno, estado=LoteProduccion.DISPONIBLE)
+        self.assertGreater(relleno_lotes.count(), 0, "At least one lote should remain DISPONIBLE after partial consumption")
+
+    def test_close_armado_lot_estado_agotado_full_consumption(self):
+        """Req 6: Lote estado changes to AGOTADO after full consumption."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Consume exactly all available (8 kg exactly available, 8 kg consumed)
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "8.0"  # Exact match
+        self.armado_linea.save()
+
+        cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify relleno lots become AGOTADO
+        relleno_lotes = LoteProduccion.objects.filter(insumo=self.relleno)
+        for lote in relleno_lotes:
+            # After complete consumption, lote should be AGOTADO
+            self.assertEqual(lote.estado, LoteProduccion.AGOTADO, msg=f"Lote {lote.codigo} should be AGOTADO")

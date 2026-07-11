@@ -437,7 +437,7 @@ def _calculate_lot_availability(lote: LoteProduccion, ubicacion: str) -> Decimal
     for mov in movimientos:
         if mov.tipo == MovimientoInventario.TIPO_ENTRADA:
             disponible += mov.cantidad
-        elif mov.tipo == MovimientoInventario.TIPO_SALIDA:
+        elif mov.tipo in (MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO):
             disponible -= mov.cantidad
     return disponible
 
@@ -660,22 +660,68 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
                     "La receta tiene componentes pendientes de vinculación."
                 )
 
+            # Req 1: Each component must have cantidad positive and finite, unidad must exist
+            if not linea_comp.unidad:
+                raise ValidationError(
+                    f"El componente {linea_comp.insumo_texto} no tiene unidad definida."
+                )
+
+            try:
+                cantidad_comp = _cantidad_positiva(linea_comp.cantidad)
+            except ValidationError:
+                raise ValidationError(
+                    f"El componente {linea_comp.insumo_texto} debe tener cantidad positiva y finita."
+                )
+
             componentes[linea_comp.insumo_id] = {
                 "insumo": linea_comp.insumo,
-                "cantidad": linea_comp.cantidad or Decimal("0"),
+                "cantidad": cantidad_comp,
                 "unidad": linea_comp.unidad,
             }
 
-            # Read real consumption from bitacora datos
+            # Req 2: Read real consumption from bitacora datos
             # Expected key format: consumo_real_{insumo_codigo_point}
+            # CRITICAL: If absent or invalid, raise ValidationError (do NOT silently convert to zero)
             real_key = f"consumo_real_{linea_comp.insumo.codigo_point.lower().replace('-', '_')}"
+            real_value = datos.get(real_key)
+
+            # Absent: must raise
+            if real_value is None:
+                raise ValidationError(
+                    f"Consumo real de {linea_comp.insumo.nombre} es obligatorio."
+                )
+
+            # Try to parse as Decimal
             try:
-                consumo_real[linea_comp.insumo_id] = _cantidad_positiva(datos.get(real_key, Decimal("0")))
-            except ValidationError:
-                consumo_real[linea_comp.insumo_id] = Decimal("0")
+                real_decimal = Decimal(str(real_value))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError(
+                    f"Consumo real de {linea_comp.insumo.nombre} debe ser numérico."
+                )
+
+            # Check finite
+            if not real_decimal.is_finite():
+                raise ValidationError(
+                    f"Consumo real de {linea_comp.insumo.nombre} debe ser finito (no NaN/Infinity)."
+                )
+
+            # Check non-negative
+            if real_decimal < 0:
+                raise ValidationError(
+                    f"Consumo real de {linea_comp.insumo.nombre} no puede ser negativo."
+                )
+
+            # Store parsed value (zero is allowed only if contract permits explicitly)
+            consumo_real[linea_comp.insumo_id] = real_decimal
 
         if not componentes:
             raise ValidationError("La receta no tiene componentes definidos.")
+
+        # Req 1: Validate final recipe has rendimiento_unidad (no fallback)
+        if receta.rendimiento_unidad_id is None:
+            raise ValidationError(
+                "La receta debe tener unidad de rendimiento definida."
+            )
 
         # Calculate theoretical consumptions: cantidad_terminada * component.cantidad
         consumo_teorico = {
@@ -683,16 +729,39 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
             for insumo_id, comp in componentes.items()
         }
 
-        # Check idempotence: if CEDIS entrada already created for this bitacora, return it
+        # Req 3: Check idempotence by (bitacora, receta) only, NOT cantidad
+        # Do this BEFORE checking if bitacora is closed, so idempotent calls can proceed
+        # If CEDIS already closed for this (bitacora, receta) pair, reintento validates completeness
         cedis_source_hash = sha256(
-            f"CERRAR_ARMADO:CEDIS_ENTRADA:{bitacora.id}:{receta.id}:{cantidad_terminada}".encode()
+            f"CERRAR_ARMADO:CEDIS_ENTRADA:{bitacora.id}:{receta.id}".encode()
         ).hexdigest()
 
         from recetas.models import InventarioCedisProducto, MovimientoProductoCedis
 
         try:
             cedis_mov_existing = MovimientoProductoCedis.objects.get(source_hash=cedis_source_hash)
-            # Idempotent: return existing result
+            # Req 3: Idempotent call detected; validate that quantity/consumos unchanged
+            # If any parameter changed from first call, raise ValidationError
+            if cedis_mov_existing.cantidad != cantidad_terminada:
+                raise ValidationError(
+                    "La cantidad terminada ha sido alterada desde el primer cierre. "
+                    "No se puede reaceptar con datos diferentes."
+                )
+            # Validate all consumo movements exist and match
+            for insumo_id, expected_consumo in consumo_real.items():
+                consumo_mov = MovimientoInventario.objects.filter(
+                    tipo=MovimientoInventario.TIPO_CONSUMO,
+                    insumo_id=insumo_id,
+                    almacen=UBICACION_ARMADO,
+                ).filter(
+                    trazabilidad__bitacora_id=bitacora.id
+                ).first()
+                if not consumo_mov or consumo_mov.cantidad != expected_consumo:
+                    raise ValidationError(
+                        f"El consumo de insumo {insumo_id} no coincide con lo registrado. "
+                        "Cierre ya aplicado; no se puede cambiar."
+                    )
+            # Idempotent: return existing result (bitacora is allowed to remain CERRADA)
             lote = LoteProduccion.objects.get(receta=receta, linea_origen__bitacora=bitacora, insumo=None)
             return CerrarArmadoResult(
                 producto=receta,
@@ -702,7 +771,12 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
                 lote_terminado=lote,
             )
         except (MovimientoProductoCedis.DoesNotExist, LoteProduccion.DoesNotExist):
-            pass  # First call: proceed with creation
+            # First call: check if bitacora already closed (only if NOT idempotent)
+            if bitacora.estatus == BitacoraOperativa.ESTATUS_CERRADA:
+                raise ValidationError(
+                    "La bitácora ya está cerrada y no puede reabrirse con datos alterados."
+                )
+            pass  # Proceed with creation
 
         # Validate that sufficient lots are available in ARMADO for all components
         lots_by_insumo = {}  # {insumo_id: {lote_id: availability}}
@@ -781,11 +855,25 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
             insumo = componentes[insumo_id]["insumo"]
             aplicar_delta(insumo, UBICACION_ARMADO, -consumo_real[insumo_id])
 
+        # Req 6: Mark ingredient lots as AGOTADO if completely consumed
+        # Must do this AFTER all consumo movements and deltas are applied
+        for insumo_id in componentes.keys():
+            insumo = componentes[insumo_id]["insumo"]
+            # Re-query lotes to get fresh state after all movements
+            lotes_to_check = LoteProduccion.objects.select_for_update().filter(
+                insumo=insumo,
+                estado=LoteProduccion.DISPONIBLE,
+            )
+            for lote_ing in lotes_to_check:
+                # Recalculate availability after all movements created
+                disponible = _calculate_lot_availability(lote_ing, UBICACION_ARMADO)
+                if disponible <= 0:
+                    # Lote completely consumed: mark as AGOTADO
+                    lote_ing.estado = LoteProduccion.AGOTADO
+                    lote_ing.save(update_fields=["estado"])
+
         # Create finished lot (insumo=None for product)
         lote_codigo = normalizar_codigo_lote(f"LOT-{receta.codigo_point}-{bitacora.id}")
-        lote_hash = sha256(
-            f"CERRAR_ARMADO:LOTE_TERMINADO:{bitacora.id}:{receta.id}".encode()
-        ).hexdigest()
 
         lote, lote_created = LoteProduccion.objects.get_or_create(
             codigo=lote_codigo,
@@ -793,7 +881,7 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
                 "insumo": None,  # Product, not ingredient
                 "receta": receta,
                 "cantidad_inicial": cantidad_terminada,
-                "unidad": receta.rendimiento_unidad or UnidadMedida.objects.first(),
+                "unidad": receta.rendimiento_unidad,  # Req 1: No fallback
                 "producido_en": timezone.now(),
                 "linea_origen": linea,
                 "creado_por": actor,
@@ -801,12 +889,10 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
             },
         )
 
-        # Create CEDIS entrada
-        cedis_inv, _ = InventarioCedisProducto.objects.get_or_create(receta=receta)
-        cedis_inv.stock_actual += cantidad_terminada
-        cedis_inv.save(update_fields=["stock_actual", "actualizado_en"])
+        # Req 4: Create CEDIS entrada atomically, increase stock only if movement new
+        cedis_inv, _ = InventarioCedisProducto.objects.select_for_update().get_or_create(receta=receta)
 
-        MovimientoProductoCedis.objects.get_or_create(
+        cedis_mov, cedis_mov_created = MovimientoProductoCedis.objects.get_or_create(
             source_hash=cedis_source_hash,
             defaults={
                 "fecha": timezone.now(),
@@ -816,6 +902,11 @@ def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:
                 "referencia": lote.codigo,
             },
         )
+
+        # Req 4: Increase CEDIS stock only if this is a new movement
+        if cedis_mov_created:
+            cedis_inv.stock_actual += cantidad_terminada
+            cedis_inv.save(update_fields=["stock_actual", "actualizado_en"])
 
         # Close bitacora
         bitacora.cerrar()
