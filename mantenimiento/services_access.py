@@ -48,7 +48,7 @@ def authorized_branch_ids(user):
         return None
     profile = getattr(user, "userprofile", None)
     branch_id = getattr(profile, "sucursal_id", None)
-    return [branch_id] if branch_id else None
+    return [branch_id] if branch_id else []
 
 
 def _authorized_queryset(user, queryset, branch_lookup):

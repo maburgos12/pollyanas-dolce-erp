@@ -1,4 +1,3 @@
-import mimetypes
 from pathlib import PurePath
 
 from django.http import FileResponse, Http404
@@ -120,8 +119,20 @@ def evidencia_v2(request, tipo, pk):
     raw_name = (supplied_name or file_field.name).splitlines()[0]
     safe_name = PurePath(raw_name).name
     safe_name = "".join(ch for ch in safe_name if ch.isprintable() and ch not in {'"', "\\"}) or "evidencia"
-    mime = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
-    inline = mime.startswith("image/") or mime == "application/pdf"
+    extension = PurePath(safe_name).suffix.lower()
+    signature = stream.read(16)
+    stream.seek(0)
+    safe_types = {
+        ".jpg": ("image/jpeg", signature.startswith(b"\xff\xd8\xff")),
+        ".jpeg": ("image/jpeg", signature.startswith(b"\xff\xd8\xff")),
+        ".png": ("image/png", signature.startswith(b"\x89PNG\r\n\x1a\n")),
+        ".webp": ("image/webp", signature.startswith(b"RIFF") and signature[8:12] == b"WEBP"),
+        ".pdf": ("application/pdf", signature.startswith(b"%PDF-")),
+    }
+    declared_mime, valid_signature = safe_types.get(extension, ("application/octet-stream", False))
+    inline = valid_signature
+    mime = declared_mime if inline else "application/octet-stream"
     response = FileResponse(stream, content_type=mime, as_attachment=not inline, filename=safe_name)
     response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
     return response

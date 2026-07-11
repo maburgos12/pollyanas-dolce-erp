@@ -166,10 +166,9 @@ class MaintenanceAccessTests(TestCase):
                 self.assertEqual(authorized_repairs(user).count(), 2)
                 self.assertEqual(authorized_unit_services(user).count(), 2)
 
-    def test_authorized_user_without_branch_scope_sees_global_data(self):
-        self.assertEqual(authorized_fallas(self.no_scope_user).count(), 2)
-        self.assertEqual(authorized_orders(self.no_scope_user).count(), 2)
-        self.assertEqual(authorized_unit_reports(self.no_scope_user).count(), 2)
+    def test_non_global_user_without_branch_scope_sees_no_data(self):
+        UserModuleAccess.objects.create(user=self.no_scope_user, module="activos", access="view")
+        self._assert_no_authorized_objects(self.no_scope_user)
 
     def test_user_with_branch_but_without_mantenimiento_permission_sees_nothing(self):
         self._assert_no_authorized_objects(self.no_permission_user)
@@ -428,10 +427,12 @@ class MaintenanceDetailV2Tests(TestCase):
         cls.other_branch = Sucursal.objects.create(codigo="DET2", nombre="Ajena")
         cls.user = users.objects.create_user("detail", password="test", first_name="Lector")
         cls.denied = users.objects.create_user("denied", password="test")
+        cls.no_profile = users.objects.create_user("no-profile", password="test")
         cls.reporter = users.objects.create_user("reporter", password="test", first_name="Reportante", last_name="QA")
         UserProfile.objects.create(user=cls.user, sucursal=cls.branch)
         UserProfile.objects.create(user=cls.denied, sucursal=cls.branch)
         UserModuleAccess.objects.create(user=cls.user, module="mantenimiento", access="view")
+        UserModuleAccess.objects.create(user=cls.no_profile, module="activos", access="view")
         category = CategoriaFalla.objects.create(nombre="Electricidad", tipo=CategoriaFalla.TIPO_EQUIPO)
         asset = Activo.objects.create(nombre="Horno", sucursal=cls.branch)
         cls.report = ReporteFalla.objects.create(
@@ -481,6 +482,8 @@ class MaintenanceDetailV2Tests(TestCase):
         self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.other_report.pk}/").status_code, 404)
         self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/desconocido/{self.report.pk}/").status_code, 404)
         self.assertEqual(self.client.get("/api/mantenimiento/v2/items/falla/999999/").status_code, 404)
+        self.client.force_login(self.no_profile)
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, 404)
 
     def test_all_declared_detail_types_resolve_authorized_objects(self):
         asset = Activo.objects.create(nombre="Batidora", sucursal=self.branch)
@@ -515,15 +518,16 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
     def setUp(self):
         super().setUp()
         self.client.force_login(self.user)
-        self.report.foto_evidencia.save("initial.jpg", ContentFile(b"jpeg-data"), save=True)
+        self.report.foto_evidencia.save("initial.jpg", ContentFile(b"\xff\xd8\xffjpeg-data"), save=True)
         self.evidence = self.old.evidencias.first()
-        self.evidence.archivo.save("avance.jpg", ContentFile(b"image-data"), save=True)
+        self.evidence.archivo.save("avance.jpg", ContentFile(b"\xff\xd8\xffimage-data"), save=True)
 
     def test_get_and_head_serve_private_inline_evidence_without_public_path(self):
         url = f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{self.evidence.pk}/"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
         self.assertIn("inline", response["Content-Disposition"])
         self.assertNotIn(self.evidence.archivo.path, response["Content-Disposition"])
         head = self.client.head(url)
@@ -574,6 +578,28 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
             self.client.head(f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{missing.pk}/").status_code,
             404,
         )
+        self.client.force_login(self.no_profile)
+        self.assertEqual(self.client.head(own_url).status_code, 404)
+
+    def test_active_or_deceptive_content_is_attachment_with_safe_mime_and_nosniff(self):
+        cases = [
+            ("vector.svg", b'<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'),
+            ("parece-foto.jpg", b"<html><script>alert(1)</script></html>"),
+            ("desconocido.bin", b"unknown"),
+        ]
+        for name, content in cases:
+            evidence = EvidenciaSeguimientoFalla.objects.create(
+                bitacora=self.old, nombre=name, subido_por=self.reporter,
+            )
+            evidence.archivo.save(name, ContentFile(content), save=True)
+            with self.subTest(name=name):
+                response = self.client.get(
+                    f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{evidence.pk}/"
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("attachment", response["Content-Disposition"])
+                self.assertEqual(response["Content-Type"], "application/octet-stream")
+                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
 
     def test_every_declared_evidence_type_is_private_and_scoped_through_its_parent(self):
         other_timeline_evidence = EvidenciaSeguimientoFalla.objects.create(
