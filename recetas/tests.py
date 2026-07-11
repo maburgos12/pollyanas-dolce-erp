@@ -42,7 +42,7 @@ from recetas.models import (
     SolicitudVenta,
     VentaHistorica,
 )
-from pos_bridge.models import PointBranch, PointSalesDailyProductFact, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailySale, PointSalesDailyProductFact, PointSyncJob
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost
 from recetas.utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
@@ -4057,6 +4057,8 @@ class SolicitudVentasForecastTests(TestCase):
         point_activo=True,
         crear_point=True,
         codigo_receta=None,
+        vendido=True,
+        categoria_point=None,
     ):
         receta = Receta.objects.create(
             nombre=nombre,
@@ -4073,13 +4075,25 @@ class SolicitudVentasForecastTests(TestCase):
             activo=alias_activo,
         )
         if crear_point:
-            PointProduct.objects.create(
+            point_product = PointProduct.objects.create(
                 external_id=f"point-{codigo.lower()}",
                 sku=codigo,
                 name=nombre,
-                category=familia,
+                category=categoria_point or familia,
                 active=point_activo,
             )
+            if vendido:
+                point_branch, _ = PointBranch.objects.get_or_create(
+                    external_id="POINT-PLANTILLA",
+                    defaults={"name": "Point Plantilla"},
+                )
+                PointDailySale.objects.create(
+                    branch=point_branch,
+                    product=point_product,
+                    receta=receta,
+                    sale_date=timezone.localdate(),
+                    quantity=Decimal("1"),
+                )
         return receta
 
     def test_calculo_insumos_plantilla_selecciona_productos_vendibles(self):
@@ -4088,7 +4102,8 @@ class SolicitudVentasForecastTests(TestCase):
         self._crear_producto_plantilla(
             nombre="Pastel Vendible",
             codigo="PASTEL-01",
-            familia="Pasteles",
+            familia="Pastel",
+            categoria_point="Pastel Mediano",
         )
         self._crear_producto_plantilla(
             nombre="Vela Número",
@@ -4104,6 +4119,11 @@ class SolicitudVentasForecastTests(TestCase):
             nombre="Kit Repostería",
             codigo="ACC-01",
             familia="Accesorios de repostería",
+        )
+        self._crear_producto_plantilla(
+            nombre="Tarjeta de regalo",
+            codigo="REGALO-01",
+            familia="Otros postres",
         )
         self._crear_producto_plantilla(
             nombre="Servicio Accesorio",
@@ -4124,23 +4144,44 @@ class SolicitudVentasForecastTests(TestCase):
             familia="Pasteles",
             crear_point=False,
         )
+        self._crear_producto_plantilla(
+            nombre="Pastel Sin Venta",
+            codigo="PASTEL-SIN-VENTA",
+            familia="Pastel",
+            categoria_point="Pastel Grande",
+            vendido=False,
+        )
 
         self.assertEqual(
             _calculo_insumos_template_products(),
             [
                 {
-                    "familia": "Pasteles",
+                    "familia": "Pastel",
                     "codigo_point": "PASTEL-01",
                     "producto": "Pastel Vendible",
+                    "presentacion": "Mediano",
                 }
             ],
+        )
+
+    def test_calculo_insumos_plantilla_infiere_presentacion_del_producto_antes_que_categoria(self):
+        from recetas.views.plan import _calculo_insumos_template_presentation
+
+        self.assertEqual(
+            _calculo_insumos_template_presentation(
+                "Vasos Preparados",
+                "Vasos Grande",
+                "Vaso Fresas con Crema Chico",
+            ),
+            "Chico",
         )
 
     def test_calculo_insumos_plantilla_xlsx_precarga_catalogo_vendible(self):
         self._crear_producto_plantilla(
             nombre="Pastel Vendible",
             codigo="PASTEL-01",
-            familia="Pasteles",
+            familia="Pastel",
+            categoria_point="Pastel Mediano",
         )
         self._crear_producto_plantilla(
             nombre="Vela Número",
@@ -4162,7 +4203,7 @@ class SolicitudVentasForecastTests(TestCase):
             list(ws.values),
             [
                 ("familia", "codigo_point", "producto", "presentacion", "cantidad", "notas"),
-                ("Pasteles", "PASTEL-01", "Pastel Vendible", None, None, None),
+                ("Pastel", "PASTEL-01", "Pastel Vendible", "Mediano", None, None),
             ],
         )
 
