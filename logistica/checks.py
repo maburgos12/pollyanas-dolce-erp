@@ -1,7 +1,10 @@
 import ast
 from pathlib import Path
 
-from django.core.checks import Error, register
+from django.core.checks import Error, Warning, register
+from django.utils import timezone
+
+from logistica.pwa_compat import v59_compat_deadline
 
 
 LOGISTICA_DIR = Path(__file__).resolve().parent
@@ -19,6 +22,21 @@ ALLOWED_CRITICAL_WRITERS = {
     "logistica/services_rutas_control.py": {"_marcar_visitada_por_permanencia"},
     "logistica/services_carga_ruta.py": {"registrar_recarga_cedis"},
 }
+
+
+@register()
+def logistica_v59_compat_window(app_configs, **kwargs):
+    try:
+        deadline = v59_compat_deadline()
+    except ValueError as exc:
+        return [Error(str(exc), id="logistica.E911")]
+    if deadline is not None and timezone.now() > deadline:
+        return [Warning(
+            "La ventana de compatibilidad PWA v59 ya vencio.",
+            hint="Deja LOGISTICA_PWA_V59_COMPAT_UNTIL vacia para deshabilitarla explicitamente.",
+            id="logistica.W911",
+        )]
+    return []
 
 
 def critical_parada_writes_in_source(source: str, relative_path: str) -> list[tuple[int, str]]:

@@ -987,7 +987,7 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA).count(), 1)
 
-    def test_excepcion_exige_motivo_y_acepta_cola_legacy_sin_contexto(self):
+    def test_excepcion_exige_motivo_y_rechaza_contexto_vacio_sin_contrato_legacy(self):
         sin_motivo = self.client.post(self.url, json.dumps(self._payload(notas="")), content_type="application/json")
         sin_contexto = self.client.post(
             self.url,
@@ -996,10 +996,7 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         )
 
         self.assertEqual(sin_motivo.status_code, 400)
-        self.assertEqual(sin_contexto.status_code, 200)
-        self.parada.refresh_from_db()
-        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
-        self.assertEqual(self.parada.revision_entrega_causa, "CLIENTE_LEGACY")
+        self.assertEqual(sin_contexto.status_code, 400)
 
     def test_confirmacion_exige_client_event_id(self):
         response = self.client.post(
@@ -1011,7 +1008,8 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("client_event_id", response.json())
 
-    def test_replay_v59_sin_id_acepta_tres_estados_y_es_idempotente(self):
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2099-07-17T23:59:59-07:00")
+    def test_replay_v59_dentro_de_ventana_acepta_tres_estados_y_es_idempotente(self):
         casos = [
             ParadaRuta.ENTREGA_ENTREGADA,
             ParadaRuta.ENTREGA_CON_DIFERENCIA,
@@ -1048,6 +1046,7 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
                 parada.refresh_from_db()
                 self.assertEqual(parada.entrega_estado, entrega_estado)
                 self.assertEqual(parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+                self.assertEqual(parada.revision_entrega_causa, "CLIENTE_LEGACY")
                 self.assertEqual(
                     ParadaEntregaEvidencia.objects.filter(
                         parada=parada, client_event_id=f"offline-v59-{queue_id}"
@@ -1055,6 +1054,7 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
                     1,
                 )
 
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2099-07-17T23:59:59-07:00")
     def test_replay_v59_posterior_a_resolucion_no_sobrescribe_revision(self):
         queue_id = "legacy-queue-resuelto"
         payload = {
@@ -1087,6 +1087,119 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(retry.json(), primero.json())
         self.parada.refresh_from_db()
         self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_AUTORIZADA)
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2000-01-01T00:00:00-07:00")
+    def test_replay_v59_vencido_rechaza_evidencia_incompleta(self):
+        queue_id = "legacy-expirado"
+        payload = {
+            "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+            "notas": "Cola offline v59 expirada.",
+            "client_event_id": f"offline-v59-{queue_id}",
+            "client_context": {
+                "causa": "GPS_SIN_SENAL",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v59-offline",
+            },
+            "evidencias": [{"tipo": "CONFIRMACION", "comentario": "Evidencia que no extiende la ventana."}],
+        }
+        response = self.client.post(
+            self.url, json.dumps(payload), content_type="application/json",
+            HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID=queue_id,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2099-07-17T23:59:59-07:00")
+    def test_replay_v59_rechaza_spoof_de_header_id_version_o_causa(self):
+        casos = [
+            ("queue-real", "offline-v59-queue-distinto", "pwa-v59-offline", "GPS_SIN_SENAL"),
+            ("queue-real", "offline-v59-queue-real", "pwa-v60", "GPS_SIN_SENAL"),
+            ("queue-real", "offline-v59-queue-real", "pwa-v59-offline", "FUERA_DE_RADIO"),
+            ("queue con espacios", "offline-v59-queue con espacios", "pwa-v59-offline", "GPS_SIN_SENAL"),
+        ]
+        for index, (header, event_id, version, causa) in enumerate(casos):
+            with self.subTest(index=index):
+                payload = {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Intento de replay.",
+                    "client_event_id": event_id,
+                    "client_context": {
+                        "causa": causa,
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": version,
+                    },
+                    "evidencias": [{"tipo": "CONFIRMACION", "comentario": "Evidencia spoof."}],
+                }
+                response = self.client.post(
+                    self.url, json.dumps(payload), content_type="application/json",
+                    HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID=header,
+                )
+                self.assertEqual(response.status_code, 400, response.content)
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2099-07-17T23:59:59-07:00")
+    def test_replay_v59_con_geocerca_siempre_queda_cliente_legacy_pendiente(self):
+        self._registrar_geocerca_real()
+        queue_id = "legacy-con-geocerca"
+        payload = {
+            "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+            "notas": "Replay offline anterior.",
+            "client_event_id": f"offline-v59-{queue_id}",
+            "client_context": {
+                "causa": "GPS_SIN_SENAL",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v59-offline",
+            },
+            "evidencias": [],
+        }
+        response = self.client.post(
+            self.url, json.dumps(payload), content_type="application/json",
+            HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID=queue_id,
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+        self.assertEqual(self.parada.revision_entrega_causa, "CLIENTE_LEGACY")
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="fecha-invalida")
+    def test_check_reporta_configuracion_v59_malformada(self):
+        from logistica.checks import logistica_v59_compat_window
+
+        self.assertEqual([item.id for item in logistica_v59_compat_window(None)], ["logistica.E911"])
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="2000-01-01")
+    def test_check_advierte_ventana_v59_vencida(self):
+        from logistica.checks import logistica_v59_compat_window
+
+        self.assertEqual([item.id for item in logistica_v59_compat_window(None)], ["logistica.W911"])
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="")
+    def test_ventana_v59_puede_deshabilitarse_inmediatamente(self):
+        from logistica.checks import logistica_v59_compat_window
+
+        self.assertEqual(logistica_v59_compat_window(None), [])
+
+    @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="fecha-invalida")
+    def test_configuracion_v59_malformada_falla_cerrado_en_api(self):
+        queue_id = "legacy-config-invalida"
+        payload = {
+            "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+            "notas": "Replay con configuración inválida.",
+            "client_event_id": f"offline-v59-{queue_id}",
+            "client_context": {
+                "causa": "GPS_SIN_SENAL",
+                "client_timestamp": timezone.now().isoformat(),
+                "client_version": "pwa-v59-offline",
+            },
+            "evidencias": [],
+        }
+        response = self.client.post(
+            self.url, json.dumps(payload), content_type="application/json",
+            HTTP_X_LOGISTICA_OFFLINE_QUEUE_ID=queue_id,
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_helper_js_reproduce_cola_v59_real_y_no_toca_payload_v60(self):
         helper = Path(__file__).resolve().parent / "static" / "logistica" / "pwa" / "offline_queue_compat.js"
@@ -1805,16 +1918,14 @@ class LogisticaEntregaContratoFinalTests(LogisticaEntregaDomainTests):
         with self.assertRaises(ValidationError):
             self._confirmar(origen="PWA", ubicacion={"causa": "INVENTADA"})
 
-    def test_cliente_v59_sin_contexto_se_conserva_como_legacy_revisable(self):
-        resultado = self._confirmar(
-            origen="PWA",
-            client_event_id="cola-v59-evidencia-1",
-            ubicacion={},
-            evidencias=[{"client_event_id": "cola-v59-evidencia-1", "comentario": "cola offline"}],
-        )
-        self.parada.refresh_from_db()
-        self.assertTrue(resultado.requiere_revision)
-        self.assertEqual(self.parada.revision_entrega_causa, "CLIENTE_LEGACY")
+    def test_servicio_no_infiere_cliente_legacy_por_contexto_vacio(self):
+        with self.assertRaises(ValidationError):
+            self._confirmar(
+                origen="PWA",
+                client_event_id="cola-v59-evidencia-1",
+                ubicacion={},
+                evidencias=[{"client_event_id": "cola-v59-evidencia-1", "comentario": "cola offline"}],
+            )
 
     def test_gps_nuevo_no_reescribe_evento_legacy(self):
         legacy_actor = User.objects.create_user(username="legacy.actor")

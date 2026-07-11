@@ -374,16 +374,13 @@ def confirmar_entrega_parada(
         raise ValidationError("La parada ya tiene una confirmación de entrega distinta.")
 
     llegada = _geocerca_real(ruta=ruta, parada=parada)
-    requiere_revision = llegada is None or origen == ORIGEN_AJUSTE_ADMIN
     datos_revision = _json_safe(dict(ubicacion or {}))
+    requiere_revision = (
+        llegada is None
+        or origen == ORIGEN_AJUSTE_ADMIN
+        or datos_revision.get("causa") == "CLIENTE_LEGACY"
+    )
     if requiere_revision:
-        legacy_v59 = origen == ORIGEN_PWA and not datos_revision
-        if legacy_v59:
-            datos_revision = {
-                "causa": "CLIENTE_LEGACY",
-                "client_timestamp": timezone.now().isoformat(),
-                "client_version": "pwa-v59-offline",
-            }
         causa = str(datos_revision.get("causa") or "SIN_GEOFENCE_VALIDADA")
         if causa not in CAUSAS_EXCEPCION:
             raise ValidationError("La causa excepcional no pertenece al catálogo permitido.")

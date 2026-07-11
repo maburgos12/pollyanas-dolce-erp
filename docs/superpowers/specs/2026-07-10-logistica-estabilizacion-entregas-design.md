@@ -116,6 +116,17 @@ Toda confirmación requiere `client_event_id`, actor, ruta, parada, fecha del cl
 
 El servidor es la autoridad: un replay nunca reabre, autoriza, rechaza ni sobrescribe una resolución posterior.
 
+### Transición acotada de la PWA v59
+
+Las colas creadas por v59 solo se recuperan durante una ventana absoluta del servidor,
+configurada con `LOGISTICA_PWA_V59_COMPAT_UNTIL` (por defecto hasta el final local del
+17 de julio de 2026). El valor vacío la deshabilita inmediatamente. Solo se acepta el
+contrato transformado exacto: header de cola seguro, `client_event_id` derivado del
+header, versión `pwa-v59-offline`, causa original `GPS_SIN_SENAL` y timestamp. El
+servidor normaliza toda aceptación como `CLIENTE_LEGACY` y `PENDIENTE` de revisión,
+incluso si existe geocerca. Al vencer la ventana, o ante cualquier intento parcial o
+adulterado, responde 400; nunca infiere un cliente antiguo por contexto vacío.
+
 ## Matriz de aceptación
 
 | Escenario | Visita física | Entrega | Revisión | Continuidad |

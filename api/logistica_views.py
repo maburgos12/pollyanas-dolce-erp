@@ -45,6 +45,7 @@ from logistica.models import (
     Unidad,
 )
 from logistica.services_google_routes import recalcular_ruta_programada
+from logistica.pwa_compat import is_exact_v59_replay_contract, v59_compat_active
 from logistica.services_combustible_auditoria import auditar_carga_combustible
 from logistica.tasks import auditar_ticket_combustible
 from logistica.services_carga_ruta import (
@@ -1377,13 +1378,28 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         evidencias_payload = payload.get("evidencias") or []
         client_context = payload.get("client_context") or {}
         offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
-        legacy_v59_replay = bool(
-            offline_queue_id
-            and len(offline_queue_id) <= 60
-            and all(char.isalnum() or char in "._:-" for char in offline_queue_id)
-            and payload.get("client_event_id") == f"offline-v59-{offline_queue_id}"
-            and client_context.get("client_version") == "pwa-v59-offline"
+        legacy_v59_contract = is_exact_v59_replay_contract(
+            queue_id=offline_queue_id,
+            client_event_id=payload.get("client_event_id"),
+            client_context=client_context,
         )
+        legacy_v59_replay = legacy_v59_contract and v59_compat_active()
+        legacy_v59_attempt = bool(
+            offline_queue_id
+            or str(payload.get("client_event_id") or "").startswith("offline-v59-")
+            or client_context.get("client_version") == "pwa-v59-offline"
+        )
+        if legacy_v59_attempt and not legacy_v59_replay:
+            return Response(
+                {"detail": "La compatibilidad de cola offline v59 no esta disponible o el contrato es invalido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if legacy_v59_replay:
+            client_context = {
+                **client_context,
+                "causa": "CLIENTE_LEGACY",
+                "offline_queue_id": offline_queue_id,
+            }
         motivo = payload.get("notas") or "Entrega confirmada por repartidor."
         # Este endpoint representa siempre el boton de la PWA. Los permisos del
         # usuario no cambian la procedencia del hecho (un jefe puede ser tambien
@@ -1492,8 +1508,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
         tiene_geocerca_confiable = tiene_llegada_geocerca_confiable(ruta=ruta, parada=parada)
-        es_legacy_v59 = not client_context
-        if not tiene_geocerca_confiable and not es_legacy_v59:
+        if not tiene_geocerca_confiable and not legacy_v59_replay:
             if not (payload.get("notas") or "").strip():
                 return Response({"notas": ["Explica el motivo de la entrega sin geocerca."]}, status=status.HTTP_400_BAD_REQUEST)
             if not client_context.get("causa") or not client_context.get("client_timestamp") or not client_context.get("client_version"):
