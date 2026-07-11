@@ -86,7 +86,7 @@
               <div class="row">
                 <div class="field-box">
                   <div class="field-label">Producto</div>
-                  <div class="field-value">{{ linea.receta.nombre }}</div>
+                  <div class="field-value">{% if linea.insumo %}{{ linea.insumo.nombre }}{% else %}{{ linea.receta.nombre }}{% endif %}</div>
                 </div>
                 <div class="field-box">
                   <div class="field-label">Existencia física</div>
@@ -217,7 +217,14 @@
         <div class="lines">
           {% for index in row_range %}
             <section class="line">
-              {% if not config.sin_producto %}
+              {% if config.usa_insumos %}
+                <label>Producto Point
+                  <select name="insumo_{{ index }}">
+                    <option value="">Seleccionar producto</option>
+                    {% for insumo in insumos %}<option value="{{ insumo.id }}">{{ insumo.nombre }} · {{ insumo.codigo_point }}</option>{% endfor %}
+                  </select>
+                </label>
+              {% elif not config.sin_producto %}
                 <label>Producto
                   <select name="receta_{{ index }}">
                     <option value="">Seleccionar producto</option>

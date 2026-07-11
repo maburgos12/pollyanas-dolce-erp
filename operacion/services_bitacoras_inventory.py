@@ -368,11 +368,16 @@ def guardar_corte_ciego(bitacora: BitacoraOperativa, actor):
                     f"Línea {linea.id}: Existencia física debe ser finita y no negativa."
                 )
 
-            # Buscar insumo desde receta si hay producto
-            if linea.receta:
+            if linea.insumo_id:
+                insumo = linea.insumo
+            elif linea.receta:
                 insumo = _resolve_insumo_from_receta(linea.receta)
             else:
                 insumo = None
+            if insumo is None or not (insumo.codigo_point or "").strip():
+                raise ValidationError(
+                    f"Línea {linea.id}: selecciona un producto con identidad Point."
+                )
 
             # Calcular esperado (suma ENTRADA-AJUSTE hasta cierre)
             esperado = Decimal("0")

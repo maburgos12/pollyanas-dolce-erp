@@ -35,7 +35,8 @@ BITACORA_CONFIG = {
         "familia": "custodia_lotes",
         "campos": ["existencia_fisica", "salida_armado"],
         "campos_legacy": ["bloque", "tamano", "existencia", "salida", "entrada"],
-        "sin_producto": True,
+        "usa_insumos": True,
+        "requiere_codigo_point": True,
     },
     BitacoraOperativa.TIPO_ARMADO: {
         "titulo": "Control producción - Armado",

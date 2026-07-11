@@ -60,6 +60,13 @@ class BitacoraOperativa(models.Model):
 class BitacoraOperativaLinea(models.Model):
     bitacora = models.ForeignKey(BitacoraOperativa, on_delete=models.CASCADE, related_name="lineas")
     receta = models.ForeignKey("recetas.Receta", null=True, blank=True, on_delete=models.PROTECT)
+    insumo = models.ForeignKey(
+        "maestros.Insumo",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lineas_bitacora_operativa",
+    )
     sucursal = models.ForeignKey("core.Sucursal", null=True, blank=True, on_delete=models.SET_NULL)
     datos = models.JSONField(default=dict, blank=True)
     observaciones = models.TextField(blank=True, default="")
@@ -69,7 +76,7 @@ class BitacoraOperativaLinea(models.Model):
         ordering = ["id"]
 
     def __str__(self) -> str:
-        return str(self.receta or self.bitacora)
+        return str(self.insumo or self.receta or self.bitacora)
 
     def save(self, *args, **kwargs):
         """Bloquear edición de líneas después de que el corte ciego haya sido sellado."""

@@ -111,13 +111,33 @@ def _recetas_for_config(config):
     return recetas.order_by("nombre")
 
 
+def _insumos_for_config(config):
+    if not config.get("usa_insumos"):
+        return []
+    return [
+        row["canonical"]
+        for row in canonicalized_active_insumos(limit=3000)
+        if row["canonical"].tipo_item == Insumo.TIPO_INTERNO
+        and (row["canonical"].codigo_point or "").strip()
+    ]
+
+
 def _lineas_from_post(request, config):
     lineas = []
     for index in range(8):
         receta = None
+        insumo = None
         datos = {}
         observaciones = (request.POST.get(f"observaciones_{index}") or "").strip()
-        if not config.get("sin_producto"):
+        if config.get("usa_insumos"):
+            insumo_id = request.POST.get(f"insumo_{index}")
+            if not insumo_id:
+                continue
+            allowed_ids = {item.id for item in _insumos_for_config(config)}
+            insumo = Insumo.objects.filter(pk=insumo_id, pk__in=allowed_ids).first()
+            if not insumo:
+                raise ValidationError("Selecciona un producto válido con identidad Point.")
+        elif not config.get("sin_producto"):
             receta_id = request.POST.get(f"receta_{index}")
             if not receta_id:
                 continue
@@ -142,10 +162,10 @@ def _lineas_from_post(request, config):
                         cantidades[key.removeprefix(prefix)] = value
             if cantidades:
                 datos["sucursales"] = cantidades
-        if receta and not datos and not observaciones:
+        if (receta or insumo) and not datos and not observaciones:
             raise ValidationError("Captura al menos una cantidad u observación.")
-        if receta or datos or observaciones:
-            lineas.append((receta, datos, observaciones))
+        if receta or insumo or datos or observaciones:
+            lineas.append((receta, insumo, datos, observaciones))
     if config.get("requiere_codigo_point") and not lineas:
         raise ValidationError("Selecciona un producto válido con identidad Point.")
     return lineas
@@ -251,6 +271,7 @@ def bitacora_captura(request, tipo):
     config = BITACORA_CONFIG[tipo]
     sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
     recetas = _recetas_for_config(config)[:120]
+    insumos = _insumos_for_config(config)[:240]
 
     # Si hay parámetro revision, cargar la bitácora sellada
     revision_id = request.GET.get("revision")
@@ -273,6 +294,7 @@ def bitacora_captura(request, tipo):
                     "tipo": tipo,
                     "config": config,
                     "recetas": recetas,
+                    "insumos": insumos,
                     "sucursales": sucursales,
                     "row_range": range(8),
                     "today": timezone.localdate(),
@@ -286,10 +308,11 @@ def bitacora_captura(request, tipo):
             notas=(request.POST.get("notas") or "").strip(),
             creado_por=request.user,
         )
-        for receta, datos, observaciones in lineas:
+        for receta, insumo, datos, observaciones in lineas:
             BitacoraOperativaLinea.objects.create(
                 bitacora=bitacora,
                 receta=receta,
+                insumo=insumo,
                 datos=datos,
                 observaciones=observaciones,
             )
@@ -351,9 +374,9 @@ def bitacora_captura(request, tipo):
             if tipo == BitacoraOperativa.TIPO_CFP11 and bitacora.conteo_guardado_en:
                 # Minimal transfer action: get first line for transfer context
                 linea = bitacora.lineas.first()
-                if linea and linea.receta:
+                if linea and (linea.insumo_id or linea.receta_id):
                     try:
-                        insumo_resuelto = resolve_preparation_recipe_for_insumo(linea.receta)
+                        insumo_resuelto = linea.insumo or resolve_preparation_recipe_for_insumo(linea.receta)
                         if insumo_resuelto:
                             cantidad_raw = (request.POST.get("cantidad_entregar") or "").strip()
                             if cantidad_raw:
@@ -404,6 +427,7 @@ def bitacora_captura(request, tipo):
         "tipo": tipo,
         "config": config,
         "recetas": recetas,
+        "insumos": insumos,
         "sucursales": sucursales,
         "row_range": range(8),
         "today": timezone.localdate(),

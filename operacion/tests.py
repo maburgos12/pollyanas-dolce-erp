@@ -352,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v23-trazabilidad-responsive", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v25-cfp-insumos-point", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -601,11 +601,15 @@ class OperacionAppTests(TestCase):
         self.assertEqual(config["familia"], "custodia_lotes")
         self.assertEqual(config["campos"], ["existencia_fisica", "salida_armado"])
         self.assertEqual(config["campos_legacy"], ["bloque", "tamano", "existencia", "salida", "entrada"])
+        self.assertTrue(config["usa_insumos"])
+        self.assertTrue(config["requiere_codigo_point"])
 
         response = self.client.get("/app/bitacoras/CFP11/")
 
         self.assertContains(response, "Existencia física")
         self.assertContains(response, "Salida a armado")
+        self.assertContains(response, "Producto")
+        self.assertContains(response, "Producto Point")
         self.assertContains(response, 'name="existencia_fisica_0"')
         self.assertNotContains(response, 'name="bloque_0"')
         self.assertNotContains(response, "Existencia_fisica")
@@ -1571,7 +1575,11 @@ class CfpBlindCountTests(TestCase):
         # Guardar el conteo físico
         response = self.client.post(
             f"/app/bitacoras/CFP11/",
-            {"accion": "guardar_existencia", "existencia_fisica_0": "5"},
+            {
+                "accion": "guardar_existencia",
+                "insumo_0": str(self.insumo.id),
+                "existencia_fisica_0": "5",
+            },
             follow=True,
         )
 
@@ -3032,5 +3040,5 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v23-trazabilidad-responsive", sw_content)
+        self.assertIn("v25-cfp-insumos-point", sw_content)
         self.assertNotIn("v21-", sw_content)
