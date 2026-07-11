@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-mantenimiento-pwa-v19-20260710-trazabilidad";
+const CACHE_NAME = "pollyanas-mantenimiento-pwa-v20-20260711-paridad-v1";
 const SHELL_ASSETS = [
   "/mantenimiento/app/",
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
@@ -26,8 +26,8 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/")) {
+    event.respondWith(fetch(event.request));
     return;
   }
 
