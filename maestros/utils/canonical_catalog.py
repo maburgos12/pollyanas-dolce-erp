@@ -1,6 +1,7 @@
 from decimal import Decimal
 from functools import lru_cache
 
+from django.db import connection
 from django.db.models import Count, DecimalField, OuterRef, Subquery
 
 from core.cache_versions import bump_cache_scopes, get_cache_scope_version, get_or_set_versioned_cache
@@ -165,6 +166,8 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
 
 def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
     limit_safe = max(100, min(int(limit or 1500), 5000))
+    if connection.in_atomic_block:
+        return _build_canonicalized_active_insumos(limit_safe)
     return get_or_set_versioned_cache(
         key_parts=("erp", "catalog", "canonicalized-insumos", f"limit{limit_safe}"),
         scopes=("insumos",),
@@ -186,8 +189,7 @@ def canonical_catalog_maps(limit: int = 1500) -> tuple[list[dict], dict[int, dic
     return canonical_rows, member_to_row, canonical_by_member_id, canonical_by_id
 
 
-@lru_cache(maxsize=8)
-def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+def _build_canonical_membership_maps() -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
     member_to_canonical_id: dict[int, int] = {}
     canonical_to_member_ids: dict[int, tuple[int, ...]] = {}
     for row in canonicalized_active_insumos(limit=5000):
@@ -200,12 +202,33 @@ def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, 
 
 
 @lru_cache(maxsize=8192)
-def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+def _cached_canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    return _build_canonical_membership_maps()
+
+
+def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    if connection.in_atomic_block:
+        return _build_canonical_membership_maps()
+    return _cached_canonical_membership_maps(version)
+
+
+def _query_active_canonical_insumo(canonical_id: int) -> Insumo | None:
     return (
         Insumo.objects.filter(pk=canonical_id, activo=True)
         .select_related("unidad_base", "proveedor_principal")
         .first()
     )
+
+
+@lru_cache(maxsize=8192)
+def _cached_active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+    return _query_active_canonical_insumo(canonical_id)
+
+
+def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+    if connection.in_atomic_block:
+        return _query_active_canonical_insumo(canonical_id)
+    return _cached_active_canonical_insumo(canonical_id, version)
 
 
 def clear_canonical_catalog_runtime_caches() -> None:
