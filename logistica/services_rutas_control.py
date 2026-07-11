@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
@@ -148,12 +149,33 @@ def crear_evento_ruta_once(
     )
 
 
-def _marcar_visitada_por_permanencia(*, ruta: RutaEntrega, parada: ParadaRuta, distancia_metros_value: int | None) -> bool:
+def _marcar_visitada_por_permanencia(
+    *,
+    ruta: RutaEntrega,
+    parada: ParadaRuta,
+    ubicacion_actual: UbicacionRuta,
+    distancia_metros_value: int | None,
+) -> bool:
     primera_pendiente = ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).order_by("orden", "id").first()
     if not primera_pendiente or primera_pendiente.id != parada.id:
         return False
     primera_llegada = (
-        EventoRuta.objects.filter(ruta=ruta, parada=parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE)
+        EventoRuta.objects.filter(
+            ruta=ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
+            metadata__ubicacion_confiable=True,
+            metadata__ruta_id=ruta.id,
+            metadata__repartidor_id=ruta.repartidor_id,
+            metadata__unidad_id=ruta.unidad_operativa_id,
+            ubicacion__ruta_id=ruta.id,
+            ubicacion__repartidor_id=ruta.repartidor_id,
+            ubicacion__unidad_id=ruta.unidad_operativa_id,
+            latitud=F("ubicacion__latitud"),
+            longitud=F("ubicacion__longitud"),
+        )
+        .exclude(ubicacion_id=ubicacion_actual.id)
         .order_by("creado_en")
         .first()
     )
@@ -371,6 +393,7 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
             _marcar_visitada_por_permanencia(
                 ruta=ruta,
                 parada=resultado.parada,
+                ubicacion_actual=ubicacion,
                 distancia_metros_value=resultado.distancia_metros,
             )
     elif ruta.paradas.exists():

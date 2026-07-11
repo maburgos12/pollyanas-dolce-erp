@@ -131,6 +131,7 @@ class LogisticaEntregaDomainTests(TestCase):
             ruta=self.ruta,
             parada=self.parada,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
         )
 
     def test_sin_geocerca_registra_excepcion_sin_fabricar_visita(self):
@@ -191,6 +192,39 @@ class LogisticaEntregaDomainTests(TestCase):
         )
         self.assertEqual(llegada.metadata["origen_servicio"], "registrar_ubicacion_ruta")
         self.assertIsNotNone(llegada.ubicacion_id)
+
+    def test_una_muestra_confiable_no_fabrica_permanencia_desde_eventos_legacy(self):
+        llegada_antigua = EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada legacy antigua.",
+            latitud=self.parada.latitud_geocerca,
+            longitud=self.parada.longitud_geocerca,
+            distancia_metros=0,
+            creado_por=self.user,
+        )
+        EventoRuta.objects.filter(pk=llegada_antigua.pk).update(
+            creado_en=timezone.now() - timezone.timedelta(minutes=10),
+        )
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada legacy reciente.",
+            latitud=self.parada.latitud_geocerca,
+            longitud=self.parada.longitud_geocerca,
+            distancia_metros=0,
+            creado_por=self.user,
+        )
+
+        self._registrar_geocerca_real()
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
 
     def test_retry_identico_es_idempotente(self):
         primero = self._confirmar()
