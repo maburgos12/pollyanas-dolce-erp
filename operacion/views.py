@@ -82,9 +82,12 @@ def _decimal(value: str):
     if not value:
         return None
     try:
-        return str(Decimal(value))
+        decimal_value = Decimal(value)
     except (InvalidOperation, ValueError):
-        return None
+        raise ValidationError("Ingresa una cantidad numérica válida.")
+    if not decimal_value.is_finite():
+        raise ValidationError("Ingresa una cantidad numérica válida.")
+    return str(decimal_value)
 
 
 def _recetas_for_config(config):
@@ -127,6 +130,8 @@ def _lineas_from_post(request, config):
                         cantidades[key.removeprefix(prefix)] = value
             if cantidades:
                 datos["sucursales"] = cantidades
+        if receta and not datos and not observaciones:
+            raise ValidationError("Captura al menos una cantidad u observación.")
         if receta or datos or observaciones:
             lineas.append((receta, datos, observaciones))
     if config.get("requiere_codigo_point") and not lineas:
@@ -171,6 +176,7 @@ def bitacora_captura(request, tipo):
                     "sucursales": sucursales,
                     "row_range": range(8),
                     "today": timezone.localdate(),
+                    "submitted_values": request.POST,
                 },
             )
         bitacora = BitacoraOperativa.objects.create(

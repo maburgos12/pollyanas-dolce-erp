@@ -14,6 +14,7 @@ from recetas.models import Receta
 from operacion.bitacoras_config import BITACORA_CONFIG
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from operacion.services import build_operacion_context
+from operacion.views import DECIMAL_FIELDS
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -296,7 +297,7 @@ class OperacionAppTests(TestCase):
                 self.assertContains(response, "Selecciona un producto válido con identidad Point.")
                 self.assertFalse(BitacoraOperativa.objects.exists())
 
-    def test_production_bitacora_fields_reject_non_decimal_values(self):
+    def test_production_bitacora_fields_reject_invalid_decimal_values(self):
         user = self._user("produccion.decimals")
         self._grant(user, "produccion")
         preparacion = Receta.objects.create(
@@ -313,22 +314,52 @@ class OperacionAppTests(TestCase):
         )
         self.client.force_login(user)
 
-        cases = (
-            ("HORNOS", preparacion, {"preparacion_0": "texto"}, "preparacion"),
-            ("CFP11", preparacion, {"existencia_fisica_0": "texto", "salida_armado_0": "texto"}, "existencia_fisica"),
-            ("ARMADO", producto_final, {"consumo_real_0": "texto", "producto_terminado_0": "texto"}, "consumo_real"),
-        )
-        for tipo, receta, invalid_fields, invalid_key in cases:
-            with self.subTest(tipo=tipo):
-                response = self.client.post(
-                    f"/app/bitacoras/{tipo}/",
-                    {"receta_0": str(receta.id), **invalid_fields},
-                )
+        required_decimal_fields = {
+            "cantidad",
+            "existencia",
+            "salida",
+            "entrada",
+            "preparacion",
+            "existencia_fisica",
+            "salida_armado",
+            "consumo_real",
+            "producto_terminado",
+        }
+        self.assertLessEqual(required_decimal_fields, DECIMAL_FIELDS)
 
-                self.assertEqual(response.status_code, 302)
-                linea = BitacoraOperativaLinea.objects.latest("id")
-                self.assertNotIn(invalid_key, linea.datos)
-                self.assertNotIn("texto", linea.datos.values())
+        field_cases = (
+            ("ROTACION", preparacion, "cantidad"),
+            ("HORNOS", preparacion, "existencia"),
+            ("HORNOS", preparacion, "preparacion"),
+            ("CFP11", preparacion, "existencia_fisica"),
+            ("CFP11", preparacion, "salida_armado"),
+            ("ARMADO", producto_final, "consumo_real"),
+            ("ARMADO", producto_final, "producto_terminado"),
+        )
+        for tipo, receta, campo in field_cases:
+            for invalid_value in ("texto", "NaN", "Infinity", "-Infinity"):
+                with self.subTest(tipo=tipo, campo=campo, invalid_value=invalid_value):
+                    BitacoraOperativa.objects.all().delete()
+                    response = self.client.post(
+                        f"/app/bitacoras/{tipo}/",
+                        {"receta_0": str(receta.id), f"{campo}_0": invalid_value},
+                    )
+
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(response, "Ingresa una cantidad numérica válida.")
+                    self.assertEqual(response.context["submitted_values"][f"{campo}_0"], invalid_value)
+                    self.assertFalse(BitacoraOperativa.objects.exists())
+                    self.assertFalse(BitacoraOperativaLinea.objects.exists())
+
+        empty_line_response = self.client.post(
+            "/app/bitacoras/HORNOS/",
+            {"receta_0": str(preparacion.id)},
+        )
+
+        self.assertEqual(empty_line_response.status_code, 200)
+        self.assertContains(empty_line_response, "Captura al menos una cantidad u observación.")
+        self.assertFalse(BitacoraOperativa.objects.exists())
+        self.assertFalse(BitacoraOperativaLinea.objects.exists())
 
     def test_logistics_only_user_cannot_use_production_bitacoras(self):
         user = self._user("logistica.bitacoras-produccion")
