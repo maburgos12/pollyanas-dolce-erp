@@ -1235,7 +1235,7 @@
         </strong>
       </div>
       <div class="calc-insumos-actions" aria-label="Acciones de cálculo de insumos">
-        <a class="btn btn-secondary" href="{% url 'recetas:calculo_insumos_plantilla' %}">Plantilla XLSX</a>
+        <a class="btn btn-secondary" href="{% url 'recetas:calculo_insumos_plantilla' %}">Nueva plantilla productos Point</a>
         <a class="btn btn-secondary" href="{% url 'recetas:calculo_insumos_plantilla' %}?format=csv">Plantilla CSV</a>
         {% if calculo_insumos_context.export_ready %}
           <a class="btn btn-primary" href="{% url 'recetas:calculo_insumos_export' %}{% if plan_actual %}?plan_id={{ plan_actual.id }}{% endif %}">Exportar XLSX</a>

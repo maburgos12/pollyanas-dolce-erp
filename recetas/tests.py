@@ -4191,6 +4191,11 @@ class SolicitudVentasForecastTests(TestCase):
         response = self.client.get(reverse("recetas:calculo_insumos_plantilla"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(
+            response["Content-Disposition"],
+            'attachment; filename="plantilla_productos_point.xlsx"',
+        )
         wb = load_workbook(BytesIO(response.content), data_only=True)
         ws = wb["Plantilla carga"]
         self.assertEqual(
