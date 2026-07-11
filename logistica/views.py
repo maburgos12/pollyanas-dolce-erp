@@ -93,7 +93,9 @@ def _parada_puede_quitarse(parada: ParadaRuta) -> tuple[bool, str]:
     if parada.evidencias_entrega.exists():
         return False, "No se puede quitar una parada que ya tiene evidencia registrada."
     lineas = parada.lineas_carga.all()
-    if lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
+    if lineas.exclude(
+        estatus__in=[RutaCargaChecklistLinea.ESTATUS_PENDIENTE, RutaCargaChecklistLinea.ESTATUS_SUPERADA]
+    ).exists():
         return False, "No se puede quitar una parada que ya tiene carga validada."
     if lineas.filter(Q(cantidad_cargada__isnull=False) | Q(validado_en__isnull=False)).exists():
         return False, "No se puede quitar una parada que ya tiene carga validada."
@@ -202,6 +204,8 @@ def _totales_recepcion_point(rows: list[dict]) -> list[dict]:
     totales = {}
     for row in rows:
         linea = row["linea"]
+        if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+            continue
         key = (
             (linea.item_code or "").strip().upper(),
             (linea.item_name or "").strip().upper(),
@@ -2002,6 +2006,7 @@ def rutas(request):
     governance_rows = _logistica_governance_rows(document_stage_rows, owner_default="Logística / Planeación")
     monto_transferido_subquery = (
         RutaCargaChecklistLinea.objects.filter(checklist__ruta=OuterRef("pk"), point_transfer_line__isnull=False)
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         .values("checklist__ruta")
         .annotate(
             total=Sum(

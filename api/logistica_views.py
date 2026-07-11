@@ -1501,7 +1501,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     id__in=linea_ids,
                     checklist__ruta=ruta,
                     parada=parada,
-                )
+                ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
             }
             missing = sorted(linea_id for linea_id in linea_ids if linea_id not in lineas_by_id)
             if missing:
@@ -1617,10 +1617,10 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         ruta = _ruta_operativa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
-        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False)
+        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
         if not checklist.lineas.exists():
             sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
-            checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False)
+            checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
         else:
             pendientes_point = checklist.lineas.filter(
                 estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
@@ -1631,7 +1631,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
             if pendientes_point.exists() and sync_stale:
                 try:
                     sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
-                    checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False)
+                    checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
                 except ValidationError:
                     logger.warning("No se pudo refrescar checklist Point para ruta activa %s", ruta.folio, exc_info=True)
         ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
@@ -1718,7 +1718,7 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
         if not can_view:
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
         solo_tramo_actual = repartidor is not None and ruta.repartidor_id == repartidor.id
-        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual)
+        checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
         return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
@@ -1731,7 +1731,7 @@ class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
             resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
         except ValidationError as exc:
             return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
-        checklist = obtener_checklist_carga_detallado(ruta)
+        checklist = obtener_checklist_carga_detallado(ruta, excluir_superadas=True)
         return Response(
             {
                 "checklist": RutaCargaChecklistSerializer(checklist, context={"request": request}).data,

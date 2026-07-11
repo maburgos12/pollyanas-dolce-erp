@@ -502,8 +502,17 @@ class RutaCargaChecklistSerializer(serializers.ModelSerializer):
     def get_lineas_confirmadas(self, obj):
         lineas = self._lineas_prefetched(obj)
         if lineas is not None:
-            return sum(1 for linea in lineas if linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        return obj.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
+            return sum(
+                1
+                for linea in lineas
+                if linea.estatus
+                not in (RutaCargaChecklistLinea.ESTATUS_PENDIENTE, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+            )
+        return (
+            obj.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+            .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+            .count()
+        )
 
     def get_lineas_pendientes(self, obj):
         lineas = self._lineas_prefetched(obj)

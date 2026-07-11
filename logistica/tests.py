@@ -47,6 +47,7 @@ from logistica.services_carga_ruta import (
     cerrar_ruta_con_diferencia_autorizada,
     checklist_bloquea_salida,
     lineas_tramo_operativo_actual,
+    marcar_lineas_checklist_superadas_historicas,
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     sincronizar_checklist_carga_desde_point,
@@ -5551,6 +5552,55 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual([row.linea_carga_id for row in evidencias], [linea_1.id, linea_2.id])
         self.assertEqual([row.cantidad_entregada for row in evidencias], [Decimal("2.000"), Decimal("3.000")])
 
+    def test_api_confirmar_entrega_rechaza_linea_carga_id_superada(self):
+        self.client.force_login(self.user)
+        self._registrar_llegada_geocerca()
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
+        linea_superada = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-ENTREGA-SUP",
+            detail_external_id="D-ENTREGA-SUP-VIEJO",
+            source_hash="entrega-superada-vieja",
+            item_code="PAY-SUP",
+            item_name="Pay superado",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega con línea superada",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "legacy-test",
+                    },
+                    "evidencias": [
+                        {
+                            "linea_carga_id": linea_superada.id,
+                            "tipo": ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+                            "cantidad_entregada": "2.000",
+                            "comentario": "Intento sobre línea superada",
+                            "client_event_id": "evt-entrega-superada",
+                        },
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
+
     def test_api_no_confirma_entrega_en_parada_cedis(self):
         self.client.force_login(self.user)
         cedis = PuntoLogistico.objects.create(
@@ -6411,6 +6461,43 @@ class LogisticaControlRutasTests(TestCase):
             ["ANTES-CEDIS", "DESPUES-CEDIS"],
         )
 
+    def test_api_ruta_activa_excluye_lineas_superadas_del_checklist(self):
+        self.client.force_login(self.user)
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            source_hash="api-superada-vieja",
+            transfer_external_id="T-API-SUP",
+            detail_external_id="D-API-VIEJO",
+            item_code="API-SUP",
+            item_name="Producto superado API",
+            unit="pz",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            source_hash="api-superada-nueva",
+            transfer_external_id="T-API-SUP",
+            detail_external_id="D-API-NUEVO",
+            item_code="API-SUP",
+            item_name="Producto superado API",
+            unit="pz",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        source_hashes = [linea["item_code"] for linea in response.json()["checklist_carga"]["lineas"]]
+        self.assertEqual(source_hashes, ["API-SUP"])
+        self.assertEqual(len(response.json()["checklist_carga"]["lineas"]), 1)
+
     def test_api_ruta_activa_hidrata_carga_desde_cache_point_si_checklist_esta_vacia(self):
         self.client.force_login(self.user)
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -6597,6 +6684,176 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.notas, "")
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash=transferencia.source_hash).exists())
 
+    def test_checklist_carga_resync_no_duplica_linea_ya_fusionada_con_cedis(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="5.000")
+        transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-resync-fusionada")
+        transferencia.sent_quantity = Decimal("3.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        primer_resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        self.assertEqual(primer_resumen.creadas, 1)
+        self.assertEqual(RutaCargaChecklistLinea.objects.filter(point_transfer_line=transferencia).count(), 1)
+
+        segundo_resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(segundo_resumen.creadas, 0)
+        self.assertEqual(
+            RutaCargaChecklistLinea.objects.filter(point_transfer_line=transferencia).count(),
+            1,
+            "Resincronizar la misma transferencia ya fusionada con CEDIS no debe crear una fila duplicada.",
+        )
+        linea = RutaCargaChecklistLinea.objects.get(point_transfer_line=transferencia)
+        self.assertEqual(linea.parada, parada)
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("3.000"))
+
+    def test_checklist_carga_marca_superada_linea_vieja_mismo_folio_nuevo_detalle(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        original = self._crear_transferencia_point_abierta(source_hash="folio-correccion-original")
+        original.transfer_external_id = "T-CORRECCION"
+        original.detail_external_id = "D-ORIGINAL"
+        original.sent_quantity = Decimal("0.000")
+        original.sent_at = None
+        original.raw_payload = {"transfer": {"isEnviado": False}}
+        original.save(
+            update_fields=["transfer_external_id", "detail_external_id", "sent_quantity", "sent_at", "raw_payload", "updated_at"]
+        )
+
+        primer_resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        self.assertEqual(primer_resumen.creadas, 1)
+        linea_vieja = RutaCargaChecklistLinea.objects.get(source_hash=original.source_hash)
+        self.assertEqual(linea_vieja.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+
+        corregida = self._crear_transferencia_point_abierta(source_hash="folio-correccion-nueva")
+        corregida.transfer_external_id = "T-CORRECCION"
+        corregida.detail_external_id = "D-CORREGIDO"
+        corregida.sent_quantity = Decimal("4.000")
+        corregida.save(update_fields=["transfer_external_id", "detail_external_id", "sent_quantity", "updated_at"])
+
+        segundo_resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        linea_vieja.refresh_from_db()
+        linea_nueva = RutaCargaChecklistLinea.objects.get(source_hash=corregida.source_hash)
+        self.assertEqual(segundo_resumen.creadas, 1)
+        self.assertEqual(linea_vieja.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(linea_vieja.superada_por, linea_nueva)
+        self.assertEqual(linea_nueva.parada, parada)
+        self.assertEqual(linea_nueva.cantidad_enviada_esperada, Decimal("4.000"))
+        self.assertEqual(linea_nueva.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+
+    def test_marcar_lineas_superadas_historicas_dry_run_no_escribe(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        duplicada_1 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="historico-dup-1",
+            transfer_external_id="T-HIST",
+            detail_external_id="D-HIST-1",
+            item_code="HIST-01",
+            item_name="Producto histórico",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+        duplicada_2 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="historico-dup-2",
+            transfer_external_id="T-HIST",
+            detail_external_id="D-HIST-2",
+            item_code="HIST-01",
+            item_name="Producto histórico",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+        resuelta = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="historico-resuelta",
+            transfer_external_id="T-HIST",
+            detail_external_id="D-HIST-3",
+            item_code="HIST-01",
+            item_name="Producto histórico",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+            cantidad_cargada="2.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+
+        resumen_dry = marcar_lineas_checklist_superadas_historicas(dry_run=True)
+        self.assertEqual(resumen_dry.grupos_afectados, 1)
+        self.assertEqual(resumen_dry.lineas_superadas, 2)
+        self.assertEqual(resumen_dry.grupos_ambiguos, 0)
+        duplicada_1.refresh_from_db()
+        duplicada_2.refresh_from_db()
+        self.assertEqual(duplicada_1.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(duplicada_2.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+
+        resumen_real = marcar_lineas_checklist_superadas_historicas(dry_run=False)
+        self.assertEqual(resumen_real.grupos_afectados, 1)
+        self.assertEqual(resumen_real.lineas_superadas, 2)
+        duplicada_1.refresh_from_db()
+        duplicada_2.refresh_from_db()
+        resuelta.refresh_from_db()
+        self.assertEqual(duplicada_1.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(duplicada_1.superada_por, resuelta)
+        self.assertEqual(duplicada_2.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(duplicada_2.superada_por, resuelta)
+        self.assertEqual(resuelta.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+
+    def test_marcar_lineas_superadas_historicas_omite_grupos_con_mas_de_una_resuelta(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        resuelta_1 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="ambiguo-1",
+            transfer_external_id="T-AMBIGUO",
+            detail_external_id="D-AMBIGUO-1",
+            item_code="AMB-01",
+            item_name="Producto ambiguo",
+            unit="pz",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+        )
+        resuelta_2 = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="ambiguo-2",
+            transfer_external_id="T-AMBIGUO",
+            detail_external_id="D-AMBIGUO-2",
+            item_code="AMB-01",
+            item_name="Producto ambiguo",
+            unit="pz",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+        )
+
+        resumen = marcar_lineas_checklist_superadas_historicas(dry_run=False)
+
+        self.assertEqual(resumen.grupos_afectados, 0)
+        self.assertEqual(resumen.grupos_ambiguos, 1)
+        self.assertEqual(set(resumen.detalle_ambiguos[0]["lineas_resueltas"]), {resuelta_1.id, resuelta_2.id})
+        resuelta_1.refresh_from_db()
+        resuelta_2.refresh_from_db()
+        self.assertEqual(resuelta_1.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(resuelta_2.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+
     def test_checklist_carga_conserva_transferencias_point_distintas_mismo_producto(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         _, _, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="10.000")
@@ -6756,6 +7013,46 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(total["solicitado"], Decimal("10.000"))
         self.assertEqual(total["enviado"], Decimal("6.000"))
         self.assertEqual(total["cargado"], Decimal("5.000"))
+
+    def test_totales_recepcion_point_excluye_lineas_superadas(self):
+        from logistica.views import _recepcion_point_rows, _totales_recepcion_point
+
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="superada-totales-vieja",
+            transfer_external_id="T-TOT",
+            detail_external_id="D-TOT-VIEJO",
+            item_code="0065",
+            item_name="Pastel de Zanahoria Mediano",
+            unit="pz",
+            cantidad_solicitada=Decimal("3.000"),
+            cantidad_enviada_esperada=Decimal("0.000"),
+            cantidad_cargada=Decimal("0.000"),
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="superada-totales-nueva",
+            transfer_external_id="T-TOT",
+            detail_external_id="D-TOT-NUEVO",
+            item_code="0065",
+            item_name="Pastel de Zanahoria Mediano",
+            unit="pz",
+            cantidad_solicitada=Decimal("3.000"),
+            cantidad_enviada_esperada=Decimal("3.000"),
+            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        )
+
+        rows = _recepcion_point_rows(checklist)
+        self.assertEqual(len(rows), 2, "La fila superada debe seguir visible individualmente para auditoría.")
+        total = _totales_recepcion_point(rows)[0]
+
+        self.assertEqual(total["solicitado"], Decimal("3.000"))
+        self.assertEqual(total["enviado"], Decimal("3.000"))
 
     def test_detalle_ruta_muestra_columnas_point_y_pwa(self):
         self.client.force_login(self.user)
@@ -7209,6 +7506,37 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, "Captura ERP")
         self.assertContains(response, 'name="action" value="confirmar_linea_carga_manual"')
 
+    def test_validar_linea_carga_rechaza_linea_superada(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea_superada = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="linea-superada-validar",
+            transfer_external_id="T-SUP",
+            detail_external_id="D-SUP-VIEJO",
+            item_code="PZA-SUP",
+            item_name="Producto superado",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+
+        with self.assertRaises(ValidationError):
+            validar_linea_carga(
+                user=self.user,
+                ruta=ruta,
+                repartidor=self.repartidor,
+                linea_id=linea_superada.id,
+                cantidad_cargada="2.000",
+            )
+
+        linea_superada.refresh_from_db()
+        self.assertEqual(linea_superada.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertIsNone(linea_superada.validado_por)
+
     def test_validar_linea_carga_sigue_bloqueando_salida_si_quedan_lineas_pendientes(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
@@ -7304,6 +7632,43 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist)), [linea_payan])
         parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
+
+    def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="incidencia-superada",
+            item_code="PZA-SUP",
+            item_name="Producto superado",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="0.000",
+            cantidad_cargada="0.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        linea_normal = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="incidencia-normal",
+            item_code="PZA-OK",
+            item_name="Producto normal",
+            unit="PZA",
+            cantidad_solicitada="4.000",
+            cantidad_enviada_esperada="4.000",
+        )
+
+        validar_linea_carga(
+            user=self.user,
+            ruta=ruta,
+            repartidor=self.repartidor,
+            linea_id=linea_normal.id,
+            cantidad_cargada="4.000",
+        )
+
+        checklist.refresh_from_db()
+        self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
 
     def test_validar_linea_carga_con_diferencia_notifica_logistica_una_sola_vez(self):
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)

@@ -453,6 +453,7 @@ class RutaCargaChecklistLinea(models.Model):
     ESTATUS_SOBRANTE = "SOBRANTE"
     ESTATUS_NO_APLICA = "NO_APLICA"
     ESTATUS_ZERO_EXPECTED = "ZERO_EXPECTED"
+    ESTATUS_SUPERADA = "SUPERADA"
     ESTATUS_CHOICES = [
         (ESTATUS_PENDIENTE, "Pendiente"),
         (ESTATUS_CARGADA, "Cargada"),
@@ -461,6 +462,7 @@ class RutaCargaChecklistLinea(models.Model):
         (ESTATUS_SOBRANTE, "Sobrante"),
         (ESTATUS_NO_APLICA, "No aplica"),
         (ESTATUS_ZERO_EXPECTED, "Enviado cero"),
+        (ESTATUS_SUPERADA, "Superada"),
     ]
 
     MOTIVO_STOCK_LIMITADO = "stock_limitado"
@@ -522,6 +524,13 @@ class RutaCargaChecklistLinea(models.Model):
         related_name="lineas_carga_validadas",
     )
     validado_en = models.DateTimeField(null=True, blank=True)
+    superada_por = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reemplaza_a",
+    )
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
