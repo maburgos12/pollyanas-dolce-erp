@@ -17008,8 +17008,14 @@ def calculo_insumos_export(request: HttpRequest) -> HttpResponse:
         out.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    today = timezone.localdate().strftime("%Y%m%d")
-    response["Content-Disposition"] = f'attachment; filename="calculo_insumos_{today}.xlsx"'
+    generated_at = timezone.localtime().strftime("%Y%m%d_%H%M%S")
+    plan_suffix = f"_plan_{plan_id}" if plan_id else ""
+    response["Content-Disposition"] = (
+        f'attachment; filename="calculo_insumos{plan_suffix}_{generated_at}.xlsx"'
+    )
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
     return response
 
 
