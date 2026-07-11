@@ -28,6 +28,14 @@
     .badge { align-self: start; border-radius: 999px; padding: 5px 9px; background: #f1e7ec; color: #66163a; font-size: .76rem; font-weight: 850; }
     .messages { display: grid; gap: 8px; }
     .message { padding: 10px 12px; border-radius: 8px; background: #e8f5ee; color: #19724a; font-weight: 750; }
+    .form { padding: 14px; display: grid; gap: 12px; }
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    label { display: grid; gap: 6px; color: #5f4d57; font-size: .84rem; font-weight: 800; }
+    input, select, textarea { width: 100%; min-height: 44px; border: 1px solid #d9cbd3; border-radius: 7px; background: #fff; color: #2b1722; padding: 9px 10px; font: inherit; }
+    textarea { min-height: 82px; resize: vertical; }
+    button { min-height: 44px; border: 0; border-radius: 7px; background: #8d174d; color: #fff; padding: 0 16px; font: inherit; font-weight: 850; cursor: pointer; }
+    .apertura-row { grid-template-columns: minmax(0, 1fr) minmax(120px, auto); }
+    @media (max-width: 620px) { .fields { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -35,10 +43,10 @@
     <section class="shell">
       <header class="top">
         <div>
-          <h1>Bitácoras</h1>
-          <p>Capturas diarias de producción y logística.</p>
+          <h1>{% if modo_apertura %}Apertura inicial de lotes{% else %}Bitácoras{% endif %}</h1>
+          <p>{% if modo_apertura %}Registra existencias anteriores al inicio de la trazabilidad.{% else %}Capturas diarias de producción y logística.{% endif %}</p>
         </div>
-        <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
+        <a class="link app-home-link" href="{% if modo_apertura %}{% url 'operacion:bitacoras_home' %}{% else %}/app/{% endif %}" aria-label="{% if modo_apertura %}Volver a bitácoras{% else %}Menú principal{% endif %}" title="{% if modo_apertura %}Volver a bitácoras{% else %}Menú principal{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
         </a>
       </header>
@@ -49,7 +57,67 @@
         </div>
       {% endif %}
 
+      {% if modo_apertura %}
+      <section class="panel">
+        <h2>Nueva apertura</h2>
+        <form method="post" class="form">
+          {% csrf_token %}
+          <div class="fields">
+            <label>Producto Point
+              <select name="insumo" required>
+                <option value="">Seleccionar producto</option>
+                {% for item in productos_apertura %}
+                  <option value="{{ item.insumo.id }}">{{ item.insumo.display_name }} · {{ item.insumo.codigo_point }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Cantidad
+              <input name="cantidad" type="number" min="0.001" step="0.001" inputmode="decimal" required>
+            </label>
+            <label>Unidad
+              <select name="unidad" required>
+                <option value="">Seleccionar unidad</option>
+                {% for unidad in unidades_apertura %}<option value="{{ unidad.id }}">{{ unidad.nombre }} ({{ unidad.codigo }})</option>{% endfor %}
+              </select>
+            </label>
+            <label>Ubicación
+              <select name="ubicacion" required>
+                {% for value,label in ubicaciones %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Fecha de elaboración conocida
+              <input name="fecha_elaboracion" type="date">
+            </label>
+          </div>
+          <label>Observación
+            <textarea name="observaciones" maxlength="255" required></textarea>
+          </label>
+          <button type="submit">Aplicar apertura</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Aperturas aplicadas</h2>
+        {% for lote in aperturas %}
+          <div class="row apertura-row">
+            <div>
+              <b>{{ lote.codigo }}</b><br>
+              <small>{{ lote.insumo.display_name }} · {{ lote.cantidad_inicial }} {{ lote.unidad.codigo }} · {{ lote.producido_en|date:"d/m/Y" }}</small>
+            </div>
+            <span class="badge">Aplicada</span>
+          </div>
+        {% empty %}
+          <div class="row"><small>Aún no hay aperturas aplicadas.</small></div>
+        {% endfor %}
+      </section>
+      {% else %}
       <div class="grid">
+        {% if can_manage_produccion %}
+          <a class="tile" href="{% url 'operacion:bitacoras_apertura' %}">
+            <b>Apertura inicial de lotes</b>
+            <span>Registrar existencias previas a la trazabilidad.</span>
+          </a>
+        {% endif %}
         {% for value,label in tipos %}
           <a class="tile" href="{% url 'operacion:bitacora_captura' value %}">
             <b>{{ label }}</b>
@@ -76,6 +144,7 @@
           <div class="row"><small>Aún no hay bitácoras capturadas.</small></div>
         {% endfor %}
       </section>
+      {% endif %}
     </section>
   </main>
 </body>

@@ -12,13 +12,18 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 
-from core.access import can_view_module, can_view_submodule
+from core.access import can_manage_module, can_view_module, can_view_submodule
 from core.models import Sucursal
+from inventario.models import ALMACEN_CHOICES, LoteProduccion
+from maestros.models import Insumo, UnidadMedida
+from maestros.utils.canonical_catalog import canonicalized_active_insumos
 from recetas.models import Receta
+from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 
 from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
+from .services_bitacoras_inventory import registrar_apertura_inicial
 
 
 PRODUCTION_BITACORA_TYPES = {
@@ -150,7 +155,85 @@ def bitacoras_home(request):
     return render(
         request,
         "operacion/bitacoras_home.html",
-        {"tipos": tipos, "config": BITACORA_CONFIG, "recientes": recientes[:8]},
+        {
+            "tipos": tipos,
+            "config": BITACORA_CONFIG,
+            "recientes": recientes[:8],
+            "can_manage_produccion": can_manage_module(request.user, "produccion"),
+        },
+    )
+
+
+def _productos_apertura():
+    productos = []
+    for row in canonicalized_active_insumos(limit=5000):
+        insumo = row["canonical"]
+        if (
+            insumo.tipo_item != Insumo.TIPO_INTERNO
+            or not (insumo.codigo_point or "").strip()
+            or not insumo.unidad_base_id
+        ):
+            continue
+        receta = resolve_preparation_recipe_for_insumo(insumo)
+        if not receta or not (receta.codigo_point or "").strip():
+            continue
+        productos.append({"insumo": insumo, "receta": receta})
+    return productos
+
+
+@login_required
+def bitacoras_apertura(request):
+    if not can_manage_module(request.user, "produccion"):
+        raise PermissionDenied
+    productos = _productos_apertura()
+    productos_por_insumo = {str(item["insumo"].pk): item for item in productos}
+    if request.method == "POST":
+        try:
+            producto = productos_por_insumo.get(request.POST.get("insumo", ""))
+            if not producto:
+                raise ValidationError("Selecciona un producto canónico de Point.")
+            unidad = UnidadMedida.objects.filter(pk=request.POST.get("unidad")).first()
+            if not unidad:
+                raise ValidationError("Selecciona una unidad válida.")
+            raw_fecha = (request.POST.get("fecha_elaboracion") or "").strip()
+            fecha_elaboracion = None
+            if raw_fecha:
+                try:
+                    fecha_elaboracion = timezone.datetime.strptime(raw_fecha, "%Y-%m-%d").date()
+                except ValueError as exc:
+                    raise ValidationError("La fecha de elaboración no es válida.") from exc
+            lote = registrar_apertura_inicial(
+                receta=producto["receta"],
+                insumo=producto["insumo"],
+                cantidad=request.POST.get("cantidad"),
+                unidad=unidad,
+                ubicacion=request.POST.get("ubicacion", ""),
+                fecha_elaboracion=fecha_elaboracion,
+                actor=request.user,
+                observaciones=request.POST.get("observaciones", ""),
+            )
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0])
+        else:
+            messages.success(request, f"Apertura aplicada: {lote.codigo}")
+            return redirect("operacion:bitacoras_apertura")
+
+    aperturas = (
+        LoteProduccion.objects.filter(es_apertura=True)
+        .select_related("insumo", "unidad", "creado_por")
+        .prefetch_related("movimientos")
+        .order_by("-id")[:50]
+    )
+    return render(
+        request,
+        "operacion/bitacoras_home.html",
+        {
+            "modo_apertura": True,
+            "productos_apertura": productos,
+            "unidades_apertura": UnidadMedida.objects.order_by("nombre"),
+            "ubicaciones": ALMACEN_CHOICES,
+            "aperturas": aperturas,
+        },
     )
 
 

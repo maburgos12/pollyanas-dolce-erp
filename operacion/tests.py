@@ -1,13 +1,18 @@
 from pathlib import Path
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase, override_settings
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROLE_REPARTIDOR
 from core.models import Sucursal, UserModuleAccess, UserProfile
+from inventario.models import LoteProduccion, MovimientoInventario, UBICACION_CFP_1_1
+from inventario.services_existencias import stock_ubicacion
 from logistica.models import Repartidor, Unidad
+from maestros.models import Insumo, UnidadMedida
 from mermas.models import PersonalEnviosSucursal
 from recetas.models import Receta
 
@@ -15,6 +20,134 @@ from operacion.bitacoras_config import BITACORA_CONFIG
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from operacion.services import build_operacion_context
 from operacion.views import DECIMAL_FIELDS
+
+
+class AperturaInicialLotesTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.apertura", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.apertura", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+        self.unidad = UnidadMedida.objects.create(codigo="kg-apertura", nombre="Kilogramo apertura")
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:APERTURA",
+            codigo_point="RC-001",
+            nombre="Preparacion Crunch",
+            nombre_point="Preparacion Crunch Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Preparacion Crunch",
+            codigo_point="RC-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="apertura-preparacion-crunch",
+        )
+
+    def _registrar(self, **overrides):
+        from operacion.services_bitacoras_inventory import registrar_apertura_inicial
+
+        values = {
+            "receta": self.receta,
+            "insumo": self.insumo,
+            "cantidad": Decimal("3"),
+            "unidad": self.unidad,
+            "ubicacion": UBICACION_CFP_1_1,
+            "fecha_elaboracion": None,
+            "actor": self.manager,
+            "observaciones": "Existencia previa al inicio de trazabilidad",
+        }
+        values.update(overrides)
+        return registrar_apertura_inicial(**values)
+
+    def test_manager_creates_initial_lot_without_fake_source(self):
+        lote = self._registrar()
+
+        self.assertTrue(lote.es_apertura)
+        self.assertIsNone(lote.linea_origen)
+        self.assertTrue(lote.codigo.startswith("INI-RC-001-"))
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+        movimiento = MovimientoInventario.objects.get(lote=lote)
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(movimiento.almacen, UBICACION_CFP_1_1)
+        self.assertEqual(movimiento.registrado_por_usuario, self.manager)
+        self.assertEqual(movimiento.trazabilidad["evento"], "apertura_inicial")
+        self.assertEqual(movimiento.trazabilidad["lote"], lote.codigo)
+
+    def test_opening_is_idempotent_and_does_not_duplicate_stock(self):
+        primero = self._registrar()
+        segundo = self._registrar()
+
+        self.assertEqual(segundo.pk, primero.pk)
+        self.assertEqual(LoteProduccion.objects.count(), 1)
+        self.assertEqual(MovimientoInventario.objects.count(), 1)
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+
+    def test_opening_requires_production_manage_permission(self):
+        with self.assertRaises(PermissionDenied):
+            self._registrar(actor=self.operator)
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+
+    def test_opening_rejects_invalid_quantity_identity_and_observation_atomically(self):
+        for invalid_quantity in ("0", "-1", "NaN", "Infinity", "texto"):
+            with self.subTest(cantidad=invalid_quantity), self.assertRaises(ValidationError):
+                self._registrar(cantidad=invalid_quantity)
+
+        self.insumo.codigo_point = "   "
+        self.insumo.save(update_fields=["codigo_point"])
+        with self.assertRaises(ValidationError):
+            self._registrar()
+        self.insumo.codigo_point = "RC-001"
+        self.insumo.save(update_fields=["codigo_point"])
+
+        with self.assertRaises(ValidationError):
+            self._registrar(observaciones="   ")
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_opening_page_lists_canonical_products_for_manager_only(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.get("/app/bitacoras/apertura/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Apertura inicial de lotes")
+        self.assertContains(response, "Preparacion Crunch Point")
+        self.assertContains(response, "RC-001")
+        self.assertContains(response, "CFP 1.1")
+        self.client.force_login(self.operator)
+        self.assertEqual(self.client.get("/app/bitacoras/apertura/").status_code, 403)
+
+    def test_opening_page_post_creates_immutable_applied_opening(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            "/app/bitacoras/apertura/",
+            {
+                "insumo": str(self.insumo.id),
+                "cantidad": "2.500",
+                "unidad": str(self.unidad.id),
+                "ubicacion": UBICACION_CFP_1_1,
+                "fecha_elaboracion": "2026-07-01",
+                "observaciones": "Conteo fisico al iniciar trazabilidad",
+            },
+        )
+
+        self.assertRedirects(response, "/app/bitacoras/apertura/")
+        lote = LoteProduccion.objects.get()
+        self.assertEqual(lote.cantidad_inicial, Decimal("2.500"))
+        self.assertEqual(lote.producido_en.date().isoformat(), "2026-07-01")
+        get_response = self.client.get("/app/bitacoras/apertura/")
+        self.assertContains(get_response, lote.codigo)
+        self.assertNotContains(get_response, "Editar")
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
