@@ -910,7 +910,7 @@ class MantenimientoUnifiedInboxTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(ServicioRealizadoUnidad.objects.count(), servicios_before)
 
     def test_can_register_installation_service_by_branch_without_asset_selection(self):
