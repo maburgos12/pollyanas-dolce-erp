@@ -43,7 +43,18 @@ def establecer_stock(insumo: Insumo, almacen: str, cantidad) -> ExistenciaInsumo
 
 @transaction.atomic
 def aplicar_delta(insumo: Insumo, almacen: str, delta) -> ExistenciaInsumo:
-    delta_decimal = Decimal(str(delta))
+    try:
+        delta_decimal = Decimal(str(delta))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError(
+            f"El delta de {almacen} debe ser una cantidad válida.",
+            code="delta_invalido",
+        ) from exc
+    if not delta_decimal.is_finite():
+        raise ValidationError(
+            f"El delta de {almacen} debe ser una cantidad finita.",
+            code="delta_invalido",
+        )
     existencia, _ = ExistenciaInsumo.objects.select_for_update().get_or_create(
         insumo=insumo,
         almacen=almacen,

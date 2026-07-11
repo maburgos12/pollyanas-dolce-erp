@@ -1586,14 +1586,20 @@ def _bi_purchase_snapshot() -> dict[str, object]:
 
 
 def _bi_inventory_snapshot() -> dict[str, object]:
-    rows = list(ExistenciaInsumo.objects.select_related("insumo")[:2000])
+    rows = list(
+        ExistenciaInsumo.objects.values("insumo_id").annotate(
+            stock_total=Sum("stock_actual"),
+            punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
+            stock_minimo_almacen_1=Max("stock_minimo", filter=Q(almacen="ALMACEN_1")),
+        )[:2000]
+    )
     total = len(rows)
     criticos = 0
     bajo_reorden = 0
     for row in rows:
-        stock = _to_decimal(getattr(row, "stock_actual", 0))
-        reorden = _to_decimal(getattr(row, "punto_reorden", 0))
-        minimo = _to_decimal(getattr(row, "stock_minimo", 0))
+        stock = _to_decimal(row.get("stock_total"))
+        reorden = _to_decimal(row.get("punto_reorden_almacen_1"))
+        minimo = _to_decimal(row.get("stock_minimo_almacen_1"))
         if stock <= 0:
             criticos += 1
         elif reorden > 0 and stock < reorden:

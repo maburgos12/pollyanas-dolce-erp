@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from openpyxl import load_workbook
 from io import BytesIO
+from unittest.mock import patch
 
 from core.models import AuditLog
 from compras.models import SolicitudCompra
@@ -505,6 +506,38 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response.status_code, 302)
         movimiento = MovimientoInventario.objects.order_by("-id").first()
         self.assertEqual(movimiento.insumo_id, canonical.id)
+
+    def test_movimiento_post_revierte_bitacora_si_delta_falla(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="pz-mov-rollback",
+            nombre="Pieza Movimiento Rollback",
+            tipo=UnidadMedida.TIPO_PIEZA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo Movimiento Rollback",
+            unidad_base=unidad,
+            activo=True,
+            codigo_point="MOV-ROLLBACK-001",
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("5"),
+        )
+
+        with patch("inventario.views.aplicar_delta", side_effect=ValidationError("delta fallido")):
+            response = self.client.post(
+                reverse("inventario:movimientos"),
+                {
+                    "insumo_id": str(insumo.id),
+                    "tipo": MovimientoInventario.TIPO_SALIDA,
+                    "cantidad": "2",
+                    "referencia": "ROLLBACK-DELTA",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MovimientoInventario.objects.filter(referencia="ROLLBACK-DELTA").exists())
 
     def test_alias_resolution_usa_costo_canonico_del_grupo(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Alias Canon", activo=True)
@@ -2633,6 +2666,15 @@ class InventarioUbicacionTests(TestCase):
 
         existencia.refresh_from_db()
         self.assertEqual(existencia.stock_actual, Decimal("3"))
+
+    def test_aplicar_delta_rechaza_valores_no_finitos_o_texto(self):
+        from inventario.services_existencias import aplicar_delta
+
+        for delta in (Decimal("NaN"), Decimal("Infinity"), "no-numero"):
+            with self.subTest(delta=delta), self.assertRaises(ValidationError):
+                aplicar_delta(self.insumo, "CFP_1", delta)
+
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=self.insumo, almacen="CFP_1").exists())
 
     def test_establecer_stock_y_delta_se_ejecutan_en_secuencia_bajo_bloqueo(self):
         from inventario.services_existencias import aplicar_delta, establecer_stock

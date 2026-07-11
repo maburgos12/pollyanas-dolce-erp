@@ -5418,36 +5418,46 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "La cantidad del movimiento debe ser mayor a cero.")
                 return redirect("inventario:movimientos")
 
-            existencia = get_or_create_existencia(insumo, "ALMACEN_1")
-            if tipo in {MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO} and existencia.stock_actual < cantidad:
-                messages.error(
-                    request,
-                    f"Stock insuficiente para {tipo.lower()}: disponible={existencia.stock_actual}, solicitado={cantidad}.",
-                )
-                return redirect("inventario:movimientos")
+            try:
+                with transaction.atomic():
+                    existencia, _ = ExistenciaInsumo.objects.select_for_update().get_or_create(
+                        insumo=insumo,
+                        almacen="ALMACEN_1",
+                    )
+                    if (
+                        tipo in {MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO}
+                        and existencia.stock_actual < cantidad
+                    ):
+                        messages.error(
+                            request,
+                            f"Stock insuficiente para {tipo.lower()}: disponible={existencia.stock_actual}, solicitado={cantidad}.",
+                        )
+                        return redirect("inventario:movimientos")
 
-            fecha_movimiento = parse_datetime(request.POST.get("fecha") or "") or timezone.now()
-            movimiento = MovimientoInventario.objects.create(
-                fecha=fecha_movimiento,
-                tipo=tipo,
-                insumo=insumo,
-                cantidad=cantidad,
-                referencia=request.POST.get("referencia", "").strip(),
-                almacen="ALMACEN_1",
-            )
-            _apply_movimiento(movimiento, user=request.user)
-            log_event(
-                request.user,
-                "CREATE",
-                "inventario.MovimientoInventario",
-                movimiento.id,
-                {
-                    "tipo": movimiento.tipo,
-                    "insumo_id": movimiento.insumo_id,
-                    "cantidad": str(movimiento.cantidad),
-                    "referencia": movimiento.referencia,
-                },
-            )
+                    fecha_movimiento = parse_datetime(request.POST.get("fecha") or "") or timezone.now()
+                    movimiento = MovimientoInventario.objects.create(
+                        fecha=fecha_movimiento,
+                        tipo=tipo,
+                        insumo=insumo,
+                        cantidad=cantidad,
+                        referencia=request.POST.get("referencia", "").strip(),
+                        almacen="ALMACEN_1",
+                    )
+                    _apply_movimiento(movimiento, user=request.user)
+                    log_event(
+                        request.user,
+                        "CREATE",
+                        "inventario.MovimientoInventario",
+                        movimiento.id,
+                        {
+                            "tipo": movimiento.tipo,
+                            "insumo_id": movimiento.insumo_id,
+                            "cantidad": str(movimiento.cantidad),
+                            "referencia": movimiento.referencia,
+                        },
+                    )
+            except ValidationError as exc:
+                messages.error(request, "; ".join(exc.messages))
         return redirect("inventario:movimientos")
 
     selected_q = (request.GET.get("q") or "").strip()

@@ -191,6 +191,24 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["insumos_activos"], Insumo.objects.filter(activo=True).count())
         self.assertEqual(response.data["recetas_activas"], Receta.objects.count())
 
+    def test_resumen_agrupa_stock_y_usa_umbral_de_almacen_1(self):
+        existencia = ExistenciaInsumo.objects.get(insumo=self.insumo, almacen="ALMACEN_1")
+        existencia.stock_actual = Decimal("2")
+        existencia.punto_reorden = Decimal("5")
+        existencia.save(update_fields=["stock_actual", "punto_reorden"])
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("4"),
+            punto_reorden=Decimal("100"),
+        )
+
+        response = self.client.get(reverse("api_public_resumen"), **self._auth_headers())
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["alertas_stock"], 0)
+        self.assertEqual(response.data["stock_critico"], 0)
+
     def test_pedidos_create_creates_cliente_and_pedido(self):
         url = reverse("api_public_pedidos_create")
         payload = {

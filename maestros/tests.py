@@ -74,6 +74,40 @@ class CanonicalCatalogCacheTransactionTests(TransactionTestCase):
         }
         self.assertNotIn(insumo_id, current_ids)
 
+    def test_rollback_de_savepoint_no_deja_insumos_fantasma_en_cache_exterior(self):
+        clear_canonical_catalog_runtime_caches()
+        insumo_id = None
+
+        with transaction.atomic():
+            try:
+                with transaction.atomic():
+                    unidad = UnidadMedida.objects.create(
+                        codigo="kg-cache-savepoint",
+                        nombre="Kilogramo cache savepoint",
+                        tipo=UnidadMedida.TIPO_MASA,
+                    )
+                    insumo = Insumo.objects.create(
+                        nombre="Insumo cache savepoint",
+                        unidad_base=unidad,
+                        activo=True,
+                    )
+                    insumo_id = insumo.id
+                    cached_ids = {
+                        row["canonical"].id
+                        for row in canonicalized_active_insumos(limit=5000)
+                    }
+                    self.assertIn(insumo_id, cached_ids)
+                    raise RuntimeError("forzar rollback de savepoint")
+            except RuntimeError:
+                pass
+
+            self.assertFalse(Insumo.objects.filter(pk=insumo_id).exists())
+            current_ids = {
+                row["canonical"].id
+                for row in canonicalized_active_insumos(limit=5000)
+            }
+            self.assertNotIn(insumo_id, current_ids)
+
     def test_rollback_no_deja_membresia_canonica_obsoleta(self):
         clear_canonical_catalog_runtime_caches()
 

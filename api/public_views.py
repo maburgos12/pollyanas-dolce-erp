@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.cache import cache
 from django.db import DatabaseError, connection, transaction
-from django.db.models import Count, F, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.utils.dateparse import parse_date
 from django.utils import timezone
 from rest_framework import status
@@ -294,11 +294,21 @@ class PublicResumenView(APIView):
         if error:
             return error
 
+        inventory_rows = list(
+            ExistenciaInsumo.objects.values("insumo_id").annotate(
+                stock_total=Sum("stock_actual"),
+                punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
+            )
+        )
         payload = {
             "insumos_activos": Insumo.objects.filter(activo=True).count(),
             "recetas_activas": Receta.objects.count(),
-            "alertas_stock": ExistenciaInsumo.objects.filter(stock_actual__lt=F("punto_reorden")).count(),
-            "stock_critico": ExistenciaInsumo.objects.filter(stock_actual__lte=0).count(),
+            "alertas_stock": sum(
+                1
+                for row in inventory_rows
+                if (row["stock_total"] or Decimal("0")) < (row["punto_reorden_almacen_1"] or Decimal("0"))
+            ),
+            "stock_critico": sum(1 for row in inventory_rows if (row["stock_total"] or Decimal("0")) <= 0),
             "timestamp": timezone.now().isoformat(),
         }
         _log_access(client, request, status.HTTP_200_OK)
