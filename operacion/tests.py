@@ -352,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v22-trazabilidad-responsive", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v23-trazabilidad-responsive", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3024,7 +3024,7 @@ class ResponsiveDesignAndContentTests(TestCase):
         self.assertIn('data-layout="mobile-line"', content)
 
     def test_service_worker_version_updated_in_sw_js(self):
-        """Service worker cache name includes v22-trazabilidad-responsive."""
+        """Service worker cache name includes the responsive traceability version."""
         from django.contrib.staticfiles import finders
         sw_path = finders.find("operacion/sw.js")
         self.assertIsNotNone(sw_path, "Service worker file not found")
@@ -3032,5 +3032,5 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v22-trazabilidad-responsive", sw_content)
+        self.assertIn("v23-trazabilidad-responsive", sw_content)
         self.assertNotIn("v21-", sw_content)

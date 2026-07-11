@@ -275,5 +275,19 @@
       </div>
     </form>
   {% endif %}
+  <script>
+    (() => {
+      const mobile = window.matchMedia("(max-width: 640px)");
+      const tablet = window.matchMedia("(min-width: 641px) and (max-width: 1024px)");
+      const syncLayout = () => {
+        document.body.dataset.layout = mobile.matches
+          ? "mobile-line"
+          : tablet.matches ? "tablet-grid" : "desktop-table";
+      };
+      syncLayout();
+      mobile.addEventListener("change", syncLayout);
+      tablet.addEventListener("change", syncLayout);
+    })();
+  </script>
 </body>
 </html>
