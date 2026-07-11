@@ -42,7 +42,8 @@ class ActivosFlowsTests(TestCase):
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(Activo.objects.filter(nombre="Refrigerador Cámara 01").exists())
+        activo = Activo.objects.get(nombre="Refrigerador Cámara 01")
+        self.assertEqual(activo.creado_por, self.admin)
         self.assertContains(response, "Cockpit operativo de activos")
 
     def test_almacen_can_raise_service_report(self):

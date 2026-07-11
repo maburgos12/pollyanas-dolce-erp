@@ -78,10 +78,10 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260707-mobile-operativo-v8", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
-        self.assertContains(worker, "pollyanas-mantenimiento-pwa-v18-20260707-mobile-operativo")
+        self.assertContains(worker, "pollyanas-mantenimiento-pwa-v19-20260710-trazabilidad")
 
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
@@ -188,6 +188,15 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'class="mant-money-prefix"')
         self.assertContains(response, 'v=20260707-mant-tabs-row-v10')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
+
+    def test_pwa_shows_order_traceability_fields(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(app, "responsable_usuario_nombre")
+        self.assertContains(app, "creado_por_nombre")
+        self.assertContains(app, "ejecutado_por_nombre")
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
@@ -348,12 +357,66 @@ class MantenimientoUnifiedInboxTests(TestCase):
         )
 
         self.assertEqual(catalogos.status_code, 200)
+        self.assertIn(
+            {"id": self.user.id, "nombre": "mantenimiento"},
+            catalogos.json()["responsables_mantenimiento"],
+        )
         self.assertEqual(falla.status_code, 201)
         self.assertEqual(servicio.status_code, 201)
         self.assertEqual(unidad.status_code, 201)
         self.assertTrue(ReporteFalla.objects.filter(titulo="Fuga en tarja").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion="Programar cambio de empaque").exists())
         self.assertTrue(ReporteUnidad.objects.filter(descripcion="Falla reportada desde mantenimiento móvil.").exists())
+
+    def test_quick_asset_keeps_creator_and_exposes_author_name(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/activos/rapido/",
+            {
+                "nombre": "Instalacion electrica QA",
+                "sucursal": self.branch.id,
+                "categoria": "Infraestructura",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        activo = Activo.objects.get(nombre="Instalacion electrica QA")
+        self.assertEqual(activo.creado_por, self.user)
+        self.assertEqual(response.json()["creado_por_nombre"], "mantenimiento")
+
+    def test_service_assignment_and_close_keep_responsible_and_executor(self):
+        self.client.force_login(self.user)
+
+        create = self.client.post(
+            "/api/mantenimiento/ordenes/",
+            {
+                "activo_ref": self.activo.id,
+                "tipo": OrdenMantenimiento.TIPO_CORRECTIVO,
+                "descripcion": "Cambiar resistencia",
+                "responsable_usuario": self.reporter.id,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(create.status_code, 201)
+        orden = OrdenMantenimiento.objects.get(pk=create.json()["id"])
+        self.assertEqual(orden.creado_por, self.user)
+        self.assertEqual(orden.responsable_usuario, self.reporter)
+        self.assertEqual(create.json()["creado_por_nombre"], "mantenimiento")
+        self.assertEqual(create.json()["responsable_usuario_nombre"], "reporter")
+
+        close = self.client.patch(
+            f"/api/mantenimiento/ordenes/{orden.id}/",
+            {"estatus": OrdenMantenimiento.ESTATUS_CERRADA, "comentario": "Trabajo terminado"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(close.status_code, 200)
+        orden.refresh_from_db()
+        self.assertEqual(orden.ejecutado_por, self.user)
+        self.assertEqual(close.json()["ejecutado_por_nombre"], "mantenimiento")
 
     def test_view_only_user_can_read_but_cannot_write_mobile_maintenance(self):
         user_model = get_user_model()

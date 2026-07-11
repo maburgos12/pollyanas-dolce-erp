@@ -81,6 +81,13 @@ class Activo(models.Model):
     horas_uso_promedio_mes = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
     notas = models.TextField(blank=True, default="")
     activo = models.BooleanField(default=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activos_creados",
+    )
     actualizado_en = models.DateTimeField(auto_now=True)
     creado_en = models.DateTimeField(auto_now_add=True)
 
@@ -218,6 +225,20 @@ class OrdenMantenimiento(models.Model):
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_cierre = models.DateField(null=True, blank=True)
     responsable = models.CharField(max_length=120, blank=True, default="")
+    responsable_usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_mantenimiento_asignadas",
+    )
+    ejecutado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_mantenimiento_ejecutadas",
+    )
     descripcion = models.TextField(blank=True, default="")
     costo_repuestos = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0"))
     costo_mano_obra = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("0"))

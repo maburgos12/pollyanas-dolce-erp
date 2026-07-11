@@ -723,7 +723,7 @@
         const visibles = ordenes.filter((orden) => {
           const abierta = ordenAbierta(orden);
           const matchEstado = state.filtroOrdenes === "todas" || (state.filtroOrdenes === "abiertas" ? abierta : !abierta);
-          const texto = `${orden.folio} ${orden.activo_nombre} ${orden.activo_codigo} ${orden.sucursal_nombre} ${orden.responsable}`.toLowerCase();
+          const texto = `${orden.folio} ${orden.activo_nombre} ${orden.activo_codigo} ${orden.sucursal_nombre} ${orden.responsable_usuario_nombre || orden.responsable}`.toLowerCase();
           return matchEstado && (!q || texto.includes(q));
         });
         render(shell(`
@@ -1595,7 +1595,7 @@
       }
 
       async function renderOrdenDetalle(error = "") {
-        await ensureProveedores();
+        await Promise.all([ensureProveedores(), ensureCatalogos()]);
         const orden = state.ordenActual;
         if (!orden) return showScreen("seguimiento");
         render(shell(`
@@ -1606,7 +1606,10 @@
             <p class="muted">${esc(orden.activo_codigo)} · ${esc(orden.sucursal_nombre || "Sin sucursal")}</p>
             <div class="kv"><b>Estatus</b><span>${esc(orden.estatus_display)}</span></div>
             <div class="kv"><b>Prioridad</b><span>${esc(orden.prioridad_display)}</span></div>
-            <div class="kv"><b>Responsable</b><span>${esc(orden.responsable || "-")}</span></div>
+            <div class="kv"><b>Creó</b><span>${esc(orden.creado_por_nombre || "-")}</span></div>
+            <div class="kv"><b>Responsable interno</b><span>${esc(orden.responsable_usuario_nombre || "-")}</span></div>
+            <div class="kv"><b>Proveedor / técnico</b><span>${esc(orden.responsable || "-")}</span></div>
+            <div class="kv"><b>Ejecutó</b><span>${esc(orden.ejecutado_por_nombre || "Pendiente")}</span></div>
             <div class="kv"><b>Costo</b><span>${orden.costo_total ? "$" + Number(orden.costo_total).toLocaleString("es-MX") : "-"}</span></div>
             <p>${esc(orden.descripcion || "Sin descripción")}</p>
           </section>
@@ -1618,6 +1621,13 @@
                 <option value="EN_PROCESO" ${orden.estatus === "EN_PROCESO" ? "selected" : ""}>En proceso</option>
                 <option value="CERRADA" ${orden.estatus === "CERRADA" ? "selected" : ""}>Cerrada</option>
                 <option value="CANCELADA" ${orden.estatus === "CANCELADA" ? "selected" : ""}>Cancelada</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Responsable interno</label>
+              <select id="seguimiento-responsable-usuario">
+                <option value="">Sin asignar</option>
+                ${(state.catalogos?.responsables_mantenimiento || []).map((user) => `<option value="${user.id}" ${Number(orden.responsable_usuario) === Number(user.id) ? "selected" : ""}>${esc(user.nombre)}</option>`).join("")}
               </select>
             </div>
             <div class="field">
@@ -1652,6 +1662,7 @@
         const payload = {
           estatus: document.getElementById("seguimiento-estatus")?.value,
           responsable: document.getElementById("seguimiento-responsable")?.value || "",
+          responsable_usuario: document.getElementById("seguimiento-responsable-usuario")?.value || null,
           comentario: document.getElementById("seguimiento-comentario")?.value || "",
         };
         const costo = document.getElementById("seguimiento-costo")?.value;
@@ -2050,7 +2061,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260707-mobile-operativo-v8", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

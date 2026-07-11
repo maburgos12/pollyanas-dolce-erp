@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
 from django.conf import settings
@@ -23,7 +24,7 @@ from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, Pl
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
-from core.models import Sucursal, sucursales_operativas
+from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import Repartidor, ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from maestros.models import Proveedor
@@ -525,7 +526,7 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         qs = OrdenMantenimiento.objects.select_related(
-            "activo_ref", "activo_ref__sucursal", "creado_por"
+            "activo_ref", "activo_ref__sucursal", "creado_por", "responsable_usuario", "ejecutado_por"
         ).order_by("-id")
         activo = self.request.query_params.get("activo")
         estatus = self.request.query_params.get("estatus")
@@ -545,6 +546,9 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
                 Q(folio__icontains=q)
                 | Q(descripcion__icontains=q)
                 | Q(responsable__icontains=q)
+                | Q(responsable_usuario__first_name__icontains=q)
+                | Q(responsable_usuario__last_name__icontains=q)
+                | Q(responsable_usuario__username__icontains=q)
                 | Q(activo_ref__nombre__icontains=q)
                 | Q(activo_ref__codigo__icontains=q)
                 | Q(activo_ref__sucursal__nombre__icontains=q)
@@ -555,7 +559,9 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
 class OrdenMantenimientoDetailView(generics.RetrieveAPIView):
     authentication_classes = AUTH
     permission_classes = [EsMantenimiento]
-    queryset = OrdenMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal").prefetch_related("bitacora")
+    queryset = OrdenMantenimiento.objects.select_related(
+        "activo_ref", "activo_ref__sucursal", "creado_por", "responsable_usuario", "ejecutado_por"
+    ).prefetch_related("bitacora__usuario")
     serializer_class = OrdenMantenimientoDetailSerializer
 
     def patch(self, request, *args, **kwargs):
@@ -633,8 +639,20 @@ def sucursales(request):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def catalogos_movil(request):
+    responsable_ids = UserModuleAccess.objects.filter(
+        module__startswith="mantenimiento",
+        access="manage",
+    ).values_list("user_id", flat=True)
+    responsables = get_user_model().objects.filter(
+        Q(id__in=responsable_ids) | Q(id=request.user.id),
+        is_active=True,
+    ).distinct().order_by("first_name", "last_name", "username")
     return Response(
         {
+            "responsables_mantenimiento": [
+                {"id": user.id, "nombre": user.get_full_name() or user.username}
+                for user in responsables
+            ],
             "categorias_falla": [
                 {"id": categoria.id, "nombre": categoria.nombre}
                 for categoria in CategoriaFalla.objects.filter(activo=True).order_by("orden", "nombre")
