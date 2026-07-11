@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}SAT fiscal · ERP{% endblock %}
+{% block page_title %}SAT fiscal{% endblock %}
+{% block body_class %}page-sat-fiscal{% endblock %}
+
+{% block extra_css %}
+<style>
+  .sat-page { display: grid; gap: 16px; max-width: 960px; margin: 0 auto; color: #2d2230; }
+  .sat-card { background: #fff; border: 1px solid #eadde5; border-radius: 8px; padding: 18px; }
+  .sat-card h1, .sat-card h2 { margin: 0; color: #321123; line-height: 1.15; }
+  .sat-card h1 { font-size: 1.75rem; }
+  .sat-card h2 { font-size: 1.25rem; }
+  .sat-note { margin: 6px 0 0; color: #625766; }
+  .sat-status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .sat-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: 999px; font-size: .82rem; font-weight: 800; }
+  .sat-chip.is-ok { color: #12633f; background: #eaf8f1; }
+  .sat-chip.is-warn { color: #8b4a00; background: #fff4dd; }
+  .sat-chip.is-muted { color: #625766; background: #f3edf2; }
+  .sat-messages { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sat-flow-list { display: grid; gap: 10px; margin-top: 14px; }
+  .sat-flow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #eadde5; border-radius: 8px; padding: 12px; background: #fffafd; }
+  .sat-flow strong { display: block; color: #321123; }
+  .sat-flow p { margin: 4px 0 0; color: #625766; }
+  .sat-flow-actions { display: flex; gap: 8px; align-items: center; }
+  .sat-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 14px; }
+  .sat-kpi { border: 1px solid #eadde5; border-radius: 8px; padding: 12px; background: #fffafd; }
+  .sat-kpi span { display: block; color: #6f5d68; font-size: .82rem; }
+  .sat-kpi strong { display: block; margin-top: 6px; color: #321123; font-size: 1.35rem; }
+  @media (max-width: 760px) {
+    .sat-flow { grid-template-columns: 1fr; }
+    .sat-flow-actions { justify-content: flex-start; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="sat-page">
+  <div class="sat-card">
+    <h1>Automatizaciones SAT</h1>
+    <p class="sat-note">Descarga documentos oficiales del SAT sin carga manual.</p>
+    <div class="sat-status">
+      <span class="sat-chip {% if estado_sat.enabled and estado_sat.configured %}is-ok{% elif estado_sat.enabled %}is-warn{% else %}is-muted{% endif %}">
+        {% if estado_sat.enabled and estado_sat.configured %}Conexión SAT configurada{% elif estado_sat.enabled %}Conexión SAT incompleta{% else %}Descarga SAT pausada{% endif %}
+      </span>
+      <span class="sat-chip is-muted">{{ estado_sat.solicitudes_abiertas|intcomma }} solicitudes CFDI abiertas</span>
+    </div>
+    <p class="sat-note">
+      {% if estado_sat.ultimo_log %}
+        Último log SAT: {{ estado_sat.ultimo_log.creado_en|date:"Y-m-d H:i" }} - {{ estado_sat.ultimo_log.mensaje }}
+      {% else %}
+        Sin registros de descarga SAT todavía.
+      {% endif %}
+    </p>
+  </div>
+
+  {% if messages %}
+    <div class="sat-messages">
+      {% for message in messages %}
+        <div class="sat-chip {% if message.tags == 'success' %}is-ok{% elif message.tags == 'warning' %}is-warn{% else %}is-muted{% endif %}">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="sat-card">
+    <h2>Documentos oficiales</h2>
+    <p class="sat-note">Cada acción crea una solicitud auditable y muestra el último resultado.</p>
+    <div class="sat-flow-list">
+      {% for item in documentos_sat %}
+        <div class="sat-flow">
+          <div>
+            <strong>{{ item.nombre }}</strong>
+            {% if item.solicitud %}
+              <p>{{ item.solicitud.get_estado_display }} · {{ item.solicitud.actualizado_en|date:"Y-m-d H:i" }}</p>
+              {% if item.solicitud.mensaje %}<p>{{ item.solicitud.mensaje }}</p>{% endif %}
+            {% else %}
+              <p>Sin solicitudes registradas.</p>
+            {% endif %}
+          </div>
+          <div class="sat-flow-actions">
+            {% if item.solicitud.archivo %}
+              <a class="btn btn-secondary" href="{{ item.solicitud.archivo.url }}">Descargar PDF</a>
+            {% endif %}
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="tipo" value="{{ item.tipo }}">
+              <button class="btn btn-primary" type="submit">
+                {% if item.tipo == "constancia" %}Descargar constancia actual{% elif item.tipo == "opinion" %}Descargar opinión{% else %}Revisar buzón{% endif %}
+              </button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="sat-card">
+    <h2>CFDI y conciliación</h2>
+    <p class="sat-note">La descarga y revisión de CFDI sigue en conciliación bancaria.</p>
+    <div class="sat-metrics">
+      <div class="sat-kpi"><span>CFDI en ERP</span><strong>{{ estado_sat.cfdis_total|intcomma }}</strong></div>
+      <div class="sat-kpi"><span>Solicitudes CFDI abiertas</span><strong>{{ estado_sat.solicitudes_abiertas|intcomma }}</strong></div>
+    </div>
+    <p class="sat-note"><a class="btn btn-secondary" href="{% url 'conciliacion:bancaria' %}">Ver conciliación</a></p>
+  </div>
+</section>
+{% endblock %}

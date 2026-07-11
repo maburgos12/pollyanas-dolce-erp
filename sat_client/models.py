@@ -170,3 +170,50 @@ class LogDescargaSat(models.Model):
 
     def __str__(self) -> str:
         return f"{self.nivel} {self.creado_en:%Y-%m-%d %H:%M}"
+
+
+class SolicitudDocumentoSat(models.Model):
+    TIPO_CONSTANCIA = "constancia"
+    TIPO_OPINION = "opinion"
+    TIPO_BUZON = "buzon"
+    TIPO_CHOICES = [
+        (TIPO_CONSTANCIA, "Constancia de situación fiscal"),
+        (TIPO_OPINION, "Opinión de cumplimiento"),
+        (TIPO_BUZON, "Buzón Tributario"),
+    ]
+
+    ESTADO_PENDIENTE = "pendiente"
+    ESTADO_PROCESANDO = "procesando"
+    ESTADO_LISTO = "listo"
+    ESTADO_ERROR = "error"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_PROCESANDO, "Procesando"),
+        (ESTADO_LISTO, "Listo"),
+        (ESTADO_ERROR, "Error"),
+    ]
+
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE)
+    archivo = models.FileField(upload_to="sat/documentos/", null=True, blank=True)
+    mensaje = models.TextField(blank=True)
+    solicitado_por = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitudes_documentos_sat",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado_en"]
+        verbose_name = "Solicitud documento SAT"
+        verbose_name_plural = "Solicitudes documentos SAT"
+        indexes = [
+            models.Index(fields=["tipo", "estado", "-creado_en"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} {self.estado}"
