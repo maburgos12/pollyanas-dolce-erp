@@ -1082,6 +1082,31 @@ class RecetasListCatalogFiltersTests(TestCase):
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertNotIn(producto.nombre, nombres)
 
+    def test_recetas_list_does_not_require_bom_for_resale_product(self):
+        reventa = Receta.objects.create(
+            nombre="Té de reventa QA",
+            hash_contenido="hash-catalogo-reventa-sin-bom",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_REVENTA,
+            codigo_point="REVENTA-QA",
+            sheet_name="AUTO_POINT_SALES",
+        )
+        PointProduct.objects.create(
+            sku="REVENTA-QA",
+            external_id="REVENTA-QA",
+            name=reventa.nombre,
+            active=True,
+        )
+
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "estado": "pendientes"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertNotIn(reventa.nombre, nombres)
+
     def test_recetas_list_filters_by_governance_issue(self):
         self.receta_preparacion.rendimiento_cantidad = None
         self.receta_preparacion.save(update_fields=["rendimiento_cantidad"])
