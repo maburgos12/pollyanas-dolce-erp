@@ -1,8 +1,21 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase
 
+from activos.models import Activo, OrdenMantenimiento
+from core.models import Sucursal, UserModuleAccess, UserProfile
+from fallas.models import CategoriaFalla, ReporteFalla
+from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from mantenimiento.services_access import (
+    authorized_fallas,
+    authorized_orders,
+    authorized_repairs,
+    authorized_unit_reports,
+    authorized_unit_services,
+    can_view_costs,
+)
 from mantenimiento.services_history import canonical_status, period_bounds
 
 
@@ -69,3 +82,76 @@ class MaintenanceHistoryDomainTests(SimpleTestCase):
         self.assertEqual(canonical_status("reporte_unidad", "PROGRAMADO"), "programado")
         self.assertEqual(canonical_status("reporte_unidad", "CERRADO"), "cerrado")
         self.assertEqual(canonical_status("reporte_unidad", "CANCELADO"), "cancelado")
+
+
+class MaintenanceAccessTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.own_branch = Sucursal.objects.create(codigo="OWN", nombre="Propia")
+        cls.other_branch = Sucursal.objects.create(codigo="OTHER", nombre="Ajena")
+        cls.limited_user = user_model.objects.create_user("limited", password="test")
+        cls.no_scope_user = user_model.objects.create_user("no-scope", password="test")
+        cls.manager = user_model.objects.create_user("manager", password="test")
+        cls.admin = user_model.objects.create_superuser("global", "global@example.com", "test")
+        UserProfile.objects.create(user=cls.limited_user, sucursal=cls.own_branch)
+        UserProfile.objects.create(user=cls.no_scope_user)
+        UserModuleAccess.objects.create(user=cls.manager, module="mantenimiento", access="manage")
+
+        category = CategoriaFalla.objects.create(nombre="General")
+        cls.own_report = ReporteFalla.objects.create(
+            sucursal=cls.own_branch, categoria=category, titulo="Propia", descripcion="x",
+            foto_evidencia="fallas/evidencias/own.jpg", reportado_por=cls.limited_user,
+        )
+        cls.other_report = ReporteFalla.objects.create(
+            sucursal=cls.other_branch, categoria=category, titulo="Ajena", descripcion="x",
+            foto_evidencia="fallas/evidencias/other.jpg", reportado_por=cls.limited_user,
+        )
+        own_asset = Activo.objects.create(nombre="Horno propio", sucursal=cls.own_branch)
+        other_asset = Activo.objects.create(nombre="Horno ajeno", sucursal=cls.other_branch)
+        cls.own_order = OrdenMantenimiento.objects.create(activo_ref=own_asset)
+        cls.other_order = OrdenMantenimiento.objects.create(activo_ref=other_asset)
+        own_unit = Unidad.objects.create(codigo="U-OWN", descripcion="Propia", sucursal=cls.own_branch)
+        other_unit = Unidad.objects.create(codigo="U-OTHER", descripcion="Ajena", sucursal=cls.other_branch)
+        cls.own_unit_report = ReporteUnidad.objects.create(unidad=own_unit, tipo="falla", descripcion="x")
+        cls.other_unit_report = ReporteUnidad.objects.create(unidad=other_unit, tipo="falla", descripcion="x")
+        service_type = TipoServicioUnidad.objects.create(nombre="Servicio")
+        cls.own_service = ServicioRealizadoUnidad.objects.create(unidad=own_unit, tipo_servicio=service_type, fecha_servicio="2026-07-11")
+        cls.other_service = ServicioRealizadoUnidad.objects.create(unidad=other_unit, tipo_servicio=service_type, fecha_servicio="2026-07-11")
+        cls.own_repair = ReparacionUnidad.objects.create(unidad=own_unit, fecha_ingreso="2026-07-11", descripcion_falla="x")
+        cls.other_repair = ReparacionUnidad.objects.create(unidad=other_unit, fecha_ingreso="2026-07-11", descripcion_falla="x")
+
+    def test_limited_user_only_resolves_objects_from_profile_branch_fk(self):
+        pairs = [
+            (authorized_fallas, self.own_report, self.other_report),
+            (authorized_orders, self.own_order, self.other_order),
+            (authorized_unit_reports, self.own_unit_report, self.other_unit_report),
+            (authorized_repairs, self.own_repair, self.other_repair),
+            (authorized_unit_services, self.own_service, self.other_service),
+        ]
+        for authorize, own, other in pairs:
+            with self.subTest(authorize=authorize.__name__):
+                qs = authorize(self.limited_user)
+                self.assertTrue(qs.filter(pk=own.pk).exists())
+                self.assertFalse(qs.filter(pk=other.pk).exists())
+
+    def test_global_and_mantenimiento_manager_see_all_branches(self):
+        for user in (self.admin, self.manager):
+            with self.subTest(user=user.username):
+                self.assertEqual(authorized_fallas(user).count(), 2)
+                self.assertEqual(authorized_orders(user).count(), 2)
+                self.assertEqual(authorized_unit_reports(user).count(), 2)
+                self.assertEqual(authorized_repairs(user).count(), 2)
+                self.assertEqual(authorized_unit_services(user).count(), 2)
+
+    def test_user_without_canonical_branch_scope_sees_nothing(self):
+        self.assertFalse(authorized_fallas(self.no_scope_user).exists())
+        self.assertFalse(authorized_orders(self.no_scope_user).exists())
+        self.assertFalse(authorized_unit_reports(self.no_scope_user).exists())
+        self.assertFalse(authorized_repairs(self.no_scope_user).exists())
+        self.assertFalse(authorized_unit_services(self.no_scope_user).exists())
+
+    def test_only_global_or_mantenimiento_manager_can_view_costs(self):
+        self.assertTrue(can_view_costs(self.admin))
+        self.assertTrue(can_view_costs(self.manager))
+        self.assertFalse(can_view_costs(self.limited_user))
