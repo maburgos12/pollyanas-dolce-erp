@@ -52,7 +52,10 @@
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
         history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1, results: [], hasNext: false},
         detailCache: new Map(),
-        requestGeneration: 0,
+        requestGeneration: {inbox: 0, history: 0, detail: 0},
+        historyLoading: false,
+        evidenceObjectUrls: new Set(),
+        evidenceBlobCache: new Map(),
         viewerReturnFocus: null,
         ordenActual: null,
         filtroOrdenes: "abiertas",
@@ -164,7 +167,7 @@
       }
 
       async function apiV2Fetch(path, options = {}) {
-        return apiFetch(path.startsWith("http") ? path : `${API_V2}${path}`, options);
+        return apiFetch(path.startsWith("http") || path.startsWith("/api/") ? path : `${API_V2}${path}`, options);
       }
 
       function esc(value) {
@@ -240,6 +243,12 @@
       }
 
       async function showScreen(name) {
+        if (state.pantalla !== name) {
+          revokeEvidenceUrls();
+          state.requestGeneration.detail += 1;
+          state.requestGeneration.history += 1;
+          state.historyLoading = false;
+        }
         state.pantalla = name;
         if (name === "login") return renderLogin();
         if (!state.perfil) await loadPerfil();
@@ -314,9 +323,9 @@
 
       async function loadBandeja(force = false) {
         if (state.bandeja.length && !force) return state.bandeja;
-        const generation = ++state.requestGeneration;
+        const generation = ++state.requestGeneration.inbox;
         const res = await apiV2Fetch("/bandeja/?estado=todos&periodo=30d&page_size=100");
-        if (generation !== state.requestGeneration) return state.bandeja;
+        if (generation !== state.requestGeneration.inbox) return state.bandeja;
         if (res.ok) {
           const data = await res.json();
           state.bandeja = data.results || [];
@@ -2049,10 +2058,19 @@
       }
 
       function setHistoryFilter(name, value) {
+        state.requestGeneration.history += 1;
+        state.historyLoading = false;
         state.history[name] = value;
         state.history.page = 1;
         state.history.results = [];
         renderHistorial();
+      }
+
+      function loadMoreHistory(button) {
+        if (state.historyLoading) return;
+        button.disabled = true;
+        button.textContent = "Cargando…";
+        renderHistorial(true);
       }
 
       function historyCard(item) {
@@ -2064,16 +2082,23 @@
       }
 
       async function renderHistorial(loadMore = false) {
+        if (state.historyLoading) return;
+        state.historyLoading = true;
         await ensureSucursales();
-        const generation = ++state.requestGeneration;
+        const generation = ++state.requestGeneration.history;
+        const requestedPage = state.history.page;
         if (!loadMore) render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1><div class="skeleton" aria-label="Cargando historial"></div>`));
-        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${state.history.page}&page_size=25`;
-        const res = await apiV2Fetch(`/historial/?${query}`);
-        if (generation !== state.requestGeneration) return;
-        if (!res.ok) return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial()">Reintentar</button></div>`));
+        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${requestedPage}&page_size=25`;
+        let res;
+        try { res = await apiV2Fetch(`/historial/?${query}`); }
+        catch (error) { state.historyLoading = false; return render(shell(`<div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial(${loadMore})">Reintentar</button></div>`)); }
+        if (generation !== state.requestGeneration.history) { state.historyLoading = false; return; }
+        if (!res.ok) { state.historyLoading = false; return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><div class="error-state" role="alert"><h1>No pudimos cargar el historial</h1><button onclick="renderHistorial(${loadMore})">Reintentar</button></div>`)); }
         const data = await res.json();
         state.history.results = loadMore ? [...state.history.results, ...(data.results || [])] : (data.results || []);
         state.history.hasNext = Boolean(data.pagination?.has_next);
+        state.history.page = requestedPage + (state.history.hasNext ? 1 : 0);
+        state.historyLoading = false;
         const branchOptions = state.sucursales.map(s => `<option value="${s.id}" ${String(s.id) === String(state.history.sucursal) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("");
         render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
           <div class="history-filters" aria-label="Filtros de historial">
@@ -2082,7 +2107,7 @@
             <label>Estado<select onchange="setHistoryFilter('estado',this.value)">${[["todo","Todos"],["abierto","Abierto"],["en_proceso","En proceso"],["cerrado","Cerrado"],["cancelado","Cancelado"]].map(([v,l])=>`<option value="${v}" ${state.history.estado===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Sucursal<select onchange="setHistoryFilter('sucursal',this.value)"><option value="">Todas</option>${branchOptions}</select></label>
           </div>${state.history.results.map(historyCard).join("") || `<div class="empty">No hay movimientos con estos filtros.</div>`}
-          ${state.history.hasNext ? `<button class="secondary-btn" onclick="state.history.page += 1; renderHistorial(true)">Cargar más</button>` : ""}`));
+          ${state.history.hasNext ? `<button class="secondary-btn" onclick="loadMoreHistory(this)" ${state.historyLoading ? "disabled" : ""}>${state.historyLoading ? "Cargando…" : "Cargar más"}</button>` : ""}`));
       }
 
       function detailRows(value, prefix = "") {
@@ -2091,7 +2116,42 @@
 
       function evidenceGallery(items) {
         const evidence = (items || []).filter(Boolean);
-        return evidence.length ? `<div class="gallery">${evidence.map(item => `<button type="button" onclick="openImageViewer('${esc(item.url)}','${esc(item.nombre || "Evidencia de mantenimiento")}',this)"><img src="${esc(item.url)}" alt="${esc(item.nombre || "Evidencia de mantenimiento")}" loading="lazy" onerror="this.closest('button').remove()"></button>`).join("")}</div>` : `<p class="muted">Sin evidencias disponibles.</p>`;
+        if (!evidence.length) return `<p class="muted">Sin evidencias disponibles.</p>`;
+        const markup = evidence.map(item => {
+          const key = `evidence-${Math.random().toString(36).slice(2)}`;
+          window.setTimeout(() => loadProtectedEvidence(key, item.url, item.nombre || "Evidencia de mantenimiento"), 160);
+          return `<figure id="${key}" class="evidence-placeholder"><div class="skeleton" aria-label="Cargando evidencia"></div><figcaption>${esc(item.nombre || "Evidencia de mantenimiento")}</figcaption></figure>`;
+        }).join("");
+        return `<div class="gallery">${markup}</div>`;
+      }
+
+      async function evidenceBlob(url) {
+        if (state.evidenceBlobCache.has(url)) return state.evidenceBlobCache.get(url);
+        const res = await apiV2Fetch(url);
+        if (!res.ok) throw new Error("Evidencia no disponible");
+        const blob = await res.blob();
+        state.evidenceBlobCache.set(url, blob);
+        return blob;
+      }
+
+      async function loadProtectedEvidence(containerId, url, filename) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        try {
+          const blob = await evidenceBlob(url);
+          if (!document.getElementById(containerId)) return;
+          const objectUrl = URL.createObjectURL(blob);
+          state.evidenceObjectUrls.add(objectUrl);
+          container.innerHTML = `<button type="button" aria-label="Ampliar ${esc(filename)}"><img src="${objectUrl}" alt="${esc(filename)}" loading="lazy"></button><figcaption>${esc(filename)}</figcaption>`;
+          container.querySelector("button").onclick = function () { openImageViewer(url, filename, this); };
+        } catch (error) {
+          container.innerHTML = `<div class="error-msg" role="status">Evidencia no disponible</div><figcaption>${esc(filename)}</figcaption>`;
+        }
+      }
+
+      function revokeEvidenceUrls() {
+        state.evidenceObjectUrls.forEach(url => URL.revokeObjectURL(url));
+        state.evidenceObjectUrls.clear();
       }
 
       async function openItemDetail(uid, trigger) {
@@ -2100,9 +2160,11 @@
         render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
         let data = state.detailCache.get(uid);
         if (!data) {
-          const generation = ++state.requestGeneration;
-          const res = await apiV2Fetch(`/items/${tipo}/${id}/`);
-          if (generation !== state.requestGeneration) return;
+          const generation = ++state.requestGeneration.detail;
+          let res;
+          try { res = await apiV2Fetch(`/items/${tipo}/${id}/`); }
+          catch (error) { if (generation === state.requestGeneration.detail) render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Revisa tu conexión e intenta nuevamente.</p><button onclick="showScreen('pendientes')">Volver</button></div>`)); return; }
+          if (generation !== state.requestGeneration.detail) return;
           if (!res.ok) return render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Puede que ya no tengas acceso o el registro no exista.</p><button onclick="showScreen('pendientes')">Volver</button></div>`));
           data = await res.json(); state.detailCache.set(uid, data);
         }
@@ -2114,12 +2176,17 @@
           <h2>Evidencias</h2>${evidenceGallery(evidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
       }
 
-      function openImageViewer(url, alt, trigger) {
+      async function openImageViewer(url, alt, trigger) {
         state.viewerReturnFocus = trigger;
+        let viewerUrl;
+        try { viewerUrl = URL.createObjectURL(await evidenceBlob(url)); }
+        catch (error) { return; }
+        state.evidenceObjectUrls.add(viewerUrl);
         const viewer = document.createElement("div"); viewer.className = "image-viewer"; viewer.id = "image-viewer"; viewer.setAttribute("role","dialog"); viewer.setAttribute("aria-modal","true");
-        viewer.innerHTML = `<button class="viewer-close" aria-label="Cerrar imagen" onclick="closeImageViewer()">×</button><img src="${esc(url)}" alt="${esc(alt)}">`; document.body.appendChild(viewer); viewer.querySelector("button").focus();
+        viewer.dataset.objectUrl = viewerUrl;
+        viewer.innerHTML = `<button class="viewer-close" aria-label="Cerrar imagen" onclick="closeImageViewer()">×</button><img src="${viewerUrl}" alt="${esc(alt)}">`; document.body.appendChild(viewer); viewer.querySelector("button").focus();
       }
-      function closeImageViewer(){ document.getElementById("image-viewer")?.remove(); state.viewerReturnFocus?.focus?.(); }
+      function closeImageViewer(){ const viewer=document.getElementById("image-viewer"); const url=viewer?.dataset.objectUrl; viewer?.remove(); if(url){URL.revokeObjectURL(url);state.evidenceObjectUrls.delete(url);} state.viewerReturnFocus?.focus?.(); }
       document.addEventListener("keydown", event => { if (event.key === "Escape" && document.getElementById("image-viewer")) closeImageViewer(); });
 
       async function boot() {
