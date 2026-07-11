@@ -462,15 +462,30 @@ class MaintenanceInboxV2Tests(TestCase):
         self.assertEqual(payload["counts"]["cerrados"], 1)
         self.assertEqual(payload["results"][0]["uid"], f"reporte_unidad:{report.pk}")
 
-    def test_legacy_closed_unit_without_close_date_is_excluded_from_30d(self):
-        self._closed_unit_report(2, with_close_date=False)
+    def test_legacy_closed_unit_without_close_date_uses_report_date_in_30d(self):
+        report = self._closed_unit_report(2, with_close_date=False)
 
         payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
             "estado": "cerrados", "periodo": "30d", "origen": "logistica",
         }).json()
 
-        self.assertEqual(payload["counts"]["cerrados"], 0)
-        self.assertEqual(payload["results"], [])
+        self.assertEqual(payload["counts"]["cerrados"], 1)
+        self.assertEqual(payload["results"][0]["uid"], f"reporte_unidad:{report.pk}")
+
+    def test_legacy_closed_unit_without_close_date_respects_30_and_90_day_periods(self):
+        report = self._closed_unit_report(45, with_close_date=False)
+
+        in_30_days = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d", "origen": "logistica",
+        }).json()
+        in_90_days = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "90d", "origen": "logistica",
+        }).json()
+
+        self.assertEqual(in_30_days["counts"]["cerrados"], 0)
+        self.assertEqual(in_30_days["results"], [])
+        self.assertEqual(in_90_days["counts"]["cerrados"], 1)
+        self.assertEqual(in_90_days["results"][0]["uid"], f"reporte_unidad:{report.pk}")
 
     def test_unit_close_date_is_set_once_and_cleared_on_reopen(self):
         report = ReporteUnidad.objects.create(

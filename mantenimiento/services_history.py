@@ -132,7 +132,9 @@ def inbox_rows(user, *, period, origin):
         )
         for row in reports:
             state = canonical_status("reporte_unidad", row["estatus"])
-            event = row["fecha_cierre"] if state == "cerrado" else row["fecha_reporte"]
+            # Historical rows created before ``fecha_cierre`` existed must remain
+            # visible.  Their report timestamp is the only trustworthy event date.
+            event = (row["fecha_cierre"] or row["fecha_reporte"]) if state == "cerrado" else row["fecha_reporte"]
             if state != "cancelado" and _in_period(event, start, end):
                 rows.append(_row_payload(
                     uid=f"reporte_unidad:{row['id']}", pk=row["id"], kind="reporte_unidad", origin="logistica",
