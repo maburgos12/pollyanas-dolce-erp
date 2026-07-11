@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -79,10 +80,22 @@ class AperturaInicialLotesTests(TestCase):
         self.assertEqual(movimiento.trazabilidad["lote"], lote.codigo)
 
     def test_opening_is_idempotent_and_does_not_duplicate_stock(self):
-        primero = self._registrar()
-        segundo = self._registrar()
+        primero = self._registrar(fecha_elaboracion=date(2026, 7, 1))
+        segundo = self._registrar(fecha_elaboracion=date(2026, 7, 1))
 
         self.assertEqual(segundo.pk, primero.pk)
+        self.assertEqual(LoteProduccion.objects.count(), 1)
+        self.assertEqual(MovimientoInventario.objects.count(), 1)
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+
+    def test_opening_rejects_a_different_date_without_changing_stock(self):
+        lote = self._registrar(fecha_elaboracion=date(2026, 7, 1))
+
+        with self.assertRaisesMessage(ValidationError, "ya fue aplicada"):
+            self._registrar(fecha_elaboracion=date(2026, 7, 2))
+
+        lote.refresh_from_db()
+        self.assertEqual(lote.producido_en.date(), date(2026, 7, 1))
         self.assertEqual(LoteProduccion.objects.count(), 1)
         self.assertEqual(MovimientoInventario.objects.count(), 1)
         self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))

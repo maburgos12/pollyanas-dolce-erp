@@ -24,14 +24,17 @@ def _cantidad_positiva(cantidad) -> Decimal:
     return value
 
 
-def _fecha_operativa(fecha_elaboracion: date | datetime | None) -> datetime:
+def _fecha_operativa(fecha_elaboracion: date | datetime | None) -> tuple[datetime, str | None]:
     if fecha_elaboracion is None:
-        return timezone.now()
+        return timezone.now(), None
     if isinstance(fecha_elaboracion, datetime):
-        return timezone.make_aware(fecha_elaboracion) if timezone.is_naive(fecha_elaboracion) else fecha_elaboracion
+        value = timezone.make_aware(fecha_elaboracion) if timezone.is_naive(fecha_elaboracion) else fecha_elaboracion
+        normalized = value.astimezone(timezone.get_current_timezone())
+        return normalized, normalized.isoformat()
     if not isinstance(fecha_elaboracion, date):
         raise ValidationError("La fecha de elaboración no es válida.")
-    return timezone.make_aware(datetime.combine(fecha_elaboracion, time(hour=12)))
+    value = timezone.make_aware(datetime.combine(fecha_elaboracion, time(hour=12)))
+    return value, value.isoformat()
 
 
 def _source_hash_apertura(insumo: Insumo, ubicacion: str) -> str:
@@ -46,6 +49,7 @@ def _validar_apertura_existente(
     cantidad: Decimal,
     unidad: UnidadMedida,
     observaciones: str,
+    fecha_normalizada: str | None,
 ) -> LoteProduccion:
     lote = movimiento.lote
     if not lote or any(
@@ -54,6 +58,7 @@ def _validar_apertura_existente(
             lote.cantidad_inicial != cantidad,
             lote.unidad_id != unidad.pk,
             lote.observaciones != observaciones,
+            movimiento.trazabilidad.get("fecha_elaboracion") != fecha_normalizada,
         )
     ):
         raise ValidationError(
@@ -88,7 +93,7 @@ def registrar_apertura_inicial(
     if not insumo.unidad_base_id or unidad.pk != insumo.unidad_base_id:
         raise ValidationError("La unidad debe coincidir con la unidad base del producto.")
 
-    producido_en = _fecha_operativa(fecha_elaboracion)
+    producido_en, fecha_normalizada = _fecha_operativa(fecha_elaboracion)
     source_hash = _source_hash_apertura(insumo, ubicacion)
 
     movimiento_existente = MovimientoInventario.objects.select_related("lote").filter(source_hash=source_hash).first()
@@ -99,6 +104,7 @@ def registrar_apertura_inicial(
             cantidad=cantidad_decimal,
             unidad=unidad,
             observaciones=observaciones_limpias,
+            fecha_normalizada=fecha_normalizada,
         )
 
     try:
@@ -131,6 +137,7 @@ def registrar_apertura_inicial(
                     "evento": "apertura_inicial",
                     "lote": lote.codigo,
                     "ubicacion": ubicacion,
+                    "fecha_elaboracion": fecha_normalizada,
                     "sin_fuente_historica": True,
                 },
             )
@@ -144,4 +151,5 @@ def registrar_apertura_inicial(
             cantidad=cantidad_decimal,
             unidad=unidad,
             observaciones=observaciones_limpias,
+            fecha_normalizada=fecha_normalizada,
         )
