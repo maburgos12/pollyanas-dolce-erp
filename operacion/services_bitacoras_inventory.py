@@ -1,6 +1,7 @@
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+from typing import NamedTuple
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
@@ -13,11 +14,17 @@ from inventario.models import (
     LoteProduccion,
     MovimientoInventario,
     normalizar_codigo_lote,
+    UBICACION_CFP_1_1,
 )
 from inventario.services_existencias import aplicar_delta
 from maestros.models import Insumo, UnidadMedida
 from recetas.models import Receta
 from recetas.utils.costeo_snapshot import preparation_recipe_matches_insumo
+from operacion.models import BitacoraOperativa
+
+
+class CierreHornosResult(NamedTuple):
+    lotes_creados: int
 
 
 def _cantidad_positiva(cantidad) -> Decimal:
@@ -199,3 +206,92 @@ def registrar_apertura_inicial(
             )
         except ValidationError:
             raise original_error
+
+
+def _resolve_insumo_from_receta(receta: Receta) -> Insumo | None:
+    """Resolver el insumo derivado desde una receta PREPARACION por codigo_point."""
+    if not receta or receta.tipo != Receta.TIPO_PREPARACION:
+        return None
+    punto = (receta.codigo_point or "").strip().upper()
+    if not punto:
+        return None
+    return Insumo.objects.filter(
+        tipo_item=Insumo.TIPO_INTERNO,
+        codigo_point__iexact=punto,
+    ).first()
+
+
+def cerrar_hornos(bitacora: BitacoraOperativa, actor) -> CierreHornosResult:
+    if bitacora.tipo != BitacoraOperativa.TIPO_HORNOS:
+        raise ValidationError("La bitacora no corresponde a Hornos.")
+
+    with transaction.atomic():
+        bitacora_locked = BitacoraOperativa.objects.select_for_update().get(pk=bitacora.pk)
+        lineas = bitacora_locked.lineas.select_related("receta").all()
+
+        lotes_creados = 0
+        for linea in lineas:
+            if linea.receta is None or not normalizar_codigo_lote(linea.receta.codigo_point):
+                raise ValidationError("La linea requiere una receta con codigo Point.")
+            if linea.receta.rendimiento_unidad_id is None:
+                raise ValidationError("La preparacion requiere unidad de rendimiento.")
+
+            insumo = _resolve_insumo_from_receta(linea.receta)
+            if not insumo:
+                raise ValidationError(f"No se encontró el insumo derivado de {linea.receta.nombre}.")
+
+            cantidad = Decimal(str(linea.datos.get("existencia") or 0))
+            source_hash = sha256(
+                f"BITACORA:HORNOS:{linea.id}:ENTRADA:{UBICACION_CFP_1_1}".encode()
+            ).hexdigest()
+
+            movimiento, movimiento_nuevo = MovimientoInventario.objects.select_for_update().get_or_create(
+                linea_bitacora=linea,
+                almacen=UBICACION_CFP_1_1,
+                defaults={
+                    "fecha": timezone.now(),
+                    "tipo": MovimientoInventario.TIPO_ENTRADA,
+                    "insumo": insumo,
+                    "cantidad": cantidad,
+                    "referencia": "",
+                    "notas": linea.observaciones,
+                    "registrado_por": actor.get_username(),
+                    "source_hash": source_hash,
+                    "registrado_por_usuario": actor,
+                    "trazabilidad": {
+                        "evento": "cierre_hornos",
+                        "bitacora_id": bitacora_locked.pk,
+                        "linea_id": linea.id,
+                    },
+                },
+            )
+
+            if movimiento_nuevo:
+                lote, lote_nuevo = LoteProduccion.objects.select_for_update().get_or_create(
+                    linea_origen=linea,
+                    defaults={
+                        "insumo": insumo,
+                        "receta": linea.receta,
+                        "cantidad_inicial": cantidad,
+                        "unidad": linea.receta.rendimiento_unidad,
+                        "producido_en": timezone.make_aware(
+                            datetime.combine(bitacora_locked.fecha, time(12, 0))
+                        ),
+                        "creado_por": actor,
+                        "estado": LoteProduccion.DISPONIBLE,
+                    },
+                )
+                movimiento.lote = lote
+                movimiento.referencia = lote.codigo
+                movimiento.save(update_fields=["lote", "referencia"])
+
+                if lote_nuevo:
+                    aplicar_delta(insumo, UBICACION_CFP_1_1, cantidad)
+                    lotes_creados += 1
+
+        bitacora_locked.estatus = BitacoraOperativa.ESTATUS_CERRADA
+        bitacora_locked.cerrado_en = timezone.now()
+        bitacora_locked.actualizado_en = timezone.now()
+        bitacora_locked.save(update_fields=["estatus", "cerrado_en", "actualizado_en"])
+
+        return CierreHornosResult(lotes_creados=lotes_creados)

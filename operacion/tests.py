@@ -1230,3 +1230,65 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No encuentro el equipo")
         self.assertContains(response, "Registrar punto mantenible")
+
+
+class HornosLoteServiceTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.hornos", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.hornos", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        self.unidad = UnidadMedida.objects.create(codigo="kg-hornos", nombre="Kilogramo hornos")
+        self.receta = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hornos-pan-chocolate",
+            pasa_modulo_produccion=True,
+        )
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-CHO-CH",
+            codigo_point="PAN-CHO-CH",
+            nombre="Pan Chocolate Chico",
+            nombre_point="Pan Chocolate Chico Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "8"},
+            observaciones="Cierre de hornos piloto",
+        )
+
+    def test_close_hornos_creates_one_lot_and_cfp_entry(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        result = cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertEqual(result.lotes_creados, 1)
+        lote = LoteProduccion.objects.get(linea_origen=self.linea)
+        movimiento = MovimientoInventario.objects.get(linea_bitacora=self.linea)
+        self.assertEqual(movimiento.lote, lote)
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(movimiento.almacen, "CFP_1_1")
+
+    def test_close_hornos_twice_does_not_duplicate(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        cerrar_hornos(self.bitacora, self.manager)
+        cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertEqual(LoteProduccion.objects.filter(linea_origen=self.linea).count(), 1)
+        self.assertEqual(MovimientoInventario.objects.filter(linea_bitacora=self.linea).count(), 1)
