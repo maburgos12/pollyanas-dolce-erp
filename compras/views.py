@@ -26,6 +26,7 @@ from openpyxl import Workbook, load_workbook
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.services_existencias import aplicar_delta
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from maestros.utils.canonical_catalog import (
     canonical_insumo,
@@ -1605,7 +1606,10 @@ def _build_plan_branch_supply_rows(
 
     existencia_map = {
         int(item.insumo_id): item
-        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+        for item in ExistenciaInsumo.objects.filter(
+            insumo_id__in=canonical_ids,
+            almacen="ALMACEN_1",
+        ).select_related("insumo")
     }
     lineas_by_recipe: dict[int, list[LineaReceta]] = defaultdict(list)
     for linea in lineas:
@@ -3850,11 +3854,8 @@ def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) ->
         return {"applied": False, "reason": "ya_aplicado"}
 
     insumo_canonical = canonical_insumo_by_id(solicitud.insumo_id) or solicitud.insumo
-    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
-    prev_stock = existencia.stock_actual
-    existencia.stock_actual = prev_stock + cantidad
-    existencia.actualizado_en = timezone.now()
-    existencia.save()
+    existencia = aplicar_delta(insumo_canonical, "ALMACEN_1", cantidad)
+    prev_stock = existencia.stock_actual - cantidad
 
     movimiento = MovimientoInventario.objects.create(
         tipo=MovimientoInventario.TIPO_ENTRADA,
@@ -3903,7 +3904,10 @@ def _build_insumo_options(limit: int = 1200):
     usage_maps = usage_maps_for_insumo_ids(grouped_member_ids)
     existencias = {
         e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=grouped_member_ids).select_related("insumo", "insumo__proveedor_principal")
+        for e in ExistenciaInsumo.objects.filter(
+            insumo_id__in=grouped_member_ids,
+            almacen="ALMACEN_1",
+        ).select_related("insumo", "insumo__proveedor_principal")
     }
 
     en_transito_by_insumo: dict[int, Decimal] = {}
@@ -6233,7 +6237,10 @@ def _filtered_solicitudes(
     )
     existencias_raw = {
         e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_member_ids)
+        for e in ExistenciaInsumo.objects.filter(
+            insumo_id__in=canonical_member_ids,
+            almacen="ALMACEN_1",
+        )
     }
 
     plan_ids = set()
@@ -6859,7 +6866,10 @@ def _dashboard_filtered_solicitudes(
     )
     existencias_raw = {
         e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_member_ids)
+        for e in ExistenciaInsumo.objects.filter(
+            insumo_id__in=canonical_member_ids,
+            almacen="ALMACEN_1",
+        )
     }
     latest_cost_by_insumo = _latest_cost_by_canonical_ids(canonical_ids, canonical_by_id)
 

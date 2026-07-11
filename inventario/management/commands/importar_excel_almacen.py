@@ -112,7 +112,8 @@ class Command(BaseCommand):
         self.stdout.write(f"Período: {year}-{month:02d}  |  dry_run={dry_run}")
 
         from maestros.models import Insumo, InsumoAlias
-        from inventario.models import ExistenciaInsumo, MovimientoInventario
+        from inventario.models import MovimientoInventario
+        from inventario.services_existencias import get_or_create_existencia
 
         # Build lookup maps
         nombre_map = {_norm(i.nombre): i for i in Insumo.objects.select_related("unidad_base").all()}
@@ -148,30 +149,17 @@ class Command(BaseCommand):
             inv_prom = _d(ws_inv.cell(r, 16).value)
 
             if not dry_run:
-                obj, created = ExistenciaInsumo.objects.get_or_create(
-                    insumo=insumo,
-                    defaults={
-                        "almacen": almacen,
-                        "stock_actual": stock_actual,
-                        "stock_minimo": stock_min,
-                        "stock_maximo": stock_max,
-                        "punto_reorden": punto_reorden,
-                        "dias_llegada_pedido": dias_llegada,
-                        "consumo_diario_promedio": consumo_diario,
-                        "inventario_promedio": inv_prom,
-                    },
-                )
+                obj, created = get_or_create_existencia(insumo, almacen)
+                obj.stock_actual = stock_actual
+                obj.stock_minimo = stock_min
+                obj.stock_maximo = stock_max
+                obj.punto_reorden = punto_reorden
+                obj.dias_llegada_pedido = dias_llegada
+                obj.consumo_diario_promedio = consumo_diario
+                obj.inventario_promedio = inv_prom
+                obj.actualizado_en = timezone.now()
+                obj.save()
                 if not created:
-                    obj.almacen = almacen
-                    obj.stock_actual = stock_actual
-                    obj.stock_minimo = stock_min
-                    obj.stock_maximo = stock_max
-                    obj.punto_reorden = punto_reorden
-                    obj.dias_llegada_pedido = dias_llegada
-                    obj.consumo_diario_promedio = consumo_diario
-                    obj.inventario_promedio = inv_prom
-                    obj.actualizado_en = timezone.now()
-                    obj.save()
                     updated_exist += 1
                 else:
                     created_exist += 1

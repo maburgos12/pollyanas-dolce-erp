@@ -11,7 +11,8 @@ from control.models import MermaPOS
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import MovimientoInventario
+from inventario.services_existencias import aplicar_delta
 from maestros.models import Insumo, PointPendingMatch
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import (
@@ -154,11 +155,8 @@ class PointMovementSyncService:
         _, created = MermaPOS.objects.update_or_create(source_hash=line.source_hash, defaults=defaults)
         return created
 
-    def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal) -> None:
-        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo)
-        existencia.stock_actual = Decimal(str(existencia.stock_actual or 0)) + delta
-        existencia.actualizado_en = timezone.now()
-        existencia.save(update_fields=["stock_actual", "actualizado_en"])
+    def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str = "ALMACEN_1") -> None:
+        aplicar_delta(insumo, almacen, delta)
 
     def _apply_cedis_delta(self, *, receta, delta: Decimal) -> None:
         inventario, _ = InventarioCedisProducto.objects.get_or_create(receta=receta)
@@ -175,18 +173,34 @@ class PointMovementSyncService:
         }
         existing = MovimientoInventario.objects.filter(source_hash=line.source_hash).first()
         if existing is None:
-            MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
-            self._apply_inventory_delta(insumo=line.insumo, delta=Decimal(str(line.produced_quantity or 0)))
+            movement = MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                delta=Decimal(str(line.produced_quantity or 0)),
+                almacen=movement.almacen or "ALMACEN_1",
+            )
             return True
         new_qty = Decimal(str(line.produced_quantity or 0))
         old_qty = Decimal(str(existing.cantidad or 0))
         if existing.insumo_id == line.insumo_id and old_qty == new_qty:
             return False
         if existing.insumo_id == line.insumo_id:
-            self._apply_inventory_delta(insumo=line.insumo, delta=new_qty - old_qty)
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                delta=new_qty - old_qty,
+                almacen=existing.almacen or "ALMACEN_1",
+            )
         else:
-            self._apply_inventory_delta(insumo=existing.insumo, delta=-old_qty)
-            self._apply_inventory_delta(insumo=line.insumo, delta=new_qty)
+            self._apply_inventory_delta(
+                insumo=existing.insumo,
+                delta=-old_qty,
+                almacen=existing.almacen or "ALMACEN_1",
+            )
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                delta=new_qty,
+                almacen=existing.almacen or "ALMACEN_1",
+            )
         for field, value in defaults.items():
             setattr(existing, field, value)
         existing.save(update_fields=["fecha", "tipo", "insumo", "cantidad", "referencia"])

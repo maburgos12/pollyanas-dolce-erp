@@ -1,0 +1,45 @@
+from decimal import Decimal
+
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from maestros.models import Insumo
+
+from .models import ExistenciaInsumo
+
+
+ALMACEN_DEFAULT = "ALMACEN_1"
+
+
+def get_or_create_existencia(insumo: Insumo, almacen: str = ALMACEN_DEFAULT):
+    return ExistenciaInsumo.objects.get_or_create(insumo=insumo, almacen=almacen)
+
+
+@transaction.atomic
+def aplicar_delta(insumo: Insumo, almacen: str, delta) -> ExistenciaInsumo:
+    delta_decimal = Decimal(str(delta))
+    existencia, _ = ExistenciaInsumo.objects.select_for_update().get_or_create(
+        insumo=insumo,
+        almacen=almacen,
+    )
+    nuevo_saldo = Decimal(str(existencia.stock_actual or 0)) + delta_decimal
+    if nuevo_saldo < 0:
+        raise ValidationError(
+            f"Stock insuficiente en {almacen}: saldo resultante {nuevo_saldo}.",
+            code="stock_negativo",
+        )
+
+    existencia.stock_actual = nuevo_saldo
+    existencia.actualizado_en = timezone.now()
+    existencia.save(update_fields=["stock_actual", "actualizado_en"])
+    return existencia
+
+
+def stock_ubicacion(insumo: Insumo, almacen: str) -> Decimal:
+    stock = (
+        ExistenciaInsumo.objects.filter(insumo=insumo, almacen=almacen)
+        .values_list("stock_actual", flat=True)
+        .first()
+    )
+    return Decimal(str(stock or 0))

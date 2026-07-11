@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from inventario.models import ExistenciaInsumo
+from inventario.services_existencias import get_or_create_existencia
 from maestros.models import Insumo
 
 
@@ -16,7 +16,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        missing_qs = Insumo.objects.filter(activo=True, existenciainsumo__isnull=True).order_by("nombre")
+        missing_qs = Insumo.objects.filter(
+            activo=True,
+        ).exclude(
+            existencias__almacen="ALMACEN_1",
+        ).order_by("nombre")
         total_missing = missing_qs.count()
 
         self.stdout.write("Backfill de existencias por insumo")
@@ -34,17 +38,9 @@ class Command(BaseCommand):
         created = 0
         with transaction.atomic():
             for insumo in missing_qs.iterator():
-                _, was_created = ExistenciaInsumo.objects.get_or_create(
-                    insumo=insumo,
-                    defaults={
-                        "stock_actual": 0,
-                        "punto_reorden": 0,
-                        "stock_minimo": 0,
-                        "stock_maximo": 0,
-                        "inventario_promedio": 0,
-                        "dias_llegada_pedido": 0,
-                        "consumo_diario_promedio": 0,
-                    },
+                _, was_created = get_or_create_existencia(
+                    insumo,
+                    "ALMACEN_1",
                 )
                 if was_created:
                     created += 1

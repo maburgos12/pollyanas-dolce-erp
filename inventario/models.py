@@ -9,6 +9,9 @@ from maestros.models import Insumo
 
 ALMACEN_CHOICES = [
     ("ALMACEN_1", "Almacén 1 (principal)"),
+    ("CFP_1_1", "CFP 1.1"),
+    ("ARMADO", "Armado"),
+    ("CFP_1", "CFP 1"),
     ("ALMACEN_CASA_1", "Almacén Casa 1"),
     ("ALMACEN_CASA_2", "Almacén Casa 2"),
     ("CUARTO_FRIO", "Cuarto Frío"),
@@ -20,7 +23,7 @@ ALMACEN_LABELS = dict(ALMACEN_CHOICES)
 
 
 class ExistenciaInsumo(models.Model):
-    insumo = models.OneToOneField(Insumo, on_delete=models.CASCADE)
+    insumo = models.ForeignKey(Insumo, on_delete=models.CASCADE, related_name="existencias")
     almacen = models.CharField(
         max_length=20, choices=ALMACEN_CHOICES, default="ALMACEN_1",
         verbose_name="Almacén / Ubicación", db_index=True,
@@ -39,6 +42,12 @@ class ExistenciaInsumo(models.Model):
         verbose_name = "Existencia de insumo"
         verbose_name_plural = "Existencias de insumos"
         ordering = ["almacen", "insumo__nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["insumo", "almacen"],
+                name="uniq_existencia_insumo_almacen",
+            ),
+        ]
 
     def __str__(self):
         return self.insumo.nombre

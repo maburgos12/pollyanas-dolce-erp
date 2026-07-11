@@ -18,13 +18,14 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.core.files.uploadedfile import UploadedFile
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from openpyxl import Workbook, load_workbook
 
 from core.access import (
@@ -78,6 +79,7 @@ from .models import (
     MovimientoInventario,
 )
 from .services_conteo_fisico import ConteoFisicoError, ConteoFisicoService, parse_conteo_period
+from .services_existencias import aplicar_delta, get_or_create_existencia, stock_ubicacion
 
 
 SOURCE_TO_FILENAME = {
@@ -102,7 +104,10 @@ def _inventory_canonical_context(limit: int = 200) -> dict[str, object]:
     usage_maps = usage_maps_for_insumo_ids(member_ids)
     existencias_by_insumo = {
         row["insumo_id"]: row["stock_actual"]
-        for row in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids).values("insumo_id", "stock_actual")
+        for row in ExistenciaInsumo.objects.filter(
+            insumo_id__in=member_ids,
+            almacen="ALMACEN_1",
+        ).values("insumo_id", "stock_actual")
     }
     return {
         "canonical_rows": canonical_rows,
@@ -125,7 +130,10 @@ def _canonicalized_insumo_stock_options(
     usage_maps = usage_maps or usage_maps_for_insumo_ids(grouped_member_ids)
     existencias_by_insumo = existencias_by_insumo or {
         row["insumo_id"]: row["stock_actual"]
-        for row in ExistenciaInsumo.objects.filter(insumo_id__in=grouped_member_ids).values("insumo_id", "stock_actual")
+        for row in ExistenciaInsumo.objects.filter(
+            insumo_id__in=grouped_member_ids,
+            almacen="ALMACEN_1",
+        ).values("insumo_id", "stock_actual")
     }
     options = []
     for row in canonical_rows:
@@ -163,7 +171,10 @@ def _canonicalized_existencias_rows(
     usage_maps = usage_maps or usage_maps_for_insumo_ids(member_ids)
     existencias = {
         existencia.insumo_id: existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids).select_related("insumo", "insumo__unidad_base")
+        for existencia in ExistenciaInsumo.objects.filter(
+            insumo_id__in=member_ids,
+            almacen="ALMACEN_1",
+        ).select_related("insumo", "insumo__unidad_base")
     }
     rows: list[SimpleNamespace] = []
     formula_mode = getattr(settings, "INVENTARIO_REORDER_FORMULA", FORMULA_EXCEL_LEGACY)
@@ -507,12 +518,8 @@ def _inventario_reorder_max_diff_pct() -> Decimal:
 
 def _apply_movimiento(movimiento: MovimientoInventario, *, trace_source: str = TRACE_MANUAL_MOVEMENT, user=None) -> None:
     insumo_canonical = canonical_insumo_by_id(movimiento.insumo_id) or movimiento.insumo
-    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
-    if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA:
-        existencia.stock_actual += movimiento.cantidad
-    else:
-        existencia.stock_actual -= movimiento.cantidad
-    existencia.actualizado_en = timezone.now()
+    delta = movimiento.cantidad if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA else -movimiento.cantidad
+    existencia = aplicar_delta(insumo_canonical, movimiento.almacen or "ALMACEN_1", delta)
     set_stock_trace(
         existencia,
         source=trace_source,
@@ -522,7 +529,7 @@ def _apply_movimiento(movimiento: MovimientoInventario, *, trace_source: str = T
         user=user,
         details={"movement_id": movimiento.id, "movement_type": movimiento.tipo},
     )
-    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
+    existencia.save(update_fields=["trazabilidad_stock"])
 
 
 def _can_approve_ajustes(user) -> bool:
@@ -531,7 +538,7 @@ def _can_approve_ajustes(user) -> bool:
 
 def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> None:
     insumo_canonical = canonical_insumo_by_id(ajuste.insumo_id) or ajuste.insumo
-    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
+    existencia, _ = get_or_create_existencia(insumo_canonical, "ALMACEN_1")
     prev_stock = existencia.stock_actual
     delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
     if ajuste.insumo_id == insumo_canonical.id:
@@ -2120,9 +2127,11 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
     solicitud_count = SolicitudCompra.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
 
     existencia_merged = 0
-    source_ex = ExistenciaInsumo.objects.filter(insumo_id=source.id).first()
-    if source_ex:
-        target_ex = ExistenciaInsumo.objects.filter(insumo_id=target.id).first()
+    for source_ex in ExistenciaInsumo.objects.filter(insumo_id=source.id).order_by("almacen"):
+        target_ex = ExistenciaInsumo.objects.filter(
+            insumo_id=target.id,
+            almacen=source_ex.almacen,
+        ).first()
         if not target_ex:
             source_ex.insumo_id = target.id
             source_ex.actualizado_en = timezone.now()
@@ -2136,7 +2145,7 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
                 details={"source_insumo_id": source.id, "target_insumo_id": target.id},
             )
             source_ex.save(update_fields=["insumo", "actualizado_en", "trazabilidad_stock"])
-            existencia_merged = 1
+            existencia_merged += 1
         else:
             target_ex.stock_actual = _to_decimal(target_ex.stock_actual) + _to_decimal(source_ex.stock_actual)
             target_ex.punto_reorden = max(_to_decimal(target_ex.punto_reorden), _to_decimal(source_ex.punto_reorden))
@@ -2178,7 +2187,7 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
                 ]
             )
             source_ex.delete()
-            existencia_merged = 1
+            existencia_merged += 1
 
     if source.proveedor_principal_id and not target.proveedor_principal_id:
         target.proveedor_principal_id = source.proveedor_principal_id
@@ -5034,7 +5043,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
 
         insumo = canonical_insumo_by_id(request.POST.get("insumo_id"))
         if insumo:
-            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo)
+            existencia, _ = get_or_create_existencia(insumo, "ALMACEN_1")
             prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
             prev_minimo = existencia.stock_minimo
@@ -5413,7 +5422,7 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "La cantidad del movimiento debe ser mayor a cero.")
                 return redirect("inventario:movimientos")
 
-            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo)
+            existencia, _ = get_or_create_existencia(insumo, "ALMACEN_1")
             if tipo in {MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO} and existencia.stock_actual < cantidad:
                 messages.error(
                     request,
@@ -5421,12 +5430,14 @@ def movimientos(request: HttpRequest) -> HttpResponse:
                 )
                 return redirect("inventario:movimientos")
 
+            fecha_movimiento = parse_datetime(request.POST.get("fecha") or "") or timezone.now()
             movimiento = MovimientoInventario.objects.create(
-                fecha=request.POST.get("fecha") or timezone.now(),
+                fecha=fecha_movimiento,
                 tipo=tipo,
                 insumo=insumo,
                 cantidad=cantidad,
                 referencia=request.POST.get("referencia", "").strip(),
+                almacen="ALMACEN_1",
             )
             _apply_movimiento(movimiento, user=request.user)
             log_event(
@@ -6182,25 +6193,33 @@ from .models import ALMACEN_CHOICES, ALMACEN_LABELS  # noqa: E402
 
 def _captura_diaria_insumo_options():
     """Insumos activos con su existencia y almacén para el selector."""
-    from django.db.models import OuterRef, Subquery
     insumos = (
         Insumo.objects.filter(activo=True)
-        .select_related("unidad_base", "existenciainsumo")
+        .select_related("unidad_base")
+        .prefetch_related(
+            Prefetch(
+                "existencias",
+                queryset=ExistenciaInsumo.objects.order_by("almacen"),
+                to_attr="existencias_por_ubicacion",
+            )
+        )
         .order_by("nombre")
     )
     rows = []
     for ins in insumos:
-        exist = getattr(ins, "existenciainsumo", None)
-        rows.append(
-            {
-                "id": ins.id,
-                "nombre": ins.nombre,
-                "unidad": getattr(ins.unidad_base, "codigo", "") or "",
-                "almacen": exist.almacen if exist else "ALMACEN_1",
-                "almacen_label": ALMACEN_LABELS.get(exist.almacen if exist else "ALMACEN_1", ""),
-                "stock_actual": float(exist.stock_actual) if exist else 0,
-            }
-        )
+        existencias = ins.existencias_por_ubicacion or [None]
+        for exist in existencias:
+            almacen = exist.almacen if exist else "ALMACEN_1"
+            rows.append(
+                {
+                    "id": ins.id,
+                    "nombre": ins.nombre,
+                    "unidad": getattr(ins.unidad_base, "codigo", "") or "",
+                    "almacen": almacen,
+                    "almacen_label": ALMACEN_LABELS.get(almacen, almacen),
+                    "stock_actual": float(exist.stock_actual) if exist else 0,
+                }
+            )
     return rows
 
 
@@ -6251,39 +6270,35 @@ def captura_diaria(request: HttpRequest) -> HttpResponse:
                 else MovimientoInventario.TIPO_SALIDA
             )
 
-            with transaction.atomic():
-                mov = MovimientoInventario.objects.create(
-                    fecha=fecha_dt,
-                    tipo=tipo,
-                    insumo=insumo,
-                    cantidad=cantidad,
-                    almacen=almacen,
-                    notas=notas,
-                    registrado_por=request.user.get_full_name() or request.user.username,
-                    referencia=f"MANUAL_{timezone.localdate():%Y%m%d}",
-                )
-                exist, _ = ExistenciaInsumo.objects.get_or_create(
-                    insumo=insumo,
-                    defaults={"almacen": almacen},
-                )
-                if tipo == MovimientoInventario.TIPO_ENTRADA:
-                    exist.stock_actual = (exist.stock_actual or Decimal("0")) + cantidad
-                    tipo_label = "Entrada"
-                else:
-                    exist.stock_actual = max(
-                        Decimal("0"), (exist.stock_actual or Decimal("0")) - cantidad
+            delta = cantidad if tipo == MovimientoInventario.TIPO_ENTRADA else -cantidad
+            tipo_label = "Entrada" if tipo == MovimientoInventario.TIPO_ENTRADA else "Salida"
+            try:
+                with transaction.atomic():
+                    mov = MovimientoInventario.objects.create(
+                        fecha=fecha_dt,
+                        tipo=tipo,
+                        insumo=insumo,
+                        cantidad=cantidad,
+                        almacen=almacen,
+                        notas=notas,
+                        registrado_por=request.user.get_full_name() or request.user.username,
+                        referencia=f"MANUAL_{timezone.localdate():%Y%m%d}",
                     )
-                    tipo_label = "Salida"
-                exist.actualizado_en = timezone.now()
-                exist.save(update_fields=["stock_actual", "actualizado_en"])
-
-                log_event(
+                    aplicar_delta(insumo, almacen, delta)
+                    log_event(
+                        request,
+                        action=f"INVENTARIO_{tipo}",
+                        model="MovimientoInventario",
+                        obj_id=mov.pk,
+                        detail=f"{tipo_label} {cantidad} {insumo.nombre}",
+                    )
+            except ValidationError:
+                disponible = stock_ubicacion(insumo, almacen)
+                messages.error(
                     request,
-                    action=f"INVENTARIO_{tipo}",
-                    model="MovimientoInventario",
-                    obj_id=mov.pk,
-                    detail=f"{tipo_label} {cantidad} {insumo.nombre}",
+                    f"Stock insuficiente en {ALMACEN_LABELS.get(almacen, almacen)}: disponible={disponible}, solicitado={cantidad}.",
                 )
+                return redirect("inventario:captura_diaria")
 
             messages.success(
                 request,
@@ -6426,7 +6441,7 @@ def auditoria_inventario(request: HttpRequest) -> HttpResponse:
     # Last reference date
     last_sync_qs = (
         MovimientoInventario.objects
-        .filter(referencia__startswith="SYNC_POINT")
+        .filter(referencia__startswith="SYNC_POINT", almacen="ALMACEN_1")
         .order_by("-fecha")
     )
     last_sync_fecha = None
@@ -6440,11 +6455,16 @@ def auditoria_inventario(request: HttpRequest) -> HttpResponse:
     point_stock: dict[int, Decimal] = {}
     if last_sync_fecha:
         # All movements in the same sync run share the same referencia
-        for mov in MovimientoInventario.objects.filter(referencia=last_sync_ref).select_related("insumo"):
+        for mov in MovimientoInventario.objects.filter(
+            referencia=last_sync_ref,
+            almacen="ALMACEN_1",
+        ).select_related("insumo"):
             point_stock[mov.insumo_id] = Decimal(str(mov.cantidad or 0))
 
     # ── ERP stock (ExistenciaInsumo) ───────────────────────────────────────────
-    exist_qs = ExistenciaInsumo.objects.select_related("insumo__unidad_base").order_by("insumo__nombre")
+    exist_qs = ExistenciaInsumo.objects.filter(almacen="ALMACEN_1").select_related(
+        "insumo__unidad_base"
+    ).order_by("insumo__nombre")
     if filtro_q:
         exist_qs = exist_qs.filter(insumo__nombre__icontains=filtro_q)
 
@@ -6458,7 +6478,7 @@ def auditoria_inventario(request: HttpRequest) -> HttpResponse:
 
     mov_period = (
         MovimientoInventario.objects
-        .filter(fecha__gte=desde_dt, fecha__lte=hasta_dt)
+        .filter(fecha__gte=desde_dt, fecha__lte=hasta_dt, almacen="ALMACEN_1")
         .exclude(referencia__startswith="SYNC_POINT")
         .values("insumo_id", "tipo")
         .annotate(total=Sum("cantidad"))

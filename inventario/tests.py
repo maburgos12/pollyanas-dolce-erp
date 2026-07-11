@@ -2,6 +2,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -2562,3 +2564,59 @@ class InventoryTraceabilityCommandTests(TestCase):
         self.existencia.refresh_from_db()
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_SYNC)
         self.assertEqual(self.existencia.trazabilidad_stock.get("run_source"), AlmacenSyncRun.SOURCE_SCHEDULED)
+
+
+class InventarioUbicacionTests(TestCase):
+    def setUp(self):
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg-ubicacion",
+            nombre="Kilogramo ubicación",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Insumo por ubicación",
+            unidad_base=self.unidad,
+            activo=True,
+        )
+
+    def test_mismo_insumo_tiene_stock_independiente_por_ubicacion(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="CFP_1_1",
+            stock_actual=Decimal("8"),
+        )
+        try:
+            with transaction.atomic():
+                ExistenciaInsumo.objects.create(
+                    insumo=self.insumo,
+                    almacen="ARMADO",
+                    stock_actual=Decimal("2"),
+                )
+        except IntegrityError:
+            self.fail("ExistenciaInsumo todavía impide existencias independientes por ubicación")
+
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=self.insumo, almacen="CFP_1_1").stock_actual,
+            Decimal("8"),
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=self.insumo, almacen="ARMADO").stock_actual,
+            Decimal("2"),
+        )
+
+    def test_aplicar_delta_negativo_conserva_saldo(self):
+        existencia = ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="CFP_1",
+            stock_actual=Decimal("3"),
+        )
+        try:
+            from inventario.services_existencias import aplicar_delta
+        except ModuleNotFoundError:
+            self.fail("Falta la puerta transaccional inventario.services_existencias")
+
+        with self.assertRaises(ValidationError):
+            aplicar_delta(self.insumo, "CFP_1", Decimal("-4"))
+
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("3"))

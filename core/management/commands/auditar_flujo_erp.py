@@ -144,7 +144,9 @@ class Command(BaseCommand):
         }
 
         calidad_stock = {
-            "insumos_sin_existencia": Insumo.objects.filter(activo=True, existenciainsumo__isnull=True).count(),
+            "insumos_sin_existencia": Insumo.objects.filter(activo=True).exclude(
+                existencias__almacen="ALMACEN_1"
+            ).count(),
             "costos_sin_proveedor": CostoInsumo.objects.filter(proveedor__isnull=True).count(),
             "aliases_sin_insumo_activo": InsumoAlias.objects.filter(insumo__activo=False).count(),
             "point_pending_total": PointPendingMatch.qs_operativos().count(),

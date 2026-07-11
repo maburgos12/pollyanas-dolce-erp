@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from core.audit import log_event
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.services_existencias import aplicar_delta, get_or_create_existencia
 from inventario.stock_trace import TRACE_IMPORTED_MOVEMENT, TRACE_IMPORT_INVENTORY, set_stock_trace
 from inventario.utils.reorder import calcular_punto_reorden
 from maestros.models import Insumo, InsumoAlias, UnidadMedida
@@ -563,12 +564,8 @@ def _ensure_alias(raw_name: str, insumo: Insumo) -> bool:
 
 
 def _apply_movimiento(movimiento: MovimientoInventario, *, trace_context: dict[str, Any] | None = None) -> ExistenciaInsumo:
-    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=movimiento.insumo)
-    if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA:
-        existencia.stock_actual += movimiento.cantidad
-    else:
-        existencia.stock_actual -= movimiento.cantidad
-    existencia.actualizado_en = timezone.now()
+    delta = movimiento.cantidad if movimiento.tipo == MovimientoInventario.TIPO_ENTRADA else -movimiento.cantidad
+    existencia = aplicar_delta(movimiento.insumo, movimiento.almacen or "ALMACEN_1", delta)
     set_stock_trace(
         existencia,
         source=TRACE_IMPORTED_MOVEMENT,
@@ -582,7 +579,7 @@ def _apply_movimiento(movimiento: MovimientoInventario, *, trace_context: dict[s
             "batch_token": str((trace_context or {}).get("batch_token") or ""),
         },
     )
-    existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
+    existencia.save(update_fields=["trazabilidad_stock"])
     log_event(
         (trace_context or {}).get("user"),
         "IMPORT",
@@ -712,7 +709,7 @@ def import_folder(
             if dry_run:
                 continue
 
-            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=match.insumo)
+            existencia, _ = get_or_create_existencia(match.insumo, "ALMACEN_1")
             existencia.stock_actual = row.stock_actual
             if row.punto_reorden >= 0:
                 existencia.punto_reorden = row.punto_reorden
