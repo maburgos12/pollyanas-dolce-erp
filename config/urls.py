@@ -3,12 +3,20 @@ from pathlib import Path
 from django.contrib import admin
 from django.conf import settings
 from django.urls import path, include, re_path
+from django.http import Http404
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
 from core import shortcut_views
 from core import views as core_views
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
+
+
+def serve_private_maintenance_media(request, path):
+    """Keep legacy local development working without exposing operational evidence in production."""
+    if not settings.DEBUG:
+        raise Http404
+    return static_serve(request, path, document_root=settings.MEDIA_ROOT)
 
 admin.site.site_url = "/dashboard/"
 
@@ -110,9 +118,14 @@ urlpatterns = [
     path("api/bonos-ventas/", include("bonos_ventas.urls")),
     path("api/fallas/", include(("fallas.urls", "fallas_api"), namespace="fallas_api")),
     path("api/mantenimiento/", include(("mantenimiento.api_urls", "mantenimiento_api"), namespace="mantenimiento_api")),
+    path("api/mantenimiento/v2/", include(("mantenimiento.api_v2_urls", "mantenimiento_api_v2"), namespace="mantenimiento_api_v2")),
     path("api/pos-bridge/", include(("pos_bridge.api.urls", "pos_bridge_api"), namespace="pos_bridge_api")),
 ]
 
 urlpatterns += [
+    re_path(
+        r"^media/(?P<path>(?:fallas/(?:evidencias|seguimiento)|activos/(?:facturas|evidencias)|logistica/reportes|servicios_unidad|reparaciones_unidad)/.*)$",
+        serve_private_maintenance_media,
+    ),
     re_path(r"^media/(?P<path>.*)$", static_serve, {"document_root": settings.MEDIA_ROOT}),
 ]

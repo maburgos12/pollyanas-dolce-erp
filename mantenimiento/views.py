@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -22,6 +23,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
+from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
+from mantenimiento.services_access import (
+    authorized_branch_ids, authorized_fallas, authorized_orders, authorized_unit_reports,
+    can_access_mantenimiento,
+)
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -67,17 +73,7 @@ class EsMantenimiento(BasePermission):
 
 
 def _can_access_mantenimiento(user) -> bool:
-    if not user or not user.is_authenticated:
-        return False
-    grupos = set(user.groups.values_list("name", flat=True))
-    return (
-        user.is_superuser
-        or bool(grupos & EsMantenimiento.GRUPOS)
-        or can_view_module(user, "activos")
-        or can_manage_submodule(user, "mantenimiento", "bandeja")
-        or can_view_submodule(user, "mantenimiento", "app")
-        or can_view_submodule(user, "mantenimiento", "dashboard")
-    )
+    return can_access_mantenimiento(user)
 
 
 def _can_write_mantenimiento(user) -> bool:
@@ -99,6 +95,11 @@ def _require_mantenimiento(user):
         return
     if not _can_access_mantenimiento(user):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
+
+
+def _require_write_mantenimiento(user):
+    if not _can_write_mantenimiento(user):
+        raise PermissionDenied("No tienes permisos para modificar Mantenimiento.")
 
 
 @never_cache
@@ -132,15 +133,44 @@ def _safe_int(value, default=0):
 
 
 def _guardar_evidencias_falla(bitacora, archivos, user):
-    for archivo in archivos:
-        if not archivo:
-            continue
-        EvidenciaSeguimientoFalla.objects.create(
-            bitacora=bitacora,
-            archivo=archivo,
-            nombre=getattr(archivo, "name", "")[:255],
-            subido_por=user,
-        )
+    creadas = []
+    try:
+        for archivo in archivos:
+            if not archivo:
+                continue
+            evidencia = EvidenciaSeguimientoFalla(
+                bitacora=bitacora, archivo=archivo,
+                nombre=getattr(archivo, "name", "")[:255], subido_por=user,
+            )
+            creadas.append(evidencia)
+            evidencia.save()
+    except Exception:
+        _eliminar_archivos_evidencias(creadas)
+        raise
+    return creadas
+
+
+def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
+    reporte = ReporteFalla(**reporte_kwargs)
+    try:
+        with transaction.atomic():
+            reporte.save()
+            BitacoraFalla.objects.create(
+                reporte=reporte, usuario=usuario, estatus_anterior="",
+                estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO, comentario=comentario,
+            )
+    except Exception:
+        if (reporte.foto_evidencia and reporte.foto_evidencia.name
+                and getattr(reporte.foto_evidencia, "_committed", False)):
+            reporte.foto_evidencia.delete(save=False)
+        raise
+    return reporte
+
+
+def _eliminar_archivos_evidencias(evidencias):
+    for evidencia in evidencias:
+        if evidencia.archivo and getattr(evidencia.archivo, "_committed", False):
+            evidencia.archivo.delete(save=False)
 
 
 def _ensure_provider(nombre):
@@ -1070,7 +1100,11 @@ def _registrar_plan(plan, user, fecha, notas):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def ejecutar_plan_movil(request, pk):
-    plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
+    branch_ids = authorized_branch_ids(request.user)
+    plans = PlanMantenimiento.objects.filter(activo=True)
+    if branch_ids is not None:
+        plans = plans.filter(activo_ref__sucursal_id__in=branch_ids)
+    plan = get_object_or_404(plans, pk=pk)
     from django.utils.dateparse import parse_date
 
     fecha = parse_date((request.data.get("fecha_ejecucion") or "").strip()) or timezone.localdate()
@@ -1089,19 +1123,28 @@ def ejecutar_plan_movil(request, pk):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def crear_falla_movil(request):
-    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal")))
     categoria = get_object_or_404(CategoriaFalla, pk=_safe_int(request.data.get("categoria")), activo=True)
     titulo = (request.data.get("titulo") or "").strip()
     descripcion = (request.data.get("descripcion") or "").strip()
     if not titulo or not descripcion:
         return Response({"error": "Título y descripción son obligatorios."}, status=400)
+    foto = request.FILES.get("foto_evidencia")
+    try:
+        fotos = validate_evidence_files([foto] if foto else [], images_only=True)
+    except EvidenceValidationError as exc:
+        return Response({"error": "La foto inicial no es válida.", "evidencias": exc.errors}, status=400)
     activo_obj = None
     activo_id = _safe_int(request.data.get("activo_id"))
     if activo_id:
         activo_obj = Activo.objects.filter(pk=activo_id, activo=True, sucursal=sucursal).first()
         if not activo_obj:
             return Response({"error": "El activo no corresponde a la sucursal seleccionada."}, status=400)
-    reporte = ReporteFalla.objects.create(
+    reporte = _crear_reporte_falla_atomico(reporte_kwargs=dict(
         sucursal=sucursal,
         categoria=categoria,
         area=(request.data.get("area") or ReporteFalla.AREA_GENERAL).strip(),
@@ -1111,14 +1154,8 @@ def crear_falla_movil(request):
         activo_relacionado=activo_obj,
         reportado_por=request.user,
         estatus=ReporteFalla.ESTATUS_ABIERTO,
-    )
-    BitacoraFalla.objects.create(
-        reporte=reporte,
-        usuario=request.user,
-        estatus_anterior="",
-        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
-        comentario="Reporte creado desde app móvil de mantenimiento.",
-    )
+        foto_evidencia=fotos[0] if fotos else None,
+    ), usuario=request.user, comentario="Reporte creado desde app móvil de mantenimiento.")
     return Response(_branch_falla_item(reporte), status=201)
 
 
@@ -1138,7 +1175,11 @@ def crear_servicio_movil(request):
     if alcance not in {"activo", "unidad", "instalacion"} or not descripcion:
         return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
 
-    sucursal = get_object_or_404(Sucursal, pk=_safe_int(request.data.get("sucursal_id")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
     if not fecha_objetivo:
         fecha_objetivo = timezone.localdate()
@@ -1202,7 +1243,11 @@ def crear_servicio_movil(request):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def crear_reporte_unidad_movil(request):
-    unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad")), activa=True)
+    branch_ids = authorized_branch_ids(request.user)
+    unidades = Unidad.objects.filter(activa=True)
+    if branch_ids is not None:
+        unidades = unidades.filter(sucursal_id__in=branch_ids)
+    unidad = get_object_or_404(unidades, pk=_safe_int(request.data.get("unidad")))
     tipo = (request.data.get("tipo") or "").strip()
     severidad = (request.data.get("severidad") or ReporteUnidad.SEVERIDAD_INFORMATIVO).strip()
     descripcion = (request.data.get("descripcion") or "").strip()
@@ -1232,6 +1277,7 @@ def crear_reporte_unidad_movil(request):
 @api_view(["POST"])
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
+@transaction.atomic
 def actualizar_item(request, tipo, pk):
     tipo = (tipo or "").strip().lower()
     comentario = (request.data.get("comentario") or "").strip()
@@ -1240,7 +1286,14 @@ def actualizar_item(request, tipo, pk):
     costo_real = _parse_decimal(request.data.get("costo_real"))
 
     if tipo == "falla":
-        reporte = get_object_or_404(ReporteFalla, pk=pk)
+        try:
+            evidencias = validate_evidence_files(request.FILES.getlist("evidencias_seguimiento"))
+        except EvidenceValidationError as exc:
+            return Response(
+                {"error": "No se pudieron adjuntar las evidencias.", "evidencias": exc.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reporte = get_object_or_404(authorized_fallas(request.user), pk=pk)
         estatus_anterior = reporte.estatus
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteFalla.ESTATUS}:
@@ -1260,7 +1313,9 @@ def actualizar_item(request, tipo, pk):
             reporte.proveedor_servicio = proveedor
         activo_id = request.data.get("activo_id")
         if activo_id:
-            reporte.activo_relacionado = get_object_or_404(Activo, pk=activo_id, activo=True)
+            reporte.activo_relacionado = get_object_or_404(
+                Activo, pk=activo_id, activo=True, sucursal_id=reporte.sucursal_id
+            )
         else:
             nuevo_activo = _create_asset_from_followup(request.data, reporte.sucursal, proveedor_obj)
             if nuevo_activo:
@@ -1284,11 +1339,11 @@ def actualizar_item(request, tipo, pk):
             estatus_nuevo=estatus if estatus != estatus_anterior else "",
             comentario=comentario or "Seguimiento actualizado desde Mantenimiento.",
         )
-        _guardar_evidencias_falla(bitacora, request.FILES.getlist("evidencias_seguimiento"), request.user)
+        _guardar_evidencias_falla(bitacora, evidencias, request.user)
         return _update_response(request, _branch_falla_item(reporte))
 
     if tipo == "unidad":
-        reporte = get_object_or_404(ReporteUnidad, pk=pk)
+        reporte = get_object_or_404(authorized_unit_reports(request.user), pk=pk)
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteUnidad.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
@@ -1306,7 +1361,7 @@ def actualizar_item(request, tipo, pk):
         return _update_response(request, _logistica_item(reporte))
 
     if tipo == "orden":
-        orden = get_object_or_404(OrdenMantenimiento, pk=pk)
+        orden = get_object_or_404(authorized_orders(request.user), pk=pk)
         estatus = (request.data.get("estatus") or orden.estatus).strip().upper()
         if estatus not in {value for value, _label in OrdenMantenimiento.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
@@ -1336,7 +1391,7 @@ def actualizar_item(request, tipo, pk):
 @login_required
 def crear_falla(request):
     """Crea un ReporteFalla directamente desde el panel de mantenimiento (sin PWA)."""
-    _require_mantenimiento(request.user)
+    _require_write_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
 
@@ -1365,16 +1420,32 @@ def crear_falla(request):
         return redirect("mantenimiento:dashboard")
 
     from core.models import Sucursal
-    sucursal = Sucursal.objects.filter(pk=sucursal_id).first()
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = sucursales.filter(pk=sucursal_id).first()
     categoria = CategoriaFalla.objects.filter(pk=categoria_id, activo=True).first()
     if not sucursal or not categoria:
         msg.error(request, "Sucursal o categoría no válida.")
         return redirect("mantenimiento:dashboard")
 
-    activo_obj = Activo.objects.filter(pk=activo_id, activo=True).first() if activo_id else None
+    activo_obj = None
+    if activo_id:
+        activo_obj = Activo.objects.filter(pk=activo_id, activo=True, sucursal=sucursal).first()
+        if not activo_obj:
+            msg.error(request, "El activo no pertenece a una sucursal autorizada.")
+            return redirect("mantenimiento:dashboard")
 
     foto = request.FILES.get("foto_evidencia")
-    reporte = ReporteFalla(
+    try:
+        validated_photos = validate_evidence_files([foto] if foto else [], images_only=True)
+    except EvidenceValidationError as exc:
+        for error in exc.errors:
+            msg.error(request, error)
+        return redirect("mantenimiento:dashboard")
+    foto = validated_photos[0] if validated_photos else None
+    reporte_kwargs = dict(
         sucursal=sucursal,
         categoria=categoria,
         area=area,
@@ -1386,14 +1457,9 @@ def crear_falla(request):
         estatus=ReporteFalla.ESTATUS_ABIERTO,
     )
     if foto:
-        reporte.foto_evidencia = foto
-    reporte.save()
-
-    BitacoraFalla.objects.create(
-        reporte=reporte,
-        usuario=request.user,
-        estatus_anterior="",
-        estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+        reporte_kwargs["foto_evidencia"] = foto
+    reporte = _crear_reporte_falla_atomico(
+        reporte_kwargs=reporte_kwargs, usuario=request.user,
         comentario="Reporte creado desde panel de Mantenimiento.",
     )
     msg.success(request, f"Falla #{reporte.id} creada: {titulo}")
@@ -1403,7 +1469,7 @@ def crear_falla(request):
 @login_required
 def crear_servicio_mantenimiento(request):
     """Registra un servicio realizado o programa una orden puntual sin reporte previo."""
-    _require_mantenimiento(request.user)
+    _require_write_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
 
@@ -1459,13 +1525,17 @@ def crear_servicio_mantenimiento(request):
         msg.error(request, "El archivo supera el límite de 30 MB.")
         return redirect("mantenimiento:dashboard")
 
-    sucursal = Sucursal.objects.filter(pk=sucursal_id, activa=True).first()
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = sucursales.filter(pk=sucursal_id).first()
     if not sucursal:
         msg.error(request, "Selecciona una sucursal válida.")
         return redirect("mantenimiento:dashboard")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True, sucursal=sucursal)
         if unidad.sucursal_id != sucursal.id:
             msg.error(request, "La unidad logística no pertenece a la sucursal seleccionada.")
             return redirect("mantenimiento:dashboard")

@@ -14,6 +14,25 @@ from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 
 
+class MaintenanceHistoryEventSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    fecha_evento = serializers.DateTimeField()
+    tipo = serializers.CharField()
+    estado = serializers.CharField()
+    sucursal = serializers.DictField()
+    sujeto = serializers.DictField(allow_null=True)
+    actor = serializers.DictField()
+    origen = serializers.CharField()
+    parent_uid = serializers.CharField(allow_null=True)
+    captura_directa = serializers.BooleanField()
+    titulo = serializers.CharField()
+    descripcion = serializers.CharField()
+    activo_id = serializers.IntegerField(allow_null=True)
+    unidad_id = serializers.IntegerField(allow_null=True)
+    factura = serializers.DictField(allow_null=True)
+    costo = serializers.DecimalField(max_digits=18, decimal_places=2, allow_null=True)
+
+
 class ActivoListSerializer(serializers.ModelSerializer):
     sucursal_nombre = serializers.CharField(source="sucursal.nombre", read_only=True, default="")
 

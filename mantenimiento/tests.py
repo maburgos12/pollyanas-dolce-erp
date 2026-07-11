@@ -1,4 +1,5 @@
 from datetime import timedelta
+import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -78,10 +79,32 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260710-trazabilidad-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-paridad-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
-        self.assertContains(worker, "pollyanas-mantenimiento-pwa-v19-20260710-trazabilidad")
+        worker_source = worker.content.decode()
+        self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
+        cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;", worker_source)
+        registration_source = app.content.decode()
+        registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
+        self.assertEqual(cache_version, registration_version)
+        self.assertIn("key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME", worker_source)
+        self.assertIn('url.pathname.startsWith("/api/")', worker_source)
+        self.assertIn('url.pathname.startsWith("/media/")', worker_source)
+        self.assertIn("event.respondWith(fetch(event.request));", worker_source)
+        protected_branch = worker_source.split('event.request.mode === "navigate"', 1)[1].split("return;", 1)[0]
+        self.assertNotIn("caches.match", protected_branch)
+        self.assertIn('url.pathname.startsWith("/mantenimiento/")', protected_branch)
+        self.assertIn("event.respondWith(fetch(event.request));", protected_branch)
+        shell_assets = worker_source.split("const SHELL_ASSETS = [", 1)[1].split("];", 1)[0]
+        self.assertNotIn('"/mantenimiento/app/"', shell_assets)
+        self.assertIn('url.origin === self.location.origin', worker_source)
+        self.assertIn('url.pathname.startsWith("/static/")', worker_source)
+        self.assertIn('!event.request.headers.has("Authorization")', worker_source)
+        activation_branch = worker_source.split('self.addEventListener("activate"', 1)[1].split('self.addEventListener("fetch"', 1)[0]
+        self.assertIn("key.startsWith(CACHE_PREFIX)", activation_branch)
+        self.assertNotIn("keys.filter((key) => key !== CACHE_NAME)", activation_branch)
 
     def test_provider_api_uses_service_provider_catalog(self):
         Proveedor.objects.create(nombre="Proveedor insumos QA", activo=True)
@@ -197,6 +220,136 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "responsable_usuario_nombre")
         self.assertContains(app, "creado_por_nombre")
         self.assertContains(app, "ejecutado_por_nombre")
+
+    def test_pwa_consumes_v2_inbox_history_and_lazy_detail_contracts(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(app, 'const API_V2 = `${API}/v2`;')
+        self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
+        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1')
+        self.assertContains(app, "detailCache: new Map()")
+        self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0}")
+        self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
+        self.assertContains(app, 'periodo=${encodeURIComponent(state.history.periodo)}')
+        self.assertContains(app, "Cargar más")
+        self.assertContains(app, 'event.key === "Escape"')
+        self.assertContains(app, 'aria-label="Cerrar imagen"')
+        self.assertContains(app, 'prefers-reduced-motion: reduce')
+        self.assertContains(app, "evidenceObjectUrls: new Set()")
+        self.assertContains(app, "async function loadProtectedEvidence")
+        self.assertContains(app, "await apiV2Fetch(url)")
+        self.assertContains(app, "URL.createObjectURL(blob)")
+        self.assertContains(app, "URL.revokeObjectURL(url)")
+        self.assertContains(app, "Evidencia no disponible")
+        self.assertContains(app, "historyLoading: false")
+        self.assertContains(app, "const requestedPage = state.history.page")
+        self.assertContains(app, "if (state.historyLoading) return")
+
+    def test_pwa_closed_kpi_opens_30_day_history_and_does_not_bump_worker(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(app, "openClosedHistory()")
+        self.assertContains(app, 'state.history.periodo = "30d"')
+        self.assertContains(app, 'state.history.estado = "cerrado"')
+
+    def test_pwa_history_catch_ignores_stale_request_before_mutating_ui(self):
+        self.client.force_login(self.mantenimiento)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+        catch_start = source.index("catch (error) {", source.index("async function renderHistorial"))
+        catch_end = source.index("}", source.index("return render(shell", catch_start))
+        catch_source = source[catch_start:catch_end]
+
+        guard = "if (generation !== state.requestGeneration.history) return;"
+        mutation = "state.historyLoading = false;"
+        render_error = "return render(shell"
+        self.assertIn(guard, catch_source)
+        self.assertLess(catch_source.index(guard), catch_source.index(mutation))
+        self.assertLess(catch_source.index(guard), catch_source.index(render_error))
+
+    def test_pwa_detail_and_evidence_async_contracts_are_stale_safe(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn('data-maintenance-uid="${esc(item.uid)}"', source)
+        self.assertNotIn("onclick=\"openItemDetail('${esc(item.uid)}'", source)
+        self.assertIn('event.target.closest("[data-maintenance-uid]")', source)
+        detail_start = source.index("async function openItemDetail")
+        generation = source.index("++state.requestGeneration.detail", detail_start)
+        cache_read = source.index("state.detailCache.get(uid)", detail_start)
+        self.assertLess(generation, cache_read)
+
+        load_start = source.index("async function loadProtectedEvidence")
+        await_blob = source.index("await evidenceBlob(url)", load_start)
+        requery = source.index("container = document.getElementById(containerId)", await_blob)
+        stale_guard = source.index("generation !== state.evidenceGeneration", requery)
+        object_url = source.index("URL.createObjectURL(blob)", stale_guard)
+        self.assertLess(await_blob, requery)
+        self.assertLess(requery, stale_guard)
+        self.assertLess(stale_guard, object_url)
+
+    def test_pwa_viewer_focus_and_bounded_blob_cache_contracts(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn("closeImageViewer(false);", source)
+        self.assertIn('event.key !== "Tab"', source)
+        self.assertIn("event.shiftKey && document.activeElement === first", source)
+        self.assertIn("state.viewerReturnFocus?.focus?.()", source)
+        self.assertIn("state.evidenceBlobCache.size > 20", source)
+        self.assertIn("state.evidenceBlobCache.keys().next().value", source)
+        self.assertIn("state.evidenceBlobCache.clear()", source)
+        self.assertIn('window.addEventListener("pagehide", clearEvidenceCache)', source)
+
+    def test_pwa_inbox_thumbnails_use_authenticated_blob_pipeline(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        card_start = source.index("function bandejaItemCard")
+        card_end = source.index("function statusClass", card_start)
+        card_source = source[card_start:card_end]
+        self.assertIn("loadProtectedThumbnail", card_source)
+        self.assertNotIn('src="${esc(item.foto_inicial.url)}"', card_source)
+
+        thumbnail_start = source.index("async function loadProtectedThumbnail")
+        thumbnail_end = source.index("function revokeEvidenceUrls", thumbnail_start)
+        thumbnail_source = source[thumbnail_start:thumbnail_end]
+        self.assertIn("await evidenceBlob(url)", thumbnail_source)
+        self.assertIn("generation !== state.evidenceGeneration", thumbnail_source)
+        self.assertIn("URL.createObjectURL(blob)", thumbnail_source)
+        self.assertIn("state.evidenceObjectUrls.add(objectUrl)", thumbnail_source)
+
+    def test_pwa_detail_return_refinds_current_trigger_by_uid(self):
+        self.client.force_login(self.mantenimiento)
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        return_start = source.index("async function returnFromDetail")
+        return_end = source.index("function invalidateDetail", return_start)
+        return_source = source[return_start:return_end]
+        self.assertIn("await showScreen(target)", return_source)
+        self.assertIn("state.detailReturn.uid", return_source)
+        self.assertIn('document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus()', return_source)
+        self.assertNotIn("detailReturn.focus", return_source)
+
+        render_start = source.index("function render(html")
+        render_end = source.index("function appGlyph", render_start)
+        render_source = source[render_start:render_end]
+        self.assertIn("return new Promise(resolve =>", render_source)
+        self.assertIn("window.clearTimeout(pendingRenderTimer)", render_source)
+        self.assertIn("pendingRenderResolve(false)", render_source)
+
+        pending_start = source.index("async function renderPendientes")
+        pending_end = source.index("async function renderNuevaFalla", pending_start)
+        self.assertIn("return render(shell(`", source[pending_start:pending_end])
+
+        history_start = source.index("async function renderHistorial")
+        history_end = source.index("function detailRows", history_start)
+        history_source = source[history_start:history_end]
+        self.assertIn('return render(shell(`<button class="secondary-btn"', history_source)
 
 
 class MantenimientoUnifiedInboxTests(TestCase):
@@ -555,7 +708,9 @@ class MantenimientoUnifiedInboxTests(TestCase):
             {
                 "estatus": ReporteFalla.ESTATUS_CERRADO,
                 "comentario": "Se entrega funcionando con foto final.",
-                "evidencias_seguimiento": SimpleUploadedFile("foto-final.jpg", b"img", content_type="image/jpeg"),
+                "evidencias_seguimiento": SimpleUploadedFile(
+                    "foto-final.jpg", b"\xff\xd8\xffimagen", content_type="image/jpeg"
+                ),
             },
         )
 
@@ -771,7 +926,7 @@ class MantenimientoUnifiedInboxTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(ServicioRealizadoUnidad.objects.count(), servicios_before)
 
     def test_can_register_installation_service_by_branch_without_asset_selection(self):

@@ -3063,7 +3063,7 @@ def tickets_kanban(request):
         "tickets_abiertos": base_qs.filter(estatus=ReporteUnidad.ESTATUS_ABIERTO),
         "tickets_en_proceso": base_qs.filter(estatus=ReporteUnidad.ESTATUS_EN_PROCESO),
         "tickets_programados": base_qs.filter(estatus=ReporteUnidad.ESTATUS_PROGRAMADO),
-        "tickets_cerrados_hoy": base_qs.filter(estatus=ReporteUnidad.ESTATUS_CERRADO, actualizado_en__date=today),
+        "tickets_cerrados_hoy": base_qs.filter(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__date=today),
     }
     return render(request, "logistica/tickets_kanban.html", context)
 
