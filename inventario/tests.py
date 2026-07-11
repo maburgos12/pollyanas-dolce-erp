@@ -149,22 +149,56 @@ class LoteProduccionTests(TestCase):
         self.assertEqual(movimiento.registrado_por_usuario, self.user)
         self.assertEqual(movimiento.trazabilidad["evento"], "cierre_hornos")
 
-    def test_lot_code_is_immutable_after_first_save(self):
+    def test_lot_historical_identity_fields_are_immutable(self):
         lote = self.crear_lote()
-        codigo_original = lote.codigo
-        self.insumo.codigo_point = "OTRO-CODIGO"
-        self.insumo.save(update_fields=["codigo_point"])
         nueva_linea = BitacoraOperativaLinea.objects.create(
             bitacora=self.bitacora,
             receta=self.receta,
         )
-        lote.producido_en = self.producido_en + timedelta(days=1)
-        lote.linea_origen = nueva_linea
+        otra_unidad = UnidadMedida.objects.create(codigo="otra-unidad-lote", nombre="Otra unidad")
+        otro_insumo = Insumo.objects.create(
+            codigo_point="OTRO-INSUMO-LOTE",
+            nombre="Otro insumo de lote",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        otra_receta = Receta.objects.create(
+            nombre="Otra receta historica",
+            codigo_point="OTRA-RECETA-HIST",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="otra-receta-historica",
+        )
+        otro_usuario = get_user_model().objects.create_user(username="otro_productor_lotes")
+        changes = {
+            "codigo": "LOT-CODIGO-MANIPULADO",
+            "insumo": otro_insumo,
+            "receta": otra_receta,
+            "cantidad_inicial": Decimal("9"),
+            "unidad": otra_unidad,
+            "producido_en": self.producido_en + timedelta(days=1),
+            "linea_origen": nueva_linea,
+            "creado_por": otro_usuario,
+            "es_apertura": True,
+        }
 
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                fresh_lote = LoteProduccion.objects.get(pk=lote.pk)
+                setattr(fresh_lote, field, value)
+                with self.assertRaises(ValidationError) as error:
+                    fresh_lote.save()
+                self.assertIn(field, error.exception.message_dict)
+
+    def test_lot_status_and_observations_remain_editable(self):
+        lote = self.crear_lote()
+
+        lote.estado = LoteProduccion.RETENIDO
+        lote.observaciones = "Retenido para revision de calidad"
         lote.save()
         lote.refresh_from_db()
 
-        self.assertEqual(lote.codigo, codigo_original)
+        self.assertEqual(lote.estado, LoteProduccion.RETENIDO)
+        self.assertEqual(lote.observaciones, "Retenido para revision de calidad")
 
     def test_ordinary_lot_requires_source_line_for_same_recipe(self):
         otra_receta = Receta.objects.create(

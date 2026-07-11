@@ -56,3 +56,59 @@ class ExistenciasPorUbicacionMigrationTests(TransactionTestCase):
         }
         self.assertEqual(rows[self.insumo_ids[0]], ("ALMACEN_CASA_1", Decimal("8")))
         self.assertEqual(rows[self.insumo_ids[1]], ("CUARTO_FRIO", Decimal("2")))
+
+
+class LotesYOrigenMovimientosMigrationTests(TransactionTestCase):
+    migrate_from = ("inventario", "0013_existencias_por_ubicacion")
+    migrate_to = ("inventario", "0014_lotes_y_origen_movimientos")
+
+    def setUp(self):
+        super().setUp()
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-mig-lote",
+            nombre="Kilogramo migracion lote",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            codigo_point="MIG-LOTE-1",
+            nombre="Insumo historico migracion lote",
+            unidad_base=unidad,
+        )
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_from])
+        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        MovimientoInventario = old_apps.get_model("inventario", "MovimientoInventario")
+        movimiento = MovimientoInventario.objects.create(
+            tipo="ENTRADA",
+            insumo_id=insumo.id,
+            cantidad=Decimal("4.250"),
+            referencia="MOV-HIST-001",
+            almacen="ALMACEN_1",
+            registrado_por="Usuario historico",
+            source_hash="movement-history-before-lots",
+        )
+        self.movimiento_id = movimiento.id
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        self.apps = executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def test_preserva_movimiento_historico_y_agrega_origenes_vacios(self):
+        MovimientoInventario = self.apps.get_model("inventario", "MovimientoInventario")
+
+        movimiento = MovimientoInventario.objects.get(pk=self.movimiento_id)
+
+        self.assertEqual(movimiento.tipo, "ENTRADA")
+        self.assertEqual(movimiento.cantidad, Decimal("4.250"))
+        self.assertEqual(movimiento.referencia, "MOV-HIST-001")
+        self.assertEqual(movimiento.registrado_por, "Usuario historico")
+        self.assertEqual(movimiento.source_hash, "movement-history-before-lots")
+        self.assertIsNone(movimiento.lote_id)
+        self.assertIsNone(movimiento.linea_bitacora_id)
+        self.assertIsNone(movimiento.registrado_por_usuario_id)
+        self.assertEqual(movimiento.trazabilidad, {})

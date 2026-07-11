@@ -119,6 +119,37 @@ class LoteProduccion(models.Model):
 
     def clean(self):
         errors = {}
+        if self.pk:
+            persisted = type(self).objects.filter(pk=self.pk).values(
+                "codigo",
+                "insumo_id",
+                "receta_id",
+                "cantidad_inicial",
+                "unidad_id",
+                "producido_en",
+                "linea_origen_id",
+                "creado_por_id",
+                "es_apertura",
+            ).first()
+            if persisted:
+                immutable_fields = {
+                    "codigo": "codigo",
+                    "insumo": "insumo_id",
+                    "receta": "receta_id",
+                    "cantidad_inicial": "cantidad_inicial",
+                    "unidad": "unidad_id",
+                    "producido_en": "producido_en",
+                    "linea_origen": "linea_origen_id",
+                    "creado_por": "creado_por_id",
+                    "es_apertura": "es_apertura",
+                }
+                for field, attribute in immutable_fields.items():
+                    if getattr(self, attribute) != persisted[attribute]:
+                        errors[field] = "Este dato historico del lote no puede modificarse."
+            if errors:
+                raise ValidationError(errors)
+            return
+
         try:
             cantidad = Decimal(str(self.cantidad_inicial))
         except (ArithmeticError, TypeError, ValueError):
@@ -175,7 +206,6 @@ class LoteProduccion(models.Model):
         codigo_existente = ""
         if self.pk:
             codigo_existente = type(self).objects.filter(pk=self.pk).values_list("codigo", flat=True).first() or ""
-            self.codigo = codigo_existente
         self.full_clean(exclude=["codigo"] if not self.codigo else None)
         point_code = self.insumo.codigo_point if self.insumo_id else self.receta.codigo_point
         identity = normalizar_codigo_lote(point_code)
