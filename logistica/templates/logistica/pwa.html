@@ -3268,7 +3268,7 @@
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
         const notasDraft = entregaNotasDraftFor(paradaId);
         const parada = (state.rutaActiva?.paradas || []).find((row) => Number(row.id) === Number(paradaId));
-        const fueraDeGeocerca = parada?.estado !== "VISITADA";
+        const fueraDeGeocerca = parada?.geocerca_confiable !== true;
         let notas = estado === "ENTREGADA" ? "Entrega completa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
         if (fueraDeGeocerca) {
           const aviso = "Estás fuera de la sucursal o no pudimos validar tu ubicación. La entrega se registrará, pero será revisada por tu jefe.";

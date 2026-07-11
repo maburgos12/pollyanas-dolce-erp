@@ -96,6 +96,36 @@ def tiene_llegada_geocerca_confiable(*, ruta: RutaEntrega, parada: ParadaRuta) -
     return _geocerca_real(ruta=ruta, parada=parada) is not None
 
 
+def obtener_respuesta_idempotente(
+    *, ruta, parada, actor, entrega_estado, motivo, client_event_id, evidencias=(), ubicacion=None
+):
+    if not getattr(actor, "pk", None) or not str(client_event_id or "").strip():
+        return None
+    payload_hash = _payload_hash(
+        entrega_estado=entrega_estado,
+        motivo=motivo,
+        ubicacion=ubicacion,
+        evidencias=evidencias,
+    )
+    existente = ParadaEntregaEvidencia.objects.filter(
+        ruta=ruta,
+        capturado_por=actor,
+        client_event_id=client_event_id,
+    ).first()
+    if not existente:
+        return None
+    if existente.parada_id != parada.id or existente.metadata.get("payload_hash") != payload_hash:
+        raise EntregaIdempotenciaConflicto("client_event_id ya fue usado con un payload diferente.")
+    return existente.metadata.get("respuesta_api")
+
+
+def guardar_respuesta_idempotente(*, evidencia: ParadaEntregaEvidencia, respuesta):
+    metadata = dict(evidencia.metadata or {})
+    metadata["respuesta_api"] = _json_safe(respuesta)
+    evidencia.metadata = metadata
+    evidencia.save(update_fields=["metadata"])
+
+
 def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entrega_estado, motivo, client_event_id):
     if parada.ruta_id != ruta.id:
         raise ValidationError("La parada no pertenece a la ruta indicada.")

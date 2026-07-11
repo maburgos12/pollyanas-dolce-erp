@@ -27,6 +27,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
+from logistica.services_entregas import tiene_llegada_geocerca_confiable
 from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -218,6 +219,9 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     entrega_estado = serializers.SerializerMethodField()
     entrega_estado_display = serializers.SerializerMethodField()
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
+    geocerca_confiable = serializers.SerializerMethodField()
+    revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
+    revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ParadaRuta
@@ -240,10 +244,13 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_confirmada_en",
             "entrega_confirmada_por_nombre",
             "entrega_notas",
+            "geocerca_confiable",
             "revision_entrega_estado",
             "revision_entrega_causa",
             "revision_entrega_datos",
             "revision_entrega_revisada_en",
+            "revision_entrega_revisada_por",
+            "revision_entrega_revisada_por_nombre",
             "revision_entrega_resolucion",
             "distancia_llegada_metros",
             "notas",
@@ -264,6 +271,14 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         if not obj.entrega_confirmada_por_id:
             return ""
         return nombre_operativo_usuario(obj.entrega_confirmada_por)
+
+    def get_geocerca_confiable(self, obj):
+        return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
+
+    def get_revision_entrega_revisada_por_nombre(self, obj):
+        if not obj.revision_entrega_revisada_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.revision_entrega_revisada_por)
 
 
 class UbicacionRutaSerializer(serializers.ModelSerializer):

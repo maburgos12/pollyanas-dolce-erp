@@ -491,6 +491,60 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertEqual(conflicto.status_code, 409)
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).count(), 1)
 
+    def test_retry_exacto_devuelve_snapshot_original_despues_de_completar_ruta(self):
+        payload = self._payload(client_event_id="api-retry-ruta-completada")
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        conflicto = self.client.post(
+            self.url,
+            json.dumps({**payload, "notas": "Payload divergente tras cierre"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(primero.status_code, 200)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+        self.assertEqual(conflicto.status_code, 409)
+
+    def test_retry_exacto_devuelve_snapshot_original_despues_de_revision(self):
+        payload = self._payload(client_event_id="api-retry-revision-autorizada")
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        jefe = User.objects.create_user(username="jefe.retry.entregas", password="pass123")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_AUTORIZADA,
+            motivo="Evidencia revisada",
+        )
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.assertEqual(primero.status_code, 200)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+
+    def test_retry_exacto_devuelve_snapshot_original_despues_de_rechazo(self):
+        payload = self._payload(client_event_id="api-retry-revision-rechazada")
+        primero = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+        jefe = User.objects.create_user(username="jefe.retry.rechazo", password="pass123")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_RECHAZADA,
+            motivo="Evidencia insuficiente",
+        )
+
+        retry = self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+        self.assertEqual(primero.status_code, 200)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.json(), primero.json())
+
     def test_ajuste_erp_no_fabrica_visita_hora_ni_geocerca(self):
         jefe = User.objects.create_user(username="jefe.api.entregas", password="pass123")
         UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
@@ -530,6 +584,40 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertIn("revision_entrega_causa", data)
         self.assertIn("revision_entrega_datos", data)
 
+    def test_serializer_expone_geocerca_confiable_con_misma_regla_de_dominio(self):
+        self._registrar_geocerca_real()
+
+        data = ParadaRutaSerializer(self.parada).data
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertTrue(data["geocerca_confiable"])
+
+    def test_serializer_no_confunde_visita_legacy_con_geocerca_confiable(self):
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.hora_llegada_real = timezone.now()
+        self.parada.save(update_fields=["estado", "hora_llegada_real", "actualizado_en"])
+
+        data = ParadaRutaSerializer(self.parada).data
+
+        self.assertFalse(data["geocerca_confiable"])
+
+    def test_serializer_expone_revisor_id_y_nombre(self):
+        self.client.post(self.url, json.dumps(self._payload()), content_type="application/json")
+        jefe = User.objects.create_user(first_name="Laura", last_name="Jefa", username="laura.jefa")
+        UserModuleAccess.objects.create(user=jefe, module="logistica.rutas", access=ACCESS_MANAGE, updated_by=jefe)
+        revisar_entrega_excepcional(
+            parada=self.parada,
+            actor=jefe,
+            decision=ParadaRuta.REVISION_RECHAZADA,
+            motivo="Falta evidencia",
+        )
+
+        data = ParadaRutaSerializer(ParadaRuta.objects.get(pk=self.parada.pk)).data
+
+        self.assertEqual(data["revision_entrega_revisada_por"], jefe.id)
+        self.assertEqual(data["revision_entrega_revisada_por_nombre"], "Laura Jefa")
+
     def test_pwa_avisa_pide_motivo_y_envia_contexto_idempotente(self):
         pwa_html = (Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
 
@@ -538,6 +626,18 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
         self.assertIn("client_event_id: clientEventId", pwa_html)
         self.assertIn("client_timestamp: new Date().toISOString()", pwa_html)
         self.assertIn("data.warning", pwa_html)
+        self.assertIn("parada?.geocerca_confiable !== true", pwa_html)
+        self.assertNotIn('parada?.estado !== "VISITADA"', pwa_html)
+
+    def test_guardrail_exige_v60_exacto_en_registro_y_service_worker(self):
+        from logistica.checks import REQUIRED_SERVICE_WORKER_MARKERS, REQUIRED_TEMPLATE_MARKERS
+
+        self.assertEqual(
+            set(REQUIRED_TEMPLATE_MARKERS),
+            {"route-control-v60-entregas-revision"},
+        )
+        self.assertIn("pollyanas-logistica-pwa-v60-entregas-revision", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
 class LogisticaEmailTemplateTests(SimpleTestCase):

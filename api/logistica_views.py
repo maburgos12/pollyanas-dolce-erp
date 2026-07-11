@@ -62,6 +62,8 @@ from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_c
 from logistica.services_entregas import (
     EntregaIdempotenciaConflicto,
     confirmar_entrega_parada,
+    guardar_respuesta_idempotente,
+    obtener_respuesta_idempotente,
     tiene_llegada_geocerca_confiable,
 )
 from rrhh.services_identidad import nombre_operativo_usuario
@@ -1388,18 +1390,36 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
             return Response({"detail": "No puedes confirmar entregas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
-        if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
-            return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
-
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
-        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
-            return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
-        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
-            return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        client_context = payload.get("client_context") or {}
+        motivo = payload.get("notas") or "Entrega confirmada por repartidor."
+        evidencias_servicio = [dict(item) for item in evidencias_payload]
+        try:
+            respuesta_idempotente = obtener_respuesta_idempotente(
+                ruta=ruta,
+                parada=parada,
+                actor=request.user,
+                entrega_estado=payload["entrega_estado"],
+                motivo=motivo,
+                client_event_id=payload.get("client_event_id"),
+                evidencias=evidencias_servicio,
+                ubicacion=client_context,
+            )
+        except EntregaIdempotenciaConflicto as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
+        if respuesta_idempotente is not None:
+            return Response(respuesta_idempotente, status=status.HTTP_200_OK)
+
+        if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+            return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
+        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
+        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
+            return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
         if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA and not evidencias_payload:
             return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
         if not payload.get("client_event_id"):
@@ -1419,7 +1439,6 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             if missing:
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
-        client_context = payload.get("client_context") or {}
         tiene_geocerca_confiable = tiene_llegada_geocerca_confiable(ruta=ruta, parada=parada)
         if not tiene_geocerca_confiable:
             if not (payload.get("notas") or "").strip():
@@ -1430,19 +1449,13 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        evidencias_servicio = []
-        for item in evidencias_payload:
-            evidencia = dict(item)
-            if evidencia.get("linea_carga_id"):
-                evidencia["linea_carga_id"] = lineas_by_id[evidencia["linea_carga_id"]].id
-            evidencias_servicio.append(evidencia)
         try:
             resultado = confirmar_entrega_parada(
                 ruta=ruta,
                 parada=parada,
                 actor=request.user,
                 entrega_estado=payload["entrega_estado"],
-                motivo=payload.get("notas") or "Entrega confirmada por repartidor.",
+                motivo=motivo,
                 client_event_id=payload["client_event_id"],
                 evidencias=evidencias_servicio,
                 ubicacion=client_context,
@@ -1465,19 +1478,18 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             str(parada.id),
             {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": evidencias.count()},
         )
-        return Response(
-            {
-                "parada": ParadaRutaSerializer(parada).data,
-                "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
-                "requiere_revision": resultado.requiere_revision,
-                "warning": (
-                    "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
-                    if resultado.requiere_revision
-                    else ""
-                ),
-            },
-            status=status.HTTP_200_OK,
-        )
+        respuesta = {
+            "parada": ParadaRutaSerializer(parada).data,
+            "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
+            "requiere_revision": resultado.requiere_revision,
+            "warning": (
+                "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
+                if resultado.requiere_revision
+                else ""
+            ),
+        }
+        guardar_respuesta_idempotente(evidencia=resultado.evidencia, respuesta=respuesta)
+        return Response(respuesta, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
