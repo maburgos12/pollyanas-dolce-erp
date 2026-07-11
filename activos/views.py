@@ -1573,6 +1573,7 @@ def activos_catalog(request):
             proveedor_id = _safe_int(request.POST.get("proveedor_mantenimiento_id"))
             activo = Activo.objects.create(
                 nombre=nombre,
+                creado_por=request.user,
                 categoria=(request.POST.get("categoria") or "").strip(),
                 ubicacion=(request.POST.get("ubicacion") or "").strip(),
                 estado=estado if estado in {x[0] for x in Activo.ESTADO_CHOICES} else Activo.ESTADO_OPERATIVO,
