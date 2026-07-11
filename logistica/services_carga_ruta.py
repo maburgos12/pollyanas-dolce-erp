@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 
 from core.access import can_manage_submodule
@@ -145,7 +145,9 @@ def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
     }
 
 
-def obtener_checklist_carga_detallado(ruta: RutaEntrega, *, solo_tramo_actual: bool = False) -> RutaCargaChecklist:
+def obtener_checklist_carga_detallado(
+    ruta: RutaEntrega, *, solo_tramo_actual: bool = False, excluir_superadas: bool = False
+) -> RutaCargaChecklist:
     checklist = obtener_checklist_carga(ruta)
     lineas_qs = RutaCargaChecklistLinea.objects.select_related(
         "parada",
@@ -157,6 +159,8 @@ def obtener_checklist_carga_detallado(ruta: RutaEntrega, *, solo_tramo_actual: b
         ordenes = _ordenes_tramo_carga_actual(ruta)
         if ordenes is not None:
             lineas_qs = lineas_qs.filter(parada__orden__in=ordenes)
+    if excluir_superadas:
+        lineas_qs = lineas_qs.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
     return (
         RutaCargaChecklist.objects.select_related("ruta")
         .prefetch_related(Prefetch("lineas", queryset=lineas_qs))
@@ -263,7 +267,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             )
             actualizadas += 1
             continue
-        existing = RutaCargaChecklistLinea.objects.filter(checklist=checklist, source_hash=line.source_hash).first()
+        existing = (
+            RutaCargaChecklistLinea.objects.filter(checklist=checklist)
+            .filter(Q(source_hash=line.source_hash) | Q(point_transfer_line_id=line.id))
+            .first()
+        )
         defaults = {
             "parada": parada,
             "point_transfer_line": line,
@@ -278,21 +286,39 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "cantidad_enviada_esperada": cantidad_esperada,
             "notas": "Point confirmó enviado final en cero; no requiere captura." if cantidad_esperada <= 0 else "",
         }
-        if existing and existing.estatus not in {
-            RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
-        }:
+        if existing:
+            # Esta misma PointTransferLine ya está adjunta a una fila de este checklist
+            # (por source_hash directo o porque un resync previo la fusionó con un
+            # placeholder de CEDIS). Nunca se crea una fila nueva para la misma línea de
+            # Point: siempre se actualiza la que ya existe, sin importar su estatus actual.
             esperada_anterior = Decimal(str(existing.cantidad_enviada_esperada or 0))
             existing.point_transfer_line = line
+            existing.transfer_external_id = line.transfer_external_id
+            existing.detail_external_id = line.detail_external_id
             existing.cantidad_solicitada = line.requested_quantity
             existing.cantidad_enviada_esperada = cantidad_esperada
             update_fields = [
                 "point_transfer_line",
+                "transfer_external_id",
+                "detail_external_id",
                 "cantidad_solicitada",
                 "cantidad_enviada_esperada",
                 "actualizado_en",
             ]
-            if existing.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
+            if existing.estatus in {
+                RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            }:
+                if cantidad_esperada <= 0:
+                    existing.cantidad_cargada = Decimal("0")
+                    existing.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+                    existing.notas = "Point confirmó enviado final en cero; no requiere captura."
+                else:
+                    existing.cantidad_cargada = None
+                    existing.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+                    existing.notas = ""
+                update_fields.extend(["cantidad_cargada", "estatus", "notas"])
+            elif existing.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(existing.cantidad_cargada))
                 existing.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
                 existing.motivo_diferencia = (
@@ -314,11 +340,35 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 else RutaCargaChecklistLinea.ESTATUS_PENDIENTE
             ),
         )
-        _, created = RutaCargaChecklistLinea.objects.update_or_create(
+        # Point corrigió esta transferencia con un detail_external_id nuevo para el
+        # mismo folio y producto, dejando la línea vieja huérfana (normalmente en 0).
+        # Se marca esa línea vieja como SUPERADA en vez de dejarla duplicada; nunca se
+        # cruzan folios distintos (dos transferencias reales del mismo producto deben
+        # seguir siendo dos líneas independientes).
+        lineas_a_superar = []
+        if producto_key:
+            candidatas = checklist.lineas.filter(
+                parada=parada,
+                transfer_external_id=line.transfer_external_id,
+                estatus__in=[
+                    RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                    RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+                ],
+                validado_por__isnull=True,
+            ).exclude(point_transfer_line_id=line.id)
+            lineas_a_superar = [
+                vieja for vieja in candidatas if _linea_producto_key(vieja) == producto_key
+            ]
+        nueva_linea, created = RutaCargaChecklistLinea.objects.update_or_create(
             checklist=checklist,
             source_hash=line.source_hash,
             defaults=defaults,
         )
+        if lineas_a_superar:
+            for vieja in lineas_a_superar:
+                vieja.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+                vieja.superada_por = nueva_linea
+                vieja.save(update_fields=["estatus", "superada_por", "actualizado_en"])
         if created:
             creadas += 1
         else:
@@ -566,6 +616,7 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
                 RutaCargaChecklistLinea.ESTATUS_CARGADA,
                 RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
                 RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+                RutaCargaChecklistLinea.ESTATUS_SUPERADA,
             ]
         ).exists():
             checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
@@ -616,6 +667,8 @@ def validar_linea_carga(
         pk=linea_id,
         checklist=checklist,
     )
+    if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+        raise ValidationError("Esta línea fue superada por una transferencia de Point más reciente y ya no admite captura.")
 
     client_event_id = (client_event_id or "").strip()
     if client_event_id and linea.client_event_id == client_event_id and linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
@@ -671,6 +724,7 @@ def validar_linea_carga(
             RutaCargaChecklistLinea.ESTATUS_CARGADA,
             RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
             RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         ]
     ).exists()
     if pendientes:
@@ -795,6 +849,7 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
             RutaCargaChecklistLinea.ESTATUS_CARGADA,
             RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
             RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         ]
     ).count()
     if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
@@ -996,6 +1051,7 @@ def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = ""
             RutaCargaChecklistLinea.ESTATUS_CARGADA,
             RutaCargaChecklistLinea.ESTATUS_NO_APLICA,
             RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         ]
     ).exists()
     checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA if diferencias else RutaCargaChecklist.ESTATUS_CONFIRMADA
@@ -1126,4 +1182,95 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
         paradas_actualizadas=paradas_actualizadas,
         lineas_recibidas=lineas_recibidas,
         lineas_pendientes_point=lineas_pendientes_point,
+    )
+
+
+@dataclass(frozen=True)
+class SuperacionHistoricaResumen:
+    grupos_afectados: int = 0
+    lineas_superadas: int = 0
+    grupos_ambiguos: int = 0
+    detalle_ambiguos: list = field(default_factory=list)
+
+
+_ESTATUS_RESUELTOS_HISTORICO = {
+    RutaCargaChecklistLinea.ESTATUS_CARGADA,
+    RutaCargaChecklistLinea.ESTATUS_PARCIAL,
+    RutaCargaChecklistLinea.ESTATUS_FALTANTE,
+    RutaCargaChecklistLinea.ESTATUS_SOBRANTE,
+}
+
+
+def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> SuperacionHistoricaResumen:
+    """Aplica retroactivamente la regla de SUPERADA a duplicados ya existentes.
+
+    Agrupa por (checklist, parada, producto, folio) -misma unidad que protege
+    _sincronizar_lineas_point_para_ruta- y nunca cruza folios distintos. Si el
+    grupo ya tiene una línea validada/resuelta, las demás se marcan SUPERADA
+    apuntando a esa; si ninguna está resuelta, se conserva la más reciente. Si
+    hay más de una línea resuelta (anomalía real, no un duplicado mecánico),
+    el grupo se reporta para revisión manual y no se toca.
+    """
+    grupos = (
+        RutaCargaChecklistLinea.objects.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .values("checklist_id", "parada_id", "item_code", "item_name", "transfer_external_id")
+        .annotate(n=Count("id"))
+        .filter(n__gt=1)
+    )
+
+    grupos_afectados = 0
+    lineas_superadas = 0
+    grupos_ambiguos = 0
+    detalle_ambiguos = []
+
+    for grupo in grupos:
+        lineas = list(
+            RutaCargaChecklistLinea.objects.filter(
+                checklist_id=grupo["checklist_id"],
+                parada_id=grupo["parada_id"],
+                item_code=grupo["item_code"],
+                item_name=grupo["item_name"],
+                transfer_external_id=grupo["transfer_external_id"],
+            ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        )
+        resueltas = [
+            linea for linea in lineas if linea.estatus in _ESTATUS_RESUELTOS_HISTORICO or linea.validado_por_id
+        ]
+
+        if len(resueltas) > 1:
+            grupos_ambiguos += 1
+            detalle_ambiguos.append(
+                {
+                    "checklist_id": grupo["checklist_id"],
+                    "parada_id": grupo["parada_id"],
+                    "item_code": grupo["item_code"],
+                    "item_name": grupo["item_name"],
+                    "transfer_external_id": grupo["transfer_external_id"],
+                    "lineas_resueltas": [linea.id for linea in resueltas],
+                }
+            )
+            continue
+
+        if resueltas:
+            autoritativa = resueltas[0]
+        else:
+            autoritativa = max(lineas, key=lambda linea: (linea.creado_en, linea.id))
+        a_superar = [linea for linea in lineas if linea.id != autoritativa.id]
+
+        if not a_superar:
+            continue
+
+        grupos_afectados += 1
+        lineas_superadas += len(a_superar)
+        if not dry_run:
+            for linea in a_superar:
+                linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+                linea.superada_por = autoritativa
+                linea.save(update_fields=["estatus", "superada_por", "actualizado_en"])
+
+    return SuperacionHistoricaResumen(
+        grupos_afectados=grupos_afectados,
+        lineas_superadas=lineas_superadas,
+        grupos_ambiguos=grupos_ambiguos,
+        detalle_ambiguos=detalle_ambiguos,
     )
