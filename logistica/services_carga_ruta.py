@@ -528,6 +528,7 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
     checklist = checklist or obtener_checklist_carga(ruta)
+    hechos_point_antes = dict(checklist.lineas.values_list("source_hash", "cantidad_enviada_esperada"))
     checklist.point_sync_job = sync_job or checklist.point_sync_job
     checklist.sincronizado_en = timezone.now()
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
@@ -549,6 +550,8 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
     actualizadas += actualizadas_point
     omitidas += omitidas_point
     omitidas += _limpiar_pendientes_antes_tramo_actual(ruta=ruta, checklist=checklist)
+    hechos_point_despues = dict(checklist.lineas.values_list("source_hash", "cantidad_enviada_esperada"))
+    hechos_point_cambiaron = hechos_point_antes != hechos_point_despues
 
     if checklist.lineas.exists():
         if checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA:
@@ -573,10 +576,11 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
             checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
             checklist.confirmado_por = None
             checklist.confirmado_en = None
-            checklist.motivo_override = ""
-            checklist.save(
-                update_fields=["estatus", "confirmado_por", "confirmado_en", "motivo_override", "actualizado_en"]
-            )
+            update_fields = ["estatus", "confirmado_por", "confirmado_en", "actualizado_en"]
+            if hechos_point_cambiaron:
+                checklist.motivo_override = ""
+                update_fields.append("motivo_override")
+            checklist.save(update_fields=update_fields)
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
         checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."

@@ -39,6 +39,7 @@ from logistica.models import (
 )
 from logistica.services_combustible_auditoria import auditar_carga_combustible
 from logistica.services_carga_ruta import (
+    autorizar_diferencia_checklist_carga,
     cerrar_ruta_con_diferencia_autorizada,
     checklist_bloquea_salida,
     lineas_tramo_operativo_actual,
@@ -1192,6 +1193,61 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
         self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def _diferencia_point_autorizada(self, *, source_hash):
+        ruta, checklist, linea, transferencia = self._linea_validada_con_cuatro(source_hash=source_hash)
+        transferencia.sent_quantity = Decimal("2.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+        autorizar_diferencia_checklist_carga(
+            ruta=ruta,
+            user=self.user,
+            autorizado=True,
+            notas="Diferencia Point revisada.",
+        )
+        checklist.refresh_from_db()
+        self.assertEqual(checklist.motivo_override, "Diferencia Point revisada.")
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+        return ruta, checklist, linea, transferencia
+
+    def test_resync_point_identico_preserva_autorizacion_de_diferencia(self):
+        ruta, checklist, linea, _ = self._diferencia_point_autorizada(source_hash="ady-auth-identical")
+
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        checklist.refresh_from_db()
+        linea.refresh_from_db()
+        ruta.refresh_from_db()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SOBRANTE)
+        self.assertEqual(checklist.motivo_override, "Diferencia Point revisada.")
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def test_resync_point_con_metadata_irrelevante_preserva_autorizacion(self):
+        ruta, checklist, _, transferencia = self._diferencia_point_autorizada(source_hash="ady-auth-metadata")
+        transferencia.raw_payload = {"sync_note": "metadata actualizada sin cambio de cantidades"}
+        transferencia.save(update_fields=["raw_payload", "updated_at"])
+
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        checklist.refresh_from_db()
+        ruta.refresh_from_db()
+        self.assertEqual(checklist.motivo_override, "Diferencia Point revisada.")
+        self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def test_resync_point_con_cambio_real_invalida_autorizacion_y_bloquea(self):
+        ruta, checklist, linea, transferencia = self._diferencia_point_autorizada(source_hash="ady-auth-change")
+        transferencia.sent_quantity = Decimal("1.000")
+        transferencia.save(update_fields=["sent_quantity", "updated_at"])
+
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
+        checklist.refresh_from_db()
+        linea.refresh_from_db()
+        ruta.refresh_from_db()
+        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("1.000"))
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SOBRANTE)
+        self.assertEqual(checklist.motivo_override, "")
+        self.assertIsNotNone(checklist_bloquea_salida(ruta))
 
     def test_ruta_nocturna_reconocida_por_api_acepta_tracking_y_vencida_no(self):
         ayer = timezone.localdate() - timezone.timedelta(days=1)
