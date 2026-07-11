@@ -550,6 +550,86 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
         self.assertEqual(self.client.get("/api/mantenimiento/v2/evidencias/seguimiento_falla/999999/").status_code, 404)
         self.assertEqual(self.client.get(f"/api/mantenimiento/v2/evidencias/desconocida/{self.evidence.pk}/").status_code, 404)
 
+    def test_head_enforces_auth_permission_parent_scope_and_missing_file(self):
+        own_url = f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{self.evidence.pk}/"
+        other = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=BitacoraFalla.objects.create(reporte=self.other_report, usuario=self.reporter),
+            archivo="fallas/seguimiento/other-head.jpg", subido_por=self.reporter,
+        )
+        other.archivo.save("other-head.jpg", ContentFile(b"other"), save=True)
+        missing = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=self.old, archivo="fallas/seguimiento/not-on-disk.jpg", subido_por=self.reporter,
+        )
+
+        self.client.logout()
+        self.assertIn(self.client.head(own_url).status_code, {401, 403})
+        self.client.force_login(self.denied)
+        self.assertEqual(self.client.head(own_url).status_code, 403)
+        self.client.force_login(self.user)
+        self.assertEqual(
+            self.client.head(f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{other.pk}/").status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.head(f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{missing.pk}/").status_code,
+            404,
+        )
+
+    def test_every_declared_evidence_type_is_private_and_scoped_through_its_parent(self):
+        other_timeline_evidence = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=BitacoraFalla.objects.create(reporte=self.other_report, usuario=self.reporter),
+            archivo="fallas/seguimiento/scoped-other.jpg", subido_por=self.reporter,
+        )
+        other_timeline_evidence.archivo.save("scoped-other.jpg", ContentFile(b"image"), save=True)
+        self.other_report.foto_evidencia.save("initial-other.jpg", ContentFile(b"image"), save=True)
+        own_asset = Activo.objects.create(nombre="Activo evidencia", sucursal=self.branch)
+        other_asset = Activo.objects.create(nombre="Activo evidencia ajena", sucursal=self.other_branch)
+        own_unit = Unidad.objects.create(codigo="EV-OWN", descripcion="Evidencia", sucursal=self.branch)
+        other_unit = Unidad.objects.create(codigo="EV-OTHER", descripcion="Evidencia ajena", sucursal=self.other_branch)
+        service_type = TipoServicioUnidad.objects.create(nombre="Servicio evidencia")
+
+        own_order = OrdenMantenimiento.objects.create(activo_ref=own_asset)
+        other_order = OrdenMantenimiento.objects.create(activo_ref=other_asset)
+        own_order.factura_archivo.save("orden.pdf", ContentFile(b"%PDF-order"), save=True)
+        other_order.factura_archivo.save("orden-ajena.pdf", ContentFile(b"%PDF-other"), save=True)
+        own_unit_report = ReporteUnidad.objects.create(unidad=own_unit, tipo="falla", descripcion="x")
+        other_unit_report = ReporteUnidad.objects.create(unidad=other_unit, tipo="falla", descripcion="x")
+        own_unit_report.foto.save("reporte.jpg", ContentFile(b"image"), save=True)
+        other_unit_report.foto.save("reporte-ajeno.jpg", ContentFile(b"image"), save=True)
+        own_repair = ReparacionUnidad.objects.create(unidad=own_unit, fecha_ingreso="2026-07-11", descripcion_falla="x")
+        other_repair = ReparacionUnidad.objects.create(unidad=other_unit, fecha_ingreso="2026-07-11", descripcion_falla="x")
+        own_repair.archivo_factura.save("reparacion.pdf", ContentFile(b"%PDF-repair"), save=True)
+        own_repair.foto_nota.save("nota.jpg", ContentFile(b"image"), save=True)
+        other_repair.archivo_factura.save("reparacion-ajena.pdf", ContentFile(b"%PDF-other"), save=True)
+        other_repair.foto_nota.save("nota-ajena.jpg", ContentFile(b"image"), save=True)
+        own_service = ServicioRealizadoUnidad.objects.create(
+            unidad=own_unit, tipo_servicio=service_type, fecha_servicio="2026-07-11",
+        )
+        other_service = ServicioRealizadoUnidad.objects.create(
+            unidad=other_unit, tipo_servicio=service_type, fecha_servicio="2026-07-11",
+        )
+        own_service.archivo_factura.save("servicio.pdf", ContentFile(b"%PDF-service"), save=True)
+        other_service.archivo_factura.save("servicio-ajeno.pdf", ContentFile(b"%PDF-other"), save=True)
+
+        cases = [
+            ("seguimiento_falla", self.evidence.pk, other_timeline_evidence.pk),
+            ("falla_inicial", self.report.pk, self.other_report.pk),
+            ("reporte_unidad", own_unit_report.pk, other_unit_report.pk),
+            ("orden_factura", own_order.pk, other_order.pk),
+            ("reparacion_factura", own_repair.pk, other_repair.pk),
+            ("reparacion_foto", own_repair.pk, other_repair.pk),
+            ("servicio_unidad_factura", own_service.pk, other_service.pk),
+        ]
+        for kind, own_pk, other_pk in cases:
+            with self.subTest(kind=kind, access="own"):
+                response = self.client.get(f"/api/mantenimiento/v2/evidencias/{kind}/{own_pk}/")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["Cache-Control"], "private, no-store")
+                self.assertIn(response["Content-Disposition"].split(";")[0], {"inline", "attachment"})
+            with self.subTest(kind=kind, access="other"):
+                response = self.client.get(f"/api/mantenimiento/v2/evidencias/{kind}/{other_pk}/")
+                self.assertEqual(response.status_code, 404)
+
     def test_missing_file_is_404_and_malicious_name_is_sanitized(self):
         missing = EvidenciaSeguimientoFalla.objects.create(
             bitacora=self.old, archivo="fallas/seguimiento/missing.pdf", nombre="../../malicioso\r\nX-Evil: yes.pdf",
