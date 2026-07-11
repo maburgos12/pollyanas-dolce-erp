@@ -183,14 +183,17 @@ def unified_history_rows(user, *, period, include_costs=False):
         "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
     )
     from activos.models import SolicitudFalla
-    linked_order_ids = set(SolicitudFalla.objects.filter(orden_atencion_id__in=[x["id"] for x in orders]).values_list("orden_atencion_id", flat=True))
+    scoped_order_ids = authorized_orders(user).values_list("id", flat=True)
+    linked_order_ids = set(SolicitudFalla.objects.filter(
+        orden_atencion_id__in=scoped_order_ids,
+    ).values_list("orden_atencion_id", flat=True))
     for item in orders:
         state = canonical_status("orden", item["estatus"])
         event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["creado_en"]
         if _in_period(event, start, end):
             unreported = item["origen"] in {OrdenMantenimiento.ORIGEN_EMERGENCIA, OrdenMantenimiento.ORIGEN_INICIATIVA} and not item["plan_ref_id"] and item["id"] not in linked_order_ids
             rows.append(_history_payload(
-                uid=f"orden:{item['id']}", event=event, kind="orden", state=state,
+                uid=f"orden:{item['id']}", event=event, kind=("sin_reporte" if unreported else "orden"), state=state,
                 branch_id=item["activo_ref__sucursal_id"], branch=item["activo_ref__sucursal__nombre"],
                 subject_id=item["activo_ref_id"], subject=item["activo_ref__nombre"],
                 actor=_history_actor(item["creado_por_id"], " ".join(filter(None, [item["creado_por__first_name"], item["creado_por__last_name"]])), item["creado_por__username"]),

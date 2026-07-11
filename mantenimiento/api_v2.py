@@ -95,7 +95,7 @@ def historial_v2(request):
     rows = unified_history_rows(request.user, period=filters["periodo"], include_costs=can_view_costs(request.user))
     tipo = filters["tipo"]
     if tipo != "todo":
-        rows = [row for row in rows if (row["origen"] == "sin_reporte" if tipo == "sin_reporte" else row["tipo"] == tipo)]
+        rows = [row for row in rows if row["tipo"] == tipo]
     if filters["estado"] != "todo": rows = [row for row in rows if row["estado"] == filters["estado"]]
     for key, field in (("sucursal", "sucursal"), ("activo", "activo_id"), ("unidad", "unidad_id")):
         raw = request.query_params.get(key)

@@ -11,7 +11,7 @@ from django.core.files.storage import default_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from activos.models import Activo, OrdenMantenimiento
+from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
@@ -674,6 +674,57 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         for key, value in (("tipo", "x"), ("estado", "x"), ("periodo", "x"), ("page", "0")):
             with self.subTest(key=key):
                 self.assertEqual(self.client.get("/api/mantenimiento/v2/historial/", {key: value}).status_code, 400)
+
+    def test_scope_linked_orders_exclusive_types_and_multi_page_stability(self):
+        linked = OrdenMantenimiento.objects.create(
+            activo_ref=self.asset, origen=OrdenMantenimiento.ORIGEN_EMERGENCIA,
+            creado_por=None, descripcion="Orden con solicitud",
+        )
+        SolicitudFalla.objects.create(
+            activo_ref=self.asset, descripcion="Solicitud real", reportado_por=self.actor,
+            orden_atencion=linked,
+        )
+        other_branch = Sucursal.objects.create(codigo="HIS-OTHER", nombre="Historial ajeno")
+        other_unit = Unidad.objects.create(codigo="HIS-OTHER", descripcion="Ajena", sucursal=other_branch)
+        ServicioRealizadoUnidad.objects.create(
+            unidad=other_unit, tipo_servicio=self.service_type, fecha_servicio=timezone.localdate(),
+            registrado_por=None,
+        )
+        for days in range(7):
+            ServicioRealizadoUnidad.objects.create(
+                unidad=self.unit, tipo_servicio=self.service_type,
+                fecha_servicio=timezone.localdate() - timedelta(days=days), registrado_por=None,
+            )
+        limited = get_user_model().objects.create_user("history-page-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=self.branch)
+        UserModuleAccess.objects.create(user=limited, module="mantenimiento", access="view")
+        self.client.force_login(limited)
+
+        all_rows = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo", "page_size": 100}).json()["results"]
+        self.assertTrue(all(row["sucursal"]["id"] == self.branch.pk for row in all_rows))
+        linked_row = next(row for row in all_rows if row["uid"] == f"orden:{linked.pk}")
+        self.assertNotEqual(linked_row["origen"], "sin_reporte")
+        self.assertFalse(linked_row["captura_directa"])
+
+        typed_uids = {}
+        for kind in ("reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"):
+            response = self.client.get("/api/mantenimiento/v2/historial/", {
+                "tipo": kind, "periodo": "todo", "page_size": 100,
+            }).json()
+            typed_uids[kind] = {row["uid"] for row in response["results"]}
+        self.assertFalse(typed_uids["orden"] & typed_uids["reporte"])
+        self.assertFalse(typed_uids["sin_reporte"] & typed_uids["orden"])
+
+        params = {"tipo": "servicio_unidad", "periodo": "todo", "page_size": 3}
+        page1 = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 1}).json()
+        page2 = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 2}).json()
+        uids1 = [row["uid"] for row in page1["results"]]
+        uids2 = [row["uid"] for row in page2["results"]]
+        self.assertEqual(page1["pagination"]["total"], 7)
+        self.assertFalse(set(uids1) & set(uids2))
+        self.assertEqual(uids1, [row["uid"] for row in self.client.get(
+            "/api/mantenimiento/v2/historial/", {**params, "page": 1}
+        ).json()["results"]])
 
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
