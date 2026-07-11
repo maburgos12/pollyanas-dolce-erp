@@ -717,6 +717,14 @@ class EventoRuta(models.Model):
     longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     distancia_metros = models.PositiveIntegerField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    clave_auditoria = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

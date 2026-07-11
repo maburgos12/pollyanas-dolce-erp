@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time
 from decimal import Decimal
 from io import StringIO
@@ -12,8 +13,8 @@ from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import IntegrityError, OperationalError, transaction
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.db import IntegrityError, OperationalError, close_old_connections, transaction
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -465,10 +466,17 @@ class LogisticaAuditoriaEntregaTests(TestCase):
             revision_entrega_estado=ParadaRuta.REVISION_AUTORIZADA,
         )
         self._evento(horas_admin, EventoRuta.TIPO_ENTREGA, creado_por=self.repartidor_user)
+        self._evento(
+            horas_admin,
+            EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            metadata={
+                "origen": "point_transfer",
+                "campos_derivados": ["hora_llegada_real", "hora_salida_real"],
+            },
+        )
         ParadaRuta.objects.filter(pk=horas_admin.pk).update(
             hora_llegada_real=ahora,
             hora_salida_real=ahora + timezone.timedelta(minutes=5),
-            entrega_notas="Horario derivado desde Point por admin",
         )
         geocerca = self._geocerca_valida(geocerca_invalida)
         EventoRuta.objects.filter(pk=geocerca.pk).update(distancia_metros=9999)
@@ -521,11 +529,173 @@ class LogisticaAuditoriaEntregaTests(TestCase):
         )
         salida = StringIO()
 
-        call_command("auditar_entregas_ruta", "--ruta-id", str(self.ruta.pk), "--dry-run", stdout=salida)
+        call_command("auditar_entregas_ruta", "--ruta-id", str(self.ruta.pk), stdout=salida)
 
         self.assertIn("ENTREGADA_SIN_GEOFENCE_O_REVISION", salida.getvalue())
         self.assertIn("dry-run", salida.getvalue().lower())
         self.assertFalse(EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA).exists())
+
+    def test_comando_exige_alcance_y_escritura_explicitamente(self):
+        from django.core.management.base import CommandError
+
+        parada = self._parada(1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+        )
+
+        with self.assertRaises(CommandError):
+            call_command("auditar_entregas_ruta")
+        call_command("auditar_entregas_ruta", "--ruta-id", self.ruta.pk)
+        self.assertFalse(EventoRuta.objects.filter(clave_auditoria__isnull=False).exists())
+        call_command("auditar_entregas_ruta", "--ruta-id", self.ruta.pk, "--crear-alertas")
+        self.assertEqual(EventoRuta.objects.filter(clave_auditoria__isnull=False).count(), 1)
+
+    def test_cedis_visitada_con_recarga_valida_no_exige_gps(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS auditoría",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.571000",
+            longitud="-108.471000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=1)
+        ahora = timezone.now()
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=ahora,
+            hora_salida_real=ahora,
+        )
+        self._evento(
+            parada,
+            EventoRuta.TIPO_RECARGA_CEDIS,
+            metadata={"tipo": "recarga_cedis", "numero": 1},
+        )
+
+        resultado = auditar_entregas_ruta(ruta_id=self.ruta.pk, dry_run=True)
+
+        self.assertEqual(resultado["hallazgos"], [])
+
+    def test_cedis_visitada_sin_recarga_valida_si_se_reporta(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS inconsistente",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.572000",
+            longitud="-108.472000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis, orden=1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(estado=ParadaRuta.ESTADO_VISITADA)
+
+        resultado = auditar_entregas_ruta(ruta_id=self.ruta.pk, dry_run=True)
+
+        self.assertIn("VISITADA_SIN_GPS_CONFIABLE", {item["regla"] for item in resultado["hallazgos"]})
+
+    def test_texto_libre_point_o_administracion_no_infiere_horas(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        parada = self._parada(1)
+        ahora = timezone.now()
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            hora_llegada_real=ahora,
+            hora_salida_real=ahora,
+            entrega_notas="Administración revisó Point; no es procedencia horaria.",
+        )
+        self._evento(
+            parada,
+            EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            metadata={"comentario": "sync de Point revisado por admin"},
+        )
+
+        resultado = auditar_entregas_ruta(ruta_id=self.ruta.pk, dry_run=True)
+
+        self.assertNotIn(
+            "HORAS_DERIVADAS_FUENTE_ADMIN_POINT",
+            {item["regla"] for item in resultado["hallazgos"]},
+        )
+
+    def test_actor_se_valida_con_procedencia_inmutable_no_permisos_o_asignacion_actual(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        parada = self._parada(1)
+        evento = self._evento(
+            parada,
+            EventoRuta.TIPO_ENTREGA,
+            metadata={"origen": "servicio_entregas", "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA},
+        )
+        evidencia = ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=parada,
+            capturado_por=self.repartidor_user,
+            client_event_id="actor-inmutable",
+            metadata={"evento_id": evento.id, "origen": "servicio_entregas"},
+        )
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            entrega_confirmada_por=self.repartidor_user,
+            entrega_confirmada_en=timezone.now(),
+            revision_entrega_estado=ParadaRuta.REVISION_AUTORIZADA,
+        )
+        nuevo = User.objects.create_user(username="repartidor.nuevo.auditoria")
+        nuevo_repartidor = Repartidor.objects.create(user=nuevo, sucursal=self.sucursal)
+        RutaEntrega.objects.filter(pk=self.ruta.pk).update(repartidor=nuevo_repartidor)
+        self.repartidor_user.is_active = False
+        self.repartidor_user.save(update_fields=["is_active"])
+
+        resultado = auditar_entregas_ruta(ruta_id=self.ruta.pk, dry_run=True)
+
+        self.assertNotIn("ENTREGA_ACTOR_INDEBIDO", {item["regla"] for item in resultado["hallazgos"]})
+        self.assertEqual(evidencia.capturado_por_id, self.repartidor_user.id)
+
+    def test_auditoria_dry_run_tiene_presupuesto_constante_de_queries(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        for numero in range(3):
+            ruta = RutaEntrega.objects.create(
+                nombre=f"Ruta query budget {numero}",
+                fecha_ruta=timezone.localdate(),
+                estatus=RutaEntrega.ESTATUS_PLANEADA,
+                repartidor=self.repartidor,
+                unidad_operativa=self.unidad,
+            )
+            for orden in range(1, 5):
+                ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=orden)
+
+        with self.assertNumQueries(4):
+            auditar_entregas_ruta(fecha=timezone.localdate(), dry_run=True)
+
+    def test_adopta_clave_legacy_duplicada_deterministicamente_sin_tercera_alerta(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        parada = self._parada(1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+        )
+        clave = f"ENTREGADA_SIN_GEOFENCE_O_REVISION:{self.ruta.id}:{parada.id}:ENTREGADA"
+        primero = self._evento(
+            parada,
+            EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            metadata={"clave": clave, "regla": "ENTREGADA_SIN_GEOFENCE_O_REVISION"},
+        )
+        segundo = self._evento(
+            parada,
+            EventoRuta.TIPO_INCONSISTENCIA_ENTREGA,
+            metadata={"clave": clave, "regla": "ENTREGADA_SIN_GEOFENCE_O_REVISION"},
+        )
+
+        resultado = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+
+        primero.refresh_from_db()
+        segundo.refresh_from_db()
+        self.assertEqual(resultado["alertas_creadas"], 0)
+        self.assertEqual(primero.clave_auditoria, clave)
+        self.assertIsNone(segundo.clave_auditoria)
+        self.assertEqual(EventoRuta.objects.filter(parada=parada).count(), 2)
 
     def test_tarea_celery_ejecuta_auditoria_segura(self):
         from logistica.tasks import auditar_entregas_ruta_task
@@ -542,9 +712,60 @@ class LogisticaAuditoriaEntregaTests(TestCase):
         self.assertEqual(resultado["alertas_creadas"], 1)
         self.assertEqual(parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
 
+    def test_tarea_valida_fecha_y_configura_reintentos_de_bd(self):
+        from logistica.tasks import auditar_entregas_ruta_task
+
+        with self.assertRaises(ValueError):
+            auditar_entregas_ruta_task(ruta_id=self.ruta.pk, fecha="fecha-invalida")
+        self.assertEqual(auditar_entregas_ruta_task.max_retries, 3)
+
     def test_periodicidad_es_opt_in_y_permanece_apagada_por_defecto(self):
         self.assertFalse(settings.LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED)
         self.assertNotIn("logistica-auditar-entregas-ruta", settings.CELERY_BEAT_SCHEDULE)
+
+
+class LogisticaAuditoriaEntregaConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        user = User.objects.create_user(username="auditoria.concurrente")
+        sucursal = Sucursal.objects.create(codigo="AUD-CON", nombre="Auditoría concurrente", activa=True)
+        unidad = Unidad.objects.create(codigo="AUD-CON", descripcion="Unidad concurrente", sucursal=sucursal)
+        repartidor = Repartidor.objects.create(user=user, sucursal=sucursal, unidad_asignada=unidad)
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta auditoría concurrente",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=repartidor,
+            unidad_operativa=unidad,
+        )
+        punto = PuntoLogistico.objects.create(
+            sucursal=sucursal,
+            nombre="Punto concurrente",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+        parada = ParadaRuta.objects.create(ruta=self.ruta, punto=punto, orden=1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+        )
+
+    def test_dos_auditores_concurrentes_crean_una_sola_alerta(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        def ejecutar():
+            close_old_connections()
+            try:
+                return auditar_entregas_ruta(ruta_id=self.ruta.pk)["alertas_creadas"]
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            creadas = list(pool.map(lambda _: ejecutar(), range(2)))
+
+        self.assertEqual(sum(creadas), 1)
+        self.assertEqual(EventoRuta.objects.exclude(clave_auditoria__isnull=True).count(), 1)
 
 
 class LogisticaEntregaApiStabilizationTests(TestCase):

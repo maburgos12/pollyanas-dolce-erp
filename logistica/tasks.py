@@ -4,7 +4,7 @@ from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
@@ -93,7 +93,14 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
     }
 
 
-@shared_task(name="logistica.tasks.auditar_entregas_ruta_task")
+@shared_task(
+    name="logistica.tasks.auditar_entregas_ruta_task",
+    autoretry_for=(OperationalError,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
 def auditar_entregas_ruta_task(ruta_id: int | None = None, fecha: str | None = None):
     fecha_ruta = date.fromisoformat(fecha) if fecha else timezone.localdate()
     return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
