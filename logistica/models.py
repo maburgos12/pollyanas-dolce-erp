@@ -913,6 +913,7 @@ class ReporteUnidad(models.Model):
     ip_reporte = models.GenericIPAddressField(null=True, blank=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_ABIERTO)
     fecha_reporte = models.DateTimeField(auto_now_add=True)
+    fecha_cierre = models.DateTimeField(null=True, blank=True)
     asignado_a = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -938,6 +939,22 @@ class ReporteUnidad(models.Model):
 
     def __str__(self) -> str:
         return f"{self.unidad.codigo} · {self.get_tipo_display()} · {self.get_estatus_display()}"
+
+    def save(self, *args, **kwargs):
+        previous_status = None
+        if self.pk:
+            previous_status = type(self).objects.filter(pk=self.pk).values_list("estatus", flat=True).first()
+        closing = self.estatus == self.ESTATUS_CERRADO and previous_status != self.ESTATUS_CERRADO
+        reopening = previous_status == self.ESTATUS_CERRADO and self.estatus != self.ESTATUS_CERRADO
+        if closing and self.fecha_cierre is None:
+            self.fecha_cierre = timezone.now()
+        elif reopening:
+            self.fecha_cierre = None
+        if closing or reopening:
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = set(update_fields) | {"fecha_cierre"}
+        super().save(*args, **kwargs)
 
 
 class ReporteUnidadReafirmacion(models.Model):

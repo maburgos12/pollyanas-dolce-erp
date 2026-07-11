@@ -228,14 +228,19 @@ class MaintenanceInboxV2Tests(TestCase):
             descripcion=f"Orden {days_ago}",
         )
 
-    def _closed_unit_report(self, days_ago):
+    def _closed_unit_report(self, days_ago, *, reported_days_ago=None, with_close_date=True):
         report = ReporteUnidad.objects.create(
             unidad=self.unit,
             tipo=ReporteUnidad.TIPO_FALLA,
             descripcion=f"Unidad {days_ago}",
             estatus=ReporteUnidad.ESTATUS_CERRADO,
         )
-        ReporteUnidad.objects.filter(pk=report.pk).update(fecha_reporte=timezone.now() - timedelta(days=days_ago))
+        updates = {"fecha_reporte": timezone.now() - timedelta(days=reported_days_ago or days_ago)}
+        if with_close_date:
+            updates["fecha_cierre"] = timezone.now() - timedelta(days=days_ago)
+        else:
+            updates["fecha_cierre"] = None
+        ReporteUnidad.objects.filter(pk=report.pk).update(**updates)
         return report
 
     def test_closed_count_is_independent_from_page_size_and_includes_all_sources(self):
@@ -254,6 +259,59 @@ class MaintenanceInboxV2Tests(TestCase):
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(payload["pagination"]["total"], 3)
         self.assertTrue(payload["pagination"]["has_next"])
+
+    def test_unit_report_uses_real_close_date_not_old_report_date(self):
+        report = self._closed_unit_report(2, reported_days_ago=45)
+
+        payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d", "origen": "logistica",
+        }).json()
+
+        self.assertEqual(payload["counts"]["cerrados"], 1)
+        self.assertEqual(payload["results"][0]["uid"], f"reporte_unidad:{report.pk}")
+
+    def test_legacy_closed_unit_without_close_date_is_excluded_from_30d(self):
+        self._closed_unit_report(2, with_close_date=False)
+
+        payload = self.client.get("/api/mantenimiento/v2/bandeja/", {
+            "estado": "cerrados", "periodo": "30d", "origen": "logistica",
+        }).json()
+
+        self.assertEqual(payload["counts"]["cerrados"], 0)
+        self.assertEqual(payload["results"], [])
+
+    def test_unit_close_date_is_set_once_and_cleared_on_reopen(self):
+        report = ReporteUnidad.objects.create(
+            unidad=self.unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Transiciones",
+        )
+        report.estatus = ReporteUnidad.ESTATUS_CERRADO
+        report.save(update_fields=["estatus", "actualizado_en"])
+        first_close = report.fecha_cierre
+        self.assertIsNotNone(first_close)
+
+        report.descripcion = "Editado después del cierre"
+        report.save(update_fields=["descripcion", "actualizado_en"])
+        report.refresh_from_db()
+        self.assertEqual(report.fecha_cierre, first_close)
+
+        report.estatus = ReporteUnidad.ESTATUS_EN_PROCESO
+        report.save(update_fields=["estatus", "actualizado_en"])
+        report.refresh_from_db()
+        self.assertIsNone(report.fecha_cierre)
+
+    def test_maintenance_write_path_persists_real_unit_close_date(self):
+        report = ReporteUnidad.objects.create(
+            unidad=self.unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Cierre desde mantenimiento",
+        )
+
+        response = self.client.post(
+            f"/api/mantenimiento/bandeja/unidad/{report.pk}/actualizar/",
+            {"estatus": ReporteUnidad.ESTATUS_CERRADO},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        report.refresh_from_db()
+        self.assertIsNotNone(report.fecha_cierre)
 
     def test_30d_includes_29_days_but_excludes_31_days_cancelled_and_other_branch(self):
         included = self._closed_falla(29)

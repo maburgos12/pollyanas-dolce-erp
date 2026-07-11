@@ -42,7 +42,7 @@ def bandeja_v2(request):
         rows = [row for row in rows if row["estado"] in {"abierto", "en_proceso", "programado"}]
     elif state == "cerrados":
         rows = [row for row in rows if row["estado"] == "cerrado"]
-    rows.sort(key=lambda row: (row["fecha_evento"], row["uid"]), reverse=True)
+    rows.sort(key=lambda row: (row["fecha_evento"] is not None, row["fecha_evento"] or "", row["uid"]), reverse=True)
     counts = {
         "abiertos": sum(row["estado"] in {"abierto", "en_proceso", "programado"} for row in rows),
         "en_proceso": sum(row["estado"] == "en_proceso" for row in rows),
@@ -53,7 +53,7 @@ def bandeja_v2(request):
     start = (page - 1) * page_size
     results = rows[start:start + page_size]
     for row in results:
-        row["fecha_evento"] = row["fecha_evento"].isoformat()
+        row["fecha_evento"] = row["fecha_evento"].isoformat() if row["fecha_evento"] else None
     return Response({
         "counts": counts,
         "schema_version": 2,

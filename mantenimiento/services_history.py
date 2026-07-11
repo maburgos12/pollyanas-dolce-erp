@@ -70,7 +70,9 @@ def _aware_date(value):
 
 def _in_period(value, start, end):
     event = _aware_date(value)
-    return event is not None and (start is None or event >= start) and event < end
+    if event is None:
+        return start is None
+    return (start is None or event >= start) and event < end
 
 
 def inbox_rows(user, *, period, origin):
@@ -118,15 +120,17 @@ def inbox_rows(user, *, period, origin):
     if origin in {"logistica", "todos"}:
         reports = authorized_unit_reports(user).values(
             "id", "tipo", "descripcion", "severidad", "estatus", "fecha_reporte",
+            "fecha_cierre",
             "unidad_id", "unidad__codigo", "unidad__sucursal_id", "unidad__sucursal__nombre",
         )
         for row in reports:
             state = canonical_status("reporte_unidad", row["estatus"])
-            if state != "cancelado" and _in_period(row["fecha_reporte"], start, end):
+            event = row["fecha_cierre"] if state == "cerrado" else row["fecha_reporte"]
+            if state != "cancelado" and _in_period(event, start, end):
                 rows.append(_row_payload(
                     uid=f"reporte_unidad:{row['id']}", pk=row["id"], kind="reporte_unidad", origin="logistica",
                     state=state, critical=row["severidad"] == ReporteUnidad.SEVERIDAD_CRITICO,
-                    event=row["fecha_reporte"], title=row["tipo"], description=row["descripcion"],
+                    event=event, title=row["tipo"], description=row["descripcion"],
                     branch_id=row["unidad__sucursal_id"], branch_name=row["unidad__sucursal__nombre"],
                     subject_id=row["unidad_id"], subject=row["unidad__codigo"],
                 ))
