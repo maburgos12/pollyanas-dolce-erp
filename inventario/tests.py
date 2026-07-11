@@ -21,6 +21,7 @@ from inventario.models import (
     ExistenciaInsumo,
     LoteProduccion,
     MovimientoInventario,
+    construir_codigo_lote,
 )
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT, TRACE_RECONSTRUCTED_SYNC
@@ -147,6 +148,194 @@ class LoteProduccionTests(TestCase):
         self.assertEqual(movimiento.linea_bitacora, self.linea)
         self.assertEqual(movimiento.registrado_por_usuario, self.user)
         self.assertEqual(movimiento.trazabilidad["evento"], "cierre_hornos")
+
+    def test_lot_code_is_immutable_after_first_save(self):
+        lote = self.crear_lote()
+        codigo_original = lote.codigo
+        self.insumo.codigo_point = "OTRO-CODIGO"
+        self.insumo.save(update_fields=["codigo_point"])
+        nueva_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+        )
+        lote.producido_en = self.producido_en + timedelta(days=1)
+        lote.linea_origen = nueva_linea
+
+        lote.save()
+        lote.refresh_from_db()
+
+        self.assertEqual(lote.codigo, codigo_original)
+
+    def test_ordinary_lot_requires_source_line_for_same_recipe(self):
+        otra_receta = Receta.objects.create(
+            nombre="Otra preparacion",
+            codigo_point="OTRA-PREP",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="otra-preparacion-lote",
+        )
+        otra_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=otra_receta,
+        )
+
+        with self.assertRaises(ValidationError):
+            self.crear_lote(linea_origen=otra_linea)
+
+    def test_preparation_unit_must_match_insumo_base_when_available(self):
+        otra_unidad = UnidadMedida.objects.create(codigo="lt-lote", nombre="Litro")
+
+        with self.assertRaises(ValidationError):
+            self.crear_lote(unidad=otra_unidad)
+
+    def test_finished_product_unit_uses_recipe_yield_when_available(self):
+        pieza = UnidadMedida.objects.create(codigo="pza-lote", nombre="Pieza")
+        otra_unidad = UnidadMedida.objects.create(codigo="caja-lote", nombre="Caja")
+        receta_final = Receta.objects.create(
+            nombre="Pastel terminado",
+            codigo_point="PASTEL-1",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=pieza,
+            hash_contenido="producto-final-unidad",
+        )
+        linea = BitacoraOperativaLinea.objects.create(bitacora=self.bitacora, receta=receta_final)
+
+        with self.assertRaises(ValidationError):
+            self.crear_lote(insumo=None, receta=receta_final, linea_origen=linea, unidad=otra_unidad)
+
+        lote = self.crear_lote(insumo=None, receta=receta_final, linea_origen=linea, unidad=pieza)
+        self.assertEqual(lote.unidad, pieza)
+
+    def test_finished_product_without_yield_unit_accepts_explicit_unit(self):
+        receta_final = Receta.objects.create(
+            nombre="Pastel sin rendimiento",
+            codigo_point="PASTEL-SIN-RENDIMIENTO",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_unidad=None,
+            hash_contenido="producto-final-sin-unidad",
+        )
+        linea = BitacoraOperativaLinea.objects.create(bitacora=self.bitacora, receta=receta_final)
+
+        lote = self.crear_lote(insumo=None, receta=receta_final, linea_origen=linea)
+
+        self.assertEqual(lote.unidad, self.unidad)
+
+    def test_lot_rejects_non_finite_quantity_and_naive_production_time(self):
+        for invalid_quantity in (Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")):
+            with self.subTest(invalid_quantity=invalid_quantity):
+                with self.assertRaises(ValidationError):
+                    self.crear_lote(cantidad_inicial=invalid_quantity)
+
+        with self.assertRaises(ValidationError):
+            self.crear_lote(producido_en=datetime(2026, 7, 11, 8, 30))
+
+    def test_long_point_codes_fit_and_keep_deterministic_uniqueness(self):
+        prefix = "X" * 79
+        lotes = []
+        for index, tail in enumerate(("A", "B")):
+            unidad = UnidadMedida.objects.create(codigo=f"u-long-{index}", nombre=f"Unidad {index}")
+            insumo = Insumo.objects.create(
+                codigo_point=prefix + tail,
+                nombre=f"Insumo largo {index}",
+                tipo_item=Insumo.TIPO_INTERNO,
+                unidad_base=unidad,
+            )
+            receta = Receta.objects.create(
+                nombre=f"Receta larga {index}",
+                codigo_point=f"REC-LONG-{index}",
+                tipo=Receta.TIPO_PREPARACION,
+                hash_contenido=f"receta-larga-{index}",
+            )
+            linea = BitacoraOperativaLinea.objects.create(bitacora=self.bitacora, receta=receta)
+            lotes.append(
+                self.crear_lote(insumo=insumo, receta=receta, linea_origen=linea, unidad=unidad)
+            )
+
+        self.assertLessEqual(len(lotes[0].codigo), 120)
+        self.assertLessEqual(len(lotes[1].codigo), 120)
+        self.assertNotEqual(lotes[0].codigo, lotes[1].codigo)
+
+        codigo_a = construir_codigo_lote("LOT", ("X" * 200) + "A", "20260711", 99)
+        codigo_b = construir_codigo_lote("LOT", ("X" * 200) + "B", "20260711", 99)
+        self.assertLessEqual(len(codigo_a), 120)
+        self.assertNotEqual(codigo_a, codigo_b)
+
+    def test_inventory_movement_rejects_lot_from_another_insumo(self):
+        lote = self.crear_lote()
+        otro = Insumo.objects.create(codigo_point="OTRO-INS", nombre="Otro insumo")
+
+        with self.assertRaises(ValidationError):
+            MovimientoInventario.objects.create(
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+                insumo=otro,
+                cantidad=Decimal("1"),
+                lote=lote,
+                linea_bitacora=self.linea,
+            )
+
+    def test_inventory_movement_rejects_line_incoherent_with_lot(self):
+        lote = self.crear_lote()
+        otra_receta = Receta.objects.create(
+            nombre="Receta movimiento distinta",
+            codigo_point="MOV-DISTINTA",
+            hash_contenido="movimiento-receta-distinta",
+        )
+        otra_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=otra_receta,
+        )
+
+        with self.assertRaises(ValidationError):
+            MovimientoInventario.objects.create(
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+                insumo=self.insumo,
+                cantidad=Decimal("1"),
+                lote=lote,
+                linea_bitacora=otra_linea,
+            )
+
+    def test_finished_product_lot_cannot_use_insumo_ledger(self):
+        receta_final = Receta.objects.create(
+            nombre="Producto final fuera de ledger",
+            codigo_point="FINAL-FUERA-LEDGER",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="final-fuera-ledger",
+        )
+        linea = BitacoraOperativaLinea.objects.create(bitacora=self.bitacora, receta=receta_final)
+        lote = self.crear_lote(insumo=None, receta=receta_final, linea_origen=linea)
+
+        with self.assertRaises(ValidationError):
+            MovimientoInventario.objects.create(
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+                insumo=self.insumo,
+                cantidad=Decimal("1"),
+                lote=lote,
+                linea_bitacora=linea,
+            )
+
+    def test_legacy_inventory_movements_still_support_create_and_bulk_create(self):
+        created = MovimientoInventario.objects.create(
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("2"),
+        )
+        bulk = MovimientoInventario.objects.bulk_create(
+            [
+                MovimientoInventario(
+                    tipo=MovimientoInventario.TIPO_SALIDA,
+                    insumo=self.insumo,
+                    cantidad=Decimal("1"),
+                ),
+                MovimientoInventario(
+                    tipo=MovimientoInventario.TIPO_AJUSTE,
+                    insumo=self.insumo,
+                    cantidad=Decimal("0.5"),
+                ),
+            ]
+        )
+
+        self.assertIsNone(created.lote_id)
+        self.assertEqual(len(bulk), 2)
 
 
 class InventarioAliasesPendingTests(TestCase):

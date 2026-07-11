@@ -1,5 +1,6 @@
 import re
 from decimal import Decimal
+from hashlib import sha256
 from uuid import uuid4
 
 from django.conf import settings
@@ -67,6 +68,15 @@ def normalizar_codigo_lote(codigo_point):
     return re.sub(r"[^A-Z0-9]+", "-", codigo).strip("-")
 
 
+def construir_codigo_lote(prefijo, identidad, fecha, origen_id):
+    sufijo = f"-{fecha}-{origen_id}"
+    espacio_identidad = 120 - len(prefijo) - len(sufijo) - 1
+    if len(identidad) > espacio_identidad:
+        digest = sha256(identidad.encode("ascii")).hexdigest()[:12].upper()
+        identidad = f"{identidad[:espacio_identidad - 13]}-{digest}"
+    return f"{prefijo}-{identidad}{sufijo}"
+
+
 class LoteProduccion(models.Model):
     DISPONIBLE = "DISPONIBLE"
     AGOTADO = "AGOTADO"
@@ -109,8 +119,14 @@ class LoteProduccion(models.Model):
 
     def clean(self):
         errors = {}
-        if self.cantidad_inicial is not None and self.cantidad_inicial <= 0:
+        try:
+            cantidad = Decimal(str(self.cantidad_inicial))
+        except (ArithmeticError, TypeError, ValueError):
+            cantidad = None
+        if cantidad is None or not cantidad.is_finite() or cantidad <= 0:
             errors["cantidad_inicial"] = "La cantidad inicial debe ser mayor que cero."
+        if self.producido_en and timezone.is_naive(self.producido_en):
+            errors["producido_en"] = "La fecha de produccion debe incluir zona horaria."
 
         if self.es_apertura:
             if self.linea_origen_id:
@@ -119,6 +135,8 @@ class LoteProduccion(models.Model):
                 errors["observaciones"] = "Un lote de apertura requiere una observacion."
         elif not self.linea_origen_id:
             errors["linea_origen"] = "Un lote ordinario requiere una linea de bitacora de origen."
+        elif self.receta_id and self.linea_origen.receta_id != self.receta_id:
+            errors["linea_origen"] = "La linea de origen debe corresponder a la receta del lote."
 
         if self.receta_id:
             from recetas.models import Receta
@@ -127,6 +145,19 @@ class LoteProduccion(models.Model):
                 errors["insumo"] = "Una preparacion interna requiere un insumo canonico."
             if not self.insumo_id and self.receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
                 errors["receta"] = "Un lote sin insumo requiere una receta de producto final."
+            if (
+                self.receta.tipo == Receta.TIPO_PREPARACION
+                and self.insumo_id
+                and self.insumo.unidad_base_id
+                and self.unidad_id != self.insumo.unidad_base_id
+            ):
+                errors["unidad"] = "La unidad debe coincidir con la unidad base del insumo."
+            if (
+                self.receta.tipo == Receta.TIPO_PRODUCTO_FINAL
+                and self.receta.rendimiento_unidad_id
+                and self.unidad_id != self.receta.rendimiento_unidad_id
+            ):
+                errors["unidad"] = "La unidad debe coincidir con la unidad de rendimiento de la receta."
 
         if self.insumo_id:
             codigo_point = self.insumo.codigo_point
@@ -141,21 +172,34 @@ class LoteProduccion(models.Model):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        codigo_existente = ""
+        if self.pk:
+            codigo_existente = type(self).objects.filter(pk=self.pk).values_list("codigo", flat=True).first() or ""
+            self.codigo = codigo_existente
         self.full_clean(exclude=["codigo"] if not self.codigo else None)
         point_code = self.insumo.codigo_point if self.insumo_id else self.receta.codigo_point
         identity = normalizar_codigo_lote(point_code)
         date_code = timezone.localtime(self.producido_en).strftime("%Y%m%d")
 
+        if codigo_existente:
+            super().save(*args, **kwargs)
+            return
+
         if self.es_apertura and not self.pk:
             with transaction.atomic():
                 self.codigo = f"INI-PENDIENTE-{uuid4().hex.upper()}"
                 super().save(*args, **kwargs)
-                self.codigo = f"INI-{identity}-{date_code}-{self.pk}"
+                self.codigo = construir_codigo_lote("INI", identity, date_code, self.pk)
                 type(self).objects.filter(pk=self.pk).update(codigo=self.codigo)
             return
 
         source_id = self.pk if self.es_apertura else self.linea_origen_id
-        self.codigo = f"{'INI' if self.es_apertura else 'LOT'}-{identity}-{date_code}-{source_id}"
+        self.codigo = construir_codigo_lote(
+            "INI" if self.es_apertura else "LOT",
+            identity,
+            date_code,
+            source_id,
+        )
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -207,6 +251,28 @@ class MovimientoInventario(models.Model):
 
     class Meta:
         ordering = ["-fecha"]
+
+    def clean(self):
+        if not self.lote_id:
+            return
+
+        errors = {}
+        if not self.lote.insumo_id:
+            errors["lote"] = "Un lote de producto final no pertenece al ledger de insumos."
+        elif self.insumo_id != self.lote.insumo_id:
+            errors["insumo"] = "El movimiento debe usar el mismo insumo que el lote."
+
+        if self.linea_bitacora_id != self.lote.linea_origen_id:
+            errors["linea_bitacora"] = "La linea del movimiento debe coincidir con el origen del lote."
+        elif self.linea_bitacora_id and self.linea_bitacora.receta_id != self.lote.receta_id:
+            errors["linea_bitacora"] = "La linea del movimiento debe corresponder a la receta del lote."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.tipo} {self.insumo.nombre} {self.cantidad}"
