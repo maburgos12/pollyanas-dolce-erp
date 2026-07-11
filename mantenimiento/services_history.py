@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
-from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.db.models import Case, Exists, F, OuterRef, Prefetch, Q, When
+from django.db.models.functions import Coalesce
 from django.http import Http404
 
 from activos.models import OrdenMantenimiento
@@ -169,7 +170,10 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     oq = Q(fecha_reporte__gte=start, fecha_reporte__lt=end) if start else Q(fecha_reporte__lt=end)
     fallas = fallas.filter(fq | rq | (~Q(estatus__in=closed) & oq))
     total += fallas.count()
-    fallas = fallas.values(
+    fallas = fallas.annotate(effective_event=Case(
+        When(estatus__in=closed, then=Coalesce("fecha_cierre", "fecha_resolucion", "fecha_reporte")),
+        default=F("fecha_reporte"),
+    )).order_by("-effective_event", "-id").values(
         "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_resolucion", "fecha_cierre",
         "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
         "reportado_por_id", "reportado_por__first_name", "reportado_por__last_name", "reportado_por__username",
@@ -207,11 +211,14 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     order_statuses = {"abierto": [OrdenMantenimiento.ESTATUS_PENDIENTE], "en_proceso": [OrdenMantenimiento.ESTATUS_EN_PROCESO], "cerrado": [OrdenMantenimiento.ESTATUS_CERRADA], "cancelado": [OrdenMantenimiento.ESTATUS_CANCELADA]}
     if filters.get("estado") not in {None, "todo"}: orders = orders.filter(estatus__in=order_statuses[filters["estado"]])
     cq = Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre__gte=start.date(), fecha_cierre__lt=end.date()) if start else Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre__lt=end.date())
-    nq = Q(creado_en__gte=start, creado_en__lt=end) if start else Q(creado_en__lt=end)
+    nq = Q(fecha_programada__gte=start.date(), fecha_programada__lt=end.date()) if start else Q(fecha_programada__lt=end.date())
     orders = orders.filter(cq | (~Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA) & nq))
     total += orders.count()
-    orders = orders.values(
-        "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id", "numero_factura", "factura_archivo", "costo_repuestos", "costo_mano_obra", "costo_otros",
+    orders = orders.annotate(effective_event=Case(
+        When(estatus=OrdenMantenimiento.ESTATUS_CERRADA, then=F("fecha_cierre")),
+        default=F("fecha_programada"),
+    )).order_by("-effective_event", "-id").values(
+        "id", "folio", "descripcion", "estatus", "creado_en", "fecha_programada", "fecha_cierre", "origen", "plan_ref_id", "numero_factura", "factura_archivo", "costo_repuestos", "costo_mano_obra", "costo_otros",
         "activo_ref_id", "activo_ref__nombre", "activo_ref__sucursal_id", "activo_ref__sucursal__nombre",
         "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
     )[:candidate_limit]
@@ -221,7 +228,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     ).values_list("orden_atencion_id", flat=True))
     for item in orders:
         state = canonical_status("orden", item["estatus"])
-        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["creado_en"]
+        event = item["fecha_cierre"] if state == "cerrado" and item["fecha_cierre"] else item["fecha_programada"]
         if _in_period(event, start, end):
             unreported = item["origen"] in {OrdenMantenimiento.ORIGEN_EMERGENCIA, OrdenMantenimiento.ORIGEN_INICIATIVA} and not item["plan_ref_id"] and item["id"] not in linked_order_ids
             rows.append(_history_payload(
@@ -246,7 +253,10 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     roq = Q(fecha_reporte__gte=start, fecha_reporte__lt=end) if start else Q(fecha_reporte__lt=end)
     reports = reports.filter(rcq | (Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__isnull=True) & roq) | (~Q(estatus=ReporteUnidad.ESTATUS_CERRADO) & roq))
     total += reports.count()
-    reports = reports.values(
+    reports = reports.annotate(effective_event=Case(
+        When(estatus=ReporteUnidad.ESTATUS_CERRADO, then=Coalesce("fecha_cierre", "fecha_reporte")),
+        default=F("fecha_reporte"),
+    )).order_by("-effective_event", "-id").values(
         "id", "tipo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre", "repartidor__user_id",
         "repartidor__user__first_name", "repartidor__user__last_name", "repartidor__user__username",
         "unidad_id", "unidad__codigo", "unidad__sucursal_id", "unidad__sucursal__nombre",

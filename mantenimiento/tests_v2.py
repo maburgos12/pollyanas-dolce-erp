@@ -8,7 +8,9 @@ from django.contrib.auth.models import Group
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import default_storage
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
@@ -707,13 +709,22 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         self.assertFalse(linked_row["captura_directa"])
 
         typed_uids = {}
-        for kind in ("reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"):
-            response = self.client.get("/api/mantenimiento/v2/historial/", {
-                "tipo": kind, "periodo": "todo", "page_size": 100,
-            }).json()
-            typed_uids[kind] = {row["uid"] for row in response["results"]}
-        self.assertFalse(typed_uids["orden"] & typed_uids["reporte"])
-        self.assertFalse(typed_uids["sin_reporte"] & typed_uids["orden"])
+        for kind in ("todo", "reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"):
+            typed_uids[kind] = set()
+            page = 1
+            while True:
+                response = self.client.get("/api/mantenimiento/v2/historial/", {
+                    "tipo": kind, "periodo": "todo", "page_size": 100, "page": page,
+                }).json()
+                typed_uids[kind].update(row["uid"] for row in response["results"])
+                if not response["pagination"]["has_next"]:
+                    break
+                page += 1
+        concrete = ["reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"]
+        for index, left in enumerate(concrete):
+            for right in concrete[index + 1:]:
+                self.assertFalse(typed_uids[left] & typed_uids[right], (left, right))
+        self.assertEqual(set().union(*(typed_uids[kind] for kind in concrete)), typed_uids["todo"])
 
         params = {"tipo": "servicio_unidad", "periodo": "todo", "page_size": 25}
         page1 = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 1}).json()
@@ -727,6 +738,15 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         self.assertEqual(uids1, [row["uid"] for row in self.client.get(
             "/api/mantenimiento/v2/historial/", {**params, "page": 1}
         ).json()["results"]])
+
+        self.client.get("/api/mantenimiento/v2/historial/", params)
+        with CaptureQueriesContext(connection) as many_queries:
+            self.client.get("/api/mantenimiento/v2/historial/", params)
+        baseline = ServicioRealizadoUnidad.objects.filter(unidad=self.unit).first()
+        ServicioRealizadoUnidad.objects.filter(unidad=self.unit).exclude(pk=baseline.pk).delete()
+        with CaptureQueriesContext(connection) as one_query:
+            self.client.get("/api/mantenimiento/v2/historial/", params)
+        self.assertEqual(len(one_query), len(many_queries))
 
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
