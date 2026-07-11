@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
@@ -14,6 +16,7 @@ from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, R
 logger = logging.getLogger(__name__)
 
 GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
+RUTA_NOCTURNA_HORA_CORTE = 22
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,44 @@ class GeocercaResultado:
     parada: ParadaRuta | None
     distancia_metros: int | None
     dentro: bool
+
+
+def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
+    hoy = hoy or timezone.localdate()
+    ayer = hoy - timedelta(days=1)
+    corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
+    return (
+        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        .filter(
+            repartidor=repartidor,
+            estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
+        )
+        .filter(Q(fecha_ruta=hoy) | Q(fecha_ruta=ayer, created_at__gte=corte))
+        .annotate(
+            _estatus_operativo_prioridad=Case(
+                When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+            _fecha_operativa_prioridad=Case(
+                When(fecha_ruta=hoy, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+        )
+        .order_by("_estatus_operativo_prioridad", "_fecha_operativa_prioridad", "-id")
+    )
+
+
+def ruta_operativa_para_repartidor(repartidor: Repartidor, *, hoy=None) -> RutaEntrega | None:
+    return _rutas_operativas_candidatas(repartidor, hoy=hoy).first()
+
+
+def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
+    if not ruta.repartidor_id:
+        return False
+    seleccionada = ruta_operativa_para_repartidor(ruta.repartidor, hoy=hoy)
+    return seleccionada is not None and seleccionada.id == ruta.id
 
 
 def _decimal(value, field_name: str) -> Decimal:
@@ -148,12 +189,33 @@ def crear_evento_ruta_once(
     )
 
 
-def _marcar_visitada_por_permanencia(*, ruta: RutaEntrega, parada: ParadaRuta, distancia_metros_value: int | None) -> bool:
+def _marcar_visitada_por_permanencia(
+    *,
+    ruta: RutaEntrega,
+    parada: ParadaRuta,
+    ubicacion_actual: UbicacionRuta,
+    distancia_metros_value: int | None,
+) -> bool:
     primera_pendiente = ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).order_by("orden", "id").first()
     if not primera_pendiente or primera_pendiente.id != parada.id:
         return False
     primera_llegada = (
-        EventoRuta.objects.filter(ruta=ruta, parada=parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE)
+        EventoRuta.objects.filter(
+            ruta=ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
+            metadata__ubicacion_confiable=True,
+            metadata__ruta_id=ruta.id,
+            metadata__repartidor_id=ruta.repartidor_id,
+            metadata__unidad_id=ruta.unidad_operativa_id,
+            ubicacion__ruta_id=ruta.id,
+            ubicacion__repartidor_id=ruta.repartidor_id,
+            ubicacion__unidad_id=ruta.unidad_operativa_id,
+            latitud=F("ubicacion__latitud"),
+            longitud=F("ubicacion__longitud"),
+        )
+        .exclude(ubicacion_id=ubicacion_actual.id)
         .order_by("creado_en")
         .first()
     )
@@ -212,7 +274,7 @@ def _salto_fisico_confiable(ruta: RutaEntrega, latitud, longitud, timestamp_disp
 def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_registro: str | None = None) -> UbicacionRuta:
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         raise ValidationError("La ruta debe estar en estatus En ruta para registrar seguimiento.")
-    if ruta.fecha_ruta != timezone.localdate():
+    if not ruta_es_operativa_hoy(ruta):
         raise ValidationError("La ruta activa no corresponde al día operativo actual.")
     if not ruta.repartidor_id:
         raise ValidationError("La ruta debe tener un repartidor asignado antes de aceptar seguimiento.")
@@ -314,13 +376,15 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
 
     resultado = evaluar_geocercas(ruta, ubicacion.latitud, ubicacion.longitud)
     if resultado.parada and resultado.dentro and ubicacion_confiable:
-        if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
-            _marcar_visitada_por_permanencia(
-                ruta=ruta,
-                parada=resultado.parada,
-                distancia_metros_value=resultado.distancia_metros,
-            )
-        crear_evento_ruta_once(
+        metadata_llegada = {
+            "origen_servicio": "registrar_ubicacion_ruta",
+            "ubicacion_confiable": True,
+            "tracking_origen": tracking_origen,
+            "ruta_id": ruta.id,
+            "repartidor_id": repartidor.id,
+            "unidad_id": unidad.id,
+        }
+        evento_llegada = crear_evento_ruta_once(
             ruta=ruta,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
             severidad=EventoRuta.SEVERIDAD_OK,
@@ -331,8 +395,44 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
             latitud=ubicacion.latitud,
             longitud=ubicacion.longitud,
             distancia_metros_value=resultado.distancia_metros,
+            metadata=metadata_llegada,
             ventana_minutos=60,
         )
+        if evento_llegada is None:
+            evento_llegada = (
+                EventoRuta.objects.select_for_update()
+                .filter(
+                    ruta=ruta,
+                    parada=resultado.parada,
+                    tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+                    creado_en__gte=timezone.now() - timezone.timedelta(minutes=60),
+                    metadata__origen_servicio="registrar_ubicacion_ruta",
+                    metadata__ubicacion_confiable=True,
+                )
+                .order_by("-creado_en", "-id")
+                .first()
+            )
+            if evento_llegada is None:
+                evento_llegada = EventoRuta.objects.create(
+                    ruta=ruta,
+                    parada=resultado.parada,
+                    ubicacion=ubicacion,
+                    tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+                    severidad=EventoRuta.SEVERIDAD_OK,
+                    descripcion=f"Llegada detectada en {resultado.parada.punto_nombre_snapshot}.",
+                    latitud=ubicacion.latitud,
+                    longitud=ubicacion.longitud,
+                    distancia_metros=resultado.distancia_metros,
+                    metadata=metadata_llegada,
+                    creado_por=user,
+                )
+        if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
+            _marcar_visitada_por_permanencia(
+                ruta=ruta,
+                parada=resultado.parada,
+                ubicacion_actual=ubicacion,
+                distancia_metros_value=resultado.distancia_metros,
+            )
     elif ruta.paradas.exists():
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])

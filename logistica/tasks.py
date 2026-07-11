@@ -1,10 +1,10 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
@@ -12,6 +12,7 @@ from core.access import can_view_module, group_name_variants
 from core.email_rendering import render_email_to_string
 
 from .models import (
+    AuditoriaEntregaCursor,
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     ConfigAlertaFlota,
@@ -24,6 +25,7 @@ from .models import (
     Unidad,
 )
 from .services_combustible_auditoria import auditar_carga_combustible
+from .services_auditoria_entregas import auditar_entregas_ruta
 from .services_rutas_control import detectar_gps_perdido
 
 
@@ -89,6 +91,46 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
         "fecha": fecha.isoformat(),
         "rutas_revisadas": revisadas,
         "eventos_gps_perdido": len(set(eventos)),
+    }
+
+
+@shared_task(
+    name="logistica.tasks.auditar_entregas_ruta_task",
+    autoretry_for=(OperationalError,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
+def auditar_entregas_ruta_task(ruta_id: int | None = None, fecha: str | None = None):
+    if ruta_id is not None or fecha:
+        fecha_ruta = date.fromisoformat(fecha) if fecha else None
+        return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
+    hoy = timezone.localdate()
+    with transaction.atomic():
+        cursor, _ = AuditoriaEntregaCursor.objects.select_for_update().get_or_create(clave="entregas_ruta")
+        inicio = cursor.ultima_fecha_exitosa + timedelta(days=1) if cursor.ultima_fecha_exitosa else hoy - timedelta(days=1)
+    fechas = []
+    actual = inicio
+    while actual <= hoy:
+        fechas.append(actual)
+        actual += timedelta(days=1)
+    resultados = []
+    for fecha_operativa in fechas:
+        resultado = auditar_entregas_ruta(fecha=fecha_operativa)
+        resultados.append(resultado)
+        with transaction.atomic():
+            cursor = AuditoriaEntregaCursor.objects.select_for_update().get(clave="entregas_ruta")
+            if cursor.ultima_fecha_exitosa is None or fecha_operativa > cursor.ultima_fecha_exitosa:
+                cursor.ultima_fecha_exitosa = fecha_operativa
+                cursor.save(update_fields=["ultima_fecha_exitosa", "actualizado_en"])
+    return {
+        "rutas_revisadas": sum(row["rutas_revisadas"] for row in resultados),
+        "paradas_revisadas": sum(row["paradas_revisadas"] for row in resultados),
+        "hallazgos": [item for row in resultados for item in row["hallazgos"]],
+        "alertas_creadas": sum(row["alertas_creadas"] for row in resultados),
+        "dry_run": False,
+        "ventana_fechas": [item.isoformat() for item in fechas],
     }
 
 

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Logística · Revisiones de entrega{% endblock %}
+{% block page_title %}Revisiones y alertas de entrega{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">Bandeja global · {{ revisiones_count }} pendiente{{ revisiones_count|pluralize }}</div>
+  <p class="muted">Las entregas continúan operativamente; aquí se revisan excepciones y anomalías históricas sin borrar evidencia.</p>
+  <div class="table-responsive"><table class="table table-striped">
+    <thead><tr><th>Ruta</th><th>Sucursal</th><th>Repartidor</th><th>Causa / hora</th><th>Acción</th></tr></thead>
+    <tbody>
+    {% for parada in paradas_revision %}<tr>
+      <td>{{ parada.ruta.folio }}</td><td>{{ parada.punto_nombre_snapshot }}</td>
+      <td>{{ parada.ruta.repartidor.user.get_full_name|default:parada.ruta.repartidor.user.username }}</td>
+      <td>{{ parada.revision_entrega_causa }} · {{ parada.entrega_confirmada_en|date:"Y-m-d H:i" }}</td>
+      <td><a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' parada.ruta_id %}#revisiones-entrega">Revisar</a></td>
+    </tr>{% endfor %}
+    {% for alerta in alertas_historicas %}<tr>
+      <td>{{ alerta.ruta.folio }}</td><td>{{ alerta.parada.punto_nombre_snapshot }}</td>
+      <td>{{ alerta.ruta.repartidor.user.get_full_name|default:alerta.ruta.repartidor.user.username }}</td>
+      <td>{{ alerta.descripcion }} · {{ alerta.creado_en|date:"Y-m-d H:i" }}</td>
+      <td>
+        <a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' alerta.ruta_id %}#revisiones-entrega">Abrir ruta</a>
+        <form method="post" class="pd-u-inline">{% csrf_token %}
+          <input type="hidden" name="evento_id" value="{{ alerta.id }}">
+          <label for="motivo-alerta-{{ alerta.id }}">Motivo de resolución</label>
+          <input id="motivo-alerta-{{ alerta.id }}" name="motivo_revision" required>
+          <button class="btn btn-primary btn-small" type="submit">Marcar resuelta</button>
+        </form>
+      </td>
+    </tr>{% endfor %}
+    {% if not paradas_revision and not alertas_historicas %}<tr><td colspan="5" class="muted">No hay revisiones pendientes.</td></tr>{% endif %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

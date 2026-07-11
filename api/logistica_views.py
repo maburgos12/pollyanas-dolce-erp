@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -45,11 +45,13 @@ from logistica.models import (
     Unidad,
 )
 from logistica.services_google_routes import recalcular_ruta_programada
+from logistica.pwa_compat import is_exact_v59_replay_contract, v59_compat_active
 from logistica.services_combustible_auditoria import auditar_carga_combustible
 from logistica.tasks import auditar_ticket_combustible
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
     obtener_checklist_carga_detallado,
+    registrar_recarga_cedis,
     registrar_evento_checklist_confirmado,
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
@@ -58,7 +60,15 @@ from logistica.services_carga_ruta import (
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
 )
-from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
+from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas, ruta_operativa_para_repartidor
+from logistica.services_entregas import (
+    EntregaEvidenciaIdConflicto,
+    EntregaIdempotenciaConflicto,
+    confirmar_entrega_parada,
+    guardar_respuesta_idempotente,
+    obtener_respuesta_idempotente,
+    tiene_llegada_geocerca_confiable,
+)
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -264,30 +274,7 @@ def _ruta_activa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | No
 
 
 def _ruta_operativa_dia_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
-    today = timezone.localdate()
-    rutas_operativas = (
-        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
-        .filter(
-            repartidor=repartidor,
-            estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
-        )
-        .order_by(
-            models.Case(
-                models.When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
-                default=1,
-                output_field=models.IntegerField(),
-            ),
-            "-id",
-        )
-    )
-    ruta_hoy = rutas_operativas.filter(fecha_ruta=today).first()
-    if ruta_hoy:
-        return ruta_hoy
-
-    previous_day = today - timedelta(days=1)
-    # ponytail: fallback acotado para rutas planeadas de noche que operativamente salen al día siguiente.
-    night_cutoff = timezone.make_aware(datetime.combine(previous_day, time(hour=22)))
-    return rutas_operativas.filter(fecha_ruta=previous_day, created_at__gte=night_cutoff).first()
+    return ruta_operativa_para_repartidor(repartidor)
 
 
 def _gas_rank(value: str | None) -> int | None:
@@ -1374,6 +1361,7 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
 
 
 class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
+    @transaction.atomic
     def post(self, request, ruta_id: int, parada_id: int):
         if not _can_operate_pwa(request.user) and not can_manage_submodule(request.user, "logistica", "rutas"):
             return Response({"detail": "No tienes permisos para confirmar entregas de ruta."}, status=status.HTTP_403_FORBIDDEN)
@@ -1383,20 +1371,127 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         repartidor = _get_repartidor_for_user(request.user)
         if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
             return Response({"detail": "No puedes confirmar entregas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
-        if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
-            return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
-
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
-        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
-            return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
-        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
-            return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
-        if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA and not evidencias_payload:
+        client_context = payload.get("client_context") or {}
+        offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
+        legacy_v59_contract = is_exact_v59_replay_contract(
+            queue_id=offline_queue_id,
+            client_event_id=payload.get("client_event_id"),
+            client_context=client_context,
+        )
+        legacy_v59_replay = legacy_v59_contract and v59_compat_active()
+        legacy_v59_attempt = bool(
+            offline_queue_id
+            or str(payload.get("client_event_id") or "").startswith("offline-v59-")
+            or client_context.get("client_version") == "pwa-v59-offline"
+        )
+        if legacy_v59_attempt and not legacy_v59_replay:
+            return Response(
+                {"detail": "La compatibilidad de cola offline v59 no esta disponible o el contrato es invalido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if legacy_v59_replay:
+            client_context = {
+                **client_context,
+                "causa": "CLIENTE_LEGACY",
+                "offline_queue_id": offline_queue_id,
+            }
+        motivo = payload.get("notas") or "Entrega confirmada por repartidor."
+        # Este endpoint representa siempre el boton de la PWA. Los permisos del
+        # usuario no cambian la procedencia del hecho (un jefe puede ser tambien
+        # repartidor). El ajuste administrativo vive en ruta_detail.
+        origen_confirmacion = "PWA"
+        evidencias_servicio = [dict(item) for item in evidencias_payload]
+        try:
+            replay_idempotente = obtener_respuesta_idempotente(
+                ruta=ruta,
+                parada=parada,
+                actor=request.user,
+                entrega_estado=payload["entrega_estado"],
+                motivo=motivo,
+                client_event_id=payload.get("client_event_id"),
+                evidencias=evidencias_servicio,
+                ubicacion=client_context,
+                origen=origen_confirmacion,
+            )
+        except EntregaIdempotenciaConflicto as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
+        if replay_idempotente is not None:
+            if replay_idempotente.respuesta is not None:
+                return Response(replay_idempotente.respuesta, status=status.HTTP_200_OK)
+            evento_original = EventoRuta.objects.get(pk=replay_idempotente.evidencia.metadata["evento_id"])
+            requiere_revision = bool(evento_original.metadata.get("requiere_revision"))
+            metadata_replay = replay_idempotente.evidencia.metadata or {}
+            parada_data = metadata_replay.get("snapshot_dominio")
+            evidencia_ids = metadata_replay.get("evidencia_ids") or [replay_idempotente.evidencia.id]
+            replay_recuperado = parada_data is None
+            if replay_recuperado:
+                parada_data = {
+                    "id": replay_idempotente.evidencia.parada_id,
+                    "ruta": replay_idempotente.evidencia.ruta_id,
+                    "punto": None,
+                    "estado": None,
+                    "estado_display": "No recuperable",
+                    "hora_llegada_real": None,
+                    "hora_salida_real": None,
+                    "entrega_estado": evento_original.metadata.get("entrega_estado"),
+                    "entrega_estado_display": evento_original.metadata.get("entrega_estado"),
+                    "entrega_confirmada_en": replay_idempotente.evidencia.capturado_en.isoformat(),
+                    "entrega_confirmada_por_nombre": nombre_operativo_usuario(request.user),
+                    "entrega_notas": replay_idempotente.evidencia.comentario,
+                    "geocerca_confiable": not requiere_revision,
+                    "revision_entrega_estado": (
+                        ParadaRuta.REVISION_PENDIENTE if requiere_revision else ParadaRuta.REVISION_NO_REQUERIDA
+                    ),
+                    "revision_entrega_causa": evento_original.metadata.get("causa", ""),
+                    "revision_entrega_datos": {},
+                    "revision_entrega_revisada_en": None,
+                    "revision_entrega_revisada_por": None,
+                    "revision_entrega_revisada_por_nombre": "",
+                    "revision_entrega_resolucion": "",
+                    "distancia_llegada_metros": evento_original.distancia_metros,
+                }
+            evidencias_originales = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
+            respuesta_reconstruida = {
+                "parada": parada_data,
+                "evidencias": ParadaEntregaEvidenciaSerializer(
+                    evidencias_originales,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "requiere_revision": requiere_revision,
+                "warning": (
+                    "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
+                    if requiere_revision
+                    else ""
+                ),
+            }
+            if replay_recuperado:
+                respuesta_reconstruida["replay_recuperado"] = True
+            guardar_respuesta_idempotente(
+                evidencia=replay_idempotente.evidencia,
+                respuesta=respuesta_reconstruida,
+            )
+            return Response(respuesta_reconstruida, status=status.HTTP_200_OK)
+
+        if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+            return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
+        if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+            return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
+        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
+            return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
+        if (
+            payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA
+            and not evidencias_payload
+            and not legacy_v59_replay
+        ):
             return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
+        if not payload.get("client_event_id"):
+            return Response({"client_event_id": ["client_event_id es obligatorio."]}, status=status.HTTP_400_BAD_REQUEST)
         linea_ids = {item.get("linea_carga_id") for item in evidencias_payload if item.get("linea_carga_id")}
         lineas_by_id = {}
         if linea_ids:
@@ -1412,115 +1507,64 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             if missing:
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
-        with transaction.atomic():
-            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
-            if parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
+        tiene_geocerca_confiable = tiene_llegada_geocerca_confiable(ruta=ruta, parada=parada)
+        if not tiene_geocerca_confiable and not legacy_v59_replay:
+            if not (payload.get("notas") or "").strip():
+                return Response({"notas": ["Explica el motivo de la entrega sin geocerca."]}, status=status.HTTP_400_BAD_REQUEST)
+            if not client_context.get("causa") or not client_context.get("client_timestamp") or not client_context.get("client_version"):
                 return Response(
-                    {
-                        "parada": ParadaRutaSerializer(parada).data,
-                        "evidencias": ParadaEntregaEvidenciaSerializer(
-                            parada.evidencias_entrega.all(),
-                            many=True,
-                            context={"request": request},
-                        ).data,
-                    },
-                    status=status.HTTP_200_OK,
-                )
-            if not EventoRuta.objects.filter(
-                ruta=ruta,
-                parada=parada,
-                tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
-            ).exists():
-                return Response(
-                    {"detail": "La entrega solo se puede confirmar después de registrar la llegada dentro de la geocerca."},
+                    {"client_context": ["Para una excepción informa causa, client_timestamp y client_version."]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            evidencias = []
-            created_any = False
-            for item in evidencias_payload:
-                client_event_id = item.get("client_event_id") or ""
-                defaults = {
-                    "linea_carga": lineas_by_id.get(item.get("linea_carga_id")) if item.get("linea_carga_id") else None,
-                    "tipo": item.get("tipo") or ParadaEntregaEvidencia.TIPO_CONFIRMACION,
-                    "cantidad_entregada": item.get("cantidad_entregada"),
-                    "comentario": item.get("comentario") or "",
-                    "latitud": item.get("latitud"),
-                    "longitud": item.get("longitud"),
-                    "precision_metros": item.get("precision_metros"),
-                    "ip_registro": request.META.get("REMOTE_ADDR"),
-                    "metadata": {"origen": "pwa_entrega_parada"},
-                }
-                if client_event_id:
-                    evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
-                        ruta=ruta,
-                        parada=parada,
-                        capturado_por=request.user,
-                        client_event_id=client_event_id,
-                        defaults={
-                            **defaults,
-                        },
-                    )
-                else:
-                    evidencia = ParadaEntregaEvidencia.objects.create(
-                        ruta=ruta,
-                        parada=parada,
-                        capturado_por=request.user,
-                        **defaults,
-                    )
-                    created = True
-                evidencias.append(evidencia)
-                created_any = created_any or created
 
-            if parada.entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
-                if parada.estado != ParadaRuta.ESTADO_VISITADA:
-                    parada.estado = ParadaRuta.ESTADO_VISITADA
-                    parada.hora_llegada_real = timezone.now()
-                parada.entrega_estado = payload["entrega_estado"]
-                parada.entrega_confirmada_en = timezone.now()
-                parada.entrega_confirmada_por = request.user
-                parada.entrega_notas = payload.get("notas") or ""
-                parada.save(
-                    update_fields=[
-                        "entrega_estado",
-                        "entrega_confirmada_en",
-                        "entrega_confirmada_por",
-                        "entrega_notas",
-                        "estado",
-                        "hora_llegada_real",
-                        "actualizado_en",
-                    ]
-                )
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-            if created_any:
-                EventoRuta.objects.create(
-                    ruta=ruta,
-                    parada=parada,
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL
-                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                    else EventoRuta.TIPO_LLEGADA_GEOFENCE,
-                    severidad=EventoRuta.SEVERIDAD_ALERTA
-                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                    else EventoRuta.SEVERIDAD_INFO,
-                    descripcion=f"Entrega de parada confirmada: {parada.get_entrega_estado_display()}.",
-                    metadata={"entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
-                    creado_por=request.user,
-                )
+        try:
+            resultado = confirmar_entrega_parada(
+                ruta=ruta,
+                parada=parada,
+                actor=request.user,
+                entrega_estado=payload["entrega_estado"],
+                motivo=motivo,
+                client_event_id=payload["client_event_id"],
+                evidencias=evidencias_servicio,
+                ubicacion=client_context,
+                origen=origen_confirmacion,
+            )
+        except EntregaIdempotenciaConflicto as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
+        except EntregaEvidenciaIdConflicto as exc:
+            return Response(
+                {"detail": exc.messages[0]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        parada = resultado.parada
+        ruta.recompute_route_control()
+        ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+        evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
+        evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
 
         log_event(
             request.user,
             "CREATE",
             "logistica.ParadaEntregaEvidencia",
             str(parada.id),
-            {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
+            {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": evidencias.count()},
         )
-        return Response(
-            {
-                "parada": ParadaRutaSerializer(parada).data,
-                "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
-            },
-            status=status.HTTP_200_OK,
-        )
+        respuesta = {
+            "parada": resultado.evidencia.metadata["snapshot_dominio"],
+            "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
+            "requiere_revision": resultado.requiere_revision,
+            "warning": (
+                "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
+                if resultado.requiere_revision
+                else ""
+            ),
+        }
+        guardar_respuesta_idempotente(evidencia=resultado.evidencia, respuesta=respuesta)
+        return Response(respuesta, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
@@ -1540,35 +1584,23 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
         if parada.punto.tipo != PuntoLogistico.TIPO_CEDIS:
             return Response({"detail": "Esta acción solo aplica a paradas CEDIS."}, status=status.HTTP_400_BAD_REQUEST)
 
-        with transaction.atomic():
-            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
-            created_event = False
-            if parada.estado != ParadaRuta.ESTADO_VISITADA:
-                now = timezone.now()
-                parada.estado = ParadaRuta.ESTADO_VISITADA
-                parada.hora_llegada_real = parada.hora_llegada_real or now
-                parada.hora_salida_real = parada.hora_salida_real or now
-                parada.notas = (request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip()
-                parada.save(update_fields=["estado", "hora_llegada_real", "hora_salida_real", "notas", "actualizado_en"])
-                EventoRuta.objects.create(
-                    ruta=ruta,
-                    parada=parada,
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                    severidad=EventoRuta.SEVERIDAD_INFO,
-                    descripcion="Recarga CEDIS registrada por repartidor en PWA.",
-                    metadata={"tipo": "recarga_cedis_pwa"},
-                    creado_por=request.user,
-                )
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-                created_event = True
+        try:
+            evento = registrar_recarga_cedis(
+                ruta=ruta,
+                parada=parada,
+                user=request.user,
+                notas=(request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip(),
+            )
+        except ValidationError as exc:
+            return Response({"detail": "; ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        parada.refresh_from_db()
 
         log_event(
             request.user,
             "CREATE",
             "logistica.EventoRuta",
             str(parada.id),
-            {"ruta": ruta.folio, "parada": parada.id, "tipo": "recarga_cedis_pwa", "created": created_event},
+            {"ruta": ruta.folio, "parada": parada.id, "tipo": EventoRuta.TIPO_RECARGA_CEDIS, "evento": evento.id},
         )
         return Response({"parada": ParadaRutaSerializer(parada).data}, status=status.HTTP_200_OK)
 
@@ -1607,7 +1639,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"), many=True).data,
                 "ultima_ubicacion": UbicacionRutaSerializer(ultima_ubicacion).data if ultima_ubicacion else None,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
                 "checklist_carga": RutaCargaChecklistSerializer(
@@ -1723,7 +1755,7 @@ class LogisticaRutaRecepcionPointSyncView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(resumen.ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto").order_by("orden", "id"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"), many=True).data,
                 "evidencias_creadas": resumen.evidencias_creadas,
                 "evidencias_existentes": resumen.evidencias_existentes,
                 "paradas_actualizadas": resumen.paradas_actualizadas,
@@ -1821,7 +1853,7 @@ class LogisticaRutaTrackingView(_LogisticaBaseView):
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("punto"), many=True).data,
+                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh"), many=True).data,
                 "ubicaciones": UbicacionRutaSerializer(ruta.ubicaciones.select_related("repartidor__user", "unidad")[:200], many=True).data,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:200], many=True).data,
             },

@@ -1359,6 +1359,7 @@
   </head>
   <body>
     <div id="app"></div>
+    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v61-v59-replay"></script>
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
@@ -2043,11 +2044,12 @@
         let failed = 0;
         for (const item of pending) {
           try {
-            const headers = cleanReplayHeaders(item.headers || {});
-            const response = await apiFetch(item.path, {
-              method: item.method,
+            const replayItem = window.PDLogisticaOfflineQueue.prepareReplay(item);
+            const headers = cleanReplayHeaders(replayItem.headers || {});
+            const response = await apiFetch(replayItem.path, {
+              method: replayItem.method,
               headers,
-              body: deserializeOfflineBody(item.body),
+              body: deserializeOfflineBody(replayItem.body),
               skipOfflineQueue: true
             });
             if (!response.ok) {
@@ -3267,7 +3269,15 @@
         rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
         const notasDraft = entregaNotasDraftFor(paradaId);
-        const notas = estado === "ENTREGADA" ? "Entrega completa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
+        const parada = (state.rutaActiva?.paradas || []).find((row) => Number(row.id) === Number(paradaId));
+        const fueraDeGeocerca = parada?.geocerca_confiable !== true;
+        let notas = estado === "ENTREGADA" ? "Entrega completa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
+        if (fueraDeGeocerca) {
+          const aviso = "Estás fuera de la sucursal o no pudimos validar tu ubicación. La entrega se registrará, pero será revisada por tu jefe.";
+          if (!window.confirm(aviso)) return;
+          notas = String(window.prompt("Explica por qué confirmas la entrega sin geocerca:", String(notasDraft.notas || "")) || "").trim();
+          if (!notas) return renderRutaActiva("El motivo es obligatorio para continuar sin geocerca.");
+        }
         if (estado !== "ENTREGADA" && !notas) {
           return renderRutaActiva("Describe la diferencia o el motivo antes de guardar.");
         }
@@ -3277,12 +3287,23 @@
         }
         try {
           const evidencias = estado === "ENTREGADA" ? evidenciasEntregaParada(paradaId) : [];
+          const clientEventId = newClientEventId();
+          const draft = ensureRutaTrackingDraft();
           const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/entrega/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               entrega_estado: estado,
               notas,
+              client_event_id: clientEventId,
+              client_context: {
+                causa: fueraDeGeocerca ? (draft.latitud && draft.longitud ? "FUERA_DE_RADIO" : "GPS_SIN_SENAL") : "DENTRO_GEOFENCE",
+                client_timestamp: new Date().toISOString(),
+                client_version: "pwa-v60-entregas",
+                latitud: draft.latitud || null,
+                longitud: draft.longitud || null,
+                precision_metros: draft.precision_metros || null
+              },
               evidencias
             })
           });
@@ -3297,7 +3318,8 @@
           }
           delete state.entregaNotasDraft[paradaId];
           state.rutaActiva = null;
-          return renderRutaActiva("✅ Entrega registrada.");
+          const data = await response.json().catch(() => ({}));
+          return renderRutaActiva(data.warning ? `✅ Entrega registrada. ${data.warning}` : "✅ Entrega registrada.");
         } catch (error) {
           return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo confirmar la entrega. Reintenta con señal.");
         }
@@ -5037,7 +5059,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v59-pwa-format", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v61-v59-replay", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

@@ -84,6 +84,11 @@ GOOGLE_ROADS_TIMEOUT_SECONDS = env_int("GOOGLE_ROADS_TIMEOUT_SECONDS", 10)
 GOOGLE_ROADS_SNAP_ENABLED = env_bool("GOOGLE_ROADS_SNAP_ENABLED", default=False)
 GOOGLE_ROADS_SNAP_MAX_POINTS = env_int("GOOGLE_ROADS_SNAP_MAX_POINTS", 100)
 LOGISTICA_FALLBACK_SPEED_KMH = env_int("LOGISTICA_FALLBACK_SPEED_KMH", 35)
+# Ventana absoluta y corta para vaciar colas offline creadas por la PWA v59.
+# Definirla vacia deshabilita la compatibilidad inmediatamente.
+LOGISTICA_PWA_V59_COMPAT_UNTIL = os.getenv(
+    "LOGISTICA_PWA_V59_COMPAT_UNTIL", "2026-07-17T23:59:59-07:00"
+).strip()
 ECOMMERCE_API_BASE_URL = os.getenv("ECOMMERCE_API_BASE_URL", "").strip()
 ECOMMERCE_SERVICE_EMAIL = os.getenv("ECOMMERCE_SERVICE_EMAIL", "").strip()
 ECOMMERCE_SERVICE_PASSWORD = os.getenv("ECOMMERCE_SERVICE_PASSWORD", "").strip()
@@ -392,6 +397,19 @@ CELERY_BEAT_SCHEDULE = {
         # Día 2 de cada mes — después del snapshot mensual del día 1
     },
 }
+
+# Opt-in deliberado: primero ejecutar el comando en --dry-run y revisar sus
+# hallazgos. Solo después habilitar esta variable en el ambiente objetivo.
+LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED = env_bool(
+    "LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED",
+    default=False,
+)
+if LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED:
+    CELERY_BEAT_SCHEDULE["logistica-auditar-entregas-ruta"] = {
+        "task": "logistica.tasks.auditar_entregas_ruta_task",
+        "schedule": crontab(hour=23, minute=30),
+        "options": {"timezone": TIME_ZONE},
+    }
 
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))

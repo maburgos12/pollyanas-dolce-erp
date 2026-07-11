@@ -873,6 +873,13 @@
     {% endfor %}
   </section>
 
+  {% if can_manage_logistica and revisiones_globales_count %}
+  <section class="active-filter-note" role="status">
+    {{ revisiones_globales_count }} entrega{{ revisiones_globales_count|pluralize }} requiere{{ revisiones_globales_count|pluralize:"n" }} revisión global.
+    <a href="{% url 'logistica:revisiones_entrega' %}">Abrir bandeja de revisiones</a>
+  </section>
+  {% endif %}
+
   <section class="route-toolbar" aria-label="Filtros de control de rutas">
     <div class="route-title-block">
       <h1>Control interno de rutas</h1>

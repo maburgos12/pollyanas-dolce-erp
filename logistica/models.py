@@ -309,6 +309,18 @@ class ParadaRuta(models.Model):
         (ENTREGA_CON_DIFERENCIA, "Con diferencia"),
         (ENTREGA_NO_ENTREGADA, "No entregada"),
     ]
+    REVISION_NO_REQUERIDA = "NO_REQUERIDA"
+    REVISION_PENDIENTE = "PENDIENTE"
+    REVISION_AUTORIZADA = "AUTORIZADA"
+    REVISION_RECHAZADA = "RECHAZADA"
+    REVISION_CORREGIDA = "CORREGIDA"
+    REVISION_CHOICES = [
+        (REVISION_NO_REQUERIDA, "No requerida"),
+        (REVISION_PENDIENTE, "Pendiente"),
+        (REVISION_AUTORIZADA, "Autorizada"),
+        (REVISION_RECHAZADA, "Rechazada"),
+        (REVISION_CORREGIDA, "Corregida"),
+    ]
 
     ruta = models.ForeignKey(RutaEntrega, on_delete=models.CASCADE, related_name="paradas")
     punto = models.ForeignKey(PuntoLogistico, on_delete=models.PROTECT, related_name="paradas_ruta")
@@ -331,6 +343,22 @@ class ParadaRuta(models.Model):
         related_name="paradas_logistica_confirmadas",
     )
     entrega_notas = models.TextField(blank=True, default="")
+    revision_entrega_estado = models.CharField(
+        max_length=20,
+        choices=REVISION_CHOICES,
+        default=REVISION_NO_REQUERIDA,
+    )
+    revision_entrega_causa = models.CharField(max_length=40, blank=True)
+    revision_entrega_datos = models.JSONField(default=dict, blank=True)
+    revision_entrega_revisada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="entregas_logistica_revisadas",
+    )
+    revision_entrega_revisada_en = models.DateTimeField(null=True, blank=True)
+    revision_entrega_resolucion = models.TextField(blank=True)
     distancia_llegada_metros = models.PositiveIntegerField(null=True, blank=True)
     notas = models.TextField(blank=True, default="")
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -424,6 +452,7 @@ class RutaCargaChecklistLinea(models.Model):
     ESTATUS_FALTANTE = "FALTANTE"
     ESTATUS_SOBRANTE = "SOBRANTE"
     ESTATUS_NO_APLICA = "NO_APLICA"
+    ESTATUS_ZERO_EXPECTED = "ZERO_EXPECTED"
     ESTATUS_CHOICES = [
         (ESTATUS_PENDIENTE, "Pendiente"),
         (ESTATUS_CARGADA, "Cargada"),
@@ -431,6 +460,7 @@ class RutaCargaChecklistLinea(models.Model):
         (ESTATUS_FALTANTE, "Faltante"),
         (ESTATUS_SOBRANTE, "Sobrante"),
         (ESTATUS_NO_APLICA, "No aplica"),
+        (ESTATUS_ZERO_EXPECTED, "Enviado cero"),
     ]
 
     MOTIVO_STOCK_LIMITADO = "stock_limitado"
@@ -643,6 +673,13 @@ class EventoRuta(models.Model):
     TIPO_SALTO_IMPOSIBLE = "SALTO_IMPOSIBLE"
     TIPO_INCIDENCIA_MANUAL = "INCIDENCIA_MANUAL"
     TIPO_CIERRE = "CIERRE"
+    TIPO_ENTREGA = "ENTREGA"
+    TIPO_ENTREGA_EXCEPCIONAL = "ENTREGA_EXCEPCIONAL"
+    TIPO_ENTREGA_AUTORIZADA = "ENTREGA_AUTORIZADA"
+    TIPO_ENTREGA_RECHAZADA = "ENTREGA_RECHAZADA"
+    TIPO_ENTREGA_CORREGIDA = "ENTREGA_CORREGIDA"
+    TIPO_INCONSISTENCIA_ENTREGA = "INCONSISTENCIA_ENTREGA"
+    TIPO_RECARGA_CEDIS = "RECARGA_CEDIS"
     TIPO_CHOICES = [
         (TIPO_SALIDA, "Salida"),
         (TIPO_LLEGADA_GEOFENCE, "Llegada a geocerca"),
@@ -654,6 +691,13 @@ class EventoRuta(models.Model):
         (TIPO_SALTO_IMPOSIBLE, "Salto GPS imposible"),
         (TIPO_INCIDENCIA_MANUAL, "Incidencia manual"),
         (TIPO_CIERRE, "Cierre"),
+        (TIPO_ENTREGA, "Entrega"),
+        (TIPO_ENTREGA_EXCEPCIONAL, "Entrega excepcional"),
+        (TIPO_ENTREGA_AUTORIZADA, "Entrega excepcional autorizada"),
+        (TIPO_ENTREGA_RECHAZADA, "Entrega excepcional rechazada"),
+        (TIPO_ENTREGA_CORREGIDA, "Entrega excepcional corregida"),
+        (TIPO_INCONSISTENCIA_ENTREGA, "Inconsistencia de entrega"),
+        (TIPO_RECARGA_CEDIS, "Recarga CEDIS"),
     ]
 
     SEVERIDAD_INFO = "info"
@@ -677,6 +721,34 @@ class EventoRuta(models.Model):
     longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     distancia_metros = models.PositiveIntegerField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    clave_auditoria = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
+    REVISION_ALERTA_PENDIENTE = "PENDIENTE"
+    REVISION_ALERTA_RESUELTA = "RESUELTA"
+    REVISION_ALERTA_CHOICES = [
+        (REVISION_ALERTA_PENDIENTE, "Pendiente"),
+        (REVISION_ALERTA_RESUELTA, "Resuelta"),
+    ]
+    revision_alerta_estado = models.CharField(
+        max_length=15,
+        choices=REVISION_ALERTA_CHOICES,
+        default=REVISION_ALERTA_PENDIENTE,
+    )
+    revision_alerta_motivo = models.TextField(blank=True, default="")
+    revision_alerta_resuelta_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="alertas_logistica_resueltas",
+    )
+    revision_alerta_resuelta_en = models.DateTimeField(null=True, blank=True)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -711,6 +783,17 @@ class EventoRuta(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ruta.folio} · {self.get_tipo_display()}"
+
+
+class AuditoriaEntregaCursor(models.Model):
+    """Punto durable del ultimo dia operativo auditado completamente."""
+
+    clave = models.CharField(max_length=40, unique=True, default="entregas_ruta")
+    ultima_fecha_exitosa = models.DateField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.clave}: {self.ultima_fecha_exitosa or 'sin ejecutar'}"
 
 
 class Unidad(models.Model):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -27,6 +28,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
+from logistica.services_entregas import geocercas_confiables_por_parada, tiene_llegada_geocerca_confiable
 from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -218,6 +220,9 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     entrega_estado = serializers.SerializerMethodField()
     entrega_estado_display = serializers.SerializerMethodField()
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
+    geocerca_confiable = serializers.SerializerMethodField()
+    revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
+    revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ParadaRuta
@@ -240,6 +245,14 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_confirmada_en",
             "entrega_confirmada_por_nombre",
             "entrega_notas",
+            "geocerca_confiable",
+            "revision_entrega_estado",
+            "revision_entrega_causa",
+            "revision_entrega_datos",
+            "revision_entrega_revisada_en",
+            "revision_entrega_revisada_por",
+            "revision_entrega_revisada_por_nombre",
+            "revision_entrega_resolucion",
             "distancia_llegada_metros",
             "notas",
         ]
@@ -259,6 +272,21 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         if not obj.entrega_confirmada_por_id:
             return ""
         return nombre_operativo_usuario(obj.entrega_confirmada_por)
+
+    def get_geocerca_confiable(self, obj):
+        root_instance = getattr(self.root, "instance", None)
+        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
+            cache = self.context.get("_geocercas_confiables")
+            if cache is None:
+                cache = geocercas_confiables_por_parada(root_instance)
+                self.context["_geocercas_confiables"] = cache
+            return obj.id in cache
+        return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
+
+    def get_revision_entrega_revisada_por_nombre(self, obj):
+        if not obj.revision_entrega_revisada_por_id:
+            return ""
+        return nombre_operativo_usuario(obj.revision_entrega_revisada_por)
 
 
 class UbicacionRutaSerializer(serializers.ModelSerializer):
@@ -535,12 +563,48 @@ class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
 class ParadaEntregaConfirmarSerializer(serializers.Serializer):
     entrega_estado = serializers.ChoiceField(choices=ParadaRuta.ENTREGA_ESTADO_CHOICES)
     notas = serializers.CharField(required=False, allow_blank=True, default="")
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    client_context = serializers.DictField(required=False, default=dict)
     evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
         entrega_estado = attrs["entrega_estado"]
         notas = (attrs.get("notas") or "").strip()
         evidencias = attrs.get("evidencias") or []
+        client_context = attrs.get("client_context") or {}
+        allowed_context = {
+            "causa", "latitud", "longitud", "precision_metros", "distancia_metros",
+            "client_timestamp", "client_version",
+        }
+        extra = set(client_context) - allowed_context
+        if extra:
+            raise serializers.ValidationError({"client_context": f"Campos no permitidos: {', '.join(sorted(extra))}."})
+        if len(json.dumps(client_context, default=str)) > 2048:
+            raise serializers.ValidationError({"client_context": "El contexto excede el tamaño permitido."})
+        validators = {
+            "causa": serializers.ChoiceField(choices=[
+                "GPS_SIN_SENAL", "FUERA_DE_RADIO", "DENTRO_GEOFENCE",
+                "AJUSTE_ADMINISTRATIVO", "GEOFENCE_LEGACY_NO_CONFIABLE",
+                "PRECISION_INSUFICIENTE", "UBICACION_TARDIA", "SALTO_IMPOSIBLE",
+                "SUCURSAL_SIN_COORDENADAS", "GPS_DENEGADO",
+            ]),
+            "latitud": serializers.DecimalField(max_digits=9, decimal_places=6, min_value=Decimal("-90"), max_value=Decimal("90")),
+            "longitud": serializers.DecimalField(max_digits=9, decimal_places=6, min_value=Decimal("-180"), max_value=Decimal("180")),
+            "precision_metros": serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("999999.99")),
+            "distancia_metros": serializers.IntegerField(min_value=0, max_value=10_000_000),
+            "client_timestamp": serializers.DateTimeField(),
+            "client_version": serializers.CharField(max_length=120),
+        }
+        for key, field in validators.items():
+            if key in client_context and client_context[key] is not None:
+                try:
+                    client_context[key] = field.run_validation(client_context[key])
+                except serializers.ValidationError as exc:
+                    raise serializers.ValidationError({"client_context": {key: exc.detail}})
+        client_event_id = (attrs.get("client_event_id") or "").strip()
+        if not client_event_id and evidencias:
+            client_event_id = str(evidencias[0].get("client_event_id") or "").strip()
+        attrs["client_event_id"] = client_event_id
         if entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
             raise serializers.ValidationError({"entrega_estado": "La entrega debe quedar entregada, con diferencia o no entregada."})
         if entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}:
