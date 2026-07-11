@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Case, F, IntegerField, When
+from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
@@ -26,40 +26,42 @@ class GeocercaResultado:
     dentro: bool
 
 
-def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
+def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
     hoy = hoy or timezone.localdate()
-    if ruta.fecha_ruta == hoy:
-        return True
     ayer = hoy - timedelta(days=1)
-    if ruta.fecha_ruta != ayer:
-        return False
     corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
-    return ruta.created_at >= corte
-
-
-def ruta_operativa_para_repartidor(repartidor: Repartidor) -> RutaEntrega | None:
-    hoy = timezone.localdate()
-    rutas = (
+    return (
         RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
         .filter(
             repartidor=repartidor,
             estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
         )
-        .order_by(
-            Case(
+        .filter(Q(fecha_ruta=hoy) | Q(fecha_ruta=ayer, created_at__gte=corte))
+        .annotate(
+            _estatus_operativo_prioridad=Case(
                 When(estatus=RutaEntrega.ESTATUS_EN_RUTA, then=0),
                 default=1,
                 output_field=IntegerField(),
             ),
-            "-id",
+            _fecha_operativa_prioridad=Case(
+                When(fecha_ruta=hoy, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
         )
+        .order_by("_estatus_operativo_prioridad", "_fecha_operativa_prioridad", "-id")
     )
-    ruta_hoy = rutas.filter(fecha_ruta=hoy).first()
-    if ruta_hoy:
-        return ruta_hoy
-    ayer = hoy - timedelta(days=1)
-    corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
-    return rutas.filter(fecha_ruta=ayer, created_at__gte=corte).first()
+
+
+def ruta_operativa_para_repartidor(repartidor: Repartidor, *, hoy=None) -> RutaEntrega | None:
+    return _rutas_operativas_candidatas(repartidor, hoy=hoy).first()
+
+
+def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
+    if not ruta.repartidor_id:
+        return False
+    seleccionada = ruta_operativa_para_repartidor(ruta.repartidor, hoy=hoy)
+    return seleccionada is not None and seleccionada.id == ruta.id
 
 
 def _decimal(value, field_name: str) -> Decimal:

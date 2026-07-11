@@ -54,7 +54,12 @@ from logistica.services_entregas import (
     confirmar_entrega_parada,
     revisar_entrega_excepcional,
 )
-from logistica.services_rutas_control import distancia_metros, registrar_ubicacion_ruta, resumen_control_rutas
+from logistica.services_rutas_control import (
+    distancia_metros,
+    registrar_ubicacion_ruta,
+    resumen_control_rutas,
+    ruta_es_operativa_hoy,
+)
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
@@ -1180,6 +1185,51 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
                 ruta=ruta,
                 payload={"latitud": "25.570000", "longitud": "-108.470000"},
             )
+
+    def test_ruta_nocturna_en_ruta_gana_a_ruta_de_hoy_planeada_y_solo_ella_acepta_tracking(self):
+        ayer = timezone.localdate() - timezone.timedelta(days=1)
+        ruta_nocturna, _ = self._crear_ruta(fecha=ayer, estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        RutaEntrega.objects.filter(pk=ruta_nocturna.pk).update(
+            created_at=timezone.make_aware(datetime.combine(ayer, time(hour=23)))
+        )
+        ruta_nocturna.refresh_from_db()
+        ruta_planeada, _ = self._crear_ruta(fecha=timezone.localdate(), estatus=RutaEntrega.ESTATUS_PLANEADA)
+        self.client.force_login(self.user)
+
+        activa = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(activa.status_code, 200)
+        self.assertEqual(activa.data["ruta"]["id"], ruta_nocturna.id)
+        self.assertTrue(ruta_es_operativa_hoy(ruta_nocturna))
+        self.assertFalse(ruta_es_operativa_hoy(ruta_planeada))
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=ruta_nocturna,
+            payload={"latitud": "25.570000", "longitud": "-108.470000"},
+        )
+        self.assertEqual(ubicacion.ruta, ruta_nocturna)
+
+    def test_ruta_en_ruta_de_hoy_gana_a_nocturna_planeada_y_solo_ella_es_operativa(self):
+        ayer = timezone.localdate() - timezone.timedelta(days=1)
+        ruta_nocturna, _ = self._crear_ruta(fecha=ayer, estatus=RutaEntrega.ESTATUS_PLANEADA)
+        RutaEntrega.objects.filter(pk=ruta_nocturna.pk).update(
+            created_at=timezone.make_aware(datetime.combine(ayer, time(hour=23)))
+        )
+        ruta_nocturna.refresh_from_db()
+        ruta_hoy, _ = self._crear_ruta(fecha=timezone.localdate(), estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        self.client.force_login(self.user)
+
+        activa = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(activa.data["ruta"]["id"], ruta_hoy.id)
+        self.assertTrue(ruta_es_operativa_hoy(ruta_hoy))
+        self.assertFalse(ruta_es_operativa_hoy(ruta_nocturna))
+        ubicacion = registrar_ubicacion_ruta(
+            user=self.user,
+            ruta=ruta_hoy,
+            payload={"latitud": "25.570000", "longitud": "-108.470000"},
+        )
+        self.assertEqual(ubicacion.ruta, ruta_hoy)
 
     def test_recarga_cedis_usa_operacion_y_evento_propios_sin_entrega_ni_geocerca(self):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
