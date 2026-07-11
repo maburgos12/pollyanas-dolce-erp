@@ -335,6 +335,22 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertIn('document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus()', return_source)
         self.assertNotIn("detailReturn.focus", return_source)
 
+        render_start = source.index("function render(html")
+        render_end = source.index("function appGlyph", render_start)
+        render_source = source[render_start:render_end]
+        self.assertIn("return new Promise(resolve =>", render_source)
+        self.assertIn("window.clearTimeout(pendingRenderTimer)", render_source)
+        self.assertIn("pendingRenderResolve(false)", render_source)
+
+        pending_start = source.index("async function renderPendientes")
+        pending_end = source.index("async function renderNuevaFalla", pending_start)
+        self.assertIn("return render(shell(`", source[pending_start:pending_end])
+
+        history_start = source.index("async function renderHistorial")
+        history_end = source.index("function detailRows", history_start)
+        history_source = source[history_start:history_end]
+        self.assertIn('return render(shell(`<button class="secondary-btn"', history_source)
+
 
 class MantenimientoUnifiedInboxTests(TestCase):
     def setUp(self):

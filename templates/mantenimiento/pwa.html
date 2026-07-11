@@ -182,16 +182,27 @@
           .replace(/'/g, "&#039;");
       }
 
+      let pendingRenderTimer = null;
+      let pendingRenderResolve = null;
+
       function render(html, autofocusId = "") {
         app.classList.add("is-changing");
-        window.setTimeout(() => {
-          app.innerHTML = html;
-          app.classList.remove("is-changing");
-          if (autofocusId) {
-            const el = document.getElementById(autofocusId);
-            if (el) { el.focus(); el.select && el.select(); }
-          }
-        }, 140);
+        if (pendingRenderTimer !== null) window.clearTimeout(pendingRenderTimer);
+        if (pendingRenderResolve) pendingRenderResolve(false);
+        return new Promise(resolve => {
+          pendingRenderResolve = resolve;
+          pendingRenderTimer = window.setTimeout(() => {
+            app.innerHTML = html;
+            app.classList.remove("is-changing");
+            if (autofocusId) {
+              const el = document.getElementById(autofocusId);
+              if (el) { el.focus(); el.select && el.select(); }
+            }
+            pendingRenderTimer = null;
+            pendingRenderResolve = null;
+            resolve(true);
+          }, 140);
+        });
       }
 
       function appGlyph(name) {
@@ -521,7 +532,7 @@
         const agendaCounts = resumen.agenda_counts || {};
         const proximo = agenda[0];
         const criticos = state.counts.criticos || 0;
-        render(shell(`
+        return render(shell(`
           <p class="screen-kicker">Bandeja de mantenimiento</p>
           <div class="summary-grid">
             <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertos</span></div>
@@ -922,7 +933,7 @@
           logistica: todos.filter((i) => i.origen === "logistica").length,
           criticos: todos.filter((i) => i.critico).length,
         };
-        render(shell(`
+        return render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Pendientes</h1>
           ${quickActions()}
@@ -2117,7 +2128,7 @@
         state.history.page = requestedPage + (state.history.hasNext ? 1 : 0);
         state.historyLoading = false;
         const branchOptions = state.sucursales.map(s => `<option value="${s.id}" ${String(s.id) === String(state.history.sucursal) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("");
-        render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
+        return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
           <div class="history-filters" aria-label="Filtros de historial">
             <label>Periodo<select onchange="setHistoryFilter('periodo',this.value)">${[["30d","30 días"],["semana","Semana"],["mes","Mes"],["90d","90 días"],["todo","Todo"]].map(([v,l])=>`<option value="${v}" ${state.history.periodo===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
