@@ -1,7 +1,16 @@
+import mimetypes
+from pathlib import PurePath
+
+from django.http import FileResponse, Http404
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 
-from mantenimiento.services_history import inbox_rows
+from fallas.models import EvidenciaSeguimientoFalla
+from mantenimiento.services_access import (
+    authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
+    authorized_unit_services,
+)
+from mantenimiento.services_history import inbox_rows, item_detail
 from mantenimiento.views import AUTH, EsMantenimiento
 
 
@@ -63,3 +72,56 @@ def bandeja_v2(request):
             "has_next": start + page_size < total,
         },
     })
+
+
+@api_view(["GET"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def item_v2(request, tipo, pk):
+    return Response(item_detail(request.user, tipo, pk))
+
+
+def _authorized_file(user, kind, pk):
+    if kind == "falla_inicial":
+        parent = authorized_fallas(user).only("foto_evidencia").filter(pk=pk).first()
+        return (parent.foto_evidencia, "") if parent else (None, "")
+    if kind == "seguimiento_falla":
+        evidence = EvidenciaSeguimientoFalla.objects.select_related("bitacora").filter(
+            pk=pk, bitacora__reporte_id__in=authorized_fallas(user).values("pk")
+        ).first()
+        return (evidence.archivo, evidence.nombre) if evidence else (None, "")
+    definitions = {
+        "reporte_unidad": (authorized_unit_reports, "foto"),
+        "orden_factura": (authorized_orders, "factura_archivo"),
+        "reparacion_factura": (authorized_repairs, "archivo_factura"),
+        "reparacion_foto": (authorized_repairs, "foto_nota"),
+        "servicio_unidad_factura": (authorized_unit_services, "archivo_factura"),
+    }
+    if kind not in definitions:
+        return None, ""
+    authorize, field = definitions[kind]
+    parent = authorize(user).only(field).filter(pk=pk).first()
+    return (getattr(parent, field), "") if parent else (None, "")
+
+
+@api_view(["GET", "HEAD"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def evidencia_v2(request, tipo, pk):
+    file_field, supplied_name = _authorized_file(request.user, tipo, pk)
+    if not file_field or not file_field.name:
+        raise Http404
+    try:
+        if not file_field.storage.exists(file_field.name):
+            raise Http404
+        stream = file_field.open("rb")
+    except (FileNotFoundError, OSError, ValueError):
+        raise Http404
+    raw_name = (supplied_name or file_field.name).splitlines()[0]
+    safe_name = PurePath(raw_name).name
+    safe_name = "".join(ch for ch in safe_name if ch.isprintable() and ch not in {'"', "\\"}) or "evidencia"
+    mime = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    inline = mime.startswith("image/") or mime == "application/pdf"
+    response = FileResponse(stream, content_type=mime, as_attachment=not inline, filename=safe_name)
+    response["Cache-Control"] = "private, no-store"
+    return response

@@ -2,11 +2,16 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
+from django.db.models import Prefetch
+from django.http import Http404
 
 from activos.models import OrdenMantenimiento
-from fallas.models import ReporteFalla
-from logistica.models import ReporteUnidad
-from mantenimiento.services_access import authorized_fallas, authorized_orders, authorized_unit_reports
+from fallas.models import BitacoraFalla, EvidenciaSeguimientoFalla, ReporteFalla
+from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
+from mantenimiento.services_access import (
+    authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
+    authorized_unit_services,
+)
 
 
 MAZATLAN = ZoneInfo("America/Mazatlan")
@@ -147,3 +152,88 @@ def _row_payload(*, uid, pk, kind, origin, state, critical, event, title, descri
         "sucursal": {"id": branch_id, "nombre": branch_name or ""},
         "sujeto": {"id": subject_id, "nombre": subject or ""} if subject_id else None,
     }
+
+
+def _person(user):
+    if user is None:
+        return None
+    return {"id": user.pk, "nombre": user.get_full_name() or user.get_username()}
+
+
+def _iso(value):
+    if value is None:
+        return None
+    value = _aware_date(value)
+    return value.astimezone(MAZATLAN).isoformat()
+
+
+def _evidence_payload(kind, pk, file_field, display_name=""):
+    if not file_field:
+        return None
+    import mimetypes
+    from pathlib import PurePath
+    name = PurePath(display_name or file_field.name).name
+    return {
+        "id": f"{kind}:{pk}", "nombre": name,
+        "mime": mimetypes.guess_type(name)[0] or "application/octet-stream",
+        "url": f"/api/mantenimiento/v2/evidencias/{kind}/{pk}/",
+    }
+
+
+def item_detail(user, kind, pk):
+    if kind == "falla":
+        evidence_qs = EvidenciaSeguimientoFalla.objects.order_by("creado_en", "id")
+        log_qs = BitacoraFalla.objects.select_related("usuario").prefetch_related(
+            Prefetch("evidencias", queryset=evidence_qs)
+        ).order_by("timestamp", "id")
+        report = authorized_fallas(user).select_related(
+            "sucursal", "categoria", "activo_relacionado", "reportado_por", "asignado_a", "cerrado_por"
+        ).prefetch_related(Prefetch("bitacora", queryset=log_qs)).filter(pk=pk).first()
+        if report is None:
+            raise Http404
+        state = {
+            ReporteFalla.ESTATUS_ABIERTO: "abierto", ReporteFalla.ESTATUS_REVISION: "en_proceso",
+            ReporteFalla.ESTATUS_PROCESO: "en_proceso", ReporteFalla.ESTATUS_RESUELTO: "cerrado",
+            ReporteFalla.ESTATUS_CERRADO: "cerrado", ReporteFalla.ESTATUS_CANCELADO: "cancelado",
+        }[report.estatus]
+        return {
+            "schema_version": 2, "uid": f"falla:{report.pk}", "tipo": "falla",
+            "estado": {"codigo": state, "etiqueta": report.get_estatus_display(), "grupo": state},
+            "prioridad": {"codigo": report.prioridad, "etiqueta": report.get_prioridad_display().split(" - ")[0]},
+            "reporte_inicial": {
+                "titulo": report.titulo or "", "descripcion": report.descripcion or "",
+                "foto": _evidence_payload("falla_inicial", report.pk, report.foto_evidencia),
+                "reportado_por": _person(report.reportado_por), "fecha": _iso(report.fecha_reporte),
+                "sucursal": {"id": report.sucursal_id, "nombre": report.sucursal.nombre or ""},
+                "categoria": report.categoria.nombre or "", "area": report.get_area_display(),
+                "activo": ({"id": report.activo_relacionado_id, "nombre": report.activo_relacionado.nombre}
+                           if report.activo_relacionado_id else None),
+            },
+            "fechas": {"reporte": _iso(report.fecha_reporte), "asignacion": _iso(report.fecha_asignacion),
+                       "resolucion": _iso(report.fecha_resolucion), "cierre": _iso(report.fecha_cierre)},
+            "responsables": {"asignado_a": _person(report.asignado_a), "cerrado_por": _person(report.cerrado_por)},
+            "seguimiento": [{
+                "id": row.pk, "fecha": _iso(row.timestamp), "usuario": _person(row.usuario),
+                "estatus_anterior": row.estatus_anterior or "", "estatus_nuevo": row.estatus_nuevo or "",
+                "comentario": row.comentario or "",
+                "evidencias": [_evidence_payload("seguimiento_falla", item.pk, item.archivo, item.nombre)
+                                for item in row.evidencias.all()],
+            } for row in report.bitacora.all()],
+        }
+
+    definitions = {
+        "orden": (authorized_orders, ("activo_ref", "activo_ref__sucursal")),
+        "reporte_unidad": (authorized_unit_reports, ("unidad", "unidad__sucursal")),
+        "reparacion": (authorized_repairs, ("unidad", "unidad__sucursal", "registrado_por")),
+        "servicio_unidad": (authorized_unit_services, ("unidad", "unidad__sucursal", "tipo_servicio", "registrado_por")),
+    }
+    if kind not in definitions:
+        raise Http404
+    authorize, related = definitions[kind]
+    obj = authorize(user).select_related(*related).filter(pk=pk).first()
+    if obj is None:
+        raise Http404
+    return {"schema_version": 2, "uid": f"{kind}:{obj.pk}", "tipo": kind, "detalle": {
+        "id": obj.pk, "sucursal": {"id": (obj.activo_ref.sucursal_id if kind == "orden" else obj.unidad.sucursal_id),
+                                    "nombre": (obj.activo_ref.sucursal.nombre if kind == "orden" else obj.unidad.sucursal.nombre)},
+    }}

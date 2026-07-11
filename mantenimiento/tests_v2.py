@@ -3,12 +3,13 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.base import ContentFile
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento
 from core.models import Sucursal, UserModuleAccess, UserProfile
-from fallas.models import CategoriaFalla, ReporteFalla
+from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 from mantenimiento.services_access import (
     authorized_fallas,
@@ -416,3 +417,147 @@ class MaintenanceInboxV2Tests(TestCase):
             self._closed_falla(1)
         with self.assertNumQueries(9):
             self.client.get("/api/mantenimiento/v2/bandeja/", {"estado": "cerrados", "periodo": "30d"})
+
+
+@override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
+class MaintenanceDetailV2Tests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        users = get_user_model()
+        cls.branch = Sucursal.objects.create(codigo="DET", nombre="Detalle")
+        cls.other_branch = Sucursal.objects.create(codigo="DET2", nombre="Ajena")
+        cls.user = users.objects.create_user("detail", password="test", first_name="Lector")
+        cls.denied = users.objects.create_user("denied", password="test")
+        cls.reporter = users.objects.create_user("reporter", password="test", first_name="Reportante", last_name="QA")
+        UserProfile.objects.create(user=cls.user, sucursal=cls.branch)
+        UserProfile.objects.create(user=cls.denied, sucursal=cls.branch)
+        UserModuleAccess.objects.create(user=cls.user, module="mantenimiento", access="view")
+        category = CategoriaFalla.objects.create(nombre="Electricidad", tipo=CategoriaFalla.TIPO_EQUIPO)
+        asset = Activo.objects.create(nombre="Horno", sucursal=cls.branch)
+        cls.report = ReporteFalla.objects.create(
+            sucursal=cls.branch, categoria=category, activo_relacionado=asset, area=ReporteFalla.AREA_PRODUCCION,
+            titulo="No enciende", descripcion="Sin corriente", prioridad=ReporteFalla.PRIORIDAD_ALTA,
+            foto_evidencia="fallas/evidencias/inicial.jpg", reportado_por=cls.reporter,
+        )
+        cls.other_report = ReporteFalla.objects.create(
+            sucursal=cls.other_branch, categoria=category, titulo="Ajena", descripcion="x",
+            foto_evidencia="fallas/evidencias/ajena.jpg", reportado_por=cls.reporter,
+        )
+        cls.old = BitacoraFalla.objects.create(
+            reporte=cls.report, usuario=cls.reporter, estatus_anterior="abierto",
+            estatus_nuevo="en_proceso", comentario="Primero",
+        )
+        cls.new = BitacoraFalla.objects.create(
+            reporte=cls.report, usuario=cls.user, estatus_anterior="en_proceso",
+            estatus_nuevo="resuelto", comentario="Después",
+        )
+        EvidenciaSeguimientoFalla.objects.create(
+            bitacora=cls.old, archivo="fallas/seguimiento/avance.jpg", nombre="avance.jpg", subido_por=cls.reporter,
+        )
+        EvidenciaSeguimientoFalla.objects.create(
+            bitacora=cls.old, archivo="fallas/seguimiento/dos.pdf", nombre="dos.pdf", subido_por=cls.reporter,
+        )
+
+    def test_falla_detail_contains_identity_nulls_initial_photo_and_ordered_timeline(self):
+        self.client.force_login(self.user)
+        data = self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").json()
+        self.assertEqual(data["uid"], f"falla:{self.report.pk}")
+        self.assertEqual(data["estado"]["codigo"], "abierto")
+        self.assertEqual(data["prioridad"], {"codigo": "alta", "etiqueta": "Alta"})
+        self.assertEqual(data["reporte_inicial"]["reportado_por"]["nombre"], "Reportante QA")
+        self.assertEqual(data["reporte_inicial"]["foto"]["url"], f"/api/mantenimiento/v2/evidencias/falla_inicial/{self.report.pk}/")
+        self.assertIsNone(data["fechas"]["asignacion"])
+        self.assertIsNone(data["responsables"]["asignado_a"])
+        self.assertEqual([row["id"] for row in data["seguimiento"]], [self.old.pk, self.new.pk])
+        self.assertEqual([row["nombre"] for row in data["seguimiento"][0]["evidencias"]], ["avance.jpg", "dos.pdf"])
+        self.assertNotIn("notas_internas", data)
+
+    def test_detail_rejects_anonymous_permissionless_other_branch_unknown_type_and_missing_id(self):
+        self.assertIn(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, {401, 403})
+        self.client.force_login(self.denied)
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, 403)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.other_report.pk}/").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/desconocido/{self.report.pk}/").status_code, 404)
+        self.assertEqual(self.client.get("/api/mantenimiento/v2/items/falla/999999/").status_code, 404)
+
+    def test_all_declared_detail_types_resolve_authorized_objects(self):
+        asset = Activo.objects.create(nombre="Batidora", sucursal=self.branch)
+        unit = Unidad.objects.create(codigo="DET-U", descripcion="Unidad", sucursal=self.branch)
+        service_type = TipoServicioUnidad.objects.create(nombre="Afinación")
+        objects = {
+            "orden": OrdenMantenimiento.objects.create(activo_ref=asset),
+            "reporte_unidad": ReporteUnidad.objects.create(unidad=unit, tipo="falla", descripcion="Motor"),
+            "reparacion": ReparacionUnidad.objects.create(unidad=unit, fecha_ingreso="2026-07-11", descripcion_falla="Motor"),
+            "servicio_unidad": ServicioRealizadoUnidad.objects.create(unidad=unit, tipo_servicio=service_type, fecha_servicio="2026-07-11"),
+        }
+        self.client.force_login(self.user)
+        for kind, obj in objects.items():
+            with self.subTest(kind=kind):
+                payload = self.client.get(f"/api/mantenimiento/v2/items/{kind}/{obj.pk}/").json()
+                self.assertEqual(payload["uid"], f"{kind}:{obj.pk}")
+                self.assertIn("detalle", payload)
+
+    def test_multiple_timeline_rows_keep_fixed_query_budget(self):
+        self.client.force_login(self.user)
+        with self.assertNumQueries(8):
+            self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
+        for index in range(5):
+            row = BitacoraFalla.objects.create(reporte=self.report, usuario=self.user, comentario=str(index))
+            EvidenciaSeguimientoFalla.objects.create(bitacora=row, archivo=f"fallas/seguimiento/{index}.jpg", subido_por=self.user)
+        with self.assertNumQueries(8):
+            self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
+
+
+@override_settings(MEDIA_ROOT="/tmp/mantenimiento-v2-test-media")
+class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+        self.report.foto_evidencia.save("initial.jpg", ContentFile(b"jpeg-data"), save=True)
+        self.evidence = self.old.evidencias.first()
+        self.evidence.archivo.save("avance.jpg", ContentFile(b"image-data"), save=True)
+
+    def test_get_and_head_serve_private_inline_evidence_without_public_path(self):
+        url = f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{self.evidence.pk}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertIn("inline", response["Content-Disposition"])
+        self.assertNotIn(self.evidence.archivo.path, response["Content-Disposition"])
+        head = self.client.head(url)
+        self.assertEqual(head.status_code, 200)
+        self.assertEqual(b"".join(head.streaming_content), b"")
+
+    def test_initial_photo_is_authorized_through_parent(self):
+        response = self.client.get(f"/api/mantenimiento/v2/evidencias/falla_inicial/{self.report.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("inline", response["Content-Disposition"])
+
+    def test_evidence_rejects_anonymous_permissionless_other_branch_missing_and_unknown(self):
+        url = f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{self.evidence.pk}/"
+        self.client.logout()
+        self.assertIn(self.client.get(url).status_code, {401, 403})
+        self.client.force_login(self.denied)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.client.force_login(self.user)
+        other = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=BitacoraFalla.objects.create(reporte=self.other_report, usuario=self.reporter),
+            archivo="fallas/seguimiento/other.jpg", subido_por=self.reporter,
+        )
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{other.pk}/").status_code, 404)
+        self.assertEqual(self.client.get("/api/mantenimiento/v2/evidencias/seguimiento_falla/999999/").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/mantenimiento/v2/evidencias/desconocida/{self.evidence.pk}/").status_code, 404)
+
+    def test_missing_file_is_404_and_malicious_name_is_sanitized(self):
+        missing = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=self.old, archivo="fallas/seguimiento/missing.pdf", nombre="../../malicioso\r\nX-Evil: yes.pdf",
+            subido_por=self.reporter,
+        )
+        url = f"/api/mantenimiento/v2/evidencias/seguimiento_falla/{missing.pk}/"
+        self.assertEqual(self.client.get(url).status_code, 404)
+        missing.archivo.save("safe.pdf", ContentFile(b"%PDF-1.4"), save=True)
+        response = self.client.get(url)
+        self.assertNotIn("..", response["Content-Disposition"])
+        self.assertNotIn("X-Evil", response["Content-Disposition"])
+        self.assertIn("inline", response["Content-Disposition"])
