@@ -302,3 +302,111 @@ def cerrar_hornos(bitacora: BitacoraOperativa, actor) -> CierreHornosResult:
         bitacora_locked.save(update_fields=["estatus", "cerrado_en", "actualizado_en"])
 
         return CierreHornosResult(lotes_creados=lotes_creados)
+
+
+def guardar_corte_ciego(bitacora: BitacoraOperativa, actor):
+    """
+    Sella el corte ciego de CFP 1.1 calculando esperado/diferencia por línea.
+    Crea una notificación si hay diferencia != 0.
+    Idempotente: llamadas posteriores no modifican ni recrean notificación.
+    """
+    from core.notificaciones import crear_notificaciones
+    from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
+
+    if bitacora.tipo != BitacoraOperativa.TIPO_CFP11:
+        raise ValidationError("La bitácora no es de tipo CFP 1.1.")
+
+    with transaction.atomic():
+        bitacora_locked = (
+            BitacoraOperativa.objects
+            .select_for_update()
+            .prefetch_related("lineas")
+            .get(pk=bitacora.pk)
+        )
+
+        # Si ya fue sellado, no hacer nada (idempotencia)
+        if bitacora_locked.conteo_guardado_en is not None:
+            return
+
+        # Validar, calcular y guardar esperado/diferencia en cada línea
+        timestamp_cierre = timezone.now()
+        hay_diferencia = False
+
+        for linea in bitacora_locked.lineas.all():
+            # Validar cantidad física
+            cantidad_fisica_str = linea.datos.get("existencia_fisica", "").strip()
+            if not cantidad_fisica_str:
+                raise ValidationError(
+                    f"Línea {linea.id}: Existencia física es obligatoria."
+                )
+            try:
+                cantidad_fisica = Decimal(cantidad_fisica_str)
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError(
+                    f"Línea {linea.id}: Existencia física debe ser numérica."
+                )
+            if not cantidad_fisica.is_finite() or cantidad_fisica < 0:
+                raise ValidationError(
+                    f"Línea {linea.id}: Existencia física debe ser finita y no negativa."
+                )
+
+            # Buscar insumo desde receta si hay producto
+            if linea.receta:
+                insumo = _resolve_insumo_from_receta(linea.receta)
+            else:
+                insumo = None
+
+            # Calcular esperado (suma ENTRADA-AJUSTE hasta cierre)
+            esperado = Decimal("0")
+            if insumo:
+                movimientos = MovimientoInventario.objects.filter(
+                    insumo=insumo,
+                    almacen=UBICACION_CFP_1_1,
+                ).exclude(fecha__gt=timestamp_cierre)
+                for mov in movimientos:
+                    if mov.tipo == MovimientoInventario.TIPO_ENTRADA:
+                        esperado += mov.cantidad
+                    elif mov.tipo == MovimientoInventario.TIPO_SALIDA:
+                        esperado -= mov.cantidad
+                    elif mov.tipo == MovimientoInventario.TIPO_AJUSTE:
+                        if mov.trazabilidad.get("es_positivo"):
+                            esperado += mov.cantidad
+                        else:
+                            esperado -= mov.cantidad
+
+            # Calcular diferencia y guardar en linea.datos (inmutable)
+            diferencia = cantidad_fisica - esperado
+            linea_datos_nuevo = dict(linea.datos)
+            # Normalizar para eliminar ceros finales
+            linea_datos_nuevo["esperado"] = str(esperado.normalize())
+            linea_datos_nuevo["diferencia"] = str(diferencia.normalize())
+            linea.datos = linea_datos_nuevo
+            linea.save(update_fields=["datos"])
+
+            if diferencia != Decimal("0"):
+                hay_diferencia = True
+
+        # Crear UNA SOLA notificación si hay diferencia
+        if hay_diferencia:
+            from core.models import UserModuleAccess, Notificacion
+            from core.access import ACCESS_MANAGE
+
+            jefes_produccion = (
+                UserModuleAccess.objects
+                .filter(module="produccion", access__gte=ACCESS_MANAGE)
+                .values_list("user", flat=True)
+            )
+            if jefes_produccion:
+                crear_notificaciones(
+                    jefes_produccion,
+                    titulo="Diferencia en corte ciego CFP 1.1",
+                    mensaje=f"Corte ciego del {bitacora_locked.fecha} tiene diferencias. Revisar.",
+                    tipo=Notificacion.TIPO_SISTEMA,
+                    objeto_tipo="operacion.BitacoraOperativa",
+                    objeto_id=bitacora_locked.id,
+                )
+
+        # Sellar con timestamp y usuario
+        bitacora_locked.conteo_guardado_en = timestamp_cierre
+        bitacora_locked.conteo_guardado_por = actor
+        bitacora_locked.save(update_fields=["conteo_guardado_en", "conteo_guardado_por", "actualizado_en"])

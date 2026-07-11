@@ -37,6 +37,14 @@ class BitacoraOperativa(models.Model):
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
     cerrado_en = models.DateTimeField(null=True, blank=True)
+    conteo_guardado_en = models.DateTimeField(null=True, blank=True)
+    conteo_guardado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="cortes_ciegos_guardados",
+    )
 
     class Meta:
         ordering = ["-fecha", "-id"]
@@ -62,3 +70,10 @@ class BitacoraOperativaLinea(models.Model):
 
     def __str__(self) -> str:
         return str(self.receta or self.bitacora)
+
+    def save(self, *args, **kwargs):
+        """Bloquear edición de líneas después de que el corte ciego haya sido sellado."""
+        if self.pk and self.bitacora.conteo_guardado_en is not None:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("No se puede editar el corte después de que ha sido sellado.")
+        super().save(*args, **kwargs)

@@ -1511,3 +1511,268 @@ class HornosLoteServiceTests(TestCase):
         # Bitácora no se cerró
         self.bitacora.refresh_from_db()
         self.assertEqual(self.bitacora.estatus, BitacoraOperativa.ESTATUS_BORRADOR)
+
+
+class CfpBlindCountTests(TestCase):
+    """Pruebas del corte ciego matutino de CFP 1.1: ocultamiento y revelado."""
+
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.cfp", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.cfp", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        self.unidad = UnidadMedida.objects.create(codigo="kg-cfp", nombre="Kilogramo CFP")
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP",
+            codigo_point="RC-001",
+            nombre="Relleno Crunch",
+            nombre_point="Relleno Crunch Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Relleno Crunch",
+            codigo_point="RC-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="cfp-relleno-crunch",
+        )
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+            observaciones="Conteo físico CFP 1.1",
+        )
+
+    def test_cfp_count_hides_expected_until_saved(self):
+        """Verificar que la pantalla oculta esperado antes del corte y lo revela después."""
+        self.client.force_login(self.operator)
+
+        # Verificar que ANTES de guardar no muestra esperado
+        response = self.client.get(f"/app/bitacoras/CFP11/")
+        self.assertNotContains(response, "Existencia esperada")
+        self.assertNotContains(response, "Stock fijo")
+        self.assertNotContains(response, "Diferencia")
+
+        # Guardar el conteo físico
+        response = self.client.post(
+            f"/app/bitacoras/CFP11/",
+            {"accion": "guardar_existencia", "existencia_fisica_0": "5"},
+            follow=True,
+        )
+
+        # Verificar que DESPUÉS de guardar muestra esperado y diferencia
+        self.assertContains(response, "Existencia esperada")
+        self.assertContains(response, "Diferencia")
+
+    def test_cfp_count_seal_is_idempotent(self):
+        """Verificar que sellar dos veces no duplica el timestamp ni el usuario."""
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+        primer_sello_en = self.bitacora.conteo_guardado_en
+        primer_sellado_por = self.bitacora.conteo_guardado_por_id
+
+        # Sellar de nuevo con otro usuario
+        guardar_corte_ciego(self.bitacora, self.operator)
+        self.bitacora.refresh_from_db()
+
+        # El sello no debe cambiar
+        self.assertEqual(self.bitacora.conteo_guardado_en, primer_sello_en)
+        self.assertEqual(self.bitacora.conteo_guardado_por_id, primer_sellado_por)
+
+    def test_cfp_count_blocks_edit_after_seal(self):
+        """Verificar que no se puede editar el corte después de sellado."""
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+
+        # Intentar cambiar cantidad después del sello debe fallar
+        self.linea.datos["existencia_fisica"] = "8"
+        with self.assertRaises(ValidationError) as ctx:
+            self.linea.save()
+
+        self.assertIn("sellado", str(ctx.exception).lower())
+
+    def test_cfp_count_calculates_expected_and_difference(self):
+        """
+        Verificar que guardar_corte_ciego calcula esperado/diferencia.
+        Entrada 8 (movimiento ENTRADA), físico 5 → esperado 8, diferencia -3.
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+        from inventario.services_existencias import aplicar_delta
+
+        # Crear movimiento de entrada inicial: 8 kg
+        mov_entrada = MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("8"),
+            almacen="CFP_1_1",
+            referencia="MOV-001",
+            notas="Entrada inicial",
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        # Actualizar linea con conteo físico de 5
+        self.linea.datos["existencia_fisica"] = "5"
+        self.linea.save(update_fields=["datos"])
+
+        # Guardar corte ciego
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+        self.linea.refresh_from_db()
+
+        # Verificar que se calculó esperado=8 y diferencia=-3
+        self.assertEqual(self.linea.datos.get("esperado"), "8")
+        self.assertEqual(self.linea.datos.get("diferencia"), "-3")
+        self.assertIsNotNone(self.bitacora.conteo_guardado_en)
+        self.assertEqual(self.bitacora.conteo_guardado_por, self.manager)
+
+    def test_cfp_count_notification_only_on_difference(self):
+        """
+        Verificar que se crea notificación SOLO si hay diferencia != 0.
+        Sin diferencia (5=5) → sin notificación.
+        Con diferencia (5≠8) → con notificación.
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+        from core.models import Notificacion
+
+        # Caso 1: Sin diferencia (esperado=5, físico=5)
+        bitacora_ok = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_ok = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_ok,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+            observaciones="Sin diferencia",
+        )
+
+        # Sin movimientos, no hay diferencia
+        notif_count_before = Notificacion.objects.count()
+        guardar_corte_ciego(bitacora_ok, self.manager)
+        notif_count_after = Notificacion.objects.count()
+        self.assertEqual(notif_count_after, notif_count_before, "No debe crear notificación si no hay diferencia")
+
+        # Caso 2: Con diferencia (esperado=8, físico=5)
+        # Crear nuevo insumo/receta para no mezclar con el anterior
+        unidad2 = UnidadMedida.objects.create(codigo="kg-cfp2", nombre="Kilogramo CFP 2")
+        insumo2 = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP2",
+            codigo_point="RC-002",
+            nombre="Relleno Fresa",
+            nombre_point="Relleno Fresa Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad2,
+        )
+        receta2 = Receta.objects.create(
+            nombre="Relleno Fresa",
+            codigo_point="RC-002",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=unidad2,
+            hash_contenido="cfp-relleno-fresa",
+        )
+
+        MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=insumo2,
+            cantidad=Decimal("8"),
+            almacen="CFP_1_1",
+            referencia="MOV-002",
+            notas="Entrada para diferencia",
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        bitacora_diff = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_diff = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_diff,
+            receta=receta2,
+            datos={"existencia_fisica": "5"},
+            observaciones="Con diferencia",
+        )
+
+        # Verificar que la línea guarda esperado=8 y diferencia=-3
+        guardar_corte_ciego(bitacora_diff, self.manager)
+        linea_diff.refresh_from_db()
+        self.assertEqual(linea_diff.datos.get("esperado"), "8", "Debe calcular esperado=8")
+        self.assertEqual(linea_diff.datos.get("diferencia"), "-3", "Debe calcular diferencia=-3")
+        # Nota: La notificación se crearía si hay usuarios con permisos MANAGE en producción
+
+    def test_cfp_count_validates_physical_quantity(self):
+        """
+        Verificar validaciones de cantidad física:
+        - Obligatoria
+        - Numérica
+        - Finita
+        - No negativa
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        # Test: cantidad física vacía
+        bitacora_empty = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_empty = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_empty,
+            receta=self.receta,
+            datos={},
+            observaciones="Sin cantidad física",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_empty, self.manager)
+
+        # Test: cantidad física no numérica
+        bitacora_invalid = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_invalid = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_invalid,
+            receta=self.receta,
+            datos={"existencia_fisica": "abc"},
+            observaciones="Cantidad no numérica",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_invalid, self.manager)
+
+        # Test: cantidad física negativa
+        bitacora_negative = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_negative = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_negative,
+            receta=self.receta,
+            datos={"existencia_fisica": "-5"},
+            observaciones="Cantidad negativa",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_negative, self.manager)

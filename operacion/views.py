@@ -23,7 +23,7 @@ from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
-from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos
+from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos, guardar_corte_ciego
 
 
 PRODUCTION_BITACORA_TYPES = {
@@ -244,6 +244,16 @@ def bitacora_captura(request, tipo):
     config = BITACORA_CONFIG[tipo]
     sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
     recetas = _recetas_for_config(config)[:120]
+
+    # Si hay parámetro revision, cargar la bitácora sellada
+    revision_id = request.GET.get("revision")
+    sealed_bitacora = None
+    if revision_id:
+        try:
+            sealed_bitacora = BitacoraOperativa.objects.get(id=revision_id, tipo=tipo)
+        except BitacoraOperativa.DoesNotExist:
+            sealed_bitacora = None
+
     if request.method == "POST":
         try:
             lineas = _lineas_from_post(request, config)
@@ -276,7 +286,16 @@ def bitacora_captura(request, tipo):
                 datos=datos,
                 observaciones=observaciones,
             )
-        cerrar_accion = request.POST.get("accion") == "cerrar_produccion" or request.POST.get("cerrar") == "1"
+        accion = request.POST.get("accion") or ""
+        if accion == "guardar_existencia":
+            if tipo == BitacoraOperativa.TIPO_CFP11:
+                guardar_corte_ciego(bitacora, request.user)
+                messages.success(request, "Existencia guardada. Se selló el corte ciego.")
+                return redirect(f"{request.path}?revision={bitacora.id}")
+            else:
+                messages.error(request, "Esta acción solo aplica a CFP 1.1.")
+                return redirect("operacion:bitacoras_home")
+        cerrar_accion = accion == "cerrar_produccion" or request.POST.get("cerrar") == "1"
         if cerrar_accion:
             if tipo == BitacoraOperativa.TIPO_HORNOS:
                 cerrar_hornos(bitacora, request.user)
@@ -287,15 +306,17 @@ def bitacora_captura(request, tipo):
                 bitacora.save(update_fields=["estatus", "cerrado_en", "actualizado_en"])
         messages.success(request, "Bitácora guardada.")
         return redirect("operacion:bitacoras_home")
+    context = {
+        "tipo": tipo,
+        "config": config,
+        "recetas": recetas,
+        "sucursales": sucursales,
+        "row_range": range(8),
+        "today": timezone.localdate(),
+        "sealed_bitacora": sealed_bitacora,
+    }
     return render(
         request,
         "operacion/bitacora_captura.html",
-        {
-            "tipo": tipo,
-            "config": config,
-            "recetas": recetas,
-            "sucursales": sucursales,
-            "row_range": range(8),
-            "today": timezone.localdate(),
-        },
+        context,
     )
