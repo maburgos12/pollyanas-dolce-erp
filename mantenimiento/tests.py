@@ -79,7 +79,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-paridad-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-api-v2-url-v2", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -246,6 +246,16 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "historyLoading: false")
         self.assertContains(app, "const requestedPage = state.history.page")
         self.assertContains(app, "if (state.historyLoading) return")
+
+    def test_pwa_does_not_duplicate_api_prefix_for_v2_requests(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(
+            app,
+            'path.startsWith("http") || path.startsWith("/api/") ? path : `${API}${path}`',
+        )
 
     def test_pwa_closed_kpi_opens_30_day_history_and_does_not_bump_worker(self):
         self.client.force_login(self.mantenimiento)
