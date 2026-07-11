@@ -916,6 +916,8 @@ class LogisticaRevisionEntregaTests(TestCase):
 
     def test_ruta_detail_muestra_cola_pendiente_y_evidencia_operativa(self):
         self.client.force_login(self.jefe)
+        self.parada.refresh_from_db()
+        hora_entrega_local = timezone.localtime(self.parada.entrega_confirmada_en).strftime("%Y-%m-%d %H:%M")
 
         response = self.client.get(self.url)
 
@@ -930,6 +932,13 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertContains(response, "repartidor.revision")
         self.assertContains(response, "GPS sin señal; entrega confirmada con foto.")
         self.assertContains(response, "Foto de mostrador")
+        self.assertContains(response, "Hora de entrega")
+        self.assertContains(response, hora_entrega_local)
+        self.assertContains(response, "Estado físico")
+        self.assertContains(response, self.parada.get_estado_display())
+        self.assertContains(response, "Hecho de entrega")
+        self.assertContains(response, self.parada.get_entrega_estado_display())
+        self.assertContains(response, "Revisión administrativa")
         self.assertContains(response, "Autorizar")
         self.assertContains(response, "Rechazar")
 

@@ -434,13 +434,17 @@
           <tr>
             <td>
               <strong>{{ parada.orden }} · {{ parada.punto_nombre_snapshot }}</strong>
-              <div>{{ parada.revision_entrega_causa|default:"Causa no informada" }}</div>
+              <div><strong>Estado físico:</strong> {{ parada.get_estado_display }}</div>
+              <div><strong>Hecho de entrega:</strong> {{ parada.get_entrega_estado_display }}</div>
+              <div><strong>Revisión administrativa:</strong> {{ parada.get_revision_entrega_estado_display }}</div>
+              <div><strong>Causa:</strong> {{ parada.revision_entrega_causa|default:"Causa no informada" }}</div>
               <span class="point-status {% if parada.revision_entrega_estado == 'AUTORIZADA' %}is-success{% elif parada.revision_entrega_estado == 'RECHAZADA' %}is-danger{% else %}is-warning{% endif %}">
                 {{ parada.get_revision_entrega_estado_display }}
               </span>
             </td>
             <td>
               <strong>{{ parada.entrega_confirmada_por.get_full_name|default:parada.entrega_confirmada_por.username|default:"Sin usuario" }}</strong>
+              <div><strong>Hora de entrega:</strong> {{ parada.entrega_confirmada_en|date:"Y-m-d H:i"|default:"-" }}</div>
               <div>{{ parada.entrega_notas|default:"Sin motivo capturado" }}</div>
             </td>
             <td>
