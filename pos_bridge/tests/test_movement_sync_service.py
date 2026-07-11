@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.test import TestCase
 
@@ -209,6 +210,56 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
         existencia = ExistenciaInsumo.objects.get(insumo=insumo)
         self.assertEqual(existencia.stock_actual, Decimal("167.340"))
+
+    def test_actualiza_transferencia_en_ubicacion_existente_no_default(self):
+        insumo = Insumo.objects.create(
+            nombre="Betún transferencia Armado",
+            codigo_point="TRANS-ARMADO-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("2"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("7"),
+        )
+        MovimientoInventario.objects.create(
+            source_hash="transfer-armado-existente",
+            insumo=insumo,
+            almacen="ARMADO",
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            cantidad=Decimal("2"),
+        )
+        line = SimpleNamespace(
+            source_hash="transfer-armado-existente",
+            received_at=datetime(2026, 3, 20, 15, 0, tzinfo=timezone.utc),
+            sent_at=None,
+            registered_at=datetime(2026, 3, 20, 14, 0, tzinfo=timezone.utc),
+            insumo=insumo,
+            insumo_id=insumo.id,
+            received_quantity=Decimal("5"),
+            transfer_external_id="TR-ARMADO-001",
+        )
+
+        PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
+
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ARMADO").stock_actual,
+            Decimal("5"),
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("7"),
+        )
+        self.assertEqual(
+            MovimientoInventario.objects.get(source_hash="transfer-armado-existente").almacen,
+            "ARMADO",
+        )
 
     def test_run_production_sync_creates_cedis_entry_for_finished_product(self):
         receta = Receta.objects.create(

@@ -329,9 +329,13 @@ class ConsumoInsumoAuditService:
         start_dt = timezone.make_aware(datetime.combine(period_start, time.min))
         end_dt = timezone.make_aware(datetime.combine(period_end, time.max))
         now = timezone.now()
-        stock_by_insumo = {
-            row["insumo_id"]: Decimal(str(row["stock_actual"] or 0))
-            for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids).values("insumo_id", "stock_actual")
+        stock_total_by_insumo = {
+            row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
+            for row in (
+                ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+                .values("insumo_id")
+                .annotate(stock_total=Sum("stock_actual"))
+            )
         }
         period_rows = list(
             MovimientoInventario.objects.filter(insumo_id__in=insumo_ids, fecha__range=(start_dt, end_dt))
@@ -370,13 +374,13 @@ class ConsumoInsumoAuditService:
 
         result: dict[int, dict[str, object]] = {}
         for insumo_id in insumo_ids:
-            stock_actual = stock_by_insumo.get(insumo_id, DECIMAL_ZERO)
+            stock_total = stock_total_by_insumo.get(insumo_id, DECIMAL_ZERO)
             period_data = period_by_insumo.get(
                 insumo_id,
                 {"entradas": DECIMAL_ZERO, "consumos": DECIMAL_ZERO, "movimientos": 0, "por_tipo": {}},
             )
-            stock_inicial = stock_actual - after_start.get(insumo_id, DECIMAL_ZERO)
-            stock_final = stock_actual - after_end.get(insumo_id, DECIMAL_ZERO)
+            stock_inicial = stock_total - after_start.get(insumo_id, DECIMAL_ZERO)
+            stock_final = stock_total - after_end.get(insumo_id, DECIMAL_ZERO)
             entradas = Decimal(str(period_data["entradas"] or 0))
             consumos = Decimal(str(period_data["consumos"] or 0))
             movimientos_por_tipo = dict(period_data["por_tipo"])
@@ -493,11 +497,11 @@ class ConsumoInsumoAuditService:
         return unit in {"kg", "lt", "l"} and cost > ANOMALO_COST_CAP
 
     def calcular_consumo_real(self, period_start: date, period_end: date, insumo: Insumo) -> dict[str, object]:
-        stock_actual = Decimal(
+        stock_total = Decimal(
             str(
-                ExistenciaInsumo.objects.filter(insumo=insumo)
-                .values_list("stock_actual", flat=True)
-                .first()
+                ExistenciaInsumo.objects.filter(insumo=insumo).aggregate(
+                    stock_total=Sum("stock_actual")
+                )["stock_total"]
                 or 0
             )
         )
@@ -507,8 +511,8 @@ class ConsumoInsumoAuditService:
 
         after_start = self._signed_movements_after(insumo, start_dt, now)
         after_end = self._signed_movements_after(insumo, end_dt, now)
-        stock_inicial = stock_actual - after_start
-        stock_final = stock_actual - after_end
+        stock_inicial = stock_total - after_start
+        stock_final = stock_total - after_end
 
         period_qs = MovimientoInventario.objects.filter(insumo=insumo, fecha__range=(start_dt, end_dt))
         entradas = period_qs.filter(tipo=MovimientoInventario.TIPO_ENTRADA).aggregate(total=Sum("cantidad"))["total"] or DECIMAL_ZERO

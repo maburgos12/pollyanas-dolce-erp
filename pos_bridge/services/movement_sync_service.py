@@ -233,32 +233,40 @@ class PointMovementSyncService:
         existing.save(update_fields=["fecha", "tipo", "receta", "cantidad", "referencia"])
         return False
 
+    @transaction.atomic
     def _upsert_transfer_inventory_movement(self, *, line: PointTransferLine) -> bool:
         movement_at = line.received_at or line.sent_at or line.registered_at
+        existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
+        almacen = getattr(line, "almacen", None) or (existing.almacen if existing else "ALMACEN_1")
         defaults = {
             "fecha": movement_at,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
+            "almacen": almacen,
             "cantidad": line.received_quantity,
             "referencia": f"POINT-TRANSFER:{line.transfer_external_id}",
         }
-        existing = MovimientoInventario.objects.filter(source_hash=line.source_hash).first()
         if existing is None:
             MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
-            self._apply_inventory_delta(insumo=line.insumo, delta=Decimal(str(line.received_quantity or 0)))
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                almacen=almacen,
+                delta=Decimal(str(line.received_quantity or 0)),
+            )
             return True
         new_qty = Decimal(str(line.received_quantity or 0))
         old_qty = Decimal(str(existing.cantidad or 0))
-        if existing.insumo_id == line.insumo_id and old_qty == new_qty:
+        old_almacen = existing.almacen
+        if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
             return False
-        if existing.insumo_id == line.insumo_id:
-            self._apply_inventory_delta(insumo=line.insumo, delta=new_qty - old_qty)
+        if existing.insumo_id == line.insumo_id and old_almacen == almacen:
+            self._apply_inventory_delta(insumo=line.insumo, almacen=almacen, delta=new_qty - old_qty)
         else:
-            self._apply_inventory_delta(insumo=existing.insumo, delta=-old_qty)
-            self._apply_inventory_delta(insumo=line.insumo, delta=new_qty)
+            self._apply_inventory_delta(insumo=existing.insumo, almacen=old_almacen, delta=-old_qty)
+            self._apply_inventory_delta(insumo=line.insumo, almacen=almacen, delta=new_qty)
         for field, value in defaults.items():
             setattr(existing, field, value)
-        existing.save(update_fields=["fecha", "tipo", "insumo", "cantidad", "referencia"])
+        existing.save(update_fields=["fecha", "tipo", "insumo", "almacen", "cantidad", "referencia"])
         return False
 
     def _upsert_transfer_cedis_movement(self, *, line: PointTransferLine) -> bool:
