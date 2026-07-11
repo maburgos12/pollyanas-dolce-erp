@@ -198,6 +198,9 @@
           {% if tipo == "CFP11" %}
             <button class="secondary" type="submit" name="accion" value="">Guardar borrador</button>
             <button type="submit" name="accion" value="guardar_existencia">Guardar existencia</button>
+          {% elif tipo == "ARMADO" %}
+            <button class="secondary" type="submit" name="accion" value="">Guardar borrador</button>
+            <button type="submit" name="accion" value="cerrar_armado">Cerrar Armado y generar lote</button>
           {% else %}
             <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
             <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>

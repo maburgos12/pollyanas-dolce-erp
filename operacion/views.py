@@ -23,7 +23,13 @@ from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from .bitacoras_config import BITACORA_CONFIG
 from .models import BitacoraOperativa, BitacoraOperativaLinea
 from .services import build_operacion_context
-from .services_bitacoras_inventory import registrar_apertura_inicial, cerrar_hornos, guardar_corte_ciego, entregar_a_armado
+from .services_bitacoras_inventory import (
+    registrar_apertura_inicial,
+    cerrar_hornos,
+    cerrar_armado,
+    guardar_corte_ciego,
+    entregar_a_armado,
+)
 
 
 PRODUCTION_BITACORA_TYPES = {
@@ -324,11 +330,24 @@ def bitacora_captura(request, tipo):
             else:
                 messages.error(request, "Esta acción solo aplica a CFP 1.1 sellada.")
                 return redirect("operacion:bitacoras_home")
-        cerrar_accion = accion == "cerrar_produccion" or request.POST.get("cerrar") == "1"
+        cerrar_accion = accion == "cerrar_produccion" or accion == "cerrar_armado" or request.POST.get("cerrar") == "1"
         if cerrar_accion:
             if tipo == BitacoraOperativa.TIPO_HORNOS:
                 cerrar_hornos(bitacora, request.user)
                 messages.success(request, f"Hornos cerrados. Se generaron lotes de producción.")
+                return redirect(f"{request.path}?revision={bitacora.id}")
+            elif tipo == BitacoraOperativa.TIPO_ARMADO and accion == "cerrar_armado":
+                try:
+                    result = cerrar_armado(bitacora, request.user)
+                    messages.success(
+                        request,
+                        f"Armado cerrado. Producto terminado: {result.lote_terminado.codigo}. "
+                        f"Stock en CEDIS: {result.cantidad_terminada} unidades."
+                    )
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0] if exc.messages else str(exc))
+                except PermissionDenied as exc:
+                    messages.error(request, str(exc))
                 return redirect(f"{request.path}?revision={bitacora.id}")
             else:
                 bitacora.cerrar()

@@ -18,7 +18,12 @@ from inventario.services_existencias import establecer_stock, stock_ubicacion
 from logistica.models import Repartidor, Unidad
 from maestros.models import Insumo, UnidadMedida
 from mermas.models import PersonalEnviosSucursal
-from recetas.models import Receta
+from recetas.models import (
+    InventarioCedisProducto,
+    LineaReceta,
+    MovimientoProductoCedis,
+    Receta,
+)
 
 from operacion.bitacoras_config import BITACORA_CONFIG
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
@@ -2177,3 +2182,285 @@ class CfpFifoTransferTests(TestCase):
 
         with self.assertRaises(ValidationError):
             entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+
+
+class ArmadoCrunchPilotTests(TestCase):
+    """Test cerrar_armado: consume real lots and create finished Crunch product."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos, entregar_a_armado
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefe.armado", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="op.armado", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Create units
+        self.kg = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo")
+        self.unidad = UnidadMedida.objects.create(codigo="pza", nombre="Pieza")
+
+        # Create PREPARACION insumo for Crunch filling
+        self.relleno = Insumo.objects.create(
+            codigo="PREP:RELLENO:CRUNCH",
+            codigo_point="RELLENO-CRUNCH",
+            nombre="Relleno Crunch",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        # Create PREPARACION recipe for Crunch filling
+        self.relleno_receta = Receta.objects.create(
+            nombre="Relleno Crunch",
+            codigo_point="RELLENO-CRUNCH",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.kg,
+            hash_contenido="relleno-crunch-test",
+        )
+
+        # Create PRODUCTO_FINAL recipe for Crunch Chico
+        self.crunch_ch = Receta.objects.create(
+            nombre="Pastel Crunch Chico",
+            codigo_point="CRUNCH-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unidad,
+            hash_contenido="crunch-chico-final",
+        )
+
+        # Add Relleno as a component of Crunch Chico with 0.6 kg per unit
+        LineaReceta.objects.create(
+            receta=self.crunch_ch,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=self.relleno,
+            insumo_texto="Relleno Crunch",
+            cantidad=Decimal("0.6"),
+            unidad=self.kg,
+        )
+
+        # Create HORNOS bitacora and line for Relleno, close it to generate lot in CFP_1_1
+        hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        hornos_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=hornos_bitacora,
+            receta=self.relleno_receta,
+            datos={"existencia": "8"},
+            observaciones="Relleno producido",
+        )
+        cerrar_hornos(hornos_bitacora, self.manager)
+
+        # Transfer Relleno from CFP_1_1 to ARMADO: 8 kg total
+        self.armado_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        transfer_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={"salida_armado": "8"},
+            observaciones="Transferencia de relleno a Armado",
+        )
+        entregar_a_armado(self.relleno, Decimal("8"), transfer_linea, self.manager)
+
+        # Create Armado capture line with real consumption: 5.5 kg (vs theoretical 4.8 kg for 8 units)
+        # Note: key format is consumo_real_{codigo_point_lowercase_with_underscores}
+        self.armado_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={
+                "cantidad_terminada": "8",
+                "consumo_real_relleno_crunch": "5.5",  # Real consumption captured in bitacora
+            },
+            observaciones="Armado Crunch Chico con consumo real",
+        )
+
+    def test_close_armado_consumes_real_and_creates_finished_lot(self):
+        """Test that cerrar_armado consumes real amounts, creates finished lot with CEDIS entries."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        result = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify result structure
+        self.assertEqual(result.producto.codigo_point, self.crunch_ch.codigo_point)
+        self.assertEqual(result.cantidad_terminada, Decimal("8"))
+        self.assertEqual(result.consumo_real[self.relleno.id], Decimal("5.5"))
+        self.assertEqual(result.consumo_teorico[self.relleno.id], Decimal("4.8"))  # 8 * 0.6
+        self.assertTrue(result.lote_terminado.codigo.startswith(f"LOT-CRUNCH-CH"))
+
+        # Verify finished lot is created with insumo=None (product, not ingredient)
+        self.assertIsNone(result.lote_terminado.insumo)
+        self.assertEqual(result.lote_terminado.receta, self.crunch_ch)
+        self.assertEqual(result.lote_terminado.cantidad_inicial, Decimal("8"))
+
+        # Verify CEDIS entries created
+        cedis_inv = InventarioCedisProducto.objects.get(receta=self.crunch_ch)
+        self.assertEqual(cedis_inv.stock_actual, Decimal("8"))
+
+        cedis_mov = MovimientoProductoCedis.objects.get(receta=self.crunch_ch)
+        self.assertEqual(cedis_mov.tipo, MovimientoProductoCedis.TIPO_ENTRADA)
+        self.assertEqual(cedis_mov.cantidad, Decimal("8"))
+
+        # Verify consumption movements created in InventarioInsumo
+        consumo_movs = MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.relleno,
+            almacen="ARMADO",
+        )
+        self.assertEqual(consumo_movs.count(), 1)
+        self.assertEqual(consumo_movs.first().cantidad, Decimal("5.5"))
+
+        # Verify Relleno stock reduced in ARMADO
+        from inventario.services_existencias import stock_ubicacion
+
+        self.assertEqual(stock_ubicacion(self.relleno, "ARMADO"), Decimal("2.5"))  # 8 - 5.5
+
+    def test_close_armado_validates_incomplete_recipe(self):
+        """Test that incomplete recipe (missing insumo link) allows draft but fails on close."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create incomplete recipe without insumo link
+        incomplete_recipe = Receta.objects.create(
+            nombre="Producto Incompleto",
+            codigo_point="PRODUCTO-INC",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="incomplete-product",
+        )
+        LineaReceta.objects.create(
+            receta=incomplete_recipe,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=None,  # No insumo linked
+            insumo_texto="Componente sin vincular",
+            cantidad=Decimal("1"),
+        )
+
+        incomplete_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=incomplete_bitacora,
+            receta=incomplete_recipe,
+            datos={"cantidad_terminada": "5"},
+        )
+
+        # Should raise ValidationError when attempting close
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_armado(incomplete_bitacora, self.manager)
+        self.assertIn("componentes pendientes", str(ctx.exception).lower())
+
+    def test_close_armado_rejects_insufficient_stock(self):
+        """Test that insufficient lot stock in ARMADO causes rollback."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create a demand exceeding available stock
+        exceed_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={
+                "cantidad_terminada": "15",  # Would need 15 * 0.6 = 9 kg, but only 8 available
+                "consumo_real_relleno_crunch": "9",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_armado(self.armado_bitacora, self.manager)
+        self.assertIn("insuficiente", str(ctx.exception).lower())
+
+        # Verify no CEDIS entries created and stock unchanged
+        self.assertFalse(InventarioCedisProducto.objects.filter(receta=self.crunch_ch).exists())
+
+    def test_close_armado_is_idempotent(self):
+        """Test that calling cerrar_armado twice does not duplicate lots or movements."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        result2 = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Same lot returned both times
+        self.assertEqual(result1.lote_terminado.id, result2.lote_terminado.id)
+
+        # No duplicate CEDIS movements
+        cedis_movs = MovimientoProductoCedis.objects.filter(receta=self.crunch_ch)
+        self.assertEqual(cedis_movs.count(), 1)
+
+        # No duplicate CONSUMO movements for Relleno
+        consumo_movs = MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.relleno,
+            almacen="ARMADO",
+        )
+        self.assertEqual(consumo_movs.count(), 1)
+
+    def test_close_armado_rollback_on_no_lots_available(self):
+        """Test rollback when Armado location has no lots of required ingredient."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create armado bitacora with component that doesn't exist in ARMADO
+        other_insumo = Insumo.objects.create(
+            codigo="PREP:OTRO",
+            codigo_point="OTRO-PREP",
+            nombre="Otro Insumo",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        recipe_with_other = Receta.objects.create(
+            nombre="Producto con Otro",
+            codigo_point="OTRO-PRODUCT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="recipe-with-other",
+        )
+        LineaReceta.objects.create(
+            receta=recipe_with_other,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=other_insumo,
+            insumo_texto="Otro Insumo",
+            cantidad=Decimal("1"),
+        )
+
+        other_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=other_bitacora,
+            receta=recipe_with_other,
+            datos={"cantidad_terminada": "5", "consumo_real_otro_prep": "5"},  # codigo_point="OTRO-PREP" -> "consumo_real_otro_prep"
+        )
+
+        # Should raise ValidationError for no lots available
+        with self.assertRaises(ValidationError):
+            cerrar_armado(other_bitacora, self.manager)
+
+    def test_close_armado_requires_manage_permission(self):
+        """Test that closing Armado requires manage permission on Produccion."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # operator has only VIEW access, not MANAGE
+        with self.assertRaises(PermissionDenied):
+            cerrar_armado(self.armado_bitacora, self.operator)
+
+    def test_close_armado_requires_armado_bitacora_type(self):
+        """Test that only ARMADO type bitacoras can be closed with cerrar_armado."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+
+        with self.assertRaises(ValidationError):
+            cerrar_armado(hornos_bitacora, self.manager)
