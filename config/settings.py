@@ -393,6 +393,19 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# Opt-in deliberado: primero ejecutar el comando en --dry-run y revisar sus
+# hallazgos. Solo después habilitar esta variable en el ambiente objetivo.
+LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED = env_bool(
+    "LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED",
+    default=False,
+)
+if LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED:
+    CELERY_BEAT_SCHEDULE["logistica-auditar-entregas-ruta"] = {
+        "task": "logistica.tasks.auditar_entregas_ruta_task",
+        "schedule": crontab(hour=23, minute=30),
+        "options": {"timezone": TIME_ZONE},
+    }
+
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", default=False)

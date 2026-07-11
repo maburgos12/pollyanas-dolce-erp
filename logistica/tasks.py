@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -24,6 +24,7 @@ from .models import (
     Unidad,
 )
 from .services_combustible_auditoria import auditar_carga_combustible
+from .services_auditoria_entregas import auditar_entregas_ruta
 from .services_rutas_control import detectar_gps_perdido
 
 
@@ -90,6 +91,12 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
         "rutas_revisadas": revisadas,
         "eventos_gps_perdido": len(set(eventos)),
     }
+
+
+@shared_task(name="logistica.tasks.auditar_entregas_ruta_task")
+def auditar_entregas_ruta_task(ruta_id: int | None = None, fecha: str | None = None):
+    fecha_ruta = date.fromisoformat(fecha) if fecha else timezone.localdate()
+    return auditar_entregas_ruta(ruta_id=ruta_id, fecha=fecha_ruta)
 
 
 @shared_task

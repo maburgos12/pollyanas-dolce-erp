@@ -365,6 +365,188 @@ class LogisticaEntregaDomainTests(TestCase):
             )
 
 
+class LogisticaAuditoriaEntregaTests(TestCase):
+    def setUp(self):
+        self.repartidor_user = User.objects.create_user(username="auditoria.repartidor", password="pass123")
+        self.sucursal = Sucursal.objects.create(codigo="AUD-LOG", nombre="Auditoría Logística", activa=True)
+        self.unidad = Unidad.objects.create(codigo="AUD-01", descripcion="Unidad auditoría", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(
+            user=self.repartidor_user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+        )
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta auditoría entregas",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        self.punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal auditoría",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+            radio_geocerca_metros=120,
+        )
+
+    def _parada(self, orden):
+        return ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=orden)
+
+    def _evento(self, parada, tipo, *, metadata=None, creado_por=None):
+        return EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada,
+            tipo=tipo,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Fixture válida antes de corrupción de auditoría.",
+            metadata=metadata or {},
+            creado_por=creado_por or self.repartidor_user,
+        )
+
+    def _geocerca_valida(self, parada):
+        ubicacion = UbicacionRuta.objects.create(
+            ruta=self.ruta,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            latitud=parada.latitud_geocerca,
+            longitud=parada.longitud_geocerca,
+            precision_metros="8.00",
+            timestamp_dispositivo=timezone.now(),
+        )
+        return EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada GPS confiable antes de corrupción.",
+            ubicacion=ubicacion,
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros=0,
+            metadata={
+                "origen_servicio": "registrar_ubicacion_ruta",
+                "ubicacion_confiable": True,
+                "ruta_id": self.ruta.id,
+                "repartidor_id": self.repartidor.id,
+                "unidad_id": self.unidad.id,
+            },
+            creado_por=self.repartidor_user,
+        )
+
+    def test_detecta_reglas_idempotentes_sin_reescribir_hechos_operativos(self):
+        from logistica.services_auditoria_entregas import auditar_entregas_ruta
+
+        sin_geocerca = self._parada(1)
+        visitada_sin_gps = self._parada(2)
+        actor_indebido = self._parada(3)
+        horas_admin = self._parada(4)
+        geocerca_invalida = self._parada(5)
+        confirmacion_duplicada = self._parada(6)
+        revision_sin_alerta = self._parada(7)
+        ahora = timezone.now()
+
+        # La corrupción de auditoría evita servicios de dominio deliberadamente.
+        ParadaRuta.objects.filter(pk=sin_geocerca.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+        )
+        ParadaRuta.objects.filter(pk=visitada_sin_gps.pk).update(
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=ahora,
+        )
+        usuario_sync = User.objects.create_user(username="point.sync.auditoria")
+        self._evento(actor_indebido, EventoRuta.TIPO_ENTREGA)
+        ParadaRuta.objects.filter(pk=actor_indebido.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            entrega_confirmada_por=usuario_sync,
+            entrega_confirmada_en=ahora,
+            revision_entrega_estado=ParadaRuta.REVISION_AUTORIZADA,
+        )
+        self._evento(horas_admin, EventoRuta.TIPO_ENTREGA, creado_por=self.repartidor_user)
+        ParadaRuta.objects.filter(pk=horas_admin.pk).update(
+            hora_llegada_real=ahora,
+            hora_salida_real=ahora + timezone.timedelta(minutes=5),
+            entrega_notas="Horario derivado desde Point por admin",
+        )
+        geocerca = self._geocerca_valida(geocerca_invalida)
+        EventoRuta.objects.filter(pk=geocerca.pk).update(distancia_metros=9999)
+        primera = self._evento(confirmacion_duplicada, EventoRuta.TIPO_ENTREGA)
+        segunda = self._evento(revision_sin_alerta, EventoRuta.TIPO_ENTREGA_EXCEPCIONAL)
+        EventoRuta.objects.filter(pk=segunda.pk).update(parada=confirmacion_duplicada)
+        ParadaRuta.objects.filter(pk=revision_sin_alerta.pk).update(
+            revision_entrega_estado=ParadaRuta.REVISION_PENDIENTE,
+            revision_entrega_causa="GPS_SIN_SENAL",
+        )
+
+        hechos_antes = list(
+            ParadaRuta.objects.filter(ruta=self.ruta).order_by("pk").values(
+                "pk", "estado", "entrega_estado", "hora_llegada_real", "hora_salida_real",
+                "revision_entrega_estado", "revision_entrega_revisada_por_id",
+                "revision_entrega_revisada_en", "revision_entrega_resolucion",
+            )
+        )
+        eventos_operativos_antes = set(EventoRuta.objects.values_list("pk", flat=True))
+
+        primero = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+        segundo = auditar_entregas_ruta(ruta_id=self.ruta.pk)
+
+        alertas = EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA)
+        reglas = set(alertas.values_list("metadata__regla", flat=True))
+        self.assertEqual(
+            reglas,
+            {
+                "ENTREGADA_SIN_GEOFENCE_O_REVISION",
+                "VISITADA_SIN_GPS_CONFIABLE",
+                "ENTREGA_ACTOR_INDEBIDO",
+                "HORAS_DERIVADAS_FUENTE_ADMIN_POINT",
+                "LLEGADA_GEOFENCE_INVALIDA",
+                "CONFIRMACION_DUPLICADA_O_INCOMPATIBLE",
+                "REVISION_PENDIENTE_SIN_ALERTA",
+            },
+        )
+        self.assertEqual(alertas.count(), 7)
+        self.assertEqual(primero["alertas_creadas"], 7)
+        self.assertEqual(segundo["alertas_creadas"], 0)
+        self.assertEqual(hechos_antes, list(ParadaRuta.objects.filter(ruta=self.ruta).order_by("pk").values(*hechos_antes[0].keys())))
+        self.assertTrue(eventos_operativos_antes.issubset(set(EventoRuta.objects.values_list("pk", flat=True))))
+        self.assertEqual(primera.parada_id, confirmacion_duplicada.pk)
+
+    def test_dry_run_y_comando_diagnostico_no_crean_alertas(self):
+        parada = self._parada(1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+            revision_entrega_estado=ParadaRuta.REVISION_NO_REQUERIDA,
+        )
+        salida = StringIO()
+
+        call_command("auditar_entregas_ruta", "--ruta-id", str(self.ruta.pk), "--dry-run", stdout=salida)
+
+        self.assertIn("ENTREGADA_SIN_GEOFENCE_O_REVISION", salida.getvalue())
+        self.assertIn("dry-run", salida.getvalue().lower())
+        self.assertFalse(EventoRuta.objects.filter(tipo=EventoRuta.TIPO_INCONSISTENCIA_ENTREGA).exists())
+
+    def test_tarea_celery_ejecuta_auditoria_segura(self):
+        from logistica.tasks import auditar_entregas_ruta_task
+
+        parada = self._parada(1)
+        ParadaRuta.objects.filter(pk=parada.pk).update(
+            revision_entrega_estado=ParadaRuta.REVISION_PENDIENTE,
+            revision_entrega_causa="GPS_SIN_SENAL",
+        )
+
+        resultado = auditar_entregas_ruta_task(ruta_id=self.ruta.pk)
+
+        parada.refresh_from_db()
+        self.assertEqual(resultado["alertas_creadas"], 1)
+        self.assertEqual(parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+
+    def test_periodicidad_es_opt_in_y_permanece_apagada_por_defecto(self):
+        self.assertFalse(settings.LOGISTICA_AUDITORIA_ENTREGAS_BEAT_ENABLED)
+        self.assertNotIn("logistica-auditar-entregas-ruta", settings.CELERY_BEAT_SCHEDULE)
+
+
 class LogisticaEntregaApiStabilizationTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="repartidor.api.entregas", password="pass123")
