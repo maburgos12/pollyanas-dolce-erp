@@ -628,9 +628,16 @@ def autorizar_correccion_bitacora(
     if not motivo_limpio:
         raise ValidationError("El motivo de la corrección es obligatorio.")
 
-    nueva_cantidad_decimal = _cantidad_positiva(nueva_cantidad)
+    try:
+        nueva_cantidad_decimal = Decimal(str(nueva_cantidad))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError("La cantidad corregida debe ser numérica.") from exc
+    if not nueva_cantidad_decimal.is_finite() or nueva_cantidad_decimal < 0:
+        raise ValidationError("La cantidad corregida debe ser finita y no negativa.")
 
     with transaction.atomic():
+        bitacora = BitacoraOperativa.objects.select_for_update().get(pk=bitacora.pk)
+        linea = BitacoraOperativaLinea.objects.select_for_update().get(pk=linea.pk)
         # Bloquear y validar movimiento original
         try:
             movimiento_original = (
@@ -650,6 +657,8 @@ def autorizar_correccion_bitacora(
             raise ValidationError(
                 "El movimiento no pertenece a esta bitácora. No se permite corregir IDs ajenos."
             )
+        if bitacora.estatus != BitacoraOperativa.ESTATUS_CERRADA:
+            raise ValidationError("Solo se pueden corregir bitácoras cerradas.")
 
         # Validar que es un movimiento de bitácora corregible (tipos permitidos)
         # Permite ENTRADA y SALIDA que provengan de operación
@@ -661,20 +670,34 @@ def autorizar_correccion_bitacora(
                 f"Movimientos de tipo {movimiento_original.tipo} no pueden corregirse."
             )
 
-        # Calcular delta
+        ajustes_previos = list(
+            MovimientoInventario.objects.select_for_update().filter(
+                tipo=MovimientoInventario.TIPO_AJUSTE,
+                trazabilidad__movimiento_original_id=movimiento_original.id,
+            )
+        )
         cantidad_original = movimiento_original.cantidad
-        delta = nueva_cantidad_decimal - cantidad_original
+        cantidad_vigente = cantidad_original
+        for ajuste_previo in ajustes_previos:
+            signo = Decimal("1") if (ajuste_previo.trazabilidad or {}).get("es_positivo") else Decimal("-1")
+            cantidad_vigente += signo * ajuste_previo.cantidad
+        delta = nueva_cantidad_decimal - cantidad_vigente
+
+        referencia = f"AJUSTE:{movimiento_original.id}:{linea.id}"
+        ajuste_hash = sha256(
+            f"{referencia}:OBJETIVO:{nueva_cantidad_decimal.normalize()}".encode("utf-8")
+        ).hexdigest()
+        ajuste_existente = MovimientoInventario.objects.filter(source_hash=ajuste_hash).first()
+        if ajuste_existente:
+            return ajuste_existente
 
         if delta == Decimal("0"):
             raise ValidationError("La nueva cantidad debe ser diferente de la original.")
 
         # Crear movimiento compensatorio (ajuste)
         es_positivo = delta > 0
-        referencia = f"AJUSTE:{movimiento_original.id}:{linea.id}"
 
-        ajuste_hash = sha256(referencia.encode("utf-8")).hexdigest()
-
-        MovimientoInventario.objects.create(
+        ajuste = MovimientoInventario.objects.create(
             fecha=timezone.now(),
             tipo=MovimientoInventario.TIPO_AJUSTE,
             insumo=movimiento_original.insumo,
@@ -691,6 +714,7 @@ def autorizar_correccion_bitacora(
                 "evento": "correccion_bitacora",
                 "movimiento_original_id": movimiento_original.id,
                 "cantidad_original": str(cantidad_original),
+                "cantidad_vigente_antes": str(cantidad_vigente),
                 "cantidad_corregida": str(nueva_cantidad_decimal),
                 "es_positivo": es_positivo,
                 "motivo": motivo_limpio,
@@ -703,6 +727,7 @@ def autorizar_correccion_bitacora(
             movimiento_original.almacen,
             delta,
         )
+        return ajuste
 
 
 def cerrar_armado(bitacora: BitacoraOperativa, actor) -> CerrarArmadoResult:

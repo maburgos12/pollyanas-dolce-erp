@@ -2827,23 +2827,36 @@ class BitacoraCorrectionPermissionTests(TestCase):
 
     def test_correction_negative_delta_allowed(self):
         """Corrección puede ser negativa (reducir cantidad)."""
+    def test_sequential_corrections_use_current_effective_quantity(self):
         from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
 
-        # Reduce 8 -> 6 (delta: -2)
-        result = autorizar_correccion_bitacora(
-            movimiento_original_id=self.original_id,
-            bitacora=self.hornos_bitacora,
-            linea=self.hornos_linea,
-            nueva_cantidad=Decimal("6"),
-            motivo="Ajuste por reconteo",
-            actor=self.manager,
-        )
+        for objetivo, motivo in ((Decimal("7"), "Primer conteo"), (Decimal("6"), "Segundo conteo")):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=objetivo,
+                motivo=motivo,
+                actor=self.manager,
+            )
 
-        compensating = MovimientoInventario.objects.filter(
-            referencia__startswith=f"AJUSTE:{self.original_id}:"
-        ).first()
-        self.assertIsNotNone(compensating)
-        self.assertEqual(compensating.cantidad, Decimal("2"))  # Absolute value
-        # Trazabilidad should indicate it's a reduction
-        if "es_positivo" in compensating.trazabilidad:
-            self.assertFalse(compensating.trazabilidad["es_positivo"])
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("6"))
+        self.original.refresh_from_db()
+        self.assertEqual(self.original.cantidad, Decimal("8"))
+
+    def test_correction_can_set_effective_quantity_to_zero_and_is_idempotent(self):
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        kwargs = {
+            "movimiento_original_id": self.original_id,
+            "bitacora": self.hornos_bitacora,
+            "linea": self.hornos_linea,
+            "nueva_cantidad": Decimal("0"),
+            "motivo": "Producto no localizado",
+            "actor": self.manager,
+        }
+        first = autorizar_correccion_bitacora(**kwargs)
+        second = autorizar_correccion_bitacora(**kwargs)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("0"))
