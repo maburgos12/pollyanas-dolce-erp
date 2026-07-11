@@ -1,0 +1,49 @@
+<tr id="revision-entrega-{{ parada.id }}" tabindex="-1">
+  <td>
+    <strong>{{ parada.orden }} · {{ parada.punto_nombre_snapshot }}</strong>
+    <div><strong>Estado físico:</strong> {{ parada.get_estado_display }}</div>
+    <div><strong>Hecho de entrega:</strong> {{ parada.get_entrega_estado_display }}</div>
+    <div><strong>Revisión administrativa:</strong> {{ parada.get_revision_entrega_estado_display }}</div>
+    <div><strong>Causa:</strong> {{ parada.revision_entrega_causa|default:"Causa no informada" }}</div>
+    <span class="point-status {% if parada.revision_entrega_estado == 'AUTORIZADA' %}is-success{% elif parada.revision_entrega_estado == 'RECHAZADA' %}is-danger{% else %}is-warning{% endif %}">{{ parada.get_revision_entrega_estado_display }}</span>
+  </td>
+  <td>
+    <strong>{{ parada.entrega_confirmada_por.get_full_name|default:parada.entrega_confirmada_por.username|default:"Sin usuario" }}</strong>
+    <div><strong>Hora de entrega:</strong> {{ parada.entrega_confirmada_en|date:"Y-m-d H:i"|default:"-" }}</div>
+    <div>{{ parada.entrega_notas|default:"Sin motivo capturado" }}</div>
+  </td>
+  <td>
+    <div>Coordenadas: {{ parada.revision_entrega_datos.latitud|default:"-" }}, {{ parada.revision_entrega_datos.longitud|default:"-" }}</div>
+    <div>Precisión: {{ parada.revision_entrega_datos.precision_metros|default:"-" }} m</div>
+    <div>Distancia: {{ parada.revision_entrega_datos.distancia_metros|default:"-" }} m</div>
+  </td>
+  <td>
+    {% for evidencia in parada.evidencias_entrega.all %}
+      <div>{{ evidencia.get_tipo_display }}{% if evidencia.comentario %}: {{ evidencia.comentario }}{% endif %}{% if evidencia.foto %} <a href="{{ evidencia.foto.url }}" target="_blank" rel="noopener">Ver archivo</a>{% endif %}</div>
+    {% empty %}Sin archivo adicional; se conserva el evento de confirmación.{% endfor %}
+  </td>
+  <td>
+    {% if parada.revision_entrega_estado == 'RECHAZADA' and can_manage_logistica %}
+      <strong>{{ parada.revision_entrega_revisada_por.get_full_name|default:parada.revision_entrega_revisada_por.username }}</strong>
+      <div>{{ parada.revision_entrega_revisada_en|date:"Y-m-d H:i" }}</div>
+      <div>{{ parada.revision_entrega_resolucion }}</div>
+      <form method="post" class="route-inline-form" data-async-action data-context-anchor="revision-entrega-{{ parada.id }}">
+        {% csrf_token %}<input type="hidden" name="action" value="revisar_entrega"><input type="hidden" name="parada_id" value="{{ parada.id }}"><input type="hidden" name="context_anchor" value="revision-entrega-{{ parada.id }}">
+        <label for="motivo-correccion-{{ parada.id }}"><strong>Evidencia de corrección</strong></label>
+        <textarea class="input-field" id="motivo-correccion-{{ parada.id }}" name="motivo_revision" required placeholder="Describe la verificación y folio de evidencia"></textarea>
+        <button class="btn btn-primary btn-small" type="submit" name="decision" value="CORREGIDA">Marcar corregida</button>
+      </form>
+    {% elif parada.revision_entrega_revisada_por_id %}
+      <strong>{{ parada.revision_entrega_revisada_por.get_full_name|default:parada.revision_entrega_revisada_por.username }}</strong>
+      <div>{{ parada.revision_entrega_revisada_en|date:"Y-m-d H:i" }}</div>
+      <div>{{ parada.revision_entrega_resolucion }}</div>
+    {% elif can_manage_logistica %}
+      <form method="post" class="route-inline-form" data-async-action data-context-anchor="revision-entrega-{{ parada.id }}">
+        {% csrf_token %}<input type="hidden" name="action" value="revisar_entrega"><input type="hidden" name="parada_id" value="{{ parada.id }}"><input type="hidden" name="context_anchor" value="revision-entrega-{{ parada.id }}">
+        <label for="motivo-revision-{{ parada.id }}"><strong>Motivo de la resolución</strong></label>
+        <textarea class="input-field" id="motivo-revision-{{ parada.id }}" name="motivo_revision" required placeholder="Describe la evidencia revisada y la decisión"></textarea>
+        <div class="route-action-row"><button class="btn btn-primary btn-small" type="submit" name="decision" value="AUTORIZADA">Autorizar</button><button class="btn btn-danger btn-small" type="submit" name="decision" value="RECHAZADA">Rechazar</button></div>
+      </form>
+    {% else %}Pendiente de administración Logística.{% endif %}
+  </td>
+</tr>

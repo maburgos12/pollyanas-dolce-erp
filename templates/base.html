@@ -862,27 +862,40 @@
         </template>
 
         <main class="main-content" id="main-content" data-hallmark-scope="erp">
+            <div class="erp-toast-region" id="erp-toast-region" aria-live="polite" aria-atomic="false" aria-label="Notificaciones">
             {% if messages %}
-            <div class="messages-container">
                 {% for message in messages %}
-                <div class="alert alert-{% if message.tags == 'error' %}danger{% elif message.tags == 'warning' %}warning{% elif message.tags == 'info' %}info{% else %}success{% endif %}" role="status">
+                <div class="erp-toast erp-toast--{% if message.tags == 'error' %}error{% elif message.tags == 'warning' %}warning{% elif message.tags == 'info' %}info{% else %}success{% endif %}" data-toast-type="{{ message.tags|default:'success' }}" role="status">
                     <span>{{ message }}</span>
-                    <button class="alert-close" type="button" onclick="this.parentElement.remove()" aria-label="Cerrar">
+                    <button class="erp-toast__close" type="button" onclick="this.parentElement.remove()" aria-label="Cerrar notificación">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 6 6 18M6 6l12 12"/>
                         </svg>
                     </button>
                 </div>
                 {% endfor %}
-            </div>
             {% endif %}
+            </div>
 
             {% block content %}{% endblock %}
         </main>
     </div>
 
+    <div class="erp-confirm" id="erp-confirm-dialog" hidden>
+        <div class="erp-confirm__backdrop" data-confirm-cancel></div>
+        <section class="erp-confirm__panel" role="dialog" aria-modal="true" aria-labelledby="erp-confirm-title" aria-describedby="erp-confirm-message">
+            <h2 id="erp-confirm-title">Confirmar acción</h2>
+            <p id="erp-confirm-message"></p>
+            <div class="erp-confirm__actions">
+                <button class="btn btn-secondary" type="button" data-confirm-cancel>Cancelar</button>
+                <button class="btn btn-danger" type="button" data-confirm-accept>Confirmar</button>
+            </div>
+        </section>
+    </div>
+
     <script src="{% static 'js/searchable_selects.js' %}?v=20260613-calculo-insumos-a11y-v1" defer></script>
     <script src="{% static 'js/pollyana_ops_ui.js' %}?v=20260614-ui100-v1" defer></script>
+    <script src="{% static 'js/erp_actions.js' %}?v=20260711-action-context-v1" defer></script>
 
     {% block extra_js %}{% endblock %}
 
@@ -1064,7 +1077,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20260704-erp-mobile-badges-v13').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20260711-action-context-v14').catch(function () {});
         }
     })();
     </script>

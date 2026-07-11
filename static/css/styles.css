@@ -7083,3 +7083,47 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   .plan-shell{max-width:1760px}
   .plan-operativo{grid-template-columns:minmax(900px,1160px) 360px}
 }
+/* Progressive action feedback: floating, non-blocking and layout-stable. */
+.erp-toast-region {
+  position: fixed;
+  right: 20px;
+  bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  z-index: 1500;
+  display: grid;
+  width: min(380px, calc(100vw - 32px));
+  gap: 10px;
+  pointer-events: none;
+}
+.erp-toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid #d8c8d0;
+  border-left: 4px solid #486b57;
+  border-radius: 12px;
+  background: #fff;
+  color: #31242b;
+  box-shadow: 0 14px 36px rgba(49, 36, 43, .18);
+  pointer-events: auto;
+  animation: erp-toast-in 160ms ease-out;
+}
+.erp-toast--error { border-left-color: #a32945; }
+.erp-toast--warning { border-left-color: #a26b0b; }
+.erp-toast--info { border-left-color: #326a88; }
+.erp-toast__close { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 22px; line-height: 1; }
+.erp-toast__close:focus-visible { outline: 3px solid rgba(139, 34, 82, .28); outline-offset: 2px; }
+@keyframes erp-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 640px) {
+  .erp-toast-region { right: 16px; bottom: max(16px, env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .erp-toast { animation: none; }
+}
+.erp-confirm[hidden] { display: none; }
+.erp-confirm { position: fixed; inset: 0; z-index: 1600; display: grid; place-items: center; padding: 20px; }
+.erp-confirm__backdrop { position: absolute; inset: 0; background: rgba(49, 36, 43, .45); }
+.erp-confirm__panel { position: relative; width: min(460px, 100%); padding: 22px; border-radius: 14px; background: #fff; box-shadow: 0 24px 60px rgba(49, 36, 43, .28); }
+.erp-confirm__panel h2 { margin: 0 0 8px; color: var(--vino); }
+.erp-confirm__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }

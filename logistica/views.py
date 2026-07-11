@@ -12,7 +12,9 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
@@ -2138,10 +2140,40 @@ def ruta_detail(request, pk: int):
                     motivo=request.POST.get("motivo_revision"),
                 )
             except ValidationError as exc:
-                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+                message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "target": f"#revision-entrega-{parada.id}",
+                            "toast": {"type": "error", "message": message, "persistent": True},
+                        },
+                        status=422,
+                    )
+                messages.error(request, message)
             else:
-                messages.success(request, "Revisión de entrega registrada con evidencia de auditoría.")
-            return redirect("logistica:ruta_detail", pk=ruta.id)
+                message = "Revisión de entrega registrada con evidencia de auditoría."
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    parada.refresh_from_db()
+                    parada = ParadaRuta.objects.select_related(
+                        "entrega_confirmada_por", "revision_entrega_revisada_por"
+                    ).prefetch_related("evidencias_entrega").get(pk=parada.id)
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "target": f"#revision-entrega-{parada.id}",
+                            "toast": {"type": "success", "message": message, "persistent": False},
+                            "html": render_to_string(
+                                "logistica/partials/revision_entrega_row.html",
+                                {"parada": parada, "can_manage_logistica": True},
+                                request=request,
+                            ),
+                        }
+                    )
+                messages.success(request, message)
+            response = redirect("logistica:ruta_detail", pk=ruta.id)
+            response["Location"] = f'{response["Location"]}#revision-entrega-{parada.id}'
+            return response
 
         if action == "add_entrega":
             pedido = None

@@ -395,3 +395,13 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 - No desplegar desde una rama con cambios mezclados o no revisados.
 - Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `claude.md` en el mismo cambio para mantenerlas alineadas.
 - Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado y limpiar ramas atoradas que puedan obstruir otros hilos.
+
+## Acciones que cambian estado — contrato obligatorio
+
+- Toda pantalla nueva con acciones como Guardar, Autorizar, Aprobar, Rechazar, Cancelar o Resolver debe mantener la posición y el contexto del usuario.
+- Usar el contrato progresivo `data-async-action` y respuesta JSON/HTML compartida; nunca duplicar la lógica de negocio entre ambos formatos.
+- Mostrar éxito, error, advertencia o información mediante el toast global accesible. El banner superior no puede ser la única respuesta inmediata.
+- Bloquear únicamente el botón presionado, mostrar `Guardando…` o `Procesando…` y prevenir doble envío.
+- Ante error, conservar inputs y habilitar reintento. Para POST tradicional, regresar a un identificador estable mediante fragmento.
+- Usar confirmación modal solo para acciones destructivas o irreversibles; debe admitir Escape, atrapar foco y devolverlo al disparador.
+- Registrar cada migración en `docs/ux/action-context-coverage.md`; no declarar cobertura total mientras existan pantallas pendientes.

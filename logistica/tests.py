@@ -1714,6 +1714,9 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertContains(response, f'id="{field_id}"')
         self.assertContains(response, 'name="motivo_revision"')
         self.assertContains(response, "required")
+        self.assertContains(response, f'id="revision-entrega-{self.parada.id}"')
+        self.assertContains(response, "data-async-action")
+        self.assertContains(response, f'value="revision-entrega-{self.parada.id}"')
 
     def test_jefe_autoriza_con_motivo_y_conserva_hecho_fisico_y_evidencia(self):
         self.client.force_login(self.jefe)
@@ -1737,6 +1740,70 @@ class LogisticaRevisionEntregaTests(TestCase):
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
         self.assertIsNone(self.parada.hora_llegada_real)
         self.assertTrue(ParadaEntregaEvidencia.objects.filter(pk=evidencia.pk).exists())
+
+    def test_revision_json_actualiza_solo_la_fila_y_devuelve_toast(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "revisar_entrega",
+                "parada_id": self.parada.id,
+                "decision": "AUTORIZADA",
+                "motivo_revision": "Foto y llamada verificadas.",
+                "context_anchor": f"revision-entrega-{self.parada.id}",
+            },
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["target"], f"#revision-entrega-{self.parada.id}")
+        self.assertEqual(payload["toast"]["type"], "success")
+        self.assertIn("Revisión de entrega registrada", payload["toast"]["message"])
+        self.assertIn(f'id="revision-entrega-{self.parada.id}"', payload["html"])
+        self.assertIn("Autorizada", payload["html"])
+
+    def test_revision_json_error_conserva_estado_y_permite_reintento(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "revisar_entrega",
+                "parada_id": self.parada.id,
+                "decision": "AUTORIZADA",
+                "motivo_revision": "   ",
+            },
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["target"], f"#revision-entrega-{self.parada.id}")
+        self.assertEqual(payload["toast"]["type"], "error")
+        self.assertTrue(payload["toast"]["persistent"])
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_PENDIENTE)
+
+    def test_revision_html_fallback_regresa_a_la_revision_afectada(self):
+        self.client.force_login(self.jefe)
+
+        response = self.client.post(
+            self.url,
+            {
+                "action": "revisar_entrega",
+                "parada_id": self.parada.id,
+                "decision": "RECHAZADA",
+                "motivo_revision": "La evidencia no identifica la sucursal.",
+                "context_anchor": f"revision-entrega-{self.parada.id}",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].endswith(f"#revision-entrega-{self.parada.id}"))
 
     def test_jefe_rechaza_en_ruta_completada_y_la_resolucion_sigue_visible(self):
         self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA

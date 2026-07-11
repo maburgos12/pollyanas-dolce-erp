@@ -431,7 +431,7 @@
         </thead>
         <tbody>
           {% for parada in revisiones_entrega %}
-          <tr>
+          <tr id="revision-entrega-{{ parada.id }}" tabindex="-1">
             <td>
               <strong>{{ parada.orden }} · {{ parada.punto_nombre_snapshot }}</strong>
               <div><strong>Estado físico:</strong> {{ parada.get_estado_display }}</div>
@@ -467,8 +467,9 @@
                 <strong>{{ parada.revision_entrega_revisada_por.get_full_name|default:parada.revision_entrega_revisada_por.username }}</strong>
                 <div>{{ parada.revision_entrega_revisada_en|date:"Y-m-d H:i" }}</div>
                 <div>{{ parada.revision_entrega_resolucion }}</div>
-                <form method="post" class="route-inline-form">
+                <form method="post" class="route-inline-form" data-async-action data-context-anchor="revision-entrega-{{ parada.id }}">
                   {% csrf_token %}<input type="hidden" name="action" value="revisar_entrega"><input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <input type="hidden" name="context_anchor" value="revision-entrega-{{ parada.id }}">
                   <label for="motivo-correccion-{{ parada.id }}"><strong>Evidencia de corrección</strong></label>
                   <textarea class="input-field" id="motivo-correccion-{{ parada.id }}" name="motivo_revision" required placeholder="Describe la verificación y folio de evidencia"></textarea>
                   <button class="btn btn-primary btn-small" type="submit" name="decision" value="CORREGIDA">Marcar corregida</button>
@@ -478,10 +479,11 @@
                 <div>{{ parada.revision_entrega_revisada_en|date:"Y-m-d H:i" }}</div>
                 <div>{{ parada.revision_entrega_resolucion }}</div>
               {% elif can_manage_logistica %}
-                <form method="post" class="route-inline-form">
+                <form method="post" class="route-inline-form" data-async-action data-context-anchor="revision-entrega-{{ parada.id }}">
                   {% csrf_token %}
                   <input type="hidden" name="action" value="revisar_entrega">
                   <input type="hidden" name="parada_id" value="{{ parada.id }}">
+                  <input type="hidden" name="context_anchor" value="revision-entrega-{{ parada.id }}">
                   <label for="motivo-revision-{{ parada.id }}"><strong>Motivo de la resolución</strong></label>
                   <textarea class="input-field" id="motivo-revision-{{ parada.id }}" name="motivo_revision" required placeholder="Describe la evidencia revisada y la decisión"></textarea>
                   <div class="route-action-row">
