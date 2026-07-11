@@ -26,7 +26,7 @@ REQUIRED_TEMPLATE_MARKERS = {
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
-    "pollyanas-logistica-pwa-v59-pwa-format": "cache versionado de la PWA",
+    "pollyanas-logistica-pwa-v60-entregas-revision": "cache versionado de la PWA",
     'event.request.mode === "navigate"': "estrategia network-first para navegacion",
     'url.pathname === "/logistica/app/"': "estrategia network-first para el app shell",
 }

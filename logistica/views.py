@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -61,6 +62,7 @@ from .services_carga_ruta import (
     validar_linea_carga,
 )
 from .services_rutas_control import distancia_metros, resumen_control_rutas
+from .services_entregas import confirmar_entrega_parada
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
@@ -2215,55 +2217,31 @@ def ruta_detail(request, pk: int):
             if not nota:
                 messages.error(request, "Captura una nota para justificar el ajuste manual.")
                 return redirect("logistica:ruta_detail", pk=ruta.id)
-            tipo_evidencia = (
-                ParadaEntregaEvidencia.TIPO_CONFIRMACION
-                if entrega_estado == ParadaRuta.ENTREGA_ENTREGADA
-                else ParadaEntregaEvidencia.TIPO_INCIDENCIA
-            )
-            now = timezone.now()
-            with transaction.atomic():
-                parada.estado = ParadaRuta.ESTADO_VISITADA
-                parada.hora_llegada_real = parada.hora_llegada_real or now
-                parada.entrega_estado = entrega_estado
-                parada.entrega_confirmada_en = now
-                parada.entrega_confirmada_por = request.user
-                parada.entrega_notas = nota
-                parada.save(
-                    update_fields=[
-                        "estado",
-                        "hora_llegada_real",
-                        "entrega_estado",
-                        "entrega_confirmada_en",
-                        "entrega_confirmada_por",
-                        "entrega_notas",
-                        "actualizado_en",
-                    ]
-                )
-                evidencia = ParadaEntregaEvidencia.objects.create(
+            try:
+                resultado = confirmar_entrega_parada(
                     ruta=ruta,
                     parada=parada,
-                    tipo=tipo_evidencia,
-                    comentario=nota,
-                    capturado_por=request.user,
-                    metadata={"origen": "erp_manual", "entrega_estado": entrega_estado},
-                )
-                EventoRuta.objects.create(
-                    ruta=ruta,
-                    parada=parada,
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                    severidad=EventoRuta.SEVERIDAD_INFO,
-                    descripcion=f"Ajuste manual de entrega en {parada.punto_nombre_snapshot}: {parada.get_entrega_estado_display()}.",
-                    metadata={
-                        "tipo": "ajuste_entrega_manual",
-                        "entrega_estado": entrega_estado,
-                        "evidencia_id": evidencia.id,
-                        "nota": nota,
+                    actor=request.user,
+                    entrega_estado=entrega_estado,
+                    motivo=nota,
+                    client_event_id=f"erp-manual-{uuid4()}",
+                    ubicacion={
+                        "causa": "AJUSTE_ADMINISTRATIVO",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "erp-ruta-detail",
                     },
-                    creado_por=request.user,
                 )
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-            messages.success(request, f"Entrega ajustada manualmente para {parada.punto_nombre_snapshot}.")
+            except (ValidationError, PermissionDenied) as exc:
+                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            ruta.recompute_route_control()
+            ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+            messages.success(
+                request,
+                f"Entrega ajustada manualmente para {parada.punto_nombre_snapshot}; quedó pendiente de revisión."
+                if resultado.requiere_revision
+                else f"Entrega ajustada manualmente para {parada.punto_nombre_snapshot}.",
+            )
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "cerrar_con_diferencia_autorizada":

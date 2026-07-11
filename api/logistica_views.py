@@ -59,6 +59,11 @@ from logistica.services_carga_ruta import (
     validar_linea_carga,
 )
 from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas
+from logistica.services_entregas import (
+    EntregaIdempotenciaConflicto,
+    confirmar_entrega_parada,
+    tiene_llegada_geocerca_confiable,
+)
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -1397,6 +1402,8 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         evidencias_payload = payload.get("evidencias") or []
         if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA and not evidencias_payload:
             return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
+        if not payload.get("client_event_id"):
+            return Response({"client_event_id": ["client_event_id es obligatorio."]}, status=status.HTTP_400_BAD_REQUEST)
         linea_ids = {item.get("linea_carga_id") for item in evidencias_payload if item.get("linea_carga_id")}
         lineas_by_id = {}
         if linea_ids:
@@ -1412,112 +1419,62 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             if missing:
                 return Response({"detail": "Una o más líneas de carga no pertenecen a esta parada.", "lineas": missing}, status=status.HTTP_400_BAD_REQUEST)
 
-        with transaction.atomic():
-            parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk)
-            if parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE:
+        client_context = payload.get("client_context") or {}
+        tiene_geocerca_confiable = tiene_llegada_geocerca_confiable(ruta=ruta, parada=parada)
+        if not tiene_geocerca_confiable:
+            if not (payload.get("notas") or "").strip():
+                return Response({"notas": ["Explica el motivo de la entrega sin geocerca."]}, status=status.HTTP_400_BAD_REQUEST)
+            if not client_context.get("causa") or not client_context.get("client_timestamp") or not client_context.get("client_version"):
                 return Response(
-                    {
-                        "parada": ParadaRutaSerializer(parada).data,
-                        "evidencias": ParadaEntregaEvidenciaSerializer(
-                            parada.evidencias_entrega.all(),
-                            many=True,
-                            context={"request": request},
-                        ).data,
-                    },
-                    status=status.HTTP_200_OK,
-                )
-            if not EventoRuta.objects.filter(
-                ruta=ruta,
-                parada=parada,
-                tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
-            ).exists():
-                return Response(
-                    {"detail": "La entrega solo se puede confirmar después de registrar la llegada dentro de la geocerca."},
+                    {"client_context": ["Para una excepción informa causa, client_timestamp y client_version."]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            evidencias = []
-            created_any = False
-            for item in evidencias_payload:
-                client_event_id = item.get("client_event_id") or ""
-                defaults = {
-                    "linea_carga": lineas_by_id.get(item.get("linea_carga_id")) if item.get("linea_carga_id") else None,
-                    "tipo": item.get("tipo") or ParadaEntregaEvidencia.TIPO_CONFIRMACION,
-                    "cantidad_entregada": item.get("cantidad_entregada"),
-                    "comentario": item.get("comentario") or "",
-                    "latitud": item.get("latitud"),
-                    "longitud": item.get("longitud"),
-                    "precision_metros": item.get("precision_metros"),
-                    "ip_registro": request.META.get("REMOTE_ADDR"),
-                    "metadata": {"origen": "pwa_entrega_parada"},
-                }
-                if client_event_id:
-                    evidencia, created = ParadaEntregaEvidencia.objects.get_or_create(
-                        ruta=ruta,
-                        parada=parada,
-                        capturado_por=request.user,
-                        client_event_id=client_event_id,
-                        defaults={
-                            **defaults,
-                        },
-                    )
-                else:
-                    evidencia = ParadaEntregaEvidencia.objects.create(
-                        ruta=ruta,
-                        parada=parada,
-                        capturado_por=request.user,
-                        **defaults,
-                    )
-                    created = True
-                evidencias.append(evidencia)
-                created_any = created_any or created
 
-            if parada.entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
-                if parada.estado != ParadaRuta.ESTADO_VISITADA:
-                    parada.estado = ParadaRuta.ESTADO_VISITADA
-                    parada.hora_llegada_real = timezone.now()
-                parada.entrega_estado = payload["entrega_estado"]
-                parada.entrega_confirmada_en = timezone.now()
-                parada.entrega_confirmada_por = request.user
-                parada.entrega_notas = payload.get("notas") or ""
-                parada.save(
-                    update_fields=[
-                        "entrega_estado",
-                        "entrega_confirmada_en",
-                        "entrega_confirmada_por",
-                        "entrega_notas",
-                        "estado",
-                        "hora_llegada_real",
-                        "actualizado_en",
-                    ]
-                )
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-            if created_any:
-                EventoRuta.objects.create(
-                    ruta=ruta,
-                    parada=parada,
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL
-                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                    else EventoRuta.TIPO_LLEGADA_GEOFENCE,
-                    severidad=EventoRuta.SEVERIDAD_ALERTA
-                    if parada.entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}
-                    else EventoRuta.SEVERIDAD_INFO,
-                    descripcion=f"Entrega de parada confirmada: {parada.get_entrega_estado_display()}.",
-                    metadata={"entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
-                    creado_por=request.user,
-                )
+        evidencias_servicio = []
+        for item in evidencias_payload:
+            evidencia = dict(item)
+            if evidencia.get("linea_carga_id"):
+                evidencia["linea_carga_id"] = lineas_by_id[evidencia["linea_carga_id"]].id
+            evidencias_servicio.append(evidencia)
+        try:
+            resultado = confirmar_entrega_parada(
+                ruta=ruta,
+                parada=parada,
+                actor=request.user,
+                entrega_estado=payload["entrega_estado"],
+                motivo=payload.get("notas") or "Entrega confirmada por repartidor.",
+                client_event_id=payload["client_event_id"],
+                evidencias=evidencias_servicio,
+                ubicacion=client_context,
+            )
+        except EntregaIdempotenciaConflicto as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
+        except (ValidationError, PermissionDenied) as exc:
+            detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        parada = resultado.parada
+        ruta.recompute_route_control()
+        ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+        evidencias = parada.evidencias_entrega.all().order_by("id")
 
         log_event(
             request.user,
             "CREATE",
             "logistica.ParadaEntregaEvidencia",
             str(parada.id),
-            {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": len(evidencias)},
+            {"ruta": ruta.folio, "parada": parada.id, "entrega_estado": parada.entrega_estado, "evidencias": evidencias.count()},
         )
         return Response(
             {
                 "parada": ParadaRutaSerializer(parada).data,
                 "evidencias": ParadaEntregaEvidenciaSerializer(evidencias, many=True, context={"request": request}).data,
+                "requiere_revision": resultado.requiere_revision,
+                "warning": (
+                    "La entrega se registró y será revisada por tu jefe porque no se validó la geocerca."
+                    if resultado.requiere_revision
+                    else ""
+                ),
             },
             status=status.HTTP_200_OK,
         )

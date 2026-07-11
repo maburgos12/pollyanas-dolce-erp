@@ -92,6 +92,10 @@ def _geocerca_real(*, ruta: RutaEntrega, parada: ParadaRuta) -> EventoRuta | Non
     return None
 
 
+def tiene_llegada_geocerca_confiable(*, ruta: RutaEntrega, parada: ParadaRuta) -> bool:
+    return _geocerca_real(ruta=ruta, parada=parada) is not None
+
+
 def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entrega_estado, motivo, client_event_id):
     if parada.ruta_id != ruta.id:
         raise ValidationError("La parada no pertenece a la ruta indicada.")
@@ -221,23 +225,31 @@ def confirmar_entrega_parada(
         },
         creado_por=actor,
     )
-    evidencia = ParadaEntregaEvidencia.objects.create(
-        ruta=ruta,
-        parada=parada,
-        tipo=ParadaEntregaEvidencia.TIPO_CONFIRMACION,
-        comentario=str(motivo).strip(),
-        latitud=datos_revision.get("latitud"),
-        longitud=datos_revision.get("longitud"),
-        precision_metros=datos_revision.get("precision_metros"),
-        client_event_id=client_event_id,
-        capturado_por=actor,
-        metadata={
-            "payload_hash": payload_hash,
-            "evento_id": evento.id,
-            "origen": "servicio_entregas",
-            "evidencias": _json_safe(list(evidencias or ())),
-        },
-    )
+    evidencias_payload = list(evidencias or ())
+    filas_evidencia = evidencias_payload or [{}]
+    evidencia = None
+    for index, item in enumerate(filas_evidencia):
+        item = dict(item)
+        evidencia_item = ParadaEntregaEvidencia.objects.create(
+            ruta=ruta,
+            parada=parada,
+            linea_carga_id=item.get("linea_carga_id"),
+            tipo=item.get("tipo") or ParadaEntregaEvidencia.TIPO_CONFIRMACION,
+            cantidad_entregada=item.get("cantidad_entregada"),
+            comentario=item.get("comentario") or str(motivo).strip(),
+            latitud=item.get("latitud") or datos_revision.get("latitud"),
+            longitud=item.get("longitud") or datos_revision.get("longitud"),
+            precision_metros=item.get("precision_metros") or datos_revision.get("precision_metros"),
+            client_event_id=(client_event_id if index == 0 else item.get("client_event_id") or ""),
+            capturado_por=actor,
+            metadata={
+                "payload_hash": payload_hash if index == 0 else "",
+                "evento_id": evento.id,
+                "origen": "servicio_entregas",
+            },
+        )
+        if evidencia is None:
+            evidencia = evidencia_item
     return ConfirmacionEntregaResultado(
         parada=parada,
         evento=evento,

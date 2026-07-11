@@ -240,6 +240,11 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_confirmada_en",
             "entrega_confirmada_por_nombre",
             "entrega_notas",
+            "revision_entrega_estado",
+            "revision_entrega_causa",
+            "revision_entrega_datos",
+            "revision_entrega_revisada_en",
+            "revision_entrega_resolucion",
             "distancia_llegada_metros",
             "notas",
         ]
@@ -535,12 +540,18 @@ class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
 class ParadaEntregaConfirmarSerializer(serializers.Serializer):
     entrega_estado = serializers.ChoiceField(choices=ParadaRuta.ENTREGA_ESTADO_CHOICES)
     notas = serializers.CharField(required=False, allow_blank=True, default="")
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    client_context = serializers.JSONField(required=False, default=dict)
     evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
         entrega_estado = attrs["entrega_estado"]
         notas = (attrs.get("notas") or "").strip()
         evidencias = attrs.get("evidencias") or []
+        client_event_id = (attrs.get("client_event_id") or "").strip()
+        if not client_event_id and evidencias:
+            client_event_id = str(evidencias[0].get("client_event_id") or "").strip()
+        attrs["client_event_id"] = client_event_id
         if entrega_estado == ParadaRuta.ENTREGA_PENDIENTE:
             raise serializers.ValidationError({"entrega_estado": "La entrega debe quedar entregada, con diferencia o no entregada."})
         if entrega_estado in {ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA}:
