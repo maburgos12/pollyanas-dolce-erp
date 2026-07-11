@@ -4194,7 +4194,7 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
         self.assertEqual(
             response["Content-Disposition"],
-            'attachment; filename="plantilla_productos_point.xlsx"',
+            'attachment; filename="plantilla_calculo_insumos.xlsx"',
         )
         wb = load_workbook(BytesIO(response.content), data_only=True)
         ws = wb["Plantilla carga"]

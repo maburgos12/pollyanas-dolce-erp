@@ -16833,7 +16833,7 @@ def calculo_insumos_plantilla(request: HttpRequest) -> HttpResponse:
         out.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    response["Content-Disposition"] = 'attachment; filename="plantilla_productos_point.xlsx"'
+    response["Content-Disposition"] = 'attachment; filename="plantilla_calculo_insumos.xlsx"'
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
