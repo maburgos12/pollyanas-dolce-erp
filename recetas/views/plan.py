@@ -29,6 +29,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 from rapidfuzz import fuzz
+from unidecode import unidecode
 
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from control.models import MermaPOS
@@ -118,6 +119,79 @@ CALCULO_INSUMOS_SESSION_KEY = "calculo_insumos_preview"
 CALCULO_INSUMOS_DRAFT_SESSION_KEY = "calculo_insumos_draft"
 CALCULO_INSUMOS_MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 CALCULO_INSUMOS_MAX_ROWS = 2000
+CALCULO_INSUMOS_EXCLUDED_TEMPLATE_FAMILY_TOKENS = {
+    "accesorio",
+    "desechable",
+    "letrero",
+    "plastico",
+    "regalo",
+    "vela",
+}
+
+
+def _calculo_insumos_excluded_template_family(value: str) -> bool:
+    normalized = " ".join(unidecode(value or "").lower().split())
+    return any(token in normalized for token in CALCULO_INSUMOS_EXCLUDED_TEMPLATE_FAMILY_TOKENS)
+
+
+def _calculo_insumos_template_products() -> list[dict[str, str]]:
+    point_products = list(
+        PointProduct.objects.filter(active=True)
+        .exclude(sku="")
+        .only("sku", "name", "category")
+    )
+    recipes = Receta.objects.filter(
+        tipo=Receta.TIPO_PRODUCTO_FINAL,
+        modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+    )
+    recipes_by_code = {
+        normalizar_codigo_point(receta.codigo_point): receta
+        for receta in recipes.exclude(codigo_point="")
+        if normalizar_codigo_point(receta.codigo_point)
+    }
+    aliases = (
+        RecetaCodigoPointAlias.objects.filter(
+            activo=True,
+            receta__tipo=Receta.TIPO_PRODUCTO_FINAL,
+            receta__modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+        )
+        .select_related("receta")
+    )
+    recipes_by_alias = {
+        alias.codigo_point_normalizado: alias.receta
+        for alias in aliases
+        if alias.codigo_point_normalizado
+    }
+    products = []
+    seen_codes = set()
+    for point_product in point_products:
+        code_key = normalizar_codigo_point(point_product.sku)
+        if not code_key or code_key in seen_codes:
+            continue
+        receta = recipes_by_code.get(code_key) or recipes_by_alias.get(code_key)
+        if receta is None:
+            continue
+        family = receta.familia or point_product.category or "Sin familia"
+        if _calculo_insumos_excluded_template_family(
+            family
+        ) or _calculo_insumos_excluded_template_family(point_product.category):
+            continue
+        seen_codes.add(code_key)
+        products.append(
+            {
+                "familia": family,
+                "codigo_point": point_product.sku,
+                "producto": receta.nombre,
+            }
+        )
+    return sorted(
+        products,
+        key=lambda row: (
+            unidecode(row["familia"]).lower(),
+            unidecode(row["producto"]).lower(),
+            row["codigo_point"],
+        ),
+    )
 
 
 def _presentacion_sort_key(nombre: str) -> tuple[int, str]:
@@ -16680,9 +16754,18 @@ def calculo_insumos_plantilla(request: HttpRequest) -> HttpResponse:
     wb = Workbook()
     ws = wb.active
     ws.title = "Plantilla carga"
-    ws.append(headers)
-    for row in sample_rows:
-        ws.append(row)
+    ws.append(["familia", "codigo_point", "producto", "presentacion", "cantidad", "notas"])
+    for product in _calculo_insumos_template_products():
+        ws.append(
+            [
+                product["familia"],
+                product["codigo_point"],
+                product["producto"],
+                "",
+                None,
+                None,
+            ]
+        )
     _style_calculo_insumos_sheet(ws)
     ws_rules = wb.create_sheet("Reglas calculo")
     _append_calculo_insumos_rules(ws_rules)

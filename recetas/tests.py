@@ -31,6 +31,7 @@ from recetas.models import (
     PlanProduccionItem,
     PronosticoVenta,
     Receta,
+    RecetaCodigoPointAlias,
     RecetaCostoVersion,
     RecetaEquivalencia,
     RecetaPresentacion,
@@ -4043,6 +4044,126 @@ class SolicitudVentasForecastTests(TestCase):
             codigo_point="P-SOL-01",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido="hash-sol-ventas-001",
+        )
+
+    def _crear_producto_plantilla(
+        self,
+        *,
+        nombre,
+        codigo,
+        familia,
+        modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+        alias_activo=True,
+        point_activo=True,
+        crear_point=True,
+        codigo_receta=None,
+    ):
+        receta = Receta.objects.create(
+            nombre=nombre,
+            codigo_point=codigo if codigo_receta is None else codigo_receta,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=modo_costeo,
+            familia=familia,
+            hash_contenido=f"hash-plantilla-{codigo.lower()}",
+        )
+        RecetaCodigoPointAlias.objects.create(
+            receta=receta,
+            codigo_point=codigo,
+            nombre_point=nombre,
+            activo=alias_activo,
+        )
+        if crear_point:
+            PointProduct.objects.create(
+                external_id=f"point-{codigo.lower()}",
+                sku=codigo,
+                name=nombre,
+                category=familia,
+                active=point_activo,
+            )
+        return receta
+
+    def test_calculo_insumos_plantilla_selecciona_productos_vendibles(self):
+        from recetas.views.plan import _calculo_insumos_template_products
+
+        self._crear_producto_plantilla(
+            nombre="Pastel Vendible",
+            codigo="PASTEL-01",
+            familia="Pasteles",
+        )
+        self._crear_producto_plantilla(
+            nombre="Vela Número",
+            codigo="VELA-01",
+            familia="Velas Sparklers",
+        )
+        self._crear_producto_plantilla(
+            nombre="Letrero Feliz",
+            codigo="LET-01",
+            familia="Letrero B",
+        )
+        self._crear_producto_plantilla(
+            nombre="Kit Repostería",
+            codigo="ACC-01",
+            familia="Accesorios de repostería",
+        )
+        self._crear_producto_plantilla(
+            nombre="Servicio Accesorio",
+            codigo="SERV-01",
+            familia="Pasteles",
+            modo_costeo=Receta.MODO_COSTEO_SERVICIO,
+        )
+        self._crear_producto_plantilla(
+            nombre="Pastel Inactivo",
+            codigo="PASTEL-OFF",
+            familia="Pasteles",
+            alias_activo=False,
+            codigo_receta="",
+        )
+        self._crear_producto_plantilla(
+            nombre="Pastel Fuera de Point",
+            codigo="PASTEL-NO-POINT",
+            familia="Pasteles",
+            crear_point=False,
+        )
+
+        self.assertEqual(
+            _calculo_insumos_template_products(),
+            [
+                {
+                    "familia": "Pasteles",
+                    "codigo_point": "PASTEL-01",
+                    "producto": "Pastel Vendible",
+                }
+            ],
+        )
+
+    def test_calculo_insumos_plantilla_xlsx_precarga_catalogo_vendible(self):
+        self._crear_producto_plantilla(
+            nombre="Pastel Vendible",
+            codigo="PASTEL-01",
+            familia="Pasteles",
+        )
+        self._crear_producto_plantilla(
+            nombre="Vela Número",
+            codigo="VELA-01",
+            familia="Velas Sparklers",
+        )
+        self._crear_producto_plantilla(
+            nombre="Letrero Feliz",
+            codigo="LET-01",
+            familia="Letrero B",
+        )
+
+        response = self.client.get(reverse("recetas:calculo_insumos_plantilla"))
+
+        self.assertEqual(response.status_code, 200)
+        wb = load_workbook(BytesIO(response.content), data_only=True)
+        ws = wb["Plantilla carga"]
+        self.assertEqual(
+            list(ws.values),
+            [
+                ("familia", "codigo_point", "producto", "presentacion", "cantidad", "notas"),
+                ("Pasteles", "PASTEL-01", "Pastel Vendible", None, None, None),
+            ],
         )
 
     def test_guardar_solicitud_venta_reemplaza_por_rango(self):
