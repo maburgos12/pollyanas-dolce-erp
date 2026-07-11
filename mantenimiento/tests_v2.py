@@ -2,6 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import SimpleTestCase, TestCase
 
 from activos.models import Activo, OrdenMantenimiento
@@ -93,7 +94,11 @@ class MaintenanceAccessTests(TestCase):
         cls.limited_user = user_model.objects.create_user("limited", password="test")
         cls.no_scope_user = user_model.objects.create_user("no-scope", password="test")
         cls.manager = user_model.objects.create_user("manager", password="test")
+        cls.dg_user = user_model.objects.create_user("dg-user", password="test")
+        cls.admin_group_user = user_model.objects.create_user("admin-group-user", password="test")
         cls.admin = user_model.objects.create_superuser("global", "global@example.com", "test")
+        cls.dg_user.groups.add(Group.objects.create(name="DG"))
+        cls.admin_group_user.groups.add(Group.objects.create(name="ADMIN"))
         UserProfile.objects.create(user=cls.limited_user, sucursal=cls.own_branch)
         UserProfile.objects.create(user=cls.no_scope_user)
         UserModuleAccess.objects.create(user=cls.manager, module="mantenimiento", access="manage")
@@ -136,7 +141,7 @@ class MaintenanceAccessTests(TestCase):
                 self.assertFalse(qs.filter(pk=other.pk).exists())
 
     def test_global_and_mantenimiento_manager_see_all_branches(self):
-        for user in (self.admin, self.manager):
+        for user in (self.admin, self.dg_user, self.admin_group_user, self.manager):
             with self.subTest(user=user.username):
                 self.assertEqual(authorized_fallas(user).count(), 2)
                 self.assertEqual(authorized_orders(user).count(), 2)
@@ -153,5 +158,8 @@ class MaintenanceAccessTests(TestCase):
 
     def test_only_global_or_mantenimiento_manager_can_view_costs(self):
         self.assertTrue(can_view_costs(self.admin))
+        self.assertTrue(can_view_costs(self.dg_user))
+        self.assertTrue(can_view_costs(self.admin_group_user))
         self.assertTrue(can_view_costs(self.manager))
         self.assertFalse(can_view_costs(self.limited_user))
+        self.assertFalse(can_view_costs(self.no_scope_user))
