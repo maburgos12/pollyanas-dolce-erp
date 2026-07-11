@@ -308,3 +308,22 @@ class OperationsAutomationFlowTests(TestCase):
         result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
 
         self.assertEqual(Decimal(result["branches"][0]["lines"][0]["shortage_immediate"]), Decimal("2.000"))
+
+    def test_stock_alert_usa_total_y_umbral_de_almacen_1(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("6"),
+            stock_minimo=Decimal("100"),
+            punto_reorden=Decimal("100"),
+        )
+
+        generate_operational_alerts(target_date=self.target_date)
+
+        self.assertFalse(
+            Alert.objects.filter(
+                fecha=self.target_date,
+                tipo=Alert.TYPE_STOCK,
+                insumo=self.insumo,
+            ).exists()
+        )

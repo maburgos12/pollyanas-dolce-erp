@@ -3192,16 +3192,26 @@ def _faltantes_rows(nivel: str):
             bucket = SimpleNamespace(
                 insumo=canonical,
                 stock_actual=Decimal("0"),
-                stock_minimo=_to_decimal(existencia.stock_minimo, "0"),
-                stock_maximo=_to_decimal(existencia.stock_maximo, "0"),
-                punto_reorden=_to_decimal(existencia.punto_reorden, "0"),
-                inventario_promedio=_to_decimal(existencia.inventario_promedio, "0"),
-                dias_llegada_pedido=int(existencia.dias_llegada_pedido or 0),
-                consumo_diario_promedio=_to_decimal(existencia.consumo_diario_promedio, "0"),
+                stock_minimo=Decimal("0"),
+                stock_maximo=Decimal("0"),
+                punto_reorden=Decimal("0"),
+                inventario_promedio=Decimal("0"),
+                dias_llegada_pedido=0,
+                consumo_diario_promedio=Decimal("0"),
                 canonical_variant_count=canonical_by_id[canonical.id]["variant_count"],
+                _config_priority=0,
             )
             grouped[canonical.id] = bucket
         bucket.stock_actual += _to_decimal(existencia.stock_actual, "0")
+        config_priority = 2 if existencia.insumo_id == canonical.id else 1
+        if existencia.almacen == "ALMACEN_1" and config_priority > bucket._config_priority:
+            bucket.stock_minimo = _to_decimal(existencia.stock_minimo, "0")
+            bucket.stock_maximo = _to_decimal(existencia.stock_maximo, "0")
+            bucket.punto_reorden = _to_decimal(existencia.punto_reorden, "0")
+            bucket.inventario_promedio = _to_decimal(existencia.inventario_promedio, "0")
+            bucket.dias_llegada_pedido = int(existencia.dias_llegada_pedido or 0)
+            bucket.consumo_diario_promedio = _to_decimal(existencia.consumo_diario_promedio, "0")
+            bucket._config_priority = config_priority
 
     existencias = list(grouped.values())
 

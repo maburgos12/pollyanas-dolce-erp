@@ -174,6 +174,8 @@ class PointMovementSyncService:
             location = normalized_locations.get(normalize_text(str(candidate or "").replace("_", " ")))
             if location:
                 return location
+        if normalize_text(branch.name) == "cedis":
+            return "CUARTO_FRIO"
         return None
 
     def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str) -> None:

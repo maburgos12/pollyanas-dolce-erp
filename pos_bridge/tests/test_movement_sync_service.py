@@ -398,7 +398,7 @@ class PointMovementSyncServiceTests(TestCase):
                 "external_id": "8",
                 "name": "CEDIS",
                 "status": "ACTIVE",
-                "metadata": {"inventario_ubicacion": "ALMACEN_1"},
+                "metadata": {},
             },
             transfer_external_id="32292",
             detail_external_id="474444",
@@ -431,8 +431,11 @@ class PointMovementSyncServiceTests(TestCase):
         movimiento = MovimientoInventario.objects.get(source_hash="transfer-insumo-1")
         self.assertEqual(movimiento.insumo, insumo)
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
-        existencia = ExistenciaInsumo.objects.get(insumo=insumo)
+        self.assertEqual(movimiento.almacen, "CUARTO_FRIO")
+        existencia = ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO")
         self.assertEqual(existencia.stock_actual, Decimal("15.270"))
+        self.assertEqual(job.result_summary["inventory_entries_created"], 1)
+        self.assertEqual(job.result_summary["skipped_non_storage_branch"], 0)
 
     def test_run_transfer_sync_creates_cedis_entry_for_received_finished_product_into_cedis(self):
         receta = Receta.objects.create(

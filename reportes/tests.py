@@ -49,6 +49,7 @@ from reportes.views import (
     _bi_branch_weekday_comparisons,
     _bi_product_weekday_comparisons,
     _bi_production_summary,
+    _faltantes_rows,
     _sales_previous_dates,
     _sales_source_context,
     _ventas_historicas_bi_summary,
@@ -80,6 +81,38 @@ class ReportesBITests(TestCase):
         solicitud_insumo = None
         # Orden sin solicitud para no depender de más catálogos en este test.
         OrdenCompra.objects.create(proveedor=prov, monto_estimado=950, solicitud=solicitud_insumo)
+
+    def test_faltantes_usa_stock_total_y_umbral_de_almacen_1(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-faltantes-multi",
+            nombre="Kilogramo Faltantes Multi",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo Faltantes Multi",
+            codigo_point="FALTANTES-MULTI-001",
+            unidad_base=unidad,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ARMADO",
+            stock_actual=Decimal("4"),
+            punto_reorden=Decimal("100"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("2"),
+            punto_reorden=Decimal("5"),
+        )
+
+        rows, _, _ = _faltantes_rows("all")
+        row = next(item for item in rows if item.insumo.id == insumo.id)
+
+        self.assertEqual(row.stock_actual, Decimal("6"))
+        self.assertEqual(row.punto_reorden, Decimal("5"))
+        self.assertEqual(row.nivel, "ok")
 
     def test_bi_view_renders(self):
         sucursal = self._create_sucursal("BI-01", "Sucursal BI 01")

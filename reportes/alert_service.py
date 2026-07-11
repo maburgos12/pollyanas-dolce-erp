@@ -241,11 +241,19 @@ def generate_operational_alerts(*, target_date: date | None = None) -> dict[str,
     }
     stock_rows = list(
         ExistenciaInsumo.objects.select_related("insumo", "insumo__proveedor_principal")
-        .filter(stock_minimo__gt=ZERO)
+        .filter(almacen="ALMACEN_1", stock_minimo__gt=ZERO)
         .order_by("insumo__nombre")
     )
+    stock_total_by_insumo = {
+        int(row["insumo_id"]): _to_decimal(row["stock_total"])
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=[item.insumo_id for item in stock_rows])
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
+    }
     for row in stock_rows:
-        stock_actual = _to_decimal(row.stock_actual)
+        stock_actual = stock_total_by_insumo.get(int(row.insumo_id), ZERO)
         threshold = max(_to_decimal(row.stock_minimo), _to_decimal(row.punto_reorden))
         if stock_actual > threshold:
             continue
