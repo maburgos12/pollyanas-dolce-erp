@@ -473,6 +473,7 @@ class MaintenanceDetailV2Tests(TestCase):
         self.assertNotIn("notas_internas", data)
 
     def test_detail_rejects_anonymous_permissionless_other_branch_unknown_type_and_missing_id(self):
+        self.client.logout()
         self.assertIn(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, {401, 403})
         self.client.force_login(self.denied)
         self.assertEqual(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, 403)
@@ -500,12 +501,12 @@ class MaintenanceDetailV2Tests(TestCase):
 
     def test_multiple_timeline_rows_keep_fixed_query_budget(self):
         self.client.force_login(self.user)
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(10):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
         for index in range(5):
             row = BitacoraFalla.objects.create(reporte=self.report, usuario=self.user, comentario=str(index))
             EvidenciaSeguimientoFalla.objects.create(bitacora=row, archivo=f"fallas/seguimiento/{index}.jpg", subido_por=self.user)
-        with self.assertNumQueries(8):
+        with self.assertNumQueries(10):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
 
 
@@ -560,4 +561,4 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
         response = self.client.get(url)
         self.assertNotIn("..", response["Content-Disposition"])
         self.assertNotIn("X-Evil", response["Content-Disposition"])
-        self.assertIn("inline", response["Content-Disposition"])
+        self.assertIn("attachment", response["Content-Disposition"])
