@@ -9,7 +9,7 @@ from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services, can_view_costs,
 )
-from mantenimiento.services_history import filtered_history_count, inbox_rows, item_detail, unified_history_rows
+from mantenimiento.services_history import inbox_rows, item_detail, unified_history_rows
 from mantenimiento.serializers import MaintenanceHistoryEventSerializer
 from mantenimiento.views import AUTH, EsMantenimiento
 
@@ -101,7 +101,7 @@ def historial_v2(request):
         if sql_filters[key]:
             try: sql_filters[key] = int(sql_filters[key])
             except ValueError: return Response({"error": f"{key.capitalize()} no válido."}, status=400)
-    rows = unified_history_rows(
+    rows, total = unified_history_rows(
         request.user, period=filters["periodo"], include_costs=can_view_costs(request.user),
         filters=sql_filters, candidate_limit=page * page_size,
     )
@@ -121,8 +121,6 @@ def historial_v2(request):
     rows.sort(key=lambda row: (
         row["fecha_evento"], row["uid"].split(":", 1)[0], int(row["uid"].split(":", 1)[1])
     ), reverse=True)
-    counted_total = filtered_history_count(request.user, period=filters["periodo"], filters=sql_filters)
-    total = counted_total if counted_total is not None else len(rows)
     start = (page - 1) * page_size
     results = MaintenanceHistoryEventSerializer(rows[start:start + page_size], many=True).data
     return Response({"schema_version": 2, "results": results, "pagination": {"page": page, "page_size": page_size, "total": total, "has_next": start + page_size < total}})

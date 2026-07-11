@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.http import Http404
 
 from activos.models import OrdenMantenimiento
@@ -153,6 +153,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     start, end = period_bounds(period)
     filters = filters or {}
     rows = []
+    total = 0
 
     fallas = authorized_fallas(user).select_related("reportado_por")
     if filters.get("tipo") not in {None, "todo", "reporte"}:
@@ -160,6 +161,14 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("sucursal"): fallas = fallas.filter(sucursal_id=filters["sucursal"])
     if filters.get("activo"): fallas = fallas.filter(activo_relacionado_id=filters["activo"])
     if filters.get("q"): fallas = fallas.filter(Q(titulo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]))
+    falla_statuses = {"abierto": [ReporteFalla.ESTATUS_ABIERTO], "en_proceso": [ReporteFalla.ESTATUS_REVISION, ReporteFalla.ESTATUS_PROCESO], "cerrado": [ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO], "cancelado": [ReporteFalla.ESTATUS_CANCELADO]}
+    if filters.get("estado") not in {None, "todo"}: fallas = fallas.filter(estatus__in=falla_statuses[filters["estado"]])
+    closed = [ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO]
+    fq = Q(estatus__in=closed, fecha_cierre__gte=start, fecha_cierre__lt=end) if start else Q(estatus__in=closed, fecha_cierre__lt=end)
+    rq = Q(estatus__in=closed, fecha_cierre__isnull=True, fecha_resolucion__gte=start, fecha_resolucion__lt=end) if start else Q(estatus__in=closed, fecha_cierre__isnull=True, fecha_resolucion__lt=end)
+    oq = Q(fecha_reporte__gte=start, fecha_reporte__lt=end) if start else Q(fecha_reporte__lt=end)
+    fallas = fallas.filter(fq | rq | (~Q(estatus__in=closed) & oq))
+    total += fallas.count()
     fallas = fallas.values(
         "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_resolucion", "fecha_cierre",
         "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
@@ -184,17 +193,28 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
                 asset_id=item["activo_relacionado_id"],
             ))
 
-    orders = authorized_orders(user).select_related("creado_por")
+    from activos.models import SolicitudFalla
+    orders = authorized_orders(user).select_related("creado_por").annotate(
+        has_linked_request=Exists(SolicitudFalla.objects.filter(orden_atencion_id=OuterRef("pk")))
+    )
     if filters.get("tipo") not in {None, "todo", "orden", "sin_reporte"}: orders = orders.none()
     if filters.get("sucursal"): orders = orders.filter(activo_ref__sucursal_id=filters["sucursal"])
     if filters.get("activo"): orders = orders.filter(activo_ref_id=filters["activo"])
     if filters.get("q"): orders = orders.filter(Q(folio__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(activo_ref__nombre__icontains=filters["q"]))
+    unreported = Q(origen__in=[OrdenMantenimiento.ORIGEN_EMERGENCIA, OrdenMantenimiento.ORIGEN_INICIATIVA], plan_ref__isnull=True, has_linked_request=False)
+    if filters.get("tipo") == "sin_reporte": orders = orders.filter(unreported)
+    elif filters.get("tipo") == "orden": orders = orders.exclude(unreported)
+    order_statuses = {"abierto": [OrdenMantenimiento.ESTATUS_PENDIENTE], "en_proceso": [OrdenMantenimiento.ESTATUS_EN_PROCESO], "cerrado": [OrdenMantenimiento.ESTATUS_CERRADA], "cancelado": [OrdenMantenimiento.ESTATUS_CANCELADA]}
+    if filters.get("estado") not in {None, "todo"}: orders = orders.filter(estatus__in=order_statuses[filters["estado"]])
+    cq = Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre__gte=start.date(), fecha_cierre__lt=end.date()) if start else Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre__lt=end.date())
+    nq = Q(creado_en__gte=start, creado_en__lt=end) if start else Q(creado_en__lt=end)
+    orders = orders.filter(cq | (~Q(estatus=OrdenMantenimiento.ESTATUS_CERRADA) & nq))
+    total += orders.count()
     orders = orders.values(
         "id", "folio", "descripcion", "estatus", "creado_en", "fecha_cierre", "origen", "plan_ref_id", "numero_factura", "factura_archivo", "costo_repuestos", "costo_mano_obra", "costo_otros",
         "activo_ref_id", "activo_ref__nombre", "activo_ref__sucursal_id", "activo_ref__sucursal__nombre",
         "creado_por_id", "creado_por__first_name", "creado_por__last_name", "creado_por__username",
     )[:candidate_limit]
-    from activos.models import SolicitudFalla
     scoped_order_ids = authorized_orders(user).values_list("id", flat=True)
     linked_order_ids = set(SolicitudFalla.objects.filter(
         orden_atencion_id__in=scoped_order_ids,
@@ -220,6 +240,12 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
     if filters.get("unidad"): reports = reports.filter(unidad_id=filters["unidad"])
     if filters.get("q"): reports = reports.filter(Q(tipo__icontains=filters["q"]) | Q(descripcion__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
+    report_statuses = {"abierto": [ReporteUnidad.ESTATUS_ABIERTO], "en_proceso": [ReporteUnidad.ESTATUS_EN_PROCESO, ReporteUnidad.ESTATUS_PROGRAMADO], "cerrado": [ReporteUnidad.ESTATUS_CERRADO], "cancelado": []}
+    if filters.get("estado") not in {None, "todo"}: reports = reports.filter(estatus__in=report_statuses[filters["estado"]])
+    rcq = Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__gte=start, fecha_cierre__lt=end) if start else Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__lt=end)
+    roq = Q(fecha_reporte__gte=start, fecha_reporte__lt=end) if start else Q(fecha_reporte__lt=end)
+    reports = reports.filter(rcq | (Q(estatus=ReporteUnidad.ESTATUS_CERRADO, fecha_cierre__isnull=True) & roq) | (~Q(estatus=ReporteUnidad.ESTATUS_CERRADO) & roq))
+    total += reports.count()
     reports = reports.values(
         "id", "tipo", "descripcion", "estatus", "fecha_reporte", "fecha_cierre", "repartidor__user_id",
         "repartidor__user__first_name", "repartidor__user__last_name", "repartidor__user__username",
@@ -245,6 +271,8 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
             else: queryset = queryset.filter(Q(tipo_servicio__nombre__icontains=filters["q"]) | Q(notas__icontains=filters["q"]) | Q(unidad__codigo__icontains=filters["q"]))
         if start: queryset = queryset.filter(**{f"{date_field}__gte": start.date()})
         queryset = queryset.filter(**{f"{date_field}__lt": end.date()})
+        if filters.get("estado") not in {None, "todo", "cerrado"}: queryset = queryset.none()
+        total += queryset.count()
         queryset = queryset.select_related("registrado_por", "unidad", "unidad__sucursal")
         if kind == "servicio_unidad": queryset = queryset.select_related("tipo_servicio")
         queryset = queryset.order_by(f"-{date_field}", "-id")[:candidate_limit]
@@ -260,7 +288,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
                 unit_id=obj.unidad_id, direct=(is_service or (kind == "reparacion" and not obj.reporte_origen_id)),
                 invoice=_invoice(f"{kind}_factura" if kind == "reparacion" else "servicio_unidad_factura", obj.pk, obj.archivo_factura),
                 cost=((obj.costo if is_service else obj.costo_total) if include_costs else None)))
-    return rows
+    return rows, total
 
 
 def filtered_history_count(user, *, period, filters):
