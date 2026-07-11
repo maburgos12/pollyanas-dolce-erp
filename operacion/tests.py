@@ -10,6 +10,8 @@ from core.models import Sucursal, UserModuleAccess, UserProfile
 from logistica.models import Repartidor, Unidad
 from mermas.models import PersonalEnviosSucursal
 from recetas.models import Receta
+
+from operacion.bitacoras_config import BITACORA_CONFIG
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from operacion.services import build_operacion_context
 
@@ -197,6 +199,23 @@ class OperacionAppTests(TestCase):
             pasa_modulo_produccion=True,
             hash_contenido="hornos-point-identity",
         )
+        preparacion_sin_codigo = Receta.objects.create(
+            nombre="Preparación sin código",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hornos-without-point",
+        )
+        preparacion_codigo_espacios = Receta.objects.create(
+            nombre="Preparación código espacios",
+            codigo_point="   ",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hornos-blank-point",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Pastel Chocolate Chico",
+            codigo_point="PAS-CHO-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hornos-final-product",
+        )
         self.client.force_login(user)
 
         response = self.client.get("/app/bitacoras/HORNOS/")
@@ -207,6 +226,139 @@ class OperacionAppTests(TestCase):
             f'<option value="{receta.id}">Pan Chocolate Chico · PAN-CHO-CH</option>',
             html=True,
         )
+        self.assertNotContains(response, preparacion_sin_codigo.nombre)
+        self.assertNotContains(response, preparacion_codigo_espacios.nombre)
+        self.assertNotContains(response, producto_final.nombre)
+
+    def test_armado_rows_require_final_product_point_identity(self):
+        user = self._user("produccion.armado")
+        self._grant(user, "produccion")
+        producto_final = Receta.objects.create(
+            nombre="Pastel Chocolate Chico",
+            codigo_point="PAS-CHO-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="armado-final-product",
+        )
+        preparacion = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="armado-preparation",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/ARMADO/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<option value="{producto_final.id}">Pastel Chocolate Chico · PAS-CHO-CH</option>',
+            html=True,
+        )
+        self.assertNotContains(response, preparacion.nombre)
+
+    def test_production_bitacoras_reject_invalid_recipe_before_creating_header(self):
+        user = self._user("produccion.invalid-recipes")
+        self._grant(user, "produccion")
+        preparacion_sin_codigo = Receta.objects.create(
+            nombre="Preparación sin Point",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="invalid-without-point",
+        )
+        preparacion_codigo_espacios = Receta.objects.create(
+            nombre="Preparación Point espacios",
+            codigo_point="   ",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="invalid-blank-point",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Producto final incorrecto",
+            codigo_point="FINAL-INCORRECTO",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="invalid-wrong-type",
+        )
+        self.client.force_login(user)
+
+        for receta_id in (
+            "",
+            "999999",
+            str(producto_final.id),
+            str(preparacion_sin_codigo.id),
+            str(preparacion_codigo_espacios.id),
+        ):
+            with self.subTest(receta_id=receta_id):
+                response = self.client.post(
+                    "/app/bitacoras/HORNOS/",
+                    {"receta_0": receta_id, "existencia_0": "1", "cerrar": "1"},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Selecciona un producto válido con identidad Point.")
+                self.assertFalse(BitacoraOperativa.objects.exists())
+
+    def test_production_bitacora_fields_reject_non_decimal_values(self):
+        user = self._user("produccion.decimals")
+        self._grant(user, "produccion")
+        preparacion = Receta.objects.create(
+            nombre="Preparación decimal",
+            codigo_point="PREP-DEC",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="decimal-preparation",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Producto final decimal",
+            codigo_point="FINAL-DEC",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="decimal-final",
+        )
+        self.client.force_login(user)
+
+        cases = (
+            ("HORNOS", preparacion, {"preparacion_0": "texto"}, "preparacion"),
+            ("CFP11", preparacion, {"existencia_fisica_0": "texto", "salida_armado_0": "texto"}, "existencia_fisica"),
+            ("ARMADO", producto_final, {"consumo_real_0": "texto", "producto_terminado_0": "texto"}, "consumo_real"),
+        )
+        for tipo, receta, invalid_fields, invalid_key in cases:
+            with self.subTest(tipo=tipo):
+                response = self.client.post(
+                    f"/app/bitacoras/{tipo}/",
+                    {"receta_0": str(receta.id), **invalid_fields},
+                )
+
+                self.assertEqual(response.status_code, 302)
+                linea = BitacoraOperativaLinea.objects.latest("id")
+                self.assertNotIn(invalid_key, linea.datos)
+                self.assertNotIn("texto", linea.datos.values())
+
+    def test_logistics_only_user_cannot_use_production_bitacoras(self):
+        user = self._user("logistica.bitacoras-produccion")
+        self._grant(user, "logistica")
+        self.client.force_login(user)
+
+        get_response = self.client.get("/app/bitacoras/HORNOS/")
+        post_response = self.client.post("/app/bitacoras/HORNOS/", {"cerrar": "1"})
+
+        self.assertEqual(get_response.status_code, 403)
+        self.assertEqual(post_response.status_code, 403)
+        self.assertFalse(BitacoraOperativa.objects.exists())
+
+    def test_cfp11_config_keeps_legacy_fields_outside_active_fields(self):
+        config = BITACORA_CONFIG[BitacoraOperativa.TIPO_CFP11]
+        user = self._user("produccion.cfp11-config")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        self.assertEqual(config["familia"], "custodia_lotes")
+        self.assertEqual(config["campos"], ["existencia_fisica", "salida_armado"])
+        self.assertEqual(config["campos_legacy"], ["bloque", "tamano", "existencia", "salida", "entrada"])
+
+        response = self.client.get("/app/bitacoras/CFP11/")
+
+        self.assertContains(response, "Existencia física")
+        self.assertContains(response, "Salida a armado")
+        self.assertContains(response, 'name="existencia_fisica_0"')
+        self.assertNotContains(response, 'name="bloque_0"')
+        self.assertNotContains(response, "Existencia_fisica")
 
     def test_merma_recepcion_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")

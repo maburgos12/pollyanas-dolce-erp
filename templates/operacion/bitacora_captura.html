@@ -17,6 +17,7 @@
     .link { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
     .panel, .line { border: 1px solid #eadde4; border-radius: 8px; background: #fff; }
     .panel { padding: 14px; display: grid; gap: 10px; }
+    .message { padding: 12px 14px; border: 1px solid #c83f5b; border-radius: 8px; background: #fff1f3; color: #7b1730; font-weight: 800; }
     .line { padding: 12px; display: grid; gap: 10px; }
     .lines { display: grid; gap: 10px; }
     label { display: grid; gap: 5px; color: #705d68; font-size: .82rem; font-weight: 800; }
@@ -52,6 +53,10 @@
         </div>
       </header>
 
+      {% for message in messages %}
+        <div class="message{% if message.tags %} {{ message.tags }}{% endif %}" role="alert">{{ message }}</div>
+      {% endfor %}
+
       <section class="panel">
         <div class="meta">
           <label>Fecha
@@ -84,7 +89,7 @@
             <div class="fields">
               {% for campo in config.campos %}
                 <label>
-                  {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% else %}{{ campo|capfirst }}{% endif %}
+                  {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% elif campo == "preparacion" %}Preparación{% elif campo == "existencia_fisica" %}Existencia física{% elif campo == "salida_armado" %}Salida a armado{% elif campo == "consumo_real" %}Consumo real{% elif campo == "producto_terminado" %}Producto terminado{% else %}{{ campo|capfirst }}{% endif %}
                   {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
                     <input type="date" name="{{ campo }}_{{ index }}">
                   {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}

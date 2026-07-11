@@ -34,6 +34,7 @@ BITACORA_CONFIG = {
         "ayuda": "Bloques de existencia, salida y entrada.",
         "familia": "custodia_lotes",
         "campos": ["existencia_fisica", "salida_armado"],
+        "campos_legacy": ["bloque", "tamano", "existencia", "salida", "entrada"],
     },
     BitacoraOperativa.TIPO_ARMADO: {
         "titulo": "Control producción - Armado",
