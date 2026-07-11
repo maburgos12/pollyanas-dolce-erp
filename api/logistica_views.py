@@ -1426,6 +1426,15 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     },
                     status=status.HTTP_200_OK,
                 )
+            if not EventoRuta.objects.filter(
+                ruta=ruta,
+                parada=parada,
+                tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            ).exists():
+                return Response(
+                    {"detail": "La entrega solo se puede confirmar después de registrar la llegada dentro de la geocerca."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             evidencias = []
             created_any = False
             for item in evidencias_payload:
