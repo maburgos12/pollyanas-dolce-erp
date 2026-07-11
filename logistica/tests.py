@@ -160,7 +160,37 @@ class LogisticaEntregaDomainTests(TestCase):
         self.parada.refresh_from_db()
         self.assertFalse(resultado.requiere_revision)
         self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
         self.assertEqual(EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA).count(), 1)
+
+    def test_muestra_gps_confiable_actualiza_llegada_legacy_sin_duplicarla(self):
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            severidad=EventoRuta.SEVERIDAD_OK,
+            descripcion="Llegada legacy sin procedencia verificable.",
+            latitud=self.parada.latitud_geocerca,
+            longitud=self.parada.longitud_geocerca,
+            distancia_metros=0,
+            creado_por=self.user,
+        )
+
+        llegada = self._registrar_geocerca_real()
+        resultado = self._confirmar(client_event_id="entrega-tras-llegada-legacy")
+
+        self.parada.refresh_from_db()
+        self.assertFalse(resultado.requiere_revision)
+        self.assertEqual(self.parada.revision_entrega_estado, ParadaRuta.REVISION_NO_REQUERIDA)
+        self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_PENDIENTE)
+        self.assertIsNone(self.parada.hora_llegada_real)
+        self.assertEqual(
+            EventoRuta.objects.filter(parada=self.parada, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).count(),
+            1,
+        )
+        self.assertEqual(llegada.metadata["origen_servicio"], "registrar_ubicacion_ruta")
+        self.assertIsNotNone(llegada.ubicacion_id)
 
     def test_retry_identico_es_idempotente(self):
         primero = self._confirmar()

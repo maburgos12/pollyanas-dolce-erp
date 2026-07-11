@@ -314,13 +314,15 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
 
     resultado = evaluar_geocercas(ruta, ubicacion.latitud, ubicacion.longitud)
     if resultado.parada and resultado.dentro and ubicacion_confiable:
-        if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
-            _marcar_visitada_por_permanencia(
-                ruta=ruta,
-                parada=resultado.parada,
-                distancia_metros_value=resultado.distancia_metros,
-            )
-        crear_evento_ruta_once(
+        metadata_llegada = {
+            "origen_servicio": "registrar_ubicacion_ruta",
+            "ubicacion_confiable": True,
+            "tracking_origen": tracking_origen,
+            "ruta_id": ruta.id,
+            "repartidor_id": repartidor.id,
+            "unidad_id": unidad.id,
+        }
+        evento_llegada = crear_evento_ruta_once(
             ruta=ruta,
             tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
             severidad=EventoRuta.SEVERIDAD_OK,
@@ -331,16 +333,46 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
             latitud=ubicacion.latitud,
             longitud=ubicacion.longitud,
             distancia_metros_value=resultado.distancia_metros,
-            metadata={
-                "origen_servicio": "registrar_ubicacion_ruta",
-                "ubicacion_confiable": True,
-                "tracking_origen": tracking_origen,
-                "ruta_id": ruta.id,
-                "repartidor_id": repartidor.id,
-                "unidad_id": unidad.id,
-            },
+            metadata=metadata_llegada,
             ventana_minutos=60,
         )
+        if evento_llegada is None:
+            evento_llegada = (
+                EventoRuta.objects.select_for_update()
+                .filter(
+                    ruta=ruta,
+                    parada=resultado.parada,
+                    tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+                    creado_en__gte=timezone.now() - timezone.timedelta(minutes=60),
+                )
+                .order_by("-creado_en", "-id")
+                .first()
+            )
+            if evento_llegada and evento_llegada.metadata.get("origen_servicio") != "registrar_ubicacion_ruta":
+                evento_llegada.ubicacion = ubicacion
+                evento_llegada.latitud = ubicacion.latitud
+                evento_llegada.longitud = ubicacion.longitud
+                evento_llegada.distancia_metros = resultado.distancia_metros
+                evento_llegada.metadata = metadata_llegada
+                evento_llegada.creado_por = user
+                evento_llegada.creado_en = timezone.now()
+                evento_llegada.save(
+                    update_fields=[
+                        "ubicacion",
+                        "latitud",
+                        "longitud",
+                        "distancia_metros",
+                        "metadata",
+                        "creado_por",
+                        "creado_en",
+                    ]
+                )
+        if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
+            _marcar_visitada_por_permanencia(
+                ruta=ruta,
+                parada=resultado.parada,
+                distancia_metros_value=resultado.distancia_metros,
+            )
     elif ruta.paradas.exists():
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])
