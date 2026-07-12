@@ -1201,6 +1201,25 @@ _ESTATUS_RESUELTOS_HISTORICO = {
 }
 
 
+def _resueltas_son_duplicado_equivalente(resueltas: list[RutaCargaChecklistLinea]) -> bool:
+    """True si todas las líneas resueltas son la misma validación duplicada.
+
+    Mismo detalle de Point (o mismo point_transfer_line), misma cantidad
+    cargada/esperada y mismo validador: es la misma transferencia capturada
+    dos veces por la Causa A, no dos entregas reales distintas.
+    """
+    primera = resueltas[0]
+    return all(
+        linea.detail_external_id == primera.detail_external_id
+        and linea.point_transfer_line_id == primera.point_transfer_line_id
+        and linea.cantidad_cargada == primera.cantidad_cargada
+        and linea.cantidad_enviada_esperada == primera.cantidad_enviada_esperada
+        and linea.validado_por_id == primera.validado_por_id
+        and primera.validado_por_id is not None
+        for linea in resueltas
+    )
+
+
 def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> SuperacionHistoricaResumen:
     """Aplica retroactivamente la regla de SUPERADA a duplicados ya existentes.
 
@@ -1208,8 +1227,11 @@ def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> Sup
     _sincronizar_lineas_point_para_ruta- y nunca cruza folios distintos. Si el
     grupo ya tiene una línea validada/resuelta, las demás se marcan SUPERADA
     apuntando a esa; si ninguna está resuelta, se conserva la más reciente. Si
-    hay más de una línea resuelta (anomalía real, no un duplicado mecánico),
-    el grupo se reporta para revisión manual y no se toca.
+    hay más de una línea resuelta pero todas comparten el mismo detalle de
+    Point, la misma cantidad y el mismo validador (misma validación duplicada
+    por la Causa A, no dos entregas reales), se conserva la más antigua. Si
+    difieren en algo de eso (anomalía real), el grupo se reporta para
+    revisión manual y no se toca.
     """
     grupos = (
         RutaCargaChecklistLinea.objects.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
@@ -1237,7 +1259,7 @@ def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> Sup
             linea for linea in lineas if linea.estatus in _ESTATUS_RESUELTOS_HISTORICO or linea.validado_por_id
         ]
 
-        if len(resueltas) > 1:
+        if len(resueltas) > 1 and not _resueltas_son_duplicado_equivalente(resueltas):
             grupos_ambiguos += 1
             detalle_ambiguos.append(
                 {
@@ -1252,7 +1274,7 @@ def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> Sup
             continue
 
         if resueltas:
-            autoritativa = resueltas[0]
+            autoritativa = min(resueltas, key=lambda linea: (linea.creado_en, linea.id))
         else:
             autoritativa = max(lineas, key=lambda linea: (linea.creado_en, linea.id))
         a_superar = [linea for linea in lineas if linea.id != autoritativa.id]
