@@ -6854,6 +6854,57 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(resuelta_1.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(resuelta_2.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
 
+    def test_marcar_lineas_superadas_historicas_resuelve_validaciones_duplicadas_equivalentes(self):
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta)
+        transferencia = self._crear_transferencia_point_abierta(source_hash="equiv-transfer")
+        transferencia.transfer_external_id = "T-EQUIV"
+        transferencia.detail_external_id = "D-EQUIV"
+        transferencia.save(update_fields=["transfer_external_id", "detail_external_id", "updated_at"])
+
+        primera_validacion = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="equiv-1",
+            point_transfer_line=transferencia,
+            transfer_external_id="T-EQUIV",
+            detail_external_id="D-EQUIV",
+            item_code="EQUIV-01",
+            item_name="Producto validado dos veces",
+            unit="pz",
+            cantidad_solicitada="4.000",
+            cantidad_enviada_esperada="4.000",
+            cantidad_cargada="4.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+        )
+        segunda_validacion = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="equiv-2",
+            point_transfer_line=transferencia,
+            transfer_external_id="T-EQUIV",
+            detail_external_id="D-EQUIV",
+            item_code="EQUIV-01",
+            item_name="Producto validado dos veces",
+            unit="pz",
+            cantidad_solicitada="4.000",
+            cantidad_enviada_esperada="4.000",
+            cantidad_cargada="4.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user,
+        )
+
+        resumen = marcar_lineas_checklist_superadas_historicas(dry_run=False)
+
+        self.assertEqual(resumen.grupos_ambiguos, 0)
+        self.assertEqual(resumen.grupos_afectados, 1)
+        primera_validacion.refresh_from_db()
+        segunda_validacion.refresh_from_db()
+        self.assertEqual(primera_validacion.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(segunda_validacion.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(segunda_validacion.superada_por, primera_validacion)
+
     def test_checklist_carga_conserva_transferencias_point_distintas_mismo_producto(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
         _, _, receta = self._crear_solicitud_cedis(ruta=ruta, cantidad="10.000")
