@@ -1,12 +1,28 @@
 # AGENTS.md — Pollyana's Dolce ERP
 
-## Contexto del proyecto
-ERP operativo de Pollyana's Dolce, cadena de pastelerías en Sinaloa, México.
-- 9 sucursales activas: Guasave (8) + Guamúchil (1)
-- Stack: Django 5.0 + DRF + PostgreSQL + Redis + Celery
-- Repo: github.com/maburgos12/pollyanas-dolce-erp (privado)
-- Producción: https://erp.pollyanasdolce.com
-- Rama principal: main
+## Identidad del proyecto
+Sistema ERP operativo para Pollyana's Dolce, cadena de pastelerías con 9 sucursales en
+Sinaloa, México (Guasave: 8 · Guamúchil: 1). Director General: Mauricio Burgos.
+Sistema de uso interno para el equipo operativo.
+
+## Servidor de producción
+- Host: 68.183.165.47 · Usuario: root · SSH: ~/.ssh/agente_dg_ops
+- Directorio: /opt/pastelerias-erp
+- Comando base: `docker compose -f /opt/pastelerias-erp/docker-compose.yml`
+- URL: https://erp.pollyanasdolce.com
+- Rama principal: main · Repo: github.com/maburgos12/pollyanas-dolce-erp (privado)
+
+## Stack
+- Backend: Django 5.0.1 + DRF 3.14 · DB: PostgreSQL 16 (prod) / SQLite (dev)
+- Deploy: Docker + VPS propio (NO Railway)
+- Servidor: Gunicorn + WhiteNoise · Zona horaria: America/Mazatlan · Moneda: MXN
+
+## Otros sistemas en el mismo servidor
+| Sistema | Directorio | Puerto | Dominio |
+|---------|-----------|--------|---------|
+| Maya omnicanal | /opt/pollyana-omnichannel | 8003 | api.pollyanasdolce.com |
+| ERP Django | /opt/pastelerias-erp | 8011 | erp.pollyanasdolce.com |
+| Ad agent | /opt/ad-agent | 8004 | ads.pollyanasdolce.com |
 
 ## Contexto de producto y diseño
 Para cualquier tarea de UI, frontend, diseño visual, experiencia de usuario,
@@ -16,92 +32,172 @@ branding, tienda online o marketing, leer primero:
 - `DESIGN_STACK.md`: enrutamiento de skills entre `impeccable`, `hallmark`,
   `emil-design-eng` y los skills de Leon.
 
-No duplicar las reglas completas de diseño en este archivo. `AGENTS.md` conserva
+No duplicar las reglas completas de diseño en este archivo. Este archivo conserva
 el protocolo operativo del ERP; `DESIGN_STACK.md` es la fuente compartida para
 ejecución de diseño.
 
-## Servidor de producción
-- Host: 68.183.165.47
-- Usuario: root
-- Llave SSH: ~/.ssh/agente_dg_ops
-- Directorio: /opt/pastelerias-erp
-- Comando base: docker compose -f /opt/pastelerias-erp/docker-compose.yml
+## Deploy manual (NO es automático al mergear)
+```bash
+cd /opt/pastelerias-erp
+bash scripts/deploy_web_safe.sh
+```
+Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la migración específica.
+`restart web` queda reservado para cambios de imagen, dependencias del contenedor o variables de entorno; para código y estáticos normales se usa recarga `HUP` de Gunicorn para no abrir una ventana de `502`.
 
-## Protocolo obligatorio antes de crear, modificar, implementar, mejorar o cambiar
+**Nunca hacer `git pull` manual en el VPS antes de correr `deploy_web_safe.sh`.** El script decide si reinicia `web`/`worker`/`beat` o solo manda `HUP` comparando el `HEAD` antes/después de **su propio** `git pull`; si el repo ya estaba actualizado a mano, no detecta cambios de `.py` y solo hace `HUP` — Gunicorn (`--preload`) sigue sirviendo el código viejo desde la memoria del proceso master aunque el filesystem ya tenga el commit nuevo. Señal de que pasó: el endpoint/feature nueva da 404 o el comportamiento viejo persiste pese a que `git log` en el VPS ya muestra el commit correcto. Verificar con `docker inspect <contenedor> --format '{{.State.StartedAt}}'`: si no cambió justo después del deploy, forzar `docker compose restart web worker beat` a mano.
+
+**Flujo mínimo obligatorio al cerrar cualquier cambio de código** (un PR mergeado sin
+deploy en VPS equivale a un cambio que no existe para el usuario — no abrir una
+segunda tarea hasta que la primera esté deployada y validada en producción):
+1. PR mergeado a main
+2. `bash scripts/deploy_web_safe.sh` en el VPS (sin `git pull` manual antes, ver arriba)
+3. Verificar resultado visible en producción
+4. Borrar la rama local y remota ya mergeada/deployada/validada para que no se
+   atraviese en otros hilos: `git branch -D <rama>` y `git push origin --delete <rama>`,
+   luego `git fetch --prune origin`.
+
+**Prohibido:** crear PR y abrir otra tarea sin deployar; copiar archivos al VPS por
+SCP como atajo al flujo git (`git pull` es el único canal válido); declarar "listo"
+cuando el VPS aún corre el código anterior.
+
+## Backups
+- Automático: diario 2am via cron
+- Script: /opt/pastelerias-erp/scripts/backup_db.sh · Destino: /opt/backups/erp/ · Retención: 7 días
+
+---
+
+## División de trabajo Claude / Codex (regla permanente)
+
+Combinación deliberada por costo: Codex (plan alto) absorbe los tokens caros;
+Claude (plan limitado) se reserva para el criterio. Codex está integrado vía el
+plugin `codex@openai-codex` (comandos `/codex:rescue`, `/codex:review`,
+`/codex:adversarial-review`). Requisito: Codex CLI instalado y autenticado
+(`/codex:setup` debe reportar `ready: true`).
+
+### Claude = cerebro / orquestador
+- Diseño, decisiones de arquitectura y lógica de negocio (costeo, márgenes,
+  nómina, bonos, MRP — todo lo delicado o irreversible).
+- Preparar rama limpia desde `origin/main`, definir el contrato/approach.
+- Validación final: `check`, `migrate --check`, tests, navegador, deploy en VPS.
+- Commit / PR / deploy SIEMPRE los hace Claude siguiendo el protocolo de abajo.
+
+### Codex = talacha pesada (lo que más consume tokens)
+Delegar a Codex cuando el trabajo sea: implementación mecánica repetida, refactor
+masivo en muchos archivos, baterías de tests, migración de patrones, normalización
+de datos, o debugging largo. Codex trabaja sobre el working tree real → SIEMPRE en
+rama aislada, nunca directo sobre algo que pueda tocar producción sin revisar.
+
+**Cómo delega Claude (mecanismo real — esto es lo que de verdad dispara Codex):**
+- Claude NO "teclea" `/codex:rescue`. Esos slash-commands los escribe Mauricio.
+- Cuando Claude decide delegar por su cuenta, invoca la herramienta **Agent** con
+  `subagent_type: "codex:codex-rescue"` y le pasa la tarea como prompt. Ese
+  subagente reenvía el trabajo al runtime de Codex (write-capable por defecto).
+- Si Claude solo describe el reparto pero hace el trabajo él mismo, NO está
+  cumpliendo esta regla. El acto de delegar = una llamada a Agent(codex:codex-rescue).
+
+**Cómo lo dispara Mauricio (garantizado, sin depender del criterio de Claude):**
+- `/codex:rescue <tarea>` → Codex implementa. `/codex:review` → Codex revisa (read-only).
+
+**Trampas que impiden que la regla aplique (verificar si "no funciona"):**
+- El plugin `codex@openai-codex` debe estar instalado y cargado en ESA sesión
+  (`/codex:setup` → `ready: true`; si se acaba de instalar, `/reload-plugins`).
+- Claude debe haberse abierto en un checkout de este repo (cualquier worktree lo
+  trae vía git). Otro repo/carpeta no tiene esta regla.
+- Esta regla debe estar mergeada en `main`; si solo vive en una rama, otras
+  sesiones no la ven.
+
+**Reglas de aislamiento y aviso (aprendidas en producción — NO ignorar):**
+- **Nunca cambiar de rama en el working tree donde Codex está corriendo.** Codex
+  lee/edita esos archivos en vivo; un `git checkout` le quita el piso y el job
+  muere huérfano (estado `running` falso, reporte perdido). Delegar SIEMPRE en un
+  `git worktree` dedicado y no tocar esa carpeta hasta que Codex termine. Ojo:
+  este repo tiene muchas sesiones/worktrees en paralelo que pueden mover la rama
+  del working tree principal solas.
+- **Los jobs en `--background` NO avisan al terminar.** Se consultan a mano con
+  `/codex:status` y se traen con `/codex:result` (o `codex-companion.mjs
+  status|result`). Para tener aviso automático + reporte completo, correr Codex
+  en `--wait` dentro de un background task del harness (ese sí notifica al salir),
+  o montar un poller. Si un job quedó huérfano, limpiarlo con `/codex:cancel`.
+
+### Lo que NO se delega a Codex
+- Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
+- Migraciones, `.env`, puertos, `settings.py`, push a `main`.
+- La decisión de commitear/mergear/deployar: ese filtro final es de Claude.
+
+### Criterio de enrutamiento
+Tarea acotada y rápida → la hace Claude. Tarea voluminosa, repetitiva o de
+iteración larga → se delega a Codex. Ante la duda sobre algo delicado, lo
+diseña Claude y Codex solo ejecuta la parte mecánica.
+
+---
+
+## Protocolo obligatorio — lo sigo siempre
 
 Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
 configuración, UI, permisos, navegación, reportes, jobs, integraciones,
 prototipos o producción.
 
 ### 1. Clasificar el tipo de trabajo antes de tocar archivos
-- **Consulta o diagnóstico:** solo leer, inspeccionar y reportar. No modificar
-  nada salvo que Mauricio lo pida explícitamente.
-- **Prototipo aislado:** mantenerlo separado del ERP real cuando sea posible. No
-  usar Docker ni producción si no hace falta para validar la idea.
-- **Prototipo dentro del ERP local:** usar rama limpia y Docker local solo como
-  entorno de prueba. No presentarlo como validación de producción.
-- **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y
-  validación en el lugar real donde se usa.
+- **Consulta o diagnóstico:** solo leer, inspeccionar y reportar. No modificar nada
+  salvo que Mauricio lo pida explícitamente.
+- **Prototipo aislado:** mantenerlo separado del ERP real. No usar producción para validar ideas.
+- **Prototipo dentro del ERP local:** usar rama limpia y Docker local solo como entorno
+  de prueba. No presentarlo como validación de producción.
+- **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y validación
+  en el lugar real donde se usa.
 
 ### 2. Sincronizar entorno local con main ANTES de tocar cualquier archivo
 
 **Obligatorio al inicio de cada tarea, sin excepción.**
-El SQLite local puede estar días o semanas detrás de `origin/main`. Si no se
-sincroniza primero, `migrate --check` muestra migraciones pendientes de otras apps
-que no son de la tarea, el entorno no es confiable y el diff final queda sucio.
+El entorno local puede estar días o semanas detrás de `origin/main`. Si no se sincroniza
+primero, aparecen migraciones "pendientes" de otras apps que no son de la tarea actual,
+`manage.py check` falla con ruido ajeno y el entorno no es confiable.
 
 ```bash
 git fetch origin main
-git checkout -b codex/<modulo>-<descripcion> origin/main   # rama desde main actualizado
-python manage.py migrate                                    # aplicar TODO lo que main tiene
+git checkout -b codex/<modulo>-<descripcion> origin/main   # rama limpia desde main actualizado
+python manage.py migrate                                    # aplicar TODO lo que main ya tiene
 python manage.py migrate --check                           # debe quedar en 0 pendientes
 python manage.py check                                     # debe quedar en 0 errores
 ```
 
-**Si `migrate --check` no es 0 al inicio:** aplicar las migraciones pendientes
-antes de escribir código. Nunca iniciar una tarea sobre una DB local desactualizada.
-Ese ruido de migraciones ajenas contamina el diff y obliga a trabajo extra al final.
+**Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
+y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
+de DB desactualizado.
 
 ### 3. Auditar estado del repo antes de cualquier cambio
-Antes de editar archivos, ejecutar y revisar:
 ```bash
-git status --short --branch
-git diff --stat
+git branch --show-current        # confirmar rama correcta — no asumir
+git status --short --branch      # sin cambios ajenos sin commitear
+git diff --stat                  # qué hay modificado
+git branch -vv                   # relación con origin
+git rev-list --left-right --count origin/main...HEAD  # cuánto detrás/adelante
 ```
-Si se va a subir, integrar o basar trabajo en `main`, revisar también:
-```bash
-git branch -vv
-git rev-list --left-right --count origin/main...HEAD
-```
+**Detenerse y reportar si:**
+- hay cambios sin commitear que no pertenecen a la tarea
+- hay mezcla de módulos no relacionados en el historial
+- la rama no tiene upstream y se pretende subir
+- la rama está muy detrás de `origin/main` sin plan explícito
+- el objetivo no corresponde al nombre o historial de la rama
 
-No continuar en esa rama si:
-- hay cambios sin commitear que no pertenecen a la tarea;
-- hay mezcla de módulos no relacionados;
-- la rama no tiene upstream y se pretende subir;
-- la rama está muy detrás de `origin/main` sin plan explícito de rebase/merge;
-- el objetivo real no corresponde al nombre o historial de la rama.
-
-En cualquiera de esos casos, detenerse, reportar el estado exacto y proponer
-rescate: respaldar parche, crear rama limpia desde `origin/main` o desde la
-rama correcta, y aplicar solo los cambios relacionados.
+En esos casos: respaldar parche, crear rama limpia desde `origin/main` y aplicar
+solo los cambios relacionados.
 
 ### 4. Una tarea, una rama, un objetivo
-- No mezclar RRHH, recetas, ventas, reportes, CSS global, activos u otros módulos
-  si la solicitud no los necesita.
-- No hacer refactors oportunistas ni "aprovechar" para tocar archivos ajenos.
-- El nombre de la rama debe reflejar la tarea: `codex/rrhh-permisos-jefe`,
-  `codex/ventas-indicadores-prototipo`, etc.
-- Para cambios grandes o productivos, crear rama nueva desde una base limpia
-  antes de implementar.
+- No mezclar RRHH + bonos + reportes + CSS + activos en una sola rama
+- No hacer refactors oportunistas ni tocar archivos que no son de la tarea
+- Nombre de rama: `codex/<modulo>-<descripcion>` o `fix/<descripcion>`
+- Para cambios grandes o productivos, crear rama nueva desde base limpia
+- Nunca dejar pares fix+revert sin squash — generan ruido y confusión
+- Si una rama local está desincronizada de su origin: `git reset --hard origin/<rama>`
 
 ### 5. Docker local no equivale a producción
-- Docker Desktop puede usarse para prototipos o validación local del ERP.
-- Si Docker local falla, diagnosticar primero logs, variables de entorno y
-  `docker compose config`; no cambiar código ni producción por intuición.
+- Si Docker local falla, diagnosticar logs y variables de entorno primero;
+  no cambiar código ni producción por intuición
 - No modificar `.env` de producción ni puertos de `docker-compose.yml` sin
-  confirmación explícita.
-- Una validación local en Docker no sustituye la validación final en VPS,
-  navegador real, reporte real, pantalla real o usuario real afectado.
+  confirmación explícita de Mauricio
+- Una validación local no sustituye la validación final en VPS, navegador real,
+  reporte real, pantalla real o usuario real afectado
 
 ### 6. Higiene de commits — quirúrgico y descriptivo
 Antes de cualquier commit:
@@ -110,279 +206,220 @@ git status --short --branch
 git log --oneline --decorate -5
 git worktree list
 ```
-- Confirmar **solo archivos relacionados con la tarea**. Si hay cambios ajenos,
-  no mezclarlos: reportarlos y usar stash o rama separada.
-- Nunca commitear:
-  - `.DS_Store`, `.playwright-mcp/`, `.claude/`, `outputs/`, `output/`
-  - `*.png`, `*.jpg`, `*.gif` fuera de `static/`
-  - `storage/dg_reports/*.json`, `storage/dg_reports/*.md`
-  - `storage/dg_reports/logs/*.log`
-  - Logs, capturas, CSVs temporales, artefactos de runtime
-- Mensaje de commit: descriptivo, en español o inglés técnico, que explique
-  **qué** y **por qué**, no solo "fix".
-- Si hay cambios ajenos sin commitear que no pertenecen a la tarea:
-  ```bash
-  git stash push -u -m "resguardo-<tarea>-<fecha>"
-  ```
+- Confirmar **solo archivos relacionados con la tarea**
+- Si hay cambios ajenos: `git stash push -u -m "resguardo-<tarea>-<fecha>"` y reportar
+- Nunca commitear: `.DS_Store`, `.playwright-mcp/`, `.claude/`, `outputs/`, `output/`,
+  `*.png/jpg/gif` fuera de `static/`, `storage/dg_reports/`, logs temporales
+- Mensaje descriptivo: qué cambió y por qué, no solo "fix"
 
 ### 7. Pull requests — una tarea, un PR
-Antes de crear cualquier PR:
+Antes de crear o aprobar cualquier PR:
 ```bash
 git status --short --branch
 git log --oneline --decorate -5
 git worktree list
-git diff origin/main..HEAD --stat
+git diff origin/main..HEAD --stat   # qué archivos cambian
 ```
-- Verificar que la rama **no mezcle tareas distintas**.
-- Verificar que no haya pendientes sin confirmar en la rama.
-- El título del PR debe reflejar exactamente qué cambia.
-- No abrir PR si `python manage.py check` da errores.
-- No abrir PR si hay migraciones sin verificar en producción.
+- Verificar que la rama no mezcle tareas distintas
+- No abrir PR con `python manage.py check` con errores
+- No abrir PR si hay migraciones sin verificar en producción
+- No aprobar PR de Codex sin revisar el diff aquí primero
 
 ### 8. Validación mínima antes de cerrar
-- Correr `python manage.py check` antes de cualquier commit.
-- Correr `python manage.py migrate --check` antes de deploy.
-- Ejecutar tests del módulo afectado cuando existan.
-- Para UI, permisos, navegación, PWA, formularios o flujos visibles, validar en
-  navegador real con consola y Network/XHR cuando aplique.
-- Para datos operativos, validar tabla/conteo/registros y luego confirmar que
-  aparecen en la pantalla, reporte, app o archivo donde se usan.
+- `python manage.py check` → 0 errores antes de cualquier commit
+- `python manage.py migrate --check` → sin migraciones pendientes antes de deploy
+- Tests del módulo afectado cuando existan
+- Para UI, permisos, PWA, formularios o flujos visibles: validar en navegador real
+  con consola y Network/XHR (ver "Verificación en navegador" abajo)
+- Para datos operativos: validar conteo/registros en tabla y confirmar que aparecen
+  en la pantalla, reporte o app donde se usan
+- No alterar datos maestros, RRHH, nómina, ventas, inventario o configuración de
+  producción salvo que Mauricio lo pida explícitamente
 
 ### 9. Cierre responsable
-No declarar terminado un cambio si solo compila, si solo responde la API, o si
-solo la base de datos tiene datos. Termina hasta que el resultado esté validado
-en el flujo real. Si no se puede validar, reportar el bloqueo exacto, lo que sí
-quedó hecho y qué falta para confirmar.
+No declarar terminado si solo compila, solo responde la API, o solo la base tiene datos.
+Termina cuando el resultado está validado en el flujo real. Si no se puede validar,
+reportar el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
+
+---
 
 ## Lecciones críticas aprendidas en producción (NO ignorar)
 
 ### Migraciones — regla de oro
-- Antes de cualquier PR que toque modelos, correr:
+- Antes de cualquier PR que toque modelos:
   ```bash
   python manage.py migrate --check
   python manage.py showmigrations bonos_produccion bonos_ventas rrhh
   ```
-- Si los campos ya existen en producción pero la migración no está registrada,
-  usar `--fake` para marcarla sin correrla. NUNCA borrar la migración.
-- Un `AttributeError: object has no attribute 'campo'` en producción = migración
-  no aplicada. Solución: `migrate --fake` + restart. No tocar código.
-
-### Deploy — no es automático
-El deploy NO se activa solo al mergear. Pasos obligatorios tras merge a main:
-```bash
-cd /opt/pastelerias-erp
-bash scripts/deploy_web_safe.sh
-```
-Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
-Usar `docker compose ... restart web` solo cuando cambie la imagen, dependencias del contenedor o variables de entorno; para cambios normales de Python/HTML/CSS/JS el `HUP` de Gunicorn evita la ventana de `502`.
-
-**Nunca hacer `git pull` manual en el VPS antes de correr `deploy_web_safe.sh`.** El script decide si reinicia `web`/`worker`/`beat` o solo manda `HUP` comparando el `HEAD` antes/después de **su propio** `git pull`; si el repo ya estaba actualizado a mano, no detecta cambios de `.py` y solo hace `HUP` — Gunicorn (`--preload`) sigue sirviendo el código viejo desde la memoria del proceso master aunque el filesystem ya tenga el commit nuevo. Señal de que pasó: el endpoint/feature nueva da 404 o el comportamiento viejo persiste pese a que `git log` en el VPS ya muestra el commit correcto. Verificar con `docker inspect <contenedor> --format '{{.State.StartedAt}}'`: si no cambió justo después del deploy, forzar `docker compose restart web worker beat` a mano.
-
-### Service Worker — caché en módulos PWA
-Cualquier módulo que registre un `sw.js` mantiene un caché activo en el navegador del
-cliente. El cliente no recibe el cambio aunque el servidor ya lo tenga desplegado.
-Cmd+Shift+R no bypasea el SW — no es suficiente.
-
-**Regla general:** si un commit toca HTML, CSS o JS de un módulo que tiene `sw.js`,
-ese mismo commit debe hacer bump del número de versión en `CACHE_NAME` dentro del SW.
-Después del deploy correr `collectstatic` para que el archivo SW actualizado llegue al
-servidor de estáticos (WhiteNoise).
-
-Esto aplica a cualquier módulo con PWA hoy o en el futuro — no es exclusivo de bonos.
+- Si producción rompe con `AttributeError: object has no attribute 'campo'`
+  → la migración no se aplicó → `migrate <app> <num> --fake` + restart. No tocar código.
+- Si campos ya existen en BD pero la migración no está registrada: usar `--fake`
+- NUNCA borrar migraciones existentes
+- NUNCA modificar migraciones ya aplicadas en producción
 
 ### Datos de usuarios — NUNCA pisar
-- `bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos capturados por el
-  equipo operativo. NUNCA resetearlos, sobreescribirlos ni incluirlos en seeds.
-- `recalcular()` y `recalcular_todos()` NO deben tocar esos campos. Verificarlo
-  antes de cualquier cambio en models.py de bonos.
-- Si un endpoint llama `recalcular_todos()` automáticamente (ej: resumen), revisar
-  que no pise datos manuales capturados por las jefas.
-
-### PR abierto = tarea sin terminar — deploy obligatorio antes de continuar
-Un PR mergeado sin deploy en VPS equivale a un cambio que no existe para el usuario.
-No abrir una segunda tarea hasta que la primera esté deployada y validada en producción.
-
-**Prohibido:**
-- Crear PR y pasar a otra tarea sin deployar
-- Copiar archivos al VPS por SCP como atajo al flujo git (git pull es el único canal)
-- Declarar "listo" cuando el VPS aún corre el código anterior
-
-**Flujo mínimo obligatorio al cerrar cualquier cambio de código:**
-1. PR mergeado a main
-2. `git pull origin main` en VPS
-3. `bash scripts/deploy_web_safe.sh` en VPS
-4. Verificar que el resultado es visible en producción
-5. Borrar la rama de trabajo local y remota cuando ya esté mergeada, deployada
-   y validada, para que no se atraviese ni aparezca como opción en otros hilos:
-   `git branch -D <rama>` y `git push origin --delete <rama>`; después correr
-   `git fetch --prune origin`.
-
-### Ramas — control de desorden
-- Una rama = una tarea = un módulo. Si la tarea crece, abrir rama nueva.
-- Nunca dejar commits de fix+revert en la misma rama sin squashearlos.
-- Antes de trabajar, confirmar con `git branch --show-current` que estás en la
-  rama correcta. No asumir.
-- Si una rama local está desincronizada de su origin: `git reset --hard origin/<rama>`.
-
-### Permisos y datos operativos — contexto real
-- Carolina Cayetano: jefa de producción. Captura datos en bonos producción.
-- Johana López: jefa de ventas. Captura datos en bonos ventas.
-- Sus capturas son datos reales de nómina. Un borrado accidental es crítico.
-- Siempre verificar en producción que los datos existen antes y después de cualquier
-  cambio que toque esos modelos:
+`bono_extra`, `ajuste_positivo`, `ajuste_negativo` son datos de nómina real capturados
+por las jefas (Carolina Cayetano en producción, Johana López en ventas). Un borrado
+accidental es crítico.
+- **NUNCA** resetearlos, sobreescribirlos ni incluirlos en seeds o inicializaciones
+- **NUNCA** hacer update masivo a 0 sin confirmación explícita de Mauricio
+- `recalcular()` y `recalcular_todos()` NO deben tocar esos campos — verificarlo
+  antes de cualquier cambio en models.py de bonos. Si un endpoint llama
+  `recalcular_todos()` automáticamente (ej. resumen), revisar que no pise datos
+  manuales capturados por las jefas.
+- Verificar antes y después de cualquier cambio:
   ```sql
-  SELECT COUNT(*), SUM(bono_extra) FROM bonos_produccion_bonoproduccionempleado
-  WHERE periodo_id IN (SELECT id FROM bonos_produccion_configbonoperiodo WHERE mes=X AND anio=Y);
+  SELECT COUNT(*), SUM(bono_extra), SUM(ajuste_positivo)
+  FROM bonos_produccion_bonoproduccionempleado bp
+  JOIN bonos_produccion_configbonoperiodo cp ON bp.periodo_id=cp.id
+  WHERE cp.mes=X AND cp.anio=Y AND (bono_extra>0 OR ajuste_positivo>0);
   ```
 
-## Reglas obligatorias antes de cualquier tarea
+### Service Worker — caché PWA
+Cualquier módulo con `sw.js` (hoy: `bonos_ventas`, `bonos_produccion`, `logistica`,
+`fallas`, `mantenimiento`, `operacion` — esta lista crece, no es exclusiva de bonos)
+mantiene un caché en el navegador del cliente. Cuando un deploy cambia HTML, CSS o JS
+visible en esos módulos, el cliente **no verá el cambio** aunque el servidor ya lo
+tenga, porque el SW sigue sirviendo la versión anterior.
 
-### NO hacer sin confirmación explícita de Mauricio:
+Regla: **cualquier commit que modifique templates o estáticos de un módulo con SW debe
+incluir en ese mismo commit un bump de la constante `CACHE_NAME` en su `sw.js`.**
+
+- Cmd+Shift+R (hard-refresh) no bypasea el Service Worker — no es suficiente
+- El bump de versión es la única garantía de que todos los clientes reciben la versión nueva
+- Después del deploy correr `collectstatic` para que el SW nuevo llegue a WhiteNoise
+
+---
+
+## Reglas absolutas — NO hacer sin confirmación explícita de Mauricio
 - Eliminar migraciones existentes
-- Hacer reset o drop de la base de datos
+- Reset o drop de la base de datos
 - Modificar .env en producción
-- Hacer push a main directamente si el cambio es destructivo
+- Push --force a main
 - Eliminar archivos de modelos o urls
 - Cambiar puertos en docker-compose.yml
+- Alterar datos de nómina, RRHH, ventas o configuración operativa
 
-### SIEMPRE hacer:
+## Siempre hacer
 - Correr `python manage.py check` antes de cualquier commit
 - Correr `python manage.py migrate --check` antes de deploy
-- Usar ramas para cambios grandes: git checkout -b feature/nombre
+- Usar ramas para cualquier cambio (`codex/<modulo>-<descripcion>` o `fix/<descripcion>`)
 - Commitear con mensajes descriptivos en español o inglés técnico
-- Push a main solo cuando check da 0 errores
+- Mergear a main solo cuando `check` da 0 errores
 
-## Regla de cierre obligatorio
+---
 
-Ningún cambio, ajuste, corrección o carga de datos se considera terminado hasta
-que el resultado final esté validado en el lugar real donde se usa. No cerrar
-solo con "la API responde", "la base de datos tiene datos" o "los tests pasan"
-si el usuario final necesita verlo o usarlo en una pantalla, app, reporte,
-correo, archivo, PDF, Excel, endpoint, permiso o flujo operativo.
+## Usuarios operativos clave
+| Usuario | Área | Rol crítico |
+|---------|------|-------------|
+| admin | DG | Acceso total |
+| carolina.cayetano | Producción | Captura bono_extra y ajustes en bonos producción |
+| johana.lopez | Ventas | Captura bono_extra y ajustes en bonos ventas |
+| jorge.perez | Compras | — |
+| paula.lugo | Capital Humano | Gestiona permisos y nómina |
+| yesenia.soto | Administración | — |
 
-Flujo estándar para cambios de código:
-1. Auditar primero el estado real: código, datos, logs, permisos, sesión,
-   navegador o producción según aplique.
-2. Crear rama nueva para el trabajo.
-3. Hacer el cambio mínimo necesario, sin mezclar hilos ni tocar archivos/datos
-   no relacionados.
-4. Validar localmente o en el contenedor con checks, tests, lint o validación
-   equivalente según el tipo de cambio.
-5. Abrir PR, mergearlo y desplegar al ambiente correcto.
-6. Ejecutar `migrate`, `collectstatic`, build o restart solo cuando aplique.
-7. Validar el resultado final en producción o en el ambiente objetivo con
-   evidencia concreta.
-8. Si el cambio ya quedó mergeado, deployado y validado, borrar la rama local y
-   remota de la tarea y podar referencias (`git fetch --prune origin`) para que
-   no aparezca atravesada en otros hilos.
+---
 
-Para UI, PWA, permisos, navegación o flujos visibles, validar con navegador real
-o con el usuario real afectado. Revisar también consola, Network/XHR, logs,
-sesión, permisos, service worker y caché si algo no aparece.
-
-Para datos operativos, validar el conteo y los registros en la tabla correcta,
-y luego confirmar que aparecen en la pantalla, reporte o app donde se usan.
-No alterar datos maestros, RRHH, nómina, ventas, inventario o configuración de
-producción salvo que Mauricio lo pida explícitamente.
-
-Si no se puede validar el resultado final, no dar la tarea por cerrada. Reportar
-el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
-
-## Arquitectura de módulos (14 apps Django)
-| App | Responsabilidad |
-|-----|----------------|
-| core | Sucursales, usuarios, audit, auth |
-| maestros | Insumos, proveedores, unidades, productos |
-| recetas | Recetas, costeo, matching, MRP |
-| inventario | Existencias, movimientos, ajustes |
-| compras | Solicitudes, órdenes, recepciones |
-| ventas | Histórico, pronóstico, solicitudes |
-| produccion | Plan producción, forecast |
-| crm | Clientes, pedidos, seguimiento |
-| rrhh | Empleados, nómina |
-| activos | Equipos, mantenimiento |
-| reportes | BI, exports CSV/XLSX |
-| control | Discrepancias POS vs producción |
-| integraciones | API pública, POS PointMeUp, Google Business |
-| horarios_especiales | Horarios por sucursal y fecha especial |
-| orquestacion | Agentes IA, loops, memoria |
-
-## Views refactorizados (NO editar archivos originales — ya no existen)
-- api/views/ → 11 módulos: auth, maestros, recetas, inventario, integraciones, presupuestos, compras, produccion, ventas, activos, control
-- recetas/views/ → 5 módulos: recetas, matching, plan, reabasto, mrp
-
-## Usuarios del sistema
-| Usuario | Área |
-|---------|------|
-| admin | DG — acceso total |
-| carolina.cayetano | Producción |
-| johana.lopez | Ventas |
-| jorge.perez | Compras |
-| paula.lugo | Capital Humano |
-| yesenia.soto | Administración |
-
-## Deploy en producción
-```bash
-cd /opt/pastelerias-erp
-git pull origin main
-docker compose restart web worker beat
-docker compose exec -T web python manage.py migrate --noinput
+## Apps Django y sus responsabilidades
+```
+core/                → Sucursales, Usuarios, AuditLog, Auth, Dashboard
+maestros/            → Insumos, Proveedores, Unidades, Productos, Categorías
+recetas/             → Recetas, Costeo, Matching, MRP, Plan Producción, Pronósticos
+compras/             → Solicitudes, Órdenes de Compra, Recepciones, Presupuestos
+inventario/          → Existencias, Movimientos, Ajustes, Aliases, Importación
+activos/             → Equipos, Mantenimiento preventivo/correctivo
+control/             → Discrepancias POS, Captura móvil
+crm/                 → Clientes, Pedidos, Seguimiento multicanal
+ventas/               → Histórico, pronóstico, solicitudes de venta
+visitas_sucursal/    → Visitas y auditoría de campo por sucursal
+rrhh/                → Empleados, Nómina, Permisos, Vacantes
+bonos_produccion/    → Bonos por área (Hornos, Embetunado, Producción, Logística)
+bonos_ventas/        → Bonos de vendedoras y repartidores por sucursal
+logistica/           → Rutas, Entregas, checklist de carga, PWA de repartidor
+fallas/              → Reportes y bitácora de fallas/incidentes de equipo
+mantenimiento/       → Proveedores de servicio, solicitudes de cancelación
+seguimiento/         → Seguimiento de personal
+mermas/              → Registro y control de mermas
+operacion/           → App operativa unificada (bitácora, puente de sesión entre módulos móviles)
+integraciones/       → API pública, POS Point, Logs
+horarios_especiales/ → Horarios por sucursal y fecha especial
+pos_bridge/          → Sincronización con POS Point (ventas, asistencia, categorías)
+reportes/            → BI, Costeo, Consumo, Faltantes
+proyecciones/        → Proyecciones financieras y de ventas
+orquestacion/        → Agentes IA, loops, memoria
+rentabilidad/        → Rentabilidad y márgenes
+consejo_ia/          → Consultas al consejo/asesor ejecutivo IA
+sat_client/          → Cliente de descarga y consulta SAT
+syncfy_client/       → Cliente Syncfy para conciliación bancaria
+conciliacion/        → Conciliación bancaria
+api/                 → Endpoints REST centralizados (80+)
 ```
 
-## Backups
-- Automático: diario 2am via cron
-- Script: /opt/pastelerias-erp/scripts/backup_db.sh
-- Destino: /opt/backups/erp/
-- Retención: 7 días
+## Views refactorizados (NO editar archivos originales — ya no existen)
+- `api/views/` → 11 módulos: auth, maestros, recetas, inventario, integraciones,
+  presupuestos, compras, produccion, ventas, activos, control
+- `recetas/views/` → 5 módulos: recetas, matching, plan, reabasto, mrp
 
-## Otros sistemas en el mismo Droplet
-| Sistema | Directorio | Puerto | Dominio |
-|---------|-----------|--------|---------|
-| Maya omnicanal | /opt/pollyana-omnichannel | 8003 | api.pollyanasdolce.com |
-| ERP Django | /opt/pastelerias-erp | 8011 | erp.pollyanasdolce.com |
-| ad_agent (próximo) | /opt/ad-agent | 8004 | ads.pollyanasdolce.com |
+---
+
+## Diseño Visual — CSS Variables
+```css
+--vino: #8B2252        /* Primario — sidebar, acentos, headers */
+--vino-light: #A0365F  /* Hover de vino */
+--dorado: #C9A84C      /* Acento dorado — badges, detalles premium */
+--rosa: #F8E8EE        /* Fondo cards suave */
+--blanco: #FFFAF5      /* Fondo general (cálido, NO blanco puro) */
+--gris-suave: #F5F0EB  /* Fondo alternativo */
+--texto: #3D2B2B       /* Texto principal (marrón oscuro) */
+--texto-light: #7A6565 /* Texto secundario */
+--verde: #4CAF50       /* Éxito */
+--amarillo: #FFC107    /* Advertencia */
+--rojo: #E53935        /* Error */
+```
+- Títulos (h1-h4): Playfair Display (serif) · Body/UI: Nunito (sans-serif)
+- Sidebar fijo: 252px, gradiente vino (#8B2252 → #6B1740)
+- NO usar frameworks JS externos en templates del ERP principal
+- Los templates de bonos SÍ usan React 18 UMD (cargado desde unpkg)
+
+---
 
 ## Verificación en navegador
-
-Cuando la tarea afecte UI, flujos web, formularios, navegación, autenticación
-o integraciones visibles en navegador, usar **Chrome DevTools MCP** para validar
-el comportamiento real antes de cerrar la tarea.
-
-Aplica para:
-- Cambios en templates HTML del ERP
-- Nuevos endpoints o modificaciones a vistas Django
-- Flujos de autenticación y permisos
-- Integraciones con Point (scraping Playwright, sincronización)
-- Cualquier otro sistema web trabajado desde Codex
-
-### ERP — pruebas funcionales
-
-Para cambios en módulos operativos del ERP, validar el flujo afectado en navegador
-cuando sea posible, incluyendo:
+Cuando la tarea afecte UI, flujos web, formularios, navegación o autenticación,
+validar en navegador real antes de cerrar (Chrome DevTools MCP desde Codex,
+`claude-in-chrome` desde Claude):
 - Pantallas principales del módulo modificado
 - Formularios: envío, validación, respuesta
 - Errores de consola JavaScript
 - Network requests relevantes (XHR/Fetch)
+- Service worker y caché si algo no aparece
 
-Ejemplo de instrucción a Codex:
-> "Valida el flujo en navegador antes de abrir el PR."
-> "Abre el módulo X en Chrome DevTools y verifica que no hay errores de consola."
+---
+
+## Comandos útiles
+```bash
+python manage.py check                                        # Verificar proyecto
+python manage.py migrate --check                              # Migraciones pendientes
+python manage.py showmigrations bonos_produccion bonos_ventas # Estado migraciones bonos
+python manage.py test bonos_produccion bonos_ventas rrhh --parallel
+python manage.py runserver                                    # Servidor local
+```
 
 ## Trabajo en paralelo por hilos
 
-Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni produccion.
+Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni producción.
 
 - Usar `1 hilo = 1 branch = 1 worktree limpio`.
 - Antes de empezar, revisar `git status --short --branch` y `git worktree list`.
 - No trabajar sobre `main` ni sobre un checkout con cambios no relacionados.
-- Si el arbol actual esta mezclado, abrir un worktree limpio desde `origin/main`.
+- Si el árbol actual está mezclado, abrir un worktree limpio desde `origin/main`.
 - Nombrar cada rama con alcance real, por ejemplo: `codex/<modulo>-<cambio>`.
-- Declarar al inicio del hilo: objetivo, alcance, archivos o carpetas permitidos, contratos compartidos afectados y si requiere deploy o solo validacion local.
+- Declarar al inicio del hilo: objetivo, alcance, archivos o carpetas permitidos, contratos compartidos afectados y si requiere deploy o solo validación local.
 - No editar archivos fuera del alcance declarado sin explicarlo primero.
-- Si el cambio toca contratos compartidos como API, modelos, estado global, autenticacion, service worker, cache, variables de entorno, scripts de deploy o procesos compartidos, avisarlo antes de editar y validar consumidores afectados.
-- Preview local, staging y produccion son evidencias distintas. No presentar validacion local como prueba de produccion.
+- Si el cambio toca contratos compartidos como API, modelos, estado global, autenticación, service worker, caché, variables de entorno, scripts de deploy o procesos compartidos, avisarlo antes de editar y validar consumidores afectados.
+- Preview local, staging y producción son evidencias distintas. No presentar validación local como prueba de producción.
 - No desplegar desde una rama con cambios mezclados o no revisados.
-- Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `claude.md` en el mismo cambio para mantenerlas alineadas.
+- Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `CLAUDE.md` en el mismo cambio para mantenerlas alineadas (deben quedar con el mismo contenido).
 - Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado y limpiar ramas atoradas que puedan obstruir otros hilos.
 
 ## Acciones que cambian estado — contrato obligatorio
