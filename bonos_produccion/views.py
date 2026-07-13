@@ -493,6 +493,13 @@ class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosPro
     def empleado_payload(self, empleado):
         return self._empleado_payload_produccion(empleado)
 
+    def ordenar_empleados(self, empleados):
+        propio = self._empleado_propio()
+        return sorted(
+            empleados,
+            key=lambda empleado: (empleado.id != getattr(propio, "id", None), empleado.nombre),
+        )
+
     def can_solicitar_empleado(self, empleado):
         if self._es_empleado_propio(empleado):
             return True
