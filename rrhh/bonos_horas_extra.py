@@ -106,6 +106,12 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         jefe_usuario_id = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp_id", None)
         return bool(jefe_usuario_id and jefe_usuario_id == self.request.user.id)
 
+    def can_solicitar_empleado(self, empleado: Empleado) -> bool:
+        return self.can_gestionar_empleado(empleado)
+
+    def after_create(self, hora_extra: HoraExtra) -> None:
+        pass
+
     def _empleados(self):
         return self.empleados_queryset().filter(activo=True).order_by("nombre")
 
@@ -160,7 +166,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             empleado = self._empleados().get(pk=empleado_id)
         except Empleado.DoesNotExist:
             return Response({"empleado": "Empleado fuera de tu equipo o inactivo."}, status=status.HTTP_400_BAD_REQUEST)
-        if not self.can_gestionar_empleado(empleado):
+        if not self.can_solicitar_empleado(empleado):
             return Response({"empleado": "Solo puedes registrar horas extra para tu equipo directo."}, status=status.HTTP_403_FORBIDDEN)
 
         fecha = parse_date(str(request.data.get("fecha") or ""))
@@ -186,6 +192,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             jefe_directo=usuario_jefe_directo_de_empleado(empleado),
             notas=notas,
         )
+        self.after_create(hora_extra)
         return Response(
             _hora_extra_payload(
                 hora_extra,

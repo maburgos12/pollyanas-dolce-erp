@@ -1,6 +1,7 @@
 import json
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -27,6 +28,199 @@ from .views import _recalcular_desde_registros
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class BonosProduccionTests(TestCase):
+    def crear_contexto_autosolicitud(self):
+        grupo, _ = Group.objects.get_or_create(name=ROLE_PRODUCCION)
+        user = get_user_model().objects.create_user(username="julissa.angulo", password="test12345")
+        user.groups.add(grupo)
+        carolina_user = get_user_model().objects.create_user(
+            username="carolina.cayetano",
+            password="test12345",
+        )
+        carolina = Empleado.objects.create(
+            nombre="CAYETANO VALENZUELA CAROLINA",
+            activo=True,
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            puesto="Jefa de Producción",
+            nivel_organizacional=Empleado.NIVEL_JEFATURA,
+            usuario_erp=carolina_user,
+        )
+        julissa = Empleado.objects.create(
+            nombre="ANGULO PARRA JULISSA",
+            activo=True,
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            departamento_origen="PRODUCCION",
+            puesto="Encargada de Producción",
+            nivel_organizacional=Empleado.NIVEL_SUPERVISION,
+            participa_bonos_produccion=False,
+            usuario_erp=user,
+            jefe_directo=carolina,
+        )
+        ajeno = Empleado.objects.create(
+            nombre="EMPLEADO FUERA DE ALCANCE",
+            activo=True,
+            area="ADMINISTRACION",
+            departamento="ADMINISTRACION",
+        )
+        return user, carolina_user, julissa, ajeno
+
+    def test_autosolicitud_incluye_usuario_actual_sin_participar_en_bonos(self):
+        user, _, julissa, _ = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        permisos = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
+        horas = self.client.get("/api/bonos-produccion/horas-extra/?area=PRODUCCION")
+
+        self.assertEqual(permisos.status_code, 200)
+        self.assertEqual(horas.status_code, 200)
+        for response in (permisos, horas):
+            propios = [row for row in response.json()["empleados"] if row["id"] == julissa.id]
+            self.assertEqual(len(propios), 1)
+            self.assertTrue(propios[0]["es_usuario_actual"])
+            self.assertTrue(propios[0]["puede_solicitar"])
+            self.assertFalse(propios[0]["puede_gestionar"])
+            self.assertEqual(response.json()["empleados"][0]["id"], julissa.id)
+
+    @patch("rrhh.bonos_permisos.notificar_permiso_solicitado")
+    def test_usuario_crea_permiso_propio_y_notifica_a_su_jefa(self, notificar_permiso):
+        user, _, julissa, _ = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        response = self.client.post(
+            "/api/bonos-produccion/permisos/",
+            json.dumps(
+                {
+                    "empleado": julissa.id,
+                    "area": "PRODUCCION",
+                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
+                    "fecha_inicio": "2026-07-14T12:00:00",
+                    "fecha_fin": "2026-07-14T13:00:00",
+                    "goce_sueldo": True,
+                    "motivo": "Cita médica",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        permiso = PermisoSalida.objects.get(pk=response.json()["id"])
+        self.assertEqual(permiso.empleado, julissa)
+        self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
+        self.assertFalse(permiso.requiere_direccion)
+        notificar_permiso.assert_called_once_with(permiso, actor=user)
+
+    @patch("bonos_produccion.views.notificar_hora_extra_solicitada", create=True)
+    def test_usuario_crea_hora_extra_propia_asignada_y_notificada_a_su_jefa(self, notificar_hora):
+        user, carolina_user, julissa, _ = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        response = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": julissa.id,
+                    "area": "PRODUCCION",
+                    "fecha": "2026-07-14",
+                    "horas": "1.50",
+                    "notas": "Pedido especial",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        hora_extra = HoraExtra.objects.get(pk=response.json()["id"])
+        self.assertEqual(hora_extra.empleado, julissa)
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(hora_extra.jefe_directo, carolina_user)
+        notificar_hora.assert_called_once_with(hora_extra, actor=user)
+
+    def test_usuario_no_gestiona_ni_autoriza_su_hora_extra(self):
+        user, carolina_user, julissa, _ = self.crear_contexto_autosolicitud()
+        hora_extra = HoraExtra.objects.create(
+            empleado=julissa,
+            fecha="2026-07-14",
+            horas="1.50",
+            notas="Pedido especial",
+            jefe_directo=carolina_user,
+        )
+        self.client.force_login(user)
+
+        listado = self.client.get("/api/bonos-produccion/horas-extra/?area=PRODUCCION")
+        propios = [row for row in listado.json()["horas_extra"] if row["id"] == hora_extra.id]
+        self.assertEqual(len(propios), 1)
+        payload = propios[0]
+        self.assertFalse(payload["puede_editar"])
+        self.assertFalse(payload["puede_eliminar"])
+        self.assertFalse(payload["puede_autorizar"])
+
+        editar = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/editar/",
+            json.dumps(
+                {
+                    "fecha": "2026-07-15",
+                    "horas": "2.00",
+                    "notas": "Intento propio",
+                    "motivo_cambio": "Intento propio",
+                }
+            ),
+            content_type="application/json",
+        )
+        eliminar = self.client.post(
+            f"/api/bonos-produccion/horas-extra/{hora_extra.id}/eliminar/",
+            json.dumps({"motivo_cambio": "Intento propio"}),
+            content_type="application/json",
+        )
+        autorizar = self.client.post(f"/api/bonos-produccion/horas-extra/{hora_extra.id}/autorizar/")
+
+        self.assertEqual(editar.status_code, 403)
+        self.assertEqual(eliminar.status_code, 403)
+        self.assertEqual(autorizar.status_code, 403)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+
+    def test_autosolicitud_rechaza_empleado_fuera_del_selector(self):
+        user, _, _, ajeno = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        response = self.client.post(
+            "/api/bonos-produccion/horas-extra/",
+            json.dumps(
+                {
+                    "empleado": ajeno.id,
+                    "area": "PRODUCCION",
+                    "fecha": "2026-07-14",
+                    "horas": "1.00",
+                    "notas": "Manipulación",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(HoraExtra.objects.filter(empleado=ajeno).exists())
+
+    def test_autosolicitud_no_se_habilita_sin_jefa_con_usuario_erp(self):
+        user, _, julissa, _ = self.crear_contexto_autosolicitud()
+        julissa.jefe_directo.usuario_erp = None
+        julissa.jefe_directo.save(update_fields=["usuario_erp"])
+        self.client.force_login(user)
+
+        response = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(julissa.id, [row["id"] for row in response.json()["empleados"]])
+
+    def test_app_etiqueta_al_usuario_actual_como_yo(self):
+        user, _, _, _ = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        response = self.client.get("/bonos-produccion/app/?captura=1&tab=permisos")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Yo — ${b.empleado_nombre}", response.content.decode())
+
     def test_sidebar_de_produccion_apunta_al_dashboard_erp(self):
         produccion = next(group for group in NAV_GROUPS if group["key"] == "produccion")
         bonos_item = next(item for item in produccion["items"] if item[0] == "produccion" and item[1] == "bonos")
@@ -342,7 +536,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v18", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v20-autosolicitudes", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 

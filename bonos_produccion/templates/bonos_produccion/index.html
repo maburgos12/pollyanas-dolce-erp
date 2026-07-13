@@ -86,7 +86,7 @@ function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaT
       filtered.length?filtered.map(b=>h('button',{key:b.id,type:'button',className:`employee-row ${selected?.id===b.id?'on':''}`,onClick:()=>onSelect(b)},
         h('div',{className:'av'},initials(b.empleado_nombre)),
         h('div',{className:'employee-row-main'},
-          h('div',{className:'persona-name'},b.empleado_nombre),
+          h('div',{className:'persona-name'},b.es_usuario_actual?`Yo — ${b.empleado_nombre}`:b.empleado_nombre),
           h('div',{className:'persona-sub'},metaText?metaText(b):(AREA_LABELS[b.area]||b.area||'Produccion'))
         ),
         rightText&&h('div',{className:'employee-row-right'},rightText(b))
