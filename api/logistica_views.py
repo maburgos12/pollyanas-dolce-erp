@@ -59,6 +59,7 @@ from logistica.services_carga_ruta import (
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
+    validar_producto_tramo_carga,
 )
 from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas, ruta_operativa_para_repartidor
 from logistica.services_entregas import (
@@ -101,6 +102,7 @@ from .logistica_serializers import (
     RutaCargaChecklistSerializer,
     RutaCargaChecklistLineaSerializer,
     RutaCargaLineaValidarSerializer,
+    RutaCargaProductoTramoValidarSerializer,
     UbicacionRutaCreateSerializer,
     UbicacionRutaSerializer,
 )
@@ -1796,6 +1798,43 @@ class LogisticaRutaCargaLineaValidarView(_LogisticaBaseView):
         return Response(
             {
                 "linea": RutaCargaChecklistLineaSerializer(linea, context={"request": request}).data,
+                "checklist": RutaCargaChecklistSerializer(checklist, context={"request": request}).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaRutaCargaProductoTramoValidarView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _can_operate_pwa(request.user):
+            return Response({"detail": "Solo repartidores registrados pueden validar carga."}, status=status.HTTP_403_FORBIDDEN)
+        ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
+        serializer = RutaCargaProductoTramoValidarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        try:
+            lineas = validar_producto_tramo_carga(
+                user=request.user,
+                ruta=ruta,
+                repartidor=repartidor,
+                item_code=payload.get("item_code") or "",
+                item_name=payload["item_name"],
+                unit=payload.get("unit") or "",
+                cantidad_cargada=payload["cantidad_cargada"],
+                client_event_id=payload.get("client_event_id") or "",
+            )
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValidationError as exc:
+            return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        checklist = lineas[0].checklist
+        checklist.refresh_from_db()
+        if checklist.estatus == checklist.ESTATUS_CONFIRMADA:
+            registrar_evento_checklist_confirmado(ruta=ruta, user=request.user)
+        return Response(
+            {
+                "lineas": RutaCargaChecklistLineaSerializer(lineas, many=True, context={"request": request}).data,
                 "checklist": RutaCargaChecklistSerializer(checklist, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,

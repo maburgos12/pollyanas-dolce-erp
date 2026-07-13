@@ -1596,9 +1596,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v62-enviado-cero-banner"},
+            {"route-control-v63-carga-tramos-consolidada"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v63-carga-tramos-consolidada", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -4644,9 +4644,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v62-enviado-cero-banner", pwa_html)
+        self.assertIn("?v=route-control-v63-carga-tramos-consolidada", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v63-carga-tramos-consolidada", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -4670,7 +4670,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("anterioresResueltas", pwa_html)
         self.assertIn("Mostrando solo el tramo operativo actual.", pwa_html)
         self.assertNotIn("lineasPostCedis", pwa_html)
-        self.assertIn("total esperado", pwa_html)
+        self.assertIn("· cargar ${totalProducto.esperado.toFixed(3)}", pwa_html)
         self.assertIn("Total cargado", pwa_html)
         self.assertIn("const ROUTE_AUTO_TRACKING_INTERVAL_MS = 45 * 1000;", pwa_html)
         self.assertIn('activo: "Activo cada 45 s"', pwa_html)
@@ -4741,7 +4741,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v63-carga-tramos-consolidada", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -7685,6 +7685,126 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist)), [linea_payan])
         parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
+
+    def test_validar_producto_tramo_confirma_sumatoria_antes_de_cedis(self):
+        ruta, parada_nio = self._crear_ruta_planeada_para_carga()
+        parada_nio.punto_nombre_snapshot = "Sucursal Plaza Nio"
+        parada_nio.save(update_fields=["punto_nombre_snapshot", "actualizado_en"])
+        parada_payan = ParadaRuta.objects.create(
+            ruta=ruta,
+            punto=self.punto,
+            orden=2,
+            punto_nombre_snapshot="Sucursal Payan",
+        )
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS corte de tramo",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=3, punto_nombre_snapshot="CEDIS")
+        parada_glorias = ParadaRuta.objects.create(
+            ruta=ruta,
+            punto=self.punto,
+            orden=4,
+            punto_nombre_snapshot="Sucursal Las Glorias",
+        )
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        lineas = []
+        for parada, cantidad, source_hash in [
+            (parada_nio, "3.000", "vainilla-nio"),
+            (parada_payan, "4.000", "vainilla-payan"),
+            (parada_glorias, "2.000", "vainilla-glorias"),
+        ]:
+            lineas.append(RutaCargaChecklistLinea.objects.create(
+                checklist=checklist,
+                parada=parada,
+                source_hash=source_hash,
+                item_code="0117",
+                item_name="Bollo Vainilla",
+                unit="PZA",
+                cantidad_solicitada=cantidad,
+                cantidad_enviada_esperada=cantidad,
+            ))
+
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/api/logistica/rutas/{ruta.id}/carga-checklist/productos/validar/",
+            data={
+                "item_code": "0117",
+                "item_name": "Bollo Vainilla",
+                "unit": "PZA",
+                "cantidad_cargada": "7.000",
+                "client_event_id": "tramo-vainilla-1",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        for linea in lineas[:2]:
+            linea.refresh_from_db()
+            self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+            self.assertEqual(linea.cantidad_cargada, linea.cantidad_enviada_esperada)
+        lineas[2].refresh_from_db()
+        self.assertEqual(lineas[2].estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(lineas[2].cantidad_cargada)
+
+    def test_validar_producto_tramo_rechaza_total_distinto_sin_repartirlo(self):
+        ruta, parada_nio = self._crear_ruta_planeada_para_carga()
+        parada_payan = ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=2, punto_nombre_snapshot="Sucursal Payan")
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        lineas = [
+            RutaCargaChecklistLinea.objects.create(
+                checklist=checklist,
+                parada=parada,
+                source_hash=source_hash,
+                item_code="0117",
+                item_name="Bollo Vainilla",
+                unit="PZA",
+                cantidad_solicitada=cantidad,
+                cantidad_enviada_esperada=cantidad,
+            )
+            for parada, cantidad, source_hash in [
+                (parada_nio, "3.000", "vainilla-nio-distinta"),
+                (parada_payan, "4.000", "vainilla-payan-distinta"),
+            ]
+        ]
+
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/api/logistica/rutas/{ruta.id}/carga-checklist/productos/validar/",
+            data={
+                "item_code": "0117",
+                "item_name": "Bollo Vainilla",
+                "unit": "PZA",
+                "cantidad_cargada": "6.000",
+                "client_event_id": "tramo-vainilla-diferencia",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("desglose", str(response.json()).lower())
+        for linea in lineas:
+            linea.refresh_from_db()
+            self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+            self.assertIsNone(linea.cantidad_cargada)
+
+    def test_pwa_captura_sumatoria_y_contrae_desglose_por_sucursal(self):
+        from pathlib import Path
+
+        pwa_html = (Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("validarCargaProductoTramo", pwa_html)
+        self.assertIn("Ver desglose por sucursal", pwa_html)
+        self.assertIn("<details class=\"route-load-breakdown\">", pwa_html)
+        self.assertIn("cantidad_total_", pwa_html)
+        self.assertIn("carga-checklist/productos/validar/", pwa_html)
+        self.assertIn("const total = totalesConCarga.length", pwa_html)
+        self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
+        self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
+        self.assertIn("route-control-v63-carga-tramos-consolidada", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()

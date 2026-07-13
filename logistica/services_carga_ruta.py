@@ -753,6 +753,75 @@ def validar_linea_carga(
     return linea
 
 
+@transaction.atomic
+def validar_producto_tramo_carga(
+    *,
+    user,
+    ruta: RutaEntrega,
+    repartidor,
+    item_code: str,
+    item_name: str,
+    unit: str,
+    cantidad_cargada,
+    client_event_id: str = "",
+) -> list[RutaCargaChecklistLinea]:
+    """Confirma en una sola captura el total físico de un producto del tramo actual."""
+    validar_usuario_puede_operar_checklist(user=user, ruta=ruta, repartidor=repartidor)
+    checklist = obtener_checklist_carga(ruta)
+    key = (
+        (item_code or "").strip().upper(),
+        (item_name or "").strip().upper(),
+        (unit or "").strip().upper(),
+    )
+    lineas = [
+        linea
+        for linea in lineas_tramo_operativo_actual(ruta, checklist=checklist)
+        .select_for_update()
+        .select_related("parada")
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .order_by("parada__orden", "id")
+        if (
+            (linea.item_code or "").strip().upper(),
+            (linea.item_name or "").strip().upper(),
+            (linea.unit or "").strip().upper(),
+        ) == key
+    ]
+    if not lineas:
+        raise ValidationError("El producto ya no pertenece al tramo de carga actual. Actualiza la pantalla.")
+
+    try:
+        cantidad = Decimal(str(cantidad_cargada))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError("Captura una cantidad total cargada válida.")
+    if cantidad < 0:
+        raise ValidationError("La cantidad total cargada no puede ser negativa.")
+
+    esperada = sum((Decimal(str(linea.cantidad_enviada_esperada or 0)) for linea in lineas), Decimal("0"))
+    if cantidad != esperada:
+        raise ValidationError(
+            "El total cargado no coincide con la sumatoria enviada. "
+            "Abre Ver desglose para registrar la diferencia por sucursal sin inventar su distribución."
+        )
+
+    base_event_id = (client_event_id or "").strip()
+    for linea in lineas:
+        if linea.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE:
+            continue
+        cantidad_linea = Decimal(str(linea.cantidad_enviada_esperada or 0))
+        if cantidad_linea <= 0:
+            continue
+        validar_linea_carga(
+            user=user,
+            ruta=ruta,
+            repartidor=repartidor,
+            linea_id=linea.id,
+            cantidad_cargada=cantidad_linea,
+            client_event_id=f"{base_event_id}:{linea.id}" if base_event_id else "",
+        )
+        linea.refresh_from_db()
+    return lineas
+
+
 def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     checklist = getattr(ruta, "checklist_carga", None)
     if not checklist or not checklist.lineas.exists():

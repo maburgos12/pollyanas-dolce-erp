@@ -1,7 +1,7 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v62-enviado-cero-banner";
+const CACHE_NAME = "pollyanas-logistica-pwa-v63-carga-tramos-consolidada";
 const SHELL_ASSETS = [
   "/logistica/app/",
-  "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v62-enviado-cero-banner",
+  "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v63-carga-tramos-consolidada",
   "/static/logistica/pwa/manifest.json?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-512.png?v=20260707-workflow-icon-v5"

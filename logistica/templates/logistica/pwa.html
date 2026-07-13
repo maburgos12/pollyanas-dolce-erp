@@ -36,6 +36,18 @@
 
       * { box-sizing: border-box; }
 
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
       html, body {
         min-height: 100%;
         margin: 0;
@@ -1255,6 +1267,37 @@
         display: grid;
         gap: 10px;
       }
+      .route-load-product-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .route-load-product-form input {
+        min-width: 0;
+      }
+      .route-load-product-form .secondary-btn {
+        min-width: 104px;
+      }
+      .route-load-breakdown {
+        margin-top: 14px;
+        border-top: 1px solid var(--route-pwa-border);
+        padding-top: 12px;
+      }
+      .route-load-breakdown summary {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--route-pwa-gold-text);
+        cursor: pointer;
+        font-weight: 900;
+        list-style: none;
+      }
+      .route-load-breakdown summary::-webkit-details-marker { display: none; }
+      .route-load-breakdown summary::after { content: "▾"; }
+      .route-load-breakdown[open] summary::after { content: "▴"; }
+      .route-load-breakdown .route-stop-list { margin-top: 10px; }
       .route-stop {
         display: grid;
         grid-template-columns: 34px minmax(0, 1fr);
@@ -1359,7 +1402,7 @@
   </head>
   <body>
     <div id="app"></div>
-    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v62-enviado-cero-banner"></script>
+    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v63-carga-tramos-consolidada"></script>
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
@@ -1395,6 +1438,7 @@
         rutaActiva: null,
         rutaTrackingDraft: null,
         rutaCargaDraft: {},
+        rutaCargaProductoDraft: {},
         entregaNotasDraft: {},
         trackingQueueCount: 0,
         offlineMutationQueueCount: 0,
@@ -2894,6 +2938,16 @@
         draft[field] = value;
       }
 
+      function cargaProductoDraftFor(index, esperado) {
+        state.rutaCargaProductoDraft[index] = state.rutaCargaProductoDraft[index] || { cantidad: esperado.toFixed(3), guardando: false };
+        return state.rutaCargaProductoDraft[index];
+      }
+
+      function updateCargaProductoTotal(index, value) {
+        state.rutaCargaProductoDraft[index] = state.rutaCargaProductoDraft[index] || { cantidad: value, guardando: false };
+        state.rutaCargaProductoDraft[index].cantidad = value;
+      }
+
       function segmentoCargaOperativo(lineas, paradas) {
         const todas = (paradas || []).map((parada) => ({
           orden: Number(parada.orden || 0),
@@ -2926,22 +2980,18 @@
         };
       }
 
-      function resumenCargaRuta(checklist) {
+      function resumenCargaRuta(checklist, paradas = []) {
         const lineas = checklist?.lineas || [];
         if (!lineas.length) return "Sin carga sincronizada desde Point.";
-        const confirmadas = lineas.filter((linea) => linea.estatus !== "PENDIENTE").length;
-        return `${confirmadas} de ${lineas.length} línea${lineas.length === 1 ? "" : "s"} revisada${lineas.length === 1 ? "" : "s"}.`;
+        const segmento = segmentoCargaOperativo(lineas, paradas);
+        const productos = totalesCargaPorProducto(segmento.lineas).filter((row) => row.esperado > 0);
+        if (!productos.length) return "Sin carga física pendiente en este tramo.";
+        const confirmados = productos.filter((row) => !row.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0)).length;
+        return `${confirmados} de ${productos.length} producto${productos.length === 1 ? "" : "s"} revisado${productos.length === 1 ? "" : "s"}.`;
       }
 
-      function renderChecklistCarga(checklist, paradas = []) {
-        if (!checklist) return "";
-        const lineas = checklist.lineas || [];
-        const segmento = segmentoCargaOperativo(lineas, paradas);
-        const lineasOperativas = segmento.lineas;
-        const cargaTitulo = segmento.titulo;
-        const pendientesPostCedis = lineasOperativas.filter((linea) => linea.estatus === "PENDIENTE").length;
-        const cargaDetalle = segmento.detalle;
-        const totales = Array.from(lineasOperativas.reduce((map, linea) => {
+      function totalesCargaPorProducto(lineas) {
+        return Array.from(lineas.reduce((map, linea) => {
           const key = `${linea.item_code || ""}|${linea.item_name || ""}|${linea.unit || ""}`.toUpperCase();
           const row = map.get(key) || {
             item_code: linea.item_code || "",
@@ -2951,7 +3001,9 @@
             cargado: 0,
             cargadoCompleto: true,
             cargadoParcial: false,
+            lineas: [],
           };
+          row.lineas.push(linea);
           row.esperado += Number(linea.cantidad_enviada_esperada || 0);
           if (linea.cantidad_cargada === null || linea.cantidad_cargada === undefined || linea.cantidad_cargada === "") {
             row.cargadoCompleto = false;
@@ -2962,9 +3014,20 @@
           map.set(key, row);
           return map;
         }, new Map()).values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
-        const total = lineasOperativas.length;
-        const confirmadas = lineasOperativas.filter((linea) => linea.estatus !== "PENDIENTE").length;
-        const pendientes = pendientesPostCedis;
+      }
+
+      function renderChecklistCarga(checklist, paradas = []) {
+        if (!checklist) return "";
+        const lineas = checklist.lineas || [];
+        const segmento = segmentoCargaOperativo(lineas, paradas);
+        const lineasOperativas = segmento.lineas;
+        const cargaTitulo = segmento.titulo;
+        const cargaDetalle = segmento.detalle;
+        const totales = totalesCargaPorProducto(lineasOperativas);
+        const totalesConCarga = totales.filter((row) => row.esperado > 0);
+        const total = totalesConCarga.length;
+        const pendientes = totalesConCarga.filter((row) => row.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0)).length;
+        const confirmadas = total - pendientes;
         const pct = total ? Math.round((confirmadas / total) * 100) : 0;
         const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
         if (!total) {
@@ -2981,7 +3044,7 @@
             <div class="route-head">
               <div>
                 <h2 style="margin:0;color:var(--gold-text);">${cargaTitulo}</h2>
-                <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} línea${total === 1 ? "" : "s"}</p>
+                <p class="route-folio">${escapeHtml(statusText)} · ${confirmadas} de ${total} producto${total === 1 ? "" : "s"}</p>
               </div>
               <span class="route-chip">${pct}%</span>
             </div>
@@ -2991,18 +3054,30 @@
             </div>
             ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por revisar antes de salida.</div>` : `<p class="success">Carga revisada.</p>`}
             <div class="route-stop-list">
-              ${totales.map((totalProducto) => `
+              ${totalesConCarga.map((totalProducto, index) => {
+                const pendienteProducto = totalProducto.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0);
+                const draftProducto = cargaProductoDraftFor(index, totalProducto.esperado);
+                return `
                 <section class="route-stop visited">
                   <span class="route-stop-number">Σ</span>
                   <div>
                     <strong>${escapeHtml(totalProducto.item_name)}</strong>
-                    <span class="route-stop-meta">${escapeHtml(totalProducto.item_code || "Sin código")} · total esperado ${totalProducto.esperado.toFixed(3)} ${escapeHtml(totalProducto.unit)}</span>
+                    <span class="route-stop-meta">${escapeHtml(totalProducto.item_code || "Sin código")} · cargar ${totalProducto.esperado.toFixed(3)} ${escapeHtml(totalProducto.unit)}</span>
                     <span class="route-stop-meta">Total cargado ${totalProducto.cargadoCompleto || totalProducto.cargadoParcial ? totalProducto.cargado.toFixed(3) : "pendiente"} ${escapeHtml(totalProducto.unit)}</span>
+                    ${pendienteProducto ? `
+                      <div class="route-load-product-form">
+                        <label class="sr-only" for="cantidad_total_${index}">Cantidad total de ${escapeHtml(totalProducto.item_name)}</label>
+                        <input id="cantidad_total_${index}" type="number" min="0" step="0.001" value="${escapeHtml(draftProducto.cantidad)}" oninput="updateCargaProductoTotal(${index}, this.value)">
+                        <button class="secondary-btn" type="button" onclick="validarCargaProductoTramo(${index}, this)" ${draftProducto.guardando ? "disabled" : ""}>${draftProducto.guardando ? "Guardando..." : "Confirmar"}</button>
+                      </div>
+                    ` : ""}
                   </div>
                 </section>
-              `).join("")}
+              `}).join("")}
             </div>
-            <div class="route-stop-list">
+            <details class="route-load-breakdown">
+              <summary>Ver desglose por sucursal</summary>
+              <div class="route-stop-list">
               ${lineasOperativas.map((linea) => {
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
@@ -3050,7 +3125,8 @@
                   </section>
                 `;
               }).join("")}
-            </div>
+              </div>
+            </details>
           </section>
         `;
       }
@@ -3191,7 +3267,7 @@
           </section>
           <section class="card route-card-pwa">
             <h2 style="margin:0;color:var(--gold-text);">Carga de ruta</h2>
-            <p class="unit-line">${escapeHtml(resumenCargaRuta(rutaData.checklist_carga))}</p>
+            <p class="unit-line">${escapeHtml(resumenCargaRuta(rutaData.checklist_carga, paradas))}</p>
             <button class="secondary-btn" type="button" onclick="showScreen('ruta_carga')">Ver carga del tramo</button>
           </section>
           <section class="card route-card-pwa">
@@ -3264,6 +3340,48 @@
           return renderRutaScreen("✅ Carga revisada.");
         } catch (error) {
           return renderRutaScreen(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga. Reintenta con señal.");
+        } finally {
+          draft.guardando = false;
+        }
+      }
+
+      async function validarCargaProductoTramo(index, button = null) {
+        if (previewBlocked("La revisión de carga está bloqueada en vista como repartidor.")) return;
+        const rutaData = state.rutaActiva;
+        const rutaId = rutaData?.ruta?.id;
+        if (!rutaId) return renderRutaScreen("No hay ruta para validar carga.");
+        const segmento = segmentoCargaOperativo(rutaData.checklist_carga?.lineas || [], rutaData.paradas || []);
+        const totalProducto = totalesCargaPorProducto(segmento.lineas).filter((row) => row.esperado > 0)[index];
+        if (!totalProducto) return renderRutaScreen("El producto ya no pertenece al tramo actual. Actualiza la pantalla.");
+        const draft = cargaProductoDraftFor(index, totalProducto.esperado);
+        const cantidad = String(draft.cantidad || "").trim();
+        if (!cantidad) return renderRutaScreen("Captura la cantidad total cargada.");
+        draft.guardando = true;
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Guardando...";
+        }
+        try {
+          const response = await apiFetch(`/rutas/${rutaId}/carga-checklist/productos/validar/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              item_code: totalProducto.item_code,
+              item_name: totalProducto.item_name,
+              unit: totalProducto.unit,
+              cantidad_cargada: cantidad,
+              client_event_id: newClientEventId(),
+            }),
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            return renderRutaScreen(apiErrorMessage(error, "No se pudo confirmar la carga total."));
+          }
+          delete state.rutaCargaProductoDraft[index];
+          state.rutaActiva = null;
+          return renderRutaScreen(responseQueuedOffline(response) ? queuedSuccessMessage("Carga total del producto") : "✅ Carga total confirmada.");
+        } catch (error) {
+          return renderRutaScreen(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo guardar la carga total. Reintenta con señal.");
         } finally {
           draft.guardando = false;
         }
@@ -5064,7 +5182,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v62-enviado-cero-banner", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v63-carga-tramos-consolidada", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
