@@ -36,6 +36,8 @@ bash scripts/deploy_web_safe.sh
 Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la migración específica.
 `restart web` queda reservado para cambios de imagen, dependencias del contenedor o variables de entorno; para código y estáticos normales se usa recarga `HUP` de Gunicorn para no abrir una ventana de `502`.
 
+**Nunca hacer `git pull` manual en el VPS antes de correr `deploy_web_safe.sh`.** El script decide si reinicia `web`/`worker`/`beat` o solo manda `HUP` comparando el `HEAD` antes/después de **su propio** `git pull`; si el repo ya estaba actualizado a mano, no detecta cambios de `.py` y solo hace `HUP` — Gunicorn (`--preload`) sigue sirviendo el código viejo desde la memoria del proceso master aunque el filesystem ya tenga el commit nuevo. Señal de que pasó: el endpoint/feature nueva da 404 o el comportamiento viejo persiste pese a que `git log` en el VPS ya muestra el commit correcto. Verificar con `docker inspect <contenedor> --format '{{.State.StartedAt}}'`: si no cambió justo después del deploy, forzar `docker compose restart web worker beat` a mano.
+
 ## Backups
 - Automático: diario 2am via cron
 - Script: /opt/pastelerias-erp/scripts/backup_db.sh · Destino: /opt/backups/erp/ · Retención: 7 días

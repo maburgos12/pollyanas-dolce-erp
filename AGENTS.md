@@ -176,6 +176,8 @@ bash scripts/deploy_web_safe.sh
 Si migrate falla por columna duplicada: usar `--fake` en la migración específica.
 Usar `docker compose ... restart web` solo cuando cambie la imagen, dependencias del contenedor o variables de entorno; para cambios normales de Python/HTML/CSS/JS el `HUP` de Gunicorn evita la ventana de `502`.
 
+**Nunca hacer `git pull` manual en el VPS antes de correr `deploy_web_safe.sh`.** El script decide si reinicia `web`/`worker`/`beat` o solo manda `HUP` comparando el `HEAD` antes/después de **su propio** `git pull`; si el repo ya estaba actualizado a mano, no detecta cambios de `.py` y solo hace `HUP` — Gunicorn (`--preload`) sigue sirviendo el código viejo desde la memoria del proceso master aunque el filesystem ya tenga el commit nuevo. Señal de que pasó: el endpoint/feature nueva da 404 o el comportamiento viejo persiste pese a que `git log` en el VPS ya muestra el commit correcto. Verificar con `docker inspect <contenedor> --format '{{.State.StartedAt}}'`: si no cambió justo después del deploy, forzar `docker compose restart web worker beat` a mano.
+
 ### Service Worker — caché en módulos PWA
 Cualquier módulo que registre un `sw.js` mantiene un caché activo en el navegador del
 cliente. El cliente no recibe el cambio aunque el servidor ya lo tenga desplegado.
