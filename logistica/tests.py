@@ -7102,6 +7102,9 @@ class LogisticaControlRutasTests(TestCase):
 
         rows = _recepcion_point_rows(checklist)
         self.assertEqual(len(rows), 2, "La fila superada debe seguir visible individualmente para auditoría.")
+        fila_superada = next(row for row in rows if row["linea"].estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(fila_superada["estado_label"], "Superada (Point corrigió el envío)")
+        self.assertEqual(fila_superada["estado_tone"], "muted")
         total = _totales_recepcion_point(rows)[0]
 
         self.assertEqual(total["solicitado"], Decimal("3.000"))
