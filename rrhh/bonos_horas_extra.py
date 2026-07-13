@@ -125,6 +125,9 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             "sucursal_nombre": empleado.sucursal_display,
         }
 
+    def ordenar_empleados(self, empleados):
+        return empleados
+
     def _horas_extra(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
@@ -144,7 +147,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         return self.filter_horas_extra(qs)
 
     def list(self, request):
-        empleados = list(self._empleados())
+        empleados = self.ordenar_empleados(list(self._empleados()))
         horas_extra = list(self._horas_extra())
         return Response(
             {

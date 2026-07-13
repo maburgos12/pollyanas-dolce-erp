@@ -67,6 +67,13 @@ class BonosProduccionTests(TestCase):
 
     def test_autosolicitud_incluye_usuario_actual_sin_participar_en_bonos(self):
         user, _, julissa, _ = self.crear_contexto_autosolicitud()
+        Empleado.objects.create(
+            nombre="ACOSTA FLORES MARTINA",
+            activo=True,
+            area="PRODUCCION",
+            departamento="PRODUCCION",
+            participa_bonos_produccion=True,
+        )
         self.client.force_login(user)
 
         permisos = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
