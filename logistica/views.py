@@ -150,7 +150,11 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         recibido = Decimal("0")
         received_at = point_line.received_at if point_line else None
         received_by = point_line.received_by if point_line else ""
-        if not point_line:
+        if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+            estado_label = "Superada (Point corrigió el envío)"
+            estado_tone = "muted"
+            recibido_display = None
+        elif not point_line:
             estado_label = "Sin transferencia Point"
             estado_tone = "danger"
             recibido_display = None
