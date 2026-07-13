@@ -1596,9 +1596,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v61-v59-replay"},
+            {"route-control-v62-enviado-cero-banner"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -4644,9 +4644,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v61-v59-replay", pwa_html)
+        self.assertIn("?v=route-control-v62-enviado-cero-banner", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -4657,6 +4657,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('return "Ruta no liberada";', pwa_html)
         self.assertIn("const pendientePoint = pendiente && Number(linea.cantidad_enviada_esperada || 0) <= 0;", pwa_html)
         self.assertIn("La carga aún no aparece enviada en Point.", pwa_html)
+        self.assertIn('const enviadoCero = linea.estatus === "ZERO_EXPECTED";', pwa_html)
+        self.assertIn("Point confirmó enviado final en cero; no requiere captura.", pwa_html)
         self.assertIn("Logística debe asignar la unidad a la ruta.", pwa_html)
         self.assertIn("Tu turno activo no corresponde a la unidad asignada a esta ruta.", pwa_html)
         api_block = sw_js[sw_js.index('url.pathname.startsWith("/api/")'):sw_js.index('event.request.mode === "navigate"')]
@@ -4739,7 +4741,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v61-v59-replay", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v62-enviado-cero-banner", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

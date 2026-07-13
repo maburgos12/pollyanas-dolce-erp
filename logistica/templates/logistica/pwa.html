@@ -1359,7 +1359,7 @@
   </head>
   <body>
     <div id="app"></div>
-    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v61-v59-replay"></script>
+    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v62-enviado-cero-banner"></script>
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
@@ -3007,6 +3007,7 @@
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
                 const pendientePoint = pendiente && Number(linea.cantidad_enviada_esperada || 0) <= 0;
+                const enviadoCero = linea.estatus === "ZERO_EXPECTED";
                 const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
                 const cantidadValue = draft.cantidad !== "" ? draft.cantidad : (linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0");
                 return `
@@ -3023,6 +3024,10 @@
                       ${pendientePoint ? `
                         <div class="daily-banner warning" style="margin-top:10px;">
                           ${escapeHtml(linea.notas || "La carga aún no aparece enviada en Point. Pide a logística que atienda o actualice la transferencia en Point.")}
+                        </div>
+                      ` : enviadoCero ? `
+                        <div class="daily-banner" style="margin-top:10px;">
+                          ${escapeHtml(linea.notas || "Point confirmó enviado final en cero; no requiere captura.")}
                         </div>
                       ` : pendiente ? `
                         <div class="form-salida" style="margin-top:10px;">
@@ -5059,7 +5064,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v61-v59-replay", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v62-enviado-cero-banner", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
