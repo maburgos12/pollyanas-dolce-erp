@@ -533,6 +533,14 @@ class RutaCargaLineaValidarSerializer(serializers.Serializer):
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
 
 
+class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
+    item_code = serializers.CharField(required=False, allow_blank=True, max_length=120, default="")
+    item_name = serializers.CharField(max_length=255)
+    unit = serializers.CharField(required=False, allow_blank=True, max_length=50, default="")
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
 class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
     linea_carga_id = serializers.IntegerField(required=False, allow_null=True)
     tipo = serializers.ChoiceField(
