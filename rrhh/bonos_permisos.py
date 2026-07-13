@@ -153,6 +153,9 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
     def filter_permisos(self, qs):
         return qs
 
+    def can_solicitar_empleado(self, empleado: Empleado) -> bool:
+        return True
+
     def _empleados(self):
         return self.empleados_queryset().filter(activo=True).order_by("nombre")
 
@@ -187,6 +190,8 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             empleado = self._empleados().get(pk=empleado_id)
         except Empleado.DoesNotExist:
             return Response({"empleado": "Empleado fuera de tu equipo o inactivo."}, status=status.HTTP_400_BAD_REQUEST)
+        if not self.can_solicitar_empleado(empleado):
+            return Response({"empleado": "No puedes solicitar permisos para este empleado."}, status=status.HTTP_403_FORBIDDEN)
 
         fecha_inicio = _parse_dt(request.data.get("fecha_inicio"))
         if not fecha_inicio:

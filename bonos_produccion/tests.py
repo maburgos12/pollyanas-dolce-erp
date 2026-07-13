@@ -201,6 +201,26 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(HoraExtra.objects.filter(empleado=ajeno).exists())
 
+    def test_autosolicitud_no_se_habilita_sin_jefa_con_usuario_erp(self):
+        user, _, julissa, _ = self.crear_contexto_autosolicitud()
+        julissa.jefe_directo.usuario_erp = None
+        julissa.jefe_directo.save(update_fields=["usuario_erp"])
+        self.client.force_login(user)
+
+        response = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(julissa.id, [row["id"] for row in response.json()["empleados"]])
+
+    def test_app_etiqueta_al_usuario_actual_como_yo(self):
+        user, _, _, _ = self.crear_contexto_autosolicitud()
+        self.client.force_login(user)
+
+        response = self.client.get("/bonos-produccion/app/?captura=1&tab=permisos")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Yo — ${b.empleado_nombre}", response.content.decode())
+
     def test_sidebar_de_produccion_apunta_al_dashboard_erp(self):
         produccion = next(group for group in NAV_GROUPS if group["key"] == "produccion")
         bonos_item = next(item for item in produccion["items"] if item[0] == "produccion" and item[1] == "bonos")
@@ -516,7 +536,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v18", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v20-autosolicitudes", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
