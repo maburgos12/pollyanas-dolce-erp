@@ -1,11 +1,15 @@
-from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
+from threading import Barrier, BrokenBarrierError
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.db import close_old_connections, connection
+from django.db.models.query import QuerySet
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -30,6 +34,118 @@ from recetas.models import (
     SolicitudVenta,
     VentaHistorica,
 )
+
+
+class RecepcionInventarioConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.proveedor = Proveedor.objects.create(nombre="Proveedor Concurrente", activo=True)
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg-concurrente",
+            nombre="Kilogramo Concurrente",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Insumo Concurrente",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="tester",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("4"),
+            fecha_requerida=date(2026, 7, 14),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=self.proveedor,
+            fecha_emision=date(2026, 7, 14),
+            monto_estimado=Decimal("40"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+        self.recepcion = RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 7, 14),
+            conformidad_pct=Decimal("100"),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="",
+        )
+        ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("10"))
+
+    def test_aplicaciones_concurrentes_incrementan_stock_una_sola_vez(self):
+        start_barrier = Barrier(2)
+        before_exists_barrier = Barrier(2)
+        after_exists_barrier = Barrier(2)
+        original_exists = QuerySet.exists
+        recepcion_pk = self.recepcion.pk
+
+        def coordinated_movement_exists(queryset):
+            if queryset.model is not MovimientoInventario:
+                return original_exists(queryset)
+
+            try:
+                before_exists_barrier.wait(timeout=2)
+            except BrokenBarrierError:
+                # Con el lock real, el segundo worker no puede llegar a este
+                # chequeo hasta que el primero confirme su transacción.
+                return original_exists(queryset)
+
+            result = original_exists(queryset)
+            after_exists_barrier.wait(timeout=2)
+            return result
+
+        def apply_from_separate_connection():
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '8s'")
+                recepcion = RecepcionCompra.objects.get(pk=recepcion_pk)
+                start_barrier.wait(timeout=5)
+                return _apply_recepcion_to_inventario(recepcion)
+            finally:
+                close_old_connections()
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        futures = []
+        try:
+            with patch.object(QuerySet, "exists", new=coordinated_movement_exists):
+                futures = [executor.submit(apply_from_separate_connection) for _ in range(2)]
+                results = [future.result(timeout=10) for future in futures]
+        except BaseException:
+            start_barrier.abort()
+            before_exists_barrier.abort()
+            after_exists_barrier.abort()
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            start_barrier.abort()
+            before_exists_barrier.abort()
+            after_exists_barrier.abort()
+            executor.shutdown(wait=True, cancel_futures=True)
+
+        source_hash = f"recepcion:{self.recepcion.pk}:entrada"
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=source_hash,
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=self.insumo).stock_actual,
+            Decimal("14"),
+        )
+        self.assertEqual(sum(result["applied"] is True for result in results), 1)
+        self.assertEqual(
+            sum(result == {"applied": False, "reason": "ya_aplicado"} for result in results),
+            1,
+        )
 
 
 class ComprasFase2FiltersTests(TestCase):
