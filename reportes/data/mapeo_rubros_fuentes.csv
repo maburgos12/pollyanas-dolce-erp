@@ -21,3 +21,41 @@ gastos-venta,Arrendamiento local,GASTO_OPERATIVO,RENTA_SUC,,Renta por sucursal
 administracion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""ADMINISTRACION""}",Nómina administrativa
 logistica,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""LOGISTICA""}",Nómina de logística
 produccion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""PRODUCCION""}",Nómina de producción
+gastos-venta,Aguinaldo,MANUAL,,,Sin fuente en ERP
+gastos-venta,Imss,MANUAL,,,Sin fuente en ERP
+gastos-venta,Infonavit,MANUAL,,,Sin fuente en ERP
+gastos-venta,Dias festivos,MANUAL,,,Sin fuente en ERP
+gastos-venta,Vacaciones,MANUAL,,,Sin fuente en ERP
+gastos-venta,Prima Vacacional,MANUAL,,,Sin fuente en ERP
+gastos-venta,Apertura sucursal,MANUAL,,,Decisión de dirección
+logistica,Aguinaldo,MANUAL,,,Sin fuente en ERP
+logistica,Imss,MANUAL,,,Sin fuente en ERP
+logistica,Infonavit,MANUAL,,,Sin fuente en ERP
+logistica,Dias festivos,MANUAL,,,Sin fuente en ERP
+logistica,Vacaciones,MANUAL,,,Sin fuente en ERP
+logistica,Prima Vacacional,MANUAL,,,Sin fuente en ERP
+logistica,Uniformes,MANUAL,,,Sin fuente en ERP
+administracion,Aguinaldo,MANUAL,,,Sin fuente en ERP
+administracion,Imss,MANUAL,,,Sin fuente en ERP
+administracion,Infonavit,MANUAL,,,Sin fuente en ERP
+administracion,Infonavit-RCV,MANUAL,,,Sin fuente en ERP
+administracion,ISR,MANUAL,,,Sin fuente en ERP
+administracion,Impuesto sobre Nómina,MANUAL,,,Sin fuente en ERP
+administracion,Otras retenciones,MANUAL,,,Sin fuente en ERP
+administracion,PTU,MANUAL,,,Sin fuente en ERP
+administracion,Dias festivos,MANUAL,,,Sin fuente en ERP
+administracion,Vacaciones,MANUAL,,,Sin fuente en ERP
+administracion,Honorarios personas fisicas,MANUAL,,,Se paga fuera del ERP
+administracion,Honorarios personas morales,MANUAL,,,Se paga fuera del ERP
+administracion,Comisiones bancarias,MANUAL,,,Estado de cuenta bancario (fase conciliación)
+administracion,Intereses bancarios,MANUAL,,,Estado de cuenta bancario (fase conciliación)
+administracion,No deducibles,MANUAL,,,Sin fuente en ERP
+administracion,Donativos,MANUAL,,,Sin fuente en ERP
+produccion,Aguinaldo,MANUAL,,,Sin fuente en ERP
+produccion,Imss,MANUAL,,,Sin fuente en ERP
+produccion,Infonavit,MANUAL,,,Sin fuente en ERP
+produccion,Dias festivos,MANUAL,,,Sin fuente en ERP
+produccion,Vacaciones,MANUAL,,,Sin fuente en ERP
+produccion,Prima Vacacional,MANUAL,,,Sin fuente en ERP
+produccion,COEPRIS,MANUAL,,,Trámite sanitario
+capex,Apertura sucursal,MANUAL,,,Decisión de dirección

@@ -376,3 +376,67 @@ class PresupuestoRealConsolidacionTests(TestCase):
 
         self.assertEqual(monto, Decimal("321.45"))
         self.assertEqual(fuente, "AUTO:NOMINA")
+
+
+class PresupuestoVsRealViewTests(TestCase):
+    """Valida el tablero comparativo: RBAC, render y export."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        cls.superuser = User.objects.create_superuser("dg_test", "dg@test.mx", "clave-test")
+        cls.sin_permiso = User.objects.create_user("sin_permiso", "np@test.mx", "clave-test")
+
+        cls.periodo = date(2026, 3, 1)
+        cls.area = AreaPresupuesto.objects.create(nombre="Área tablero", codigo="tablero")
+        cls.rubro = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Concepto tablero", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        cls.linea = LineaPresupuestoMensual.objects.create(
+            rubro=cls.rubro,
+            periodo=cls.periodo,
+            monto_presupuesto=Decimal("100.00"),
+            monto_real=Decimal("80.00"),
+            fuente_real="AUTO:NOMINA",
+            metadata={"real_breakdown": [{"tipo_fuente": "NOMINA", "monto": "80.00"}]},
+        )
+
+    def test_requiere_permiso_de_reportes(self):
+        """Un usuario sin acceso al módulo recibe 403."""
+        self.client.force_login(self.sin_permiso)
+        response = self.client.get("/reportes/presupuesto-vs-real/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_render_muestra_detalle_y_fuente(self):
+        """El tablero muestra el concepto, su varianza y el badge de fuente."""
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode()
+        self.assertIn("Concepto tablero", contenido)
+        self.assertIn("Automático · Nómina", contenido)
+        detalle = response.context["detalle"]
+        self.assertEqual(len(detalle), 1)
+        self.assertEqual(detalle[0]["varianza"], Decimal("-20.00"))
+        # Egreso gastando menos que presupuesto = verde
+        self.assertEqual(detalle[0]["tone"], "success")
+
+    def test_export_csv_incluye_encabezados_y_fila(self):
+        """El export CSV trae encabezados y la línea del mes."""
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&export=csv")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        cuerpo = response.content.decode()
+        self.assertIn("Concepto tablero", cuerpo)
+        self.assertIn("Varianza %", cuerpo)
+
+    def test_export_xlsx_responde_archivo(self):
+        """El export XLSX responde un adjunto de Excel."""
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&export=xlsx")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+        self.assertIn("attachment", response["Content-Disposition"])

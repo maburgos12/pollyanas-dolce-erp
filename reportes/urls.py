@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 from . import investment_views
 from . import views_mano_obra_area
+from . import views_presupuesto_real
 from .views_produccion import ProducidoVsVendidoMermaView
 
 app_name = "reportes"
@@ -28,6 +29,11 @@ urlpatterns = [
     path("produccion/data/", ProducidoVsVendidoMermaView.as_view(), name="producido_vs_vendido_data"),
     path("financiero/", views.costo_receta, name="financiero"),
     path("presupuesto-maestro/", views.presupuesto_maestro, name="presupuesto_maestro"),
+    path(
+        "presupuesto-vs-real/",
+        views_presupuesto_real.presupuesto_vs_real,
+        name="presupuesto_vs_real",
+    ),
     path("mermas-devoluciones/", views.mermas_devoluciones, name="mermas_devoluciones"),
     path("auditoria-insumos/", views.auditoria_insumos, name="auditoria_insumos"),
     path("proyeccion-produccion/", views.proyeccion_produccion, name="proyeccion_produccion"),
