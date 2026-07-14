@@ -61,7 +61,13 @@ from logistica.services_carga_ruta import (
     validar_linea_carga,
     validar_producto_tramo_carga,
 )
-from logistica.services_rutas_control import registrar_ubicacion_ruta, resumen_control_rutas, ruta_operativa_para_repartidor
+from logistica.services_rutas_control import (
+    LiberacionRutaError,
+    liberar_ruta_con_turno,
+    registrar_ubicacion_ruta,
+    resumen_control_rutas,
+    ruta_operativa_para_repartidor,
+)
 from logistica.services_entregas import (
     EntregaEvidenciaIdConflicto,
     EntregaIdempotenciaConflicto,
@@ -200,26 +206,15 @@ def _get_repartidor_for_user(user) -> Repartidor | None:
         return None
 
 
-def _liberar_ruta_desde_bitacora_salida(*, ruta: RutaEntrega | None, bitacora: BitacoraSalidaLlegada, user) -> None:
-    if not ruta or ruta.estatus != RutaEntrega.ESTATUS_PLANEADA:
+def _liberar_ruta_desde_bitacora_salida(
+    *,
+    ruta: RutaEntrega | None,
+    bitacora: BitacoraSalidaLlegada | None = None,
+    user,
+) -> None:
+    if not ruta:
         return
-    if ruta.unidad_operativa_id and ruta.unidad_operativa_id != bitacora.unidad_id:
-        return
-    blocker = checklist_bloquea_salida(ruta)
-    if blocker:
-        raise ValidationError(blocker)
-    ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
-    ruta.bitacora_salida = bitacora
-    ruta.hora_inicio_real = ruta.hora_inicio_real or bitacora.hora_salida or timezone.now()
-    ruta.save(update_fields=["estatus", "bitacora_salida", "hora_inicio_real", "updated_at"])
-    if not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists():
-        EventoRuta.objects.create(
-            ruta=ruta,
-            tipo=EventoRuta.TIPO_SALIDA,
-            severidad=EventoRuta.SEVERIDAD_INFO,
-            descripcion="Ruta liberada por salida registrada desde PWA.",
-            creado_por=user,
-        )
+    liberar_ruta_con_turno(ruta=ruta, actor=user, bitacora=bitacora)
 
 
 def _auditar_ticket_combustible_sin_bloquear(carga_id: int) -> None:
@@ -751,44 +746,21 @@ class LogisticaBitacoraSalidaLiberarRutaView(_LogisticaBaseView):
         if not repartidor or not _can_operate_pwa(request.user):
             return Response({"detail": "Solo repartidores registrados pueden liberar ruta."}, status=status.HTTP_403_FORBIDDEN)
 
-        bitacora = (
-            BitacoraSalidaLlegada.objects.select_related("unidad")
-            .filter(repartidor=repartidor, cerrada=False)
-            .first()
-        )
-        if not bitacora:
-            return Response({"error": "sin_turno", "mensaje": "Abre turno antes de liberar la ruta."}, status=status.HTTP_400_BAD_REQUEST)
-
         ruta = _ruta_operativa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response({"error": "sin_ruta", "mensaje": "No tienes ruta planeada para liberar hoy."}, status=status.HTTP_400_BAD_REQUEST)
-        if ruta.unidad_operativa_id and ruta.unidad_operativa_id != bitacora.unidad_id:
-            return Response(
-                {
-                    "error": "unidad_ruta_distinta",
-                    "mensaje": (
-                        f"Tienes turno abierto en {bitacora.unidad.codigo}. "
-                        f"Para salir a {ruta.folio}, cierra este turno y abre con {ruta.unidad_operativa.codigo}."
-                    ),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
-            return Response(
-                {"ruta": LogisticaRutaSerializer(ruta).data, "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data},
-                status=status.HTTP_200_OK,
-            )
         try:
-            _liberar_ruta_desde_bitacora_salida(ruta=ruta, bitacora=bitacora, user=request.user)
-        except ValidationError as exc:
+            _liberar_ruta_desde_bitacora_salida(ruta=ruta, user=request.user)
+        except LiberacionRutaError as exc:
             return Response(
                 {
-                    "error": "ruta_no_liberada",
-                    "mensaje": exc.message if hasattr(exc, "message") else "; ".join(exc.messages),
+                    "error": exc.error_code,
+                    "mensaje": "; ".join(exc.messages),
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=exc.http_status,
             )
         ruta.refresh_from_db()
+        bitacora = ruta.bitacora_salida
         return Response(
             {"ruta": LogisticaRutaSerializer(ruta).data, "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data},
             status=status.HTTP_200_OK,
@@ -1231,38 +1203,23 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
         if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and estatus_nuevo == RutaEntrega.ESTATUS_PLANEADA:
             return Response({"detail": "La ruta ya inició seguimiento y no puede regresar a planeada."}, status=status.HTTP_400_BAD_REQUEST)
         if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA:
-            blockers = []
-            if not ruta.repartidor_id:
-                blockers.append("asigna repartidor")
-            if not ruta.unidad_operativa_id:
-                blockers.append("asigna unidad operativa")
-            if not ruta.paradas.exists():
-                blockers.append("agrega al menos una parada")
-            if (
-                ruta.repartidor_id
-                and RutaEntrega.objects.filter(
-                    repartidor_id=ruta.repartidor_id,
-                    estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            from_status = ruta.estatus
+            try:
+                ruta = liberar_ruta_con_turno(ruta=ruta, actor=request.user)
+            except LiberacionRutaError as exc:
+                return Response(
+                    {"detail": "; ".join(exc.messages), "error": exc.error_code},
+                    status=exc.http_status,
                 )
-                .exclude(pk=ruta.pk)
-                .exists()
-            ):
-                blockers.append("el repartidor ya tiene otra ruta en curso")
-            if (
-                ruta.unidad_operativa_id
-                and RutaEntrega.objects.filter(
-                    unidad_operativa_id=ruta.unidad_operativa_id,
-                    estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            if from_status != ruta.estatus:
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "logistica.RutaEntrega",
+                    str(ruta.id),
+                    {"folio": ruta.folio, "from": from_status, "to": ruta.estatus},
                 )
-                .exclude(pk=ruta.pk)
-                .exists()
-            ):
-                blockers.append("la unidad ya tiene otra ruta en curso")
-            checklist_blocker = checklist_bloquea_salida(ruta)
-            if checklist_blocker:
-                blockers.append(checklist_blocker)
-            if blockers:
-                return Response({"detail": "No se puede liberar la ruta: " + ", ".join(blockers) + "."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
         if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA:
             if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
                 return Response({"detail": "Solo puedes completar una ruta que ya está en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1277,25 +1234,9 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
-        if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not ruta.hora_inicio_real:
-            ruta.hora_inicio_real = timezone.now()
         if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not ruta.hora_cierre_real:
             ruta.hora_cierre_real = timezone.now()
-        try:
-            ruta.save(update_fields=["estatus", "hora_inicio_real", "hora_cierre_real", "updated_at"])
-        except IntegrityError:
-            return Response(
-                {"detail": "No se puede liberar la ruta: el repartidor o la unidad ya tiene otra ruta en curso."},
-                status=status.HTTP_409_CONFLICT,
-            )
-        if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists():
-            EventoRuta.objects.create(
-                ruta=ruta,
-                tipo=EventoRuta.TIPO_SALIDA,
-                severidad=EventoRuta.SEVERIDAD_INFO,
-                descripcion="Ruta liberada para seguimiento operativo.",
-                creado_por=request.user,
-            )
+        ruta.save(update_fields=["estatus", "hora_cierre_real", "updated_at"])
         if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_CIERRE).exists():
             EventoRuta.objects.create(
                 ruta=ruta,
@@ -1446,6 +1387,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
                     "entrega_confirmada_por_nombre": nombre_operativo_usuario(request.user),
                     "entrega_notas": replay_idempotente.evidencia.comentario,
                     "geocerca_confiable": not requiere_revision,
+                    "operativamente_resuelta": True,
                     "revision_entrega_estado": (
                         ParadaRuta.REVISION_PENDIENTE if requiere_revision else ParadaRuta.REVISION_NO_REQUERIDA
                     ),
@@ -1484,7 +1426,11 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             return Response({"detail": "Solo puedes confirmar entregas de una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
         if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
             return Response({"detail": "CEDIS es parada de recarga; no requiere confirmación de entrega."}, status=status.HTTP_400_BAD_REQUEST)
-        if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE, orden__lt=parada.orden).exists():
+        if ruta.paradas.filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            orden__lt=parada.orden,
+        ).exists():
             return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
         if (
             payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA
@@ -1592,9 +1538,22 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
                 parada=parada,
                 user=request.user,
                 notas=(request.data.get("notas") or "Recarga CEDIS registrada por repartidor en PWA.").strip(),
+                autorizar_sin_sync=request.data.get("autorizar_sin_sync") is True,
+                motivo_autorizacion=(request.data.get("motivo_autorizacion") or "").strip(),
+                expected_snapshot_hash=(request.data.get("expected_snapshot_hash") or "").strip(),
             )
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValidationError as exc:
-            return Response({"detail": "; ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+            payload = {"detail": "; ".join(exc.messages)}
+            if hasattr(exc, "estado_sync"):
+                payload.update(
+                    estado_sync=exc.estado_sync,
+                    jefe_notificado=getattr(exc, "jefe_notificado", False),
+                )
+            if getattr(exc, "snapshot_hash", ""):
+                payload["snapshot_hash"] = exc.snapshot_hash
+            return Response(payload, status=getattr(exc, "http_status", status.HTTP_400_BAD_REQUEST))
         parada.refresh_from_db()
 
         log_event(
@@ -1604,7 +1563,13 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
             str(parada.id),
             {"ruta": ruta.folio, "parada": parada.id, "tipo": EventoRuta.TIPO_RECARGA_CEDIS, "evento": evento.id},
         )
-        return Response({"parada": ParadaRutaSerializer(parada).data}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "parada": ParadaRutaSerializer(parada).data,
+                "estado_sync": evento.metadata.get("estado_sync", "ACTUALIZADO"),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogisticaRutaActivaView(_LogisticaBaseView):

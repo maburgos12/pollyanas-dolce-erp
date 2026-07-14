@@ -13,6 +13,7 @@ from django.utils import timezone
 from core.access import can_manage_submodule
 from core.models import Notificacion
 from core.notificaciones import crear_notificaciones
+from logistica.domain_ruta import parada_resuelta_operativamente
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -152,6 +153,7 @@ def _snapshot_dominio_parada(*, parada: ParadaRuta, geocerca_confiable: bool) ->
             ),
             "entrega_notas": parada.entrega_notas,
             "geocerca_confiable": geocerca_confiable,
+            "operativamente_resuelta": parada_resuelta_operativamente(parada),
             "revision_entrega_estado": parada.revision_entrega_estado,
             "revision_entrega_causa": parada.revision_entrega_causa,
             "revision_entrega_datos": parada.revision_entrega_datos,

@@ -536,14 +536,39 @@
       </form>
       {% endif %}
       {% if recarga_cedis_disponible %}
-      <form method="post" data-route-loading-form data-loading-title="Registrando recarga CEDIS" data-loading-message="Actualizando el flujo de carga de la unidad..." onsubmit="return confirm('¿Registrar recarga CEDIS para esta misma ruta?');">
+      <form id="recarga-cedis" method="post" data-route-loading-form data-loading-title="Registrando recarga CEDIS" data-loading-message="Actualizando el flujo de carga de la unidad..." onsubmit="return confirm('¿Registrar recarga CEDIS para esta misma ruta?');">
         {% csrf_token %}
         <input type="hidden" name="action" value="registrar_recarga_cedis">
+        {% if ruta.estatus == "EN_RUTA" and proxima_parada_cedis %}
+        <input type="hidden" name="parada_cedis_id" value="{{ proxima_parada_cedis.id }}">
+        {% endif %}
         <input type="hidden" name="notas_recarga_cedis" value="Recarga registrada por CEDIS/Logística.">
         <button class="btn btn-secondary" type="submit">
           {% if ruta.estatus == "PLANEADA" %}Autorizar salida parcial con recarga{% else %}Registrar evento recarga CEDIS{% endif %}
         </button>
       </form>
+      {% if ruta.estatus == "EN_RUTA" and proxima_parada_cedis and alerta_recarga_cedis_revisable %}
+      <details class="route-load-breakdown">
+        <summary>Autorizar recarga con alerta de Point</summary>
+        <p class="muted">
+          Úsalo sólo después de revisar la carga física cuando Point no responda, no confirme Enviado o no devuelva líneas del siguiente tramo.
+        </p>
+        <p class="muted">
+          Alerta revisada: {{ alerta_recarga_cedis_revisable.metadata.estado_sync }} · {{ alerta_recarga_cedis_revisable.descripcion }}
+        </p>
+        <form method="post" action="#recarga-cedis" data-async-action>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="registrar_recarga_cedis">
+          <input type="hidden" name="parada_cedis_id" value="{{ proxima_parada_cedis.id }}">
+          <input type="hidden" name="autorizar_sin_sync" value="1">
+          <input type="hidden" name="expected_snapshot_hash" value="{{ alerta_recarga_cedis_revisable.metadata.snapshot.snapshot_hash }}">
+          <input type="hidden" name="notas_recarga_cedis" value="Recarga CEDIS autorizada por jefatura tras revisar alerta de Point.">
+          <label for="motivo_autorizacion_recarga">Motivo y evidencia revisada</label>
+          <textarea id="motivo_autorizacion_recarga" name="motivo_autorizacion" required maxlength="500" placeholder="Describe qué se verificó antes de autorizar"></textarea>
+          <button class="btn btn-primary" type="submit">Autorizar y registrar recarga</button>
+        </form>
+      </details>
+      {% endif %}
       {% endif %}
       {% if diferencia_carga_pendiente_autorizar %}
       <form method="post" data-route-loading-form data-loading-title="Autorizando diferencia" data-loading-message="Registrando autorización de logística..." onsubmit="return confirm('¿Autorizar que esta ruta se libere con la diferencia de carga reportada?');">

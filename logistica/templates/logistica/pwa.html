@@ -1309,7 +1309,8 @@
         background: var(--route-pwa-panel);
         color: var(--route-pwa-text);
       }
-      .route-stop.visited {
+      .route-stop.visited,
+      .route-stop.resolved {
         border-color: rgba(81, 181, 111, .70);
         background: #effaf3;
       }
@@ -1327,7 +1328,8 @@
         color: var(--route-pwa-gold-text);
         font-weight: 900;
       }
-      .route-stop.visited .route-stop-number {
+      .route-stop.visited .route-stop-number,
+      .route-stop.resolved .route-stop-number {
         background: var(--route-pwa-success);
         color: #FFFFFF;
       }
@@ -1443,6 +1445,7 @@
         trackingQueueCount: 0,
         offlineMutationQueueCount: 0,
         offlineMutationFailedCount: 0,
+        offlineMutationReplayErrors: [],
         routeAutoTrackingTimer: null,
         routeAutoTrackingRutaId: null,
         routeAutoTrackingBusy: false,
@@ -1923,6 +1926,10 @@
         return `${String(method || "POST").toUpperCase()} ${path}`;
       }
 
+      function isRecargaCedisPath(path) {
+        return String(path || "").includes("/recarga-cedis/");
+      }
+
       function responseQueuedOffline(response) {
         return response?.headers?.get("X-Offline-Queued") === "1";
       }
@@ -2045,7 +2052,7 @@
 
       async function enqueueOfflineMutation(path, options = {}) {
         const method = String(options.method || "GET").toUpperCase();
-        if (!isMutationMethod(method) || options.skipOfflineQueue || options._retry) return null;
+        if (!isMutationMethod(method) || isRecargaCedisPath(path) || options.skipOfflineQueue || options._retry) return null;
         const item = {
           id: newClientEventId(),
           path,
@@ -2086,6 +2093,7 @@
         if (!pending.length) return 0;
         const remaining = [];
         let failed = 0;
+        const replayErrors = [];
         for (const item of pending) {
           try {
             const replayItem = window.PDLogisticaOfflineQueue.prepareReplay(item);
@@ -2097,7 +2105,23 @@
               skipOfflineQueue: true
             });
             if (!response.ok) {
-              if ([400, 403, 404, 409].includes(response.status)) {
+              if (isRecargaCedisPath(item.path) && [409, 503].includes(response.status)) {
+                const data = await response.json().catch(() => ({}));
+                const message = apiErrorMessage(data, response.status === 409 ? "Point aún no confirma Enviado." : "Point no está disponible.");
+                remaining.push({
+                  ...item,
+                  attempts: Number(item.attempts || 0) + 1,
+                  last_error_status: response.status,
+                  last_error_message: message,
+                });
+                failed += 1;
+                replayErrors.push({
+                  id: item.id,
+                  label: item.label || "Recarga CEDIS",
+                  status: response.status,
+                  message,
+                });
+              } else if ([400, 403, 404, 409].includes(response.status)) {
                 failed += 1;
               } else {
                 remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
@@ -2108,6 +2132,7 @@
           }
         }
         state.offlineMutationFailedCount = failed;
+        state.offlineMutationReplayErrors = replayErrors;
         saveOfflineMutationQueue(remaining);
         return remaining.length;
       }
@@ -2385,11 +2410,18 @@
       function offlineMutationBanner(count = loadOfflineMutationQueue().length) {
         if (!count && !state.offlineMutationFailedCount) return "";
         const failed = state.offlineMutationFailedCount || 0;
+        const replayErrors = state.offlineMutationReplayErrors || [];
         return `
           <section class="daily-banner ${failed ? "warning" : ""}" style="margin:0 0 16px;">
             <strong>${count} captura${count === 1 ? "" : "s"} pendiente${count === 1 ? "" : "s"} por sincronizar.</strong>
-            ${count ? "La app la enviará automáticamente cuando vuelva la señal." : ""}
+            ${count && !replayErrors.length ? "La app la enviará automáticamente cuando vuelva la señal." : ""}
             ${failed ? ` ${failed} captura${failed === 1 ? "" : "s"} requiere${failed === 1 ? "" : "n"} revisión porque el servidor la rechazó.` : ""}
+            ${replayErrors.map((error) => `
+              <div style="margin-top:8px;">
+                <strong>${escapeHtml(error.label)} (${escapeHtml(error.status)}).</strong>
+                ${escapeHtml(error.message)} La operación se conservó y requiere acción explícita; revisa Point y usa “Reintentar ahora”.
+              </div>
+            `).join("")}
             ${count ? `<button class="secondary-btn" type="button" onclick="flushAllOfflineQueues()" style="margin-top:10px;">Reintentar ahora</button>` : ""}
           </section>
         `;
@@ -2752,11 +2784,15 @@
         draft.desvio_motivo = value.slice(0, 160);
       }
 
+      function paradaOperativamenteResuelta(parada) {
+        return parada?.operativamente_resuelta === true;
+      }
+
       function routeProgressValue(ruta, paradas) {
         const total = paradas?.length || 0;
         if (total) {
-          const visitadas = paradas.filter((parada) => parada.estado === "VISITADA").length;
-          return Math.round((visitadas / total) * 100);
+          const resueltas = paradas.filter(paradaOperativamenteResuelta).length;
+          return Math.round((resueltas / total) * 100);
         }
         return Math.round(Number(ruta?.cumplimiento_porcentaje || 0));
       }
@@ -2764,9 +2800,10 @@
       function routeStopCounts(paradas) {
         const total = paradas?.length || 0;
         const visitadas = (paradas || []).filter((parada) => parada.estado === "VISITADA").length;
+        const resueltas = (paradas || []).filter(paradaOperativamenteResuelta).length;
         const entregables = (paradas || []).filter(paradaRequiereEntrega);
-        const entregadas = entregables.filter((parada) => parada.entrega_estado === "ENTREGADA").length;
-        return { total, visitadas, pendientes: Math.max(total - visitadas, 0), entregables: entregables.length, entregadas };
+        const entregadas = entregables.filter(paradaOperativamenteResuelta).length;
+        return { total, visitadas, resueltas, pendientes: Math.max(total - resueltas, 0), entregables: entregables.length, entregadas };
       }
 
       function renderRutaSignals({ turnoOk, unidadOk, ubicacionLista, pendientesOffline, draft, rutaData }) {
@@ -2850,7 +2887,7 @@
       }
 
       function proximaParadaId(paradas) {
-        const proxima = (paradas || []).find((parada) => parada.estado !== "VISITADA");
+        const proxima = (paradas || []).find((parada) => !paradaOperativamenteResuelta(parada));
         return proxima ? Number(proxima.id) : null;
       }
 
@@ -2874,23 +2911,27 @@
         const nextId = proximaParadaId(paradas);
         return `<div class="route-stop-list">` + paradas.map((parada) => {
           const visited = parada.estado === "VISITADA";
+          const resolved = paradaOperativamenteResuelta(parada);
           const entrega = parada.entrega_estado || "PENDIENTE";
           const requiereEntrega = paradaRequiereEntrega(parada);
-          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
-          const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !visited;
-          const esSiguiente = !visited && Number(parada.id) === nextId;
+          const revisionPendiente = parada.revision_entrega_estado === "PENDIENTE";
+          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
+          const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !resolved;
+          const esSiguiente = !resolved && Number(parada.id) === nextId;
           const notasDraft = entregaNotasDraftFor(parada.id);
           return `
-            <section class="route-stop ${visited ? "visited" : ""}${esSiguiente ? " next" : ""}" tabindex="0">
-              <span class="route-stop-number">${visited ? "OK" : escapeHtml(parada.orden)}</span>
+            <section class="route-stop ${visited ? "visited" : (resolved ? "resolved" : "")}${esSiguiente ? " next" : ""}" tabindex="0">
+              <span class="route-stop-number">${resolved ? "OK" : escapeHtml(parada.orden)}</span>
               <div>
                 ${esSiguiente ? `<span class="route-status-pill ok" style="margin-bottom:6px;display:inline-block;">Siguiente parada</span>` : ""}
                 <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
                 <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
                 <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
+                ${resolved && !visited ? `<span class="route-stop-meta">Entrega resuelta · visita física sin confirmar</span>` : ""}
                 <span class="route-stop-meta">${escapeHtml(parada.entrega_notas || (requiereEntrega ? "La ruta puede continuar; cierre final espera recepción Point." : "Parada operativa para recarga CEDIS."))}</span>
                 <div class="route-status-row">
-                  <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (visited ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
+                  <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (resolved ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
+                  ${revisionPendiente ? `<span class="route-status-pill warn">Fuera de geocerca · revisión administrativa pendiente</span>` : ""}
                 </div>
                 ${puedeConfirmarEntrega ? `
                   <div class="route-status-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
@@ -2952,51 +2993,72 @@
         const todas = (paradas || []).map((parada) => ({
           orden: Number(parada.orden || 0),
           tipo: (parada.punto?.tipo || "").toUpperCase(),
-          visitada: parada.estado === "VISITADA",
-          entrega: parada.entrega_estado || "PENDIENTE",
+          resuelta: paradaOperativamenteResuelta(parada),
         }));
         const cedis = todas
           .filter((parada) => parada.tipo === "CEDIS")
           .map((parada) => ({
             orden: parada.orden,
-            visitada: parada.visitada,
-            anterioresResueltas: todas.every((item) => item.tipo === "CEDIS" || item.orden >= parada.orden || item.entrega !== "PENDIENTE"),
+            resuelta: parada.resuelta,
           }))
           .filter((parada) => parada.orden > 0)
           .sort((a, b) => a.orden - b.orden);
         if (!cedis.length) return { lineas, titulo: "Carga de ruta", detalle: "" };
 
-        const siguienteCedis = cedis.find((parada) => !(parada.visitada && parada.anterioresResueltas));
+        const siguienteCedis = cedis.find((parada) => !parada.resuelta);
         const limiteSuperior = siguienteCedis?.orden || Infinity;
-        const limiteInferior = Math.max(0, ...cedis.filter((parada) => parada.visitada && parada.anterioresResueltas && parada.orden < limiteSuperior).map((parada) => parada.orden));
+        const limiteInferior = Math.max(0, ...cedis.filter((parada) => parada.resuelta && parada.orden < limiteSuperior).map((parada) => parada.orden));
         const segmento = lineas.filter((linea) => {
           const orden = Number(linea.parada_orden || 0);
           return orden > limiteInferior && orden < limiteSuperior;
         });
         return {
-          lineas: segmento.length ? segmento : lineas,
+          lineas: segmento,
           titulo: "Carga del tramo",
-          detalle: segmento.length ? "Mostrando solo el tramo operativo actual." : "",
+          detalle: "Mostrando solo el tramo operativo actual.",
         };
+      }
+
+      function productoCargaVisible(producto) {
+        return producto.esperado > 0 || producto.lineas.some((linea) => ["PENDIENTE", "ZERO_EXPECTED"].includes(linea.estatus));
+      }
+
+      function lineaPendientePoint(linea) {
+        return linea.estatus === "PENDIENTE" && linea.point_enviada !== true;
+      }
+
+      function lineaPendienteCaptura(linea) {
+        return linea.estatus === "PENDIENTE" && linea.point_enviada === true && Number(linea.cantidad_enviada_esperada || 0) > 0;
+      }
+
+      function productoPendiente(producto) {
+        return producto.lineas.some((linea) => linea.estatus === "PENDIENTE");
       }
 
       function resumenCargaRuta(checklist, paradas = []) {
         const lineas = checklist?.lineas || [];
         if (!lineas.length) return "Sin carga sincronizada desde Point.";
         const segmento = segmentoCargaOperativo(lineas, paradas);
-        const productos = totalesCargaPorProducto(segmento.lineas).filter((row) => row.esperado > 0);
+        const productos = totalesCargaPorProducto(segmento.lineas).filter(productoCargaVisible);
         if (!productos.length) return "Sin carga física pendiente en este tramo.";
-        const confirmados = productos.filter((row) => !row.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0)).length;
+        const confirmados = productos.filter((row) => !productoPendiente(row)).length;
         return `${confirmados} de ${productos.length} producto${productos.length === 1 ? "" : "s"} revisado${productos.length === 1 ? "" : "s"}.`;
+      }
+
+      function normalizarIdentidadCarga(value) {
+        return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
       }
 
       function totalesCargaPorProducto(lineas) {
         return Array.from(lineas.reduce((map, linea) => {
-          const key = `${linea.item_code || ""}|${linea.item_name || ""}|${linea.unit || ""}`.toUpperCase();
+          const itemCode = normalizarIdentidadCarga(linea.item_code);
+          const itemName = normalizarIdentidadCarga(linea.item_name);
+          const unit = normalizarIdentidadCarga(linea.unit);
+          const key = `${itemCode ? `CODIGO:${itemCode}` : `NOMBRE:${itemName}`}|UNIDAD:${unit}`;
           const row = map.get(key) || {
-            item_code: linea.item_code || "",
-            item_name: linea.item_name || "Producto",
-            unit: linea.unit || "",
+            item_code: String(linea.item_code || "").trim(),
+            item_name: String(linea.item_name || "Producto").trim().replace(/\s+/g, " "),
+            unit: String(linea.unit || "").trim().toUpperCase(),
             esperado: 0,
             cargado: 0,
             cargadoCompleto: true,
@@ -3024,9 +3086,10 @@
         const cargaTitulo = segmento.titulo;
         const cargaDetalle = segmento.detalle;
         const totales = totalesCargaPorProducto(lineasOperativas);
-        const totalesConCarga = totales.filter((row) => row.esperado > 0);
+        const totalesConCarga = totales.filter(productoCargaVisible);
         const total = totalesConCarga.length;
-        const pendientes = totalesConCarga.filter((row) => row.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0)).length;
+        const pendientes = totalesConCarga.filter(productoPendiente).length;
+        const pendientesPoint = totalesConCarga.filter((row) => row.lineas.some(lineaPendientePoint)).length;
         const confirmadas = total - pendientes;
         const pct = total ? Math.round((confirmadas / total) * 100) : 0;
         const statusText = checklist.estatus_display || checklist.estatus || "Pendiente";
@@ -3052,10 +3115,11 @@
             <div class="route-progress-track" aria-label="Avance de carga ${pct}%">
               <div class="route-progress-fill" style="--route-progress:${pct}%;"></div>
             </div>
-            ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por revisar antes de salida.</div>` : `<p class="success">Carga revisada.</p>`}
+            ${pendientes ? `<div class="daily-banner warning">Faltan ${pendientes} producto${pendientes === 1 ? "" : "s"} por resolver antes de salida.${pendientesPoint ? ` ${pendientesPoint} espera${pendientesPoint === 1 ? "" : "n"} confirmación de Enviado en Point y mantiene${pendientesPoint === 1 ? "" : "n"} la carga bloqueada.` : ""}</div>` : `<p class="success">Carga revisada.</p>`}
             <div class="route-stop-list">
               ${totalesConCarga.map((totalProducto, index) => {
-                const pendienteProducto = totalProducto.lineas.some((linea) => linea.estatus === "PENDIENTE" && Number(linea.cantidad_enviada_esperada || 0) > 0);
+                const pendienteCaptura = totalProducto.lineas.some(lineaPendienteCaptura);
+                const pendientePoint = totalProducto.lineas.some(lineaPendientePoint);
                 const draftProducto = cargaProductoDraftFor(index, totalProducto.esperado);
                 return `
                 <section class="route-stop visited">
@@ -3064,7 +3128,11 @@
                     <strong>${escapeHtml(totalProducto.item_name)}</strong>
                     <span class="route-stop-meta">${escapeHtml(totalProducto.item_code || "Sin código")} · cargar ${totalProducto.esperado.toFixed(3)} ${escapeHtml(totalProducto.unit)}</span>
                     <span class="route-stop-meta">Total cargado ${totalProducto.cargadoCompleto || totalProducto.cargadoParcial ? totalProducto.cargado.toFixed(3) : "pendiente"} ${escapeHtml(totalProducto.unit)}</span>
-                    ${pendienteProducto ? `
+                    ${pendientePoint ? `
+                      <div class="daily-banner warning" style="margin-top:10px;">
+                        Este producto espera confirmación de Enviado en Point; la carga permanece bloqueada y no solicita captura.
+                      </div>
+                    ` : pendienteCaptura ? `
                       <div class="route-load-product-form">
                         <label class="sr-only" for="cantidad_total_${index}">Cantidad total de ${escapeHtml(totalProducto.item_name)}</label>
                         <input id="cantidad_total_${index}" type="number" min="0" step="0.001" value="${escapeHtml(draftProducto.cantidad)}" oninput="updateCargaProductoTotal(${index}, this.value)">
@@ -3081,7 +3149,7 @@
               ${lineasOperativas.map((linea) => {
                 const draft = cargaDraftFor(linea.id);
                 const pendiente = linea.estatus === "PENDIENTE";
-                const pendientePoint = pendiente && Number(linea.cantidad_enviada_esperada || 0) <= 0;
+                const pendientePoint = pendiente && linea.point_enviada !== true;
                 const enviadoCero = linea.estatus === "ZERO_EXPECTED";
                 const diferencia = ["PARCIAL", "FALTANTE", "SOBRANTE"].includes(linea.estatus);
                 const cantidadValue = draft.cantidad !== "" ? draft.cantidad : (linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0");
@@ -3306,6 +3374,9 @@
         if (!rutaId) return renderRutaScreen("No hay ruta para validar carga.");
         const draft = cargaDraftFor(lineaId);
         const linea = (state.rutaActiva?.checklist_carga?.lineas || []).find((item) => Number(item.id) === Number(lineaId));
+        if (lineaPendientePoint(linea)) {
+          return renderRutaScreen("Point aún no confirma Enviado para esta solicitud; la captura sigue bloqueada.");
+        }
         const cantidad = String(draft.cantidad !== "" ? draft.cantidad : (linea?.cantidad_cargada ?? linea?.cantidad_enviada_esperada ?? "")).trim();
         if (!cantidad) return renderRutaScreen("Captura la cantidad real cargada.");
         const real = Number(cantidad);
@@ -3351,8 +3422,11 @@
         const rutaId = rutaData?.ruta?.id;
         if (!rutaId) return renderRutaScreen("No hay ruta para validar carga.");
         const segmento = segmentoCargaOperativo(rutaData.checklist_carga?.lineas || [], rutaData.paradas || []);
-        const totalProducto = totalesCargaPorProducto(segmento.lineas).filter((row) => row.esperado > 0)[index];
+        const totalProducto = totalesCargaPorProducto(segmento.lineas).filter(productoCargaVisible)[index];
         if (!totalProducto) return renderRutaScreen("El producto ya no pertenece al tramo actual. Actualiza la pantalla.");
+        if (totalProducto.lineas.some(lineaPendientePoint)) {
+          return renderRutaScreen("Point aún no confirma Enviado para este producto; la captura sigue bloqueada.");
+        }
         const draft = cargaProductoDraftFor(index, totalProducto.esperado);
         const cantidad = String(draft.cantidad || "").trim();
         if (!cantidad) return renderRutaScreen("Captura la cantidad total cargada.");
@@ -3460,20 +3534,28 @@
           const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/recarga-cedis/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ notas: "Recarga CEDIS registrada por repartidor en PWA." })
+            body: JSON.stringify({ notas: "Recarga CEDIS registrada por repartidor en PWA." }),
+            skipOfflineQueue: true,
           });
+          const data = await response.json().catch(() => ({}));
+          if (response.status === 409 || response.status === 503) {
+            const title = response.status === 503 ? "Point no está disponible" : "Point aún no confirma Enviado";
+            return renderRutaActiva(apiErrorMessage(data, "No se pudo abrir el siguiente tramo."), title);
+          }
           if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            return renderRutaActiva(apiErrorMessage(error, "No se pudo registrar la recarga CEDIS."));
+            return renderRutaActiva(apiErrorMessage(data, "No se pudo registrar la recarga CEDIS."));
           }
           if (responseQueuedOffline(response)) {
-            state.rutaActiva = null;
-            return renderRutaActiva(queuedSuccessMessage("Recarga CEDIS"));
+            return renderRutaActiva("La recarga CEDIS requiere conexión y no puede quedar pendiente en el dispositivo.");
           }
           state.rutaActiva = null;
-          return renderRutaCarga("✅ Recarga CEDIS registrada. Captura lo que se cargó.");
+          const estado_sync = data.estado_sync || "ACTUALIZADO";
+          if (estado_sync === "AUTORIZADO") {
+            return renderRutaCarga("✅ Continuación autorizada. Revisa la carga actualizada del tramo.");
+          }
+          return renderRutaCarga("✅ Point sincronizado. Revisa la carga del siguiente tramo.");
         } catch (error) {
-          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "No se pudo registrar la recarga CEDIS. Reintenta con señal.");
+          return renderRutaActiva(error?.message === "Sesión expirada" ? "Tu sesión expiró. Vuelve a iniciar sesión." : "La recarga CEDIS requiere conexión. Recupera la señal y reintenta; la ruta no avanzó.");
         }
       }
 
@@ -5182,7 +5264,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v63-carga-tramos-consolidada", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v64-route-invariants", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

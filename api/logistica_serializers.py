@@ -28,6 +28,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
+from logistica.domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from logistica.services_entregas import geocercas_confiables_por_parada, tiene_llegada_geocerca_confiable
 from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
@@ -221,6 +222,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     entrega_estado_display = serializers.SerializerMethodField()
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
     geocerca_confiable = serializers.SerializerMethodField()
+    operativamente_resuelta = serializers.SerializerMethodField()
     revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
     revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
 
@@ -246,6 +248,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_confirmada_por_nombre",
             "entrega_notas",
             "geocerca_confiable",
+            "operativamente_resuelta",
             "revision_entrega_estado",
             "revision_entrega_causa",
             "revision_entrega_datos",
@@ -282,6 +285,9 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
                 self.context["_geocercas_confiables"] = cache
             return obj.id in cache
         return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
+
+    def get_operativamente_resuelta(self, obj):
+        return parada_resuelta_operativamente(obj)
 
     def get_revision_entrega_revisada_por_nombre(self, obj):
         if not obj.revision_entrega_revisada_por_id:
@@ -360,6 +366,7 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
     point_received_at = serializers.SerializerMethodField()
     point_received_by = serializers.SerializerMethodField()
     point_recepcion_estado = serializers.SerializerMethodField()
+    point_enviada = serializers.SerializerMethodField()
 
     class Meta:
         model = RutaCargaChecklistLinea
@@ -379,6 +386,7 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
             "cantidad_solicitada_point",
             "cantidad_enviada_esperada",
             "cantidad_enviada_point",
+            "point_enviada",
             "cantidad_cargada",
             "cantidad_cargada_pwa",
             "estatus",
@@ -418,6 +426,10 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         if point_line:
             return _format_quantity(point_line.sent_quantity)
         return _format_quantity(obj.cantidad_enviada_esperada)
+
+    def get_point_enviada(self, obj):
+        point_line = self._point_line(obj)
+        return bool(point_line and point_transfer_enviada(point_line))
 
     def get_cantidad_cargada(self, obj):
         return self.get_cantidad_cargada_pwa(obj)
