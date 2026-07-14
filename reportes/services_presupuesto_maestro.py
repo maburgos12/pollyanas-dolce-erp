@@ -801,6 +801,11 @@ class PresupuestoMaestroService:
 
     def _line_actual(self, line: LineaPresupuestoMensual, actuals: dict[str, Decimal], consumed: set[str]) -> tuple[Decimal | None, str]:
         rubro = line.rubro
+        # El real consolidado (AUTO:*) o capturado (MANUAL:*) tiene precedencia
+        # sobre el fallback heurístico de EmpresaResultadoMensual.
+        fuente = str(line.fuente_real or "")
+        if line.monto_real is not None and (fuente.startswith("AUTO:") or fuente.startswith("MANUAL:")):
+            return line.monto_real, line.fuente_real
         actual_key = str((rubro.metadata or {}).get("actual_key") or "")
         if not actual_key:
             actual_key = normalize_actual_key(rubro.codigo_cuenta, rubro.concepto, rubro.area.codigo)
