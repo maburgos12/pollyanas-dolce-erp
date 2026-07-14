@@ -1,0 +1,292 @@
+"""Consolidación mensual del gasto/ingreso REAL hacia el presupuesto maestro.
+
+Llena ``LineaPresupuestoMensual.monto_real`` desde las fuentes ERP mapeadas por
+``ReglaFuenteRubro``. Convenciones de ``fuente_real``:
+
+- ``AUTO:<TIPO_FUENTE>``  → escrito por este servicio; re-ejecutable.
+- ``MANUAL:<username>``   → captura humana; NUNCA se pisa.
+- ``AUTO:LEGADO``         → valor migrado de imports previos; re-escribible.
+
+El desglose por regla queda en ``metadata["real_breakdown"]`` para drill-down.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
+
+from django.db.models import Sum
+from django.utils import timezone
+
+from .models import (
+    GastoOperativoMensual,
+    LineaPresupuestoMensual,
+    ReglaFuenteRubro,
+)
+from .services_presupuesto_maestro import normalize_header_text
+
+AUTO_PREFIX = "AUTO:"
+MANUAL_PREFIX = "MANUAL:"
+FUENTE_LEGADO = "AUTO:LEGADO"
+
+# fuente_real heredados de imports anteriores → nuevo namespace.
+LEGACY_FUENTE_MAP = {
+    # Resultados de ventas tecleados del Excel: el POS es autoritativo, re-escribible.
+    "PROYECCIO_N_VENTAS_2026_AUTORIZADA": FUENTE_LEGADO,
+    # CAPEX confirmado a mano por dirección: protegido.
+    "CAPEX_GUAMUCHIL_CONFIRMADO": "MANUAL:legado",
+}
+
+NOMINA_CAMPOS_VALIDOS = {"salario_base", "bonos", "total_percepciones", "neto_calculado"}
+VENTA_POS_CAMPOS_VALIDOS = {"total_venta", "total_venta_neta"}
+
+
+def es_manual(fuente_real: str) -> bool:
+    return str(fuente_real or "").startswith(MANUAL_PREFIX)
+
+
+def es_escribible(fuente_real: str) -> bool:
+    """Solo se escriben líneas vacías o previamente consolidadas por AUTO."""
+    valor = str(fuente_real or "").strip()
+    return not valor or valor.startswith(AUTO_PREFIX)
+
+
+@dataclass
+class ConsolidacionSummary:
+    periodo: date
+    version: str
+    dry_run: bool
+    actualizadas: int = 0
+    sin_cambio: int = 0
+    protegidas_manual: int = 0
+    sin_regla: int = 0
+    sin_datos_fuente: int = 0
+    errores: list[str] = field(default_factory=list)
+    detalle: list[dict] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "periodo": self.periodo.isoformat(),
+            "version": self.version,
+            "dry_run": self.dry_run,
+            "actualizadas": self.actualizadas,
+            "sin_cambio": self.sin_cambio,
+            "protegidas_manual": self.protegidas_manual,
+            "sin_regla": self.sin_regla,
+            "sin_datos_fuente": self.sin_datos_fuente,
+            "errores": self.errores,
+        }
+
+
+class PresupuestoRealConsolidacionService:
+    """Calcula y persiste el monto real por rubro×periodo desde las fuentes."""
+
+    def consolidar(
+        self,
+        *,
+        periodo: date,
+        version: str = LineaPresupuestoMensual.VERSION_ORIGINAL,
+        areas: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> ConsolidacionSummary:
+        periodo = periodo.replace(day=1)
+        summary = ConsolidacionSummary(periodo=periodo, version=version, dry_run=dry_run)
+
+        lineas = (
+            LineaPresupuestoMensual.objects.filter(periodo=periodo, version=version)
+            .select_related("rubro", "rubro__area", "rubro__sucursal")
+            .prefetch_related("rubro__reglas_fuente")
+        )
+        if areas:
+            lineas = lineas.filter(rubro__area__codigo__in=areas)
+
+        ventas_index = None  # se construye perezosamente una vez por periodo
+
+        for linea in lineas:
+            reglas = [
+                r
+                for r in linea.rubro.reglas_fuente.all()
+                if r.activa and r.tipo_fuente != ReglaFuenteRubro.FUENTE_MANUAL
+            ]
+            if not reglas:
+                summary.sin_regla += 1
+                continue
+            if es_manual(linea.fuente_real):
+                summary.protegidas_manual += 1
+                continue
+            if not es_escribible(linea.fuente_real):
+                # fuente legada no migrada: no tocar hasta migrar namespace.
+                summary.protegidas_manual += 1
+                continue
+
+            total = Decimal("0")
+            breakdown: list[dict] = []
+            con_datos = False
+            try:
+                for regla in reglas:
+                    if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS and ventas_index is None:
+                        ventas_index = self._build_ventas_index(periodo)
+                    monto, hubo_datos = self._monto_regla(regla, periodo, ventas_index)
+                    con_datos = con_datos or hubo_datos
+                    aporte = (monto * regla.signo).quantize(Decimal("0.01"))
+                    total += aporte
+                    breakdown.append(
+                        {
+                            "regla_id": regla.id,
+                            "tipo_fuente": regla.tipo_fuente,
+                            "monto": str(aporte),
+                            "filtros": regla.filtros or {},
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001 — un rubro mal mapeado no debe tirar el resto
+                summary.errores.append(f"rubro={linea.rubro_id} {linea.rubro}: {exc}")
+                continue
+
+            tipos = sorted({r.tipo_fuente for r in reglas})
+            fuente = AUTO_PREFIX + "+".join(tipos)
+            metadata = dict(linea.metadata or {})
+            metadata["real_breakdown"] = breakdown
+            metadata["consolidado_en"] = timezone.now().isoformat()
+            metadata["sin_datos_fuente"] = not con_datos
+            if not con_datos:
+                summary.sin_datos_fuente += 1
+
+            if linea.monto_real == total and linea.fuente_real == fuente:
+                summary.sin_cambio += 1
+                continue
+
+            summary.actualizadas += 1
+            summary.detalle.append(
+                {
+                    "linea_id": linea.id,
+                    "rubro": str(linea.rubro),
+                    "anterior": str(linea.monto_real) if linea.monto_real is not None else None,
+                    "nuevo": str(total),
+                    "fuente": fuente,
+                }
+            )
+            if not dry_run:
+                linea.monto_real = total
+                linea.fuente_real = fuente
+                linea.metadata = metadata
+                linea.save(update_fields=["monto_real", "fuente_real", "metadata", "actualizado_en"])
+
+        return summary
+
+    # ------------------------------------------------------------------ #
+    # Fuentes                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _monto_regla(self, regla: ReglaFuenteRubro, periodo: date, ventas_index) -> tuple[Decimal, bool]:
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO:
+            return self._monto_gasto_operativo(regla, periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA:
+            return self._monto_nomina(regla, periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS:
+            return self._monto_venta_pos(regla, ventas_index)
+        raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
+
+    def _monto_gasto_operativo(self, regla: ReglaFuenteRubro, periodo: date) -> tuple[Decimal, bool]:
+        if regla.categoria_gasto_id is None:
+            raise ValueError("regla GASTO_OPERATIVO sin categoria_gasto")
+        qs = GastoOperativoMensual.objects.filter(
+            periodo=periodo,
+            tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+            categoria_gasto=regla.categoria_gasto,
+        )
+        if regla.centro_costo_id:
+            qs = qs.filter(centro_costo=regla.centro_costo)
+        else:
+            sucursal = regla.sucursal_efectiva()
+            if sucursal is not None:
+                qs = qs.filter(centro_costo__sucursal=sucursal)
+            centro_tipo = (regla.filtros or {}).get("centro_tipo")
+            if centro_tipo:
+                qs = qs.filter(centro_costo__tipo=centro_tipo)
+        total = qs.aggregate(t=Sum("monto"))["t"]
+        return (total or Decimal("0"), total is not None)
+
+    def _monto_nomina(self, regla: ReglaFuenteRubro, periodo: date) -> tuple[Decimal, bool]:
+        from rrhh.models import NominaLinea, NominaPeriodo
+
+        filtros = regla.filtros or {}
+        campo = filtros.get("campo_monto", "total_percepciones")
+        if campo not in NOMINA_CAMPOS_VALIDOS:
+            raise ValueError(f"campo_monto de nómina inválido: {campo}")
+        # Un periodo de nómina pertenece al mes donde termina (fecha_fin).
+        qs = NominaLinea.objects.filter(
+            periodo__fecha_fin__year=periodo.year,
+            periodo__fecha_fin__month=periodo.month,
+            periodo__estatus__in=[NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA],
+        )
+        departamento = filtros.get("departamento")
+        if departamento:
+            qs = qs.filter(empleado__departamento=str(departamento).strip().upper())
+        sucursal = regla.sucursal_efectiva()
+        if sucursal is not None:
+            qs = qs.filter(empleado__sucursal_ref=sucursal)
+        total = qs.aggregate(t=Sum(campo))["t"]
+        return (total or Decimal("0"), total is not None)
+
+    def _build_ventas_index(self, periodo: date) -> dict:
+        """Suma mensual de ventas POS por (sucursal_id, categoría, producto) normalizados.
+
+        Se agrega en Python porque los nombres de categoría/producto del POS
+        traen acentos y mayúsculas inconsistentes frente a los conceptos del
+        presupuesto.
+        """
+        from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
+
+        index: dict[tuple, dict[str, Decimal]] = {}
+        rows = (
+            PointSalesDailyProductFact.objects.filter(
+                sale_date__year=periodo.year, sale_date__month=periodo.month
+            )
+            .values("branch__erp_branch_id", "categoria", "producto_nombre_historico")
+            .annotate(venta=Sum("total_venta"), venta_neta=Sum("total_venta_neta"))
+        )
+        for row in rows:
+            key = (
+                row["branch__erp_branch_id"],
+                normalize_header_text(row["categoria"]),
+                normalize_header_text(row["producto_nombre_historico"]),
+            )
+            bucket = index.setdefault(key, {"total_venta": Decimal("0"), "total_venta_neta": Decimal("0")})
+            bucket["total_venta"] += row["venta"] or Decimal("0")
+            bucket["total_venta_neta"] += row["venta_neta"] or Decimal("0")
+        return index
+
+    def _monto_venta_pos(self, regla: ReglaFuenteRubro, ventas_index: dict) -> tuple[Decimal, bool]:
+        filtros = regla.filtros or {}
+        campo = filtros.get("campo_monto", "total_venta")
+        if campo not in VENTA_POS_CAMPOS_VALIDOS:
+            raise ValueError(f"campo_monto de ventas inválido: {campo}")
+        categoria = normalize_header_text(filtros.get("categoria_pos", ""))
+        producto = normalize_header_text(filtros.get("producto_pos", ""))
+        sucursal = regla.sucursal_efectiva()
+        sucursal_id = sucursal.id if sucursal is not None else None
+
+        total = Decimal("0")
+        hubo_datos = False
+        for (branch_id, cat, prod), montos in (ventas_index or {}).items():
+            if sucursal_id is not None and branch_id != sucursal_id:
+                continue
+            if categoria and cat != categoria:
+                continue
+            if producto and prod != producto:
+                continue
+            total += montos[campo]
+            hubo_datos = True
+        return (total, hubo_datos)
+
+
+def migrar_fuentes_legadas(*, dry_run: bool = False) -> dict[str, int]:
+    """Mueve los fuente_real heredados al namespace AUTO:/MANUAL:."""
+    resultado: dict[str, int] = {}
+    for legado, nuevo in LEGACY_FUENTE_MAP.items():
+        qs = LineaPresupuestoMensual.objects.filter(fuente_real=legado)
+        resultado[legado] = qs.count()
+        if not dry_run:
+            qs.update(fuente_real=nuevo)
+    return resultado
