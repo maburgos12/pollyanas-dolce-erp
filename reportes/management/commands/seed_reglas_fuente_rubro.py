@@ -56,8 +56,13 @@ class Command(BaseCommand):
                     codigo = row["categoria_gasto"].strip()
                     categoria = CategoriaGasto.objects.filter(codigo=codigo).first()
                     if categoria is None:
-                        avisos.append(f"fila {idx}: categoria_gasto '{codigo}' no existe; fila omitida")
-                        continue
+                        # Abortar ANTES de escribir: si esta fila se omitiera, la
+                        # reconciliación borraría la regla SEED previa del rubro
+                        # como si se hubiera retirado del mapeo (pérdida de config).
+                        raise CommandError(
+                            f"fila {idx}: categoria_gasto '{codigo}' no existe en CategoriaGasto. "
+                            "Corrige el CSV o crea la categoría; no se escribió nada."
+                        )
                 try:
                     filtros = json.loads(row["filtros"]) if (row.get("filtros") or "").strip() else {}
                 except json.JSONDecodeError as exc:

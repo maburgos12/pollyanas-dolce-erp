@@ -155,8 +155,19 @@ class PresupuestoRealConsolidacionService:
                 continue
 
             if not con_datos:
-                # Ninguna fuente tuvo filas este mes: NO tocar el último real.
+                # Ninguna fuente tuvo filas este mes: NO tocar el último real,
+                # pero dejar la advertencia visible (badge "Fuente sin datos")
+                # con la fecha del intento, para que el valor retenido no pase
+                # por dato vigente. Escritura condicional: una captura MANUAL
+                # concurrente tampoco se pisa aquí.
                 summary.sin_datos_fuente += 1
+                metadata = dict(linea.metadata or {})
+                metadata["sin_datos_fuente"] = True
+                metadata["fuente_sin_datos_en"] = timezone.now().isoformat()
+                if not dry_run:
+                    LineaPresupuestoMensual.objects.filter(
+                        pk=linea.pk, fuente_real=linea.fuente_real
+                    ).update(metadata=metadata, actualizado_en=timezone.now())
                 continue
 
             tipos = sorted({r.tipo_fuente for r in reglas})

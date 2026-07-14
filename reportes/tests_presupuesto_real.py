@@ -290,6 +290,15 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertEqual(linea.fuente_real, "AUTO:GASTO_OPERATIVO")
         self.assertEqual(summary.sin_datos_fuente, 1)
         self.assertEqual(summary.actualizadas, 0)
+        # El valor retenido queda marcado visiblemente como fuente sin datos.
+        self.assertTrue(linea.metadata["sin_datos_fuente"])
+        self.assertIn("fuente_sin_datos_en", linea.metadata)
+        # Y al volver datos de la fuente, la marca se limpia.
+        self.crear_gasto("450")
+        self.consolidar()
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("450.00"))
+        self.assertFalse(linea.metadata.get("sin_datos_fuente"))
 
     def test_captura_manual_concurrente_no_se_pisa(self):
         """Si una usuaria captura entre la lectura y la escritura, el UPDATE
@@ -373,6 +382,10 @@ class PresupuestoRealConsolidacionTests(TestCase):
 
     def test_seed_real_es_idempotente_respeta_admin_y_dry_run(self):
         """El seed real crea nómina/ventas, no duplica y respeta reglas ADMIN."""
+        # El CSV real referencia RENTA_SUC; debe existir o el comando aborta.
+        CategoriaGasto.objects.create(
+            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
         nomina = AreaPresupuesto.objects.create(nombre="Nómina seed", codigo="nomina")
         ventas = AreaPresupuesto.objects.create(nombre="Ventas seed", codigo="ventas")
         sueldo, _ = self.crear_linea(concepto="SUELDO", area=nomina)
@@ -544,6 +557,9 @@ class PresupuestoRealFixesReviewTests(TestCase):
 
     def test_seed_elimina_reglas_obsoletas(self):
         """Una regla SEED cuyo rubro salió del mapeo se elimina al re-correr."""
+        CategoriaGasto.objects.create(
+            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
         rubro_viejo = RubroPresupuesto.objects.create(
             area=self.area_ventas, concepto="Concepto retirado", tipo=RubroPresupuesto.TIPO_EGRESO
         )
@@ -557,3 +573,41 @@ class PresupuestoRealFixesReviewTests(TestCase):
         call_command("seed_reglas_fuente_rubro", stdout=salida)
         self.assertFalse(ReglaFuenteRubro.objects.filter(rubro=rubro_viejo).exists())
         self.assertIn("seed obsoletas eliminadas: 1", salida.getvalue())
+
+    def test_categoria_inexistente_aborta_sin_escribir(self):
+        """Una categoria_gasto inválida en el CSV aborta el comando completo;
+        las reglas SEED previas se conservan (no hay borrado degradado)."""
+        import csv as csv_mod
+        import tempfile
+
+        from django.core.management.base import CommandError
+
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area_ventas, concepto="Con regla previa", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        regla_previa = ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA,
+            origen=ReglaFuenteRubro.ORIGEN_SEED,
+            filtros={"campo_monto": "salario_base"},
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as tmp:
+            writer = csv_mod.DictWriter(
+                tmp, fieldnames=["area", "concepto", "tipo_fuente", "categoria_gasto", "filtros", "notas"]
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "area": "gastos-venta",
+                    "concepto": "Con regla previa",
+                    "tipo_fuente": "GASTO_OPERATIVO",
+                    "categoria_gasto": "NO_EXISTE_XYZ",
+                    "filtros": "",
+                    "notas": "",
+                }
+            )
+            ruta = tmp.name
+
+        with self.assertRaises(CommandError):
+            call_command("seed_reglas_fuente_rubro", csv=ruta, stdout=StringIO())
+        self.assertTrue(ReglaFuenteRubro.objects.filter(pk=regla_previa.pk).exists())
