@@ -183,8 +183,11 @@ class MermasOnlyMiddleware:
     Usuarios creados solo para mermas no deben navegar el ERP general.
     """
 
-    ALLOWED_PREFIXES = (
+    ALLOWED_PATHS = (
         "/app/",
+        "/app/sw.js",
+    )
+    ALLOWED_PREFIXES = (
         "/merma/",
         "/mermas/",
         "/logout/",
@@ -205,6 +208,7 @@ class MermasOnlyMiddleware:
             user
             and user.is_authenticated
             and is_mermas_only(user)
+            and path not in self.ALLOWED_PATHS
             and not any(path.startswith(prefix) for prefix in self.ALLOWED_PREFIXES)
         ):
             return redirect("/mermas/app/")
