@@ -272,17 +272,61 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertEqual(len(summary.detalle), 1)
         self.assertEqual(summary.detalle[0]["nuevo"], "63.00")
 
-    def test_regla_sin_datos_guarda_cero_y_marca_metadata(self):
-        """Una regla válida sin filas fuente persiste cero y la marca sin datos."""
-        rubro, linea = self.crear_linea(concepto="Sin datos", sucursal=self.sucursal)
+    def test_regla_sin_datos_no_modifica_la_linea(self):
+        """Sin filas fuente en el mes, la línea NO se toca (un retraso de
+        Point/nómina no debe borrar el último real consolidado)."""
+        rubro, linea = self.crear_linea(
+            concepto="Sin datos",
+            sucursal=self.sucursal,
+            monto_real=Decimal("500.00"),
+            fuente_real="AUTO:GASTO_OPERATIVO",
+        )
         self.crear_regla_gasto(rubro)
 
         summary = self.consolidar()
 
         linea.refresh_from_db()
-        self.assertEqual(linea.monto_real, Decimal("0.00"))
-        self.assertTrue(linea.metadata["sin_datos_fuente"])
+        self.assertEqual(linea.monto_real, Decimal("500.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:GASTO_OPERATIVO")
         self.assertEqual(summary.sin_datos_fuente, 1)
+        self.assertEqual(summary.actualizadas, 0)
+
+    def test_captura_manual_concurrente_no_se_pisa(self):
+        """Si una usuaria captura entre la lectura y la escritura, el UPDATE
+        condicional no coincide y la captura se conserva."""
+        rubro, linea = self.crear_linea(concepto="Concurrente", sucursal=self.sucursal)
+        self.crear_regla_gasto(rubro)
+        self.crear_gasto("700")
+
+        # Simula la carrera: la instancia en memoria tiene fuente_real="",
+        # pero la base ya recibió una captura manual.
+        LineaPresupuestoMensual.objects.filter(pk=linea.pk).update(
+            monto_real=Decimal("123.45"), fuente_real="MANUAL:johana"
+        )
+
+        service = PresupuestoRealConsolidacionService()
+        escrita = service._escribir_linea(linea, Decimal("700.00"), "AUTO:GASTO_OPERATIVO", {})
+
+        self.assertFalse(escrita)
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("123.45"))
+        self.assertEqual(linea.fuente_real, "MANUAL:johana")
+
+    def test_consolidacion_usa_consultas_acotadas(self):
+        """Las fuentes se precargan agrupadas: el número de consultas no crece
+        con el número de rubros."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        for i in range(12):
+            rubro, _ = self.crear_linea(concepto=f"Rubro escala {i}", sucursal=self.sucursal)
+            self.crear_regla_gasto(rubro)
+        self.crear_gasto("100")
+
+        with CaptureQueriesContext(connection) as ctx:
+            self.consolidar(dry_run=True)
+        # 12 rubros con regla: sin índices serían 12+ consultas de agregación.
+        self.assertLess(len(ctx.captured_queries), 8)
 
     def test_rubro_sin_reglas_deja_linea_intacta(self):
         """Un rubro sin reglas se reporta y conserva todos sus valores."""
@@ -317,9 +361,15 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertEqual(resultado["CAPEX_GUAMUCHIL_CONFIRMADO"], 1)
         self.assertEqual(linea_auto.fuente_real, "AUTO:LEGADO")
         self.assertEqual(linea_manual.fuente_real, "MANUAL:legado")
+        # Con datos de fuente, el legado AUTO se re-escribe y el MANUAL queda protegido.
+        self.crear_gasto("55")
         summary = self.consolidar()
         self.assertEqual(summary.actualizadas, 1)
         self.assertEqual(summary.protegidas_manual, 1)
+        linea_auto.refresh_from_db()
+        linea_manual.refresh_from_db()
+        self.assertEqual(linea_auto.monto_real, Decimal("55.00"))
+        self.assertEqual(linea_manual.monto_real, Decimal("20"))
 
     def test_seed_real_es_idempotente_respeta_admin_y_dry_run(self):
         """El seed real crea nómina/ventas, no duplica y respeta reglas ADMIN."""
@@ -440,3 +490,70 @@ class PresupuestoVsRealViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("spreadsheetml", response["Content-Type"])
         self.assertIn("attachment", response["Content-Disposition"])
+
+
+class PresupuestoRealFixesReviewTests(TestCase):
+    """Cobertura de los hallazgos de la revisión adversarial."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        cls.superuser = get_user_model().objects.create_superuser(
+            "dg_fixes", "dgf@test.mx", "clave-test"
+        )
+        cls.periodo = date(2026, 3, 1)
+        cls.area_nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        cls.area_ventas = AreaPresupuesto.objects.create(nombre="Gastos", codigo="gastos-venta")
+
+        rubro_nomina = RubroPresupuesto.objects.create(
+            area=cls.area_nomina, concepto="SUELDO", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro_nomina, periodo=cls.periodo,
+            monto_presupuesto=Decimal("100.00"), monto_real=Decimal("90.00"),
+            fuente_real="AUTO:NOMINA",
+        )
+        rubro_gasto = RubroPresupuesto.objects.create(
+            area=cls.area_ventas, concepto="=SUMA(A1:A9)", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro_gasto, periodo=cls.periodo,
+            monto_presupuesto=Decimal("50.00"), monto_real=Decimal("40.00"),
+            fuente_real="AUTO:GASTO_OPERATIVO",
+        )
+
+    def test_kpi_global_excluye_area_nomina(self):
+        """El área Nómina no se suma a los KPI globales (doble conteo)."""
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["presupuesto"], Decimal("50.00"))
+        self.assertEqual(kpis["real"], Decimal("40.00"))
+        # Con el área nómina seleccionada sí se muestra su propio total.
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=nomina")
+        self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("100.00"))
+
+    def test_export_neutraliza_formulas(self):
+        """Un concepto que empieza con '=' se exporta neutralizado."""
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&export=csv")
+        cuerpo = response.content.decode()
+        self.assertIn("'=SUMA(A1:A9)", cuerpo)
+        self.assertNotIn("\n=SUMA", cuerpo.replace("\r", ""))
+
+    def test_seed_elimina_reglas_obsoletas(self):
+        """Una regla SEED cuyo rubro salió del mapeo se elimina al re-correr."""
+        rubro_viejo = RubroPresupuesto.objects.create(
+            area=self.area_ventas, concepto="Concepto retirado", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro_viejo,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA,
+            origen=ReglaFuenteRubro.ORIGEN_SEED,
+            filtros={"campo_monto": "salario_base"},
+        )
+        salida = StringIO()
+        call_command("seed_reglas_fuente_rubro", stdout=salida)
+        self.assertFalse(ReglaFuenteRubro.objects.filter(rubro=rubro_viejo).exists())
+        self.assertIn("seed obsoletas eliminadas: 1", salida.getvalue())

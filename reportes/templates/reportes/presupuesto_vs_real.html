@@ -93,6 +93,10 @@
   </div>
 </section>
 
+{% if not selected_area %}
+<div class="alert alert-info">El área <strong>Nómina</strong> se muestra como vista de control y no se suma a los KPI: sus sueldos ya están incluidos dentro de cada área.</div>
+{% endif %}
+
 <section class="card">
   <div class="card-header">Resumen anual por área · {{ selected_year }}</div>
   <p class="muted">Presupuesto y real acumulados del año, y el corte de {{ selected_month_name }}.</p>

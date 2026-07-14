@@ -30,6 +30,11 @@ from .services_presupuesto_maestro import (
 
 ZERO = Decimal("0")
 
+# El área "Nómina" replica los sueldos que ya viven dentro de cada área
+# (Gastos de Venta, Administración, Logística, Producción). Se muestra como
+# vista de control pero NO se suma a los KPI globales para no duplicar dinero.
+AREAS_NO_SUMABLES = {"nomina"}
+
 
 def _parse_int(value, default: int) -> int:
     try:
@@ -170,8 +175,12 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
         fila["mes_varianza_pct"] = variance_pct(varianza, celda["presupuesto"]) if varianza is not None else None
 
     # ---- KPIs del mes ------------------------------------------------------
+    # Sin área seleccionada, las áreas de control (Nómina) no se suman: sus
+    # sueldos ya están dentro de las demás áreas y duplicarían el total.
     kpis = {"presupuesto": ZERO, "real": ZERO, "capturado": 0, "pendiente": 0}
     for row in detalle:
+        if not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
+            continue
         kpis["presupuesto"] += row["presupuesto"]
         if row["real"] is not None:
             kpis["real"] += row["real"]
@@ -203,20 +212,28 @@ EXPORT_HEADERS = [
 ]
 
 
+def _celda_segura(valor: object) -> str:
+    """Neutraliza inyección de fórmulas en hojas de cálculo (=, +, -, @, tab, CR)."""
+    texto = str(valor or "")
+    if texto.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + texto
+    return texto
+
+
 def _export_rows(detalle: list[dict[str, object]]) -> list[list[object]]:
     rows = []
     for row in detalle:
         rows.append(
             [
-                row["area"],
-                row["concepto"],
-                row["sucursal"],
-                row["tipo"],
+                _celda_segura(row["area"]),
+                _celda_segura(row["concepto"]),
+                _celda_segura(row["sucursal"]),
+                _celda_segura(row["tipo"]),
                 f"{row['presupuesto']:.2f}",
                 f"{row['real']:.2f}" if row["real"] is not None else "",
                 f"{row['varianza']:.2f}" if row["varianza"] is not None else "",
                 f"{row['varianza_pct']:.2f}" if row["varianza_pct"] is not None else "",
-                row["fuente"]["label"],
+                _celda_segura(row["fuente"]["label"]),
             ]
         )
     return rows
