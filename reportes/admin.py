@@ -37,6 +37,7 @@ from reportes.models import (
     RecetaCostoHistoricoMensual,
     ReglaCostoHistoricoInsumo,
     ReglaAsignacionGasto,
+    ReglaFuenteRubro,
     RubroPresupuesto,
     SupplierLeadTime,
     LineaPresupuestoMensual,
@@ -221,6 +222,14 @@ class LineaPresupuestoMensualAdmin(admin.ModelAdmin):
     list_display = ("periodo", "version", "rubro", "monto_presupuesto", "monto_real", "fuente_real")
     list_filter = ("periodo", "version", "rubro__area", "rubro__tipo")
     search_fields = ("rubro__concepto", "rubro__codigo_cuenta", "fuente_real")
+
+
+@admin.register(ReglaFuenteRubro)
+class ReglaFuenteRubroAdmin(admin.ModelAdmin):
+    list_display = ("rubro", "tipo_fuente", "categoria_gasto", "centro_costo", "sucursal", "signo", "activa", "origen")
+    list_filter = ("tipo_fuente", "activa", "origen", "rubro__area")
+    search_fields = ("rubro__concepto", "notas", "categoria_gasto__codigo")
+    autocomplete_fields = ("rubro", "categoria_gasto", "centro_costo", "sucursal")
 
 
 @admin.register(ProductionExecutionLog)

@@ -244,3 +244,29 @@ def task_monitoreo_variacion_costos_reventa(self):
         raise self.retry(exc=exc)
 
     return {**result, "email_enviado": True}
+
+
+@shared_task(name="reportes.consolidar_presupuesto_real", bind=True, max_retries=1, default_retry_delay=300)
+def task_consolidar_presupuesto_real(self, periodo: str | None = None):
+    """Consolida el monto real del presupuesto maestro para el mes indicado.
+
+    Sin argumento consolida el mes en curso y, los primeros 5 días del mes,
+    también el mes anterior (cierre).
+    """
+    from reportes.services_presupuesto_real import PresupuestoRealConsolidacionService
+
+    service = PresupuestoRealConsolidacionService()
+    hoy = date.today()
+    if periodo:
+        year, month = periodo.split("-")
+        periodos = [date(int(year), int(month), 1)]
+    else:
+        periodos = [hoy.replace(day=1)]
+        if hoy.day <= 5:
+            previo = hoy.replace(day=1) - timedelta(days=1)
+            periodos.append(previo.replace(day=1))
+
+    try:
+        return [service.consolidar(periodo=p).as_dict() for p in periodos]
+    except Exception as exc:
+        raise self.retry(exc=exc)

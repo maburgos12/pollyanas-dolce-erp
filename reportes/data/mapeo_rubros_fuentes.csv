@@ -1,0 +1,23 @@
+area,concepto,tipo_fuente,categoria_gasto,filtros,notas
+nomina,SUELDO,NOMINA,,"{""campo_monto"": ""salario_base""}",Suma de salario base de todos los departamentos
+nomina,IMSS,MANUAL,,,Sin fuente en ERP
+nomina,INFONAVIT,MANUAL,,,Sin fuente en ERP
+nomina,DESCUENTO IMSS,MANUAL,,,Sin fuente en ERP
+nomina,DESCUENTO ISR,MANUAL,,,Sin fuente en ERP
+nomina,AGUINALDO,MANUAL,,,Sin fuente en ERP
+nomina,FESTIVO,MANUAL,,,Sin fuente en ERP
+nomina,FESTIVOS,MANUAL,,,Sin fuente en ERP
+nomina,VACACIONES,MANUAL,,,Sin fuente en ERP
+nomina,PRIMA VACACIONES,MANUAL,,,Sin fuente en ERP
+nomina,CAMISA HOMBRE,MANUAL,,,Uniformes sin fuente en ERP
+nomina,CAMISA MUJER,MANUAL,,,Uniformes sin fuente en ERP
+nomina,GORRA,MANUAL,,,Uniformes sin fuente en ERP
+nomina,MANDIL,MANUAL,,,Uniformes sin fuente en ERP
+nomina,PLAYERA,MANUAL,,,Uniformes sin fuente en ERP
+nomina,PLAYERAS,MANUAL,,,Uniformes sin fuente en ERP
+nomina,POLO,MANUAL,,,Uniformes sin fuente en ERP
+gastos-venta,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""VENTAS""}",Nómina de ventas por sucursal del rubro
+gastos-venta,Arrendamiento local,GASTO_OPERATIVO,RENTA_SUC,,Renta por sucursal
+administracion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""ADMINISTRACION""}",Nómina administrativa
+logistica,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""LOGISTICA""}",Nómina de logística
+produccion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""PRODUCCION""}",Nómina de producción
