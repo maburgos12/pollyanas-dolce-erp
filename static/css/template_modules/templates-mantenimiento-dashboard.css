@@ -89,6 +89,7 @@
   .mant-form{display:grid;gap:14px}
   .mant-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .mant-field{display:grid;gap:6px;color:#513744;font-size:13px;font-weight:900}
+  .mant-field[hidden]{display:none}
   .mant-input{width:100%;min-height:42px;border:1px solid rgba(139,34,82,.22);border-radius:8px;padding:9px 10px;font:inherit;background:#fff;min-width:0}
   textarea.mant-input{min-height:116px;resize:vertical}
   .mant-field.full{grid-column:1/-1}

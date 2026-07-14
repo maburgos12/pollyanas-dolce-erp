@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260714-flota-sin-sucursal-v1">
 {% endblock %}
 
 {% block content %}
@@ -482,7 +482,7 @@
             <option value="flota">Flota</option>
           </select>
         </label>
-        <label class="mant-field full">Sucursal <span style="color:#E53935">*</span>
+        <label class="mant-field full" id="ordenServicioSucursalField">Sucursal <span style="color:#E53935">*</span>
           <select class="mant-input" name="sucursal_id" id="ordenServicioSucursal" required>
             <option value="">Seleccionar sucursal...</option>
             {% for sucursal in sucursales_list %}
@@ -507,9 +507,9 @@
         </label>
         <label class="mant-field full" id="ordenServicioUnidadField" hidden>Unidad logística <span style="color:#E53935">*</span>
           <select class="mant-input" name="unidad_id" id="ordenServicioUnidad">
-            <option value="">Selecciona primero una sucursal...</option>
+            <option value="">Seleccionar unidad...</option>
             {% for unidad in unidades_para_servicio %}
-              <option value="{{ unidad.id }}" data-sucursal="{{ unidad.sucursal_id|default:'' }}">{{ unidad.descripcion|default:unidad.codigo }}{% if unidad.sucursal %} · {{ unidad.sucursal.nombre }}{% endif %}</option>
+              <option value="{{ unidad.id }}">{{ unidad.descripcion|default:unidad.codigo }}</option>
             {% endfor %}
           </select>
         </label>
@@ -1134,6 +1134,7 @@
   const origen = document.getElementById("ordenServicioOrigen");
   const alcance = document.getElementById("ordenServicioAlcance");
   const sucursal = document.getElementById("ordenServicioSucursal");
+  const sucursalField = document.getElementById("ordenServicioSucursalField");
   const activo = document.getElementById("ordenServicioActivo");
   const instalacion = document.getElementById("ordenServicioInstalacion");
   const unidad = document.getElementById("ordenServicioUnidad");
@@ -1196,27 +1197,41 @@
 
   function filtrarPorSucursal() {
     const sucursalId = sucursal.value;
+    const esUnidad = alcance.value === "unidad" || alcance.value === "flota";
     const activosVisibles = filtrarOpciones(
       activo,
       "No hay equipos activos en esta sucursal",
       (option) => option.dataset.sucursal === sucursalId && !instalacionCategorias.has(option.dataset.categoria || "")
     );
-    const unidadesVisibles = filtrarOpciones(
-      unidad,
-      "No hay unidades activas en esta sucursal",
-      (option) => option.dataset.sucursal === sucursalId
-    );
+    let unidadesVisibles = 0;
+    Array.from(unidad.options).forEach((option, index) => {
+      if (index === 0) {
+        option.textContent = "Seleccionar unidad...";
+        option.hidden = false;
+        option.disabled = false;
+        return;
+      }
+      const visible = esUnidad || option.dataset.sucursal === sucursalId;
+      option.hidden = !visible;
+      option.disabled = !visible;
+      if (!visible && option.selected) option.selected = false;
+      if (visible) unidadesVisibles += 1;
+    });
     if (alcance.value === "activo") {
       activo.disabled = !sucursalId || activosVisibles === 0;
     }
     if (alcance.value === "unidad" || alcance.value === "flota") {
-      unidad.disabled = !sucursalId || unidadesVisibles === 0;
+      unidad.disabled = unidadesVisibles === 0;
     }
   }
 
   function setAlcance(value) {
     const esUnidad = value === "unidad" || value === "flota";
     const esInstalacion = value === "instalacion";
+    sucursalField.hidden = esUnidad;
+    sucursal.required = !esUnidad;
+    sucursal.disabled = esUnidad;
+    if (esUnidad) sucursal.value = "";
     activoField.hidden = esUnidad || esInstalacion;
     instalacionField.hidden = !esInstalacion;
     unidadField.hidden = !esUnidad;
