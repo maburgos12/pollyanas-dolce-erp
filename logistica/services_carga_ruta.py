@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+import hashlib
+import json
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from core.access import can_manage_submodule
 from core.models import Notificacion, Sucursal
@@ -19,6 +22,7 @@ from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncServi
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 
+from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .models import (
     EventoRuta,
     ParadaEntregaEvidencia,
@@ -33,6 +37,36 @@ POINT_PENDIENTE_ENVIO_NOTA = (
     "La carga aún no aparece enviada en Point. "
     "Pide a logística que atienda o actualice la transferencia en Point."
 )
+
+
+class RecargaCedisPointError(ValidationError):
+    estado_sync = "ERROR_POINT"
+    http_status = 503
+    jefe_notificado = True
+
+
+class PointSyncUnavailableError(ValidationError):
+    def __init__(self, message, *, sync_job=None):
+        super().__init__(message)
+        self.sync_job = sync_job
+
+
+class RecargaCedisPendienteEnviado(ValidationError):
+    estado_sync = "PENDIENTE_ENVIADO"
+    http_status = 409
+    jefe_notificado = True
+
+
+class RecargaCedisSinLineasPoint(ValidationError):
+    estado_sync = "SIN_LINEAS_POINT"
+    http_status = 409
+    jefe_notificado = True
+
+
+class RecargaCedisSnapshotObsoleto(ValidationError):
+    estado_sync = "SNAPSHOT_OBSOLETO"
+    http_status = 409
+    jefe_notificado = False
 
 
 @dataclass(frozen=True)
@@ -55,6 +89,14 @@ class RecepcionPointResumen:
 
 def _cantidad_esperada(line: PointTransferLine) -> Decimal:
     return Decimal(str(line.sent_quantity or 0))
+
+
+def _identidad_producto_carga(*, item_code: str, item_name: str, unit: str) -> tuple[str, str, str]:
+    """Identidad estable: código y unidad; nombre sólo cuando Point no aporta código."""
+    code = " ".join(str(item_code or "").split()).upper()
+    name = " ".join(str(item_name or "").split()).upper()
+    normalized_unit = " ".join(str(unit or "").split()).upper()
+    return (code, "" if code else name, normalized_unit)
 
 
 def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
@@ -80,7 +122,11 @@ def _cantidad_referencia_entrega(linea: RutaCargaChecklistLinea) -> Decimal:
 
 
 def _linea_pendiente_envio_point(linea: RutaCargaChecklistLinea) -> bool:
-    return linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE and Decimal(str(linea.cantidad_enviada_esperada or 0)) <= 0
+    return (
+        linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+        and linea.point_transfer_line_id is not None
+        and not point_transfer_enviada(linea.point_transfer_line)
+    )
 
 
 def _estatus_carga_para_cantidades(*, cargada: Decimal, esperada: Decimal) -> str:
@@ -184,14 +230,39 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         return 0, 0, 0
 
     branch_ids = set(paradas_by_branch)
-    candidates = (
+    candidates_qs = (
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
         .filter(is_cancelled=False, registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta])
         .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
         .order_by("transfer_external_id", "detail_external_id", "id")
     )
     if solo_abiertas:
-        candidates = candidates.filter(is_open=True)
+        candidates_qs = candidates_qs.filter(is_open=True)
+
+    # _actualizar_checklist_carga_desde_point abre la transacción que contiene esta
+    # función. Bloquear primero las líneas Point serializa dos rutas que intenten
+    # reclamar el mismo detalle, incluso si una conserva un source_hash CEDIS.
+    candidates = list(candidates_qs.select_for_update(of=("self",)))
+    candidate_ids = [line.id for line in candidates]
+    candidate_hashes = [line.source_hash for line in candidates]
+    reservas_globales = list(
+        RutaCargaChecklistLinea.objects.filter(
+            Q(source_hash__in=candidate_hashes) | Q(point_transfer_line_id__in=candidate_ids)
+        )
+        .exclude(checklist=checklist)
+        .values_list("source_hash", "point_transfer_line_id")
+    )
+    hashes_reservados = {source_hash for source_hash, _ in reservas_globales}
+    point_ids_reservados = {point_id for _, point_id in reservas_globales if point_id is not None}
+    checklist_lines = list(
+        checklist.lineas.select_for_update(of=("self",)).select_related("point_transfer_line")
+    )
+    lineas_por_source = {linea.source_hash: linea for linea in checklist_lines}
+    lineas_por_point_id = {
+        linea.point_transfer_line_id: linea
+        for linea in checklist_lines
+        if linea.point_transfer_line_id is not None
+    }
 
     creadas = 0
     actualizadas = 0
@@ -201,21 +272,19 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         if branch is None or branch.id not in paradas_by_branch:
             omitidas += 1
             continue
-        if (
-            RutaCargaChecklistLinea.objects.filter(source_hash=line.source_hash)
-            .exclude(checklist=checklist)
-            .exists()
-        ):
+        if line.source_hash in hashes_reservados or line.id in point_ids_reservados:
             omitidas += 1
             continue
         cantidad_esperada = _cantidad_esperada(line)
+        enviada = point_transfer_enviada(line)
         parada = paradas_by_branch[branch.id]
         producto_key = _point_producto_key(line)
         cedis_line = None
         if producto_key:
-            for existing in checklist.lineas.filter(parada=parada).select_for_update():
+            for existing in checklist_lines:
                 if (
-                    existing.source_hash.startswith("cedis-reabasto-")
+                    existing.parada_id == parada.id
+                    and existing.source_hash.startswith("cedis-reabasto-")
                     and existing.point_transfer_line_id is None
                     and _linea_producto_key(existing) == producto_key
                 ):
@@ -230,17 +299,22 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             cedis_line.erp_origin_branch = line.erp_origin_branch
             cedis_line.erp_destination_branch = line.erp_destination_branch
             cedis_line.cantidad_enviada_esperada = cantidad_esperada
-            if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE and cantidad_esperada <= 0:
-                cedis_line.cantidad_cargada = Decimal("0")
-                cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
-                cedis_line.notas = "Point confirmó enviado final en cero; no requiere captura."
-            elif cedis_line.estatus in {
+            if cedis_line.estatus in {
                 RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                 RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
             }:
-                cedis_line.cantidad_cargada = None
-                cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
-                cedis_line.notas = ""
+                if not enviada:
+                    cedis_line.cantidad_cargada = None
+                    cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+                    cedis_line.notas = "Point aún no registra Enviado para esta solicitud."
+                elif cantidad_esperada <= 0:
+                    cedis_line.cantidad_cargada = Decimal("0")
+                    cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+                    cedis_line.notas = "Point confirmó enviado final en cero; no requiere captura."
+                else:
+                    cedis_line.cantidad_cargada = None
+                    cedis_line.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+                    cedis_line.notas = ""
             elif cedis_line.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(cedis_line.cantidad_cargada))
                 cedis_line.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
@@ -265,13 +339,10 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     "actualizado_en",
                 ]
             )
+            lineas_por_point_id[line.id] = cedis_line
             actualizadas += 1
             continue
-        existing = (
-            RutaCargaChecklistLinea.objects.filter(checklist=checklist)
-            .filter(Q(source_hash=line.source_hash) | Q(point_transfer_line_id=line.id))
-            .first()
-        )
+        existing = lineas_por_point_id.get(line.id) or lineas_por_source.get(line.source_hash)
         defaults = {
             "parada": parada,
             "point_transfer_line": line,
@@ -284,7 +355,13 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "erp_destination_branch": line.erp_destination_branch,
             "cantidad_solicitada": line.requested_quantity,
             "cantidad_enviada_esperada": cantidad_esperada,
-            "notas": "Point confirmó enviado final en cero; no requiere captura." if cantidad_esperada <= 0 else "",
+            "notas": (
+                "Point aún no registra Enviado para esta solicitud."
+                if not enviada
+                else "Point confirmó enviado final en cero; no requiere captura."
+                if cantidad_esperada <= 0
+                else ""
+            ),
         }
         if existing:
             # Esta misma PointTransferLine ya está adjunta a una fila de este checklist
@@ -309,7 +386,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                 RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
             }:
-                if cantidad_esperada <= 0:
+                if not enviada:
+                    existing.cantidad_cargada = None
+                    existing.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+                    existing.notas = "Point aún no registra Enviado para esta solicitud."
+                elif cantidad_esperada <= 0:
                     existing.cantidad_cargada = Decimal("0")
                     existing.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
                     existing.notas = "Point confirmó enviado final en cero; no requiere captura."
@@ -333,10 +414,10 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             actualizadas += 1
             continue
         defaults.update(
-            cantidad_cargada=Decimal("0") if cantidad_esperada <= 0 else None,
+            cantidad_cargada=Decimal("0") if enviada and cantidad_esperada <= 0 else None,
             estatus=(
                 RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
-                if cantidad_esperada <= 0
+                if enviada and cantidad_esperada <= 0
                 else RutaCargaChecklistLinea.ESTATUS_PENDIENTE
             ),
         )
@@ -346,33 +427,62 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         # cruzan folios distintos (dos transferencias reales del mismo producto deben
         # seguir siendo dos líneas independientes).
         lineas_a_superar = []
-        if producto_key:
-            candidatas = checklist.lineas.filter(
-                parada=parada,
-                transfer_external_id=line.transfer_external_id,
-                estatus__in=[
+        if producto_key and enviada and cantidad_esperada > 0:
+            lineas_a_superar = [
+                vieja
+                for vieja in checklist_lines
+                if vieja.parada_id == parada.id
+                and vieja.transfer_external_id == line.transfer_external_id
+                and vieja.estatus
+                in {
                     RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                     RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
-                ],
-                validado_por__isnull=True,
-            ).exclude(point_transfer_line_id=line.id)
-            lineas_a_superar = [
-                vieja for vieja in candidatas if _linea_producto_key(vieja) == producto_key
+                }
+                and vieja.validado_por_id is None
+                and vieja.validado_en is None
+                and vieja.point_transfer_line_id != line.id
+                and _linea_producto_key(vieja) == producto_key
+                and (
+                    vieja.point_transfer_line_id is None
+                    or not point_transfer_enviada(vieja.point_transfer_line)
+                    or Decimal(str(vieja.cantidad_enviada_esperada or 0)) <= 0
+                )
             ]
-        nueva_linea, created = RutaCargaChecklistLinea.objects.update_or_create(
+        nueva_linea = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             source_hash=line.source_hash,
-            defaults=defaults,
+            **defaults,
         )
-        if lineas_a_superar:
-            for vieja in lineas_a_superar:
-                vieja.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
-                vieja.superada_por = nueva_linea
-                vieja.save(update_fields=["estatus", "superada_por", "actualizado_en"])
-        if created:
-            creadas += 1
-        else:
-            actualizadas += 1
+        checklist_lines.append(nueva_linea)
+        lineas_por_source[nueva_linea.source_hash] = nueva_linea
+        lineas_por_point_id[line.id] = nueva_linea
+        if len(lineas_a_superar) == 1:
+            vieja = lineas_a_superar[0]
+            vieja.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            vieja.superada_por = nueva_linea
+            vieja.save(update_fields=["estatus", "superada_por", "actualizado_en"])
+        elif len(lineas_a_superar) > 1:
+            clave = f"carga-point-reemplazo-ambiguo:{ruta.id}:{line.id}"
+            EventoRuta.objects.get_or_create(
+                clave_auditoria=clave,
+                defaults={
+                    "ruta": ruta,
+                    "parada": parada,
+                    "tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    "severidad": EventoRuta.SEVERIDAD_ALERTA,
+                    "descripcion": "Point presentó múltiples líneas candidatas a reemplazo; se conservan para revisión.",
+                    "metadata": {
+                        "regla": "CARGA_POINT_REEMPLAZO_AMBIGUO",
+                        "ruta_id": ruta.id,
+                        "parada_id": parada.id,
+                        "point_transfer_line_nueva_id": line.id,
+                        "lineas_checklist_candidatas_ids": sorted(vieja.id for vieja in lineas_a_superar),
+                        "clave": clave,
+                        "origen": "sync_carga_point",
+                    },
+                },
+            )
+        creadas += 1
     return creadas, actualizadas, omitidas
 
 
@@ -384,15 +494,19 @@ def ruta_tiene_movimiento_point_nuevo(*, fecha, puntos: list[PuntoLogistico]) ->
         PointTransferLine.objects.filter(
             is_cancelled=False,
             is_open=True,
-            sent_quantity__gt=0,
             registered_at__date__in=[fecha - timedelta(days=1), fecha],
         )
         .exclude(source_hash__in=RutaCargaChecklistLinea.objects.exclude(source_hash="").values("source_hash"))
     )
-    return all(
-        base_qs.filter(Q(erp_origin_branch_id=branch_id) | Q(erp_destination_branch_id=branch_id)).exists()
-        for branch_id in branch_ids
-    )
+    sucursales_con_movimiento = set()
+    for linea in base_qs.iterator():
+        if not point_transfer_enviada(linea):
+            continue
+        if linea.erp_origin_branch_id:
+            sucursales_con_movimiento.add(linea.erp_origin_branch_id)
+        if linea.erp_destination_branch_id:
+            sucursales_con_movimiento.add(linea.erp_destination_branch_id)
+    return branch_ids.issubset(sucursales_con_movimiento)
 
 
 def _sincronizar_lineas_consolidado_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist) -> tuple[int, int, int]:
@@ -562,7 +676,10 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
         for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
             sync_job = service.sync_open_transfers(fecha=fecha, triggered_by=user)
             if sync_job.status != sync_job.STATUS_SUCCESS:
-                raise ValidationError("No se pudo sincronizar Point para generar la carga esperada.")
+                raise PointSyncUnavailableError(
+                    "No se pudo sincronizar Point para generar la carga esperada.",
+                    sync_job=sync_job,
+                )
 
     return _actualizar_checklist_carga_desde_point(ruta=ruta, user=user, sync_job=sync_job)
 
@@ -580,10 +697,13 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
     checklist = checklist or obtener_checklist_carga(ruta)
     hechos_point_antes = dict(checklist.lineas.values_list("source_hash", "cantidad_enviada_esperada"))
     checklist.point_sync_job = sync_job or checklist.point_sync_job
-    checklist.sincronizado_en = timezone.now()
+    sync_fields = ["point_sync_job", "estatus", "actualizado_en"]
+    if sync_job is not None:
+        checklist.sincronizado_en = timezone.now()
+        sync_fields.append("sincronizado_en")
     if checklist.estatus == RutaCargaChecklist.ESTATUS_PENDIENTE:
         checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
-    checklist.save(update_fields=["point_sync_job", "sincronizado_en", "estatus", "actualizado_en"])
+    checklist.save(update_fields=sync_fields)
     omitidas = checklist.lineas.filter(parada__punto__tipo=PuntoLogistico.TIPO_CEDIS, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()[0]
 
     creadas, actualizadas, omitidas_consolidado = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
@@ -768,11 +888,7 @@ def validar_producto_tramo_carga(
     """Confirma en una sola captura el total físico de un producto del tramo actual."""
     validar_usuario_puede_operar_checklist(user=user, ruta=ruta, repartidor=repartidor)
     checklist = obtener_checklist_carga(ruta)
-    key = (
-        (item_code or "").strip().upper(),
-        (item_name or "").strip().upper(),
-        (unit or "").strip().upper(),
-    )
+    key = _identidad_producto_carga(item_code=item_code, item_name=item_name, unit=unit)
     lineas = [
         linea
         for linea in lineas_tramo_operativo_actual(ruta, checklist=checklist)
@@ -780,10 +896,10 @@ def validar_producto_tramo_carga(
         .select_related("parada")
         .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         .order_by("parada__orden", "id")
-        if (
-            (linea.item_code or "").strip().upper(),
-            (linea.item_name or "").strip().upper(),
-            (linea.unit or "").strip().upper(),
+        if _identidad_producto_carga(
+            item_code=linea.item_code,
+            item_name=linea.item_name,
+            unit=linea.unit,
         ) == key
     ]
     if not lineas:
@@ -827,7 +943,10 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     if not checklist or not checklist.lineas.exists():
         return None
     if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
-        lineas_salida = lineas_tramo_operativo_actual(ruta, checklist=checklist)
+        lineas_salida = lineas_tramo_operativo_actual(
+            ruta,
+            checklist=checklist,
+        ).select_related("point_transfer_line")
         if not lineas_salida.exists():
             return None
         if any(_linea_pendiente_envio_point(linea) for linea in lineas_salida):
@@ -835,7 +954,8 @@ def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
         if lineas_salida.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists():
             return "confirma todas las líneas de carga antes de liberar la ruta"
         return None
-    if any(_linea_pendiente_envio_point(linea) for linea in checklist.lineas.all()):
+    lineas = checklist.lineas.select_related("point_transfer_line").all()
+    if any(_linea_pendiente_envio_point(linea) for linea in lineas):
         return POINT_PENDIENTE_ENVIO_NOTA
     if checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA:
         return None
@@ -888,8 +1008,248 @@ def autorizar_diferencia_checklist_carga(*, ruta: RutaEntrega, user, autorizado:
     return checklist
 
 
+def _evento_recarga_existente(*, ruta_id: int, parada_id: int | None) -> EventoRuta | None:
+    if parada_id is None:
+        return None
+    return (
+        EventoRuta.objects.filter(ruta_id=ruta_id, parada_id=parada_id)
+        .filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"])
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def _paradas_siguiente_tramo(ruta: RutaEntrega, parada: ParadaRuta):
+    siguiente_cedis = (
+        ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, orden__gt=parada.orden)
+        .order_by("orden", "id")
+        .first()
+    )
+    paradas = ruta.paradas.filter(orden__gt=parada.orden).exclude(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+    )
+    if siguiente_cedis is not None:
+        paradas = paradas.filter(orden__lt=siguiente_cedis.orden)
+    return paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
+
+
+def _lineas_siguiente_tramo(ruta: RutaEntrega, parada: ParadaRuta):
+    lineas = RutaCargaChecklistLinea.objects.filter(
+        checklist__ruta=ruta,
+        parada_id__in=_paradas_siguiente_tramo(ruta, parada).values("id"),
+    ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+    return lineas.select_related(
+        "point_transfer_line",
+        "parada",
+        "parada__punto",
+        "parada__punto__sucursal",
+    ).order_by("parada__orden", "id")
+
+
+def _snapshot_siguiente_tramo(ruta: RutaEntrega, parada: ParadaRuta, *, actor) -> dict:
+    lineas = []
+    sucursales = {}
+    checklist = (
+        RutaCargaChecklist.objects.select_related("point_sync_job")
+        .filter(ruta=ruta)
+        .first()
+    )
+    for parada_tramo in _paradas_siguiente_tramo(ruta, parada):
+        sucursal = parada_tramo.punto.sucursal
+        if sucursal is not None:
+            sucursales[sucursal.id] = {"id": sucursal.id, "nombre": sucursal.nombre}
+    for linea in _lineas_siguiente_tramo(ruta, parada):
+        point_line = linea.point_transfer_line
+        lineas.append(
+            {
+                "linea_checklist_id": linea.id,
+                "parada_id": linea.parada_id,
+                "point_transfer_line_id": linea.point_transfer_line_id,
+                "detail_external_id": linea.detail_external_id,
+                "enviado": bool(point_line and point_transfer_enviada(point_line)),
+                "cantidad_solicitada": str(linea.cantidad_solicitada),
+                "cantidad_enviada": str(linea.cantidad_enviada_esperada),
+            }
+        )
+    contenido_autorizable = {
+        "ruta_id": ruta.id,
+        "parada_id": parada.id,
+        "sucursales": [sucursales[key] for key in sorted(sucursales)],
+        "lineas": lineas,
+    }
+    metadata_sync = {
+        "checklist_sincronizado_en": (
+            checklist.sincronizado_en.isoformat()
+            if checklist and checklist.sincronizado_en
+            else None
+        ),
+        "point_sync_job_id": checklist.point_sync_job_id if checklist else None,
+        "point_sync_job_status": (
+            checklist.point_sync_job.status
+            if checklist and checklist.point_sync_job_id
+            else None
+        ),
+    }
+    payload = {
+        **contenido_autorizable,
+        **metadata_sync,
+        "actor_id": getattr(actor, "id", None),
+        "capturado_en": timezone.now().isoformat(),
+    }
+    payload["snapshot_hash"] = hashlib.sha256(
+        json.dumps(contenido_autorizable, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
+def _snapshot_obsoleto(*, expected_snapshot_hash: str, snapshot_actual: dict):
+    if snapshot_actual["snapshot_hash"] == expected_snapshot_hash:
+        return
+    exc = RecargaCedisSnapshotObsoleto(
+        "La carga del siguiente tramo cambió desde la revisión; actualiza y vuelve a revisar antes de autorizar."
+    )
+    exc.snapshot_hash = snapshot_actual["snapshot_hash"]
+    raise exc
+
+
+def _error_recarga_con_snapshot(exc: ValidationError, snapshot: dict) -> ValidationError:
+    exc.snapshot_hash = snapshot["snapshot_hash"]
+    return exc
+
+
+def _snapshot_tiene_sync_externo_valido(snapshot: dict) -> bool:
+    return bool(
+        snapshot.get("checklist_sincronizado_en")
+        and snapshot.get("point_sync_job_id")
+        and snapshot.get("point_sync_job_status") == "SUCCESS"
+    )
+
+
+ESTADOS_ALERTA_RECARGA_REVISABLE = (
+    "ERROR_POINT",
+    "PENDIENTE_ENVIADO",
+    "SIN_LINEAS_POINT",
+)
+
+
+def _fecha_observacion_alerta_recarga(evento: EventoRuta):
+    raw = (evento.metadata or {}).get("ultima_observacion_en")
+    observada_en = parse_datetime(raw) if isinstance(raw, str) else None
+    if observada_en is None:
+        observada_en = evento.creado_en
+    if timezone.is_naive(observada_en):
+        observada_en = timezone.make_aware(observada_en, timezone.get_current_timezone())
+    return observada_en
+
+
+def ultima_alerta_recarga_cedis_revisable(
+    *, ruta: RutaEntrega, parada: ParadaRuta, bloquear: bool = False
+) -> EventoRuta | None:
+    alertas = EventoRuta.objects.filter(
+        ruta=ruta,
+        parada=parada,
+        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        metadata__tipo="alerta_recarga_cedis_sync",
+        metadata__estado_sync__in=ESTADOS_ALERTA_RECARGA_REVISABLE,
+    ).order_by("id")
+    if bloquear:
+        alertas = alertas.select_for_update()
+    candidatas = list(alertas)
+    return max(
+        candidatas,
+        key=lambda evento: (
+            _fecha_observacion_alerta_recarga(evento),
+            evento.creado_en,
+            evento.id,
+        ),
+        default=None,
+    )
+
+
+def _hash_alerta_recarga(evento: EventoRuta | None) -> str:
+    if evento is None:
+        return ""
+    return ((evento.metadata or {}).get("snapshot") or {}).get("snapshot_hash") or ""
+
+
 @transaction.atomic
-def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada: ParadaRuta | None = None) -> EventoRuta:
+def _validar_alerta_recarga_revisada(
+    *, ruta: RutaEntrega, parada: ParadaRuta, expected_snapshot_hash: str
+) -> EventoRuta:
+    alerta = ultima_alerta_recarga_cedis_revisable(
+        ruta=ruta,
+        parada=parada,
+        bloquear=True,
+    )
+    if _hash_alerta_recarga(alerta) != expected_snapshot_hash:
+        raise ValidationError("La alerta revisada ya no está disponible; actualiza la ruta antes de autorizar.")
+    return alerta
+
+
+@transaction.atomic
+def _registrar_alerta_recarga_sync(
+    *, ruta: RutaEntrega, parada: ParadaRuta, estado_sync: str, snapshot: dict, detalle: str, actor
+) -> EventoRuta:
+    snapshot_hash = snapshot["snapshot_hash"]
+    clave = f"recarga-sync:{ruta.id}:{parada.id}:{estado_sync}:{snapshot_hash}"
+    observada_en_inicial = timezone.now()
+    evento, creado = EventoRuta.objects.get_or_create(
+        clave_auditoria=clave,
+        defaults={
+            "ruta": ruta,
+            "parada": parada,
+            "tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            "severidad": EventoRuta.SEVERIDAD_ALERTA,
+            "descripcion": detalle,
+            "metadata": {
+                "tipo": "alerta_recarga_cedis_sync",
+                "estado_sync": estado_sync,
+                "ruta_id": ruta.id,
+                "parada_id": parada.id,
+                "actor_id": getattr(actor, "id", None),
+                "capturado_en": snapshot["capturado_en"],
+                "ultima_observacion_en": observada_en_inicial.isoformat(),
+                "ultima_observacion_actor_id": getattr(actor, "id", None),
+                "sucursales": snapshot["sucursales"],
+                "snapshot": snapshot,
+            },
+            "creado_por": actor,
+        },
+    )
+    evento = EventoRuta.objects.select_for_update().get(pk=evento.pk)
+    observada_en = timezone.now()
+    metadata = dict(evento.metadata or {})
+    metadata["ultima_observacion_en"] = observada_en.isoformat()
+    metadata["ultima_observacion_actor_id"] = getattr(actor, "id", None)
+    evento.metadata = metadata
+    evento.save(update_fields=["metadata"])
+    for usuario in _usuarios_diferencia_carga(ruta):
+        if not usuario.is_active:
+            continue
+        Notificacion.objects.get_or_create(
+            usuario=usuario,
+            objeto_tipo="logistica.EventoRuta",
+            objeto_id=str(evento.id),
+            defaults={
+                "actor": actor if getattr(actor, "is_authenticated", False) else None,
+                "titulo": f"Recarga CEDIS requiere atención · {ruta.folio}",
+                "mensaje": detalle,
+                "url": f"/logistica/rutas/{ruta.id}/",
+                "tipo": Notificacion.TIPO_SISTEMA,
+                "prioridad": Notificacion.PRIORIDAD_ALTA,
+            },
+        )
+    return evento
+
+
+@transaction.atomic
+def registrar_recarga_cedis(
+    *, ruta: RutaEntrega, user, notas: str, parada: ParadaRuta | None, snapshot: dict | None,
+    estado_sync: str, motivo_autorizacion: str, expected_snapshot_hash: str = "",
+) -> EventoRuta:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La recarga CEDIS solo aplica a rutas planeadas o en ruta.")
@@ -901,15 +1261,21 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
         raise ValidationError("No hay punto logístico CEDIS configurado para registrar la recarga.")
     if parada is not None:
         parada = ParadaRuta.objects.select_for_update().select_related("punto").get(pk=parada.pk, ruta=ruta)
-        existente = EventoRuta.objects.filter(
-            ruta=ruta,
-            parada=parada,
-        ).filter(
-            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
-            | Q(tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL, metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"])
-        ).order_by("id").first()
+        if estado_sync == "AUTORIZADO":
+            _validar_alerta_recarga_revisada(
+                ruta=ruta,
+                parada=parada,
+                expected_snapshot_hash=expected_snapshot_hash,
+            )
+        existente = _evento_recarga_existente(ruta_id=ruta.id, parada_id=parada.id)
         if existente:
             return existente
+        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+            snapshot_actual = _snapshot_siguiente_tramo(ruta, parada, actor=user)
+            if not snapshot or snapshot_actual["snapshot_hash"] != snapshot.get("snapshot_hash"):
+                raise RecargaCedisSnapshotObsoleto(
+                    "La carga del siguiente tramo cambió; actualiza y vuelve a revisar antes de confirmar."
+                )
 
     lineas_tramo = lineas_tramo_operativo_actual(ruta, checklist=checklist)
     pendientes = lineas_tramo.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).count()
@@ -940,7 +1306,10 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
     )
     parada_cedis = (
         ruta.paradas.select_for_update()
-        .filter(punto__tipo=PuntoLogistico.TIPO_CEDIS, estado=ParadaRuta.ESTADO_PENDIENTE)
+        .filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+        )
         .order_by("orden", "id")
         .first()
     )
@@ -958,21 +1327,200 @@ def registrar_recarga_cedis(*, ruta: RutaEntrega, user, notas: str = "", parada:
     ruta.recompute_route_control()
     ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
 
+    metadata = {
+        "tipo": "recarga_cedis",
+        "numero": numero,
+        "pendientes": pendientes,
+        "diferencias": diferencias,
+        "notas": notas,
+        "estado_sync": estado_sync,
+        "snapshot": snapshot,
+    }
+    if estado_sync == "AUTORIZADO":
+        metadata["autorizacion"] = {
+            "actor_id": user.id,
+            "motivo": motivo_autorizacion,
+            "snapshot_hash": snapshot["snapshot_hash"],
+            "parada_id": parada_cedis.id,
+        }
     return EventoRuta.objects.create(
         ruta=ruta,
         parada=parada_cedis,
         tipo=EventoRuta.TIPO_RECARGA_CEDIS,
         severidad=EventoRuta.SEVERIDAD_INFO,
         descripcion=f"Recarga CEDIS {numero} registrada por logística.",
-        metadata={
-            "tipo": "recarga_cedis",
-            "numero": numero,
-            "pendientes": pendientes,
-            "diferencias": diferencias,
-            "notas": notas,
-        },
+        metadata=metadata,
         creado_por=user,
     )
+
+
+_confirmar_recarga_cedis_atomica = registrar_recarga_cedis
+
+
+def _validar_parada_recarga_pre_sync(
+    *, ruta: RutaEntrega, parada: ParadaRuta | None
+) -> tuple[RutaEntrega, ParadaRuta | None]:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La recarga CEDIS solo aplica a rutas planeadas o en ruta.")
+    if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
+        return ruta, parada
+
+    siguiente = (
+        ruta.paradas.select_related("punto")
+        .filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+        )
+        .order_by("orden", "id")
+        .first()
+    )
+    if parada is None:
+        parada = siguiente
+    else:
+        parada = (
+            ruta.paradas.select_related("punto")
+            .filter(
+                pk=parada.pk,
+                punto__tipo=PuntoLogistico.TIPO_CEDIS,
+                estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            )
+            .first()
+        )
+    if parada is None:
+        raise ValidationError("No hay una parada CEDIS pendiente para registrar la recarga.")
+    if siguiente is None or siguiente.id != parada.id:
+        raise ValidationError("La recarga CEDIS no corresponde al siguiente tramo de la ruta.")
+    return ruta, parada
+
+
+def _orquestar_recarga_cedis(
+    *, ruta: RutaEntrega, user, notas: str = "", parada: ParadaRuta | None = None,
+    autorizar_sin_sync: bool = False, motivo_autorizacion: str = "",
+    expected_snapshot_hash: str = "",
+) -> EventoRuta:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    parada_id = getattr(parada, "id", None)
+    existente = _evento_recarga_existente(ruta_id=ruta.id, parada_id=parada_id)
+    if existente:
+        return existente
+    ruta, parada = _validar_parada_recarga_pre_sync(ruta=ruta, parada=parada)
+
+    if autorizar_sin_sync:
+        if not can_manage_submodule(user, "logistica", "rutas"):
+            raise PermissionDenied("Solo una jefatura de logística puede autorizar el snapshot de recarga.")
+        motivo_autorizacion = (motivo_autorizacion or "").strip()
+        if not motivo_autorizacion:
+            raise ValidationError("Captura el motivo de autorización del snapshot de recarga.")
+        expected_snapshot_hash = (expected_snapshot_hash or "").strip()
+        if not expected_snapshot_hash:
+            raise ValidationError("Actualiza la ruta y revisa la alerta antes de autorizar la recarga.")
+        _validar_alerta_recarga_revisada(
+            ruta=ruta,
+            parada=parada,
+            expected_snapshot_hash=expected_snapshot_hash,
+        )
+
+    snapshot = None
+    estado_sync = "ACTUALIZADO"
+    if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+        try:
+            sincronizar_checklist_carga_desde_point(ruta=ruta, user=user, ejecutar_sync=True)
+        except PointSyncUnavailableError as exc:
+            snapshot = _snapshot_siguiente_tramo(ruta, parada, actor=user)
+            detalle_error = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            snapshot["sync_error"] = detalle_error
+            _registrar_alerta_recarga_sync(
+                ruta=ruta,
+                parada=parada,
+                estado_sync="ERROR_POINT",
+                snapshot=snapshot,
+                detalle="Point no pudo sincronizar; el jefe fue notificado.",
+                actor=user,
+            )
+            if autorizar_sin_sync:
+                _snapshot_obsoleto(
+                    expected_snapshot_hash=expected_snapshot_hash,
+                    snapshot_actual=snapshot,
+                )
+                if _snapshot_tiene_sync_externo_valido(snapshot):
+                    estado_sync = "AUTORIZADO"
+                else:
+                    raise _error_recarga_con_snapshot(
+                        RecargaCedisPointError(
+                            "Point no pudo sincronizar y no existe un snapshot externo previo válido para autorizar."
+                        ),
+                        snapshot,
+                    ) from exc
+            else:
+                raise _error_recarga_con_snapshot(
+                    RecargaCedisPointError("Point no pudo sincronizar; el jefe fue notificado."),
+                    snapshot,
+                ) from exc
+
+        if snapshot is None:
+            snapshot = _snapshot_siguiente_tramo(ruta, parada, actor=user)
+        if autorizar_sin_sync and estado_sync != "AUTORIZADO":
+            _snapshot_obsoleto(
+                expected_snapshot_hash=expected_snapshot_hash,
+                snapshot_actual=snapshot,
+            )
+        sin_lineas_para_sucursales = bool(snapshot["sucursales"] and not snapshot["lineas"])
+        if sin_lineas_para_sucursales and estado_sync != "AUTORIZADO":
+            if autorizar_sin_sync:
+                estado_sync = "AUTORIZADO"
+            else:
+                _registrar_alerta_recarga_sync(
+                    ruta=ruta,
+                    parada=parada,
+                    estado_sync="SIN_LINEAS_POINT",
+                    snapshot=snapshot,
+                    detalle=(
+                        "El siguiente tramo tiene sucursales planeadas pero Point no devolvió líneas; "
+                        "el jefe fue notificado."
+                    ),
+                    actor=user,
+                )
+                raise _error_recarga_con_snapshot(
+                    RecargaCedisSinLineasPoint(
+                        "Point no devolvió líneas para las sucursales planeadas del siguiente tramo; "
+                        "el jefe fue notificado."
+                    ),
+                    snapshot,
+                )
+        pendientes = [linea for linea in snapshot["lineas"] if not linea["enviado"]]
+        if pendientes and estado_sync != "AUTORIZADO":
+            if autorizar_sin_sync:
+                estado_sync = "AUTORIZADO"
+            else:
+                _registrar_alerta_recarga_sync(
+                    ruta=ruta,
+                    parada=parada,
+                    estado_sync="PENDIENTE_ENVIADO",
+                    snapshot=snapshot,
+                    detalle="Hay solicitudes del siguiente tramo que aún no pasan a Enviado; el jefe fue notificado.",
+                    actor=user,
+                )
+                raise _error_recarga_con_snapshot(
+                    RecargaCedisPendienteEnviado(
+                        "Hay solicitudes que aún no pasan a Enviado; el jefe fue notificado."
+                    ),
+                    snapshot,
+                )
+
+    return _confirmar_recarga_cedis_atomica(
+        ruta=ruta,
+        user=user,
+        notas=notas,
+        parada=parada,
+        snapshot=snapshot,
+        estado_sync=estado_sync,
+        motivo_autorizacion=motivo_autorizacion,
+        expected_snapshot_hash=expected_snapshot_hash,
+    )
+
+
+registrar_recarga_cedis = _orquestar_recarga_cedis
 
 
 def _usuarios_logistica_rutas():
@@ -998,7 +1546,10 @@ def paradas_con_entrega_requerida(ruta: RutaEntrega):
 
 
 def ruta_tiene_paradas_entregables_pendientes(ruta: RutaEntrega) -> bool:
-    return paradas_con_entrega_requerida(ruta).filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists()
+    return any(
+        not parada_resuelta_operativamente(parada)
+        for parada in ruta.paradas.select_related("punto").order_by("orden", "id")
+    )
 
 
 def ruta_tiene_entregas_pendientes(ruta: RutaEntrega) -> bool:
@@ -1092,7 +1643,11 @@ def confirmar_checklist_carga_manual(*, ruta: RutaEntrega, user, notas: str = ""
     if not checklist or not checklist.lineas.exists():
         raise ValidationError("La ruta no tiene carga Point para confirmar.")
     now = timezone.now()
-    lineas = list(checklist.lineas.select_for_update().filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE))
+    lineas = list(
+        checklist.lineas.select_related("point_transfer_line")
+        .select_for_update(of=("self",))
+        .filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+    )
     if any(_linea_pendiente_envio_point(linea) for linea in lineas):
         raise ValidationError(POINT_PENDIENTE_ENVIO_NOTA)
     for linea in lineas:
@@ -1289,22 +1844,37 @@ def _resueltas_son_duplicado_equivalente(resueltas: list[RutaCargaChecklistLinea
     )
 
 
+def _linea_historica_enviada_positiva(linea: RutaCargaChecklistLinea) -> bool:
+    cantidad = Decimal(str(linea.cantidad_enviada_esperada or 0))
+    if cantidad <= 0:
+        return False
+    if linea.point_transfer_line_id is None:
+        return True
+    return point_transfer_enviada(linea.point_transfer_line)
+
+
+def _linea_historica_superable(linea: RutaCargaChecklistLinea) -> bool:
+    if linea.validado_por_id or linea.validado_en:
+        return False
+    if Decimal(str(linea.cantidad_enviada_esperada or 0)) > 0:
+        return False
+    return True
+
+
 def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> SuperacionHistoricaResumen:
     """Aplica retroactivamente la regla de SUPERADA a duplicados ya existentes.
 
-    Agrupa por (checklist, parada, producto, folio) -misma unidad que protege
-    _sincronizar_lineas_point_para_ruta- y nunca cruza folios distintos. Si el
-    grupo ya tiene una línea validada/resuelta, las demás se marcan SUPERADA
-    apuntando a esa; si ninguna está resuelta, se conserva la más reciente. Si
-    hay más de una línea resuelta pero todas comparten el mismo detalle de
-    Point, la misma cantidad y el mismo validador (misma validación duplicada
-    por la Causa A, no dos entregas reales), se conserva la más antigua. Si
-    difieren en algo de eso (anomalía real), el grupo se reporta para
-    revisión manual y no se toca.
+    Agrupa por (checklist, parada, producto, unidad, folio) y nunca cruza folios
+    ni unidades. Sólo una línea positiva/enviada o una validación inequívoca
+    puede ser autoritativa; únicamente candidatos antiguos en cero y no
+    validados se marcan SUPERADA, incluso si ese cero fue un Enviado válido.
+    Dos detalles positivos reales permanecen independientes. Dos validaciones sólo se colapsan cuando
+    comparten el mismo detalle/linaje Point, cantidad y validador; cualquier
+    diferencia se reporta para revisión manual sin alterar el grupo.
     """
     grupos = (
         RutaCargaChecklistLinea.objects.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        .values("checklist_id", "parada_id", "item_code", "item_name", "transfer_external_id")
+        .values("checklist_id", "parada_id", "item_code", "item_name", "unit", "transfer_external_id")
         .annotate(n=Count("id"))
         .filter(n__gt=1)
     )
@@ -1321,8 +1891,11 @@ def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> Sup
                 parada_id=grupo["parada_id"],
                 item_code=grupo["item_code"],
                 item_name=grupo["item_name"],
+                unit=grupo["unit"],
                 transfer_external_id=grupo["transfer_external_id"],
-            ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+            )
+            .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+            .select_related("point_transfer_line")
         )
         resueltas = [
             linea for linea in lineas if linea.estatus in _ESTATUS_RESUELTOS_HISTORICO or linea.validado_por_id
@@ -1342,11 +1915,31 @@ def marcar_lineas_checklist_superadas_historicas(*, dry_run: bool = True) -> Sup
             )
             continue
 
-        if resueltas:
+        if len(resueltas) > 1:
             autoritativa = min(resueltas, key=lambda linea: (linea.creado_en, linea.id))
+            a_superar = [
+                linea
+                for linea in lineas
+                if linea.id != autoritativa.id
+                and (linea in resueltas or _linea_historica_superable(linea))
+            ]
+        elif resueltas:
+            autoritativa = min(resueltas, key=lambda linea: (linea.creado_en, linea.id))
+            a_superar = [
+                linea
+                for linea in lineas
+                if linea.id != autoritativa.id and _linea_historica_superable(linea)
+            ]
         else:
-            autoritativa = max(lineas, key=lambda linea: (linea.creado_en, linea.id))
-        a_superar = [linea for linea in lineas if linea.id != autoritativa.id]
+            positivas = [linea for linea in lineas if _linea_historica_enviada_positiva(linea)]
+            if len(positivas) != 1:
+                continue
+            autoritativa = positivas[0]
+            a_superar = [
+                linea
+                for linea in lineas
+                if linea.id != autoritativa.id and _linea_historica_superable(linea)
+            ]
 
         if not a_superar:
             continue

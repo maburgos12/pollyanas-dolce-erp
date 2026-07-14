@@ -7,10 +7,11 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
+from .domain_ruta import parada_resuelta_operativamente
 from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
 
 logger = logging.getLogger(__name__)
@@ -19,11 +20,29 @@ GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
 RUTA_NOCTURNA_HORA_CORTE = 22
 
 
+class LiberacionRutaError(ValidationError):
+    error_code = "ruta_no_liberada"
+    http_status = 400
+
+    def __init__(self, message, *, error_code=None):
+        super().__init__(message)
+        if error_code:
+            self.error_code = error_code
+
+
+class LiberacionRutaConflicto(LiberacionRutaError):
+    error_code = "ruta_conflicto"
+    http_status = 409
+
+
 @dataclass(frozen=True)
 class GeocercaResultado:
     parada: ParadaRuta | None
     distancia_metros: int | None
     dentro: bool
+    dentro_geocerca_planeada: bool
+    parada_planeada_mas_cercana: ParadaRuta | None
+    distancia_planeada_metros: int | None
 
 
 def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
@@ -64,6 +83,143 @@ def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
     return seleccionada is not None and seleccionada.id == ruta.id
 
 
+@transaction.atomic
+def liberar_ruta_con_turno(
+    *,
+    ruta: RutaEntrega,
+    actor,
+    bitacora: BitacoraSalidaLlegada | None = None,
+) -> RutaEntrega:
+    """Libera una ruta bajo un único contrato de turno, unidad y checklist."""
+    from .services_carga_ruta import checklist_bloquea_salida
+
+    ruta = (
+        RutaEntrega.objects.select_for_update(of=("self",))
+        .select_related("repartidor", "unidad_operativa", "bitacora_salida")
+        .get(pk=ruta.pk)
+    )
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise LiberacionRutaError("La ruta ya está cerrada o cancelada y no puede liberarse.")
+    if not ruta.repartidor_id:
+        raise LiberacionRutaError("No se puede liberar la ruta: asigna repartidor.")
+    if not ruta.unidad_operativa_id:
+        raise LiberacionRutaError("No se puede liberar la ruta: asigna unidad operativa.")
+
+    rutas_activas_ajenas = (
+        RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA)
+        .exclude(pk=ruta.pk)
+    )
+    if rutas_activas_ajenas.filter(repartidor_id=ruta.repartidor_id).exists():
+        raise LiberacionRutaConflicto(
+            "No se puede liberar la ruta: el repartidor ya tiene otra ruta en curso (otra ruta activa)."
+        )
+    if rutas_activas_ajenas.filter(unidad_operativa_id=ruta.unidad_operativa_id).exists():
+        raise LiberacionRutaConflicto(
+            "No se puede liberar la ruta: la unidad ya tiene otra ruta en curso (otra ruta activa)."
+        )
+
+    bitacora_solicitada_id = bitacora.pk if bitacora is not None else None
+    if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and ruta.bitacora_salida_id:
+        if bitacora_solicitada_id and bitacora_solicitada_id != ruta.bitacora_salida_id:
+            raise LiberacionRutaError(
+                "La ruta ya fue liberada con otro turno; conserva la bitácora original.",
+                error_code="turno_ruta_distinto",
+            )
+        bitacora = (
+            BitacoraSalidaLlegada.objects.select_for_update()
+            .select_related("repartidor", "unidad")
+            .filter(pk=ruta.bitacora_salida_id, cerrada=False)
+            .first()
+        )
+    else:
+        turnos_abiertos = list(
+            BitacoraSalidaLlegada.objects.select_for_update(of=("self",))
+            .select_related("repartidor", "unidad")
+            .filter(repartidor_id=ruta.repartidor_id, cerrada=False)
+            .order_by("-hora_salida", "-id")
+            [:2]
+        )
+        if len(turnos_abiertos) > 1:
+            raise LiberacionRutaError(
+                "El repartidor tiene más de un turno abierto; cierra el turno incorrecto antes de liberar la ruta.",
+                error_code="turno_ambiguo",
+            )
+        bitacora_explicita = None
+        if bitacora_solicitada_id:
+            bitacora_explicita = (
+                BitacoraSalidaLlegada.objects.select_for_update(of=("self",))
+                .filter(pk=bitacora_solicitada_id, cerrada=False)
+                .first()
+            )
+            if bitacora_explicita and bitacora_explicita.repartidor_id != ruta.repartidor_id:
+                raise LiberacionRutaError(
+                    "El turno activo pertenece a otro repartidor.",
+                    error_code="repartidor_ruta_distinto",
+                )
+        bitacora = turnos_abiertos[0] if turnos_abiertos else None
+        if bitacora_solicitada_id and bitacora is not None and bitacora_solicitada_id != bitacora.id:
+            raise LiberacionRutaError(
+                "La bitácora indicada no corresponde al único turno abierto del repartidor.",
+                error_code="turno_ruta_distinto",
+            )
+    if bitacora is None:
+        raise LiberacionRutaError(
+            "El repartidor no tiene un turno activo.",
+            error_code="sin_turno",
+        )
+    if bitacora.repartidor_id != ruta.repartidor_id:
+        raise LiberacionRutaError(
+            "El turno activo pertenece a otro repartidor.",
+            error_code="repartidor_ruta_distinto",
+        )
+    if bitacora.unidad_id != ruta.unidad_operativa_id:
+        raise LiberacionRutaError(
+            "El turno activo no corresponde a la unidad asignada a la ruta.",
+            error_code="unidad_ruta_distinta",
+        )
+    if not ruta.paradas.exists():
+        raise LiberacionRutaError("No se puede liberar la ruta: agrega al menos una parada.")
+
+    blocker = checklist_bloquea_salida(ruta)
+    if blocker:
+        raise LiberacionRutaError(blocker)
+
+    if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA or ruta.bitacora_salida_id != bitacora.id:
+        ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        ruta.bitacora_salida = bitacora
+        ruta.hora_inicio_real = ruta.hora_inicio_real or bitacora.hora_salida or timezone.now()
+        try:
+            with transaction.atomic():
+                ruta.save(
+                    update_fields=[
+                        "estatus",
+                        "bitacora_salida",
+                        "hora_inicio_real",
+                        "updated_at",
+                    ]
+                )
+        except IntegrityError as exc:
+            raise LiberacionRutaConflicto(
+                "No se puede liberar la ruta: el repartidor o la unidad ya tiene otra ruta en curso (otra ruta activa)."
+            ) from exc
+
+    evento_salida = (
+        EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA)
+        .order_by("id")
+        .first()
+    )
+    if evento_salida is None:
+        EventoRuta.objects.create(
+            ruta=ruta,
+            tipo=EventoRuta.TIPO_SALIDA,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Ruta liberada con turno activo validado.",
+            creado_por=actor if getattr(actor, "is_authenticated", False) else None,
+            metadata={"bitacora_salida_id": bitacora.id},
+        )
+    return ruta
+
+
 def _decimal(value, field_name: str) -> Decimal:
     try:
         return Decimal(str(value))
@@ -100,20 +256,35 @@ def distancia_metros(lat1, lon1, lat2, lon2) -> int:
 
 
 def evaluar_geocercas(ruta: RutaEntrega, latitud, longitud) -> GeocercaResultado:
-    closest: ParadaRuta | None = None
-    closest_distance: int | None = None
+    elegible_mas_cercana: ParadaRuta | None = None
+    distancia_elegible: int | None = None
+    planeada_mas_cercana: ParadaRuta | None = None
+    distancia_planeada: int | None = None
+    dentro_geocerca_planeada = False
     for parada in ruta.paradas.select_related("punto").all():
         distance = distancia_metros(latitud, longitud, parada.latitud_geocerca, parada.longitud_geocerca)
-        if closest_distance is None or distance < closest_distance:
-            closest = parada
-            closest_distance = distance
+        if distancia_planeada is None or distance < distancia_planeada:
+            planeada_mas_cercana = parada
+            distancia_planeada = distance
+        if distance <= parada.radio_geocerca_metros:
+            dentro_geocerca_planeada = True
+        if parada_resuelta_operativamente(parada):
+            continue
+        if distancia_elegible is None or distance < distancia_elegible:
+            elegible_mas_cercana = parada
+            distancia_elegible = distance
 
-    if closest is None or closest_distance is None:
-        return GeocercaResultado(parada=None, distancia_metros=None, dentro=False)
     return GeocercaResultado(
-        parada=closest,
-        distancia_metros=closest_distance,
-        dentro=closest_distance <= closest.radio_geocerca_metros,
+        parada=elegible_mas_cercana,
+        distancia_metros=distancia_elegible,
+        dentro=bool(
+            elegible_mas_cercana is not None
+            and distancia_elegible is not None
+            and distancia_elegible <= elegible_mas_cercana.radio_geocerca_metros
+        ),
+        dentro_geocerca_planeada=dentro_geocerca_planeada,
+        parada_planeada_mas_cercana=planeada_mas_cercana,
+        distancia_planeada_metros=distancia_planeada,
     )
 
 
@@ -196,7 +367,14 @@ def _marcar_visitada_por_permanencia(
     ubicacion_actual: UbicacionRuta,
     distancia_metros_value: int | None,
 ) -> bool:
-    primera_pendiente = ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).order_by("orden", "id").first()
+    primera_pendiente = next(
+        (
+            candidata
+            for candidata in ruta.paradas.select_related("punto").order_by("orden", "id")
+            if not parada_resuelta_operativamente(candidata)
+        ),
+        None,
+    )
     if not primera_pendiente or primera_pendiente.id != parada.id:
         return False
     primera_llegada = (
@@ -433,7 +611,7 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                 ubicacion_actual=ubicacion,
                 distancia_metros_value=resultado.distancia_metros,
             )
-    elif ruta.paradas.exists():
+    elif ruta.paradas.exists() and not resultado.dentro_geocerca_planeada:
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])
         confirmado = payload.get("fuera_de_ruta_confirmado") is True
@@ -458,13 +636,17 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
             severidad=EventoRuta.SEVERIDAD_CRITICA,
             descripcion=descripcion_desvio,
             user=user,
-            parada=resultado.parada,
+            parada=resultado.parada_planeada_mas_cercana,
             ubicacion=ubicacion,
             latitud=ubicacion.latitud,
             longitud=ubicacion.longitud,
-            distancia_metros_value=resultado.distancia_metros,
+            distancia_metros_value=resultado.distancia_planeada_metros,
             metadata={
-                "punto_mas_cercano": resultado.parada.punto_nombre_snapshot if resultado.parada else None,
+                "punto_mas_cercano": (
+                    resultado.parada_planeada_mas_cercana.punto_nombre_snapshot
+                    if resultado.parada_planeada_mas_cercana
+                    else None
+                ),
                 "motivo": motivo_desvio,
                 "origen": "repartidor_confirmado" if confirmado else tracking_origen,
             },
