@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import OperationalError
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
@@ -6365,3 +6365,42 @@ class InventarioAjustesApiTests(TestCase):
         self.existencia.refresh_from_db()
         self.assertEqual(self.existencia.stock_actual, Decimal("10"))
         self.assertEqual(MovimientoInventario.objects.count(), 0)
+
+
+class InventarioAjusteDecisionApiTransactionTests(TransactionTestCase):
+    def test_admin_aprueba_ajuste_api_en_autocommit(self):
+        user_model = get_user_model()
+        admin = user_model.objects.create_superuser(
+            username="admin_api_decision_tx",
+            email="admin_api_decision_tx@example.com",
+            password="test12345",
+        )
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-api-tx",
+            nombre="Kilogramo API TX",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(nombre="Harina API TX", unidad_base=unidad, activo=True)
+        existencia = ExistenciaInsumo.objects.create(insumo=insumo, stock_actual=Decimal("10"))
+        ajuste = AjusteInventario.objects.create(
+            insumo=insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("7"),
+            motivo="Merma API TX",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=admin,
+        )
+
+        self.client.force_login(admin)
+        response = self.client.post(
+            reverse("api_inventario_ajuste_decision", args=[ajuste.id]),
+            {"action": "approve", "comentario_revision": "aprobado api tx"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["estatus"], AjusteInventario.STATUS_APLICADO)
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("7"))
+        self.assertEqual(MovimientoInventario.objects.filter(referencia=ajuste.folio).count(), 1)
