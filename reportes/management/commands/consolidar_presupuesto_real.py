@@ -35,7 +35,12 @@ class Command(BaseCommand):
         parser.add_argument("--periodo", help="Mes único YYYY-MM")
         parser.add_argument("--desde", help="Inicio de rango YYYY-MM")
         parser.add_argument("--hasta", help="Fin de rango YYYY-MM")
-        parser.add_argument("--version", default=LineaPresupuestoMensual.VERSION_ORIGINAL)
+        parser.add_argument(
+            "--presupuesto-version",
+            dest="presupuesto_version",
+            default=LineaPresupuestoMensual.VERSION_ORIGINAL,
+            help="ORIGINAL o REVISADO (no confundir con --version, reservado por Django).",
+        )
         parser.add_argument("--areas", nargs="*", help="Códigos de área a consolidar")
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument(
@@ -62,7 +67,7 @@ class Command(BaseCommand):
         for periodo in periodos:
             summary = service.consolidar(
                 periodo=periodo,
-                version=options["version"],
+                version=options["presupuesto_version"],
                 areas=options["areas"] or None,
                 dry_run=dry_run,
             )

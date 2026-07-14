@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Presupuesto vs Real{% endblock %}
+{% block page_title %}Reportes · Presupuesto vs Real{% endblock %}
+{% block body_class %}page-reportes-presupuesto-vs-real{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* Solo estilos sin equivalente global (badges de fuente y celdas de semáforo) */
+  .pvr-fuente { display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; border-radius:var(--radius-sm); padding:2px 8px; }
+  .pvr-fuente.is-auto { background:var(--rosa); color:var(--vino); }
+  .pvr-fuente.is-manual { background:var(--gris-suave); color:var(--texto); border:1px solid var(--dorado); }
+  .pvr-fuente.is-pendiente { background:var(--gris-suave); color:var(--texto-light); }
+  .pvr-var.is-success { color:var(--verde); font-weight:700; }
+  .pvr-var.is-danger { color:var(--rojo); font-weight:700; }
+  .pvr-var.is-neutral { color:var(--texto-light); }
+  .pvr-breakdown summary { cursor:pointer; color:var(--vino); font-size:0.8rem; }
+  .pvr-breakdown ul { margin:6px 0 0 14px; padding:0; font-size:0.8rem; color:var(--texto-light); }
+  .pvr-cobertura-bar { background:var(--gris-suave); border-radius:var(--radius-sm); height:10px; overflow:hidden; }
+  .pvr-cobertura-bar span { display:block; height:100%; background:var(--vino); width:var(--pct, 0%); }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
+  {% for tab in module_tabs %}
+  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="card-header">Presupuesto vs Real</div>
+  <p class="muted">Comparativo mensual del presupuesto autorizado contra el gasto e ingreso real consolidado desde el ERP (Point, nómina y gastos operativos).</p>
+
+  <form method="get" novalidate>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="pvr-area">Área</label>
+        <select class="input-field" id="pvr-area" name="area">
+          <option value="">Todas</option>
+          {% for area in areas %}
+          <option value="{{ area.codigo }}" {% if selected_area == area.codigo %}selected{% endif %}>{{ area.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="pvr-month">Mes</label>
+        <select class="input-field" id="pvr-month" name="month">
+          {% for month_name, month_number in month_options %}
+          <option value="{{ month_number }}" {% if selected_month == month_number %}selected{% endif %}>{{ month_name|capfirst }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="pvr-year">Año</label>
+        <input class="input-field" id="pvr-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}">
+      </div>
+      <div class="form-group">
+        <label for="pvr-version">Versión</label>
+        <select class="input-field" id="pvr-version" name="version">
+          {% for version in versions %}
+          <option value="{{ version }}" {% if selected_version == version %}selected{% endif %}>{{ version }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" type="submit">Actualizar</button>
+      <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=xlsx">Exportar Excel</a>
+      <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=csv">Exportar CSV</a>
+    </div>
+  </form>
+</section>
+
+<section class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-number">${{ kpis.presupuesto|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Presupuesto · {{ selected_month_name|capfirst }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">${{ kpis.real|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Real consolidado</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if kpis.varianza < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.varianza|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Varianza ({{ kpis.varianza_pct|floatformat:2 }}%)</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
+    <div class="kpi-label">Conceptos con real</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Resumen anual por área · {{ selected_year }}</div>
+  <p class="muted">Presupuesto y real acumulados del año, y el corte de {{ selected_month_name }}.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Área</th>
+          <th>Presupuesto anual</th>
+          <th>Real acumulado</th>
+          <th>Presupuesto {{ selected_month_name|capfirst }}</th>
+          <th>Real {{ selected_month_name|capfirst }}</th>
+          <th>Varianza</th>
+          <th>% Var</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in matriz %}
+        <tr>
+          <td><a href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ fila.codigo }}">{{ fila.area }}</a></td>
+          <td>${{ fila.anual_presupuesto|floatformat:2|intcomma }}</td>
+          <td>${{ fila.anual_real|floatformat:2|intcomma }}</td>
+          <td>${{ fila.mes_presupuesto|floatformat:2|intcomma }}</td>
+          <td>{% if fila.mes_real is not None %}${{ fila.mes_real|floatformat:2|intcomma }}{% else %}<span class="muted">Sin datos</span>{% endif %}</td>
+          <td>{% if fila.mes_varianza is not None %}${{ fila.mes_varianza|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+          <td>{% if fila.mes_varianza_pct is not None %}{{ fila.mes_varianza_pct|floatformat:2 }}%{% else %}-{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="muted">No hay presupuesto cargado para {{ selected_year }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    Detalle {{ selected_month_name|capfirst }} {{ selected_year }}
+    {% if selected_area %}· {% for area in areas %}{% if area.codigo == selected_area %}{{ area.nombre }}{% endif %}{% endfor %}{% endif %}
+  </div>
+  <p class="muted">Cada renglón indica de dónde salió el dato real. Los pendientes se capturan en su módulo de área.</p>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Sucursal</th>
+          <th>Presupuesto</th>
+          <th>Real</th>
+          <th>Varianza</th>
+          <th>% Var</th>
+          <th>Fuente</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in detalle %}
+        <tr>
+          <td>
+            {{ row.concepto }}
+            {% if not selected_area %}<div class="muted" style="font-size:0.75rem;">{{ row.area }}</div>{% endif %}
+            {% if row.breakdown %}
+            <details class="pvr-breakdown">
+              <summary>Ver desglose</summary>
+              <ul>
+                {% for parte in row.breakdown %}
+                <li>{{ parte.tipo_fuente }}: ${{ parte.monto|floatformat:2|intcomma }}</li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% endif %}
+          </td>
+          <td>{{ row.sucursal|default:"—" }}</td>
+          <td>${{ row.presupuesto|floatformat:2|intcomma }}</td>
+          <td>
+            {% if row.real is not None %}${{ row.real|floatformat:2|intcomma }}
+              {% if row.sin_datos_fuente %}<span class="badge bg-warning">Fuente sin datos</span>{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="pvr-var is-{{ row.tone }}">{% if row.varianza is not None %}${{ row.varianza|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+          <td class="pvr-var is-{{ row.tone }}">{% if row.varianza_pct is not None %}{{ row.varianza_pct|floatformat:2 }}%{% else %}—{% endif %}</td>
+          <td><span class="pvr-fuente is-{{ row.fuente.kind }}">{{ row.fuente.label }}</span></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="muted">Sin líneas de presupuesto para este mes.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Cobertura de automatización por área</div>
+  <p class="muted">Qué proporción de cada área ya se llena sola desde el ERP. "Manual" = concepto que por naturaleza se captura (IMSS, uniformes, gastos no facturados).</p>
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Área</th>
+          <th>Conceptos</th>
+          <th>Automáticos</th>
+          <th>Manuales</th>
+          <th>Sin mapear</th>
+          <th>Avance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in cobertura %}
+        <tr>
+          <td>{{ fila.area }}</td>
+          <td>{{ fila.total }}</td>
+          <td>{{ fila.auto }}</td>
+          <td>{{ fila.manual }}</td>
+          <td>{% if fila.sin_mapear %}<span class="badge bg-warning">{{ fila.sin_mapear }}</span>{% else %}0{% endif %}</td>
+          <td>
+            <div class="pvr-cobertura-bar" role="img" aria-label="{{ fila.pct_auto }}% automatizado"><span style="--pct:{{ fila.pct_auto }}%"></span></div>
+            <span class="muted" style="font-size:0.75rem;">{{ fila.pct_auto }}%</span>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="muted">Sin rubros de presupuesto.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}
