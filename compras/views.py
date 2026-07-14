@@ -14,6 +14,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Count, Max, Q, Sum
 from django.urls import reverse
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -3835,8 +3836,10 @@ def _enterprise_blocker_details_for_recepcion(recepcion) -> list[dict[str, objec
     return blockers
 
 
+@transaction.atomic
 def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) -> dict:
-    orden = recepcion.orden
+    recepcion = RecepcionCompra.objects.select_for_update().get(pk=recepcion.pk)
+    orden = OrdenCompra.objects.select_related("solicitud", "solicitud__insumo").get(pk=recepcion.orden_id)
     solicitud = orden.solicitud
     if not solicitud or not solicitud.insumo_id:
         return {"applied": False, "reason": "sin_solicitud_o_insumo"}
@@ -3851,6 +3854,7 @@ def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) ->
 
     insumo_canonical = canonical_insumo_by_id(solicitud.insumo_id) or solicitud.insumo
     existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
+    existencia = ExistenciaInsumo.objects.select_for_update().get(pk=existencia.pk)
     prev_stock = existencia.stock_actual
     existencia.stock_actual = prev_stock + cantidad
     existencia.actualizado_en = timezone.now()
