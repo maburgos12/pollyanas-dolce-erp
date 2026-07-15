@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260714-flota-sin-sucursal-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260715-mantenimiento-guardar-v2">
 {% endblock %}
 
 {% block content %}
@@ -471,7 +471,7 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-orden-servicio>Cerrar</button>
     </div>
-    <form class="mant-form" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data">
+    <form class="mant-form" id="ordenServicioForm" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
       <input type="hidden" name="modo_servicio" id="ordenServicioModo" value="realizado">
       <div class="mant-form-grid">
@@ -565,6 +565,7 @@
           Cerrar servicio al guardar
         </label>
       </div>
+      <div class="mant-form-error" id="ordenServicioError" role="alert" tabindex="-1" hidden></div>
       <button class="btn btn-primary" type="submit" id="ordenServicioSubmit" style="background:#8B2252;border-color:#8B2252;">Guardar servicio</button>
     </form>
   </aside>
@@ -1143,6 +1144,8 @@
   const unidadField = document.getElementById("ordenServicioUnidadField");
   const cierreBlock = document.getElementById("ordenServicioCierreBlock");
   const cerrar = document.getElementById("ordenServicioCerrar");
+  const form = document.getElementById("ordenServicioForm");
+  const error = document.getElementById("ordenServicioError");
   const submit = document.getElementById("ordenServicioSubmit");
   const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
   const activoOnly = modal.querySelectorAll("[data-activo-only]");
@@ -1155,6 +1158,14 @@
     for (let option of select.options) {
       option.selected = option.value === value;
     }
+  }
+
+  function syncSearchableState(select, enabled, required) {
+    const searchInput = select?.nextElementSibling?.querySelector(".pd-searchable-select__input");
+    if (!searchInput) return;
+    searchInput.disabled = !enabled;
+    searchInput.required = required;
+    if (!enabled) searchInput.setCustomValidity("");
   }
 
   function clearForm() {
@@ -1241,6 +1252,10 @@
     activo.disabled = esUnidad || esInstalacion;
     instalacion.disabled = !esInstalacion;
     unidad.disabled = !esUnidad;
+    syncSearchableState(sucursal, !esUnidad, !esUnidad);
+    syncSearchableState(activo, !esUnidad && !esInstalacion, !esUnidad && !esInstalacion);
+    syncSearchableState(instalacion, esInstalacion, esInstalacion);
+    syncSearchableState(unidad, esUnidad, esUnidad);
     activoOnly.forEach((field) => {
       field.style.display = esUnidad ? "none" : "grid";
       field.querySelectorAll("input,select,textarea").forEach((input) => {
@@ -1304,6 +1319,40 @@
 
   alcance.addEventListener("change", () => setAlcance(alcance.value));
   sucursal.addEventListener("change", filtrarPorSucursal);
+  form.addEventListener("submit", (event) => {
+    error.hidden = true;
+    error.textContent = "";
+
+    // El navegador puede restaurar estados required/disabled de una apertura
+    // anterior del drawer. Normalizar el alcance evita bloqueos invisibles.
+    setAlcance(alcance.value);
+    if (!form.checkValidity()) {
+      event.preventDefault();
+      const invalid = Array.from(form.elements).find(
+        (field) => field.name && !field.disabled && !field.checkValidity()
+      );
+      const fieldLabels = {
+        sucursal_id: "Sucursal",
+        activo_id: "Activo / equipo",
+        unidad_id: "Unidad logística",
+        fecha_objetivo: "Fecha del servicio",
+        descripcion: "Servicio / pendiente",
+      };
+      const label = fieldLabels[invalid?.name]
+        || invalid?.closest("label")?.childNodes[0]?.textContent?.trim();
+      error.textContent = label
+        ? `Revisa el campo “${label}” antes de guardar.`
+        : "Revisa los campos obligatorios antes de guardar.";
+      error.hidden = false;
+      error.focus();
+      invalid?.focus();
+      invalid?.reportValidity();
+      return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = "Guardando…";
+  });
   btnRealizado.addEventListener("click", () => open("realizado"));
   btnPendiente.addEventListener("click", () => open("pendiente"));
   document.querySelectorAll("[data-close-orden-servicio]").forEach((button) => {
