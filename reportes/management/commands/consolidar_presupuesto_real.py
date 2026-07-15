@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from reportes.models import LineaPresupuestoMensual
 from reportes.services_presupuesto_real import (
     PresupuestoRealConsolidacionService,
+    limpiar_reales_sin_asignacion,
     migrar_fuentes_legadas,
 )
 
@@ -48,6 +49,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Migra fuente_real heredados al namespace AUTO:/MANUAL: antes de consolidar.",
         )
+        parser.add_argument(
+            "--limpiar-sin-asignacion",
+            action="store_true",
+            help="Anula reales AUTO de rubros cuya regla VENTA_POS quedó sin asignación (vuelven a pendiente).",
+        )
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
@@ -62,6 +68,10 @@ class Command(BaseCommand):
             migrados = migrar_fuentes_legadas(dry_run=dry_run)
             for legado, n in migrados.items():
                 self.stdout.write(f"namespace legado '{legado}': {n} líneas")
+
+        if options["limpiar_sin_asignacion"]:
+            limpiadas = limpiar_reales_sin_asignacion(dry_run=dry_run)
+            self.stdout.write(f"reales sin asignación limpiados: {limpiadas}")
 
         service = PresupuestoRealConsolidacionService()
         for periodo in periodos:

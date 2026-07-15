@@ -391,6 +391,46 @@ class PresupuestoRealConsolidacionService:
         return (total, hubo_datos)
 
 
+def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
+    """Anula reales AUTO de rubros cuya regla VENTA_POS ya no tiene asignación.
+
+    Caso real: un rubro consolidó con una asignación que luego se detectó
+    incorrecta (p.ej. una categoría solapada anulada por exclusividad). La
+    regla queda "sin asignación" y la protección de fuente-vacía retendría el
+    valor viejo para siempre. Aquí se limpia explícitamente: la línea vuelve a
+    "pendiente" (nunca toca MANUAL:*).
+    """
+    limpiadas = 0
+    reglas = ReglaFuenteRubro.objects.filter(
+        tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS, activa=True
+    ).select_related("rubro")
+    rubros_sin_asignacion = [
+        regla.rubro_id
+        for regla in reglas
+        if not (regla.filtros or {}).get("categoria_pos")
+        and not (regla.filtros or {}).get("productos_pos")
+        and not (regla.filtros or {}).get("producto_pos")
+    ]
+    lineas = LineaPresupuestoMensual.objects.filter(
+        rubro_id__in=rubros_sin_asignacion,
+        fuente_real__startswith=AUTO_PREFIX,
+        monto_real__isnull=False,
+    )
+    for linea in lineas:
+        limpiadas += 1
+        if dry_run:
+            continue
+        metadata = dict(linea.metadata or {})
+        metadata.pop("real_breakdown", None)
+        metadata.pop("sin_datos_fuente", None)
+        metadata.pop("fuente_sin_datos_en", None)
+        metadata["limpiado_sin_asignacion_en"] = timezone.now().isoformat()
+        LineaPresupuestoMensual.objects.filter(pk=linea.pk, fuente_real=linea.fuente_real).update(
+            monto_real=None, fuente_real="", metadata=metadata, actualizado_en=timezone.now()
+        )
+    return limpiadas
+
+
 def migrar_fuentes_legadas(*, dry_run: bool = False) -> dict[str, int]:
     """Mueve los fuente_real heredados al namespace AUTO:/MANUAL:."""
     resultado: dict[str, int] = {}

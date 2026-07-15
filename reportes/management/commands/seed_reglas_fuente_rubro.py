@@ -237,14 +237,19 @@ class Command(BaseCommand):
             .distinct()
         )
         categorias_pos = sorted({cat for cat, _ in pares_pos})
-        canon_pares = [(cat, prod, canon_pos(f"{cat} {prod}")) for cat, prod in pares_pos]
+        # Dos canónicos por producto: con y sin el nombre de la categoría POS.
+        # La categoría a veces aporta contexto ("Pastel Mediano") y a veces solo
+        # ruido ("Galletas" en plural vs rubro "GALLETA"); se toma el mejor.
+        canon_pares = [
+            (cat, prod, canon_pos(f"{cat} {prod}"), canon_pos(prod)) for cat, prod in pares_pos
+        ]
 
         ventas = RubroPresupuesto.objects.filter(
             area__codigo="ventas", tipo=RubroPresupuesto.TIPO_INGRESO, activo=True
         ).select_related("sucursal")
 
         producto_a_categorias: dict[str, set[str]] = {}
-        for cat, prod, _canon in canon_pares:
+        for cat, prod, _canon, _canon_solo in canon_pares:
             producto_a_categorias.setdefault(prod, set()).add(cat)
 
         propuestas = []  # [rubro, score, categoria_pos, productos, nota] (mutable)
@@ -255,8 +260,8 @@ class Command(BaseCommand):
             objetivo = canon_pos(f"{cat_r} {prod_r}")
 
             candidatos = [
-                (cat, prod, _score(objetivo, canon))
-                for cat, prod, canon in canon_pares
+                (cat, prod, max(_score(objetivo, canon), _score(objetivo, canon_solo)))
+                for cat, prod, canon, canon_solo in canon_pares
             ]
             con_score = [c for c in candidatos if c[2] >= SCORE_PRODUCTO]
             if con_score:
