@@ -58,9 +58,23 @@ def canon_pos(texto: object) -> str:
 
 
 def _score(a: str, b: str) -> float:
+    """Score de producto: token_sort penaliza tokens extra.
+
+    token_set_ratio daba 100 a cualquier superconjunto ("chico crunch" vs
+    "TOPPING CRUNCH C") y regalaba productos ajenos al rubro (hallazgo de
+    auditoría con doble conteo real). token_sort exige tamaños comparables.
+    """
     from rapidfuzz import fuzz
 
-    return fuzz.token_set_ratio(a, b)
+    return fuzz.token_sort_ratio(a, b)
+
+
+def _score_categoria(a: str, b: str) -> float:
+    """Score de categoría completa: ratio simple, sin semántica de subconjunto
+    ("fresa rebanada" vs "rebanada" NO debe dar 100)."""
+    from rapidfuzz import fuzz
+
+    return fuzz.ratio(a, b)
 
 
 class Command(BaseCommand):
@@ -229,7 +243,11 @@ class Command(BaseCommand):
             area__codigo="ventas", tipo=RubroPresupuesto.TIPO_INGRESO, activo=True
         ).select_related("sucursal")
 
-        propuestas = []  # (rubro, score, categoria_pos, productos, nota)
+        producto_a_categorias: dict[str, set[str]] = {}
+        for cat, prod, _canon in canon_pares:
+            producto_a_categorias.setdefault(prod, set()).add(cat)
+
+        propuestas = []  # [rubro, score, categoria_pos, productos, nota] (mutable)
         for rubro in ventas:
             partes = [p.strip() for p in rubro.concepto.split("·")]
             cat_r = partes[0]
@@ -244,24 +262,24 @@ class Command(BaseCommand):
             if con_score:
                 mejor = max(con_score, key=lambda c: c[2])
                 productos = sorted({prod for _, prod, _ in con_score})
-                propuestas.append((rubro, mejor[2], "", productos, f"POS: {', '.join(productos)}"))
+                propuestas.append([rubro, mejor[2], "", productos, f"POS: {', '.join(productos)}"])
                 continue
 
             # Sin producto: ¿el "producto" del rubro es una categoría POS
             # completa? (BEBIDAS/OTROS · TE → categoría TE)
             canon_prod = canon_pos(prod_r or cat_r)
-            cat_scores = [(cat, _score(canon_prod, canon_pos(cat))) for cat in categorias_pos]
+            cat_scores = [(cat, _score_categoria(canon_prod, canon_pos(cat))) for cat in categorias_pos]
             mejor_cat = max(cat_scores, key=lambda c: c[1], default=None)
             if mejor_cat and mejor_cat[1] >= SCORE_CATEGORIA:
                 propuestas.append(
-                    (rubro, mejor_cat[1], mejor_cat[0], [], f"POS categoría completa: {mejor_cat[0]}")
+                    [rubro, mejor_cat[1], mejor_cat[0], [], f"POS categoría completa: {mejor_cat[0]}"]
                 )
                 continue
 
-            propuestas.append((rubro, 0, "", [], "SIN MATCH POS — asignar en admin"))
+            propuestas.append([rubro, 0, "", [], "SIN MATCH POS — asignar en admin"])
 
         # Un producto POS no puede pertenecer a dos rubros: gana el mayor score.
-        dueno_por_producto: dict[str, tuple] = {}
+        dueno_por_producto: dict[str, list] = {}
         for propuesta in sorted(propuestas, key=lambda p: -p[1]):
             rubro, score, _cat, productos, _nota = propuesta
             ganados = []
@@ -278,6 +296,24 @@ class Command(BaseCommand):
             if productos:
                 # Conserva solo los productos realmente ganados por este rubro.
                 propuesta[3][:] = ganados
+
+        # Exclusividad categoría/producto (hallazgo de auditoría con doble
+        # conteo real): una regla de categoría COMPLETA no puede convivir con
+        # productos de esa misma categoría asignados a otros rubros — sumaría
+        # dos veces la misma venta. La categoría-completa se anula y se avisa.
+        categorias_de_asignados: set[str] = set()
+        for prod in dueno_por_producto:
+            categorias_de_asignados |= producto_a_categorias.get(prod, set())
+        for propuesta in propuestas:
+            if propuesta[2] and propuesta[2] in categorias_de_asignados:
+                avisos.append(
+                    f"conflicto POS: la categoría completa '{propuesta[2]}' de "
+                    f"'{propuesta[0].concepto}' se solapa con productos ya asignados "
+                    "a otros rubros; se anula para no duplicar dinero — asignar en admin"
+                )
+                propuesta[2] = ""
+                propuesta[4] = "SIN MATCH POS (categoría solapada) — asignar en admin"
+                propuesta[1] = 0
 
         for rubro, score, categoria_pos, productos, nota in propuestas:
             filtros: dict[str, object] = {"campo_monto": "total_venta"}

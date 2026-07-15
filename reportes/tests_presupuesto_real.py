@@ -920,3 +920,133 @@ class CapturaPorAreaTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn(f"#linea-{self.linea_manual.id}", response["Location"])
+
+
+class EndurecimientoAuditoriaTests(TestCase):
+    """Fixes de la auditoría de arquitectura: importador, matching y RBAC."""
+
+    def _csv_ventas(self, concepto="Rubro import", real_enero=None):
+        import csv as csv_mod
+        import tempfile
+
+        campos = ["concepto", "tipo", "sucursal", "enero", "febrero", "marzo", "abril", "mayo",
+                  "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        fila = {c: "0" for c in campos}
+        fila.update({"concepto": concepto, "tipo": "EGRESO", "sucursal": "", "enero": "100.00"})
+        if real_enero is not None:
+            campos.append("enero_real")
+            fila["enero_real"] = real_enero
+        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False, encoding="utf-8")
+        writer = csv_mod.DictWriter(tmp, fieldnames=campos)
+        writer.writeheader()
+        writer.writerow(fila)
+        tmp.close()
+        return tmp.name
+
+    def test_import_no_pisa_captura_manual_ni_metadata(self):
+        """Re-importar presupuesto conserva el real MANUAL y su historial."""
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        service = PresupuestoMaestroImportService()
+        service.import_file(archivo=self._csv_ventas(), area_code="administracion", version="ORIGINAL", year=2026)
+        linea = LineaPresupuestoMensual.objects.get(periodo=date(2026, 1, 1), rubro__concepto="Rubro import")
+        linea.monto_real = Decimal("777.77")
+        linea.fuente_real = "MANUAL:paula.lugo"
+        linea.metadata = {**linea.metadata, "capturas": [{"usuario": "paula.lugo", "monto": "777.77"}]}
+        linea.save()
+
+        # Re-import con columna _real que intenta traer otro valor.
+        service.import_file(
+            archivo=self._csv_ventas(real_enero="999.99"),
+            area_code="administracion", version="ORIGINAL", year=2026,
+        )
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("777.77"))
+        self.assertEqual(linea.fuente_real, "MANUAL:paula.lugo")
+        self.assertEqual(linea.metadata["capturas"][0]["usuario"], "paula.lugo")
+        # Y el presupuesto sí se actualizó (ese es el trabajo del import).
+        self.assertEqual(linea.monto_presupuesto, Decimal("100.00"))
+
+    def test_import_real_en_linea_libre_usa_namespace_legado(self):
+        """Columna _real en línea sin captura entra como AUTO:LEGADO (re-escribible)."""
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        PresupuestoMaestroImportService().import_file(
+            archivo=self._csv_ventas(concepto="Rubro libre", real_enero="55.00"),
+            area_code="administracion", version="ORIGINAL", year=2026,
+        )
+        linea = LineaPresupuestoMensual.objects.get(periodo=date(2026, 1, 1), rubro__concepto="Rubro libre")
+        self.assertEqual(linea.monto_real, Decimal("55.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+
+    def test_clear_first_bloqueado_con_capturas_manuales(self):
+        """reimport_sales_projection(clear_first=True) no destruye capturas."""
+        from reportes.services_presupuesto_maestro import (
+            PresupuestoMaestroImportService,
+            ensure_master_budget_areas,
+        )
+
+        areas = ensure_master_budget_areas()
+        rubro = RubroPresupuesto.objects.create(
+            area=areas["ventas"], concepto="Con captura", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("1"),
+            monto_real=Decimal("10"), fuente_real="MANUAL:johana",
+        )
+        with self.assertRaises(ValueError):
+            PresupuestoMaestroImportService().reimport_sales_projection(
+                archivo=self._csv_ventas(), year=2026, clear_first=True
+            )
+        self.assertTrue(LineaPresupuestoMensual.objects.filter(fuente_real="MANUAL:johana").exists())
+
+    def test_matching_no_regala_toppings_ni_categorias_solapadas(self):
+        """token_sort no asigna superconjuntos y la categoría solapada se anula."""
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        ventas = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        branch = PointBranch.objects.create(external_id="HARD-BR", name="Centro")
+
+        def fact(categoria, producto):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 5, 3), sucursal_nombre="Centro",
+                categoria=categoria, producto_nombre_historico=producto,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+        fact("Pastel Chico", "Pastel de Crunch Chico")
+        fact("Pastel Chico", "TOPPING CRUNCH C")
+        fact("Rebanada", "Pastel de 3 Pecados R")
+
+        def rubro(concepto):
+            r = RubroPresupuesto.objects.create(area=ventas, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO)
+            LineaPresupuestoMensual.objects.create(rubro=r, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1"))
+            return r
+
+        r_crunch = rubro("PASTEL CHICO · CRUNCH")
+        r_rebanada = rubro("PASTEL REBANADAS · 3 PECADOS")
+        r_fresa = rubro("CHEESECAKE · FRESA R")  # antes recibía "Rebanada" completa
+
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        filtros_crunch = ReglaFuenteRubro.objects.get(rubro=r_crunch).filtros
+        self.assertEqual(filtros_crunch["productos_pos"], ["Pastel de Crunch Chico"])  # sin topping
+        filtros_rebanada = ReglaFuenteRubro.objects.get(rubro=r_rebanada).filtros
+        self.assertEqual(filtros_rebanada["productos_pos"], ["Pastel de 3 Pecados R"])
+        filtros_fresa = ReglaFuenteRubro.objects.get(rubro=r_fresa).filtros
+        # La categoría "Rebanada" ya tiene productos asignados a otro rubro:
+        # no puede quedar como categoría completa (doble conteo).
+        self.assertNotIn("categoria_pos", filtros_fresa)
+        self.assertNotIn("productos_pos", filtros_fresa)
+
+    def test_post_presupuesto_maestro_requiere_manage(self):
+        """Un usuario sin nivel de administración no puede escribir por POST."""
+        from django.contrib.auth import get_user_model
+
+        comun = get_user_model().objects.create_user("solo_lectura_x", "sl@test.mx", "clave-test")
+        self.client.force_login(comun)
+        r1 = self.client.post("/reportes/presupuesto-maestro/", {"action": "add_rubro"})
+        self.assertEqual(r1.status_code, 403)
+        r2 = self.client.post("/reportes/presupuestos/importar/", {})
+        self.assertEqual(r2.status_code, 403)
