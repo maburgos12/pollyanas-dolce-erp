@@ -31,7 +31,7 @@ BITACORA_CONFIG = {
     },
     BitacoraOperativa.TIPO_CFP11: {
         "titulo": "Inventario CFP 1.1",
-        "ayuda": "Bloques de existencia, salida y entrada.",
+        "ayuda": "Existencia física y salida a Armado por producto Point.",
         "familia": "custodia_lotes",
         "campos": ["existencia_fisica", "salida_armado"],
         "campos_legacy": ["bloque", "tamano", "existencia", "salida", "entrada"],

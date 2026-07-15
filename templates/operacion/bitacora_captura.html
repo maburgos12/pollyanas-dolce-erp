@@ -20,6 +20,9 @@
     .message { padding: 12px 14px; border: 1px solid #c83f5b; border-radius: 8px; background: #fff1f3; color: #7b1730; font-weight: 800; }
     .line { padding: 12px; display: grid; gap: 10px; }
     .lines { display: grid; gap: 10px; }
+    .product-identity { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid #eadde4; }
+    .product-identity strong { color: #2b1722; font-size: .95rem; }
+    .product-identity span { color: #705d68; font-size: .78rem; font-weight: 800; }
     label { display: grid; gap: 5px; color: #705d68; font-size: .82rem; font-weight: 800; }
     input, select, textarea { width: 100%; min-height: 42px; border: 1px solid #d9c6d0; border-radius: 8px; background: #fff; color: #2b1722; font: inherit; padding: 9px 10px; }
     textarea { min-height: 76px; resize: vertical; }
@@ -46,6 +49,7 @@
     @media (max-width: 640px) {
       .page { padding: 12px 12px 88px; }
       .meta, .actions-inner { grid-template-columns: 1fr; }
+      .product-identity { align-items: flex-start; flex-direction: column; gap: 3px; }
     }
     @media (min-width: 641px) and (max-width: 1024px) {
       .page { padding: 14px; }
@@ -215,18 +219,17 @@
         </section>
 
         <div class="lines">
-          {% for index in row_range %}
+          {% for row in capture_rows %}
             <section class="line">
               {% if config.usa_insumos %}
-                <label>Producto Point
-                  <select name="insumo_{{ index }}">
-                    <option value="">Seleccionar producto</option>
-                    {% for insumo in insumos %}<option value="{{ insumo.id }}">{{ insumo.nombre }} · {{ insumo.codigo_point }}</option>{% endfor %}
-                  </select>
-                </label>
+                <div class="product-identity">
+                  <strong>{{ row.insumo.nombre }}</strong>
+                  <span>{{ row.insumo.codigo_point }}</span>
+                </div>
+                <input type="hidden" name="insumo_{{ row.index }}" value="{{ row.insumo.id }}">
               {% elif not config.sin_producto %}
                 <label>Producto
-                  <select name="receta_{{ index }}">
+                  <select name="receta_{{ row.index }}">
                     <option value="">Seleccionar producto</option>
                     {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>{% endfor %}
                   </select>
@@ -238,11 +241,11 @@
                   <label>
                     {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% elif campo == "preparacion" %}Preparación{% elif campo == "existencia_fisica" %}Existencia física{% elif campo == "salida_armado" %}Salida a armado{% elif campo == "consumo_real" %}Consumo real{% elif campo == "producto_terminado" %}Producto terminado{% else %}{{ campo|capfirst }}{% endif %}
                     {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
-                      <input type="date" name="{{ campo }}_{{ index }}">
+                      <input type="date" name="{{ campo }}_{{ row.index }}">
                     {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}
-                      <input type="text" name="{{ campo }}_{{ index }}">
+                      <input type="text" name="{{ campo }}_{{ row.index }}">
                     {% else %}
-                      <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ index }}">
+                      <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ row.index }}">
                     {% endif %}
                   </label>
                 {% endfor %}
@@ -252,14 +255,14 @@
                 <div class="sucursales">
                   {% for sucursal in sucursales %}
                     <label>{{ sucursal.codigo }}
-                      <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ index }}_{{ sucursal.id }}">
+                      <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ row.index }}_{{ sucursal.id }}">
                     </label>
                   {% endfor %}
                 </div>
               {% endif %}
 
               <label>Observaciones
-                <textarea name="observaciones_{{ index }}" placeholder="Comentario de esta línea"></textarea>
+                <textarea name="observaciones_{{ row.index }}" placeholder="Comentario de esta línea"></textarea>
               </label>
             </section>
           {% endfor %}

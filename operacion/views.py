@@ -124,7 +124,10 @@ def _insumos_for_config(config):
 
 def _lineas_from_post(request, config):
     lineas = []
-    for index in range(8):
+    allowed_insumos = _insumos_for_config(config) if config.get("usa_insumos") else []
+    allowed_insumos_by_id = {str(item.id): item for item in allowed_insumos}
+    indices = range(len(allowed_insumos)) if config.get("usa_insumos") else range(8)
+    for index in indices:
         receta = None
         insumo = None
         datos = {}
@@ -133,8 +136,7 @@ def _lineas_from_post(request, config):
             insumo_id = request.POST.get(f"insumo_{index}")
             if not insumo_id:
                 continue
-            allowed_ids = {item.id for item in _insumos_for_config(config)}
-            insumo = Insumo.objects.filter(pk=insumo_id, pk__in=allowed_ids).first()
+            insumo = allowed_insumos_by_id.get(str(insumo_id))
             if not insumo:
                 raise ValidationError("Selecciona un producto válido con identidad Point.")
         elif not config.get("sin_producto"):
@@ -162,7 +164,11 @@ def _lineas_from_post(request, config):
                         cantidades[key.removeprefix(prefix)] = value
             if cantidades:
                 datos["sucursales"] = cantidades
-        if (receta or insumo) and not datos and not observaciones:
+        if insumo and not datos and not observaciones:
+            if request.POST.get("accion") == "guardar_existencia":
+                raise ValidationError(f"Captura la existencia de {insumo.nombre}.")
+            continue
+        if receta and not datos and not observaciones:
             raise ValidationError("Captura al menos una cantidad u observación.")
         if receta or insumo or datos or observaciones:
             lineas.append((receta, insumo, datos, observaciones))
@@ -272,6 +278,11 @@ def bitacora_captura(request, tipo):
     sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
     recetas = _recetas_for_config(config)[:120]
     insumos = _insumos_for_config(config)[:240]
+    capture_rows = (
+        [{"index": index, "insumo": insumo} for index, insumo in enumerate(insumos)]
+        if config.get("usa_insumos")
+        else [{"index": index, "insumo": None} for index in range(8)]
+    )
 
     # Si hay parámetro revision, cargar la bitácora sellada
     revision_id = request.GET.get("revision")
@@ -296,7 +307,7 @@ def bitacora_captura(request, tipo):
                     "recetas": recetas,
                     "insumos": insumos,
                     "sucursales": sucursales,
-                    "row_range": range(8),
+                    "capture_rows": capture_rows,
                     "today": timezone.localdate(),
                     "submitted_values": request.POST,
                 },
@@ -429,7 +440,7 @@ def bitacora_captura(request, tipo):
         "recetas": recetas,
         "insumos": insumos,
         "sucursales": sucursales,
-        "row_range": range(8),
+        "capture_rows": capture_rows,
         "today": timezone.localdate(),
         "sealed_bitacora": sealed_bitacora,
     }

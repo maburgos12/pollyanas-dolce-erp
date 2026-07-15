@@ -352,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v25-cfp-insumos-point", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v26-cfp-filas-producto", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -1586,6 +1586,41 @@ class CfpBlindCountTests(TestCase):
         # Verificar que DESPUÉS de guardar muestra esperado y diferencia
         self.assertContains(response, "Existencia esperada")
         self.assertContains(response, "Diferencia")
+
+    def test_cfp_capture_shows_one_fixed_row_per_point_product(self):
+        self.client.force_login(self.operator)
+
+        response = self.client.get("/app/bitacoras/CFP11/")
+
+        self.assertContains(response, self.insumo.nombre)
+        self.assertContains(response, self.insumo.codigo_point)
+        self.assertContains(response, 'name="insumo_0"', html=False)
+        self.assertContains(response, f'value="{self.insumo.id}"', html=False)
+        self.assertNotContains(response, '<select name="insumo_0"', html=False)
+
+    def test_cfp_count_requires_every_visible_product(self):
+        second = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-2",
+            codigo_point="RC-002",
+            nombre="Relleno Vainilla",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.client.force_login(self.operator)
+
+        response = self.client.post(
+            "/app/bitacoras/CFP11/",
+            {
+                "accion": "guardar_existencia",
+                "insumo_0": str(self.insumo.id),
+                "existencia_fisica_0": "5",
+                "insumo_1": str(second.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Captura la existencia de Relleno Vainilla.")
+        self.assertFalse(BitacoraOperativa.objects.filter(lineas__insumo=second).exists())
 
     def test_cfp_count_seal_is_idempotent(self):
         """Verificar que sellar dos veces no duplica el timestamp ni el usuario."""
@@ -3040,5 +3075,5 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v25-cfp-insumos-point", sw_content)
+        self.assertIn("v26-cfp-filas-producto", sw_content)
         self.assertNotIn("v21-", sw_content)
