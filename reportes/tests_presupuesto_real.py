@@ -395,6 +395,17 @@ class PresupuestoRealConsolidacionTests(TestCase):
         venta, _ = self.crear_linea(
             concepto="BOLLO · CHOCOLATE", area=ventas, sucursal=self.sucursal, tipo=RubroPresupuesto.TIPO_INGRESO
         )
+        # Nombres POS reales para el matching difuso del seed.
+        branch_seed = PointBranch.objects.create(external_id="SEED-BR", name="Centro", erp_branch=self.sucursal)
+        PointSalesDailyProductFact.objects.create(
+            branch=branch_seed,
+            sale_date=self.periodo,
+            sucursal_nombre="Centro",
+            categoria="Bollo",
+            producto_nombre_historico="Bollo Chocolate",
+            total_venta=Decimal("10"),
+            total_venta_neta=Decimal("9"),
+        )
         sueldo_admin = RubroPresupuesto.objects.create(
             area=nomina, concepto="Sueldo", codigo_cuenta="ADMIN", tipo=RubroPresupuesto.TIPO_EGRESO
         )
@@ -416,8 +427,8 @@ class PresupuestoRealConsolidacionTests(TestCase):
         )
         regla_venta = ReglaFuenteRubro.objects.get(rubro=venta, origen=ReglaFuenteRubro.ORIGEN_SEED)
         self.assertEqual(regla_venta.tipo_fuente, ReglaFuenteRubro.FUENTE_VENTA_POS)
-        self.assertEqual(regla_venta.filtros["categoria_pos"], "BOLLO")
-        self.assertEqual(regla_venta.filtros["producto_pos"], "CHOCOLATE")
+        # El matching difuso asigna el nombre POS REAL, no el texto del rubro.
+        self.assertEqual(regla_venta.filtros["productos_pos"], ["Bollo Chocolate"])
         self.assertEqual(venta.sucursal, self.sucursal)
         self.assertFalse(ReglaFuenteRubro.objects.filter(rubro=sueldo_admin, origen=ReglaFuenteRubro.ORIGEN_SEED).exists())
 
@@ -614,3 +625,87 @@ class PresupuestoRealFixesReviewTests(TestCase):
         with self.assertRaises(CommandError):
             call_command("seed_reglas_fuente_rubro", csv=ruta, stdout=StringIO())
         self.assertTrue(ReglaFuenteRubro.objects.filter(pk=regla_previa.pk).exists())
+
+
+class VentasPosMatchingTests(TestCase):
+    """Matching difuso rubro de Ventas → nombres POS reales (casos de producción)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # El CSV real referencia RENTA_SUC; debe existir o el comando aborta.
+        CategoriaGasto.objects.create(
+            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.ventas = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        cls.branch = PointBranch.objects.create(external_id="MATCH-BR", name="Centro")
+
+        def fact(categoria, producto):
+            PointSalesDailyProductFact.objects.create(
+                branch=cls.branch,
+                sale_date=date(2026, 5, 3),
+                sucursal_nombre="Centro",
+                categoria=categoria,
+                producto_nombre_historico=producto,
+                total_venta=Decimal("10"),
+                total_venta_neta=Decimal("9"),
+            )
+
+        fact("Pastel Mediano", "Pastel de 3 Pecados Mediano")
+        fact("Pastel Mediano", "Pastel de Snickers Mediano")
+        fact("Rebanada", "Pastel de 3 Pecados R")
+        fact("TE", "Té helado 500ml")
+        fact("Galletas", "Bolitas de Nuez 10 PZ")
+
+    def _rubro(self, concepto):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.ventas, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1")
+        )
+        return rubro
+
+    def _filtros_de(self, rubro):
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        return ReglaFuenteRubro.objects.get(rubro=rubro, origen=ReglaFuenteRubro.ORIGEN_SEED).filtros
+
+    def test_producto_con_orden_y_preposiciones_distintas(self):
+        """'PASTEL MEDIANO · 3 PECADOS' cruza con 'Pastel de 3 Pecados Mediano'."""
+        rubro = self._rubro("PASTEL MEDIANO · 3 PECADOS")
+        filtros = self._filtros_de(rubro)
+        self.assertEqual(filtros["productos_pos"], ["Pastel de 3 Pecados Mediano"])
+
+    def test_apostrofe_y_abreviatura(self):
+        """SNICKER'S cruza con Snickers; el sufijo R se expande a rebanada."""
+        rubro_snickers = self._rubro("PASTEL MEDIANO · SNICKER'S")
+        rubro_rebanada = self._rubro("PASTEL REBANADAS · 3 PECADOS")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        filtros_s = ReglaFuenteRubro.objects.get(rubro=rubro_snickers, origen="SEED").filtros
+        filtros_r = ReglaFuenteRubro.objects.get(rubro=rubro_rebanada, origen="SEED").filtros
+        self.assertEqual(filtros_s["productos_pos"], ["Pastel de Snickers Mediano"])
+        self.assertEqual(filtros_r["productos_pos"], ["Pastel de 3 Pecados R"])
+
+    def test_categoria_pos_completa(self):
+        """'BEBIDAS/OTROS · TE' cruza con la categoría POS 'TE' completa."""
+        rubro = self._rubro("BEBIDAS/OTROS · TE")
+        filtros = self._filtros_de(rubro)
+        self.assertEqual(filtros.get("categoria_pos"), "TE")
+        self.assertNotIn("productos_pos", filtros)
+
+    def test_sin_match_queda_reportado_y_sin_asignacion(self):
+        """'BEBIDAS/OTROS · REFRESCO' no cruza con nada: regla sin asignación."""
+        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        filtros = self._filtros_de(rubro)
+        self.assertNotIn("productos_pos", filtros)
+        self.assertNotIn("categoria_pos", filtros)
+
+    def test_conflicto_de_producto_gana_el_mejor_score(self):
+        """Dos rubros no pueden reclamar el mismo producto POS."""
+        exacto = self._rubro("GALLETA · BOLITA DE NUEZ (10PZ)")
+        parecido = self._rubro("GALLETA · BOLITAS DE NUEZ")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        con_producto = [
+            r for r in ReglaFuenteRubro.objects.filter(rubro__in=[exacto, parecido])
+            if r.filtros.get("productos_pos")
+        ]
+        self.assertEqual(len(con_producto), 1)

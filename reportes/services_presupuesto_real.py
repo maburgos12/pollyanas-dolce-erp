@@ -355,12 +355,25 @@ class PresupuestoRealConsolidacionService:
         return index
 
     def _monto_venta_pos(self, regla: ReglaFuenteRubro, ventas_index: dict) -> tuple[Decimal, bool]:
+        """Suma las ventas POS asignadas a la regla.
+
+        La asignación es EXPLÍCITA (la calcula el seed y queda auditada en
+        filtros): ``categoria_pos`` con lista ``productos_pos`` (nombres POS
+        exactos), o solo ``categoria_pos`` para sumar la categoría completa.
+        Se acepta el legado ``producto_pos`` (string único).
+        """
         filtros = regla.filtros or {}
         campo = filtros.get("campo_monto", "total_venta")
         if campo not in VENTA_POS_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de ventas inválido: {campo}")
         categoria = normalize_header_text(filtros.get("categoria_pos", ""))
-        producto = normalize_header_text(filtros.get("producto_pos", ""))
+        productos_raw = filtros.get("productos_pos")
+        if not productos_raw and filtros.get("producto_pos"):
+            productos_raw = [filtros["producto_pos"]]
+        productos = {normalize_header_text(p) for p in (productos_raw or []) if str(p).strip()}
+        if not categoria and not productos:
+            # Regla sin asignación POS (el seed no encontró match): sin datos.
+            return (Decimal("0"), False)
         sucursal = regla.sucursal_efectiva()
         sucursal_id = sucursal.id if sucursal is not None else None
 
@@ -371,7 +384,7 @@ class PresupuestoRealConsolidacionService:
                 continue
             if categoria and cat != categoria:
                 continue
-            if producto and prod != producto:
+            if productos and prod not in productos:
                 continue
             total += montos[campo]
             hubo_datos = True
