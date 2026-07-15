@@ -7881,6 +7881,21 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIsNone(checklist_bloquea_salida(ruta))
         parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
         parada_cedis.save(update_fields=["estado", "actualizado_en"])
+
+        self.assertEqual(
+            list(lineas_tramo_operativo_actual(ruta, checklist=checklist).order_by("id")),
+            [linea_guamuchil, linea_sobrante],
+        )
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
+
         self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist)), [linea_payan])
         parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
@@ -8406,6 +8421,19 @@ class LogisticaControlRutasTests(TestCase):
 
         sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-viejo").exists())
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-actual").exists())
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-viejo").exists())
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-actual").exists())
 
@@ -8463,6 +8491,20 @@ class LogisticaControlRutasTests(TestCase):
             cantidad_enviada_esperada=Decimal("2.000"),
         )
 
+        response = self.client.get(reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_lineas"], 1)
+        self.assertEqual(response.json()["lineas"][0]["item_name"], "Anterior")
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
         response = self.client.get(reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": ruta.id}))
 
         self.assertEqual(response.status_code, 200)
