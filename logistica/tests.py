@@ -2918,9 +2918,19 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp, "$25.00")
 
     def test_rutas_view_muestra_y_filtra_bloqueo_point_sin_enviado(self):
-        ruta_ok = RutaEntrega.objects.create(nombre="Ruta sin bloqueo Point", fecha_ruta=timezone.localdate())
+        ruta_ok = RutaEntrega.objects.create(
+            nombre="Ruta sin bloqueo Point",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_COMPLETADA,
+        )
         ruta_bloqueada = RutaEntrega.objects.create(nombre="Ruta Point Pendiente", fecha_ruta=timezone.localdate())
         sucursal = Sucursal.objects.create(nombre="Sucursal Point", codigo="SPT")
+        origen = PointBranch.objects.create(external_id="CEDIS-POINT-LISTA", name="CEDIS")
+        destino = PointBranch.objects.create(
+            external_id="SUC-POINT-LISTA",
+            name="Sucursal Point",
+            erp_branch=sucursal,
+        )
         punto = PuntoLogistico.objects.create(
             nombre="Sucursal Point",
             tipo=PuntoLogistico.TIPO_SUCURSAL,
@@ -2930,9 +2940,27 @@ class LogisticaViewsTests(TestCase):
         )
         parada = ParadaRuta.objects.create(ruta=ruta_bloqueada, punto=punto, orden=1)
         checklist = RutaCargaChecklist.objects.create(ruta=ruta_bloqueada, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        point_solicitado = PointTransferLine.objects.create(
+            origin_branch=origen,
+            destination_branch=destino,
+            erp_destination_branch=sucursal,
+            transfer_external_id="POINT-SOLICITADO-LISTA",
+            detail_external_id="POINT-SOLICITADO-DETALLE",
+            source_hash="point-sin-enviado-lista",
+            registered_at=timezone.now(),
+            item_code="PZA1",
+            item_name="Producto sin enviado",
+            unit="pz",
+            requested_quantity="3.000",
+            sent_quantity="0.000",
+            raw_payload={"transfer": {"isEnviado": False}},
+        )
         RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=parada,
+            point_transfer_line=point_solicitado,
+            transfer_external_id=point_solicitado.transfer_external_id,
+            detail_external_id=point_solicitado.detail_external_id,
             source_hash="point-sin-enviado-lista",
             item_code="PZA1",
             item_name="Producto sin enviado",
@@ -2940,6 +2968,48 @@ class LogisticaViewsTests(TestCase):
             cantidad_solicitada="3.000",
             cantidad_enviada_esperada="0.000",
         )
+
+        parada_ok = ParadaRuta.objects.create(ruta=ruta_ok, punto=punto, orden=1)
+        checklist_ok = RutaCargaChecklist.objects.create(ruta=ruta_ok)
+        for suffix, current, received in [
+            ("HISTORICO", False, False),
+            ("RECIBIDO", True, True),
+        ]:
+            point_line = PointTransferLine.objects.create(
+                origin_branch=origen,
+                destination_branch=destino,
+                erp_destination_branch=sucursal,
+                transfer_external_id=f"POINT-{suffix}-LISTA",
+                detail_external_id=f"POINT-{suffix}-DETALLE",
+                source_hash=f"point-{suffix.lower()}-lista",
+                registered_at=timezone.now(),
+                sent_at=timezone.now() if received else None,
+                received_at=timezone.now() if received else None,
+                item_code=f"PZA-{suffix}",
+                item_name=f"Producto {suffix}",
+                unit="pz",
+                requested_quantity="1.000",
+                sent_quantity="1.000" if received else "0.000",
+                received_quantity="1.000" if received else "0.000",
+                is_current_snapshot=current,
+                is_open=not received,
+                is_received=received,
+                is_finalized=received,
+                raw_payload={"transfer": {"isEnviado": received, "isRecibido": received}},
+            )
+            RutaCargaChecklistLinea.objects.create(
+                checklist=checklist_ok,
+                parada=parada_ok,
+                point_transfer_line=point_line,
+                transfer_external_id=point_line.transfer_external_id,
+                detail_external_id=point_line.detail_external_id,
+                source_hash=point_line.source_hash,
+                item_code=point_line.item_code,
+                item_name=point_line.item_name,
+                unit=point_line.unit,
+                cantidad_solicitada="1.000",
+                cantidad_enviada_esperada="0.000",
+            )
 
         resp = self.client.get(reverse("logistica:rutas"), {"enterprise_focus": "POINT_BLOQUEO"})
 
@@ -2950,6 +3020,10 @@ class LogisticaViewsTests(TestCase):
         self.assertContains(resp, "Point sin enviado")
         self.assertContains(resp, "1 sin enviado")
         self.assertNotContains(resp, ruta_ok.nombre)
+
+        listado = self.client.get(reverse("logistica:rutas"))
+        rutas_por_id = {ruta.id: ruta for ruta in listado.context["rutas"]}
+        self.assertEqual(rutas_por_id[ruta_ok.id].point_bloqueo_lineas, 0)
 
     def test_rutas_selector_omite_repartidores_con_usuario_inactivo(self):
         sucursal = Sucursal.objects.create(nombre="Sucursal Centro", codigo="SC01")

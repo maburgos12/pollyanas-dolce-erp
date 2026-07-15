@@ -759,15 +759,28 @@ def _logistica_release_gate_rows(
     ]
 
 
+def _point_sin_enviado_q() -> Q:
+    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
+    prefix = "checklist_carga__lineas__point_transfer_line__"
+    return (
+        Q(estatus__in=[RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA])
+        & Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        & Q(**{f"{prefix}is_current_snapshot": True})
+        & Q(**{f"{prefix}is_cancelled": False})
+        & Q(**{f"{prefix}is_received": False})
+        & Q(**{f"{prefix}sent_at__isnull": True})
+        & (
+            Q(**{f"{prefix}raw_payload__transfer__isEnviado": False})
+            | Q(**{f"{prefix}raw_payload__transfer__isEnviado__isnull": True})
+        )
+    )
+
+
 def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
     today = timezone.localdate()
     point_blocked_routes = (
-        RutaEntrega.objects.filter(
-            fecha_ruta=today,
-            checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-            checklist_carga__lineas__cantidad_enviada_esperada__lte=0,
-        )
-        .exclude(estatus__in=[RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA])
+        RutaEntrega.objects.filter(fecha_ruta=today)
+        .filter(_point_sin_enviado_q())
         .distinct()
         .count()
     )
@@ -1969,14 +1982,7 @@ def rutas(request):
             paradas__entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA],
         ).exclude(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS).distinct()
     elif enterprise_focus == "POINT_BLOQUEO":
-        rutas_qs = (
-            rutas_qs.filter(
-                checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-                checklist_carga__lineas__cantidad_enviada_esperada__lte=0,
-            )
-            .exclude(estatus__in=[RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA])
-            .distinct()
-        )
+        rutas_qs = rutas_qs.filter(_point_sin_enviado_q()).distinct()
 
     rutas_total = RutaEntrega.objects.count()
     rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=today).count()
@@ -2064,8 +2070,7 @@ def rutas(request):
             ),
             point_bloqueo_lineas=Count(
                 "checklist_carga__lineas",
-                filter=Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-                & Q(checklist_carga__lineas__cantidad_enviada_esperada__lte=0),
+                filter=_point_sin_enviado_q(),
                 distinct=True,
             ),
             monto_transferido_point=Coalesce(
