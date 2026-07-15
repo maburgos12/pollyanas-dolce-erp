@@ -6299,6 +6299,21 @@ class LogisticaControlRutasTests(TestCase):
         self.assertContains(response, ">5</td>")
         self.assertNotContains(response, "Carga sin validar")
 
+    def test_ruta_detail_no_muestra_snapshot_historico_como_pendiente_point(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        _, _, transfer_line = self._crear_linea_carga_con_transferencia_recibida(
+            is_received=False,
+        )
+        transfer_line.is_current_snapshot = False
+        transfer_line.save(update_fields=["is_current_snapshot", "updated_at"])
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Pendiente en Point")
+        self.assertNotContains(response, "Pastel Snicker chico")
+
     def test_ruta_detail_en_ruta_muestra_boton_recepcion_point(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)

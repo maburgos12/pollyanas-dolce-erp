@@ -136,7 +136,13 @@ def _recepcion_point_rows(checklist) -> list[dict]:
     rows = []
     lineas = list(
         checklist.lineas.select_related("parada", "point_transfer_line")
-        .filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_cancelled=False))
+        .filter(
+            Q(point_transfer_line__isnull=True)
+            | Q(
+                point_transfer_line__is_cancelled=False,
+                point_transfer_line__is_current_snapshot=True,
+            )
+        )
         .order_by("parada__orden", "item_name", "id")
     )
     evidencias = {
