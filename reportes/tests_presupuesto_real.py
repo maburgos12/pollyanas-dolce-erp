@@ -1346,6 +1346,9 @@ class NormalizacionConceptosTests(TestCase):
             "Cuotas y suscriciones": "Cuotas y suscripciones",
             "Impuesto sobre Nómina": "Impuesto sobre nómina",
             "Mantenimiento eq. de computo": "Mantenimiento eq. de cómputo",
+            # Palabras YA acentuadas encuentran su grafía (bug de primera versión).
+            "CAPEX Guamúchil local": "CAPEX Guamúchil local",
+            "Renta y agua Leyva": "Renta y agua Leyva",
         }
         for entrada, esperado in casos.items():
             self.assertEqual(normalizar_concepto(entrada), esperado, entrada)
