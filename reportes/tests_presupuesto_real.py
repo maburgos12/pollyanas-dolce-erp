@@ -1752,7 +1752,9 @@ class CedulaImssTests(TestCase):
         imss_nom = LineaPresupuestoMensual.objects.get(
             rubro__area=self.nom, rubro__concepto="IMSS", periodo=date(2026, 4, 1),
         )
-        self.assertEqual(imss_nom.monto_real, Decimal("2308.03"))  # total control
+        # El control (Nómina) lleva el total ÍNTEGRO de la cédula, incluido
+        # el NSS sin cruce ($930) — el dinero nunca se esconde.
+        self.assertEqual(imss_nom.monto_real, Decimal("3238.03"))
 
     def test_bimestral_parte_mitad_y_mitad_y_respeta_manual(self):
         from reportes.services_cedula_imss import aplicar_cedula, parsear_cedula
@@ -1795,3 +1797,111 @@ class CedulaImssTests(TestCase):
         )
         self.assertEqual(linea_manual.monto_real, Decimal("777"))
         self.assertEqual(resumen.protegidas_manual, 1)
+
+
+class CedulaImssEndurecidaTests(TestCase):
+    """Fixes de la revisión adversarial del import de cédulas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.nom = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in [cls.adm, cls.nom]:
+            for concepto in ["IMSS", "Infonavit"]:
+                RubroPresupuesto.objects.create(
+                    area=area, concepto=concepto, tipo=RubroPresupuesto.TIPO_EGRESO
+                )
+
+    def _parseada(self, tipo="MENSUAL", periodo=None, trabajadores=None):
+        from reportes.services_cedula_imss import CedulaParseada, TrabajadorCedula
+
+        return CedulaParseada(
+            tipo=tipo, periodo=periodo or date(2026, 4, 1), registro_patronal="E52",
+            trabajadores=[TrabajadorCedula(*t) for t in (trabajadores or [])],
+        )
+
+    def test_nss_duplicado_en_rrhh_aborta(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        for codigo in ["DUP-1", "DUP-2"]:
+            Empleado.objects.create(
+                codigo=codigo, nombre=f"Empleado {codigo}", nss="11-11-11-1111-1",
+                departamento=Empleado.DEP_ADMINISTRACION,
+            )
+        parseada = self._parseada(trabajadores=[("11111111111", "X", Decimal("100"))])
+        with self.assertRaises(ValueError):
+            aplicar_cedula(parseada)
+
+    def test_total_control_incluye_sin_cruce_y_avisa(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        Empleado.objects.create(
+            codigo="OK-1", nombre="Con cruce", nss="22222222222",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        parseada = self._parseada(trabajadores=[
+            ("22222222222", "Con cruce", Decimal("100.00")),
+            ("33333333333", "Sin cruce", Decimal("50.00")),
+        ])
+        resumen = aplicar_cedula(parseada)
+        self.assertEqual(resumen.total_patronal, Decimal("150.00"))
+        control = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.nom, rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(control.monto_real, Decimal("150.00"))  # íntegro
+        adm = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(adm.monto_real, Decimal("100.00"))  # solo asignado
+        self.assertTrue(any("SIN asignar" in a for a in resumen.avisos))
+
+    def test_no_pisa_otra_fuente_auto_pero_si_legado(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        Empleado.objects.create(
+            codigo="OK-2", nombre="Admin", nss="44444444444",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        rubro_adm = RubroPresupuesto.objects.get(area=self.adm, concepto="IMSS")
+        otra_fuente = LineaPresupuestoMensual.objects.create(
+            rubro=rubro_adm, periodo=date(2026, 4, 1), monto_presupuesto=Decimal("0"),
+            monto_real=Decimal("999"), fuente_real="AUTO:GASTO_OPERATIVO",
+        )
+        resumen = aplicar_cedula(self._parseada(trabajadores=[("44444444444", "A", Decimal("80"))]))
+        otra_fuente.refresh_from_db()
+        self.assertEqual(otra_fuente.monto_real, Decimal("999"))  # conflicto, no pisado
+        self.assertTrue(any("conflicto de fuentes" in a for a in resumen.avisos))
+
+        # AUTO:LEGADO (Excel tecleado) SÍ cede ante la cédula oficial.
+        otra_fuente.fuente_real = "AUTO:LEGADO"
+        otra_fuente.save()
+        aplicar_cedula(self._parseada(trabajadores=[("44444444444", "A", Decimal("80"))]))
+        otra_fuente.refresh_from_db()
+        self.assertEqual(otra_fuente.monto_real, Decimal("80.00"))
+        self.assertEqual(otra_fuente.fuente_real, "AUTO:SIPARE")
+
+    def test_bimestre_impar_rechazado_y_centavo_conservado(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        with self.assertRaises(ValueError):
+            aplicar_cedula(self._parseada(
+                tipo="BIMESTRAL", periodo=date(2026, 3, 1),
+                trabajadores=[("55555555555", "X", Decimal("100"))],
+            ))
+
+        Empleado.objects.create(
+            codigo="OK-3", nombre="Admin b", nss="66666666666",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        # Total con centavo impar: 100.01 → 50.01 + 50.00 (suma exacta).
+        aplicar_cedula(self._parseada(
+            tipo="BIMESTRAL", periodo=date(2026, 4, 1),
+            trabajadores=[("66666666666", "B", Decimal("100.01"))],
+        ))
+        marzo = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="Infonavit", periodo=date(2026, 3, 1)
+        )
+        abril = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="Infonavit", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(marzo.monto_real + abril.monto_real, Decimal("100.01"))

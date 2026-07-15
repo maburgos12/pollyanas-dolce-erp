@@ -76,10 +76,15 @@ class CedulaParseada:
     @property
     def meses(self) -> list[date]:
         if self.tipo == "BIMESTRAL":
-            # "Bimestre de Proceso: Abril-2026" cubre marzo-abril.
-            primero = self.periodo.replace(month=self.periodo.month - 1) if self.periodo.month > 1 else date(
-                self.periodo.year - 1, 12, 1
-            )
+            # "Bimestre de Proceso: Abril-2026" cubre marzo-abril. Un bimestre
+            # solo puede cerrar en mes par; otro valor es un archivo mal
+            # formado y se rechaza (no se escribe en diciembre del año previo).
+            if self.periodo.month % 2 != 0:
+                raise ValueError(
+                    f"Bimestre inválido: cierra en {self.periodo:%B-%Y}; "
+                    "los bimestres IMSS cierran en mes par (feb/abr/jun/ago/oct/dic)."
+                )
+            primero = self.periodo.replace(month=self.periodo.month - 1)
             return [primero, self.periodo]
         return [self.periodo]
 
@@ -121,14 +126,16 @@ def parsear_cedula(filas: list[list[object]]) -> CedulaParseada:
         if not nss:
             continue
         nombre = next((str(v).strip() for v in fila[1:8] if str(v or "").strip()), "")
-        # La fila de montos es la siguiente con datos numéricos (hasta +3).
+        # La fila de montos es la siguiente (hasta +3) con valor NUMÉRICO en
+        # TODAS las columnas objetivo (una fila basura o subtotal con texto se
+        # rechaza); si aparece otro NSS antes, el trabajador queda sin montos.
         for j in range(i + 1, min(i + 4, n)):
             montos = filas[j]
-            if any(_decimal(montos[c]) for c in columnas.values() if c < len(montos)):
-                patronal = sum(
-                    (_decimal(montos[c]) for c in columnas.values() if c < len(montos)),
-                    Decimal("0"),
-                )
+            if montos and NSS_RE.match(str(montos[0] or "").strip()) and _nss_digits(montos[0]):
+                break
+            celdas = [montos[c] if c < len(montos) else None for c in columnas.values()]
+            if all(isinstance(v, (int, float)) for v in celdas):
+                patronal = sum((_decimal(v) for v in celdas), Decimal("0"))
                 trabajadores.append(TrabajadorCedula(nss=nss, nombre=nombre, patronal=patronal))
                 break
 
@@ -175,21 +182,33 @@ class ResumenCedula:
 def aplicar_cedula(parseada: CedulaParseada, *, dry_run: bool = False) -> ResumenCedula:
     from rrhh.models import Empleado
 
-    indice_nss = {
-        _nss_digits(e.nss): e
-        for e in Empleado.objects.filter(activo=True).select_related("sucursal_ref")
-        if _nss_digits(e.nss)
-    }
+    por_nss: dict[str, list] = {}
+    for e in Empleado.objects.filter(activo=True).select_related("sucursal_ref"):
+        digitos = _nss_digits(e.nss)
+        if digitos:
+            por_nss.setdefault(digitos, []).append(e)
+    nss_cedula = {t.nss for t in parseada.trabajadores}
+    ambiguos = {nss: emps for nss, emps in por_nss.items() if len(emps) > 1 and nss in nss_cedula}
+    if ambiguos:
+        detalle = "; ".join(
+            f"{nss}: {', '.join(e.codigo or e.nombre for e in emps)}" for nss, emps in ambiguos.items()
+        )
+        raise ValueError(
+            f"NSS duplicados en RRHH — el dinero no puede asignarse sin ambigüedad: {detalle}. "
+            "Corrige los expedientes y reintenta."
+        )
+    indice_nss = {nss: emps[0] for nss, emps in por_nss.items()}
 
     totales: dict[tuple[str, int | None], Decimal] = {}
-    total_global = Decimal("0")
+    total_cedula = sum((t.patronal for t in parseada.trabajadores), Decimal("0"))
+    total_asignado = Decimal("0")
     sin_cruce: list[str] = []
     avisos: list[str] = []
     cruzados = 0
     for trabajador in parseada.trabajadores:
         empleado = indice_nss.get(trabajador.nss)
         if empleado is None:
-            sin_cruce.append(f"{trabajador.nss} {trabajador.nombre}")
+            sin_cruce.append(f"{trabajador.nss} {trabajador.nombre} (${trabajador.patronal})")
             continue
         cruzados += 1
         area = DEPARTAMENTO_A_AREA.get((empleado.departamento or "").upper())
@@ -201,34 +220,54 @@ def aplicar_cedula(parseada: CedulaParseada, *, dry_run: bool = False) -> Resume
         sucursal_id = empleado.sucursal_ref_id if area == "gastos-venta" else None
         clave = (area, sucursal_id)
         totales[clave] = totales.get(clave, Decimal("0")) + trabajador.patronal
-        total_global += trabajador.patronal
+        total_asignado += trabajador.patronal
 
-    # El área Nómina (vista de control) recibe el total de la empresa.
-    totales[("nomina", None)] = total_global
+    # El área Nómina (vista de control) recibe el total ÍNTEGRO de la cédula
+    # (incluye NSS sin cruce): la diferencia contra la suma de áreas queda
+    # visible y reportada, nunca se esconde dinero.
+    totales[("nomina", None)] = total_cedula
+    if total_cedula != total_asignado:
+        avisos.append(
+            f"${total_cedula - total_asignado} de la cédula quedaron SIN asignar a áreas "
+            f"({len(sin_cruce)} NSS sin cruce) — el total de control (Nómina) sí los incluye"
+        )
 
     conceptos_objetivo = (
         ["imss"] if parseada.tipo == "MENSUAL" else ["infonavit rcv", "infonavit"]
     )
     meses = parseada.meses
-    divisor = Decimal(len(meses))
 
     actualizadas = 0
     protegidas = 0
+    conflictos = 0
     with transaction.atomic():
         for (area_codigo, sucursal_id), total in sorted(totales.items()):
             rubro = _rubro_destino(area_codigo, sucursal_id, conceptos_objetivo, avisos)
             if rubro is None:
                 continue
-            monto_mes = (total / divisor).quantize(Decimal("0.01"))
-            for mes in meses:
+            # Reparto que conserva el total al centavo: el primer mes lleva la
+            # mitad redondeada y el último la diferencia exacta.
+            primera_mitad = (total / Decimal(len(meses))).quantize(Decimal("0.01"))
+            montos_mes = [primera_mitad] * (len(meses) - 1) + [total - primera_mitad * (len(meses) - 1)]
+            for mes, monto_mes in zip(meses, montos_mes):
                 linea, _ = LineaPresupuestoMensual.objects.get_or_create(
                     rubro=rubro,
                     periodo=mes,
                     version=LineaPresupuestoMensual.VERSION_ORIGINAL,
                     defaults={"monto_presupuesto": Decimal("0")},
                 )
-                if str(linea.fuente_real or "").startswith("MANUAL:"):
+                fuente_actual = str(linea.fuente_real or "")
+                if fuente_actual.startswith("MANUAL:"):
                     protegidas += 1
+                    continue
+                # Precedencia: SIPARE solo escribe sobre vacío, sobre sí mismo
+                # o sobre el legado del Excel (la cédula oficial es más
+                # autoritativa que lo tecleado). Otra fuente AUTO = conflicto.
+                if fuente_actual and fuente_actual not in (FUENTE_SIPARE, "AUTO:LEGADO"):
+                    conflictos += 1
+                    avisos.append(
+                        f"{rubro} {mes:%Y-%m}: ya lo llena {fuente_actual}; no se pisó (conflicto de fuentes)"
+                    )
                     continue
                 metadata = dict(linea.metadata or {})
                 metadata["cedula_imss"] = {
@@ -239,23 +278,29 @@ def aplicar_cedula(parseada: CedulaParseada, *, dry_run: bool = False) -> Resume
                 }
                 metadata.pop("sin_datos_fuente", None)
                 metadata.pop("fuente_sin_datos_en", None)
-                actualizadas += 1
-                if not dry_run:
-                    LineaPresupuestoMensual.objects.filter(
-                        pk=linea.pk, fuente_real=linea.fuente_real
-                    ).update(
-                        monto_real=monto_mes,
-                        fuente_real=FUENTE_SIPARE,
-                        metadata=metadata,
-                        actualizado_en=timezone.now(),
-                    )
+                if dry_run:
+                    actualizadas += 1
+                    continue
+                escritas = LineaPresupuestoMensual.objects.filter(
+                    pk=linea.pk, fuente_real=linea.fuente_real
+                ).update(
+                    monto_real=monto_mes,
+                    fuente_real=FUENTE_SIPARE,
+                    metadata=metadata,
+                    actualizado_en=timezone.now(),
+                )
+                if escritas == 1:
+                    actualizadas += 1
+                else:
+                    conflictos += 1
+                    avisos.append(f"{rubro} {mes:%Y-%m}: captura concurrente detectada; no se pisó")
         if dry_run:
             transaction.set_rollback(True)
 
     return ResumenCedula(
         tipo=parseada.tipo,
         meses=[m.isoformat() for m in meses],
-        total_patronal=total_global,
+        total_patronal=total_cedula,
         empleados_cruzados=cruzados,
         nss_sin_cruce=sin_cruce,
         lineas_actualizadas=actualizadas,
