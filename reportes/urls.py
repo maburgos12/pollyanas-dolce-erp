@@ -44,6 +44,11 @@ urlpatterns = [
         views_presupuesto_real.presupuesto_real_captura_guardar,
         name="presupuesto_real_captura_guardar",
     ),
+    path(
+        "presupuesto-real/cedula-imss/",
+        views_presupuesto_real.cedula_imss_importar,
+        name="cedula_imss_importar",
+    ),
     path("mermas-devoluciones/", views.mermas_devoluciones, name="mermas_devoluciones"),
     path("auditoria-insumos/", views.auditoria_insumos, name="auditoria_insumos"),
     path("proyeccion-produccion/", views.proyeccion_produccion, name="proyeccion_produccion"),

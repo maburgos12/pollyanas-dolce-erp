@@ -482,3 +482,57 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
         True,
         f"Capturado {linea.rubro.concepto}: ${monto:,.2f}.",
     )
+
+
+# ---------------------------------------------------------------------- #
+# Cédulas IMSS / SIPARE                                                   #
+# ---------------------------------------------------------------------- #
+
+
+def _puede_subir_cedulas(user) -> bool:
+    """Administración de reportes, o responsable del área Nómina."""
+    from core.access import can_manage_module
+
+    if can_manage_module(user, "reportes"):
+        return True
+    return AreaPresupuestoResponsable.objects.filter(
+        usuario=user, puede_capturar=True, area__codigo="nomina", area__activa=True
+    ).exists()
+
+
+def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
+    from .views import _reportes_module_tabs
+
+    if not _puede_subir_cedulas(request.user):
+        raise PermissionDenied("No tienes permisos para subir cédulas del IMSS.")
+
+    resumen = None
+    error = None
+    fue_dry_run = False
+    if request.method == "POST":
+        from .services_cedula_imss import procesar_cedula_subida
+
+        archivo = request.FILES.get("cedula")
+        fue_dry_run = bool(request.POST.get("previsualizar"))
+        if archivo is None:
+            error = "Selecciona el archivo .xls de la cédula (SUA/SIPARE)."
+        elif not archivo.name.lower().endswith(".xls"):
+            error = "El archivo debe ser el .xls que genera el SUA/SIPARE."
+        else:
+            try:
+                resumen = procesar_cedula_subida(archivo, dry_run=fue_dry_run)
+            except ValueError as exc:
+                error = str(exc)
+
+    return render(
+        request,
+        "reportes/cedula_imss_importar.html",
+        {
+            "module_tabs": _reportes_module_tabs("presupuesto_vs_real")
+            if can_view_reportes(request.user)
+            else [],
+            "resumen": resumen,
+            "error": error,
+            "fue_dry_run": fue_dry_run,
+        },
+    )
