@@ -16,6 +16,7 @@ from core.models import Notificacion
 from core.notificaciones import crear_notificaciones
 from logistica.domain_ruta import parada_resuelta_operativamente
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
+from logistica.services_rutas_control import repartidor_participa_en_ruta
 from rrhh.services_identidad import nombre_operativo_usuario
 
 
@@ -192,7 +193,7 @@ def _actor_puede_confirmar(*, actor, ruta: RutaEntrega) -> bool:
     if can_manage_submodule(actor, "logistica", "rutas"):
         return True
     repartidor = getattr(actor, "repartidor_logistica", None)
-    return repartidor is not None and ruta.repartidor_id == repartidor.id
+    return repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor)
 
 
 def _geocerca_real(*, ruta: RutaEntrega, parada: ParadaRuta) -> EventoRuta | None:

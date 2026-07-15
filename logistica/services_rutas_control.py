@@ -60,14 +60,26 @@ class GeocercaResultado:
     distancia_planeada_metros: int | None
 
 
+def repartidor_participa_en_ruta(*, ruta: RutaEntrega, repartidor: Repartidor | None) -> bool:
+    """Autoriza la operación compartida sin convertir al acompañante en conductor GPS."""
+    if repartidor is None:
+        return False
+    return repartidor.id in {ruta.repartidor_id, ruta.acompanante_id}
+
+
 def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
     hoy = hoy or timezone.localdate()
     ayer = hoy - timedelta(days=1)
     corte = timezone.make_aware(datetime.combine(ayer, time(hour=RUTA_NOCTURNA_HORA_CORTE)))
     return (
-        RutaEntrega.objects.select_related("unidad_operativa", "repartidor__user", "bitacora_salida")
+        RutaEntrega.objects.select_related(
+            "unidad_operativa",
+            "repartidor__user",
+            "acompanante__user",
+            "bitacora_salida",
+        )
         .filter(
-            repartidor=repartidor,
+            Q(repartidor=repartidor) | Q(acompanante=repartidor),
             estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
         )
         .filter(Q(fecha_ruta=hoy) | Q(fecha_ruta=ayer, created_at__gte=corte))
