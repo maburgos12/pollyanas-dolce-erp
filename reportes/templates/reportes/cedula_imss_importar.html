@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Cédulas IMSS{% endblock %}
+{% block page_title %}Presupuesto · Cédulas IMSS / SIPARE{% endblock %}
+{% block body_class %}page-reportes-cedula-imss{% endblock %}
+
+{% block content %}
+
+{% if module_tabs %}
+<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
+  {% for tab in module_tabs %}
+  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Subir cédula del IMSS (SUA / SIPARE)</div>
+  <p class="muted">Sube el archivo .xls tal como lo genera el SUA. La mensual llena los rubros IMSS del mes (cuota patronal); la bimestral llena Infonavit/RCV partida 50/50 entre los dos meses. El archivo se procesa y se desecha: no queda guardado en el servidor. Volver a subir una cédula corregida re-escribe; lo capturado a mano nunca se pisa.</p>
+
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="id_cedula">Archivo .xls de la cédula <span class="text-danger">*</span></label>
+        <input class="input-field" type="file" id="id_cedula" name="cedula" accept=".xls" required>
+        <p class="muted">Cédula de determinación de cuotas: mensual (obrero-patronal) o bimestral (Retiro/Cesantía/Infonavit).</p>
+      </div>
+      <div class="form-group">
+        <label for="id_previsualizar">Modo</label>
+        <label style="display:flex; gap:8px; align-items:center;">
+          <input type="checkbox" id="id_previsualizar" name="previsualizar" checked>
+          Solo previsualizar (no escribe nada)
+        </label>
+        <p class="muted">Revisa el resumen primero; desmarca la casilla y vuelve a subir para aplicar.</p>
+      </div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="btn btn-primary" type="submit" data-pending-label="Procesando…">Procesar cédula</button>
+    </div>
+  </form>
+
+  {% if error %}
+  <div class="alert alert-danger" style="margin-top:16px;">{{ error }}</div>
+  {% endif %}
+</section>
+
+{% if resumen %}
+<section class="card">
+  <div class="card-header">
+    {% if fue_dry_run %}Previsualización (no se escribió nada){% else %}Cédula aplicada{% endif %}
+    · {{ resumen.tipo }}
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-number">${{ resumen.total_patronal|floatformat:2|intcomma }}</div>
+      <div class="kpi-label">Cuota patronal total</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ resumen.empleados_cruzados }}</div>
+      <div class="kpi-label">Empleados cruzados por NSS</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number {% if resumen.nss_sin_cruce %}is-warning{% endif %}">{{ resumen.nss_sin_cruce|length }}</div>
+      <div class="kpi-label">NSS sin cruce</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ resumen.lineas_actualizadas }}</div>
+      <div class="kpi-label">Renglones del tablero {% if fue_dry_run %}a llenar{% else %}llenados{% endif %} ({{ resumen.meses|join:", " }})</div>
+    </div>
+  </div>
+
+  {% if resumen.nss_sin_cruce %}
+  <div class="alert alert-info">Los NSS sin cruce suelen ser personal dado de baja en RRHH. Su dinero SÍ está en el total de control (área Nómina); si Capital Humano corrige el expediente, vuelve a subir la cédula.</div>
+  <div class="table-responsive">
+    <table class="table">
+      <thead><tr><th>NSS y nombre en la cédula</th></tr></thead>
+      <tbody>
+        {% for nss in resumen.nss_sin_cruce %}<tr><td>{{ nss }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% for aviso in resumen.avisos %}
+  <div class="alert alert-info">{{ aviso }}</div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% endblock %}

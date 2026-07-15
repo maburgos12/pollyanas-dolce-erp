@@ -1928,3 +1928,77 @@ class CedulaImssEndurecidaTests(TestCase):
             rubro__area=self.adm, rubro__concepto="Infonavit", periodo=date(2026, 4, 1)
         )
         self.assertEqual(marzo.monto_real + abril.monto_real, Decimal("100.01"))
+
+
+class PantallaCedulaImssTests(TestCase):
+    """Pantalla de subida de cédulas: RBAC, preview y aplicación."""
+
+    URL = "/reportes/presupuesto-real/cedula-imss/"
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        cls.dg = User.objects.create_superuser("dg_ced", "dgc@test.mx", "x")
+        cls.paula = User.objects.create_user("paula_ced", "p@test.mx", "x")
+        cls.ajeno = User.objects.create_user("ajeno_ced", "a@test.mx", "x")
+
+        from reportes.models import AreaPresupuestoResponsable
+
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        for area in [nomina, adm]:
+            RubroPresupuesto.objects.create(area=area, concepto="IMSS", tipo=RubroPresupuesto.TIPO_EGRESO)
+        AreaPresupuestoResponsable.objects.create(area=nomina, usuario=cls.paula)
+        Empleado.objects.create(
+            codigo="PC-1", nombre="Admin cédula", nss="12121212121",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def _subir(self, usuario, previsualizar=True):
+        from unittest.mock import patch
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        filas = [
+            ["Período de Proceso: Abril-2026"],
+            ["Clave", "", "", "Patronal", "Obrera"],
+            ["12-12-12-1212-1", "TRABAJADORA UNO"],
+            ["", "", "", 500.0, 100.0],
+        ]
+        self.client.force_login(usuario)
+        datos = {"cedula": SimpleUploadedFile("cedula.xls", b"fake")}
+        if previsualizar:
+            datos["previsualizar"] = "1"
+        with patch("reportes.services_cedula_imss.cargar_filas_xls", return_value=filas):
+            return self.client.post(self.URL, datos)
+
+    def test_rbac(self):
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+        self.client.force_login(self.paula)
+        self.assertEqual(self.client.get(self.URL).status_code, 200)  # responsable de nómina
+
+    def test_preview_no_escribe_y_aplicar_si(self):
+        r = self._subir(self.paula, previsualizar=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["resumen"].lineas_actualizadas, 2)
+        self.assertFalse(
+            LineaPresupuestoMensual.objects.filter(fuente_real="AUTO:SIPARE").exists()
+        )
+
+        r = self._subir(self.paula, previsualizar=False)
+        self.assertEqual(r.status_code, 200)
+        linea = LineaPresupuestoMensual.objects.get(
+            rubro__area__codigo="administracion", rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(linea.monto_real, Decimal("500.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:SIPARE")
+
+    def test_extension_invalida_rechazada(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_login(self.dg)
+        r = self.client.post(self.URL, {"cedula": SimpleUploadedFile("cedula.pdf", b"x")})
+        self.assertIn(".xls", r.context["error"])

@@ -338,3 +338,24 @@ def _rubro_destino(
         return sin_sucursal[0]
     avisos.append(f"área '{area_codigo}': no existe rubro {'/'.join(conceptos)}; monto no asignado")
     return None
+
+
+def procesar_cedula_subida(archivo_django, *, dry_run: bool = False) -> ResumenCedula:
+    """Procesa una cédula subida por la pantalla del ERP.
+
+    El archivo vive solo en un temporal del contenedor y se elimina al
+    terminar — nunca queda en el disco del servidor.
+    """
+    import os
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".xls", delete=False)
+    try:
+        for chunk in archivo_django.chunks():
+            tmp.write(chunk)
+        tmp.close()
+        parseada = parsear_cedula(cargar_filas_xls(tmp.name))
+        return aplicar_cedula(parseada, dry_run=dry_run)
+    finally:
+        tmp.close()
+        os.remove(tmp.name)

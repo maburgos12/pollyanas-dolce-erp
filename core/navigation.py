@@ -260,6 +260,24 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         # Entradas con permiso propio (no dependen del acceso por módulo):
         # la captura de presupuesto la usan responsables de área que pueden
         # no tener el módulo de reportes; el tablero es de dirección.
+        if group["key"] == "mi_trabajo" and user and user.is_authenticated:
+            from reportes.views_presupuesto_real import _puede_subir_cedulas
+
+            if _puede_subir_cedulas(user):
+                url_cedula = "/reportes/presupuesto-real/cedula-imss/"
+                match_len = len(url_cedula) if current_path.startswith(url_cedula) else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Cédulas IMSS",
+                        "url": url_cedula,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "reportes",
+                        "submodule": "cedula_imss",
+                        "initial": "I",
+                    }
+                )
         if group["key"] == "mi_trabajo" and _puede_capturar_presupuesto(user):
             url_captura = "/reportes/presupuesto-real/captura/"
             match_len = len(url_captura) if current_path.startswith(url_captura) else 0
