@@ -2055,6 +2055,48 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertTrue(por_id[cedis_adicionales[1].id]["recarga_cedis_resuelta"])
         self.assertFalse(por_id[cedis_adicionales[0].id]["recarga_cedis_resuelta"])
 
+    def test_serializer_iterator_materializa_todas_y_precarga_recarga_una_vez(self):
+        cedis_adicional = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=PuntoLogistico.objects.create(
+                nombre="CEDIS iterator",
+                tipo=PuntoLogistico.TIPO_CEDIS,
+                latitud="25.565000",
+                longitud="-108.465000",
+                radio_geocerca_metros=120,
+            ),
+            orden=4,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=cedis_adicional,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga iterator",
+        )
+        iterable = self.ruta.paradas.select_related(
+            "ruta",
+            "punto",
+            "punto__sucursal",
+            "entrega_confirmada_por",
+            "revision_entrega_revisada_por",
+        ).order_by("orden", "id").iterator()
+
+        with CaptureQueriesContext(connection) as queries:
+            data = ParadaRutaSerializer(iterable, many=True).data
+
+        consultas_recarga = [
+            query["sql"]
+            for query in queries
+            if EventoRuta._meta.db_table in query["sql"]
+            and EventoRuta.TIPO_RECARGA_CEDIS in query["sql"]
+        ]
+        self.assertEqual(len(data), self.ruta.paradas.count())
+        self.assertEqual(len(consultas_recarga), 1)
+        self.assertTrue(
+            next(item for item in data if item["id"] == cedis_adicional.id)["recarga_cedis_resuelta"]
+        )
+
     def test_pwa_conserva_reintento_hasta_recarga(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         render_function = re.search(
@@ -2076,7 +2118,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             body,
         )
         self.assertIn(
-            'const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === "PENDIENTE"',
+            'const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);',
             body,
         )
         recarga_function = re.search(
@@ -2086,6 +2128,26 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         )
         self.assertIsNotNone(recarga_function)
         self.assertIn("skipOfflineQueue: true", recarga_function.group("body"))
+
+    def test_pwa_visitada_con_entrega_pendiente_conserva_confirmar_entrega(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+        render_function = re.search(
+            r"function renderParadasRuta\(paradas, rutaId, rutaEnSeguimiento\) \{(?P<body>.*?)\n      \}",
+            html,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(render_function)
+        body = render_function.group("body")
+        self.assertIn(
+            'const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);',
+            body,
+        )
+        self.assertNotIn(
+            "const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved",
+            body,
+        )
+        self.assertIn("Confirmar entrega</button>", body)
 
     @patch("logistica.services_rutas_control.logger.exception")
     @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")

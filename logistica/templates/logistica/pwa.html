@@ -2917,7 +2917,7 @@
           const recargaResuelta = parada.recarga_cedis_resuelta === true;
           const recargaPendiente = !requiereEntrega && !recargaResuelta;
           const revisionPendiente = parada.revision_entrega_estado === "PENDIENTE";
-          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
+          const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
           const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && parada.recarga_cedis_resuelta !== true;
           const esSiguiente = !resolved && Number(parada.id) === nextId;
           const notasDraft = entregaNotasDraftFor(parada.id);

@@ -216,6 +216,34 @@ class PuntoLogisticoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "sucursal_nombre"]
 
 
+class ParadaRutaListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        iterable = data.all() if hasattr(data, "all") else data
+        paradas = list(iterable)
+        if "_recarga_cedis_parada_ids" not in self.context:
+            cedis_ids = [
+                parada.id
+                for parada in paradas
+                if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS
+            ]
+            self.context["_recarga_cedis_parada_ids"] = (
+                set(
+                    EventoRuta.objects.filter(parada_id__in=cedis_ids)
+                    .filter(
+                        Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+                        | Q(
+                            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                            metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+                        )
+                    )
+                    .values_list("parada_id", flat=True)
+                )
+                if cedis_ids
+                else set()
+            )
+        return [self.child.to_representation(parada) for parada in paradas]
+
+
 class ParadaRutaSerializer(serializers.ModelSerializer):
     punto = PuntoLogisticoSerializer(read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
@@ -230,6 +258,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ParadaRuta
+        list_serializer_class = ParadaRutaListSerializer
         fields = [
             "id",
             "ruta",
@@ -298,23 +327,6 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
 
         cache = self.context.get("_recarga_cedis_parada_ids")
         if cache is not None:
-            return obj.id in cache
-
-        root_instance = getattr(self.root, "instance", None)
-        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
-            parada_ids = [parada.id for parada in root_instance]
-            cache = set(
-                EventoRuta.objects.filter(parada_id__in=parada_ids)
-                .filter(
-                    Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
-                    | Q(
-                        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                        metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
-                    )
-                )
-                .values_list("parada_id", flat=True)
-            )
-            self.context["_recarga_cedis_parada_ids"] = cache
             return obj.id in cache
 
         return EventoRuta.objects.filter(ruta_id=obj.ruta_id, parada_id=obj.id).filter(
