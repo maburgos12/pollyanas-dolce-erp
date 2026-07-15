@@ -1082,3 +1082,74 @@ class EndurecimientoAuditoriaTests(TestCase):
         self.assertEqual(r1.status_code, 403)
         r2 = self.client.post("/reportes/presupuestos/importar/", {})
         self.assertEqual(r2.status_code, 403)
+
+
+class LimpiezaSinAsignacionTests(TestCase):
+    """Reales AUTO huérfanos de una asignación anulada vuelven a pendiente."""
+
+    def test_limpia_auto_de_regla_sin_asignacion_y_respeta_manual(self):
+        from reportes.services_presupuesto_real import limpiar_reales_sin_asignacion
+
+        area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+
+        def caso(concepto, fuente, filtros):
+            rubro = RubroPresupuesto.objects.create(
+                area=area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+            )
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS, filtros=filtros
+            )
+            return LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1"),
+                monto_real=Decimal("999"), fuente_real=fuente,
+            )
+
+        huerfana = caso("Sin asignación", "AUTO:VENTA_POS", {"campo_monto": "total_venta"})
+        asignada = caso("Con asignación", "AUTO:VENTA_POS", {"productos_pos": ["Bollo Lotus"]})
+        manual = caso("Capturada", "MANUAL:johana", {"campo_monto": "total_venta"})
+
+        limpiadas = limpiar_reales_sin_asignacion()
+
+        huerfana.refresh_from_db(); asignada.refresh_from_db(); manual.refresh_from_db()
+        self.assertEqual(limpiadas, 1)
+        self.assertIsNone(huerfana.monto_real)
+        self.assertEqual(huerfana.fuente_real, "")
+        self.assertIn("limpiado_sin_asignacion_en", huerfana.metadata)
+        self.assertEqual(asignada.monto_real, Decimal("999"))
+        self.assertEqual(manual.monto_real, Decimal("999"))
+
+
+class MatchingProductoSoloTests(TestCase):
+    """El score toma el mejor entre producto-solo y categoría+producto."""
+
+    def test_categoria_ruidosa_no_bloquea_match_exacto(self):
+        """'GALLETA · LOTUS' cruza con 'Galleta Lotus' aunque la categoría POS
+        sea 'Galletas' (plural); y el topping sigue sin regalarse."""
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        branch = PointBranch.objects.create(external_id="MPS-BR", name="Centro")
+        for cat, prod in [("Galletas", "Galleta Lotus"), ("Pastel Chico", "TOPPING CRUNCH C"),
+                          ("Pastel Chico", "Pastel de Crunch Chico")]:
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 5, 3), sucursal_nombre="Centro",
+                categoria=cat, producto_nombre_historico=prod,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+        def rubro(concepto):
+            r = RubroPresupuesto.objects.create(area=area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO)
+            LineaPresupuestoMensual.objects.create(rubro=r, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1"))
+            return r
+
+        r_lotus = rubro("GALLETA · LOTUS")
+        r_crunch = rubro("PASTEL CHICO · CRUNCH")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        self.assertEqual(
+            ReglaFuenteRubro.objects.get(rubro=r_lotus).filtros["productos_pos"], ["Galleta Lotus"]
+        )
+        self.assertEqual(
+            ReglaFuenteRubro.objects.get(rubro=r_crunch).filtros["productos_pos"], ["Pastel de Crunch Chico"]
+        )
