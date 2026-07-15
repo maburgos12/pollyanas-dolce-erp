@@ -1460,3 +1460,36 @@ class CuraduriaRubrosTests(TestCase):
         conceptos = [r["concepto"] for r in response.context["detalle"]]
         self.assertNotIn("CHEESECAKE · FRESA R", conceptos)
         self.assertIn("Con captura", conceptos)
+
+
+class FusionPorCuentaTests(TestCase):
+    """Duplicados con el MISMO nombre se distinguen por cuenta contable."""
+
+    def test_fusiona_mismo_nombre_por_cuenta(self):
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        con_cuenta = RubroPresupuesto.objects.create(
+            area=area, concepto="Peugeot Partner", codigo_cuenta="1057-0003-0000",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        sin_cuenta = RubroPresupuesto.objects.create(
+            area=area, concepto="Peugeot Partner", codigo_cuenta="",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=con_cuenta, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("100")
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=sin_cuenta, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("40")
+        )
+
+        call_command(
+            "fusionar_rubros", area="logistica", destino="Peugeot Partner",
+            origenes=["Peugeot Partner"], destino_cuenta="1057-0003-0000",
+            origen_cuenta="", stdout=StringIO(),
+        )
+
+        con_cuenta.refresh_from_db(); sin_cuenta.refresh_from_db()
+        self.assertTrue(con_cuenta.activo)
+        self.assertFalse(sin_cuenta.activo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=con_cuenta)
+        self.assertEqual(linea.monto_presupuesto, Decimal("140"))

@@ -27,29 +27,41 @@ class Command(BaseCommand):
         parser.add_argument("--area", required=True)
         parser.add_argument("--destino", required=True)
         parser.add_argument("--origenes", nargs="+", required=True)
+        parser.add_argument(
+            "--destino-cuenta",
+            default=None,
+            help="codigo_cuenta del destino, para distinguir duplicados con el mismo nombre.",
+        )
+        parser.add_argument(
+            "--origen-cuenta",
+            default=None,
+            help="codigo_cuenta de los orígenes, para duplicados con el mismo nombre.",
+        )
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args, **options):
         area = options["area"]
         dry_run = options["dry_run"]
 
-        def rubros_de(concepto):
-            return list(
-                RubroPresupuesto.objects.filter(
-                    area__codigo=area, concepto=concepto, activo=True
-                )
-            )
+        def rubros_de(concepto, cuenta=None):
+            qs = RubroPresupuesto.objects.filter(area__codigo=area, concepto=concepto, activo=True)
+            if cuenta is not None:
+                qs = qs.filter(codigo_cuenta=cuenta)
+            return list(qs)
 
         origenes: list[RubroPresupuesto] = []
         for concepto in options["origenes"]:
-            encontrados = rubros_de(concepto)
+            encontrados = rubros_de(concepto, options["origen_cuenta"])
             if not encontrados:
                 self.stdout.write(self.style.WARNING(f"  origen no encontrado: '{concepto}'"))
             origenes.extend(encontrados)
         if not origenes:
             raise CommandError("Ningún rubro de origen encontrado; nada que fusionar.")
 
-        destinos = rubros_de(options["destino"])
+        destinos = rubros_de(options["destino"], options["destino_cuenta"])
+        # Mismo nombre en destino y origen: no dejar que el destino se
+        # fusione consigo mismo.
+        destinos = [d for d in destinos if all(d.pk != o.pk for o in origenes)]
         with transaction.atomic():
             if destinos:
                 destino = destinos[0]
