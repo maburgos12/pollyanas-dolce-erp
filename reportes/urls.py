@@ -34,6 +34,16 @@ urlpatterns = [
         views_presupuesto_real.presupuesto_vs_real,
         name="presupuesto_vs_real",
     ),
+    path(
+        "presupuesto-real/captura/",
+        views_presupuesto_real.presupuesto_real_captura,
+        name="presupuesto_real_captura",
+    ),
+    path(
+        "presupuesto-real/captura/guardar/",
+        views_presupuesto_real.presupuesto_real_captura_guardar,
+        name="presupuesto_real_captura_guardar",
+    ),
     path("mermas-devoluciones/", views.mermas_devoluciones, name="mermas_devoluciones"),
     path("auditoria-insumos/", views.auditoria_insumos, name="auditoria_insumos"),
     path("proyeccion-produccion/", views.proyeccion_produccion, name="proyeccion_produccion"),

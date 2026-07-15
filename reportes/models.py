@@ -866,6 +866,38 @@ class LineaPresupuestoMensual(models.Model):
         return f"{self.periodo:%Y-%m} · {self.rubro.concepto} · {self.version}"
 
 
+class AreaPresupuestoResponsable(models.Model):
+    """Usuaria responsable de capturar el gasto real de un área del presupuesto.
+
+    Da acceso a la pantalla de captura SOLO para su(s) área(s); los perfiles
+    con acceso al módulo de reportes ven todas las áreas.
+    """
+
+    area = models.ForeignKey(
+        AreaPresupuesto,
+        on_delete=models.CASCADE,
+        related_name="responsables",
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="areas_presupuesto",
+    )
+    puede_capturar = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Responsable de área de presupuesto"
+        verbose_name_plural = "Responsables de área de presupuesto"
+        constraints = [
+            models.UniqueConstraint(fields=["area", "usuario"], name="uniq_area_presu_responsable")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.usuario} → {self.area.nombre}"
+
+
 class ReglaFuenteRubro(models.Model):
     """Mapea un rubro de presupuesto a la fuente ERP que llena su monto real.
 
