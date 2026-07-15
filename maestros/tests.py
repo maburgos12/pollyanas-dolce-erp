@@ -1902,3 +1902,17 @@ class CostosAdquisicionRecipeMappingTests(TestCase):
         self.assertEqual(row["tipo"], "reventa")
         self.assertFalse(row["es_anticipo"])
         self.assertTrue(row["editable"])
+
+
+class TipoHerramientaTests(__import__('django.test', fromlist=['TestCase']).TestCase):
+    """Las herramientas de cocina no son materia prima (instrucción de dirección)."""
+
+    def test_choice_herramienta_existe_y_no_es_materia_prima(self):
+        from maestros.models import Insumo
+
+        herramienta = Insumo.objects.create(
+            nombre="Batidor de globo", categoria="HERRAMIENTA Y EQUIPO COCINA",
+            tipo_item=Insumo.TIPO_HERRAMIENTA,
+        )
+        self.assertFalse(herramienta.es_materia_prima if hasattr(herramienta, 'es_materia_prima') else herramienta.tipo_item == Insumo.TIPO_MATERIA_PRIMA)
+        self.assertEqual(herramienta.get_tipo_item_display(), "Herramienta / equipo")
