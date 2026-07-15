@@ -60,11 +60,11 @@ class GeocercaResultado:
     distancia_planeada_metros: int | None
 
 
-def repartidor_participa_en_ruta(*, ruta: RutaEntrega, repartidor: Repartidor | None) -> bool:
-    """Autoriza la operación compartida sin convertir al acompañante en conductor GPS."""
+def repartidor_es_chofer_de_ruta(*, ruta: RutaEntrega, repartidor: Repartidor | None) -> bool:
+    """Autoriza la operación PWA únicamente al chofer canónico de la ruta."""
     if repartidor is None:
         return False
-    return repartidor.id in {ruta.repartidor_id, ruta.acompanante_id}
+    return repartidor.id == ruta.repartidor_id
 
 
 def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
@@ -79,7 +79,7 @@ def _rutas_operativas_candidatas(repartidor: Repartidor, *, hoy=None):
             "bitacora_salida",
         )
         .filter(
-            Q(repartidor=repartidor) | Q(acompanante=repartidor),
+            repartidor=repartidor,
             estatus__in=[RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_PLANEADA],
         )
         .filter(Q(fecha_ruta=hoy) | Q(fecha_ruta=ayer, created_at__gte=corte))
@@ -132,15 +132,7 @@ def liberar_ruta_con_turno(
     if not ruta.unidad_operativa_id:
         raise LiberacionRutaError("No se puede liberar la ruta: asigna unidad operativa.")
 
-    try:
-        actor_repartidor = actor.repartidor_logistica
-    except (AttributeError, Repartidor.DoesNotExist):
-        actor_repartidor = None
-    operador_turno = (
-        actor_repartidor
-        if repartidor_participa_en_ruta(ruta=ruta, repartidor=actor_repartidor)
-        else ruta.repartidor
-    )
+    operador_turno = ruta.repartidor
 
     rutas_activas_ajenas = (
         RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA)
@@ -746,7 +738,7 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         raise ValidationError("La ruta debe tener una unidad asignada antes de aceptar seguimiento.")
 
     repartidor = _repartidor_usuario(user)
-    if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
+    if not repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor):
         raise PermissionDenied("Esta ruta está asignada a otro repartidor.")
 
     bitacora = _bitacora_abierta(repartidor, ruta)
