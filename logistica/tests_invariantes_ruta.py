@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import DatabaseError, IntegrityError, close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -382,6 +382,7 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
         liberar_sync = Event()
         errores = []
         resultados = []
+        errores_lock = []
 
         def sync_bloqueado(**kwargs):
             sync_iniciado.set()
@@ -415,12 +416,20 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
             primero.start()
             self.assertTrue(sync_iniciado.wait(timeout=5))
             segundo.start()
-            liberar_sync.set()
+            try:
+                with transaction.atomic():
+                    RutaEntrega.objects.select_for_update(nowait=True).get(pk=self.ruta.id)
+                    ParadaRuta.objects.select_for_update(nowait=True).get(pk=self.cedis.id)
+            except DatabaseError as exc:
+                errores_lock.append(exc)
+            finally:
+                liberar_sync.set()
             primero.join(timeout=10)
             segundo.join(timeout=10)
 
         self.assertFalse(primero.is_alive() or segundo.is_alive())
         self.assertEqual(errores, [])
+        self.assertEqual(errores_lock, [], "Point se ejecutó mientras Ruta/Parada seguían bloqueadas.")
         self.assertEqual(
             sync.call_count,
             1,
@@ -434,7 +443,10 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
             },
         )
         self.assertEqual(len(resultados), 2)
-        self.assertEqual(resultados[0]["evento_id"], resultados[1]["evento_id"])
+        self.assertEqual(
+            sorted(resultado["estado_sync"] for resultado in resultados),
+            ["ACTUALIZADO", "EN_PROCESO"],
+        )
         self.assertEqual(
             EventoRuta.objects.filter(
                 ruta=self.ruta,
@@ -1889,7 +1901,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         delay,
         log_exception,
     ):
-        delay.side_effect = [RuntimeError("broker no disponible"), None]
+        delay.side_effect = [RuntimeError("broker no disponible"), None, None]
         BitacoraSalidaLlegada.objects.create(
             repartidor=self.repartidor,
             unidad=self.unidad,
@@ -1926,12 +1938,39 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertTrue(UbicacionRuta.objects.filter(pk=segunda_ubicacion.id).exists())
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        self.assertEqual(lease.metadata["estado"], "FALLA_ENCOLADO")
+        self.assertIsNone(lease.metadata["lease_hasta"])
 
         with self.captureOnCommitCallbacks(execute=True):
             registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
 
         self.assertEqual(delay.call_count, 2)
         log_exception.assert_called_once()
+
+        lease.refresh_from_db()
+        self.assertEqual(lease.metadata["tipo"], "recarga_cedis_lease_interno")
+        self.assertEqual(lease.metadata["estado"], "ENCOLADA")
+        self.assertEqual(lease.severidad, EventoRuta.SEVERIDAD_INFO)
+        self.assertEqual(lease.revision_alerta_estado, EventoRuta.REVISION_ALERTA_RESUELTA)
+        self.assertIsNone(
+            ultima_alerta_recarga_cedis_revisable(ruta=self.ruta, parada=self.cedis)
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+        self.assertEqual(delay.call_count, 2, "Un lease vigente no debe producir otra tarea.")
+
+        metadata = dict(lease.metadata)
+        metadata["estado"] = "EN_PROCESO"
+        metadata["lease_hasta"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        lease.metadata = metadata
+        lease.save(update_fields=["metadata"])
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+        self.assertEqual(delay.call_count, 3, "Un worker muerto debe recuperarse al vencer su lease.")
 
         EventoRuta.objects.create(
             ruta=self.ruta,
@@ -1943,6 +1982,59 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         with self.captureOnCommitCallbacks(execute=True):
             registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
 
+        self.assertEqual(delay.call_count, 3)
+
+    @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
+    def test_resultado_point_aplica_backoff_durable_y_luego_reintenta(self, delay):
+        from .services_rutas_control import _agendar_recarga_cedis_si_pendiente
+        from .tasks import procesar_recarga_cedis_automatica
+
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        with self.captureOnCommitCallbacks(execute=True):
+            agendada = _agendar_recarga_cedis_si_pendiente(
+                ruta=self.ruta,
+                parada=self.cedis,
+                user=self.user,
+            )
+        self.assertTrue(agendada)
+        delay.assert_called_once()
+
+        with patch(
+            "logistica.tasks.registrar_recarga_cedis",
+            side_effect=RecargaCedisPendienteEnviado("Point sigue pendiente"),
+        ):
+            resultado = procesar_recarga_cedis_automatica(
+                ruta_id=self.ruta.id,
+                parada_id=self.cedis.id,
+                user_id=self.user.id,
+            )
+        self.assertEqual(resultado["estado_sync"], "PENDIENTE_ENVIADO")
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        self.assertEqual(lease.metadata["estado"], "BACKOFF")
+        siguiente_intento = datetime.fromisoformat(lease.metadata["proximo_intento_en"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertFalse(
+                _agendar_recarga_cedis_si_pendiente(
+                    ruta=self.ruta,
+                    parada=self.cedis,
+                    user=self.user,
+                )
+            )
+        delay.assert_called_once()
+
+        with patch("logistica.services_rutas_control.timezone.now", return_value=siguiente_intento + timedelta(seconds=1)):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertTrue(
+                    _agendar_recarga_cedis_si_pendiente(
+                        ruta=self.ruta,
+                        parada=self.cedis,
+                        user=self.user,
+                    )
+                )
         self.assertEqual(delay.call_count, 2)
 
     def test_task_recarga_no_inventa_exito_si_point_pendiente(self):
@@ -1954,6 +2046,9 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             (RecargaCedisPointError, "ERROR_POINT"),
         )
         for exception_class, estado_sync in errores_revisables:
+            EventoRuta.objects.filter(
+                clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+            ).delete()
             with self.subTest(estado_sync=estado_sync), patch(
                 "logistica.tasks.registrar_recarga_cedis",
                 side_effect=exception_class("Falla revisable de Point"),
@@ -1968,6 +2063,12 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
                 self.assertEqual(resultado["ruta_id"], self.ruta.id)
                 self.assertEqual(resultado["parada_id"], self.cedis.id)
                 registrar.assert_called_once()
+                lease = EventoRuta.objects.get(
+                    clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+                )
+                self.assertEqual(lease.metadata["estado"], "BACKOFF")
+                self.assertEqual(lease.metadata["estado_sync"], estado_sync)
+                self.assertTrue(lease.metadata["proximo_intento_en"])
                 self.assertFalse(
                     EventoRuta.objects.filter(
                         ruta=self.ruta,
