@@ -18,7 +18,11 @@ from core.models import Notificacion, Sucursal
 from core.notificaciones import crear_notificaciones
 from pos_bridge.models import PointTransferLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
-from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService, resolve_requesting_erp_branch
+from pos_bridge.services.open_transfer_sync_service import (
+    OpenTransferSyncService,
+    is_cedis_like_name,
+    resolve_requesting_erp_branch,
+)
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 
@@ -231,7 +235,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     candidates_qs = (
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
         .filter(is_cancelled=False, registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta])
-        .filter(Q(erp_origin_branch_id__in=branch_ids) | Q(erp_destination_branch_id__in=branch_ids))
+        .filter(erp_destination_branch_id__in=branch_ids)
         .order_by("transfer_external_id", "detail_external_id", "id")
     )
     if solo_abiertas:
@@ -243,18 +247,76 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     candidates = list(candidates_qs.select_for_update(of=("self",)))
     candidate_ids = [line.id for line in candidates]
     candidate_hashes = [line.source_hash for line in candidates]
-    reservas_globales = list(
+    hashes_ocupados_otras_rutas = set(
+        RutaCargaChecklistLinea.objects.filter(source_hash__in=candidate_hashes)
+        .exclude(checklist=checklist)
+        .values_list("source_hash", flat=True)
+    )
+    reservas_activas = list(
         RutaCargaChecklistLinea.objects.filter(
             Q(source_hash__in=candidate_hashes) | Q(point_transfer_line_id__in=candidate_ids)
         )
-        .exclude(checklist=checklist)
-        .values_list("source_hash", "point_transfer_line_id")
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .order_by("point_transfer_line_id", "creado_en", "id")
+        .values_list("source_hash", "point_transfer_line_id", "checklist_id")
     )
-    hashes_reservados = {source_hash for source_hash, _ in reservas_globales}
-    point_ids_reservados = {point_id for _, point_id in reservas_globales if point_id is not None}
+    propietario_por_point_id = {}
+    for _, point_id, checklist_id in reservas_activas:
+        if point_id is not None:
+            propietario_por_point_id.setdefault(point_id, checklist_id)
+    hashes_reservados = {
+        source_hash
+        for source_hash, point_id, checklist_id in reservas_activas
+        if checklist_id != checklist.id
+        and (
+            point_id is None
+            or propietario_por_point_id.get(point_id) != checklist.id
+        )
+    }
+    point_ids_reservados = {
+        point_id
+        for point_id, checklist_id in propietario_por_point_id.items()
+        if checklist_id != checklist.id
+    }
     checklist_lines = list(
-        checklist.lineas.select_for_update(of=("self",)).select_related("point_transfer_line")
+        checklist.lineas.select_for_update(of=("self",)).select_related(
+            "point_transfer_line",
+            "point_transfer_line__destination_branch",
+        )
     )
+    lineas_superadas = 0
+    for linea in checklist_lines:
+        point_line = linea.point_transfer_line
+        retorno_a_cedis = bool(
+            point_line
+            and point_line.erp_origin_branch_id in branch_ids
+            and point_line.erp_destination_branch_id not in branch_ids
+            and point_line.destination_branch_id
+            and is_cedis_like_name(point_line.destination_branch.name)
+        )
+        reservada_por_otra_ruta = (
+            linea.point_transfer_line_id in point_ids_reservados
+            and linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        )
+        if retorno_a_cedis or reservada_por_otra_ruta:
+            if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+                continue
+            linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            nota_auditoria = (
+                "Transferencia de regreso a CEDIS; se conserva solo para auditoría."
+                if retorno_a_cedis
+                else "Línea Point ya asignada a otra ruta; se conserva solo para auditoría."
+            )
+            linea.notas = " ".join(
+                value
+                for value in [
+                    linea.notas.strip(),
+                    nota_auditoria,
+                ]
+                if value
+            )
+            linea.save(update_fields=["estatus", "notas", "actualizado_en"])
+            lineas_superadas += 1
     lineas_por_source = {linea.source_hash: linea for linea in checklist_lines}
     lineas_por_point_id = {
         linea.point_transfer_line_id: linea
@@ -263,7 +325,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     }
 
     creadas = 0
-    actualizadas = 0
+    actualizadas = lineas_superadas
     omitidas = 0
     for line in candidates:
         branch = resolve_requesting_erp_branch(line)
@@ -453,9 +515,12 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     or Decimal(str(vieja.cantidad_enviada_esperada or 0)) <= 0
                 )
             ]
+        source_hash_nuevo = line.source_hash
+        if source_hash_nuevo in hashes_ocupados_otras_rutas:
+            source_hash_nuevo = f"point-ruta-{ruta.id}-{line.id}"
         nueva_linea = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
-            source_hash=line.source_hash,
+            source_hash=source_hash_nuevo,
             **defaults,
         )
         checklist_lines.append(nueva_linea)

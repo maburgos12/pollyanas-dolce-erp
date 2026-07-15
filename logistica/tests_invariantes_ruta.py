@@ -22,7 +22,12 @@ from django.utils import timezone
 from core.access import ACCESS_MANAGE
 from core.models import Notificacion, Sucursal, UserModuleAccess
 from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
+from pos_bridge.services.open_transfer_sync_service import (
+    OpenTransferSyncService,
+    resolve_requesting_erp_branch,
+)
 from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
+from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .models import (
@@ -44,6 +49,7 @@ from .services_carga_ruta import (
     RecargaCedisSnapshotObsoleto,
     RecargaCedisSinLineasPoint,
     _ordenes_tramo_carga_actual,
+    _point_recibidas_por_ruta,
     _registrar_alerta_recarga_sync,
     _sincronizar_lineas_point_para_ruta,
     checklist_bloquea_salida,
@@ -1033,6 +1039,382 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(
             bloqueo,
             "confirma todas las líneas de carga antes de liberar la ruta",
+        )
+
+
+class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
+    def test_carga_de_ruta_excluye_transferencias_de_sucursal_hacia_cedis(self):
+        origin = PointBranch.objects.create(
+            external_id="INV-RETORNO-SUC",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        destination = PointBranch.objects.create(
+            external_id="INV-RETORNO-CEDIS",
+            name="CEDIS",
+        )
+        retorno = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=self.sucursal,
+            transfer_external_id="INV-RETORNO-1",
+            detail_external_id="INV-RETORNO-D-1",
+            source_hash="invariante-retorno-sucursal-cedis",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Producto devuelto a CEDIS",
+            item_code="INV-RETORNO",
+            unit="pz",
+            requested_quantity="3",
+            sent_quantity="3",
+            received_quantity="3",
+            is_open=False,
+            is_received=True,
+            is_finalized=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        self.assertFalse(
+            checklist.lineas.filter(point_transfer_line=retorno).exists()
+        )
+
+    def test_resync_supera_retorno_sucursal_cedis_ya_existente_y_preserva_auditoria(self):
+        origin = PointBranch.objects.create(
+            external_id="INV-RETORNO-PREVIO-SUC",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        destination = PointBranch.objects.create(
+            external_id="INV-RETORNO-PREVIO-CEDIS",
+            name="CEDIS",
+        )
+        retorno = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=self.sucursal,
+            transfer_external_id="INV-RETORNO-PREVIO-1",
+            detail_external_id="INV-RETORNO-PREVIO-D-1",
+            source_hash="invariante-retorno-previo-sucursal-cedis",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Producto devuelto a CEDIS ya capturado",
+            item_code="INV-RETORNO-PREVIO",
+            unit="pz",
+            requested_quantity="3",
+            sent_quantity="3",
+            received_quantity="3",
+            is_open=False,
+            is_received=True,
+            is_finalized=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=retorno,
+            transfer_external_id=retorno.transfer_external_id,
+            detail_external_id=retorno.detail_external_id,
+            source_hash=retorno.source_hash,
+            item_code=retorno.item_code,
+            item_name=retorno.item_name,
+            unit=retorno.unit,
+            cantidad_solicitada=retorno.requested_quantity,
+            cantidad_enviada_esperada=retorno.sent_quantity,
+            cantidad_cargada="3",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            notas="Captura previa del repartidor.",
+            client_event_id="retorno-previo-auditado",
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        validado_en_original = linea.validado_en
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(linea.cantidad_cargada, Decimal("3"))
+        self.assertEqual(linea.client_event_id, "retorno-previo-auditado")
+        self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(linea.validado_en, validado_en_original)
+        self.assertIn("Captura previa del repartidor.", linea.notas)
+        self.assertIn("regreso a CEDIS", linea.notas)
+
+    def test_resync_conserva_destino_mapeado_a_sucursal_aunque_nombre_parezca_cedis(self):
+        segunda_sucursal = Sucursal.objects.create(
+            codigo="INV-ALMACEN-GLORIAS",
+            nombre="Almacén Las Glorias",
+            activa=True,
+        )
+        segundo_punto = PuntoLogistico.objects.create(
+            sucursal=segunda_sucursal,
+            nombre=segunda_sucursal.nombre,
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+        segunda_parada = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=segundo_punto,
+            orden=2,
+        )
+        origin = PointBranch.objects.create(
+            external_id="INV-ORIGEN-INTERSUCURSAL",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        destination = PointBranch.objects.create(
+            external_id="INV-DESTINO-ALMACEN-GLORIAS",
+            name=segunda_sucursal.nombre,
+            erp_branch=segunda_sucursal,
+        )
+        transferencia = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=self.sucursal,
+            erp_destination_branch=segunda_sucursal,
+            transfer_external_id="INV-INTERSUCURSAL-1",
+            detail_external_id="INV-INTERSUCURSAL-D-1",
+            source_hash="invariante-intersucursal-destino-almacen",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Producto legítimo para Almacén Las Glorias",
+            item_code="INV-INTERSUCURSAL",
+            unit="pz",
+            requested_quantity="4",
+            sent_quantity="4",
+            received_quantity="4",
+            is_open=True,
+            is_received=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        receta = Receta.objects.create(
+            nombre="Producto legítimo para Almacén Las Glorias",
+            codigo_point="INV-INTERSUCURSAL",
+            hash_contenido="hash-invariante-destino-estructurado",
+        )
+        transferencia.receta = receta
+        transferencia.save(update_fields=["receta", "updated_at"])
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        self.assertEqual(resolve_requesting_erp_branch(transferencia), segunda_sucursal)
+        self.assertEqual(
+            OpenTransferSyncService()._requesting_branch_ids(
+                fecha=self.ruta.fecha_ruta,
+                transfer_ids={transferencia.transfer_external_id},
+            ),
+            {segunda_sucursal.id},
+        )
+        recibidas = _point_recibidas_por_ruta(self.ruta)
+        self.assertIn((segunda_sucursal.id, "inv-intersucursal"), recibidas)
+        self.assertNotIn((self.sucursal.id, "inv-intersucursal"), recibidas)
+        ConsolidadoNocturnoCedisService()._crear_solicitudes_desde_point(
+            fecha_operacion=self.ruta.fecha_ruta,
+            usuario=self.user,
+        )
+        self.assertTrue(
+            SolicitudReabastoCedis.objects.filter(
+                fecha_operacion=self.ruta.fecha_ruta,
+                sucursal=segunda_sucursal,
+                lineas__receta=receta,
+            ).exists()
+        )
+        self.assertFalse(
+            SolicitudReabastoCedis.objects.filter(
+                fecha_operacion=self.ruta.fecha_ruta,
+                sucursal=self.sucursal,
+                lineas__receta=receta,
+            ).exists()
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        linea = checklist.lineas.get(point_transfer_line=transferencia)
+        self.assertNotEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(linea.parada, segunda_parada)
+
+    def test_linea_point_ya_asignada_a_otra_ruta_conserva_captura_como_auditoria(self):
+        point_line = self.point_line(
+            requested="1",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-RUTA-PREVIA",
+            detail="INV-DETALLE-RUTA-PREVIA",
+        )
+        ruta_previa = RutaEntrega.objects.create(
+            nombre="Ruta previa que ya reclamó Point",
+            fecha_ruta=self.ruta.fecha_ruta - timedelta(days=1),
+            estatus=RutaEntrega.ESTATUS_COMPLETADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        parada_previa = ParadaRuta.objects.create(
+            ruta=ruta_previa,
+            punto=self.punto,
+            orden=1,
+        )
+        checklist_previo = RutaCargaChecklist.objects.create(
+            ruta=ruta_previa,
+            estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA,
+        )
+        linea_previa = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist_previo,
+            parada=parada_previa,
+            point_transfer_line=point_line,
+            transfer_external_id=point_line.transfer_external_id,
+            detail_external_id=point_line.detail_external_id,
+            source_hash=point_line.source_hash,
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada=point_line.requested_quantity,
+            cantidad_enviada_esperada="0",
+            cantidad_cargada="0",
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+        checklist_actual = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        linea_duplicada = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist_actual,
+            parada=self.parada,
+            point_transfer_line=point_line,
+            transfer_external_id=point_line.transfer_external_id,
+            detail_external_id=point_line.detail_external_id,
+            source_hash="cedis-reabasto-placeholder-duplicado",
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada=point_line.requested_quantity,
+            cantidad_enviada_esperada="0",
+            cantidad_cargada="1",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            notas="Captura física del repartidor conservada.",
+            client_event_id="captura-duplicada-auditada",
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        validado_en_original = linea_duplicada.validado_en
+
+        sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
+
+        linea_previa.refresh_from_db()
+        linea_duplicada.refresh_from_db()
+        self.assertEqual(
+            linea_previa.estatus,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+        self.assertEqual(
+            linea_duplicada.estatus,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(linea_duplicada.cantidad_cargada, Decimal("1"))
+        self.assertEqual(linea_duplicada.validado_por, self.user)
+        self.assertEqual(linea_duplicada.validado_en, validado_en_original)
+        self.assertEqual(
+            linea_duplicada.client_event_id,
+            "captura-duplicada-auditada",
+        )
+        self.assertIn("Captura física del repartidor conservada.", linea_duplicada.notas)
+        self.assertFalse(
+            checklist_actual.lineas.exclude(
+                estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            ).filter(point_transfer_line=point_line).exists()
+        )
+
+    def test_reserva_superada_de_otra_ruta_no_reclama_point_en_la_actual(self):
+        point_line = self.point_line(
+            requested="5",
+            sent="5",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-SUPERADO",
+            detail="INV-DETALLE-SUPERADO",
+        )
+        ruta_previa = RutaEntrega.objects.create(
+            nombre="Ruta previa con auditoría superada",
+            fecha_ruta=self.ruta.fecha_ruta - timedelta(days=1),
+            estatus=RutaEntrega.ESTATUS_COMPLETADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        parada_previa = ParadaRuta.objects.create(
+            ruta=ruta_previa,
+            punto=self.punto,
+            orden=1,
+        )
+        checklist_previo = RutaCargaChecklist.objects.create(
+            ruta=ruta_previa,
+            estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA,
+        )
+        linea_previa = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist_previo,
+            parada=parada_previa,
+            point_transfer_line=point_line,
+            transfer_external_id=point_line.transfer_external_id,
+            detail_external_id=point_line.detail_external_id,
+            source_hash=point_line.source_hash,
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada=point_line.requested_quantity,
+            cantidad_enviada_esperada=point_line.sent_quantity,
+            cantidad_cargada=point_line.sent_quantity,
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        checklist_actual = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist_actual,
+            solo_abiertas=False,
+        )
+
+        linea_previa.refresh_from_db()
+        self.assertEqual(
+            linea_previa.estatus,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        linea_actual = checklist_actual.lineas.get(point_transfer_line=point_line)
+        self.assertEqual(linea_actual.cantidad_enviada_esperada, Decimal("5"))
+        self.assertNotEqual(
+            linea_actual.estatus,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         )
 
 
