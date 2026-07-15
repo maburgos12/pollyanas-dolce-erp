@@ -167,21 +167,22 @@ class LogisticaEntregaDomainTests(TestCase):
             1,
         )
 
-    def test_acompanante_asignado_puede_confirmar_entrega_sin_asumir_tracking(self):
+    def test_acompanante_asignado_no_puede_confirmar_entrega(self):
         user_acompanante = User.objects.create_user(username="acompanante.entregas", password="pass123")
         user_acompanante.groups.add(Group.objects.get_or_create(name="repartidor")[0])
         acompanante = Repartidor.objects.create(user=user_acompanante, sucursal=self.sucursal)
         self.ruta.acompanante = acompanante
         self.ruta.save(update_fields=["acompanante", "updated_at"])
 
-        resultado = self._confirmar(
-            actor=user_acompanante,
-            client_event_id="entrega-acompanante-1",
-        )
+        with self.assertRaisesMessage(PermissionDenied, "No puedes confirmar entregas de esta ruta"):
+            self._confirmar(
+                actor=user_acompanante,
+                client_event_id="entrega-acompanante-1",
+            )
 
         self.parada.refresh_from_db()
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
-        self.assertTrue(resultado.requiere_revision)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        self.assertIsNone(self.parada.entrega_confirmada_por)
         self.assertFalse(UbicacionRuta.objects.filter(ruta=self.ruta, repartidor=acompanante).exists())
 
     def test_geocerca_real_no_requiere_revision(self):
@@ -4398,19 +4399,16 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
 
-    def test_api_ruta_activa_devuelve_misma_ruta_al_acompanante_asignado(self):
+    def test_api_ruta_activa_no_expone_ruta_al_acompanante(self):
         self.ruta.acompanante = self.acompanante
         self.ruta.save(update_fields=["acompanante", "updated_at"])
         self.client.force_login(self.user_acompanante)
 
         response = self.client.get(reverse("api_logistica_ruta_activa"))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
-        self.assertEqual(response.json()["ruta"]["repartidor"], self.repartidor.id)
-        self.assertEqual(response.json()["ruta"]["acompanante"], self.acompanante.id)
+        self.assertEqual(response.status_code, 204)
 
-    def test_acompanante_asignado_puede_confirmar_carga_de_la_ruta(self):
+    def test_acompanante_no_puede_consultar_ni_confirmar_carga_de_la_ruta(self):
         self.ruta.acompanante = self.acompanante
         self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
         self.ruta.save(update_fields=["acompanante", "estatus", "updated_at"])
@@ -4429,19 +4427,26 @@ class LogisticaControlRutasTests(TestCase):
             cantidad_enviada_esperada="2.000",
         )
 
-        validar_linea_carga(
-            user=self.user_acompanante,
-            ruta=self.ruta,
-            repartidor=self.acompanante,
-            linea_id=linea.id,
-            cantidad_cargada="2.000",
+        self.client.force_login(self.user_acompanante)
+        consulta = self.client.get(
+            reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": self.ruta.id})
         )
 
-        linea.refresh_from_db()
-        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
-        self.assertEqual(linea.validado_por, self.user_acompanante)
+        self.assertEqual(consulta.status_code, 403)
+        with self.assertRaisesMessage(PermissionDenied, "No tienes permiso para confirmar carga de esta ruta"):
+            validar_linea_carga(
+                user=self.user_acompanante,
+                ruta=self.ruta,
+                repartidor=self.acompanante,
+                linea_id=linea.id,
+                cantidad_cargada="2.000",
+            )
 
-    def test_acompanante_con_turno_de_la_unidad_puede_iniciar_y_rastrear_ruta(self):
+        linea.refresh_from_db()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(linea.validado_por)
+
+    def test_acompanante_con_turno_no_puede_iniciar_ruta(self):
         self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
         self.ruta.save(update_fields=["estatus", "updated_at"])
         ruta = RutaEntrega.objects.create(
@@ -4473,7 +4478,7 @@ class LogisticaControlRutasTests(TestCase):
             validado_por=self.user_acompanante,
             validado_en=timezone.now(),
         )
-        bitacora = BitacoraSalidaLlegada.objects.create(
+        BitacoraSalidaLlegada.objects.create(
             repartidor=self.acompanante,
             unidad=self.unidad,
             km_salida=1000,
@@ -4484,13 +4489,26 @@ class LogisticaControlRutasTests(TestCase):
 
         liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
 
-        self.assertEqual(liberar.status_code, 200, liberar.content)
+        self.assertEqual(liberar.status_code, 400, liberar.content)
+        self.assertEqual(liberar.json()["error"], "sin_ruta")
         ruta.refresh_from_db()
-        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
-        self.assertEqual(ruta.bitacora_salida_id, bitacora.id)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertIsNone(ruta.bitacora_salida_id)
+
+    def test_acompanante_no_puede_rastrear_ni_finalizar_ruta(self):
+        self.ruta.acompanante = self.acompanante
+        self.ruta.save(update_fields=["acompanante", "updated_at"])
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.acompanante,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        self.client.force_login(self.user_acompanante)
 
         tracking = self.client.post(
-            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": ruta.id}),
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": self.ruta.id}),
             json.dumps(
                 {
                     "latitud": "25.570010",
@@ -4501,32 +4519,16 @@ class LogisticaControlRutasTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(tracking.status_code, 201, tracking.content)
-        self.assertTrue(UbicacionRuta.objects.filter(ruta=ruta, repartidor=self.acompanante).exists())
-
-        parada.estado = ParadaRuta.ESTADO_VISITADA
-        parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
-        parada.hora_llegada_real = timezone.now()
-        parada.entrega_confirmada_en = timezone.now()
-        parada.entrega_confirmada_por = self.user_acompanante
-        parada.save(
-            update_fields=[
-                "estado",
-                "entrega_estado",
-                "hora_llegada_real",
-                "entrega_confirmada_en",
-                "entrega_confirmada_por",
-                "actualizado_en",
-            ]
-        )
+        self.assertEqual(tracking.status_code, 403, tracking.content)
+        self.assertFalse(UbicacionRuta.objects.filter(ruta=self.ruta, repartidor=self.acompanante).exists())
 
         finalizar = self.client.post(
-            reverse("api_logistica_ruta_finalizar_pwa", kwargs={"ruta_id": ruta.id})
+            reverse("api_logistica_ruta_finalizar_pwa", kwargs={"ruta_id": self.ruta.id})
         )
 
-        self.assertEqual(finalizar.status_code, 200, finalizar.content)
-        ruta.refresh_from_db()
-        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+        self.assertEqual(finalizar.status_code, 403, finalizar.content)
+        self.ruta.refresh_from_db()
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
 
     def test_api_ruta_activa_refresca_checklist_point_pendiente_viejo(self):
         checklist = RutaCargaChecklist.objects.create(
