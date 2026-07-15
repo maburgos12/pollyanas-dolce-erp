@@ -431,8 +431,12 @@ class PointMovementSyncService:
         cedis_entries_updated = 0
         skipped_non_storage = 0
         unresolved = 0
+        current_detail_ids_by_transfer: dict[str, set[str]] = {}
 
         for item in extracted_lines:
+            current_detail_ids_by_transfer.setdefault(item.transfer_external_id, set()).add(
+                item.detail_external_id
+            )
             origin_branch = self._upsert_branch(item.origin_branch)
             destination_branch = self._upsert_branch(item.destination_branch)
             receta = self.matcher.resolve_receta(codigo_point=item.item_code, point_name=item.item_name)
@@ -465,6 +469,7 @@ class PointMovementSyncService:
                 "is_cancelled": item.is_cancelled,
                 "is_finalized": item.is_finalized,
                 "is_open": getattr(item, "is_open", False),
+                "is_current_snapshot": True,
                 "source_endpoint": "/Transfer/GetTransfer",
                 "raw_payload": item.raw_payload,
             }
@@ -501,6 +506,17 @@ class PointMovementSyncService:
                 payload=line.raw_payload,
             )
 
+        superseded_details = 0
+        for transfer_external_id, current_detail_ids in current_detail_ids_by_transfer.items():
+            superseded_details += (
+                PointTransferLine.objects.filter(
+                    transfer_external_id=transfer_external_id,
+                    is_current_snapshot=True,
+                )
+                .exclude(detail_external_id__in=current_detail_ids)
+                .update(is_open=False, is_current_snapshot=False)
+            )
+
         return {
             "transfer_lines_seen": len(extracted_lines),
             "transfer_lines_created": staged_created,
@@ -511,6 +527,7 @@ class PointMovementSyncService:
             "cedis_entries_updated": cedis_entries_updated,
             "skipped_non_storage_branch": skipped_non_storage,
             "unmatched_items": unresolved,
+            "transfer_details_superseded": superseded_details,
         }
 
     def _mark_success(self, sync_job: PointSyncJob, summary: dict) -> PointSyncJob:
