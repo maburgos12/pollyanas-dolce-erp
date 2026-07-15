@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -223,6 +224,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
     geocerca_confiable = serializers.SerializerMethodField()
     operativamente_resuelta = serializers.SerializerMethodField()
+    recarga_cedis_resuelta = serializers.SerializerMethodField()
     revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
     revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
 
@@ -249,6 +251,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_notas",
             "geocerca_confiable",
             "operativamente_resuelta",
+            "recarga_cedis_resuelta",
             "revision_entrega_estado",
             "revision_entrega_causa",
             "revision_entrega_datos",
@@ -288,6 +291,39 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
 
     def get_operativamente_resuelta(self, obj):
         return parada_resuelta_operativamente(obj)
+
+    def get_recarga_cedis_resuelta(self, obj):
+        if obj.punto.tipo != PuntoLogistico.TIPO_CEDIS:
+            return False
+
+        cache = self.context.get("_recarga_cedis_parada_ids")
+        if cache is not None:
+            return obj.id in cache
+
+        root_instance = getattr(self.root, "instance", None)
+        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
+            parada_ids = [parada.id for parada in root_instance]
+            cache = set(
+                EventoRuta.objects.filter(parada_id__in=parada_ids)
+                .filter(
+                    Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+                    | Q(
+                        tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                        metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+                    )
+                )
+                .values_list("parada_id", flat=True)
+            )
+            self.context["_recarga_cedis_parada_ids"] = cache
+            return obj.id in cache
+
+        return EventoRuta.objects.filter(ruta_id=obj.ruta_id, parada_id=obj.id).filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(
+                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+            )
+        ).exists()
 
     def get_revision_entrega_revisada_por_nombre(self, obj):
         if not obj.revision_entrega_revisada_por_id:

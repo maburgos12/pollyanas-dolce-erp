@@ -1987,6 +1987,106 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             creado_por=self.manager,
         )
 
+    def test_serializer_separa_visita_de_recarga(self):
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+
+        self.assertFalse(ParadaRutaSerializer(self.cedis).data["recarga_cedis_resuelta"])
+
+        canonico = EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga canónica confirmada",
+        )
+        self.assertTrue(ParadaRutaSerializer(self.cedis).data["recarga_cedis_resuelta"])
+
+        canonico.delete()
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga histórica compatible",
+            metadata={"tipo": "recarga_cedis_pwa"},
+        )
+        self.assertTrue(ParadaRutaSerializer(self.cedis).data["recarga_cedis_resuelta"])
+
+    def test_serializer_coleccion_precarga_recargas_sin_n_mas_uno(self):
+        cedis_adicionales = [
+            ParadaRuta.objects.create(
+                ruta=self.ruta,
+                punto=PuntoLogistico.objects.create(
+                    nombre=f"CEDIS colección {indice}",
+                    tipo=PuntoLogistico.TIPO_CEDIS,
+                    latitud=f"25.56{indice}000",
+                    longitud=f"-108.46{indice}000",
+                    radio_geocerca_metros=120,
+                ),
+                orden=10 + indice,
+                estado=ParadaRuta.ESTADO_VISITADA,
+            )
+            for indice in range(1, 4)
+        ]
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=cedis_adicionales[1],
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga de colección",
+        )
+        paradas = self.ruta.paradas.select_related(
+            "ruta",
+            "punto",
+            "punto__sucursal",
+            "entrega_confirmada_por",
+            "revision_entrega_revisada_por",
+        ).order_by("orden", "id")
+
+        with CaptureQueriesContext(connection) as queries:
+            data = ParadaRutaSerializer(paradas, many=True).data
+
+        tabla_eventos = EventoRuta._meta.db_table
+        consultas_recarga = [
+            query["sql"]
+            for query in queries
+            if tabla_eventos in query["sql"] and EventoRuta.TIPO_RECARGA_CEDIS in query["sql"]
+        ]
+        self.assertEqual(len(consultas_recarga), 1)
+        por_id = {item["id"]: item for item in data}
+        self.assertTrue(por_id[cedis_adicionales[1].id]["recarga_cedis_resuelta"])
+        self.assertFalse(por_id[cedis_adicionales[0].id]["recarga_cedis_resuelta"])
+
+    def test_pwa_conserva_reintento_hasta_recarga(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+        render_function = re.search(
+            r"function renderParadasRuta\(paradas, rutaId, rutaEnSeguimiento\) \{(?P<body>.*?)\n      \}",
+            html,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(render_function)
+        body = render_function.group("body")
+        self.assertIn(
+            "const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && parada.recarga_cedis_resuelta !== true;",
+            body,
+        )
+        self.assertIn("Sincronización de recarga pendiente", body)
+        self.assertIn("Reintentar sincronización Point", body)
+        self.assertIn(
+            'requiereEntrega ? entregaTone(entrega) : (recargaResuelta ? "ok" : "warn")',
+            body,
+        )
+        self.assertIn(
+            'const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === "PENDIENTE"',
+            body,
+        )
+        recarga_function = re.search(
+            r"async function registrarRecargaCedis\(.*?\) \{(?P<body>.*?)\n      \}",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(recarga_function)
+        self.assertIn("skipOfflineQueue: true", recarga_function.group("body"))
+
     @patch("logistica.services_rutas_control.logger.exception")
     @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
     def test_permanencia_cedis_reintenta_broker_y_deja_de_agendar_al_resolverse(
@@ -3713,5 +3813,5 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v64-route-invariants")
-        self.assertIn("?v=route-control-v64-route-invariants", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v65-recarga-point")
+        self.assertIn("?v=route-control-v65-recarga-point", html)

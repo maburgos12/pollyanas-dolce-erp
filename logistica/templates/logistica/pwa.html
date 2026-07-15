@@ -2914,14 +2914,16 @@
           const resolved = paradaOperativamenteResuelta(parada);
           const entrega = parada.entrega_estado || "PENDIENTE";
           const requiereEntrega = paradaRequiereEntrega(parada);
+          const recargaResuelta = parada.recarga_cedis_resuelta === true;
+          const recargaPendiente = !requiereEntrega && !recargaResuelta;
           const revisionPendiente = parada.revision_entrega_estado === "PENDIENTE";
           const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === "PENDIENTE" && paradaDisponibleParaEntrega(parada, paradas);
-          const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !resolved;
+          const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && parada.recarga_cedis_resuelta !== true;
           const esSiguiente = !resolved && Number(parada.id) === nextId;
           const notasDraft = entregaNotasDraftFor(parada.id);
           return `
             <section class="route-stop ${visited ? "visited" : (resolved ? "resolved" : "")}${esSiguiente ? " next" : ""}" tabindex="0">
-              <span class="route-stop-number">${resolved ? "OK" : escapeHtml(parada.orden)}</span>
+              <span class="route-stop-number">${resolved && !recargaPendiente ? "OK" : escapeHtml(parada.orden)}</span>
               <div>
                 ${esSiguiente ? `<span class="route-status-pill ok" style="margin-bottom:6px;display:inline-block;">Siguiente parada</span>` : ""}
                 <strong>${escapeHtml(parada.punto_nombre_snapshot || parada.punto?.nombre || "Punto")}</strong>
@@ -2929,8 +2931,9 @@
                 <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
                 ${resolved && !visited ? `<span class="route-stop-meta">Entrega resuelta · visita física sin confirmar</span>` : ""}
                 <span class="route-stop-meta">${escapeHtml(parada.entrega_notas || (requiereEntrega ? "La ruta puede continuar; cierre final espera recepción Point." : "Parada operativa para recarga CEDIS."))}</span>
+                ${recargaPendiente ? `<span class="route-stop-meta">Sincronización de recarga pendiente</span>` : ""}
                 <div class="route-status-row">
-                  <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (resolved ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
+                  <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (recargaResuelta ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
                   ${revisionPendiente ? `<span class="route-status-pill warn">Fuera de geocerca · revisión administrativa pendiente</span>` : ""}
                 </div>
                 ${puedeConfirmarEntrega ? `
@@ -2949,7 +2952,7 @@
                 ` : ""}
                 ${puedeRegistrarRecarga ? `
                   <div class="route-status-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
-                    <button class="primary-btn" type="button" onclick="registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)">Registrar llegada / recarga CEDIS</button>
+                    <button class="primary-btn" type="button" onclick="registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)">${visited ? "Reintentar sincronización Point" : "Registrar llegada / recarga CEDIS"}</button>
                   </div>
                 ` : ""}
               </div>
@@ -5264,7 +5267,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v64-route-invariants", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v65-recarga-point", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
