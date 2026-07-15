@@ -6769,7 +6769,7 @@ class LogisticaControlRutasTests(TestCase):
             "confirma todas las líneas de carga antes de liberar la ruta",
         )
 
-    def test_checklist_carga_mantiene_linea_point_sin_enviado_aunque_mismo_producto_tenga_enviado(self):
+    def test_checklist_carga_supera_folio_sin_enviado_si_mismo_producto_tiene_folio_posterior_enviado(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         sin_enviado = self._crear_transferencia_point_abierta(
             item_name="Crema Para Fresas",
@@ -6786,10 +6786,11 @@ class LogisticaControlRutasTests(TestCase):
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
         linea_cero = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=sin_enviado.source_hash)
-        self.assertEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         self.assertEqual(linea_cero.cantidad_enviada_esperada, Decimal("0.000"))
         self.assertIn("aún no registra Enviado", linea_cero.notas)
         linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=enviado.source_hash)
+        self.assertEqual(linea_cero.superada_por, linea)
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
 
     def test_checklist_carga_mantiene_linea_point_reducida_a_cero_si_transferencia_ya_fue_enviada(self):

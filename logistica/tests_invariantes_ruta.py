@@ -33,6 +33,7 @@ from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .models import (
     EventoRuta,
     BitacoraSalidaLlegada,
+    ParadaEntregaEvidencia,
     ParadaRuta,
     PuntoLogistico,
     Repartidor,
@@ -2104,6 +2105,283 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
         self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         self.assertEqual(old_row.superada_por, new_row)
+
+    def test_folio_no_enviado_es_superado_por_folio_posterior_enviado_del_mismo_producto(self):
+        old = self.point_line(
+            requested="7",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-SOLICITADO",
+            detail="10",
+            item_code="INV-PRODUCTO-RECARGA",
+        )
+        self.sync_all()
+        new = self.point_line(
+            requested="5",
+            sent="5",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-ENVIADO",
+            detail="20",
+            item_code="INV-PRODUCTO-RECARGA",
+        )
+
+        self.sync_all()
+
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(old_row.superada_por, new_row)
+
+    def test_dos_folios_enviados_del_mismo_producto_permanecen_activos_y_suman(self):
+        self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now() - timedelta(minutes=5),
+            is_enviado=True,
+            transfer="INV-FOLIO-ENVIADO-A",
+            detail="10",
+            item_code="INV-PRODUCTO-DOS-ENVIOS",
+        )
+        self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-ENVIADO-B",
+            detail="20",
+            item_code="INV-PRODUCTO-DOS-ENVIOS",
+        )
+
+        resumen = self.sync_all()
+
+        activas = resumen.checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(activas.count(), 2)
+        self.assertEqual(
+            sum((row.cantidad_enviada_esperada for row in activas), Decimal("0")),
+            Decimal("5"),
+        )
+
+    def test_folio_no_enviado_de_otro_producto_no_es_superado(self):
+        old = self.point_line(
+            requested="4",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-SOLICITADO-OTRO",
+            detail="10",
+            item_code="INV-PRODUCTO-PENDIENTE-REAL",
+        )
+        self.sync_all()
+        self.point_line(
+            requested="4",
+            sent="4",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-ENVIADO-OTRO",
+            detail="20",
+            item_code="INV-PRODUCTO-DISTINTO",
+        )
+
+        self.sync_all()
+
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+
+    def test_folio_enviado_en_cero_supera_solicitud_anterior_no_enviada(self):
+        old = self.point_line(
+            requested="4",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-PENDIENTE-CERO",
+            detail="10",
+            item_code="INV-PRODUCTO-ENVIADO-CERO",
+        )
+        self.sync_all()
+        new = self.point_line(
+            requested="0",
+            sent="0",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-ENVIADO-CERO",
+            detail="20",
+            item_code="INV-PRODUCTO-ENVIADO-CERO",
+        )
+
+        self.sync_all()
+
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(old_row.superada_por, new_row)
+        self.assertEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+
+    def test_folio_superado_se_reactiva_si_point_lo_confirma_enviado_despues(self):
+        old = self.point_line(
+            requested="2",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-REACTIVABLE",
+            detail="10",
+            item_code="INV-PRODUCTO-REACTIVABLE",
+        )
+        self.sync_all()
+        self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-POSTERIOR",
+            detail="20",
+            item_code="INV-PRODUCTO-REACTIVABLE",
+        )
+        self.sync_all()
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+
+        old.sent_quantity = Decimal("2")
+        old.sent_at = timezone.now()
+        old.raw_payload = {"transfer": {"isEnviado": True}}
+        old.save(update_fields=["sent_quantity", "sent_at", "raw_payload", "updated_at"])
+
+        resumen = self.sync_all()
+
+        old_row.refresh_from_db()
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(old_row.superada_por)
+        self.assertEqual(
+            resumen.checklist.lineas.exclude(
+                estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            ).count(),
+            2,
+        )
+
+    def test_reactivacion_preserva_cantidad_evidencia_y_notas_de_captura_humana(self):
+        old = self.point_line(
+            requested="2",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-REACTIVA-AUDITADO",
+            detail="10",
+            item_code="INV-PRODUCTO-REACTIVA-AUDITADO",
+        )
+        self.sync_all()
+        self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-POSTERIOR-AUDITADO",
+            detail="20",
+            item_code="INV-PRODUCTO-REACTIVA-AUDITADO",
+        )
+        self.sync_all()
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        old_row.cantidad_cargada = Decimal("1")
+        old_row.validado_por = self.user
+        old_row.validado_en = timezone.now()
+        old_row.client_event_id = "captura-humana-reactivada"
+        old_row.notas = f"{old_row.notas} Captura física conservada."
+        old_row.save(
+            update_fields=[
+                "cantidad_cargada",
+                "validado_por",
+                "validado_en",
+                "client_event_id",
+                "notas",
+                "actualizado_en",
+            ]
+        )
+        ParadaEntregaEvidencia.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            linea_carga=old_row,
+            cantidad_entregada=Decimal("1"),
+            comentario="Evidencia humana previa a confirmación tardía Point.",
+            client_event_id="evidencia-reactivada",
+            capturado_por=self.user,
+        )
+
+        old.sent_quantity = Decimal("2")
+        old.sent_at = timezone.now()
+        old.raw_payload = {"transfer": {"isEnviado": True}}
+        old.save(update_fields=["sent_quantity", "sent_at", "raw_payload", "updated_at"])
+        self.sync_all()
+
+        old_row.refresh_from_db()
+        self.assertEqual(old_row.cantidad_cargada, Decimal("1"))
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PARCIAL)
+        self.assertIsNone(old_row.superada_por)
+        self.assertIn("Captura física conservada", old_row.notas)
+        self.assertIn("línea reactivada", old_row.notas)
+
+    def test_folio_cancelado_no_puede_superar_solicitud_pendiente(self):
+        old = self.point_line(
+            requested="2",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-PENDIENTE-CANCELADO",
+            detail="10",
+            item_code="INV-PRODUCTO-CANCELADO",
+        )
+        self.sync_all()
+        new = self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-POSTERIOR-CANCELADO",
+            detail="20",
+            item_code="INV-PRODUCTO-CANCELADO",
+        )
+        self.sync_all()
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
+        old_row.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+        old_row.superada_por = None
+        old_row.save(update_fields=["estatus", "superada_por", "actualizado_en"])
+        new.is_cancelled = True
+        new.save(update_fields=["is_cancelled", "updated_at"])
+
+        self.sync_all()
+
+        old_row.refresh_from_db()
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(old_row.superada_por)
+
+    def test_folio_no_enviado_con_captura_humana_no_se_supera_entre_folios(self):
+        old = self.point_line(
+            requested="4",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-FOLIO-CAPTURADO",
+            detail="10",
+            item_code="INV-PRODUCTO-CAPTURADO",
+        )
+        old_row = self.sync_line(old)
+        old_row.client_event_id = "captura-humana-1"
+        old_row.save(update_fields=["client_event_id"])
+        self.point_line(
+            requested="4",
+            sent="4",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-POSTERIOR-CAPTURA",
+            detail="20",
+            item_code="INV-PRODUCTO-CAPTURADO",
+        )
+
+        self.sync_all()
+
+        old_row.refresh_from_db()
+        self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
     def test_linea_fusionada_cedis_no_puede_reutilizarse_en_otra_ruta(self):
         receta = Receta.objects.create(
