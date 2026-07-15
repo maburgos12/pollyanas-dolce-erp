@@ -1387,3 +1387,76 @@ class NormalizacionConceptosTests(TestCase):
                 rubro=sueldo, tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA
             ).exists()
         )
+
+
+class CuraduriaRubrosTests(TestCase):
+    """Fusión de duplicados y desactivación de rubros fantasma."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.logistica = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+
+    def _rubro(self, concepto, presupuesto="100", real=None, fuente=""):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.logistica, concepto=concepto, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 1, 1), monto_presupuesto=Decimal(presupuesto),
+            monto_real=Decimal(real) if real else None, fuente_real=fuente,
+        )
+        return rubro
+
+    def test_fusiona_suma_presupuesto_y_desactiva_origenes(self):
+        destino_previo = self._rubro("Cheyenne", presupuesto="100")
+        duplicado = self._rubro("Camioneta Cheyenne", presupuesto="50", real="30", fuente="MANUAL:jefa")
+
+        call_command(
+            "fusionar_rubros", area="logistica", destino="Chevrolet Cheyenne",
+            origenes=["Cheyenne", "Camioneta Cheyenne"], stdout=StringIO(),
+        )
+
+        destino_previo.refresh_from_db(); duplicado.refresh_from_db()
+        self.assertEqual(destino_previo.concepto, "Chevrolet Cheyenne")  # renombrado
+        self.assertTrue(destino_previo.activo)
+        self.assertFalse(duplicado.activo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=destino_previo, periodo=date(2026, 1, 1))
+        self.assertEqual(linea.monto_presupuesto, Decimal("150"))  # sumado
+        self.assertEqual(linea.monto_real, Decimal("30"))          # real conservado
+        self.assertEqual(linea.fuente_real, "MANUAL:jefa")
+        self.assertEqual(LineaPresupuestoMensual.objects.filter(rubro=duplicado).count(), 0)
+
+    def test_fusion_no_pierde_reales_en_conflicto(self):
+        self._rubro("Peugeot Manager", presupuesto="100", real="10", fuente="MANUAL:a")
+        conflicto = self._rubro("PEUGEOT MANAGER", presupuesto="50", real="99", fuente="MANUAL:b")
+
+        salida = StringIO()
+        call_command(
+            "fusionar_rubros", area="logistica", destino="Peugeot Manager",
+            origenes=["PEUGEOT MANAGER"], stdout=salida,
+        )
+        self.assertIn("CONFLICTO", salida.getvalue())
+        # La línea en conflicto NO se movió ni se borró.
+        self.assertEqual(LineaPresupuestoMensual.objects.filter(rubro=conflicto).count(), 1)
+
+    def test_desactivar_saca_del_tablero_y_protege_capturas(self):
+        from django.contrib.auth import get_user_model
+
+        fantasma = self._rubro("CHEESECAKE · FRESA R")
+        con_captura = self._rubro("Con captura", real="5", fuente="MANUAL:x")
+
+        call_command(
+            "desactivar_rubros", area="logistica",
+            conceptos=["CHEESECAKE · FRESA R", "Con captura"],
+            motivo="no existe en Point", stdout=StringIO(),
+        )
+        fantasma.refresh_from_db(); con_captura.refresh_from_db()
+        self.assertFalse(fantasma.activo)
+        self.assertTrue(con_captura.activo)  # protegido sin --forzar
+
+        # Y el tablero ya no lo incluye.
+        superuser = get_user_model().objects.create_superuser("dg_cura", "c@test.mx", "x")
+        self.client.force_login(superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=1")
+        conceptos = [r["concepto"] for r in response.context["detalle"]]
+        self.assertNotIn("CHEESECAKE · FRESA R", conceptos)
+        self.assertIn("Con captura", conceptos)
