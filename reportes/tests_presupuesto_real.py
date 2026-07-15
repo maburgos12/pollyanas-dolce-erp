@@ -1327,3 +1327,60 @@ class RenombradoPointTests(TestCase):
         self.assertEqual(rubro.concepto, "Bollo Chocolate")  # nombre Point se queda
         linea = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 1, 1))
         self.assertEqual(linea.monto_presupuesto, Decimal("5000.00"))  # presupuesto actualizado
+
+
+class NormalizacionConceptosTests(TestCase):
+    """Nomenclatura unificada: Primera mayúscula, acrónimos, acentos y typos."""
+
+    def test_funcion_de_normalizacion(self):
+        from reportes.management.commands.normalizar_conceptos_rubros import normalizar_concepto
+
+        casos = {
+            "SUELDO": "Sueldo",
+            "Dias festivos": "Días festivos",
+            "Imss": "IMSS",
+            "Mantanimiento equipo/maquinaria": "Mantenimiento equipo/maquinaria",
+            "Material de seguiridad e higiene": "Material de seguridad e higiene",
+            "JUEGO DE LLANTAS PEGEOT": "Juego de llantas Peugeot",
+            "SISTEMA DE REGRIFERACION MANAGER": "Sistema de refrigeración Manager",
+            "Cuotas y suscriciones": "Cuotas y suscripciones",
+            "Impuesto sobre Nómina": "Impuesto sobre nómina",
+            "Mantenimiento eq. de computo": "Mantenimiento eq. de cómputo",
+        }
+        for entrada, esperado in casos.items():
+            self.assertEqual(normalizar_concepto(entrada), esperado, entrada)
+        # Idempotencia: normalizar dos veces da lo mismo.
+        for esperado in casos.values():
+            self.assertEqual(normalizar_concepto(esperado), esperado)
+
+    def test_comando_renombra_conserva_referencia_y_el_csv_sigue_cruzando(self):
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        sueldo = RubroPresupuesto.objects.create(
+            area=nomina, concepto="SUELDO", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        festivo = RubroPresupuesto.objects.create(
+            area=nomina, concepto="FESTIVO", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        festivos = RubroPresupuesto.objects.create(
+            area=nomina, concepto="FESTIVOS", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+        call_command("normalizar_conceptos_rubros", stdout=StringIO())
+
+        sueldo.refresh_from_db(); festivo.refresh_from_db(); festivos.refresh_from_db()
+        self.assertEqual(sueldo.concepto, "Sueldo")
+        self.assertEqual(sueldo.metadata["nombre_excel"], "SUELDO")
+        self.assertEqual(festivo.concepto, "Festivo")
+        self.assertEqual(festivos.concepto, "Festivos")  # distintos, sin colisión
+
+        # El seed sigue cruzando el CSV (matching insensible a caso/acentos):
+        # la fila nomina,SUELDO,NOMINA aplica al rubro renombrado "Sueldo".
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        self.assertTrue(
+            ReglaFuenteRubro.objects.filter(
+                rubro=sueldo, tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA
+            ).exists()
+        )
