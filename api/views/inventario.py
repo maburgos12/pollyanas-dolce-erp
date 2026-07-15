@@ -2122,6 +2122,13 @@ class InventarioAjusteDecisionView(APIView):
                 )
             else:
                 if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                    # El SELECT con JOIN puede conservar relaciones del snapshot
+                    # anterior mientras espera el lock; recarga el estado confirmado.
+                    ajuste = AjusteInventario.objects.select_related(
+                        "insumo",
+                        "solicitado_por",
+                        "aprobado_por",
+                    ).get(pk=ajuste.pk)
                     return Response(
                         {
                             "detail": "El ajuste ya estaba aplicado.",
@@ -2139,4 +2146,3 @@ class InventarioAjusteDecisionView(APIView):
             payload = _serialize_ajuste_row(ajuste)
             payload["action"] = action
             return Response(payload, status=status.HTTP_200_OK)
-

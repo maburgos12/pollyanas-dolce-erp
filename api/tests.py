@@ -1,11 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from threading import Barrier, BrokenBarrierError, Lock
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.db import OperationalError
-from django.test import TestCase, TransactionTestCase
+from django.db import OperationalError, close_old_connections, connection
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
@@ -6368,6 +6370,210 @@ class InventarioAjustesApiTests(TestCase):
 
 
 class InventarioAjusteDecisionApiTransactionTests(TransactionTestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_superuser(
+            username="admin_api_decision_concurrente",
+            email="admin_api_decision_concurrente@example.com",
+            password="test12345",
+        )
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg-api-dec-conc",
+            nombre="Kilogramo API decisión concurrente",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Harina API decisión concurrente",
+            unidad_base=self.unidad,
+            activo=True,
+        )
+
+    def _crear_ajuste(self):
+        existencia = ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("10"))
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("7"),
+            motivo="Decisión concurrente",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.admin,
+        )
+        return ajuste, existencia
+
+    def _decidir_desde_conexion_separada(
+        self,
+        ajuste_id,
+        action,
+        worker_id,
+        start_barrier,
+        select_start_barrier,
+        read_barrier,
+        evidence,
+    ):
+        close_old_connections()
+        client = Client()
+        client.force_login(get_user_model().objects.get(pk=self.admin.pk))
+        coordinated = False
+
+        def coordinate_adjustment_read(execute, sql, params, many, context):
+            nonlocal coordinated
+            if (
+                not coordinated
+                and sql.lstrip().upper().startswith("SELECT")
+                and 'FROM "inventario_ajusteinventario"' in sql
+                and 'WHERE "inventario_ajusteinventario"."id"' in sql
+            ):
+                coordinated = True
+                with evidence["lock"]:
+                    evidence["matches"] += 1
+                    evidence["events"].append(("select_started", worker_id))
+                select_start_barrier.wait(timeout=5)
+                result = execute(sql, params, many, context)
+                with evidence["lock"]:
+                    evidence["events"].append(("select_completed", worker_id))
+                try:
+                    read_barrier.wait(timeout=2)
+                    with evidence["lock"]:
+                        evidence["events"].append(("read_barrier_passed", worker_id))
+                except BrokenBarrierError:
+                    with evidence["lock"]:
+                        evidence["events"].append(("read_barrier_broken", worker_id))
+                return result
+            return execute(sql, params, many, context)
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET lock_timeout = '5s'")
+                cursor.execute("SET statement_timeout = '8s'")
+            start_barrier.wait(timeout=5)
+            with evidence["lock"]:
+                evidence["start_crossed"].add(worker_id)
+            with connection.execute_wrapper(coordinate_adjustment_read):
+                response = client.post(
+                    reverse("api_inventario_ajuste_decision", args=[ajuste_id]),
+                    {"action": action, "comentario_revision": f"{action} concurrente {worker_id}"},
+                    content_type="application/json",
+                )
+            return worker_id, response.status_code, response.json()
+        finally:
+            close_old_connections()
+
+    def _decidir_concurrentemente(self, ajuste_id, actions):
+        start_barrier = Barrier(2)
+        select_start_barrier = Barrier(2)
+        read_barrier = Barrier(2)
+        evidence = {"lock": Lock(), "matches": 0, "start_crossed": set(), "events": []}
+        executor = ThreadPoolExecutor(max_workers=2)
+        futures = []
+        try:
+            futures = [
+                executor.submit(
+                    self._decidir_desde_conexion_separada,
+                    ajuste_id,
+                    action,
+                    worker_id,
+                    start_barrier,
+                    select_start_barrier,
+                    read_barrier,
+                    evidence,
+                )
+                for worker_id, action in enumerate(actions)
+            ]
+            results = [future.result(timeout=12) for future in futures]
+            with evidence["lock"]:
+                snapshot = {
+                    "matches": evidence["matches"],
+                    "start_crossed": set(evidence["start_crossed"]),
+                    "events": list(evidence["events"]),
+                }
+            return results, snapshot
+        except BaseException:
+            start_barrier.abort()
+            select_start_barrier.abort()
+            read_barrier.abort()
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            start_barrier.abort()
+            select_start_barrier.abort()
+            read_barrier.abort()
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _assert_lock_coordination(self, evidence):
+        self.assertEqual(evidence["start_crossed"], {0, 1})
+        self.assertEqual(evidence["matches"], 2)
+        self.assertEqual(
+            [event for event, _worker_id in evidence["events"]],
+            [
+                "select_started",
+                "select_started",
+                "select_completed",
+                "read_barrier_broken",
+                "select_completed",
+                "read_barrier_broken",
+            ],
+        )
+        self.assertEqual({evidence["events"][0][1], evidence["events"][1][1]}, {0, 1})
+        self.assertNotEqual(evidence["events"][2][1], evidence["events"][4][1])
+
+    def test_dos_aprobaciones_concurrentes_aplican_ajuste_una_sola_vez(self):
+        ajuste, existencia = self._crear_ajuste()
+
+        results, evidence = self._decidir_concurrentemente(ajuste.pk, ("approve", "approve"))
+
+        ajuste.refresh_from_db()
+        existencia.refresh_from_db()
+        self.assertEqual([status for _worker_id, status, _payload in results], [200, 200])
+        self.assertEqual(
+            sum(payload.get("estatus") == AjusteInventario.STATUS_APLICADO for _, _, payload in results),
+            1,
+        )
+        self.assertEqual(
+            sum(payload.get("detail") == "El ajuste ya estaba aplicado." for _, _, payload in results),
+            1,
+        )
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_APLICADO)
+        self.assertEqual(existencia.stock_actual, Decimal("7"))
+        self.assertEqual(MovimientoInventario.objects.filter(referencia=ajuste.folio).count(), 1)
+        idempotent_payload = next(
+            payload for _, _, payload in results if payload.get("detail") == "El ajuste ya estaba aplicado."
+        )
+        item = idempotent_payload["item"]
+        self.assertEqual(item["estatus"], ajuste.estatus)
+        self.assertEqual(item["aprobado_por"], ajuste.aprobado_por.username)
+        self.assertEqual(item["aprobado_en"], ajuste.aprobado_en.isoformat().replace("+00:00", "Z"))
+        self.assertEqual(item["aplicado_en"], ajuste.aplicado_en.isoformat().replace("+00:00", "Z"))
+        self.assertEqual(item["comentario_revision"], ajuste.comentario_revision)
+        self.assertIn(ajuste.comentario_revision, {"approve concurrente 0", "approve concurrente 1"})
+        self._assert_lock_coordination(evidence)
+
+    def test_aprobar_y_rechazar_concurrentemente_dejan_estado_coherente(self):
+        ajuste, existencia = self._crear_ajuste()
+
+        results, evidence = self._decidir_concurrentemente(ajuste.pk, ("approve", "reject"))
+
+        ajuste.refresh_from_db()
+        existencia.refresh_from_db()
+        movement_count = MovimientoInventario.objects.filter(referencia=ajuste.folio).count()
+        outcomes = {
+            (status, payload.get("estatus"), payload.get("detail"))
+            for _worker_id, status, payload in results
+        }
+        if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+            self.assertEqual(existencia.stock_actual, Decimal("7"))
+            self.assertEqual(movement_count, 1)
+            self.assertIn((200, AjusteInventario.STATUS_APLICADO, None), outcomes)
+            self.assertIn((400, None, "No se puede rechazar un ajuste ya aplicado."), outcomes)
+        else:
+            self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_RECHAZADO)
+            self.assertEqual(existencia.stock_actual, Decimal("10"))
+            self.assertEqual(movement_count, 0)
+            self.assertIn((200, AjusteInventario.STATUS_RECHAZADO, None), outcomes)
+            self.assertIn((400, None, "El ajuste fue rechazado y no puede aplicarse."), outcomes)
+        self._assert_lock_coordination(evidence)
+
     def test_admin_aprueba_ajuste_api_en_autocommit(self):
         user_model = get_user_model()
         admin = user_model.objects.create_superuser(
