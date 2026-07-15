@@ -6028,6 +6028,19 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
         self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
 
+    def test_sincronizar_recepcion_no_exige_recibir_linea_enviada_en_cero(self):
+        self._crear_linea_carga_con_transferencia_recibida(
+            sent_quantity="0.000",
+            loaded_quantity="0.000",
+            received_quantity="0.000",
+            is_received=False,
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=self.ruta, user=self.user, ejecutar_sync=False)
+
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(resumen.lineas_pendientes_point, 0)
+
     def test_sincronizar_recepcion_desde_point_no_marca_diferencia_si_recibido_no_cuadra(self):
         self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="3.000")
 
@@ -6313,6 +6326,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Pendiente en Point")
         self.assertNotContains(response, "Pastel Snicker chico")
+
+    def test_ruta_detail_muestra_enviado_cero_sin_recepcion_pendiente(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self._crear_linea_carga_con_transferencia_recibida(
+            sent_quantity="0.000",
+            loaded_quantity="0.000",
+            received_quantity="0.000",
+            is_received=False,
+        )
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enviado cero · sin recepción requerida")
+        self.assertNotContains(response, "Pendiente en Point")
 
     def test_ruta_detail_en_ruta_muestra_boton_recepcion_point(self):
         self.client.force_login(self.user)
