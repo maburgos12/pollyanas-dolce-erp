@@ -1672,3 +1672,126 @@ class ImportRealGastosExcelTests(TestCase):
         )
         linea.refresh_from_db()
         self.assertEqual(linea.monto_real, Decimal("999"))
+
+
+class CedulaImssTests(TestCase):
+    """Import de cédulas SIPARE: parseo por etiquetas, cruce NSS y reparto."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.sucursal = Sucursal.objects.create(codigo="CED01", nombre="Centro cédula")
+        cls.gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        cls.adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.nom = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area, sucursal in [(cls.gv, cls.sucursal), (cls.adm, None), (cls.nom, None)]:
+            for concepto in ["IMSS", "Infonavit"]:
+                RubroPresupuesto.objects.create(
+                    area=area, concepto=concepto, sucursal=sucursal,
+                    tipo=RubroPresupuesto.TIPO_EGRESO,
+                )
+        Empleado.objects.create(
+            codigo="CED-1", nombre="Vendedora uno", nss="23-91-73-3507-9",
+            departamento=Empleado.DEP_VENTAS, sucursal_ref=cls.sucursal,
+        )
+        Empleado.objects.create(
+            codigo="CED-2", nombre="Admin uno", nss="23988051852",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def _filas_mensual(self):
+        return [
+            [""] * 22,
+            ["SISTEMA ÚNICO DE AUTODETERMINACIÓN"] + [""] * 21,
+            [""] * 22,
+            [""] * 22,
+            [""] * 22,
+            [""] * 22,
+            ["Fecha de Proceso", "2026-05-15"] + [""] * 20,
+            ["Período de Proceso: Abril-2026"] + [""] * 21,
+            [""] * 22,
+            ["Registro Patronal: ", "E52-40157-10-0"] + [""] * 20,
+            *[[""] * 22 for _ in range(11)],
+            ["Clave", "", "Fecha", "Días", "SDI", "Lic.", "Inc.", "Aus.", "C.F.", "Exc.Pat.",
+             "Exc. Obr.", "P.D. Pat.", "P.D. Obr.", "G.M.P. Pat.", "G.M.P. Obr.", "R.T.",
+             "I.V. Pat.", "I.V. Obr", "G.P.S.", "Patronal", "Obrera", "SubTotal"],
+            ["23-91-73-3507-9", "", "", "", "", "ACOSTA FLORES MARIA"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 331.44, 0, 3, 0, 646.14, 0, 0, 62.64, 22.37, 93.96, 33.56,
+             44.74, 156.61, 55.93, 89.49, 1093.58, 111.86, 1205.44],
+            ["23-98-80-5185-2", "", "", "", "", "PEREZ ADMIN JUAN"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 331.01, 0, 0, 0, 717.94, 0, 0, 69.51, 24.83, 104.27, 37.24,
+             49.65, 173.78, 62.06, 99.3, 1214.45, 124.13, 1338.58],
+            ["99-99-99-9999-9", "", "", "", "", "SIN CRUCE FULANO"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 300, 0, 0, 0, 500, 0, 0, 50, 20, 80, 30, 40, 150, 50, 80, 930, 100, 1030],
+        ]
+
+    def test_mensual_cruza_reparte_y_reporta_sin_nss(self):
+        from reportes.services_cedula_imss import aplicar_cedula, parsear_cedula
+
+        parseada = parsear_cedula(self._filas_mensual())
+        self.assertEqual(parseada.tipo, "MENSUAL")
+        self.assertEqual(parseada.periodo, date(2026, 4, 1))
+        self.assertEqual(len(parseada.trabajadores), 3)
+
+        resumen = aplicar_cedula(parseada)
+        self.assertEqual(resumen.empleados_cruzados, 2)
+        self.assertEqual(len(resumen.nss_sin_cruce), 1)
+
+        imss_suc = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="IMSS", rubro__sucursal=self.sucursal,
+            periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(imss_suc.monto_real, Decimal("1093.58"))  # patronal vendedora
+        self.assertEqual(imss_suc.fuente_real, "AUTO:SIPARE")
+        imss_adm = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="IMSS", periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(imss_adm.monto_real, Decimal("1214.45"))
+        imss_nom = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.nom, rubro__concepto="IMSS", periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(imss_nom.monto_real, Decimal("2308.03"))  # total control
+
+    def test_bimestral_parte_mitad_y_mitad_y_respeta_manual(self):
+        from reportes.services_cedula_imss import aplicar_cedula, parsear_cedula
+
+        filas = self._filas_mensual()
+        filas[7] = ["Bimestre de Proceso: Abril-2026"] + [""] * 21
+        filas[21] = ["Clave", "Fecha", "Días", "SDI", "Lic.", "Inc.", "Aus.", "Retiro",
+                     "Patronal", "Obrera", "Suma", "Aportación Pa", "% o $ o FD", "*",
+                     "Suma", "Créd. Vivienda", "Tipo"] + [""] * 5
+        filas[24] = ["", "", 61, 331.44, 0, 3, 0, 404.36, 1158.41, 216.26, 1779.03,
+                     1010.89, "", 1404.24, "", 2823.48, ""] + [""] * 5
+        filas[27] = ["", "", 61, 331.01, 0, 0, 0, 403.83, 1216.75, 227.16, 1847.74,
+                     1009.58, "", "", "", 0, ""] + [""] * 5
+        filas[30] = ["", "", 61, 300, 0, 0, 0, 400, 1100, 200, 1700, 1000, "", "", "", 0, ""] + [""] * 5
+
+        # Captura manual previa en marzo (mes 1 del bimestre): NO debe pisarse.
+        infonavit_adm = RubroPresupuesto.objects.get(area=self.adm, concepto="Infonavit")
+        LineaPresupuestoMensual.objects.create(
+            rubro=infonavit_adm, periodo=date(2026, 3, 1), monto_presupuesto=Decimal("0"),
+            monto_real=Decimal("777"), fuente_real="MANUAL:paula.lugo",
+        )
+
+        parseada = parsear_cedula(filas)
+        self.assertEqual(parseada.tipo, "BIMESTRAL")
+        self.assertEqual([m.isoformat() for m in parseada.meses], ["2026-03-01", "2026-04-01"])
+
+        resumen = aplicar_cedula(parseada)
+        # Vendedora: (404.36 + 1158.41 + 1010.89) = 2573.66 → 1286.83 por mes.
+        marzo = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="Infonavit", periodo=date(2026, 3, 1),
+        )
+        abril = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="Infonavit", periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(marzo.monto_real, Decimal("1286.83"))
+        self.assertEqual(abril.monto_real, Decimal("1286.83"))
+        # La captura manual de marzo en administración quedó intacta.
+        linea_manual = LineaPresupuestoMensual.objects.get(
+            rubro=infonavit_adm, periodo=date(2026, 3, 1),
+        )
+        self.assertEqual(linea_manual.monto_real, Decimal("777"))
+        self.assertEqual(resumen.protegidas_manual, 1)
