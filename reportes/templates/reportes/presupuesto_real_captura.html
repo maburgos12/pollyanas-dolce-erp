@@ -53,8 +53,11 @@
         <input class="input-field" id="prc-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}">
       </div>
     </div>
-    <div style="margin-top:16px;">
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
       <button class="btn btn-primary" type="submit">Cambiar</button>
+      {% if module_tabs %}
+      <a class="btn btn-secondary" href="{% url 'reportes:presupuesto_vs_real' %}?year={{ selected_year }}&month={{ selected_month }}">Ver resumen consolidado</a>
+      {% endif %}
     </div>
   </form>
 </section>
