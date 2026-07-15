@@ -7,6 +7,12 @@ Llena ``LineaPresupuestoMensual.monto_real`` desde las fuentes ERP mapeadas por
 - ``MANUAL:<username>``   → captura humana; NUNCA se pisa.
 - ``AUTO:LEGADO``         → valor migrado de imports previos; re-escribible.
 
+Garantías de escritura:
+- La persistencia usa un UPDATE condicional sobre ``fuente_real`` (el valor
+  leído debe seguir en la base) — una captura manual concurrente jamás se pisa.
+- Si ninguna fuente del rubro tiene datos en el mes, la línea NO se modifica:
+  un retraso de Point/nómina no borra el último real consolidado.
+
 El desglose por regla queda en ``metadata["real_breakdown"]`` para drill-down.
 """
 
@@ -38,7 +44,7 @@ LEGACY_FUENTE_MAP = {
     "CAPEX_GUAMUCHIL_CONFIRMADO": "MANUAL:legado",
 }
 
-NOMINA_CAMPOS_VALIDOS = {"salario_base", "bonos", "total_percepciones", "neto_calculado"}
+NOMINA_CAMPOS_VALIDOS = ("salario_base", "bonos", "total_percepciones", "neto_calculado")
 VENTA_POS_CAMPOS_VALIDOS = {"total_venta", "total_venta_neta"}
 
 
@@ -60,6 +66,7 @@ class ConsolidacionSummary:
     actualizadas: int = 0
     sin_cambio: int = 0
     protegidas_manual: int = 0
+    conflictos_concurrencia: int = 0
     sin_regla: int = 0
     sin_datos_fuente: int = 0
     errores: list[str] = field(default_factory=list)
@@ -73,6 +80,7 @@ class ConsolidacionSummary:
             "actualizadas": self.actualizadas,
             "sin_cambio": self.sin_cambio,
             "protegidas_manual": self.protegidas_manual,
+            "conflictos_concurrencia": self.conflictos_concurrencia,
             "sin_regla": self.sin_regla,
             "sin_datos_fuente": self.sin_datos_fuente,
             "errores": self.errores,
@@ -80,7 +88,12 @@ class ConsolidacionSummary:
 
 
 class PresupuestoRealConsolidacionService:
-    """Calcula y persiste el monto real por rubro×periodo desde las fuentes."""
+    """Calcula y persiste el monto real por rubro×periodo desde las fuentes.
+
+    Las fuentes se precargan en índices agrupados (una consulta por fuente y
+    periodo) y cada regla se resuelve en memoria — el costo no crece con el
+    número de rubros.
+    """
 
     def consolidar(
         self,
@@ -101,7 +114,7 @@ class PresupuestoRealConsolidacionService:
         if areas:
             lineas = lineas.filter(rubro__area__codigo__in=areas)
 
-        ventas_index = None  # se construye perezosamente una vez por periodo
+        indices: dict[str, dict] = {}  # un índice por tipo de fuente, perezoso
 
         for linea in lineas:
             reglas = [
@@ -125,9 +138,7 @@ class PresupuestoRealConsolidacionService:
             con_datos = False
             try:
                 for regla in reglas:
-                    if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS and ventas_index is None:
-                        ventas_index = self._build_ventas_index(periodo)
-                    monto, hubo_datos = self._monto_regla(regla, periodo, ventas_index)
+                    monto, hubo_datos = self._monto_regla(regla, periodo, indices)
                     con_datos = con_datos or hubo_datos
                     aporte = (monto * regla.signo).quantize(Decimal("0.01"))
                     total += aporte
@@ -143,17 +154,40 @@ class PresupuestoRealConsolidacionService:
                 summary.errores.append(f"rubro={linea.rubro_id} {linea.rubro}: {exc}")
                 continue
 
+            if not con_datos:
+                # Ninguna fuente tuvo filas este mes: NO tocar el último real,
+                # pero dejar la advertencia visible (badge "Fuente sin datos")
+                # con la fecha del intento, para que el valor retenido no pase
+                # por dato vigente. Escritura condicional: una captura MANUAL
+                # concurrente tampoco se pisa aquí.
+                summary.sin_datos_fuente += 1
+                metadata = dict(linea.metadata or {})
+                metadata["sin_datos_fuente"] = True
+                metadata["fuente_sin_datos_en"] = timezone.now().isoformat()
+                if not dry_run:
+                    LineaPresupuestoMensual.objects.filter(
+                        pk=linea.pk, fuente_real=linea.fuente_real
+                    ).update(metadata=metadata, actualizado_en=timezone.now())
+                continue
+
             tipos = sorted({r.tipo_fuente for r in reglas})
             fuente = AUTO_PREFIX + "+".join(tipos)
             metadata = dict(linea.metadata or {})
             metadata["real_breakdown"] = breakdown
             metadata["consolidado_en"] = timezone.now().isoformat()
-            metadata["sin_datos_fuente"] = not con_datos
-            if not con_datos:
-                summary.sin_datos_fuente += 1
+            metadata.pop("sin_datos_fuente", None)
+            metadata.pop("fuente_sin_datos_en", None)
 
-            if linea.monto_real == total and linea.fuente_real == fuente:
+            # "Sin cambio" solo si tampoco hay una advertencia de fuente sin
+            # datos pendiente de limpiar — si la fuente se recuperó con el
+            # mismo importe, hay que persistir la limpieza del badge.
+            tenia_advertencia = bool((linea.metadata or {}).get("sin_datos_fuente"))
+            if linea.monto_real == total and linea.fuente_real == fuente and not tenia_advertencia:
                 summary.sin_cambio += 1
+                continue
+
+            if not dry_run and not self._escribir_linea(linea, total, fuente, metadata):
+                summary.conflictos_concurrencia += 1
                 continue
 
             summary.actualizadas += 1
@@ -166,71 +200,134 @@ class PresupuestoRealConsolidacionService:
                     "fuente": fuente,
                 }
             )
-            if not dry_run:
-                linea.monto_real = total
-                linea.fuente_real = fuente
-                linea.metadata = metadata
-                linea.save(update_fields=["monto_real", "fuente_real", "metadata", "actualizado_en"])
 
         return summary
 
+    @staticmethod
+    def _escribir_linea(
+        linea: LineaPresupuestoMensual, total: Decimal, fuente: str, metadata: dict
+    ) -> bool:
+        """UPDATE condicional: solo escribe si fuente_real no cambió desde la lectura.
+
+        Si una usuaria capturó (MANUAL:*) entre la lectura y este punto, el
+        filtro no coincide, no se escribe nada y se reporta como conflicto.
+        """
+        actualizadas = LineaPresupuestoMensual.objects.filter(
+            pk=linea.pk, fuente_real=linea.fuente_real
+        ).update(
+            monto_real=total,
+            fuente_real=fuente,
+            metadata=metadata,
+            actualizado_en=timezone.now(),
+        )
+        return actualizadas == 1
+
     # ------------------------------------------------------------------ #
-    # Fuentes                                                             #
+    # Fuentes (índices agrupados, una consulta por fuente y periodo)      #
     # ------------------------------------------------------------------ #
 
-    def _monto_regla(self, regla: ReglaFuenteRubro, periodo: date, ventas_index) -> tuple[Decimal, bool]:
+    def _monto_regla(
+        self, regla: ReglaFuenteRubro, periodo: date, indices: dict
+    ) -> tuple[Decimal, bool]:
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO:
-            return self._monto_gasto_operativo(regla, periodo)
+            if "gasto" not in indices:
+                indices["gasto"] = self._build_gasto_index(periodo)
+            return self._monto_gasto_operativo(regla, indices["gasto"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA:
-            return self._monto_nomina(regla, periodo)
+            if "nomina" not in indices:
+                indices["nomina"] = self._build_nomina_index(periodo)
+            return self._monto_nomina(regla, indices["nomina"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS:
-            return self._monto_venta_pos(regla, ventas_index)
+            if "ventas" not in indices:
+                indices["ventas"] = self._build_ventas_index(periodo)
+            return self._monto_venta_pos(regla, indices["ventas"])
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
-    def _monto_gasto_operativo(self, regla: ReglaFuenteRubro, periodo: date) -> tuple[Decimal, bool]:
+    @staticmethod
+    def _build_gasto_index(periodo: date) -> list[dict]:
+        """Gasto REAL del mes agrupado por categoría × centro (con su sucursal/tipo)."""
+        return list(
+            GastoOperativoMensual.objects.filter(
+                periodo=periodo, tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL
+            )
+            .values(
+                "categoria_gasto_id",
+                "centro_costo_id",
+                "centro_costo__sucursal_id",
+                "centro_costo__tipo",
+            )
+            .annotate(monto=Sum("monto"))
+        )
+
+    def _monto_gasto_operativo(
+        self, regla: ReglaFuenteRubro, gasto_index: list[dict]
+    ) -> tuple[Decimal, bool]:
         if regla.categoria_gasto_id is None:
             raise ValueError("regla GASTO_OPERATIVO sin categoria_gasto")
-        qs = GastoOperativoMensual.objects.filter(
-            periodo=periodo,
-            tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
-            categoria_gasto=regla.categoria_gasto,
-        )
-        if regla.centro_costo_id:
-            qs = qs.filter(centro_costo=regla.centro_costo)
-        else:
-            sucursal = regla.sucursal_efectiva()
-            if sucursal is not None:
-                qs = qs.filter(centro_costo__sucursal=sucursal)
-            centro_tipo = (regla.filtros or {}).get("centro_tipo")
-            if centro_tipo:
-                qs = qs.filter(centro_costo__tipo=centro_tipo)
-        total = qs.aggregate(t=Sum("monto"))["t"]
-        return (total or Decimal("0"), total is not None)
+        sucursal = regla.sucursal_efectiva()
+        sucursal_id = sucursal.id if sucursal is not None else None
+        centro_tipo = (regla.filtros or {}).get("centro_tipo")
 
-    def _monto_nomina(self, regla: ReglaFuenteRubro, periodo: date) -> tuple[Decimal, bool]:
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in gasto_index:
+            if fila["categoria_gasto_id"] != regla.categoria_gasto_id:
+                continue
+            if regla.centro_costo_id:
+                if fila["centro_costo_id"] != regla.centro_costo_id:
+                    continue
+            else:
+                if sucursal_id is not None and fila["centro_costo__sucursal_id"] != sucursal_id:
+                    continue
+                if centro_tipo and fila["centro_costo__tipo"] != centro_tipo:
+                    continue
+            total += fila["monto"] or Decimal("0")
+            hubo_datos = True
+        return (total, hubo_datos)
+
+    @staticmethod
+    def _build_nomina_index(periodo: date) -> list[dict]:
+        """Nómina cerrada/pagada del mes agrupada por departamento × sucursal.
+
+        Un periodo de nómina pertenece al mes donde termina (fecha_fin).
+        Trae los cuatro campos monetarios de una vez.
+        """
         from rrhh.models import NominaLinea, NominaPeriodo
 
+        agregados = {campo: Sum(campo) for campo in NOMINA_CAMPOS_VALIDOS}
+        return list(
+            NominaLinea.objects.filter(
+                periodo__fecha_fin__year=periodo.year,
+                periodo__fecha_fin__month=periodo.month,
+                periodo__estatus__in=[NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA],
+            )
+            .values("empleado__departamento", "empleado__sucursal_ref_id")
+            .annotate(**agregados)
+        )
+
+    def _monto_nomina(self, regla: ReglaFuenteRubro, nomina_index: list[dict]) -> tuple[Decimal, bool]:
         filtros = regla.filtros or {}
         campo = filtros.get("campo_monto", "total_percepciones")
         if campo not in NOMINA_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de nómina inválido: {campo}")
-        # Un periodo de nómina pertenece al mes donde termina (fecha_fin).
-        qs = NominaLinea.objects.filter(
-            periodo__fecha_fin__year=periodo.year,
-            periodo__fecha_fin__month=periodo.month,
-            periodo__estatus__in=[NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA],
-        )
-        departamento = filtros.get("departamento")
-        if departamento:
-            qs = qs.filter(empleado__departamento=str(departamento).strip().upper())
+        departamento = str(filtros.get("departamento") or "").strip().upper()
         sucursal = regla.sucursal_efectiva()
-        if sucursal is not None:
-            qs = qs.filter(empleado__sucursal_ref=sucursal)
-        total = qs.aggregate(t=Sum(campo))["t"]
-        return (total or Decimal("0"), total is not None)
+        sucursal_id = sucursal.id if sucursal is not None else None
 
-    def _build_ventas_index(self, periodo: date) -> dict:
-        """Suma mensual de ventas POS por (sucursal_id, categoría, producto) normalizados.
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in nomina_index:
+            if departamento and fila["empleado__departamento"] != departamento:
+                continue
+            if sucursal_id is not None and fila["empleado__sucursal_ref_id"] != sucursal_id:
+                continue
+            total += fila[campo] or Decimal("0")
+            hubo_datos = True
+        return (total, hubo_datos)
+
+    @staticmethod
+    def _build_ventas_index(periodo: date) -> dict:
+        """Suma mensual de ventas POS por (sucursal, categoría, producto) normalizados.
 
         Se agrega en Python porque los nombres de categoría/producto del POS
         traen acentos y mayúsculas inconsistentes frente a los conceptos del

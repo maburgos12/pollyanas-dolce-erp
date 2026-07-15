@@ -56,8 +56,13 @@ class Command(BaseCommand):
                     codigo = row["categoria_gasto"].strip()
                     categoria = CategoriaGasto.objects.filter(codigo=codigo).first()
                     if categoria is None:
-                        avisos.append(f"fila {idx}: categoria_gasto '{codigo}' no existe; fila omitida")
-                        continue
+                        # Abortar ANTES de escribir: si esta fila se omitiera, la
+                        # reconciliación borraría la regla SEED previa del rubro
+                        # como si se hubiera retirado del mapeo (pérdida de config).
+                        raise CommandError(
+                            f"fila {idx}: categoria_gasto '{codigo}' no existe en CategoriaGasto. "
+                            "Corrige el CSV o crea la categoría; no se escribió nada."
+                        )
                 try:
                     filtros = json.loads(row["filtros"]) if (row.get("filtros") or "").strip() else {}
                 except json.JSONDecodeError as exc:
@@ -122,6 +127,19 @@ class Command(BaseCommand):
                             rubro_id=rubro_id, origen=ReglaFuenteRubro.ORIGEN_SEED, **kwargs
                         )
                 creadas += len(reglas)
+
+            # Reconciliación: reglas SEED de rubros que salieron del mapeo se
+            # eliminan para que la base converja al estado declarado en el CSV.
+            # No toca reglas ADMIN ni rubros con regla ADMIN (ahí manda admin).
+            obsoletas_qs = ReglaFuenteRubro.objects.filter(
+                origen=ReglaFuenteRubro.ORIGEN_SEED
+            ).exclude(rubro_id__in=planes.keys()).exclude(rubro_id__in=rubros_con_admin)
+            if options["sin_ventas"]:
+                # Corrida parcial: las reglas de Ventas las administra la corrida completa.
+                obsoletas_qs = obsoletas_qs.exclude(rubro__area__codigo="ventas")
+            obsoletas = obsoletas_qs.count()
+            if not dry_run and obsoletas:
+                obsoletas_qs.delete()
             if dry_run:
                 transaction.set_rollback(True)
 
@@ -130,7 +148,7 @@ class Command(BaseCommand):
         con_regla = len(planes) - omitidos_admin + len(rubros_con_admin)
         modo = "DRY-RUN" if dry_run else "APLICADO"
         self.stdout.write(f"[{modo}] reglas: {creadas} en {len(planes)} rubros "
-                          f"(admin respetados: {omitidos_admin})")
+                          f"(admin respetados: {omitidos_admin}, seed obsoletas eliminadas: {obsoletas})")
         self.stdout.write(f"Cobertura: {con_regla}/{total} rubros activos con regla")
         for area_codigo in (
             RubroPresupuesto.objects.filter(activo=True)
