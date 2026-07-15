@@ -6,6 +6,7 @@ from threading import Barrier, BrokenBarrierError
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection
 from django.db.models.query import QuerySet
@@ -2565,6 +2566,73 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertEqual(idempotent.status_code, 200)
         self.assertEqual(idempotent.json()["toast"]["type"], "info")
         self.assertIn("stock no cambió nuevamente", idempotent.json()["toast"]["message"])
+
+    def test_retry_repara_recepcion_cerrada_sin_movimiento_y_luego_es_idempotente(self):
+        self.recepcion_pendiente.estatus = RecepcionCompra.STATUS_CERRADA
+        self.recepcion_pendiente.save(update_fields=["estatus"])
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        repaired = self.client.post(url, HTTP_ACCEPT="application/json")
+        repeated = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(repaired.status_code, 200)
+        self.assertEqual(repaired.json()["toast"]["type"], "success")
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["toast"]["type"], "info")
+        self.assertEqual(ExistenciaInsumo.objects.get(insumo=self.insumo).stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada"
+            ).count(),
+            1,
+        )
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_retry_recepcion_cerrada_no_aplicable_reporta_error_sin_desmarcar_historia(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "sin_solicitud_o_insumo"}
+        self.recepcion_pendiente.estatus = RecepcionCompra.STATUS_CERRADA
+        self.recepcion_pendiente.save(update_fields=["estatus"])
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        html_response = self.client.post(url)
+        html_messages = [str(message) for message in get_messages(html_response.wsgi_request)]
+        response = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(html_response.status_code, 302)
+        self.assertTrue(any("No se pudo aplicar" in message for message in html_messages))
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "error")
+        self.recepcion_pendiente.refresh_from_db()
+        self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_CERRADA)
+        self.assertFalse(MovimientoInventario.objects.filter(referencia=self.recepcion_pendiente.folio).exists())
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_crear_recepcion_cerrada_no_aplicable_no_persiste_cierre(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        initial_count = RecepcionCompra.objects.count()
+
+        response = self.client.post(
+            reverse("compras:recepciones"),
+            {
+                "orden_id": self.orden_enviada.id,
+                "fecha_recepcion": "2026-02-22",
+                "conformidad_pct": "100",
+                "estatus": RecepcionCompra.STATUS_CERRADA,
+                "observaciones": "cierre fallido",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(RecepcionCompra.objects.count(), initial_count)
+        self.orden_enviada.refresh_from_db()
+        self.assertNotEqual(self.orden_enviada.estatus, OrdenCompra.STATUS_CERRADA)
 
     def test_cerrar_recepcion_post_html_conserva_redirect_tradicional_con_fragmento(self):
         url = reverse(

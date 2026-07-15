@@ -3903,6 +3903,10 @@ def _apply_recepcion_to_inventario(recepcion: RecepcionCompra, acted_by=None) ->
     return {"applied": True, "movimiento_id": movimiento.id}
 
 
+def _recepcion_apply_succeeded(result: dict) -> bool:
+    return result.get("applied") is True or result.get("reason") == "ya_aplicado"
+
+
 def _build_insumo_options(limit: int = 1200):
     cache_key = f"compras:solicitudes:insumo-options:{int(limit or 1200)}"
     cached = cache.get(cache_key)
@@ -9691,6 +9695,7 @@ def ordenes(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@transaction.atomic
 def recepciones(request: HttpRequest) -> HttpResponse:
     if not can_view_compras(request.user):
         raise PermissionDenied("No tienes permisos para ver Compras.")
@@ -9742,7 +9747,14 @@ def recepciones(request: HttpRequest) -> HttpResponse:
                 {"folio": recepcion.folio, "estatus": recepcion.estatus},
             )
             if recepcion.estatus == RecepcionCompra.STATUS_CERRADA:
-                _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+                apply_result = _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+                if not _recepcion_apply_succeeded(apply_result):
+                    transaction.set_rollback(True)
+                    messages.error(
+                        request,
+                        f"No se pudo aplicar la recepción {recepcion.folio} al inventario. Corrige sus datos e inténtalo de nuevo.",
+                    )
+                    return _redirect_scoped_list("compras:recepciones", request)
                 if orden.estatus != OrdenCompra.STATUS_CERRADA:
                     orden_prev = orden.estatus
                     orden.estatus = OrdenCompra.STATUS_CERRADA
@@ -10118,8 +10130,10 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
             )
         messages.error(request, message)
         return _redirect_scoped_list("compras:recepciones", request, preserve_query=True)
-    apply_result = {"applied": False, "reason": "ya_aplicado"}
+    apply_result = None
+    transitioned = False
     if _can_transition_recepcion(prev, estatus):
+        transitioned = True
         recepcion.estatus = estatus
         recepcion.save(update_fields=["estatus"])
         log_event(
@@ -10130,19 +10144,21 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
             {"from": prev, "to": estatus, "folio": recepcion.folio},
         )
 
-        # Si la recepción quedó cerrada, marcamos la orden cerrada automáticamente.
-        if estatus == RecepcionCompra.STATUS_CERRADA:
-            apply_result = _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
-            if not apply_result["applied"] and apply_result["reason"] != "ya_aplicado":
+    # Un retry de CERRADA también debe verificar/reparar la aplicación real a inventario.
+    if estatus == RecepcionCompra.STATUS_CERRADA and (transitioned or prev == estatus):
+        apply_result = _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+        if not _recepcion_apply_succeeded(apply_result):
+            if transitioned:
                 transaction.set_rollback(True)
-                message = f"No se pudo aplicar la recepción {recepcion.folio} al inventario. Corrige sus datos e inténtalo de nuevo."
-                if wants_json:
-                    return JsonResponse(
-                        {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
-                        status=409,
-                    )
-                messages.error(request, message)
-                return _redirect_scoped_list("compras:recepciones", request, preserve_query=True)
+            message = f"No se pudo aplicar la recepción {recepcion.folio} al inventario. Corrige sus datos e inténtalo de nuevo."
+            if wants_json:
+                return JsonResponse(
+                    {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+                    status=409,
+                )
+            messages.error(request, message)
+            return _redirect_scoped_list("compras:recepciones", request, preserve_query=True)
+        if transitioned:
             if recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
                 orden_prev = recepcion.orden.estatus
                 recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
@@ -10157,7 +10173,7 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
     redirect_response = _redirect_scoped_list("compras:recepciones", request, preserve_query=True)
     redirect_url = f"{redirect_response.url}#recepcion-{recepcion.id}"
     if estatus == RecepcionCompra.STATUS_CERRADA:
-        if apply_result["applied"]:
+        if apply_result and apply_result["applied"]:
             toast = {"type": "success", "message": f"Recepción {recepcion.folio} cerrada y aplicada al inventario."}
         else:
             toast = {
@@ -10166,7 +10182,7 @@ def actualizar_recepcion_estatus(request: HttpRequest, pk: int, estatus: str) ->
             }
         if wants_json:
             return JsonResponse({"ok": True, "toast": toast, "redirect": redirect_url})
-        messages.success(request, toast["message"]) if apply_result["applied"] else messages.info(request, toast["message"])
+        messages.success(request, toast["message"]) if apply_result and apply_result["applied"] else messages.info(request, toast["message"])
         return redirect(redirect_url)
     return redirect_response
 

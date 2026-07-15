@@ -2827,6 +2827,31 @@ class RecetasCosteoApiTests(TestCase):
         orden.refresh_from_db()
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
 
+    @patch("api.views.compras._apply_recepcion_to_inventario")
+    def test_endpoint_crear_recepcion_cerrada_no_aplicable_hace_rollback(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        proveedor = Proveedor.objects.create(nombre="Proveedor recepcion fallida", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras", solicitante="api", insumo=self.insumo,
+            proveedor_sugerido=proveedor, cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud, proveedor=proveedor, estatus=OrdenCompra.STATUS_ENVIADA,
+            monto_estimado=Decimal("25.00"),
+        )
+
+        resp = self.client.post(
+            reverse("api_compras_orden_recepciones", args=[orden.id]),
+            {"estatus": RecepcionCompra.STATUS_CERRADA},
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertFalse(RecepcionCompra.objects.filter(orden=orden).exists())
+        orden.refresh_from_db()
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_ENVIADA)
+
     def test_endpoint_compras_recepcion_estatus_update_cierra_orden(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor recepcion update", activo=True)
         solicitud = SolicitudCompra.objects.create(
@@ -2873,6 +2898,35 @@ class RecetasCosteoApiTests(TestCase):
         )
         orden.refresh_from_db()
         self.assertEqual(orden.estatus, OrdenCompra.STATUS_CERRADA)
+
+    @patch("api.views.compras._apply_recepcion_to_inventario")
+    def test_endpoint_cerrar_recepcion_no_aplicable_hace_rollback(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        proveedor = Proveedor.objects.create(nombre="Proveedor status fallido", activo=True)
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras", solicitante="api", insumo=self.insumo,
+            proveedor_sugerido=proveedor, cantidad=Decimal("2"),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud, proveedor=proveedor, estatus=OrdenCompra.STATUS_PARCIAL,
+            monto_estimado=Decimal("25.00"),
+        )
+        recepcion = RecepcionCompra.objects.create(
+            orden=orden, estatus=RecepcionCompra.STATUS_PENDIENTE, conformidad_pct=Decimal("90"),
+        )
+
+        resp = self.client.post(
+            reverse("api_compras_recepcion_estatus", args=[recepcion.id]),
+            {"estatus": RecepcionCompra.STATUS_CERRADA},
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        recepcion.refresh_from_db()
+        orden.refresh_from_db()
+        self.assertEqual(recepcion.estatus, RecepcionCompra.STATUS_PENDIENTE)
+        self.assertEqual(orden.estatus, OrdenCompra.STATUS_PARCIAL)
 
     def test_endpoint_compras_solicitudes_list_filters_and_totals(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor lista solicitudes", activo=True)
