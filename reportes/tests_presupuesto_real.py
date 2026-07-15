@@ -1000,6 +1000,38 @@ class EndurecimientoAuditoriaTests(TestCase):
             )
         self.assertTrue(LineaPresupuestoMensual.objects.filter(fuente_real="MANUAL:johana").exists())
 
+    def test_clear_first_bloqueado_con_auto_y_reglas_admin(self):
+        """clear_first tampoco destruye consolidados AUTO ni reglas ADMIN."""
+        from reportes.services_presupuesto_maestro import (
+            PresupuestoMaestroImportService,
+            ensure_master_budget_areas,
+        )
+
+        areas = ensure_master_budget_areas()
+        rubro = RubroPresupuesto.objects.create(
+            area=areas["ventas"], concepto="Consolidado auto", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("1"),
+            monto_real=Decimal("10"), fuente_real="AUTO:VENTA_POS",
+        )
+        with self.assertRaises(ValueError):
+            PresupuestoMaestroImportService().reimport_sales_projection(
+                archivo=self._csv_ventas(), year=2026, clear_first=True
+            )
+
+        # Solo regla ADMIN, sin reales: también bloquea.
+        LineaPresupuestoMensual.objects.filter(rubro=rubro).update(monto_real=None, fuente_real="")
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANUAL,
+            origen=ReglaFuenteRubro.ORIGEN_ADMIN,
+        )
+        with self.assertRaises(ValueError):
+            PresupuestoMaestroImportService().reimport_sales_projection(
+                archivo=self._csv_ventas(), year=2026, clear_first=True
+            )
+        self.assertTrue(RubroPresupuesto.objects.filter(pk=rubro.pk).exists())
+
     def test_matching_no_regala_toppings_ni_categorias_solapadas(self):
         """token_sort no asigna superconjuntos y la categoría solapada se anula."""
         CategoriaGasto.objects.create(

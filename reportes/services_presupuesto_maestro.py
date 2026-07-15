@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils.text import slugify
 from openpyxl import load_workbook
 
@@ -701,14 +701,25 @@ class PresupuestoMaestroImportService:
 
         with transaction.atomic():
             if clear_first:
+                from .models import ReglaFuenteRubro
+
                 rubros_qs = RubroPresupuesto.objects.filter(area=area)
-                capturas_manuales = LineaPresupuestoMensual.objects.filter(
-                    rubro__in=rubros_qs, fuente_real__startswith="MANUAL:"
+                protegidas = (
+                    LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs)
+                    .filter(
+                        Q(fuente_real__startswith="MANUAL:")
+                        | Q(fuente_real__startswith="AUTO:")
+                    )
+                    .count()
+                )
+                reglas_admin = ReglaFuenteRubro.objects.filter(
+                    rubro__in=rubros_qs, origen=ReglaFuenteRubro.ORIGEN_ADMIN
                 ).count()
-                if capturas_manuales:
+                if protegidas or reglas_admin:
                     raise ValueError(
-                        f"El área tiene {capturas_manuales} captura(s) manual(es) de gasto real; "
-                        "clear_first las destruiría. Respáldalas o resuélvelas antes de limpiar."
+                        f"El área tiene {protegidas} línea(s) con real protegido "
+                        f"(MANUAL/AUTO) y {reglas_admin} regla(s) de mapeo ADMIN; "
+                        "clear_first las destruiría. Resuélvelas antes de limpiar."
                     )
                 deleted_rubros = rubros_qs.count()
                 deleted_lines = LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).count()
