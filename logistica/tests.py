@@ -2630,6 +2630,16 @@ class LogisticaSeedPuntosPollyanasTests(TestCase):
         self.assertFalse(Sucursal.objects.filter(codigo__in=["GLORIAS", "NIO", "TUNEL"]).exists())
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Matriz", radio_geocerca_metros=120).exists())
         self.assertTrue(PuntoLogistico.objects.filter(nombre="Sucursal Guamuchil", notas__contains="Blvd. Rosales 627").exists())
+        self.assertTrue(
+            PuntoLogistico.objects.filter(
+                sucursal__codigo="CRUCERO",
+                nombre="Sucursal Bamoa",
+                latitud=Decimal("25.702448"),
+                longitud=Decimal("-108.313204"),
+                radio_geocerca_metros=120,
+                notas__contains="https://maps.app.goo.gl/QY5wRXx5rc1j4Xq39",
+            ).exists()
+        )
 
     def test_normalize_branch_aliases_migrates_logistica_and_deletes_alias(self):
         canonical = Sucursal.objects.create(codigo="LAS_GLORIAS", nombre="Las Glorias", activa=True)

@@ -70,11 +70,11 @@ class Command(BaseCommand):
         },
         {
             "codigo": "CRUCERO",
-            "nombre": "Sucursal Crucero",
-            "direccion": "Calzada Ninos Heroes 1000, Col. Ermita, Guasave, Sinaloa",
-            "latitud": "25.577880",
-            "longitud": "-108.462272",
-            "google_maps_url": "https://maps.app.goo.gl/uhp6RtXy7KtodkSy5",
+            "nombre": "Sucursal Bamoa",
+            "direccion": "Bamoa, Guasave, Sinaloa",
+            "latitud": "25.702448",
+            "longitud": "-108.313204",
+            "google_maps_url": "https://maps.app.goo.gl/QY5wRXx5rc1j4Xq39",
         },
         {
             "codigo": "GUAMUCHIL",
