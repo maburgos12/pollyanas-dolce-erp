@@ -599,6 +599,10 @@ class RutaCargaLineaValidarSerializer(serializers.Serializer):
     )
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    source_hash = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
+    transfer_external_id = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
+    detail_external_id = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
+    parada_id = serializers.IntegerField(required=False, min_value=1)
 
 
 class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
@@ -1294,6 +1298,7 @@ class LogisticaLavadoUnidadCreateSerializer(serializers.ModelSerializer):
 
 
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
+    unidad = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True), required=False)
     nivel_gas_salida = serializers.CharField()
     MAX_KM_SALTO_SALIDA = 1000
 
@@ -1323,6 +1328,13 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         unidad = attrs.get("unidad")
+        if not unidad:
+            ruta = self.context.get("ruta")
+            unidad = getattr(ruta, "unidad_operativa", None)
+            if unidad and unidad.activa:
+                attrs["unidad"] = unidad
+            else:
+                raise serializers.ValidationError({"unidad": "Selecciona una unidad activa para iniciar bitácora."})
         km_salida = attrs.get("km_salida")
         if unidad and km_salida is not None:
             ultimo_turno = (

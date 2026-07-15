@@ -699,7 +699,10 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = LogisticaBitacoraSalidaCreateSerializer(data=request.data, context={"repartidor": repartidor})
+        serializer = LogisticaBitacoraSalidaCreateSerializer(
+            data=request.data,
+            context={"repartidor": repartidor, "ruta": ruta_activa},
+        )
         if not serializer.is_valid():
             return Response(
                 {
@@ -1767,6 +1770,10 @@ class LogisticaRutaCargaLineaValidarView(_LogisticaBaseView):
                 motivo_diferencia=payload.get("motivo_diferencia") or "",
                 notas=payload.get("notas") or "",
                 client_event_id=payload.get("client_event_id") or "",
+                source_hash=payload.get("source_hash") or "",
+                transfer_external_id=payload.get("transfer_external_id") or "",
+                detail_external_id=payload.get("detail_external_id") or "",
+                parada_id=payload.get("parada_id"),
             )
         except PermissionDenied as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)

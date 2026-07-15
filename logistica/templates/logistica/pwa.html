@@ -3397,7 +3397,11 @@
               cantidad_cargada: cantidad,
               motivo_diferencia: draft.motivo || "",
               notas: draft.notas || "",
-              client_event_id: newClientEventId()
+              client_event_id: newClientEventId(),
+              source_hash: linea?.source_hash || "",
+              transfer_external_id: linea?.transfer_external_id || "",
+              detail_external_id: linea?.detail_external_id || "",
+              parada_id: linea?.parada || null
             })
           });
           if (!response.ok) {
@@ -5267,7 +5271,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v65-recarga-point", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v66-carga-estable", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
