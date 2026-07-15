@@ -38,6 +38,8 @@ from .models import (
 from .services_carga_ruta import (
     PointSyncUnavailableError,
     RecargaCedisPendienteEnviado,
+    RecargaCedisPointError,
+    RecargaCedisSinLineasPoint,
     _ordenes_tramo_carga_actual,
     _registrar_alerta_recarga_sync,
     _sincronizar_lineas_point_para_ruta,
@@ -1630,6 +1632,101 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             clave_auditoria=clave,
             creado_por=self.manager,
         )
+
+    @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
+    def test_permanencia_cedis_agenda_recarga_una_vez(self, delay):
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile(
+                "tablero-recarga.gif",
+                b"gif",
+                content_type="image/gif",
+            ),
+        )
+        payload = {
+            "latitud": str(self.cedis.latitud_geocerca),
+            "longitud": str(self.cedis.longitud_geocerca),
+            "precision_metros": "8.00",
+            "tracking_origen": "automatico_pwa",
+        }
+        registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+        EventoRuta.objects.filter(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
+        ).update(creado_en=timezone.now() - timedelta(minutes=6))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+
+        delay.assert_called_once_with(
+            ruta_id=self.ruta.id,
+            parada_id=self.cedis.id,
+            user_id=self.user.id,
+        )
+        self.cedis.refresh_from_db()
+        self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+
+        delay.assert_called_once()
+
+    def test_task_recarga_no_inventa_exito_si_point_pendiente(self):
+        from .tasks import procesar_recarga_cedis_automatica
+
+        errores_revisables = (
+            (RecargaCedisPendienteEnviado, "PENDIENTE_ENVIADO"),
+            (RecargaCedisSinLineasPoint, "SIN_LINEAS_POINT"),
+            (RecargaCedisPointError, "ERROR_POINT"),
+        )
+        for exception_class, estado_sync in errores_revisables:
+            with self.subTest(estado_sync=estado_sync), patch(
+                "logistica.tasks.registrar_recarga_cedis",
+                side_effect=exception_class("Falla revisable de Point"),
+            ) as registrar:
+                resultado = procesar_recarga_cedis_automatica(
+                    ruta_id=self.ruta.id,
+                    parada_id=self.cedis.id,
+                    user_id=self.user.id,
+                )
+
+                self.assertEqual(resultado["estado_sync"], estado_sync)
+                self.assertEqual(resultado["ruta_id"], self.ruta.id)
+                self.assertEqual(resultado["parada_id"], self.cedis.id)
+                registrar.assert_called_once()
+                self.assertFalse(
+                    EventoRuta.objects.filter(
+                        ruta=self.ruta,
+                        parada=self.cedis,
+                        tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+                    ).exists()
+                )
+
+    @patch("logistica.tasks.registrar_recarga_cedis")
+    def test_task_recarga_exitosa_reporta_evento_reconciliado(self, registrar):
+        from .tasks import procesar_recarga_cedis_automatica
+
+        registrar.return_value = SimpleNamespace(
+            id=812,
+            metadata={"estado_sync": "ACTUALIZADO"},
+        )
+
+        resultado = procesar_recarga_cedis_automatica(
+            ruta_id=self.ruta.id,
+            parada_id=self.cedis.id,
+            user_id=self.user.id,
+        )
+
+        self.assertEqual(
+            resultado,
+            {"estado_sync": "ACTUALIZADO", "evento_id": 812},
+        )
+        registrar.assert_called_once()
 
     def test_selector_alerta_interpreta_zona_horaria_en_vez_de_ordenar_json(self):
         cronologicamente_nueva = self._evento_alerta_manual(

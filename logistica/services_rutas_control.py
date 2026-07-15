@@ -12,7 +12,15 @@ from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
 from .domain_ruta import parada_resuelta_operativamente
-from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
+from .models import (
+    BitacoraSalidaLlegada,
+    EventoRuta,
+    ParadaRuta,
+    PuntoLogistico,
+    Repartidor,
+    RutaEntrega,
+    UbicacionRuta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -605,12 +613,25 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                     creado_por=user,
                 )
         if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
-            _marcar_visitada_por_permanencia(
+            visita_confirmada = _marcar_visitada_por_permanencia(
                 ruta=ruta,
                 parada=resultado.parada,
                 ubicacion_actual=ubicacion,
                 distancia_metros_value=resultado.distancia_metros,
             )
+            if visita_confirmada and resultado.parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
+                from .tasks import procesar_recarga_cedis_automatica
+
+                ruta_id = ruta.id
+                parada_id = resultado.parada.id
+                user_id = getattr(user, "id", None)
+                transaction.on_commit(
+                    lambda: procesar_recarga_cedis_automatica.delay(
+                        ruta_id=ruta_id,
+                        parada_id=parada_id,
+                        user_id=user_id,
+                    )
+                )
     elif ruta.paradas.exists() and not resultado.dentro_geocerca_planeada:
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])
