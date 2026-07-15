@@ -12,6 +12,7 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
+from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -291,6 +292,7 @@ def _export_xlsx(context: dict[str, object]) -> HttpResponse:
     return response
 
 
+@login_required
 def presupuesto_vs_real(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
@@ -343,6 +345,7 @@ def _wants_json(request: HttpRequest) -> bool:
     )
 
 
+@login_required
 def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
 
@@ -407,6 +410,7 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
 @require_POST
 def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
     areas_permitidas = _areas_capturables(request.user)
@@ -500,6 +504,7 @@ def _puede_subir_cedulas(user) -> bool:
     ).exists()
 
 
+@login_required
 def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
 
