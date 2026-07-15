@@ -241,7 +241,10 @@ def aplicar_cedula(parseada: CedulaParseada, *, dry_run: bool = False) -> Resume
     protegidas = 0
     conflictos = 0
     with transaction.atomic():
-        for (area_codigo, sucursal_id), total in sorted(totales.items()):
+        # Orden None-safe: una misma área puede mezclar claves con y sin sucursal.
+        for (area_codigo, sucursal_id), total in sorted(
+            totales.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)
+        ):
             rubro = _rubro_destino(area_codigo, sucursal_id, conceptos_objetivo, avisos)
             if rubro is None:
                 continue

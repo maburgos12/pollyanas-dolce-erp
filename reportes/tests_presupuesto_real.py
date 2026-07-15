@@ -1820,6 +1820,29 @@ class CedulaImssEndurecidaTests(TestCase):
             trabajadores=[TrabajadorCedula(*t) for t in (trabajadores or [])],
         )
 
+    def test_area_con_mezcla_de_sucursales_no_truena(self):
+        """Ventas con sucursal + sin sucursal en la misma corrida (bug de prod)."""
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        sucursal = Sucursal.objects.create(codigo="MIX01", nombre="Mixta")
+        RubroPresupuesto.objects.create(area=gv, concepto="IMSS", tipo=RubroPresupuesto.TIPO_EGRESO)
+        RubroPresupuesto.objects.create(
+            area=gv, concepto="IMSS", sucursal=sucursal, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        Empleado.objects.create(
+            codigo="MIX-1", nombre="Con sucursal", nss="77777777777",
+            departamento=Empleado.DEP_VENTAS, sucursal_ref=sucursal,
+        )
+        Empleado.objects.create(
+            codigo="MIX-2", nombre="Sin sucursal", nss="88888888888",
+            departamento=Empleado.DEP_VENTAS,
+        )
+        resumen = aplicar_cedula(self._parseada(trabajadores=[
+            ("77777777777", "A", Decimal("10")), ("88888888888", "B", Decimal("20")),
+        ]))
+        self.assertEqual(resumen.empleados_cruzados, 2)
+
     def test_nss_duplicado_en_rrhh_aborta(self):
         from reportes.services_cedula_imss import aplicar_cedula
 
