@@ -318,9 +318,12 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             elif cedis_line.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(cedis_line.cantidad_cargada))
                 cedis_line.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
-                cedis_line.motivo_diferencia = (
-                    "" if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
-                )
+                if not (cedis_line.validado_por_id or cedis_line.validado_en or cedis_line.client_event_id):
+                    cedis_line.motivo_diferencia = (
+                        ""
+                        if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA
+                        else RutaCargaChecklistLinea.MOTIVO_OTRO
+                    )
                 nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
                 cedis_line.notas = " ".join(value for value in [cedis_line.notas.strip(), nota_cambio] if value)
             cedis_line.save(
@@ -402,12 +405,16 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             elif existing.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(existing.cantidad_cargada))
                 existing.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
-                existing.motivo_diferencia = (
-                    "" if existing.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
-                )
                 nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
                 existing.notas = " ".join(value for value in [existing.notas.strip(), nota_cambio] if value)
-                update_fields.extend(["estatus", "motivo_diferencia", "notas"])
+                update_fields.extend(["estatus", "notas"])
+                if not (existing.validado_por_id or existing.validado_en or existing.client_event_id):
+                    existing.motivo_diferencia = (
+                        ""
+                        if existing.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA
+                        else RutaCargaChecklistLinea.MOTIVO_OTRO
+                    )
+                    update_fields.append("motivo_diferencia")
             existing.save(
                 update_fields=update_fields
             )
@@ -797,7 +804,11 @@ def _actualizar_checklist_carga_desde_point(
             checklist.save(update_fields=update_fields)
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
-        checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
+        checklist.notas = (
+            "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
+            if solo_abiertas
+            else "No se encontraron transferencias de Point en el snapshot completo para las sucursales de esta ruta."
+        )
         checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
 
     return ChecklistCargaResumen(checklist=checklist, creadas=creadas, actualizadas=actualizadas, omitidas=omitidas)

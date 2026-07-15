@@ -384,6 +384,41 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
             triggered_by=self.user,
         )
 
+    def _extracted_line(self, point_line, *, sent, received):
+        ahora = timezone.now()
+        return SimpleNamespace(
+            origin_branch={
+                "external_id": point_line.origin_branch.external_id,
+                "name": point_line.origin_branch.name,
+            },
+            destination_branch={
+                "external_id": point_line.destination_branch.external_id,
+                "name": point_line.destination_branch.name,
+            },
+            transfer_external_id=point_line.transfer_external_id,
+            detail_external_id=point_line.detail_external_id,
+            registered_at=point_line.registered_at,
+            sent_at=ahora,
+            received_at=ahora,
+            requested_by="cedis",
+            sent_by="cedis",
+            received_by="sucursal",
+            item_name=point_line.item_name,
+            item_code=point_line.item_code,
+            unit=point_line.unit,
+            unit_cost=point_line.unit_cost,
+            requested_quantity=point_line.requested_quantity,
+            sent_quantity=Decimal(sent),
+            received_quantity=Decimal(received),
+            is_insumo=False,
+            is_received=True,
+            is_cancelled=False,
+            is_finalized=True,
+            is_open=False,
+            raw_payload={"transfer": {"isEnviado": True}},
+            source_hash=point_line.source_hash,
+        )
+
     def test_recarga_completa_actualiza_snapshot_con_transferencias_cerradas(self):
         positiva = self.point_line(
             requested="41",
@@ -421,62 +456,18 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
         )
         self.assertTrue(callable(funcion_recarga))
         fechas = []
-        jobs = []
+        extracted = [
+            self._extracted_line(positiva, sent="41", received="41"),
+            self._extracted_line(cero, sent="0", received="0"),
+        ]
 
-        def cerrar_transferencias(**kwargs):
+        def extraer_transferencias(**kwargs):
             fechas.append((kwargs["start_date"], kwargs["end_date"]))
-            job = self._sync_job(status=PointSyncJob.STATUS_SUCCESS)
-            jobs.append(job)
-            if kwargs["start_date"] == self.ruta.fecha_ruta:
-                ahora = timezone.now()
-                positiva.sent_quantity = Decimal("41")
-                positiva.received_quantity = Decimal("41")
-                positiva.sent_at = ahora
-                positiva.received_at = ahora
-                positiva.is_received = True
-                positiva.is_finalized = True
-                positiva.is_open = False
-                positiva.sync_job = job
-                positiva.raw_payload = {"transfer": {"isEnviado": True}}
-                positiva.save(
-                    update_fields=[
-                        "sent_quantity",
-                        "received_quantity",
-                        "sent_at",
-                        "received_at",
-                        "is_received",
-                        "is_finalized",
-                        "is_open",
-                        "sync_job",
-                        "raw_payload",
-                        "updated_at",
-                    ]
-                )
-                cero.sent_at = ahora
-                cero.received_at = ahora
-                cero.is_received = True
-                cero.is_finalized = True
-                cero.is_open = False
-                cero.sync_job = job
-                cero.raw_payload = {"transfer": {"isEnviado": True}}
-                cero.save(
-                    update_fields=[
-                        "sent_at",
-                        "received_at",
-                        "is_received",
-                        "is_finalized",
-                        "is_open",
-                        "sync_job",
-                        "raw_payload",
-                        "updated_at",
-                    ]
-                )
-            return job
+            return extracted if kwargs["start_date"] == self.ruta.fecha_ruta else []
 
-        with patch.object(
-            services_carga_ruta.PointMovementSyncService,
-            "run_transfer_sync",
-            side_effect=cerrar_transferencias,
+        with patch(
+            "pos_bridge.services.movement_sync_service.PointTransferExtractor.extract",
+            side_effect=extraer_transferencias,
         ):
             resumen = funcion_recarga(ruta=self.ruta, user=self.user)
 
@@ -487,7 +478,7 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
                 (self.ruta.fecha_ruta, self.ruta.fecha_ruta),
             ],
         )
-        self.assertEqual(resumen.checklist.point_sync_job, jobs[-1])
+        self.assertEqual(resumen.checklist.point_sync_job.status, PointSyncJob.STATUS_SUCCESS)
         activas = resumen.checklist.lineas.exclude(
             estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         )
@@ -502,6 +493,72 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(positiva.sent_quantity, Decimal("41"))
         self.assertEqual(positiva.received_quantity, Decimal("41"))
         self.assertFalse(positiva.is_open)
+        self.assertEqual(PointTransferLine.objects.filter(source_hash=positiva.source_hash).count(), 1)
+        self.assertEqual(PointTransferLine.objects.filter(source_hash=cero.source_hash).count(), 1)
+
+    def test_recarga_completa_preserva_auditoria_humana_si_point_cambia_esperado(self):
+        point_line = self.point_line(
+            requested="5",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+        )
+        row = self.sync_line(point_line)
+        validado_en = timezone.now() - timedelta(minutes=10)
+        row.cantidad_cargada = Decimal("2")
+        row.estatus = RutaCargaChecklistLinea.ESTATUS_FALTANTE
+        row.motivo_diferencia = RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO
+        row.notas = "Operador: faltó producto por stock físico."
+        row.client_event_id = "evento-operador-auditado"
+        row.validado_por = self.user
+        row.validado_en = validado_en
+        row.save(
+            update_fields=[
+                "cantidad_cargada",
+                "estatus",
+                "motivo_diferencia",
+                "notas",
+                "client_event_id",
+                "validado_por",
+                "validado_en",
+                "actualizado_en",
+            ]
+        )
+        extracted = [self._extracted_line(point_line, sent="5", received="5")]
+
+        with patch(
+            "pos_bridge.services.movement_sync_service.PointTransferExtractor.extract",
+            side_effect=[[], extracted],
+        ):
+            services_carga_ruta.sincronizar_checklist_recarga_desde_point(
+                ruta=self.ruta,
+                user=self.user,
+            )
+
+        row.refresh_from_db()
+        self.assertEqual(row.cantidad_enviada_esperada, Decimal("5"))
+        self.assertEqual(row.cantidad_cargada, Decimal("2"))
+        self.assertEqual(row.motivo_diferencia, RutaCargaChecklistLinea.MOTIVO_STOCK_LIMITADO)
+        self.assertEqual(row.client_event_id, "evento-operador-auditado")
+        self.assertEqual(row.validado_por, self.user)
+        self.assertEqual(row.validado_en, validado_en)
+        self.assertIn("Operador: faltó producto por stock físico.", row.notas)
+        self.assertIn("Point actualizó enviado de 3.000 a 5.000", row.notas)
+
+    def test_recarga_completa_sin_lineas_no_afirma_que_busco_solo_abiertas(self):
+        with patch(
+            "pos_bridge.services.movement_sync_service.PointTransferExtractor.extract",
+            return_value=[],
+        ):
+            resumen = services_carga_ruta.sincronizar_checklist_recarga_desde_point(
+                ruta=self.ruta,
+                user=self.user,
+            )
+
+        self.assertEqual(
+            resumen.checklist.notas,
+            "No se encontraron transferencias de Point en el snapshot completo para las sucursales de esta ruta.",
+        )
 
     def test_recarga_completa_falla_conservando_job_no_exitoso(self):
         funcion_recarga = getattr(
