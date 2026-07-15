@@ -684,8 +684,43 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     return _actualizar_checklist_carga_desde_point(ruta=ruta, user=user, sync_job=sync_job)
 
 
+def sincronizar_checklist_recarga_desde_point(*, ruta: RutaEntrega, user=None) -> ChecklistCargaResumen:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
+    if not _paradas_por_sucursal(ruta):
+        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
+
+    service = PointMovementSyncService()
+    sync_job = None
+    for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+        sync_job = service.run_transfer_sync(
+            start_date=fecha,
+            end_date=fecha,
+            triggered_by=user,
+        )
+        if sync_job.status != sync_job.STATUS_SUCCESS:
+            raise PointSyncUnavailableError(
+                "No se pudo completar la recarga de transferencias Point.",
+                sync_job=sync_job,
+            )
+
+    return _actualizar_checklist_carga_desde_point(
+        ruta=ruta,
+        user=user,
+        sync_job=sync_job,
+        solo_abiertas=False,
+    )
+
+
 @transaction.atomic
-def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, sync_job=None) -> ChecklistCargaResumen:
+def _actualizar_checklist_carga_desde_point(
+    *,
+    ruta: RutaEntrega,
+    user=None,
+    sync_job=None,
+    solo_abiertas: bool = True,
+) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
@@ -714,8 +749,16 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
         ).delete()
         checklist.notas = "Carga esperada generada desde consolidado CEDIS."
         checklist.save(update_fields=["notas", "actualizado_en"])
-    checklist.lineas.filter(point_transfer_line__is_open=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
-    creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    if solo_abiertas:
+        checklist.lineas.filter(
+            point_transfer_line__is_open=False,
+            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        ).delete()
+    creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(
+        ruta=ruta,
+        checklist=checklist,
+        solo_abiertas=solo_abiertas,
+    )
     creadas += creadas_point
     actualizadas += actualizadas_point
     omitidas += omitidas_point

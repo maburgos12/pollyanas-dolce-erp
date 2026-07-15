@@ -57,6 +57,7 @@ from .services_rutas_control import (
 )
 from api.logistica_views import _liberar_ruta_desde_bitacora_salida
 from api.logistica_serializers import ParadaRutaSerializer, RutaCargaChecklistLineaSerializer
+from . import services_carga_ruta
 
 
 User = get_user_model()
@@ -373,6 +374,154 @@ class LogisticaInvariantFixtures(TestCase):
             checklist=resumen.checklist,
             source_hash=line.source_hash,
         )
+
+
+class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
+    def _sync_job(self, *, status):
+        return PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=status,
+            triggered_by=self.user,
+        )
+
+    def test_recarga_completa_actualiza_snapshot_con_transferencias_cerradas(self):
+        positiva = self.point_line(
+            requested="41",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-RECARGA-COMPLETA",
+            detail="1",
+        )
+        cero = self.point_line(
+            requested="12",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-RECARGA-COMPLETA",
+            detail="2",
+        )
+        snapshot_inicial = sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
+        self.assertEqual(
+            sum(
+                (linea.cantidad_solicitada for linea in snapshot_inicial.checklist.lineas.all()),
+                Decimal("0"),
+            ),
+            Decimal("53"),
+        )
+
+        funcion_recarga = getattr(
+            services_carga_ruta,
+            "sincronizar_checklist_recarga_desde_point",
+            None,
+        )
+        self.assertTrue(callable(funcion_recarga))
+        fechas = []
+        jobs = []
+
+        def cerrar_transferencias(**kwargs):
+            fechas.append((kwargs["start_date"], kwargs["end_date"]))
+            job = self._sync_job(status=PointSyncJob.STATUS_SUCCESS)
+            jobs.append(job)
+            if kwargs["start_date"] == self.ruta.fecha_ruta:
+                ahora = timezone.now()
+                positiva.sent_quantity = Decimal("41")
+                positiva.received_quantity = Decimal("41")
+                positiva.sent_at = ahora
+                positiva.received_at = ahora
+                positiva.is_received = True
+                positiva.is_finalized = True
+                positiva.is_open = False
+                positiva.sync_job = job
+                positiva.raw_payload = {"transfer": {"isEnviado": True}}
+                positiva.save(
+                    update_fields=[
+                        "sent_quantity",
+                        "received_quantity",
+                        "sent_at",
+                        "received_at",
+                        "is_received",
+                        "is_finalized",
+                        "is_open",
+                        "sync_job",
+                        "raw_payload",
+                        "updated_at",
+                    ]
+                )
+                cero.sent_at = ahora
+                cero.received_at = ahora
+                cero.is_received = True
+                cero.is_finalized = True
+                cero.is_open = False
+                cero.sync_job = job
+                cero.raw_payload = {"transfer": {"isEnviado": True}}
+                cero.save(
+                    update_fields=[
+                        "sent_at",
+                        "received_at",
+                        "is_received",
+                        "is_finalized",
+                        "is_open",
+                        "sync_job",
+                        "raw_payload",
+                        "updated_at",
+                    ]
+                )
+            return job
+
+        with patch.object(
+            services_carga_ruta.PointMovementSyncService,
+            "run_transfer_sync",
+            side_effect=cerrar_transferencias,
+        ):
+            resumen = funcion_recarga(ruta=self.ruta, user=self.user)
+
+        self.assertEqual(
+            fechas,
+            [
+                (self.ruta.fecha_ruta - timedelta(days=1), self.ruta.fecha_ruta - timedelta(days=1)),
+                (self.ruta.fecha_ruta, self.ruta.fecha_ruta),
+            ],
+        )
+        self.assertEqual(resumen.checklist.point_sync_job, jobs[-1])
+        activas = resumen.checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(
+            sum((linea.cantidad_enviada_esperada for linea in activas), Decimal("0")),
+            Decimal("41"),
+        )
+        linea_cero = activas.get(point_transfer_line=cero)
+        self.assertEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertNotEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        positiva.refresh_from_db()
+        self.assertEqual(positiva.sent_quantity, Decimal("41"))
+        self.assertEqual(positiva.received_quantity, Decimal("41"))
+        self.assertFalse(positiva.is_open)
+
+    def test_recarga_completa_falla_conservando_job_no_exitoso(self):
+        funcion_recarga = getattr(
+            services_carga_ruta,
+            "sincronizar_checklist_recarga_desde_point",
+            None,
+        )
+        self.assertTrue(callable(funcion_recarga))
+        success = self._sync_job(status=PointSyncJob.STATUS_SUCCESS)
+        failed = self._sync_job(status=PointSyncJob.STATUS_FAILED)
+
+        with patch.object(
+            services_carga_ruta.PointMovementSyncService,
+            "run_transfer_sync",
+            side_effect=[success, failed],
+        ):
+            with self.assertRaises(PointSyncUnavailableError) as ctx:
+                funcion_recarga(ruta=self.ruta, user=self.user)
+
+        self.assertEqual(ctx.exception.sync_job, failed)
 
 
 class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
