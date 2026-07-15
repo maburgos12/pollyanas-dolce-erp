@@ -191,6 +191,7 @@ class PointTransferLine(models.Model):
     is_cancelled = models.BooleanField(default=False)
     is_finalized = models.BooleanField(default=False)
     is_open = models.BooleanField(default=False, db_index=True)
+    is_current_snapshot = models.BooleanField(default=True, db_index=True)
     source_endpoint = models.CharField(max_length=160, blank=True, default="/Transfer/GetTransfer")
     raw_payload = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

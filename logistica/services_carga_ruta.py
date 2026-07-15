@@ -226,77 +226,83 @@ def _limpiar_pendientes_antes_tramo_actual(*, ruta: RutaEntrega, checklist: Ruta
     ).delete()[0]
 
 
-def _superar_solicitudes_point_reemplazadas(
+def _superar_versiones_snapshot_point_anteriores(
     *, lineas: list[RutaCargaChecklistLinea]
 ) -> int:
-    """Aparta solicitudes viejas no enviadas cuando Point ya emitió otro folio.
+    """Conserva snapshots anteriores del mismo folio sólo como auditoría."""
+    actuales_por_folio: dict[str, list[RutaCargaChecklistLinea]] = {}
+    for linea in lineas:
+        point_line = linea.point_transfer_line
+        if (
+            linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            and point_line is not None
+            and point_line.is_current_snapshot
+        ):
+            actuales_por_folio.setdefault(linea.transfer_external_id, []).append(linea)
 
-    La sustitución cruza folios únicamente si coincide parada, producto y unidad,
-    y el nuevo movimiento fue registrado después. Una captura humana o una línea
-    que Point ya considera Enviado nunca se ocultan.
-    """
-    ids_con_evidencia = set(
-        ParadaEntregaEvidencia.objects.filter(
-            linea_carga_id__in=[linea.id for linea in lineas],
-        ).values_list("linea_carga_id", flat=True)
-    )
-    enviadas_por_identidad: dict[
-        tuple[int, tuple[str, str, str]], list[RutaCargaChecklistLinea]
-    ] = {}
+    superadas = 0
+    for anterior in lineas:
+        point_line = anterior.point_transfer_line
+        if (
+            anterior.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            or point_line is None
+            or point_line.is_current_snapshot
+        ):
+            continue
+        actuales = actuales_por_folio.get(anterior.transfer_external_id, [])
+        if not actuales:
+            continue
+        identidad_anterior = _identidad_producto_carga(
+            item_code=anterior.item_code,
+            item_name=anterior.item_name,
+            unit=anterior.unit,
+        )
+        equivalentes = [
+            actual
+            for actual in actuales
+            if _identidad_producto_carga(
+                item_code=actual.item_code,
+                item_name=actual.item_name,
+                unit=actual.unit,
+            )
+            == identidad_anterior
+        ]
+        anterior.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        anterior.superada_por = equivalentes[0] if len(equivalentes) == 1 else None
+        nota = "Snapshot anterior del mismo folio Point; datos y evidencia conservados para auditoría."
+        if nota not in anterior.notas:
+            anterior.notas = " ".join(
+                value for value in [anterior.notas.strip(), nota] if value
+            )
+        anterior.save(
+            update_fields=["estatus", "superada_por", "notas", "actualizado_en"]
+        )
+        superadas += 1
+    return superadas
+
+
+def _superar_lineas_point_canceladas(
+    *, lineas: list[RutaCargaChecklistLinea]
+) -> int:
+    superadas = 0
     for linea in lineas:
         point_line = linea.point_transfer_line
         if (
             linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA
             or point_line is None
-            or point_line.is_cancelled
-            or not point_transfer_enviada(point_line)
+            or not point_line.is_cancelled
         ):
             continue
-        identidad = _identidad_producto_carga(
-            item_code=linea.item_code,
-            item_name=linea.item_name,
-            unit=linea.unit,
+        linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        linea.superada_por = None
+        nota = "Point canceló este folio; datos y evidencia conservados para auditoría."
+        if nota not in linea.notas:
+            linea.notas = " ".join(
+                value for value in [linea.notas.strip(), nota] if value
+            )
+        linea.save(
+            update_fields=["estatus", "superada_por", "notas", "actualizado_en"]
         )
-        enviadas_por_identidad.setdefault((linea.parada_id, identidad), []).append(linea)
-
-    superadas = 0
-    nota = "Solicitud Point anterior no enviada; sustituida por un folio posterior Enviado."
-    for anterior in lineas:
-        point_anterior = anterior.point_transfer_line
-        if (
-            anterior.estatus != RutaCargaChecklistLinea.ESTATUS_PENDIENTE
-            or point_anterior is None
-            or point_transfer_enviada(point_anterior)
-            or anterior.validado_por_id is not None
-            or anterior.validado_en is not None
-            or anterior.client_event_id
-            or anterior.id in ids_con_evidencia
-            or point_anterior.registered_at is None
-        ):
-            continue
-        identidad = _identidad_producto_carga(
-            item_code=anterior.item_code,
-            item_name=anterior.item_name,
-            unit=anterior.unit,
-        )
-        posteriores = [
-            enviada
-            for enviada in enviadas_por_identidad.get((anterior.parada_id, identidad), [])
-            if enviada.transfer_external_id != anterior.transfer_external_id
-            and enviada.point_transfer_line.registered_at is not None
-            and enviada.point_transfer_line.registered_at > point_anterior.registered_at
-        ]
-        if not posteriores:
-            continue
-        reemplazo = min(
-            posteriores,
-            key=lambda linea: (linea.point_transfer_line.registered_at, linea.point_transfer_line_id),
-        )
-        anterior.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
-        anterior.superada_por = reemplazo
-        if nota not in anterior.notas:
-            anterior.notas = " ".join(value for value in [anterior.notas.strip(), nota] if value)
-        anterior.save(update_fields=["estatus", "superada_por", "notas", "actualizado_en"])
         superadas += 1
     return superadas
 
@@ -309,12 +315,14 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     branch_ids = set(paradas_by_branch)
     candidates_qs = (
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
-        .filter(is_cancelled=False, registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta])
+        .filter(
+            is_cancelled=False,
+            is_current_snapshot=True,
+            registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta],
+        )
         .filter(erp_destination_branch_id__in=branch_ids)
         .order_by("transfer_external_id", "detail_external_id", "id")
     )
-    if solo_abiertas:
-        candidates_qs = candidates_qs.filter(is_open=True)
 
     # _actualizar_checklist_carga_desde_point abre la transacción que contiene esta
     # función. Bloquear primero las líneas Point serializa dos rutas que intenten
@@ -578,14 +586,14 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 "cantidad_enviada_esperada",
                 "actualizado_en",
             ]
+            tiene_captura_humana = bool(
+                existing.validado_por_id
+                or existing.validado_en
+                or existing.client_event_id
+                or existing.evidencias_entrega.exists()
+            )
             reactivada = existing.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA and enviada
             if reactivada:
-                tiene_captura_humana = bool(
-                    existing.validado_por_id
-                    or existing.validado_en
-                    or existing.client_event_id
-                    or existing.evidencias_entrega.exists()
-                )
                 existing.superada_por = None
                 if tiene_captura_humana and existing.cantidad_cargada is not None:
                     existing.estatus = _estatus_carga_para_cantidades(
@@ -611,7 +619,22 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                 RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
             }:
-                if not enviada:
+                if tiene_captura_humana and existing.cantidad_cargada is not None:
+                    if enviada:
+                        cargada = Decimal(str(existing.cantidad_cargada))
+                        existing.estatus = _estatus_carga_para_cantidades(
+                            cargada=cargada,
+                            esperada=cantidad_esperada,
+                        )
+                        nota_cambio = (
+                            f"Point actualizó enviado de {esperada_anterior} a "
+                            f"{cantidad_esperada}; captura conservada en {cargada}."
+                        )
+                        existing.notas = " ".join(
+                            value for value in [existing.notas.strip(), nota_cambio] if value
+                        )
+                        update_fields.extend(["estatus", "notas"])
+                elif not enviada:
                     existing.cantidad_cargada = None
                     existing.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
                     existing.notas = "Point aún no registra Enviado para esta solicitud."
@@ -623,7 +646,8 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                     existing.cantidad_cargada = None
                     existing.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
                     existing.notas = ""
-                update_fields.extend(["cantidad_cargada", "estatus", "notas"])
+                if not tiene_captura_humana or existing.cantidad_cargada is None:
+                    update_fields.extend(["cantidad_cargada", "estatus", "notas"])
             elif (
                 not reactivada
                 and existing.cantidad_cargada is not None
@@ -654,33 +678,6 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
                 else RutaCargaChecklistLinea.ESTATUS_PENDIENTE
             ),
         )
-        # Point corrigió esta transferencia con un detail_external_id nuevo para el
-        # mismo folio y producto, dejando la línea vieja huérfana (normalmente en 0).
-        # Se marca esa línea vieja como SUPERADA en vez de dejarla duplicada; nunca se
-        # cruzan folios distintos (dos transferencias reales del mismo producto deben
-        # seguir siendo dos líneas independientes).
-        lineas_a_superar = []
-        if producto_key and enviada and cantidad_esperada > 0:
-            lineas_a_superar = [
-                vieja
-                for vieja in checklist_lines
-                if vieja.parada_id == parada.id
-                and vieja.transfer_external_id == line.transfer_external_id
-                and vieja.estatus
-                in {
-                    RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-                    RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
-                }
-                and vieja.validado_por_id is None
-                and vieja.validado_en is None
-                and vieja.point_transfer_line_id != line.id
-                and _linea_producto_key(vieja) == producto_key
-                and (
-                    vieja.point_transfer_line_id is None
-                    or not point_transfer_enviada(vieja.point_transfer_line)
-                    or Decimal(str(vieja.cantidad_enviada_esperada or 0)) <= 0
-                )
-            ]
         source_hash_nuevo = line.source_hash
         if source_hash_nuevo in hashes_ocupados_otras_rutas:
             source_hash_nuevo = f"point-ruta-{ruta.id}-{line.id}"
@@ -692,34 +689,11 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         checklist_lines.append(nueva_linea)
         lineas_por_source[nueva_linea.source_hash] = nueva_linea
         lineas_por_point_id[line.id] = nueva_linea
-        if len(lineas_a_superar) == 1:
-            vieja = lineas_a_superar[0]
-            vieja.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
-            vieja.superada_por = nueva_linea
-            vieja.save(update_fields=["estatus", "superada_por", "actualizado_en"])
-        elif len(lineas_a_superar) > 1:
-            clave = f"carga-point-reemplazo-ambiguo:{ruta.id}:{line.id}"
-            EventoRuta.objects.get_or_create(
-                clave_auditoria=clave,
-                defaults={
-                    "ruta": ruta,
-                    "parada": parada,
-                    "tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                    "severidad": EventoRuta.SEVERIDAD_ALERTA,
-                    "descripcion": "Point presentó múltiples líneas candidatas a reemplazo; se conservan para revisión.",
-                    "metadata": {
-                        "regla": "CARGA_POINT_REEMPLAZO_AMBIGUO",
-                        "ruta_id": ruta.id,
-                        "parada_id": parada.id,
-                        "point_transfer_line_nueva_id": line.id,
-                        "lineas_checklist_candidatas_ids": sorted(vieja.id for vieja in lineas_a_superar),
-                        "clave": clave,
-                        "origen": "sync_carga_point",
-                    },
-                },
-            )
         creadas += 1
-    actualizadas += _superar_solicitudes_point_reemplazadas(
+    actualizadas += _superar_versiones_snapshot_point_anteriores(
+        lineas=checklist_lines,
+    )
+    actualizadas += _superar_lineas_point_canceladas(
         lineas=checklist_lines,
     )
     return creadas, actualizadas, omitidas
@@ -732,7 +706,7 @@ def ruta_tiene_movimiento_point_nuevo(*, fecha, puntos: list[PuntoLogistico]) ->
     base_qs = (
         PointTransferLine.objects.filter(
             is_cancelled=False,
-            is_open=True,
+            is_current_snapshot=True,
             registered_at__date__in=[fecha - timedelta(days=1), fecha],
         )
         .exclude(source_hash__in=RutaCargaChecklistLinea.objects.exclude(source_hash="").values("source_hash"))
@@ -834,6 +808,7 @@ def _point_recibidas_por_ruta(ruta: RutaEntrega) -> dict[tuple[int, str], list[P
         PointTransferLine.objects.select_related("erp_origin_branch", "erp_destination_branch", "origin_branch", "destination_branch")
         .filter(
             is_cancelled=False,
+            is_current_snapshot=True,
             is_received=True,
             registered_at__date__in=[ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta],
         )
@@ -988,11 +963,6 @@ def _actualizar_checklist_carga_desde_point(
         ).delete()
         checklist.notas = "Carga esperada generada desde consolidado CEDIS."
         checklist.save(update_fields=["notas", "actualizado_en"])
-    if solo_abiertas:
-        checklist.lineas.filter(
-            point_transfer_line__is_open=False,
-            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-        ).delete()
     creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(
         ruta=ruta,
         checklist=checklist,
@@ -2043,6 +2013,7 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
         for line in PointTransferLine.objects.select_related("sync_job").filter(
             source_hash__in=source_hashes,
             is_cancelled=False,
+            is_current_snapshot=True,
         )
     }
     point_recibidas = _point_recibidas_por_ruta(ruta)
@@ -2053,7 +2024,9 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
     lineas_recibidas = 0
     lineas_pendientes_point = 0
 
-    for linea in checklist.lineas.select_related("parada").order_by("parada__orden", "id"):
+    for linea in checklist.lineas.exclude(
+        estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+    ).select_related("parada").order_by("parada__orden", "id"):
         point_line = point_lines.get(linea.source_hash)
         if point_line is not None and linea.point_transfer_line_id != point_line.id:
             linea.point_transfer_line = point_line

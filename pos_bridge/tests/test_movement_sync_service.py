@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -75,6 +75,7 @@ class FakeTransferLine:
     is_finalized: bool
     raw_payload: dict
     source_hash: str
+    is_open: bool = False
 
 
 class FakeWasteExtractor:
@@ -327,3 +328,83 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(movimiento.receta, receta)
         inventario = InventarioCedisProducto.objects.get(receta=receta)
         self.assertEqual(inventario.stock_actual, Decimal("24"))
+
+    def test_transfer_sync_desactiva_detalles_ausentes_del_snapshot_actual_del_mismo_folio(self):
+        pendiente = FakeTransferLine(
+            origin_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "25", "name": "Sucursal Leyva", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="36654",
+            detail_external_id="519914",
+            registered_at=datetime(2026, 7, 13, 18, 0, tzinfo=timezone.utc),
+            sent_at=None,
+            received_at=None,
+            requested_by="Sucursal Leyva",
+            sent_by="",
+            received_by="",
+            item_name="Pay de Queso Grande",
+            item_code="0001",
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            requested_quantity=Decimal("2"),
+            sent_quantity=Decimal("0"),
+            received_quantity=Decimal("0"),
+            is_insumo=False,
+            is_received=False,
+            is_cancelled=False,
+            is_finalized=False,
+            is_open=True,
+            raw_payload={"transfer": {"isEnviado": False}, "detail": {"PK_Transf_Det": 519914}},
+            source_hash="point-36654-519914",
+        )
+        pendiente_2 = replace(
+            pendiente,
+            detail_external_id="519915",
+            item_name="Pay de Queso Mediano",
+            item_code="0002",
+            source_hash="point-36654-519915",
+        )
+        extractor = FakeTransferExtractor([pendiente, pendiente_2])
+        service = PointMovementSyncService(transfer_extractor=extractor)
+        service.run_transfer_sync(start_date=date(2026, 7, 13), end_date=date(2026, 7, 13))
+
+        enviada = replace(
+            pendiente,
+            detail_external_id="520176",
+            sent_at=datetime(2026, 7, 13, 19, 50, tzinfo=timezone.utc),
+            received_at=datetime(2026, 7, 14, 18, 0, tzinfo=timezone.utc),
+            requested_quantity=Decimal("3"),
+            sent_quantity=Decimal("3"),
+            received_quantity=Decimal("3"),
+            is_received=True,
+            is_finalized=True,
+            is_open=False,
+            raw_payload={"transfer": {"isEnviado": True}, "detail": {"PK_Transf_Det": 520176}},
+            source_hash="point-36654-520176",
+        )
+        enviada_2 = replace(
+            enviada,
+            detail_external_id="520177",
+            item_name="Pay de Queso Mediano",
+            item_code="0002",
+            source_hash="point-36654-520177",
+        )
+        extractor.rows = [enviada, enviada_2]
+
+        service.run_transfer_sync(start_date=date(2026, 7, 13), end_date=date(2026, 7, 14))
+
+        self.assertEqual(PointTransferLine.objects.filter(transfer_external_id="36654").count(), 4)
+        anterior = PointTransferLine.objects.get(source_hash=pendiente.source_hash)
+        anterior_2 = PointTransferLine.objects.get(source_hash=pendiente_2.source_hash)
+        self.assertFalse(anterior.is_open)
+        self.assertFalse(anterior.is_current_snapshot)
+        self.assertFalse(anterior_2.is_open)
+        self.assertFalse(anterior_2.is_current_snapshot)
+        self.assertEqual(
+            set(
+                PointTransferLine.objects.filter(
+                    transfer_external_id="36654",
+                    sent_at__isnull=False,
+                ).values_list("detail_external_id", flat=True)
+            ),
+            {"520176", "520177"},
+        )

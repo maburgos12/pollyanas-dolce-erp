@@ -26,6 +26,7 @@ from pos_bridge.services.open_transfer_sync_service import (
     OpenTransferSyncService,
     resolve_requesting_erp_branch,
 )
+from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 
@@ -782,6 +783,239 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
             is_open=False,
             raw_payload={"transfer": {"isEnviado": True}},
             source_hash=point_line.source_hash,
+        )
+
+    def test_recarga_consume_snapshot_enviado_aunque_ya_este_recibido_y_excluye_version_vieja(self):
+        vieja = self.point_line(
+            requested="2",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-SNAPSHOT-36654",
+            detail="519914",
+            item_code="0001",
+        )
+        actual = self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-36654",
+            detail="520176",
+            item_code="0001",
+        )
+        actual_cero = self.point_line(
+            requested="1",
+            sent="0",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-36654",
+            detail="520177",
+            item_code="0065",
+        )
+        PointTransferLine.objects.filter(pk__in=[actual.pk, actual_cero.pk]).update(
+            is_open=False,
+            is_received=True,
+            is_finalized=True,
+        )
+        PointTransferLine.objects.filter(pk=vieja.pk).update(
+            is_open=False,
+            is_current_snapshot=False,
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=True,
+        )
+
+        activas = checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(
+            set(activas.values_list("point_transfer_line_id", flat=True)),
+            {actual.id, actual_cero.id},
+        )
+        self.assertFalse(activas.filter(point_transfer_line=vieja).exists())
+        self.assertEqual(
+            activas.get(point_transfer_line=actual_cero).estatus,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+
+    def test_sync_de_snapshots_no_duplica_version_enviada_positiva_y_conserva_cero(self):
+        vieja_positiva = self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-EDITADO",
+            detail="OLD-POS",
+            item_code="0001",
+        )
+        vieja_cero = self.point_line(
+            requested="1",
+            sent="0",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-EDITADO",
+            detail="OLD-ZERO",
+            item_code="0065",
+        )
+        service = PointMovementSyncService()
+        service.persist_transfer_lines(
+            self._sync_job(status=PointSyncJob.STATUS_RUNNING),
+            [
+                self._extracted_line(vieja_positiva, sent="2", received="2"),
+                self._extracted_line(vieja_cero, sent="0", received="0"),
+            ],
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+        self.assertEqual(
+            set(
+                checklist.lineas.exclude(
+                    estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+                ).values_list("point_transfer_line_id", flat=True)
+            ),
+            {vieja_positiva.id, vieja_cero.id},
+        )
+        actual_positiva = self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-EDITADO",
+            detail="NEW-POS",
+            item_code="0001",
+        )
+        actual_cero = self.point_line(
+            requested="1",
+            sent="0",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SNAPSHOT-EDITADO",
+            detail="NEW-ZERO",
+            item_code="0065",
+        )
+        service.persist_transfer_lines(
+            self._sync_job(status=PointSyncJob.STATUS_RUNNING),
+            [
+                self._extracted_line(actual_positiva, sent="3", received="3"),
+                self._extracted_line(actual_cero, sent="0", received="0"),
+            ],
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        activas = checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(
+            set(activas.values_list("point_transfer_line_id", flat=True)),
+            {actual_positiva.id, actual_cero.id},
+        )
+        self.assertEqual(
+            activas.get(point_transfer_line=actual_positiva).cantidad_enviada_esperada,
+            Decimal("3"),
+        )
+        self.assertEqual(
+            activas.get(point_transfer_line=actual_cero).estatus,
+            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+
+    def test_folios_distintos_del_mismo_producto_permanecen_independientes(self):
+        primero = self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-CEDIS-1",
+            detail="D-1",
+            item_code="0117",
+        )
+        segundo = self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-CEDIS-2",
+            detail="D-2",
+            item_code="0117",
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=True,
+        )
+
+        activas = checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(
+            set(activas.values_list("point_transfer_line_id", flat=True)),
+            {primero.id, segundo.id},
+        )
+        self.assertEqual(
+            sum(activas.values_list("cantidad_enviada_esperada", flat=True), Decimal("0")),
+            Decimal("5"),
+        )
+
+    def test_folio_pendiente_no_se_supera_por_otro_folio_enviado_del_mismo_producto(self):
+        pendiente = self.point_line(
+            requested="2",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+            transfer="INV-SOLICITUD-INDEPENDIENTE-1",
+            detail="D-PENDIENTE",
+            item_code="0117",
+        )
+        enviada = self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-SOLICITUD-INDEPENDIENTE-2",
+            detail="D-ENVIADA",
+            item_code="0117",
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=True,
+        )
+
+        activas = checklist.lineas.exclude(
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+        )
+        self.assertEqual(
+            set(activas.values_list("point_transfer_line_id", flat=True)),
+            {pendiente.id, enviada.id},
         )
 
     def test_recarga_completa_actualiza_snapshot_con_transferencias_cerradas(self):
@@ -2098,6 +2332,9 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             detail="11",
             item_code="INV-PRODUCTO-CORREGIDO",
         )
+        old.is_current_snapshot = False
+        old.is_open = False
+        old.save(update_fields=["is_current_snapshot", "is_open", "updated_at"])
 
         self.sync_all()
 
@@ -2106,7 +2343,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         self.assertEqual(old_row.superada_por, new_row)
 
-    def test_folio_no_enviado_es_superado_por_folio_posterior_enviado_del_mismo_producto(self):
+    def test_folio_no_enviado_permanece_independiente_de_otro_folio_enviado(self):
         old = self.point_line(
             requested="7",
             sent="0",
@@ -2131,8 +2368,9 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        self.assertEqual(old_row.superada_por, new_row)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(old_row.superada_por)
+        self.assertNotEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
     def test_dos_folios_enviados_del_mismo_producto_permanecen_activos_y_suman(self):
         self.point_line(
@@ -2191,7 +2429,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
-    def test_folio_enviado_en_cero_supera_solicitud_anterior_no_enviada(self):
+    def test_folio_enviado_en_cero_no_oculta_otro_folio_pendiente(self):
         old = self.point_line(
             requested="4",
             sent="0",
@@ -2216,11 +2454,11 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        self.assertEqual(old_row.superada_por, new_row)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(old_row.superada_por)
         self.assertEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
 
-    def test_folio_superado_se_reactiva_si_point_lo_confirma_enviado_despues(self):
+    def test_folio_pendiente_se_actualiza_si_point_lo_confirma_enviado_despues(self):
         old = self.point_line(
             requested="2",
             sent="0",
@@ -2242,7 +2480,8 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         )
         self.sync_all()
         old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertIsNone(old_row.superada_por)
 
         old.sent_quantity = Decimal("2")
         old.sent_at = timezone.now()
@@ -2319,7 +2558,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PARCIAL)
         self.assertIsNone(old_row.superada_por)
         self.assertIn("Captura física conservada", old_row.notas)
-        self.assertIn("línea reactivada", old_row.notas)
+        self.assertIn("captura conservada en 1.000", old_row.notas)
 
     def test_folio_cancelado_no_puede_superar_solicitud_pendiente(self):
         old = self.point_line(
@@ -2354,6 +2593,32 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         old_row.refresh_from_db()
         self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
         self.assertIsNone(old_row.superada_por)
+
+    def test_folio_cancelado_despues_de_cargarse_sale_de_operacion_y_conserva_auditoria(self):
+        point_line = self.point_line(
+            requested="3",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-CANCELADO-DESPUES",
+            detail="10",
+            item_code="INV-PRODUCTO-CANCELADO-DESPUES",
+        )
+        row = self.sync_line(point_line)
+        row.client_event_id = "captura-antes-cancelacion"
+        row.notas = "Captura preservada."
+        row.save(update_fields=["client_event_id", "notas", "actualizado_en"])
+        point_line.is_cancelled = True
+        point_line.is_open = False
+        point_line.save(update_fields=["is_cancelled", "is_open", "updated_at"])
+
+        self.sync_all()
+
+        row.refresh_from_db()
+        self.assertEqual(row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(row.client_event_id, "captura-antes-cancelacion")
+        self.assertIn("Captura preservada", row.notas)
+        self.assertIn("canceló este folio", row.notas)
 
     def test_folio_no_enviado_con_captura_humana_no_se_supera_entre_folios(self):
         old = self.point_line(
@@ -2476,7 +2741,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             "La selección debe bloquear específicamente PointTransferLine con FOR UPDATE OF.",
         )
 
-    def test_multiples_candidatas_viejas_no_se_superan_y_crean_incidencia_idempotente(self):
+    def test_snapshot_anterior_con_multiples_detalles_se_conserva_superado_sin_inventar_incidencia(self):
         old_lines = [
             self.point_line(
                 requested="3",
@@ -2499,6 +2764,10 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             detail="12",
             item_code="INV-PRODUCTO-AMBIGUO",
         )
+        PointTransferLine.objects.filter(pk__in=[line.id for line in old_lines]).update(
+            is_current_snapshot=False,
+            is_open=False,
+        )
 
         self.sync_all()
         self.sync_all()
@@ -2508,21 +2777,22 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         )
         self.assertEqual(
             set(old_rows.values_list("estatus", flat=True)),
-            {RutaCargaChecklistLinea.ESTATUS_PENDIENTE},
+            {RutaCargaChecklistLinea.ESTATUS_SUPERADA},
         )
         incidencias = EventoRuta.objects.filter(
             ruta=self.ruta,
             metadata__regla="CARGA_POINT_REEMPLAZO_AMBIGUO",
         )
-        self.assertEqual(incidencias.count(), 1)
-        incidencia = incidencias.get()
-        self.assertEqual(incidencia.metadata["point_transfer_line_nueva_id"], new_line.id)
-        self.assertEqual(
-            set(incidencia.metadata["lineas_checklist_candidatas_ids"]),
-            set(old_rows.values_list("id", flat=True)),
+        self.assertFalse(incidencias.exists())
+        self.assertTrue(
+            old_rows.filter(notas__contains="Snapshot anterior del mismo folio").count(),
+        )
+        self.assertNotEqual(
+            RutaCargaChecklistLinea.objects.get(point_transfer_line=new_line).estatus,
+            RutaCargaChecklistLinea.ESTATUS_SUPERADA,
         )
 
-    def test_linea_con_validado_en_sin_usuario_no_se_supera(self):
+    def test_snapshot_anterior_superado_conserva_validado_en_sin_usuario(self):
         old = self.point_line(
             requested="3",
             sent="0",
@@ -2535,7 +2805,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         old_row = self.sync_line(old)
         old_row.validado_en = timezone.now()
         old_row.save(update_fields=["validado_en"])
-        self.point_line(
+        new = self.point_line(
             requested="3",
             sent="3",
             sent_at=timezone.now(),
@@ -2544,11 +2814,19 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             detail="11",
             item_code="INV-PRODUCTO-VALIDADO-EN",
         )
+        old.is_current_snapshot = False
+        old.is_open = False
+        old.save(update_fields=["is_current_snapshot", "is_open", "updated_at"])
 
         self.sync_all()
 
         old_row.refresh_from_db()
-        self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertIsNotNone(old_row.validado_en)
+        self.assertEqual(
+            old_row.superada_por,
+            RutaCargaChecklistLinea.objects.get(point_transfer_line=new),
+        )
 
     def test_zero_expected_confirmado_pasa_a_positivo_en_misma_linea(self):
         point_line = self.point_line(
