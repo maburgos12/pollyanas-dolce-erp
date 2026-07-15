@@ -285,6 +285,48 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         )
     )
     lineas_superadas = 0
+    activas_por_point_id: dict[int, list[RutaCargaChecklistLinea]] = {}
+    for linea in checklist_lines:
+        if (
+            linea.point_transfer_line_id is not None
+            and linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        ):
+            activas_por_point_id.setdefault(linea.point_transfer_line_id, []).append(linea)
+    for duplicadas in activas_por_point_id.values():
+        if len(duplicadas) <= 1:
+            continue
+        point_line = duplicadas[0].point_transfer_line
+        propietaria = max(
+            duplicadas,
+            key=lambda linea: (
+                linea.source_hash == point_line.source_hash,
+                linea.detail_external_id == point_line.detail_external_id,
+                linea.transfer_external_id == point_line.transfer_external_id,
+                -linea.id,
+            ),
+        )
+        for linea in duplicadas:
+            if linea.id == propietaria.id:
+                continue
+            linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            linea.superada_por = propietaria
+            linea.notas = " ".join(
+                value
+                for value in [
+                    linea.notas.strip(),
+                    "Fila duplicada de la misma línea Point; se conserva solo para auditoría.",
+                ]
+                if value
+            )
+            linea.save(
+                update_fields=[
+                    "estatus",
+                    "superada_por",
+                    "notas",
+                    "actualizado_en",
+                ]
+            )
+            lineas_superadas += 1
     for linea in checklist_lines:
         point_line = linea.point_transfer_line
         retorno_a_cedis = bool(
@@ -317,11 +359,16 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             )
             linea.save(update_fields=["estatus", "notas", "actualizado_en"])
             lineas_superadas += 1
-    lineas_por_source = {linea.source_hash: linea for linea in checklist_lines}
+    lineas_por_source = {
+        linea.source_hash: linea
+        for linea in checklist_lines
+        if linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
+    }
     lineas_por_point_id = {
         linea.point_transfer_line_id: linea
         for linea in checklist_lines
         if linea.point_transfer_line_id is not None
+        and linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
     }
 
     creadas = 0
