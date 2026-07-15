@@ -805,3 +805,118 @@ class ImportUnidadesProyeccionTests(TestCase):
         self.assertEqual(febrero.fuente, "PRESUPUESTO_2026")
         self.assertEqual(marzo.cantidad, Decimal("130"))
         self.assertEqual(resumen.unidades_upsertadas, 2)
+
+
+class CapturaPorAreaTests(TestCase):
+    """Pantalla de captura distribuida: RBAC por área e invariantes de escritura."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        cls.dg = User.objects.create_superuser("dg_captura", "dgc@test.mx", "clave-test")
+        cls.jefa_logistica = User.objects.create_user("jefa_logistica", "jl@test.mx", "clave-test")
+        cls.sin_area = User.objects.create_user("sin_area_cap", "sa@test.mx", "clave-test")
+
+        cls.periodo = date(2026, 6, 1)
+        cls.area_logistica = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        cls.area_admin = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        AreaPresupuestoResponsable = __import__(
+            "reportes.models", fromlist=["AreaPresupuestoResponsable"]
+        ).AreaPresupuestoResponsable
+        AreaPresupuestoResponsable.objects.create(area=cls.area_logistica, usuario=cls.jefa_logistica)
+
+        def linea(area, concepto, **kwargs):
+            rubro = RubroPresupuesto.objects.create(
+                area=area, concepto=concepto, tipo=RubroPresupuesto.TIPO_EGRESO
+            )
+            return LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=cls.periodo, monto_presupuesto=Decimal("100"), **kwargs
+            )
+
+        cls.linea_manual = linea(cls.area_logistica, "Diesel")
+        cls.linea_otra_area = linea(cls.area_admin, "ISR")
+        cls.linea_auto = linea(cls.area_logistica, "Sueldo logística")
+        ReglaFuenteRubro.objects.create(
+            rubro=cls.linea_auto.rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA,
+            filtros={"campo_monto": "salario_base", "departamento": "LOGISTICA"},
+        )
+
+    URL = "/reportes/presupuesto-real/captura/"
+    URL_GUARDAR = "/reportes/presupuesto-real/captura/guardar/"
+
+    def test_usuario_sin_area_no_entra(self):
+        self.client.force_login(self.sin_area)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+
+    def test_jefa_solo_ve_su_area(self):
+        self.client.force_login(self.jefa_logistica)
+        response = self.client.get(f"{self.URL}?year=2026&month=6")
+        self.assertEqual(response.status_code, 200)
+        codigos = [a.codigo for a in response.context["areas"]]
+        self.assertEqual(codigos, ["logistica"])
+        conceptos = [f["linea"].rubro.concepto for f in response.context["filas"]]
+        self.assertIn("Diesel", conceptos)
+        self.assertNotIn("ISR", conceptos)
+
+    def test_guardar_escribe_manual_con_historial(self):
+        self.client.force_login(self.jefa_logistica)
+        response = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_manual.id, "monto": "1,250.50"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["toast"]["type"], "success")
+        self.linea_manual.refresh_from_db()
+        self.assertEqual(self.linea_manual.monto_real, Decimal("1250.50"))
+        self.assertEqual(self.linea_manual.fuente_real, "MANUAL:jefa_logistica")
+        self.assertEqual(len(self.linea_manual.metadata["capturas"]), 1)
+        # Y la consolidación automática NO la pisa después.
+        service = PresupuestoRealConsolidacionService()
+        summary = service.consolidar(periodo=self.periodo)
+        self.linea_manual.refresh_from_db()
+        self.assertEqual(self.linea_manual.monto_real, Decimal("1250.50"))
+
+    def test_no_captura_linea_de_otra_area_ni_automatica(self):
+        self.client.force_login(self.jefa_logistica)
+        otra = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_otra_area.id, "monto": "10"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(otra.status_code, 403)
+        auto = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "10"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(auto.status_code, 409)
+        self.linea_auto.refresh_from_db()
+        self.assertIsNone(self.linea_auto.monto_real)
+
+    def test_monto_invalido_rechazado(self):
+        self.client.force_login(self.jefa_logistica)
+        response = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_manual.id, "monto": "abc"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_tradicional_redirige_con_fragmento(self):
+        self.client.force_login(self.dg)
+        response = self.client.post(
+            self.URL_GUARDAR,
+            {
+                "linea_id": self.linea_manual.id,
+                "monto": "500",
+                "return_to": f"{self.URL}?year=2026&month=6&area=logistica",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"#linea-{self.linea_manual.id}", response["Location"])

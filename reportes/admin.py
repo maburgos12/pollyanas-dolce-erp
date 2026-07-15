@@ -4,6 +4,7 @@ from reportes.models import (
     Alert,
     AnalyticAuditLog,
     AreaPresupuesto,
+    AreaPresupuestoResponsable,
     AutoControlSettings,
     AutoPurchaseRequestSnapshot,
     CargaGastoOperativoArchivo,
@@ -222,6 +223,14 @@ class LineaPresupuestoMensualAdmin(admin.ModelAdmin):
     list_display = ("periodo", "version", "rubro", "monto_presupuesto", "monto_real", "fuente_real")
     list_filter = ("periodo", "version", "rubro__area", "rubro__tipo")
     search_fields = ("rubro__concepto", "rubro__codigo_cuenta", "fuente_real")
+
+
+@admin.register(AreaPresupuestoResponsable)
+class AreaPresupuestoResponsableAdmin(admin.ModelAdmin):
+    list_display = ("area", "usuario", "puede_capturar", "actualizado_en")
+    list_filter = ("area", "puede_capturar")
+    search_fields = ("usuario__username", "usuario__first_name", "area__nombre")
+    autocomplete_fields = ("usuario",)
 
 
 @admin.register(ReglaFuenteRubro)
