@@ -8355,6 +8355,8 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("cantidad_total_", pwa_html)
         self.assertIn("carga-checklist/productos/validar/", pwa_html)
         self.assertIn("const total = totalesConCarga.length", pwa_html)
+        self.assertIn("totalProducto.lineas.every(lineaPendientePoint)", pwa_html)
+        self.assertNotIn("totalProducto.lineas.some(lineaPendientePoint)", pwa_html)
         self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
         self.assertIn("route-control-v66-carga-estable", pwa_html)

@@ -3122,7 +3122,7 @@
             <div class="route-stop-list">
               ${totalesConCarga.map((totalProducto, index) => {
                 const pendienteCaptura = totalProducto.lineas.some(lineaPendienteCaptura);
-                const pendientePoint = totalProducto.lineas.some(lineaPendientePoint);
+                const pendientePoint = totalProducto.lineas.every(lineaPendientePoint);
                 const draftProducto = cargaProductoDraftFor(index, totalProducto.esperado);
                 return `
                 <section class="route-stop visited">
@@ -3431,7 +3431,7 @@
         const segmento = segmentoCargaOperativo(rutaData.checklist_carga?.lineas || [], rutaData.paradas || []);
         const totalProducto = totalesCargaPorProducto(segmento.lineas).filter(productoCargaVisible)[index];
         if (!totalProducto) return renderRutaScreen("El producto ya no pertenece al tramo actual. Actualiza la pantalla.");
-        if (totalProducto.lineas.some(lineaPendientePoint)) {
+        if (totalProducto.lineas.every(lineaPendientePoint)) {
           return renderRutaScreen("Point aún no confirma Enviado para este producto; la captura sigue bloqueada.");
         }
         const draft = cargaProductoDraftFor(index, totalProducto.esperado);
