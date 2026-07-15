@@ -4441,6 +4441,93 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(linea.validado_por, self.user_acompanante)
 
+    def test_acompanante_con_turno_de_la_unidad_puede_iniciar_y_rastrear_ruta(self):
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        ruta = RutaEntrega.objects.create(
+            nombre="Ruta operada por acompañante",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            acompanante=self.acompanante,
+            unidad_operativa=self.unidad,
+        )
+        parada = ParadaRuta.objects.create(ruta=ruta, punto=self.punto, orden=1)
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=ruta,
+            estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA,
+            confirmado_por=self.user_acompanante,
+            confirmado_en=timezone.now(),
+        )
+        RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="salida-acompanante",
+            item_code="ACOMP-SALIDA",
+            item_name="Carga del acompañante",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+            cantidad_cargada="1.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            validado_por=self.user_acompanante,
+            validado_en=timezone.now(),
+        )
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.acompanante,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        self.client.force_login(self.user_acompanante)
+
+        liberar = self.client.post(reverse("api_logistica_bitacora_salida_liberar_ruta"))
+
+        self.assertEqual(liberar.status_code, 200, liberar.content)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
+        self.assertEqual(ruta.bitacora_salida_id, bitacora.id)
+
+        tracking = self.client.post(
+            reverse("api_logistica_ruta_tracking", kwargs={"ruta_id": ruta.id}),
+            json.dumps(
+                {
+                    "latitud": "25.570010",
+                    "longitud": "-108.470010",
+                    "tracking_origen": "automatico_pwa",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(tracking.status_code, 201, tracking.content)
+        self.assertTrue(UbicacionRuta.objects.filter(ruta=ruta, repartidor=self.acompanante).exists())
+
+        parada.estado = ParadaRuta.ESTADO_VISITADA
+        parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        parada.hora_llegada_real = timezone.now()
+        parada.entrega_confirmada_en = timezone.now()
+        parada.entrega_confirmada_por = self.user_acompanante
+        parada.save(
+            update_fields=[
+                "estado",
+                "entrega_estado",
+                "hora_llegada_real",
+                "entrega_confirmada_en",
+                "entrega_confirmada_por",
+                "actualizado_en",
+            ]
+        )
+
+        finalizar = self.client.post(
+            reverse("api_logistica_ruta_finalizar_pwa", kwargs={"ruta_id": ruta.id})
+        )
+
+        self.assertEqual(finalizar.status_code, 200, finalizar.content)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
+
     def test_api_ruta_activa_refresca_checklist_point_pendiente_viejo(self):
         checklist = RutaCargaChecklist.objects.create(
             ruta=self.ruta,

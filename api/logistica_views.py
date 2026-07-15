@@ -1272,8 +1272,12 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
             ruta = get_object_or_404(
                 RutaEntrega.objects.select_for_update(),
                 pk=ruta_id,
-                repartidor=repartidor,
             )
+            if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
+                return Response(
+                    {"detail": "No puedes finalizar una ruta asignada a otro equipo."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             if ruta.estatus == RutaEntrega.ESTATUS_COMPLETADA:
                 return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
             if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
