@@ -162,6 +162,8 @@ class VentasReimportSummary:
     lines_updated: int
     skipped_rows: int
     monthly_totals: dict[str, Decimal]
+    unidades_upsertadas: int = 0
+    unidades_sin_receta: tuple[str, ...] = ()
 
 
 def normalize_area_code(value: str) -> str:
@@ -325,6 +327,9 @@ class PresupuestoMaestroImportService:
             for month_name, col_idx in layout["actual_columns"].items():
                 value = row[col_idx] if col_idx < len(row) else None
                 output[f"{month_name}_real"] = value
+            for month_name, col_idx in layout.get("qty_columns", {}).items():
+                value = row[col_idx] if col_idx < len(row) else None
+                output[f"{month_name}_qty"] = value
             if has_value:
                 yield output
 
@@ -351,6 +356,7 @@ class PresupuestoMaestroImportService:
             header_row_indexes = list(range(month_row_idx + 1, min(month_row_idx + 5, len(rows))))
             budget_columns: dict[str, int] = {}
             actual_columns: dict[str, int] = {}
+            qty_columns: dict[str, int] = {}
             for pos, (month_name, start_idx) in enumerate(month_starts):
                 end_idx = next((boundary for boundary in boundaries if boundary > start_idx), len(month_row))
                 for col_idx in range(start_idx, end_idx):
@@ -358,6 +364,8 @@ class PresupuestoMaestroImportService:
                         budget_columns[month_name] = col_idx
                     if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="actual"):
                         actual_columns[month_name] = col_idx
+                    if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="budget_qty"):
+                        qty_columns[month_name] = col_idx
                 if month_name not in budget_columns:
                     continue
 
@@ -378,6 +386,7 @@ class PresupuestoMaestroImportService:
                     "data_start": min(last_header_idx + 1, len(rows)),
                     "budget_columns": budget_columns,
                     "actual_columns": actual_columns,
+                    "qty_columns": qty_columns,
                 }
         return None
 
@@ -397,6 +406,10 @@ class PresupuestoMaestroImportService:
             previous_labels.append(normalize_header_text(row[col_idx - 1] if col_idx > 0 and col_idx - 1 < len(row) else ""))
         labels = " ".join(label for label in current_labels + previous_labels if label)
         current = " ".join(label for label in current_labels if label)
+        if kind == "budget_qty":
+            # Columna CANTIDAD de la proyección (unidades propuestas del mes).
+            is_qty = "cant" in current
+            return is_qty and ("proy" in labels or "proyeccion" in labels)
         is_sale_amount = "venta" in current and "cant" not in current and "cantidad" not in current
         if not is_sale_amount:
             return False
@@ -687,6 +700,9 @@ class PresupuestoMaestroImportService:
                 year=year,
                 source_name=source_name or path.stem.upper(),
             )
+            unidades_upsertadas, unidades_sin_receta = self._upsert_pronostico_unidades(
+                path=path, year=year
+            )
             monthly_totals = {
                 month_name: money(
                     LineaPresupuestoMensual.objects.filter(
@@ -711,7 +727,72 @@ class PresupuestoMaestroImportService:
             lines_updated=summary.lines_updated,
             skipped_rows=summary.skipped_rows,
             monthly_totals=monthly_totals,
+            unidades_upsertadas=unidades_upsertadas,
+            unidades_sin_receta=tuple(unidades_sin_receta),
         )
+
+    def _upsert_pronostico_unidades(self, *, path: Path, year: int) -> tuple[int, list[str]]:
+        """Guarda las CANTIDADES proyectadas del Excel en recetas.PronosticoVenta.
+
+        El concepto del Excel se cruza con la Receta por matching difuso (el
+        mismo criterio que el seed de reglas POS). Solo se pisan pronósticos
+        cuya fuente sea de presupuesto (PRESUPUESTO_*) o esté vacía — un
+        pronóstico capturado manualmente en recetas no se toca.
+        """
+        from rapidfuzz import fuzz
+
+        from recetas.models import PronosticoVenta, Receta
+        from reportes.management.commands.seed_reglas_fuente_rubro import canon_pos
+
+        # Receta no tiene campo "activo"; se cruzan todas (fabricado y reventa).
+        recetas = [(receta, canon_pos(receta.nombre)) for receta in Receta.objects.all()]
+
+        # Cantidades por concepto×mes (la hoja GENERAL ya es toda la empresa).
+        cantidades: dict[str, dict[int, Decimal]] = {}
+        for row in self._rows(path):
+            concepto = str(row.get("concepto") or "").strip()
+            if not concepto:
+                continue
+            for month_name, month_number in MONTH_COLUMNS:
+                qty = row.get(f"{month_name}_qty")
+                if qty in (None, ""):
+                    continue
+                try:
+                    valor = Decimal(str(qty))
+                except Exception:  # noqa: BLE001 — celdas con texto se ignoran
+                    continue
+                if valor == 0:
+                    continue
+                cantidades.setdefault(concepto, {})
+                cantidades[concepto][month_number] = (
+                    cantidades[concepto].get(month_number, Decimal("0")) + valor
+                )
+
+        fuente = f"PRESUPUESTO_{year}"
+        upsertadas = 0
+        sin_receta: list[str] = []
+        for concepto, meses in cantidades.items():
+            objetivo = canon_pos(concepto)
+            candidatos = [(receta, fuzz.token_set_ratio(objetivo, canon)) for receta, canon in recetas]
+            mejor = max(candidatos, key=lambda c: c[1], default=None)
+            if mejor is None or mejor[1] < 90:
+                sin_receta.append(concepto)
+                continue
+            receta = mejor[0]
+            for month_number, cantidad in meses.items():
+                periodo = f"{year}-{month_number:02d}"
+                existente = PronosticoVenta.objects.filter(receta=receta, periodo=periodo).first()
+                if existente is not None and not (
+                    not existente.fuente or existente.fuente.startswith("PRESUPUESTO")
+                ):
+                    continue  # capturado manualmente en recetas: no pisar
+                PronosticoVenta.objects.update_or_create(
+                    receta=receta,
+                    periodo=periodo,
+                    defaults={"cantidad": cantidad, "fuente": fuente},
+                )
+                upsertadas += 1
+        return upsertadas, sin_receta
 
 
 class PresupuestoMaestroService:

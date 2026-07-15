@@ -190,8 +190,16 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     kpis["varianza"] = kpis["real"] - kpis["presupuesto"]
     kpis["varianza_pct"] = variance_pct(kpis["varianza"], kpis["presupuesto"])
 
+    # ---- ventas por unidades (regla de dirección: unidades × precio actual) --
+    ventas_unidades = None
+    if not selected_area or selected_area == "ventas":
+        from .services_ventas_unidades import comparativo_ventas_unidades
+
+        ventas_unidades = comparativo_ventas_unidades(periodo)
+
     return {
         "module_tabs": _reportes_module_tabs("presupuesto_vs_real"),
+        "ventas_unidades": ventas_unidades,
         "areas": AreaPresupuesto.objects.filter(activa=True).order_by("orden", "nombre"),
         "versions": [v for v, _ in LineaPresupuestoMensual.VERSION_CHOICES],
         "month_options": MONTH_COLUMNS,
