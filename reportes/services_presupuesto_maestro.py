@@ -441,6 +441,7 @@ class PresupuestoMaestroImportService:
             budget_columns = self._month_budget_columns(rows, header_idx)
             if not budget_columns:
                 continue
+            real_columns = self._month_real_columns(rows, header_idx, budget_columns)
             concept_col = self._concept_column(rows, header_idx)
             if concept_col is None:
                 continue
@@ -461,9 +462,39 @@ class PresupuestoMaestroImportService:
                     value = row[col_idx] if col_idx < len(row) else None
                     output[month_name] = value
                     has_value = has_value or money(value) != 0
+                for month_name, col_idx in real_columns.items():
+                    value = row[col_idx] if col_idx < len(row) else None
+                    # Solo REAL con contenido: un cero del Excel no debe
+                    # marcar el mes como "capturado" (allá el vacío y el 0
+                    # se confunden; acá el vacío significa pendiente).
+                    if value not in (None, "") and money(value) != 0:
+                        output[f"{month_name}_real"] = value
+                        has_value = True
                 if has_value:
                     yield output
             return
+
+    def _month_real_columns(
+        self,
+        rows: list[tuple[object, ...]],
+        header_idx: int,
+        budget_columns: dict[str, int],
+    ) -> dict[str, int]:
+        """Columna REAL de cada mes en las hojas de gastos.
+
+        El patrón del paquete es PRESUPUESTADO | REAL | VARIACIÓN bajo el
+        encabezado del mes: se busca la subcolumna "real" en las 3 celdas
+        siguientes a la de presupuesto.
+        """
+        next_row = rows[header_idx + 1] if header_idx + 1 < len(rows) else ()
+        columns: dict[str, int] = {}
+        for month_name, budget_idx in budget_columns.items():
+            for offset in (1, 2, 3):
+                idx = budget_idx + offset
+                if idx < len(next_row) and self._normalize_cell(next_row[idx]) == "real":
+                    columns[month_name] = idx
+                    break
+        return columns
 
     def _month_budget_columns(self, rows: list[tuple[object, ...]], header_idx: int) -> dict[str, int]:
         header = rows[header_idx]
