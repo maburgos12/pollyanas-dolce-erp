@@ -2016,3 +2016,93 @@ class AccesoAnonimoTests(TestCase):
             respuesta = self.client.get(url)
             self.assertEqual(respuesta.status_code, 302, url)
             self.assertIn("login", respuesta["Location"], url)
+
+
+class OverrideDirigidoTests(TestCase):
+    """Dirección sobrescribe automáticos con motivo y puede liberar capturas."""
+
+    URL_GUARDAR = "/reportes/presupuesto-real/captura/guardar/"
+    URL_LIBERAR = "/reportes/presupuesto-real/liberar/"
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        from reportes.models import AreaPresupuestoResponsable
+
+        User = get_user_model()
+        cls.dg = User.objects.create_superuser("dg_ovr", "d@test.mx", "x")
+        cls.jefa = User.objects.create_user("jefa_ovr", "j@test.mx", "x")
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        AreaPresupuestoResponsable.objects.create(area=area, usuario=cls.jefa)
+        rubro_auto = RubroPresupuesto.objects.create(
+            area=area, concepto="Sueldo logística", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro_auto,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA,
+            filtros={"campo_monto": "salario_base", "departamento": "LOGISTICA"},
+        )
+        cls.linea_auto = LineaPresupuestoMensual.objects.create(
+            rubro=rubro_auto, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("100"),
+            monto_real=Decimal("80"), fuente_real="AUTO:NOMINA",
+        )
+
+    def test_jefa_no_sobrescribe_automatico(self):
+        self.client.force_login(self.jefa)
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "50", "motivo": "intento"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 409)
+
+    def test_direccion_sobrescribe_con_motivo_y_libera(self):
+        self.client.force_login(self.dg)
+        # Sin motivo → rechazado.
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "77"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 400)
+        # Con motivo → queda MANUAL:dg con el motivo en el historial.
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "77", "motivo": "Ajuste por finiquito"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.monto_real, Decimal("77.00"))
+        self.assertEqual(self.linea_auto.fuente_real, "MANUAL:dg_ovr")
+        self.assertEqual(self.linea_auto.metadata["capturas"][-1]["motivo"], "Ajuste por finiquito")
+        # Y el motor la respeta.
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.monto_real, Decimal("77.00"))
+
+        # Liberar: vuelve a pendiente y el motor la rellena de nuevo.
+        r = self.client.post(
+            self.URL_LIBERAR,
+            {"linea_id": self.linea_auto.id},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.fuente_real, "")
+        self.assertEqual(self.linea_auto.metadata["capturas"][-1]["accion"], "liberado_a_automatico")
+
+    def test_jefa_no_puede_liberar(self):
+        # Deja una captura manual primero (de la propia dirección).
+        LineaPresupuestoMensual.objects.filter(pk=self.linea_auto.pk).update(
+            fuente_real="MANUAL:dg_ovr"
+        )
+        self.client.force_login(self.jefa)
+        r = self.client.post(
+            self.URL_LIBERAR,
+            {"linea_id": self.linea_auto.id},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 403)

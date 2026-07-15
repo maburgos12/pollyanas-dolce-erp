@@ -45,6 +45,11 @@ urlpatterns = [
         name="presupuesto_real_captura_guardar",
     ),
     path(
+        "presupuesto-real/liberar/",
+        views_presupuesto_real.presupuesto_real_liberar,
+        name="presupuesto_real_liberar",
+    ),
+    path(
         "presupuesto-real/cedula-imss/",
         views_presupuesto_real.cedula_imss_importar,
         name="cedula_imss_importar",

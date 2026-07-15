@@ -345,11 +345,18 @@ def _wants_json(request: HttpRequest) -> bool:
     )
 
 
+def _es_admin_presupuesto(user) -> bool:
+    from core.access import can_manage_module
+
+    return bool(user and user.is_authenticated and (user.is_superuser or can_manage_module(user, "reportes")))
+
+
 @login_required
 def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
 
     areas_permitidas = _areas_capturables(request.user)
+    es_admin = _es_admin_presupuesto(request.user)
 
     hoy = timezone.localdate()
     selected_year = max(2020, min(_parse_int(request.GET.get("year"), hoy.year), 2035))
@@ -387,6 +394,10 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             {
                 "linea": linea,
                 "capturable": capturable,
+                # Dirección puede sobrescribir un automático (motivo obligatorio)
+                # y liberar una captura manual para que vuelva al automático.
+                "puede_sobrescribir": es_admin and not capturable,
+                "puede_liberar": es_admin and str(linea.fuente_real or "").startswith("MANUAL:"),
                 "con_real": con_real,
                 "fuente": _fuente_display(linea.fuente_real),
             }
@@ -406,6 +417,7 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             "filas": filas,
             "completos": completos,
             "total_filas": len(filas),
+            "es_admin": es_admin,
         },
     )
 
@@ -455,13 +467,24 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
 
         if areas_permitidas is not None and linea.rubro.area.codigo not in areas_permitidas:
             return responder(False, "No eres responsable de esta área.", tipo="error", status=403)
+        motivo = (request.POST.get("motivo") or "").strip()
         if not _linea_es_capturable(linea):
-            return responder(
-                False,
-                "Este concepto se llena automáticamente desde el sistema; no se captura a mano.",
-                tipo="error",
-                status=409,
-            )
+            # Sobrescribir un automático: solo dirección y con motivo (queda
+            # como MANUAL:<usuario>, que el motor respeta — auditoría).
+            if not _es_admin_presupuesto(request.user):
+                return responder(
+                    False,
+                    "Este concepto se llena automáticamente desde el sistema; no se captura a mano.",
+                    tipo="error",
+                    status=409,
+                )
+            if not motivo:
+                return responder(
+                    False,
+                    "Para sobrescribir un dato automático escribe el motivo (obligatorio).",
+                    tipo="error",
+                    status=400,
+                )
 
         metadata = dict(linea.metadata or {})
         historial = list(metadata.get("capturas") or [])
@@ -471,6 +494,7 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
                 "monto": str(monto),
                 "anterior": str(linea.monto_real) if linea.monto_real is not None else None,
                 "fecha": timezone.now().isoformat(),
+                **({"motivo": motivo[:200]} if motivo else {}),
             }
         )
         metadata["capturas"] = historial[-20:]  # historial acotado, nunca se borra lo capturado
@@ -541,3 +565,59 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
             "fue_dry_run": fue_dry_run,
         },
     )
+
+
+@login_required
+@require_POST
+def presupuesto_real_liberar(request: HttpRequest) -> HttpResponse:
+    """Devuelve una captura manual al flujo automático (solo dirección).
+
+    Limpia fuente_real: la consolidación nocturna (o la siguiente corrida)
+    vuelve a llenar el dato desde su fuente. El historial se conserva.
+    """
+    from django.contrib import messages
+    from django.db import transaction
+
+    if not _es_admin_presupuesto(request.user):
+        raise PermissionDenied("Solo dirección puede liberar capturas.")
+
+    wants_json = _wants_json(request)
+
+    def responder(ok: bool, mensaje: str, *, status: int = 200):
+        if wants_json:
+            return JsonResponse(
+                {"ok": ok, "toast": {"type": "success" if ok else "error", "message": mensaje, "persistent": not ok}},
+                status=status,
+            )
+        (messages.success if ok else messages.error)(request, mensaje)
+        destino = request.POST.get("return_to") or reverse("reportes:presupuesto_real_captura")
+        if not destino.startswith("/") or destino.startswith("//"):
+            destino = reverse("reportes:presupuesto_real_captura")
+        return redirect(destino + f"#linea-{request.POST.get('linea_id', '')}")
+
+    with transaction.atomic():
+        try:
+            linea = LineaPresupuestoMensual.objects.select_for_update().select_related("rubro").get(
+                pk=_parse_int(request.POST.get("linea_id"), 0)
+            )
+        except LineaPresupuestoMensual.DoesNotExist:
+            return responder(False, "La línea no existe.", status=404)
+        if not str(linea.fuente_real or "").startswith("MANUAL:"):
+            return responder(False, "Esta línea no tiene captura manual que liberar.", status=409)
+
+        metadata = dict(linea.metadata or {})
+        historial = list(metadata.get("capturas") or [])
+        historial.append(
+            {
+                "usuario": request.user.get_username(),
+                "accion": "liberado_a_automatico",
+                "anterior": str(linea.monto_real) if linea.monto_real is not None else None,
+                "fecha": timezone.now().isoformat(),
+            }
+        )
+        metadata["capturas"] = historial[-20:]
+        linea.fuente_real = ""
+        linea.metadata = metadata
+        linea.save(update_fields=["fuente_real", "metadata", "actualizado_en"])
+
+    return responder(True, f"{linea.rubro.concepto}: liberado — el automático lo rellenará en la próxima consolidación.")

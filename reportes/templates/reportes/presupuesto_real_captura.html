@@ -99,6 +99,26 @@
                      placeholder="0.00" aria-label="Monto real de {{ fila.linea.rubro.concepto }}">
               <button class="btn btn-primary btn-sm" type="submit" data-pending-label="Guardando…">Guardar</button>
             </form>
+            {% if fila.puede_liberar %}
+            <form class="prc-form" method="post" action="{% url 'reportes:presupuesto_real_liberar' %}" data-async-action style="margin-top:6px;">
+              {% csrf_token %}
+              <input type="hidden" name="linea_id" value="{{ fila.linea.id }}">
+              <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+              <button class="btn btn-secondary btn-sm" type="submit" data-pending-label="Liberando…">Liberar a automático</button>
+            </form>
+            {% endif %}
+            {% elif fila.puede_sobrescribir %}
+            <form class="prc-form" method="post" action="{% url 'reportes:presupuesto_real_captura_guardar' %}" data-async-action>
+              {% csrf_token %}
+              <input type="hidden" name="linea_id" value="{{ fila.linea.id }}">
+              <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+              <input class="input-field prc-monto-input" type="text" inputmode="decimal" name="monto"
+                     placeholder="0.00" aria-label="Sobrescribir {{ fila.linea.rubro.concepto }}">
+              <input class="input-field" type="text" name="motivo" maxlength="200"
+                     placeholder="Motivo (obligatorio)" aria-label="Motivo del ajuste de dirección">
+              <button class="btn btn-secondary btn-sm" type="submit" data-pending-label="Guardando…">Sobrescribir</button>
+            </form>
+            <p class="muted" style="font-size:0.72rem; margin:4px 0 0;">Automático — al sobrescribir queda como captura de dirección y el motor deja de tocarlo.</p>
             {% else %}
             <span class="muted">Automático — no se captura</span>
             {% endif %}
