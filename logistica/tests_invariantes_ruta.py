@@ -1043,6 +1043,79 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
 
 
 class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
+    def test_resync_deja_una_sola_fila_activa_por_linea_point_y_preserva_auditoria(self):
+        point_line = self.point_line(
+            requested="1",
+            sent="0",
+            sent_at=timezone.now(),
+            is_enviado=True,
+            transfer="INV-FOLIO-DUPLICADO-INTERNO",
+            detail="INV-DETALLE-CANONICO",
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        placeholder = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=point_line,
+            transfer_external_id="INV-FOLIO-ANTERIOR",
+            detail_external_id="INV-DETALLE-ANTERIOR",
+            source_hash="cedis-reabasto-placeholder-duplicado-interno",
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada="1",
+            cantidad_enviada_esperada="0",
+            cantidad_cargada="0",
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+            notas="Evidencia histórica del placeholder.",
+            client_event_id="duplicado-interno-auditado",
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        validado_en_original = placeholder.validado_en
+        canonica = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=point_line,
+            transfer_external_id=point_line.transfer_external_id,
+            detail_external_id=point_line.detail_external_id,
+            source_hash=point_line.source_hash,
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada=point_line.requested_quantity,
+            cantidad_enviada_esperada="0",
+            cantidad_cargada="0",
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        placeholder.refresh_from_db()
+        canonica.refresh_from_db()
+        self.assertEqual(placeholder.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(placeholder.superada_por, canonica)
+        self.assertEqual(placeholder.cantidad_cargada, Decimal("0"))
+        self.assertEqual(placeholder.client_event_id, "duplicado-interno-auditado")
+        self.assertEqual(placeholder.validado_por, self.user)
+        self.assertEqual(placeholder.validado_en, validado_en_original)
+        self.assertIn("Evidencia histórica del placeholder.", placeholder.notas)
+        self.assertIn("misma línea Point", placeholder.notas)
+        self.assertNotEqual(canonica.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(
+            checklist.lineas.exclude(
+                estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            ).filter(point_transfer_line=point_line).count(),
+            1,
+        )
+
     def test_carga_de_ruta_excluye_transferencias_de_sucursal_hacia_cedis(self):
         origin = PointBranch.objects.create(
             external_id="INV-RETORNO-SUC",
