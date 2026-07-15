@@ -17,7 +17,7 @@ nomina,PLAYERA,MANUAL,,,Uniformes sin fuente en ERP
 nomina,PLAYERAS,MANUAL,,,Uniformes sin fuente en ERP
 nomina,POLO,MANUAL,,,Uniformes sin fuente en ERP
 gastos-venta,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""VENTAS""}",Nómina de ventas por sucursal del rubro
-gastos-venta,Arrendamiento local,GASTO_OPERATIVO,RENTA_SUC,,Renta por sucursal
+gastos-venta,Arrendamiento local,GASTO_OPERATIVO,RENTA,,Renta por sucursal
 administracion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""ADMINISTRACION""}",Nómina administrativa
 logistica,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""LOGISTICA""}",Nómina de logística
 produccion,Sueldo,NOMINA,,"{""campo_monto"": ""salario_base"", ""departamento"": ""PRODUCCION""}",Nómina de producción
