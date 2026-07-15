@@ -1574,14 +1574,14 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
         self.assertIn("parada?.geocerca_confiable !== true", pwa_html)
         self.assertNotIn('parada?.estado !== "VISITADA"', pwa_html)
 
-    def test_guardrail_exige_v60_exacto_en_registro_y_service_worker(self):
+    def test_guardrail_exige_version_recarga_point_en_registro_y_service_worker(self):
         from logistica.checks import REQUIRED_SERVICE_WORKER_MARKERS, REQUIRED_TEMPLATE_MARKERS
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v64-route-invariants"},
+            {"route-control-v65-recarga-point"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v64-route-invariants", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -2323,7 +2323,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         )
         self.assertEqual(ubicacion.ruta, ruta_hoy)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_usa_operacion_y_evento_propios_sin_entrega_ni_geocerca(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -2363,7 +2363,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
         self.assertFalse(parada_cedis.evidencias_entrega.exists())
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_con_objeto_obsoleto_retorna_el_mismo_evento(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -2381,7 +2381,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertEqual(segundo.id, primero.id)
         self.assertEqual(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(), 1)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_numera_despues_de_evento_historico_compatible(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -4698,9 +4698,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v64-route-invariants", pwa_html)
+        self.assertIn("?v=route-control-v65-recarga-point", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v64-route-invariants", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -4772,10 +4772,12 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("return parada?.operativamente_resuelta === true;", pwa_html)
         self.assertIn("confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
         self.assertIn("paradaDisponibleParaEntrega", pwa_html)
-        self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved && entrega === \"PENDIENTE\" && paradaDisponibleParaEntrega(parada, paradas);", pwa_html)
-        self.assertIn("const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && !resolved;", pwa_html)
+        self.assertIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && entrega === \"PENDIENTE\" && paradaDisponibleParaEntrega(parada, paradas);", pwa_html)
+        self.assertNotIn("const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved", pwa_html)
+        self.assertIn("const puedeRegistrarRecarga = !requiereEntrega && rutaEnSeguimiento && parada.recarga_cedis_resuelta !== true;", pwa_html)
         self.assertIn("registrarRecargaCedis(${Number(rutaId)}, ${Number(parada.id)}, this)", pwa_html)
-        self.assertIn("Registrar llegada / recarga CEDIS", pwa_html)
+        self.assertIn("Reintentar sincronización Point", pwa_html)
+        self.assertIn("Sincronización de recarga pendiente", pwa_html)
         self.assertIn("/recarga-cedis/", pwa_html)
         self.assertIn('return renderRutaCarga("✅ Point sincronizado. Revisa la carga del siguiente tramo.");', pwa_html)
         self.assertIn('return renderRutaCarga("✅ Continuación autorizada. Revisa la carga actualizada del tramo.");', pwa_html)
@@ -4803,7 +4805,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v64-route-invariants", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -5732,6 +5734,32 @@ class LogisticaControlRutasTests(TestCase):
         parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
         parada_cedis.save(update_fields=["estado", "actualizado_en"])
         self._registrar_llegada_geocerca()
+        response_visitada = self.client.post(
+            url,
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega confirmada después de recarga CEDIS.",
+                    "client_event_id": "entrega-tras-cedis",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "legacy-test",
+                    },
+                    "evidencias": [{"comentario": "Entrega tras recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response_visitada.status_code, 400, response_visitada.content)
+        self.assertIn("recarga CEDIS", response_visitada.json()["detail"])
+
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga canónica confirmada",
+        )
         response = self.client.post(
             url,
             json.dumps(
@@ -5751,7 +5779,98 @@ class LogisticaControlRutasTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    def test_api_cedis_inicial_no_bloquea_entrega_siguiente(self):
+        self.client.force_login(self.user)
+        self.parada.orden = 2
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS inicial entrega",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=1,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self._registrar_llegada_geocerca()
+
+        response = self.client.post(
+            reverse(
+                "api_logistica_ruta_parada_entrega",
+                kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id},
+            ),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega posterior a salida inicial.",
+                    "client_event_id": "entrega-tras-cedis-inicial",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "cedis-inicial-test",
+                    },
+                    "evidencias": [{"comentario": "CEDIS inicial no requiere recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_api_recarga_cedis_legacy_habilita_entrega_siguiente(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS legacy entrega",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.parada.orden = 3
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga histórica compatible",
+            metadata={"tipo": "recarga_cedis_pwa"},
+        )
+        self._registrar_llegada_geocerca()
+
+        response = self.client.post(
+            reverse(
+                "api_logistica_ruta_parada_entrega",
+                kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id},
+            ),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega posterior a recarga legacy.",
+                    "client_event_id": "entrega-tras-recarga-legacy",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "recarga-legacy-test",
+                    },
+                    "evidencias": [{"comentario": "Recarga legacy compatible"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_api_registra_recarga_cedis_desde_pwa(self, sync_point):
         self.client.force_login(self.user)
         cedis = PuntoLogistico.objects.create(
@@ -7881,6 +8000,21 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIsNone(checklist_bloquea_salida(ruta))
         parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
         parada_cedis.save(update_fields=["estado", "actualizado_en"])
+
+        self.assertEqual(
+            list(lineas_tramo_operativo_actual(ruta, checklist=checklist).order_by("id")),
+            [linea_guamuchil, linea_sobrante],
+        )
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
+
         self.assertEqual(list(lineas_tramo_operativo_actual(ruta, checklist=checklist)), [linea_payan])
         parada_cedis.delete()
         self.assertEqual(checklist_bloquea_salida(ruta), "confirma todas las líneas de carga antes de liberar la ruta")
@@ -8006,7 +8140,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("const total = totalesConCarga.length", pwa_html)
         self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v64-route-invariants", pwa_html)
+        self.assertIn("route-control-v65-recarga-point", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -8250,7 +8384,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(salida.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_registrar_recarga_cedis_en_ruta_no_cierra_ni_duplica_ruta(self, sync_point):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         cedis_punto = PuntoLogistico.objects.create(
@@ -8294,7 +8428,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(parada_cedis.punto.tipo, PuntoLogistico.TIPO_CEDIS)
         self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
 
-    def test_tramo_carga_avanza_con_llegada_a_cedis(self):
+    def test_tramo_carga_avanza_con_recarga_cedis(self):
         ruta, primera = self._crear_ruta_planeada_para_carga()
         ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
         ruta.save(update_fields=["estatus", "updated_at"])
@@ -8322,9 +8456,9 @@ class LogisticaControlRutasTests(TestCase):
         EventoRuta.objects.create(
             ruta=ruta,
             parada=cedis,
-            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
             severidad=EventoRuta.SEVERIDAD_OK,
-            descripcion="Llegada detectada en CEDIS.",
+            descripcion="Recarga CEDIS reconciliada.",
             creado_por=self.user,
         )
         checklist = RutaCargaChecklist.objects.create(ruta=ruta)
@@ -8406,6 +8540,19 @@ class LogisticaControlRutasTests(TestCase):
 
         sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-viejo").exists())
+        self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-actual").exists())
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
+        sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
+
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-viejo").exists())
         self.assertTrue(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-actual").exists())
 
@@ -8463,6 +8610,20 @@ class LogisticaControlRutasTests(TestCase):
             cantidad_enviada_esperada=Decimal("2.000"),
         )
 
+        response = self.client.get(reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_lineas"], 1)
+        self.assertEqual(response.json()["lineas"][0]["item_name"], "Anterior")
+
+        EventoRuta.objects.create(
+            ruta=ruta,
+            parada=cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS reconciliada.",
+            creado_por=self.user,
+        )
         response = self.client.get(reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": ruta.id}))
 
         self.assertEqual(response.status_code, 200)

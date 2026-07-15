@@ -1602,11 +1602,26 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                 except ValidationError:
                     logger.warning("No se pudo refrescar checklist Point para ruta activa %s", ruta.folio, exc_info=True)
         ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
+        recarga_cedis_parada_ids = set(
+            ruta.eventos.filter(
+                Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+                | Q(
+                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+                )
+            )
+            .exclude(parada_id__isnull=True)
+            .values_list("parada_id", flat=True)
+        )
 
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "paradas": ParadaRutaSerializer(ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"), many=True).data,
+                "paradas": ParadaRutaSerializer(
+                    ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"),
+                    many=True,
+                    context={"_recarga_cedis_parada_ids": recarga_cedis_parada_ids},
+                ).data,
                 "ultima_ubicacion": UbicacionRutaSerializer(ultima_ubicacion).data if ultima_ubicacion else None,
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
                 "checklist_carga": RutaCargaChecklistSerializer(

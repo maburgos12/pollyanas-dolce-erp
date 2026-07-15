@@ -147,35 +147,33 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     return checklist
 
 
+def _ids_paradas_con_recarga_cedis(ruta: RutaEntrega) -> set[int]:
+    return set(
+        EventoRuta.objects.filter(ruta=ruta)
+        .filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(
+                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+            )
+        )
+        .exclude(parada_id__isnull=True)
+        .values_list("parada_id", flat=True)
+    )
+
+
 def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
     paradas = list(ruta.paradas.select_related("punto").order_by("orden", "id"))
     cedis = [parada for parada in paradas if parada.punto and parada.punto.tipo == PuntoLogistico.TIPO_CEDIS]
     if not cedis:
         return None
 
-    cedis_con_llegada = set(
-        EventoRuta.objects.filter(
-            ruta=ruta,
-            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
-            parada_id__in=[parada.id for parada in cedis],
-        ).values_list("parada_id", flat=True)
-    )
+    cedis_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
     inicio = cedis[0].orden if cedis[0].orden == 1 else None
     for cedis_parada in cedis:
         if inicio is not None and cedis_parada.orden <= inicio:
             continue
-        tramo_anterior = [
-            parada
-            for parada in paradas
-            if parada.punto
-            and parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
-            and (inicio is None or parada.orden > inicio)
-            and parada.orden < cedis_parada.orden
-        ]
-        cedis_alcanzado = cedis_parada.estado == ParadaRuta.ESTADO_VISITADA or cedis_parada.id in cedis_con_llegada
-        if cedis_alcanzado or (
-            tramo_anterior and all(parada.estado == ParadaRuta.ESTADO_VISITADA for parada in tramo_anterior)
-        ):
+        if cedis_parada.id in cedis_con_recarga:
             inicio = cedis_parada.orden
             continue
         break
@@ -318,9 +316,12 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             elif cedis_line.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(cedis_line.cantidad_cargada))
                 cedis_line.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
-                cedis_line.motivo_diferencia = (
-                    "" if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
-                )
+                if not (cedis_line.validado_por_id or cedis_line.validado_en or cedis_line.client_event_id):
+                    cedis_line.motivo_diferencia = (
+                        ""
+                        if cedis_line.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA
+                        else RutaCargaChecklistLinea.MOTIVO_OTRO
+                    )
                 nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
                 cedis_line.notas = " ".join(value for value in [cedis_line.notas.strip(), nota_cambio] if value)
             cedis_line.save(
@@ -402,12 +403,16 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             elif existing.cantidad_cargada is not None and esperada_anterior != cantidad_esperada:
                 cargada = Decimal(str(existing.cantidad_cargada))
                 existing.estatus = _estatus_carga_para_cantidades(cargada=cargada, esperada=cantidad_esperada)
-                existing.motivo_diferencia = (
-                    "" if existing.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA else RutaCargaChecklistLinea.MOTIVO_OTRO
-                )
                 nota_cambio = f"Point actualizó enviado de {esperada_anterior} a {cantidad_esperada}; captura conservada en {cargada}."
                 existing.notas = " ".join(value for value in [existing.notas.strip(), nota_cambio] if value)
-                update_fields.extend(["estatus", "motivo_diferencia", "notas"])
+                update_fields.extend(["estatus", "notas"])
+                if not (existing.validado_por_id or existing.validado_en or existing.client_event_id):
+                    existing.motivo_diferencia = (
+                        ""
+                        if existing.estatus == RutaCargaChecklistLinea.ESTATUS_CARGADA
+                        else RutaCargaChecklistLinea.MOTIVO_OTRO
+                    )
+                    update_fields.append("motivo_diferencia")
             existing.save(
                 update_fields=update_fields
             )
@@ -684,8 +689,43 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
     return _actualizar_checklist_carga_desde_point(ruta=ruta, user=user, sync_job=sync_job)
 
 
+def sincronizar_checklist_recarga_desde_point(*, ruta: RutaEntrega, user=None) -> ChecklistCargaResumen:
+    ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
+        raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
+    if not _paradas_por_sucursal(ruta):
+        raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
+
+    service = PointMovementSyncService()
+    sync_job = None
+    for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+        sync_job = service.run_transfer_sync(
+            start_date=fecha,
+            end_date=fecha,
+            triggered_by=user,
+        )
+        if sync_job.status != sync_job.STATUS_SUCCESS:
+            raise PointSyncUnavailableError(
+                "No se pudo completar la recarga de transferencias Point.",
+                sync_job=sync_job,
+            )
+
+    return _actualizar_checklist_carga_desde_point(
+        ruta=ruta,
+        user=user,
+        sync_job=sync_job,
+        solo_abiertas=False,
+    )
+
+
 @transaction.atomic
-def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, sync_job=None) -> ChecklistCargaResumen:
+def _actualizar_checklist_carga_desde_point(
+    *,
+    ruta: RutaEntrega,
+    user=None,
+    sync_job=None,
+    solo_abiertas: bool = True,
+) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
@@ -714,8 +754,16 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
         ).delete()
         checklist.notas = "Carga esperada generada desde consolidado CEDIS."
         checklist.save(update_fields=["notas", "actualizado_en"])
-    checklist.lineas.filter(point_transfer_line__is_open=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
-    creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(ruta=ruta, checklist=checklist, solo_abiertas=True)
+    if solo_abiertas:
+        checklist.lineas.filter(
+            point_transfer_line__is_open=False,
+            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        ).delete()
+    creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(
+        ruta=ruta,
+        checklist=checklist,
+        solo_abiertas=solo_abiertas,
+    )
     creadas += creadas_point
     actualizadas += actualizadas_point
     omitidas += omitidas_point
@@ -754,7 +802,11 @@ def _actualizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, syn
             checklist.save(update_fields=update_fields)
     else:
         checklist.estatus = RutaCargaChecklist.ESTATUS_BLOQUEADA
-        checklist.notas = "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
+        checklist.notas = (
+            "No se encontraron transferencias abiertas de Point para las sucursales de esta ruta."
+            if solo_abiertas
+            else "No se encontraron transferencias de Point en el snapshot completo para las sucursales de esta ruta."
+        )
         checklist.save(update_fields=["estatus", "notas", "actualizado_en"])
 
     return ChecklistCargaResumen(checklist=checklist, creadas=creadas, actualizadas=actualizadas, omitidas=omitidas)
@@ -971,13 +1023,10 @@ def lineas_tramo_operativo_actual(ruta: RutaEntrega, *, checklist: RutaCargaChec
     if not checklist:
         return RutaCargaChecklistLinea.objects.none()
     lineas = checklist.lineas.all()
-    limite_inferior = 0
-    for parada in ruta.paradas.select_related("punto").filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).order_by("orden", "id"):
-        if parada.estado == ParadaRuta.ESTADO_VISITADA:
-            limite_inferior = max(limite_inferior, parada.orden)
-            continue
-        return lineas.filter(parada__orden__gt=limite_inferior, parada__orden__lt=parada.orden)
-    return lineas.filter(parada__orden__gt=limite_inferior)
+    ordenes = _ordenes_tramo_carga_actual(ruta)
+    if ordenes is None:
+        return lineas
+    return lineas.filter(parada__orden__in=ordenes)
 
 
 @transaction.atomic
@@ -1304,12 +1353,23 @@ def registrar_recarga_cedis(
         .count()
         + 1
     )
+    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
+    cedis_inicial_id = ruta.paradas.filter(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+        orden=1,
+    ).values_list("id", flat=True).first()
     parada_cedis = (
         ruta.paradas.select_for_update()
         .filter(
             punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            estado__in=[
+                ParadaRuta.ESTADO_PENDIENTE,
+                ParadaRuta.ESTADO_OMITIDA,
+                ParadaRuta.ESTADO_VISITADA,
+            ],
         )
+        .exclude(pk__in=paradas_con_recarga)
+        .exclude(pk=cedis_inicial_id)
         .order_by("orden", "id")
         .first()
     )
@@ -1366,12 +1426,24 @@ def _validar_parada_recarga_pre_sync(
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         return ruta, parada
 
+    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
+    cedis_inicial_id = ruta.paradas.filter(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+        orden=1,
+    ).values_list("id", flat=True).first()
+    estados_candidatos = [
+        ParadaRuta.ESTADO_PENDIENTE,
+        ParadaRuta.ESTADO_OMITIDA,
+        ParadaRuta.ESTADO_VISITADA,
+    ]
     siguiente = (
         ruta.paradas.select_related("punto")
         .filter(
             punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            estado__in=estados_candidatos,
         )
+        .exclude(pk__in=paradas_con_recarga)
+        .exclude(pk=cedis_inicial_id)
         .order_by("orden", "id")
         .first()
     )
@@ -1383,8 +1455,10 @@ def _validar_parada_recarga_pre_sync(
             .filter(
                 pk=parada.pk,
                 punto__tipo=PuntoLogistico.TIPO_CEDIS,
-                estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+                estado__in=estados_candidatos,
             )
+            .exclude(pk__in=paradas_con_recarga)
+            .exclude(pk=cedis_inicial_id)
             .first()
         )
     if parada is None:
@@ -1425,7 +1499,7 @@ def _orquestar_recarga_cedis(
     estado_sync = "ACTUALIZADO"
     if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
         try:
-            sincronizar_checklist_carga_desde_point(ruta=ruta, user=user, ejecutar_sync=True)
+            sincronizar_checklist_recarga_desde_point(ruta=ruta, user=user)
         except PointSyncUnavailableError as exc:
             snapshot = _snapshot_siguiente_tramo(ruta, parada, actor=user)
             detalle_error = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)

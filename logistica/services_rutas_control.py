@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from uuid import uuid4
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
@@ -12,12 +13,26 @@ from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
 from .domain_ruta import parada_resuelta_operativamente
-from .models import BitacoraSalidaLlegada, EventoRuta, ParadaRuta, Repartidor, RutaEntrega, UbicacionRuta
+from .models import (
+    BitacoraSalidaLlegada,
+    EventoRuta,
+    ParadaRuta,
+    PuntoLogistico,
+    Repartidor,
+    RutaEntrega,
+    UbicacionRuta,
+)
 
 logger = logging.getLogger(__name__)
 
 GEOCERCA_PERMANENCIA_VISITA_MINUTOS = 5
 RUTA_NOCTURNA_HORA_CORTE = 22
+RECARGA_CEDIS_LEASE_ENCOLADA = timedelta(minutes=2)
+RECARGA_CEDIS_LEASE_PROCESO = timedelta(minutes=10)
+RECARGA_CEDIS_BACKOFF = timedelta(minutes=5)
+# EventoRuta técnico con metadata durable: estado, lease_hasta,
+# proximo_intento_en e intento. No pertenece a las alertas administrativas.
+RECARGA_CEDIS_LEASE_TIPO = "recarga_cedis_lease_interno"
 
 
 class LiberacionRutaError(ValidationError):
@@ -401,12 +416,261 @@ def _marcar_visitada_por_permanencia(
         return False
     if primera_llegada.creado_en > timezone.now() - timezone.timedelta(minutes=GEOCERCA_PERMANENCIA_VISITA_MINUTOS):
         return False
+    actualizado_en = timezone.now()
+    filas_actualizadas = (
+        ParadaRuta.objects.filter(pk=parada.pk, estado=parada.estado)
+        .exclude(estado=ParadaRuta.ESTADO_VISITADA)
+        .update(
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=primera_llegada.creado_en,
+            distancia_llegada_metros=distancia_metros_value,
+            actualizado_en=actualizado_en,
+        )
+    )
+    if filas_actualizadas != 1:
+        return False
     parada.estado = ParadaRuta.ESTADO_VISITADA
     parada.hora_llegada_real = primera_llegada.creado_en
     parada.distancia_llegada_metros = distancia_metros_value
-    parada.save(update_fields=["estado", "hora_llegada_real", "distancia_llegada_metros", "actualizado_en"])
+    parada.actualizado_en = actualizado_en
     ruta.recompute_route_control()
     ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+    return True
+
+
+def _clave_lease_recarga_cedis(*, ruta_id: int, parada_id: int) -> str:
+    return f"recarga-auto-lease:{ruta_id}:{parada_id}"
+
+
+def _datetime_lease(value):
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def _obtener_lease_recarga_bloqueado(*, ruta_id: int, parada_id: int, actor=None) -> EventoRuta:
+    clave = _clave_lease_recarga_cedis(ruta_id=ruta_id, parada_id=parada_id)
+    defaults = {
+        "ruta_id": ruta_id,
+        "parada_id": parada_id,
+        "tipo": EventoRuta.TIPO_INCIDENCIA_MANUAL,
+        "severidad": EventoRuta.SEVERIDAD_INFO,
+        "descripcion": "Control interno de ejecución automática de recarga CEDIS.",
+        "metadata": {
+            "tipo": RECARGA_CEDIS_LEASE_TIPO,
+            "estado": "NUEVA",
+            "lease_hasta": None,
+            "proximo_intento_en": None,
+            "intento": 0,
+        },
+        "revision_alerta_estado": EventoRuta.REVISION_ALERTA_RESUELTA,
+        "revision_alerta_motivo": "Registro técnico interno; no requiere revisión administrativa.",
+        "creado_por": actor if getattr(actor, "is_authenticated", False) else None,
+    }
+    lease, creado = EventoRuta.objects.get_or_create(clave_auditoria=clave, defaults=defaults)
+    if not creado:
+        lease = EventoRuta.objects.select_for_update().get(pk=lease.pk)
+    return lease
+
+
+def _guardar_metadata_lease(lease: EventoRuta, metadata: dict) -> None:
+    lease.metadata = metadata
+    lease.save(update_fields=["metadata"])
+
+
+@transaction.atomic
+def _reclamar_lease_recarga_para_encolar(*, ruta: RutaEntrega, parada: ParadaRuta, user) -> str | None:
+    from .services_carga_ruta import _evento_recarga_existente
+
+    if _evento_recarga_existente(ruta_id=ruta.id, parada_id=parada.id):
+        return None
+
+    lease = _obtener_lease_recarga_bloqueado(
+        ruta_id=ruta.id,
+        parada_id=parada.id,
+        actor=user,
+    )
+    now = timezone.now()
+    metadata = dict(lease.metadata or {})
+    estado = metadata.get("estado")
+    lease_hasta = _datetime_lease(metadata.get("lease_hasta"))
+    proximo_intento = _datetime_lease(metadata.get("proximo_intento_en"))
+    if estado in {"ENCOLADA", "EN_PROCESO"} and lease_hasta and lease_hasta > now:
+        return None
+    if estado == "BACKOFF" and proximo_intento and proximo_intento > now:
+        return None
+    if estado == "SUPERADA":
+        return None
+
+    intento = int(metadata.get("intento") or 0) + 1
+    lease_token = str(uuid4())
+    metadata.update(
+        {
+            "tipo": RECARGA_CEDIS_LEASE_TIPO,
+            "estado": "ENCOLADA",
+            "lease_hasta": (now + RECARGA_CEDIS_LEASE_ENCOLADA).isoformat(),
+            "proximo_intento_en": None,
+            "intento": intento,
+            "generacion": intento,
+            "lease_token": lease_token,
+            "user_id": getattr(user, "id", None),
+            "actualizado_en": now.isoformat(),
+        }
+    )
+    _guardar_metadata_lease(lease, metadata)
+    return lease_token
+
+
+@transaction.atomic
+def _actualizar_lease_recarga(
+    *,
+    ruta_id: int,
+    parada_id: int,
+    estado: str,
+    estado_sync: str | None = None,
+    lease_duracion: timedelta | None = None,
+    proximo_intento_duracion: timedelta | None = None,
+    error: Exception | None = None,
+    lease_token: str,
+) -> bool:
+    lease = _obtener_lease_recarga_bloqueado(ruta_id=ruta_id, parada_id=parada_id)
+    now = timezone.now()
+    metadata = dict(lease.metadata or {})
+    if not lease_token or metadata.get("lease_token") != lease_token:
+        return False
+    metadata.update(
+        {
+            "tipo": RECARGA_CEDIS_LEASE_TIPO,
+            "estado": estado,
+            "estado_sync": estado_sync,
+            "lease_hasta": (now + lease_duracion).isoformat() if lease_duracion else None,
+            "proximo_intento_en": (
+                (now + proximo_intento_duracion).isoformat()
+                if proximo_intento_duracion is not None
+                else None
+            ),
+            "actualizado_en": now.isoformat(),
+        }
+    )
+    if error is not None:
+        metadata["ultimo_error"] = type(error).__name__
+    _guardar_metadata_lease(lease, metadata)
+    return True
+
+
+def _lease_token_recarga_es_actual(*, ruta_id: int, parada_id: int, lease_token: str) -> bool:
+    if not lease_token:
+        return False
+    return EventoRuta.objects.filter(
+        clave_auditoria=_clave_lease_recarga_cedis(ruta_id=ruta_id, parada_id=parada_id),
+        metadata__lease_token=lease_token,
+    ).exists()
+
+
+@transaction.atomic
+def _reclamar_lease_recarga_para_procesar(
+    *, ruta_id: int, parada_id: int, lease_token: str, user_id: int | None = None
+) -> tuple[bool, str]:
+    from .services_carga_ruta import _evento_recarga_existente
+
+    lease = _obtener_lease_recarga_bloqueado(ruta_id=ruta_id, parada_id=parada_id)
+    metadata = dict(lease.metadata or {})
+    now = timezone.now()
+    if not lease_token or metadata.get("lease_token") != lease_token:
+        return False, "OBSOLETA"
+    if _evento_recarga_existente(ruta_id=ruta_id, parada_id=parada_id):
+        metadata.update(
+            {
+                "tipo": RECARGA_CEDIS_LEASE_TIPO,
+                "estado": "SUPERADA",
+                "lease_hasta": None,
+                "proximo_intento_en": None,
+                "actualizado_en": now.isoformat(),
+            }
+        )
+        _guardar_metadata_lease(lease, metadata)
+        return False, "SUPERADA"
+
+    estado = metadata.get("estado")
+    lease_hasta = _datetime_lease(metadata.get("lease_hasta"))
+    proximo_intento = _datetime_lease(metadata.get("proximo_intento_en"))
+    if estado == "EN_PROCESO" and lease_hasta and lease_hasta > now:
+        return False, "EN_PROCESO"
+    if estado == "BACKOFF" and proximo_intento and proximo_intento > now:
+        return False, "BACKOFF"
+    if estado == "SUPERADA":
+        return False, "SUPERADA"
+
+    metadata.update(
+        {
+            "tipo": RECARGA_CEDIS_LEASE_TIPO,
+            "estado": "EN_PROCESO",
+            "lease_hasta": (now + RECARGA_CEDIS_LEASE_PROCESO).isoformat(),
+            "proximo_intento_en": None,
+            "intento": max(1, int(metadata.get("intento") or 0)),
+            "user_id": user_id,
+            "actualizado_en": now.isoformat(),
+        }
+    )
+    _guardar_metadata_lease(lease, metadata)
+    return True, "EN_PROCESO"
+
+
+def _agendar_recarga_cedis_si_pendiente(*, ruta: RutaEntrega, parada: ParadaRuta, user) -> bool:
+    if (
+        parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
+        or parada.orden == 1
+        or parada.estado != ParadaRuta.ESTADO_VISITADA
+    ):
+        return False
+    lease_token = _reclamar_lease_recarga_para_encolar(ruta=ruta, parada=parada, user=user)
+    if not lease_token:
+        return False
+
+    ruta_id = ruta.id
+    parada_id = parada.id
+    user_id = getattr(user, "id", None)
+
+    def encolar_recarga():
+        from .tasks import procesar_recarga_cedis_automatica
+
+        try:
+            procesar_recarga_cedis_automatica.delay(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                user_id=user_id,
+                lease_token=lease_token,
+            )
+        except Exception as exc:
+            try:
+                _actualizar_lease_recarga(
+                    ruta_id=ruta_id,
+                    parada_id=parada_id,
+                    estado="FALLA_ENCOLADO",
+                    proximo_intento_duracion=timedelta(0),
+                    error=exc,
+                    lease_token=lease_token,
+                )
+            except Exception:
+                logger.exception(
+                    "No se pudo liberar el lease de recarga CEDIS para ruta=%s parada=%s.",
+                    ruta_id,
+                    parada_id,
+                )
+            logger.exception(
+                "No se pudo encolar la recarga CEDIS automática para ruta=%s parada=%s; "
+                "se reintentará con la siguiente ubicación confiable.",
+                ruta_id,
+                parada_id,
+            )
+
+    transaction.on_commit(encolar_recarga)
     return True
 
 
@@ -659,6 +923,19 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                 notificar_desvio_ruta_automatico.delay(evento_desvio.id)
             except Exception:
                 logger.exception("No se pudo encolar notificar_desvio_ruta_automatico para evento %s", evento_desvio.id)
+
+    parada_planeada = resultado.parada_planeada_mas_cercana
+    if (
+        ubicacion_confiable
+        and parada_planeada is not None
+        and resultado.distancia_planeada_metros is not None
+        and resultado.distancia_planeada_metros <= parada_planeada.radio_geocerca_metros
+    ):
+        _agendar_recarga_cedis_si_pendiente(
+            ruta=ruta,
+            parada=parada_planeada,
+            user=user,
+        )
 
     ubicacion._alertas_tracking = alertas_tracking
     return ubicacion
