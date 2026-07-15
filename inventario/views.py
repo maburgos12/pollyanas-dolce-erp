@@ -90,6 +90,13 @@ SOURCE_TO_FILENAME = {
 FILENAME_TO_SOURCE = {v: k for k, v in SOURCE_TO_FILENAME.items()}
 
 
+def _wants_progressive_response(request: HttpRequest) -> bool:
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
 def _insumo_display_name(insumo: Insumo | None) -> str:
     if not insumo:
         return ""
@@ -531,7 +538,9 @@ def _can_approve_ajustes(user) -> bool:
 
 def _apply_ajuste(ajuste: AjusteInventario, acted_by, comentario: str = "") -> None:
     insumo_canonical = canonical_insumo_by_id(ajuste.insumo_id) or ajuste.insumo
-    existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
+    existencia, created = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
+    if not created:
+        existencia = ExistenciaInsumo.objects.select_for_update().get(pk=existencia.pk)
     prev_stock = existencia.stock_actual
     delta = ajuste.cantidad_fisica - ajuste.cantidad_sistema
     if ajuste.insumo_id == insumo_canonical.id:
@@ -5603,53 +5612,84 @@ def ajustes(request: HttpRequest) -> HttpResponse:
         action = (request.POST.get("action") or "create").strip().lower()
 
         if action in {"approve", "reject", "apply"}:
+            wants_json = _wants_progressive_response(request)
             if not can_approve_ajustes:
                 raise PermissionDenied("No tienes permisos para aprobar/rechazar ajustes.")
             ajuste_id = request.POST.get("ajuste_id")
-            ajuste = AjusteInventario.objects.select_related("insumo").filter(pk=ajuste_id).first()
-            if not ajuste:
-                messages.error(request, "No se encontró el ajuste seleccionado.")
-                return redirect("inventario:ajustes")
-
-            comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
-            if action == "reject":
-                if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                    messages.error(request, "No se puede rechazar un ajuste ya aplicado.")
+            with transaction.atomic():
+                ajuste = (
+                    AjusteInventario.objects.select_for_update()
+                    .select_related("insumo")
+                    .filter(pk=ajuste_id)
+                    .first()
+                )
+                if not ajuste:
+                    message = "No se encontró el ajuste seleccionado."
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+                            status=404,
+                        )
+                    messages.error(request, message)
                     return redirect("inventario:ajustes")
-                ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
-                ajuste.aprobado_por = request.user
-                ajuste.aprobado_en = timezone.now()
-                ajuste.aplicado_en = None
-                ajuste.comentario_revision = comentario
-                ajuste.save(
-                    update_fields=[
-                        "estatus",
-                        "aprobado_por",
-                        "aprobado_en",
-                        "aplicado_en",
-                        "comentario_revision",
-                    ]
-                )
-                log_event(
-                    request.user,
-                    "REJECT",
-                    "inventario.AjusteInventario",
-                    ajuste.id,
-                    {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
-                )
-                messages.success(request, f"Ajuste {ajuste.folio} rechazado.")
-                return redirect("inventario:ajustes")
 
-            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                messages.info(request, f"El ajuste {ajuste.folio} ya estaba aplicado.")
-                return redirect("inventario:ajustes")
-            if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
-                messages.error(request, f"El ajuste {ajuste.folio} fue rechazado y no puede aplicarse.")
-                return redirect("inventario:ajustes")
+                comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
+                if action == "reject":
+                    if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                        messages.error(request, "No se puede rechazar un ajuste ya aplicado.")
+                        return redirect("inventario:ajustes")
+                    ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
+                    ajuste.aprobado_por = request.user
+                    ajuste.aprobado_en = timezone.now()
+                    ajuste.aplicado_en = None
+                    ajuste.comentario_revision = comentario
+                    ajuste.save(
+                        update_fields=[
+                            "estatus",
+                            "aprobado_por",
+                            "aprobado_en",
+                            "aplicado_en",
+                            "comentario_revision",
+                        ]
+                    )
+                    log_event(
+                        request.user,
+                        "REJECT",
+                        "inventario.AjusteInventario",
+                        ajuste.id,
+                        {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
+                    )
+                    messages.success(request, f"Ajuste {ajuste.folio} rechazado.")
+                    return redirect("inventario:ajustes")
 
-            _apply_ajuste(ajuste, request.user, comentario=comentario)
-            messages.success(request, f"Ajuste {ajuste.folio} aprobado y aplicado.")
-            return redirect("inventario:ajustes")
+                if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                    message = f"El ajuste {ajuste.folio} ya estaba aplicado. El stock no cambió nuevamente."
+                    redirect_url = f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}"
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": True, "toast": {"type": "info", "message": message}, "redirect": redirect_url}
+                        )
+                    messages.info(request, message)
+                    return redirect(redirect_url)
+                if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
+                    message = f"El ajuste {ajuste.folio} fue rechazado y no puede aplicarse."
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+                            status=409,
+                        )
+                    messages.error(request, message)
+                    return redirect("inventario:ajustes")
+
+                _apply_ajuste(ajuste, request.user, comentario=comentario)
+                message = f"Ajuste {ajuste.folio} aprobado y aplicado."
+                redirect_url = f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}"
+                if wants_json:
+                    return JsonResponse(
+                        {"ok": True, "toast": {"type": "success", "message": message}, "redirect": redirect_url}
+                    )
+                messages.success(request, message)
+                return redirect(redirect_url)
 
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para registrar ajustes.")
@@ -5661,38 +5701,39 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Las cantidades del ajuste no pueden ser negativas.")
                 return redirect("inventario:ajustes")
 
-            ajuste = AjusteInventario.objects.create(
-                insumo=insumo,
-                cantidad_sistema=cantidad_sistema,
-                cantidad_fisica=cantidad_fisica,
-                motivo=request.POST.get("motivo", "").strip() or "Sin motivo",
-                estatus=AjusteInventario.STATUS_PENDIENTE,
-                solicitado_por=request.user if request.user.is_authenticated else None,
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "inventario.AjusteInventario",
-                ajuste.id,
-                {
-                    "folio": ajuste.folio,
-                    "insumo_id": ajuste.insumo_id,
-                    "cantidad_sistema": str(ajuste.cantidad_sistema),
-                    "cantidad_fisica": str(ajuste.cantidad_fisica),
-                    "estatus": ajuste.estatus,
-                    "solicitado_por": request.user.username if request.user.is_authenticated else "",
-                },
-            )
+            with transaction.atomic():
+                ajuste = AjusteInventario.objects.create(
+                    insumo=insumo,
+                    cantidad_sistema=cantidad_sistema,
+                    cantidad_fisica=cantidad_fisica,
+                    motivo=request.POST.get("motivo", "").strip() or "Sin motivo",
+                    estatus=AjusteInventario.STATUS_PENDIENTE,
+                    solicitado_por=request.user if request.user.is_authenticated else None,
+                )
+                log_event(
+                    request.user,
+                    "CREATE",
+                    "inventario.AjusteInventario",
+                    ajuste.id,
+                    {
+                        "folio": ajuste.folio,
+                        "insumo_id": ajuste.insumo_id,
+                        "cantidad_sistema": str(ajuste.cantidad_sistema),
+                        "cantidad_fisica": str(ajuste.cantidad_fisica),
+                        "estatus": ajuste.estatus,
+                        "solicitado_por": request.user.username if request.user.is_authenticated else "",
+                    },
+                )
 
-            if request.POST.get("create_and_apply") == "1":
-                if can_approve_ajustes:
-                    comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
-                    _apply_ajuste(ajuste, request.user, comentario=comentario)
-                    messages.success(request, f"Ajuste {ajuste.folio} creado y aplicado.")
+                if request.POST.get("create_and_apply") == "1":
+                    if can_approve_ajustes:
+                        comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
+                        _apply_ajuste(ajuste, request.user, comentario=comentario)
+                        messages.success(request, f"Ajuste {ajuste.folio} creado y aplicado.")
+                    else:
+                        messages.info(request, f"Ajuste {ajuste.folio} creado en pendiente (requiere aprobación ADMIN).")
                 else:
-                    messages.info(request, f"Ajuste {ajuste.folio} creado en pendiente (requiere aprobación ADMIN).")
-            else:
-                messages.success(request, f"Ajuste {ajuste.folio} creado en pendiente.")
+                    messages.success(request, f"Ajuste {ajuste.folio} creado en pendiente.")
         return redirect("inventario:ajustes")
 
     selected_q = (request.GET.get("q") or "").strip()

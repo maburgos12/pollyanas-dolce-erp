@@ -2,7 +2,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.db import connection
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from datetime import datetime, timedelta
@@ -2402,6 +2403,48 @@ class InventarioAjustesApprovalTests(TestCase):
         self.assertEqual(movimiento.cantidad, Decimal("2"))
         self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_SALIDA)
 
+    def test_admin_no_reaplica_ajuste_y_bloquea_ajuste_y_existencia(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("8"),
+            motivo="Conteo mensual repetido",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        payload = {
+            "action": "approve",
+            "ajuste_id": ajuste.id,
+            "comentario_revision": "Aprobado una sola vez",
+        }
+
+        self.client.force_login(self.admin)
+        queries = []
+
+        def capture_query(execute, sql, params, many, context):
+            queries.append(sql)
+            return execute(sql, params, many, context)
+
+        with connection.execute_wrapper(capture_query):
+            first_response = self.client.post(reverse("inventario:ajustes"), payload, follow=True)
+        second_response = self.client.post(reverse("inventario:ajustes"), payload, follow=True)
+
+        self.assertContains(first_response, f"Ajuste {ajuste.folio} aprobado y aplicado.")
+        self.assertContains(second_response, f"El ajuste {ajuste.folio} ya estaba aplicado.")
+        self.existencia.refresh_from_db()
+        self.assertEqual(self.existencia.stock_actual, Decimal("8"))
+        self.assertEqual(MovimientoInventario.objects.filter(referencia=ajuste.folio).count(), 1)
+
+        locking_queries = [sql for sql in queries if "FOR UPDATE" in sql]
+        self.assertTrue(
+            any('inventario_ajusteinventario' in sql for sql in locking_queries),
+            queries,
+        )
+        self.assertTrue(
+            any('inventario_existenciainsumo' in sql for sql in locking_queries),
+            locking_queries,
+        )
+
     def test_admin_aprueba_ajuste_de_variante_y_aplica_en_canonico(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Ajuste Canon", activo=True)
         unidad = UnidadMedida.objects.create(
@@ -2497,6 +2540,83 @@ class InventarioAjustesApprovalTests(TestCase):
             {"action": "approve", "ajuste_id": ajuste.id},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_aprobar_ajuste_responde_json_aplicado_e_idempotente(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("8"),
+            motivo="Conteo JSON",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+        headers = {"HTTP_ACCEPT": "application/json", "HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+        payload = {"action": "approve", "ajuste_id": ajuste.id, "comentario_revision": "Validado"}
+
+        applied = self.client.post(reverse("inventario:ajustes"), payload, **headers)
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(applied.json()["toast"]["type"], "success")
+        self.assertEqual(applied.json()["redirect"], f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}")
+
+        idempotent = self.client.post(reverse("inventario:ajustes"), payload, **headers)
+        self.assertEqual(idempotent.status_code, 200)
+        self.assertEqual(idempotent.json()["toast"]["type"], "info")
+        self.assertIn("stock no cambió nuevamente", idempotent.json()["toast"]["message"])
+
+    def test_aprobar_ajuste_post_html_conserva_redirect_tradicional_con_fragmento(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Conteo HTML",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {"action": "approve", "ajuste_id": ajuste.id},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}")
+
+
+class InventarioAjusteCreateAndApplyTransactionTests(TransactionTestCase):
+    def test_admin_crea_y_aplica_ajuste_en_autocommit(self):
+        user_model = get_user_model()
+        admin = user_model.objects.create_user(
+            username="admin_crea_aplica_inv",
+            email="admin_crea_aplica_inv@example.com",
+            password="test12345",
+        )
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin.groups.add(admin_group)
+        unidad = UnidadMedida.objects.create(codigo="kg-ca", nombre="Kilogramo create apply", tipo=UnidadMedida.TIPO_MASA)
+        insumo = Insumo.objects.create(nombre="Azucar Create Apply", unidad_base=unidad, activo=True)
+        existencia = ExistenciaInsumo.objects.create(insumo=insumo, stock_actual=Decimal("10"))
+
+        self.client.force_login(admin)
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {
+                "action": "create",
+                "insumo_id": insumo.id,
+                "cantidad_sistema": "10",
+                "cantidad_fisica": "8",
+                "motivo": "Conteo inmediato",
+                "create_and_apply": "1",
+                "comentario_revision": "Aplicación inmediata",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        ajuste = AjusteInventario.objects.get(insumo=insumo)
+        self.assertEqual(ajuste.estatus, AjusteInventario.STATUS_APLICADO)
+        existencia.refresh_from_db()
+        self.assertEqual(existencia.stock_actual, Decimal("8"))
+        self.assertEqual(MovimientoInventario.objects.filter(referencia=ajuste.folio).count(), 1)
 
 
 class InventoryTraceabilityCommandTests(TestCase):

@@ -2079,61 +2079,70 @@ class InventarioAjusteDecisionView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        ajuste = get_object_or_404(
-            AjusteInventario.objects.select_related("insumo", "solicitado_por", "aprobado_por"),
-            pk=ajuste_id,
-        )
         ser = InventarioAjusteDecisionSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         action = ser.validated_data["action"]
         comentario = ser.validated_data.get("comentario_revision") or ""
 
-        if action == "reject":
-            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                return Response(
-                    {"detail": "No se puede rechazar un ajuste ya aplicado."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
-            ajuste.aprobado_por = request.user
-            ajuste.aprobado_en = timezone.now()
-            ajuste.aplicado_en = None
-            ajuste.comentario_revision = comentario
-            ajuste.save(
-                update_fields=[
-                    "estatus",
+        with transaction.atomic():
+            ajuste = get_object_or_404(
+                AjusteInventario.objects.select_for_update(of=("self",)).select_related(
+                    "insumo",
+                    "solicitado_por",
                     "aprobado_por",
-                    "aprobado_en",
-                    "aplicado_en",
-                    "comentario_revision",
-                ]
+                ),
+                pk=ajuste_id,
             )
-            log_event(
-                request.user,
-                "REJECT",
-                "inventario.AjusteInventario",
-                ajuste.id,
-                {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
-            )
-        else:
-            if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                return Response(
-                    {
-                        "detail": "El ajuste ya estaba aplicado.",
-                        "item": _serialize_ajuste_row(ajuste),
-                    },
-                    status=status.HTTP_200_OK,
+            if action == "reject":
+                if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                    return Response(
+                        {"detail": "No se puede rechazar un ajuste ya aplicado."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                ajuste.estatus = AjusteInventario.STATUS_RECHAZADO
+                ajuste.aprobado_por = request.user
+                ajuste.aprobado_en = timezone.now()
+                ajuste.aplicado_en = None
+                ajuste.comentario_revision = comentario
+                ajuste.save(
+                    update_fields=[
+                        "estatus",
+                        "aprobado_por",
+                        "aprobado_en",
+                        "aplicado_en",
+                        "comentario_revision",
+                    ]
                 )
-            if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
-                return Response(
-                    {"detail": "El ajuste fue rechazado y no puede aplicarse."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                log_event(
+                    request.user,
+                    "REJECT",
+                    "inventario.AjusteInventario",
+                    ajuste.id,
+                    {"folio": ajuste.folio, "estatus": ajuste.estatus, "comentario_revision": comentario},
                 )
-            _apply_ajuste(ajuste, request.user, comentario=comentario)
+            else:
+                if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
+                    # El SELECT con JOIN puede conservar relaciones del snapshot
+                    # anterior mientras espera el lock; recarga el estado confirmado.
+                    ajuste = AjusteInventario.objects.select_related(
+                        "insumo",
+                        "solicitado_por",
+                        "aprobado_por",
+                    ).get(pk=ajuste.pk)
+                    return Response(
+                        {
+                            "detail": "El ajuste ya estaba aplicado.",
+                            "item": _serialize_ajuste_row(ajuste),
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
+                    return Response(
+                        {"detail": "El ajuste fue rechazado y no puede aplicarse."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                _apply_ajuste(ajuste, request.user, comentario=comentario)
 
-        payload = _serialize_ajuste_row(ajuste)
-        payload["action"] = action
-        return Response(payload, status=status.HTTP_200_OK)
-
-
-
+            payload = _serialize_ajuste_row(ajuste)
+            payload["action"] = action
+            return Response(payload, status=status.HTTP_200_OK)
