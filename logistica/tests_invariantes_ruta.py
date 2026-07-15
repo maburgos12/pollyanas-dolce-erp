@@ -2074,6 +2074,32 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             tipo=EventoRuta.TIPO_RECARGA_CEDIS,
             descripcion="Recarga iterator",
         )
+        ubicacion = UbicacionRuta.objects.create(
+            ruta=self.ruta,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            latitud=cedis_adicional.latitud_geocerca,
+            longitud=cedis_adicional.longitud_geocerca,
+            precision_metros="8.00",
+        )
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=cedis_adicional,
+            ubicacion=ubicacion,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            descripcion="Geocerca confiable iterator",
+            latitud=ubicacion.latitud,
+            longitud=ubicacion.longitud,
+            distancia_metros=0,
+            metadata={
+                "origen_servicio": "registrar_ubicacion_ruta",
+                "ubicacion_confiable": True,
+                "ruta_id": self.ruta.id,
+                "repartidor_id": self.repartidor.id,
+                "unidad_id": self.unidad.id,
+            },
+            creado_por=self.user,
+        )
         iterable = self.ruta.paradas.select_related(
             "ruta",
             "punto",
@@ -2093,9 +2119,36 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         ]
         self.assertEqual(len(data), self.ruta.paradas.count())
         self.assertEqual(len(consultas_recarga), 1)
-        self.assertTrue(
-            next(item for item in data if item["id"] == cedis_adicional.id)["recarga_cedis_resuelta"]
+        cedis_data = next(item for item in data if item["id"] == cedis_adicional.id)
+        self.assertTrue(cedis_data["recarga_cedis_resuelta"])
+        self.assertTrue(cedis_data["geocerca_confiable"])
+
+    def test_serializer_cedis_inicial_resuelto_aunque_view_precargue_cache_vacio(self):
+        self.parada_previa.delete()
+        inicial = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=PuntoLogistico.objects.create(
+                nombre="CEDIS inicial",
+                tipo=PuntoLogistico.TIPO_CEDIS,
+                latitud="25.555000",
+                longitud="-108.455000",
+                radio_geocerca_metros=120,
+            ),
+            orden=1,
+            estado=ParadaRuta.ESTADO_VISITADA,
         )
+        paradas = list(
+            self.ruta.paradas.select_related("ruta", "punto", "punto__sucursal").order_by("orden", "id")
+        )
+
+        data = ParadaRutaSerializer(
+            paradas,
+            many=True,
+            context={"_recarga_cedis_parada_ids": set()},
+        ).data
+
+        self.assertTrue(next(item for item in data if item["id"] == inicial.id)["recarga_cedis_resuelta"])
+        self.assertTrue(ParadaRutaSerializer(inicial).data["recarga_cedis_resuelta"])
 
     def test_pwa_conserva_reintento_hasta_recarga(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
@@ -2148,6 +2201,20 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             body,
         )
         self.assertIn("Confirmar entrega</button>", body)
+
+    def test_pwa_bloquea_tramo_por_recarga_real_y_exenta_cedis_inicial(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+        availability_function = re.search(
+            r"function paradaDisponibleParaEntrega\(parada, paradas\) \{(?P<body>.*?)\n      \}",
+            html,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(availability_function)
+        body = availability_function.group("body")
+        self.assertIn("Number(item.orden || 0) > 1", body)
+        self.assertIn("item.recarga_cedis_resuelta !== true", body)
+        self.assertNotIn('item.estado !== "VISITADA"', body)
 
     @patch("logistica.services_rutas_control.logger.exception")
     @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")

@@ -2868,7 +2868,7 @@
 
       function paradaDisponibleParaEntrega(parada, paradas) {
         const orden = Number(parada?.orden || 0);
-        return !(paradas || []).some((item) => String(item?.punto?.tipo || "").toUpperCase() === "CEDIS" && item.estado !== "VISITADA" && Number(item.orden || 0) < orden);
+        return !(paradas || []).some((item) => String(item?.punto?.tipo || "").toUpperCase() === "CEDIS" && Number(item.orden || 0) > 1 && item.recarga_cedis_resuelta !== true && Number(item.orden || 0) < orden);
       }
 
       function pointRecepcionTone(linea) {

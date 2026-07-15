@@ -220,6 +220,13 @@ class ParadaRutaListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
         iterable = data.all() if hasattr(data, "all") else data
         paradas = list(iterable)
+        if "_geocercas_confiables" not in self.context:
+            self.context["_geocercas_confiables"] = geocercas_confiables_por_parada(paradas)
+        cedis_iniciales = {
+            parada.id
+            for parada in paradas
+            if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS and parada.orden == 1
+        }
         if "_recarga_cedis_parada_ids" not in self.context:
             cedis_ids = [
                 parada.id
@@ -241,6 +248,9 @@ class ParadaRutaListSerializer(serializers.ListSerializer):
                 if cedis_ids
                 else set()
             )
+        self.context["_recarga_cedis_parada_ids"] = set(
+            self.context["_recarga_cedis_parada_ids"]
+        ) | cedis_iniciales
         return [self.child.to_representation(parada) for parada in paradas]
 
 
@@ -309,12 +319,8 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         return nombre_operativo_usuario(obj.entrega_confirmada_por)
 
     def get_geocerca_confiable(self, obj):
-        root_instance = getattr(self.root, "instance", None)
-        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
-            cache = self.context.get("_geocercas_confiables")
-            if cache is None:
-                cache = geocercas_confiables_por_parada(root_instance)
-                self.context["_geocercas_confiables"] = cache
+        cache = self.context.get("_geocercas_confiables")
+        if cache is not None:
             return obj.id in cache
         return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
 
@@ -324,6 +330,8 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     def get_recarga_cedis_resuelta(self, obj):
         if obj.punto.tipo != PuntoLogistico.TIPO_CEDIS:
             return False
+        if obj.orden == 1:
+            return True
 
         cache = self.context.get("_recarga_cedis_parada_ids")
         if cache is not None:

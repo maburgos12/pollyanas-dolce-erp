@@ -5734,6 +5734,32 @@ class LogisticaControlRutasTests(TestCase):
         parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
         parada_cedis.save(update_fields=["estado", "actualizado_en"])
         self._registrar_llegada_geocerca()
+        response_visitada = self.client.post(
+            url,
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega confirmada después de recarga CEDIS.",
+                    "client_event_id": "entrega-tras-cedis",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "legacy-test",
+                    },
+                    "evidencias": [{"comentario": "Entrega tras recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response_visitada.status_code, 400, response_visitada.content)
+        self.assertIn("recarga CEDIS", response_visitada.json()["detail"])
+
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga canónica confirmada",
+        )
         response = self.client.post(
             url,
             json.dumps(
@@ -5751,6 +5777,97 @@ class LogisticaControlRutasTests(TestCase):
             ),
             content_type="application/json",
         )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_api_cedis_inicial_no_bloquea_entrega_siguiente(self):
+        self.client.force_login(self.user)
+        self.parada.orden = 2
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS inicial entrega",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=1,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self._registrar_llegada_geocerca()
+
+        response = self.client.post(
+            reverse(
+                "api_logistica_ruta_parada_entrega",
+                kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id},
+            ),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega posterior a salida inicial.",
+                    "client_event_id": "entrega-tras-cedis-inicial",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "cedis-inicial-test",
+                    },
+                    "evidencias": [{"comentario": "CEDIS inicial no requiere recarga"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_api_recarga_cedis_legacy_habilita_entrega_siguiente(self):
+        self.client.force_login(self.user)
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS legacy entrega",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.567916",
+            longitud="-108.459969",
+            radio_geocerca_metros=120,
+        )
+        parada_cedis = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.parada.orden = 3
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=parada_cedis,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga histórica compatible",
+            metadata={"tipo": "recarga_cedis_pwa"},
+        )
+        self._registrar_llegada_geocerca()
+
+        response = self.client.post(
+            reverse(
+                "api_logistica_ruta_parada_entrega",
+                kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id},
+            ),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega posterior a recarga legacy.",
+                    "client_event_id": "entrega-tras-recarga-legacy",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "recarga-legacy-test",
+                    },
+                    "evidencias": [{"comentario": "Recarga legacy compatible"}],
+                }
+            ),
+            content_type="application/json",
+        )
+
         self.assertEqual(response.status_code, 200, response.content)
 
     @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
