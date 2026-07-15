@@ -1493,3 +1493,106 @@ class FusionPorCuentaTests(TestCase):
         self.assertFalse(sin_cuenta.activo)
         linea = LineaPresupuestoMensual.objects.get(rubro=con_cuenta)
         self.assertEqual(linea.monto_presupuesto, Decimal("140"))
+
+
+class BonosYConsumoTests(TestCase):
+    """PR4: bonos de producción/ventas y consumo de materia prima."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from bonos_produccion.models import BonoProduccionEmpleado, ConfigBonoPeriodo
+        from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
+
+        cls.periodo = date(2026, 6, 1)
+        cls.sucursal = Sucursal.objects.create(codigo="BNS01", nombre="Centro bonos")
+        cls.area = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+
+        empleado = Empleado.objects.create(
+            codigo="EMP-BONO-1", nombre="Prod uno", departamento=Empleado.DEP_PRODUCCION,
+            sucursal_ref=cls.sucursal,
+        )
+        periodo_prod = ConfigBonoPeriodo.objects.create(mes=6, anio=2026)
+        BonoProduccionEmpleado.objects.create(
+            periodo=periodo_prod, empleado=empleado,
+            monto_asistencia=Decimal("100"), monto_puntualidad=Decimal("50"),
+            total_a_pagar=Decimal("400"),
+        )
+        periodo_ven = ConfigBonoVentasPeriodo.objects.create(mes=6, anio=2026)
+        BonoVentasEmpleado.objects.create(
+            periodo=periodo_ven, empleado=empleado, sucursal=cls.sucursal,
+            monto_asistencia=Decimal("30"), monto_puntualidad=Decimal("20"),
+            total_a_pagar=Decimal("250"),
+        )
+
+    def _linea(self, concepto, reglas):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        for kwargs in reglas:
+            ReglaFuenteRubro.objects.create(rubro=rubro, **kwargs)
+        return LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=self.periodo, monto_presupuesto=Decimal("1")
+        )
+
+    def test_bonos_resultados_resta_componentes_sin_doble_conteo(self):
+        F = ReglaFuenteRubro
+        asistencia = self._linea("Bonos asistencia", [
+            {"tipo_fuente": F.FUENTE_BONO_PRODUCCION, "filtros": {"campo_monto": "monto_asistencia"}},
+            {"tipo_fuente": F.FUENTE_BONO_VENTAS, "filtros": {"campo_monto": "monto_asistencia"}},
+        ])
+        resultados = self._linea("Bonos por resultados", [
+            {"tipo_fuente": F.FUENTE_BONO_PRODUCCION, "filtros": {"campo_monto": "total_a_pagar"}},
+            {"tipo_fuente": F.FUENTE_BONO_PRODUCCION, "filtros": {"campo_monto": "monto_asistencia"}, "signo": -1},
+            {"tipo_fuente": F.FUENTE_BONO_PRODUCCION, "filtros": {"campo_monto": "monto_puntualidad"}, "signo": -1},
+            {"tipo_fuente": F.FUENTE_BONO_VENTAS, "filtros": {"campo_monto": "total_a_pagar"}},
+            {"tipo_fuente": F.FUENTE_BONO_VENTAS, "filtros": {"campo_monto": "monto_asistencia"}, "signo": -1},
+            {"tipo_fuente": F.FUENTE_BONO_VENTAS, "filtros": {"campo_monto": "monto_puntualidad"}, "signo": -1},
+        ])
+
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+
+        asistencia.refresh_from_db(); resultados.refresh_from_db()
+        self.assertEqual(asistencia.monto_real, Decimal("130.00"))  # 100 prod + 30 ventas
+        # resultados = (400-100-50) + (250-30-20) = 250 + 200 = 450
+        self.assertEqual(resultados.monto_real, Decimal("450.00"))
+        # Suma total de los rubros = total de ambos módulos (400+250) menos puntualidad aún sin rubro aquí
+        # (asistencia 130 + resultados 450 + puntualidad 70 = 650 = 400+250) ✓ sin doble conteo.
+
+    def test_consumo_mp_por_insumo(self):
+        from inventario.models import ConsumoInsumoMensual
+        from maestros.models import Insumo
+
+        harina = Insumo.objects.create(nombre="Harina Espiga")
+        ConsumoInsumoMensual.objects.create(
+            insumo=harina, periodo=self.periodo, costo_real=Decimal("12345.67")
+        )
+        linea = self._linea("Harina espiga", [
+            {"tipo_fuente": ReglaFuenteRubro.FUENTE_CONSUMO_MP, "filtros": {"insumo_id": harina.id}},
+        ])
+
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("12345.67"))
+        self.assertEqual(linea.fuente_real, "AUTO:CONSUMO_MP")
+
+    def test_seed_asigna_insumos_de_produccion(self):
+        from maestros.models import Insumo
+
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        produccion = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        azucar = Insumo.objects.create(nombre="Azúcar Estándar")
+        Insumo.objects.create(nombre="Azúcar Glass")
+        rubro = RubroPresupuesto.objects.create(
+            area=produccion, concepto="Azucar estandar", tipo=RubroPresupuesto.TIPO_COSTO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=self.periodo, monto_presupuesto=Decimal("1")
+        )
+
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        regla = ReglaFuenteRubro.objects.get(rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP)
+        self.assertEqual(regla.filtros["insumo_id"], azucar.id)

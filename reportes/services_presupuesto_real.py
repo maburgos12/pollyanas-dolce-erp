@@ -46,6 +46,21 @@ LEGACY_FUENTE_MAP = {
 
 NOMINA_CAMPOS_VALIDOS = ("salario_base", "bonos", "total_percepciones", "neto_calculado")
 VENTA_POS_CAMPOS_VALIDOS = {"total_venta", "total_venta_neta"}
+BONO_PROD_CAMPOS_VALIDOS = (
+    "total_a_pagar",
+    "monto_asistencia",
+    "monto_puntualidad",
+    "monto_produccion",
+    "monto_uniforme",
+    "monto_premio_embetunado",
+)
+BONO_VENTAS_CAMPOS_VALIDOS = (
+    "total_a_pagar",
+    "monto_asistencia",
+    "monto_puntualidad",
+    "monto_bono_entregas",
+    "bono_ventas",
+)
 
 
 def es_manual(fuente_real: str) -> bool:
@@ -241,6 +256,18 @@ class PresupuestoRealConsolidacionService:
             if "ventas" not in indices:
                 indices["ventas"] = self._build_ventas_index(periodo)
             return self._monto_venta_pos(regla, indices["ventas"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_BONO_PRODUCCION:
+            if "bono_prod" not in indices:
+                indices["bono_prod"] = self._build_bono_prod_index(periodo)
+            return self._monto_bono(regla, indices["bono_prod"], BONO_PROD_CAMPOS_VALIDOS)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_BONO_VENTAS:
+            if "bono_ventas" not in indices:
+                indices["bono_ventas"] = self._build_bono_ventas_index(periodo)
+            return self._monto_bono(regla, indices["bono_ventas"], BONO_VENTAS_CAMPOS_VALIDOS)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_CONSUMO_MP:
+            if "consumo" not in indices:
+                indices["consumo"] = self._build_consumo_index(periodo)
+            return self._monto_consumo_mp(regla, indices["consumo"])
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -389,6 +416,77 @@ class PresupuestoRealConsolidacionService:
             total += montos[campo]
             hubo_datos = True
         return (total, hubo_datos)
+
+
+    @staticmethod
+    def _build_bono_prod_index(periodo: date) -> list[dict]:
+        """Bonos de producción del mes por sucursal del empleado (todos los montos)."""
+        from bonos_produccion.models import BonoProduccionEmpleado
+
+        agregados = {campo: Sum(campo) for campo in BONO_PROD_CAMPOS_VALIDOS}
+        return list(
+            BonoProduccionEmpleado.objects.filter(
+                periodo__mes=periodo.month, periodo__anio=periodo.year
+            )
+            .values("empleado__sucursal_ref_id")
+            .annotate(**agregados)
+        )
+
+    @staticmethod
+    def _build_bono_ventas_index(periodo: date) -> list[dict]:
+        """Bonos de ventas del mes por sucursal (FK directa)."""
+        from bonos_ventas.models import BonoVentasEmpleado
+
+        agregados = {campo: Sum(campo) for campo in BONO_VENTAS_CAMPOS_VALIDOS}
+        return list(
+            BonoVentasEmpleado.objects.filter(
+                periodo__mes=periodo.month, periodo__anio=periodo.year
+            )
+            .values("sucursal_id")
+            .annotate(**agregados)
+        )
+
+    def _monto_bono(
+        self, regla: ReglaFuenteRubro, bono_index: list[dict], campos_validos: tuple
+    ) -> tuple[Decimal, bool]:
+        filtros = regla.filtros or {}
+        campo = filtros.get("campo_monto", "total_a_pagar")
+        if campo not in campos_validos:
+            raise ValueError(f"campo_monto de bono inválido: {campo}")
+        sucursal = regla.sucursal_efectiva()
+        sucursal_id = sucursal.id if sucursal is not None else None
+
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in bono_index:
+            fila_sucursal = fila.get("sucursal_id", fila.get("empleado__sucursal_ref_id"))
+            if sucursal_id is not None and fila_sucursal != sucursal_id:
+                continue
+            total += fila[campo] or Decimal("0")
+            hubo_datos = True
+        return (total, hubo_datos)
+
+    @staticmethod
+    def _build_consumo_index(periodo: date) -> dict[int, Decimal]:
+        """Costo real de consumo del mes por insumo."""
+        from inventario.models import ConsumoInsumoMensual
+
+        return {
+            fila["insumo_id"]: fila["costo"] or Decimal("0")
+            for fila in ConsumoInsumoMensual.objects.filter(periodo=periodo)
+            .values("insumo_id")
+            .annotate(costo=Sum("costo_real"))
+        }
+
+    def _monto_consumo_mp(
+        self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal]
+    ) -> tuple[Decimal, bool]:
+        insumo_id = (regla.filtros or {}).get("insumo_id")
+        if not insumo_id:
+            raise ValueError("regla CONSUMO_MP sin insumo_id en filtros")
+        if int(insumo_id) not in consumo_index:
+            return (Decimal("0"), False)
+        return (consumo_index[int(insumo_id)], True)
 
 
 def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
