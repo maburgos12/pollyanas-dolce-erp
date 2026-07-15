@@ -893,7 +893,7 @@
         </section>
     </div>
 
-    <script src="{% static 'js/searchable_selects.js' %}?v=20260613-calculo-insumos-a11y-v1" defer></script>
+    <script src="{% static 'js/searchable_selects.js' %}?v=20260715-mantenimiento-guardar-v2" defer></script>
     <script src="{% static 'js/pollyana_ops_ui.js' %}?v=20260614-ui100-v1" defer></script>
     <script src="{% static 'js/erp_actions.js' %}?v=20260714-stock-actions-v2" defer></script>
 
@@ -1077,7 +1077,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20260711-plantilla-point-v15').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20260715-mantenimiento-guardar-v16').catch(function () {});
         }
     })();
     </script>

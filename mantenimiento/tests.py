@@ -916,7 +916,7 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertIn("sucursal.disabled = esUnidad;", source)
         self.assertIn('option.textContent = "Seleccionar unidad...";', source)
         self.assertIn("const visible = esUnidad ||", source)
-        self.assertIn("20260714-flota-sin-sucursal-v1", source)
+        self.assertIn("20260715-mantenimiento-guardar-v2", source)
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
         self.assertIn(".mant-field[hidden]{display:none}", css)
 
@@ -1144,3 +1144,29 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertContains(response, "+ Falla / imprevisto")
         self.assertContains(response, "+ Servicio sin orden")
         self.assertContains(response, "+ Programar servicio")
+
+
+class MantenimientoServiceFormMarkupTests(TestCase):
+    databases = []
+
+    def test_direct_service_form_reports_client_validation_and_normalizes_scope(self):
+        source = (Path(settings.BASE_DIR) / "templates/mantenimiento/dashboard.html").read_text()
+
+        self.assertIn('id="ordenServicioForm"', source)
+        self.assertIn('id="ordenServicioError"', source)
+        self.assertIn('class="mant-form-error"', source)
+        self.assertIn("form.addEventListener(\"submit\"", source)
+        self.assertIn("setAlcance(alcance.value);", source)
+        self.assertIn("form.checkValidity()", source)
+        self.assertIn('unidad_id: "Unidad logística"', source)
+        self.assertIn("field.name && !field.disabled", source)
+        self.assertIn("syncSearchableState(sucursal, !esUnidad, !esUnidad);", source)
+        base = (Path(settings.BASE_DIR) / "templates/base.html").read_text()
+        service_worker = (Path(settings.BASE_DIR) / "static/erp-sw.js").read_text()
+        searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
+        css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
+        self.assertIn("20260715-mantenimiento-guardar-v16", base)
+        self.assertIn("20260715-mantenimiento-guardar-v2", base)
+        self.assertIn("pollyanas-erp-shell-v16-mantenimiento-guardar", service_worker)
+        self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
+        self.assertIn(".mant-form-error", css)

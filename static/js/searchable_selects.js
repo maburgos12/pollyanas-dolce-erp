@@ -339,6 +339,7 @@
         var form = select.form;
         if (form) {
             form.addEventListener("submit", function (event) {
+                if (select.disabled || input.disabled) return;
                 if (!validateTypedValue()) {
                     event.preventDefault();
                     input.reportValidity();
