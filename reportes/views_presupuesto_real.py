@@ -116,7 +116,9 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     periodo = date(selected_year, selected_month, 1)
 
     lineas = (
-        LineaPresupuestoMensual.objects.filter(periodo__year=selected_year, version=selected_version)
+        LineaPresupuestoMensual.objects.filter(
+            periodo__year=selected_year, version=selected_version, rubro__activo=True
+        )
         .select_related("rubro", "rubro__area", "rubro__sucursal")
         .order_by("rubro__area__orden", "rubro__concepto", "rubro__sucursal__codigo")
     )
