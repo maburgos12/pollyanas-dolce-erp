@@ -623,7 +623,11 @@ def _reclamar_lease_recarga_para_procesar(
 
 
 def _agendar_recarga_cedis_si_pendiente(*, ruta: RutaEntrega, parada: ParadaRuta, user) -> bool:
-    if parada.punto.tipo != PuntoLogistico.TIPO_CEDIS or parada.estado != ParadaRuta.ESTADO_VISITADA:
+    if (
+        parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
+        or parada.orden == 1
+        or parada.estado != ParadaRuta.ESTADO_VISITADA
+    ):
         return False
     lease_token = _reclamar_lease_recarga_para_encolar(ruta=ruta, parada=parada, user=user)
     if not lease_token:

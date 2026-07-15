@@ -189,6 +189,17 @@ def procesar_recarga_cedis_automatica(
                 lease_token=lease_token,
             )
             raise
+        except Exception as exc:
+            _actualizar_lease_recarga(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                estado="BACKOFF",
+                estado_sync=getattr(exc, "estado_sync", "ERROR_NO_CLASIFICADO"),
+                proximo_intento_duracion=RECARGA_CEDIS_BACKOFF,
+                error=exc,
+                lease_token=lease_token,
+            )
+            raise
 
         estado_sync = (evento.metadata or {}).get("estado_sync", "ACTUALIZADO")
         _actualizar_lease_recarga(

@@ -41,6 +41,7 @@ from .services_carga_ruta import (
     PointSyncUnavailableError,
     RecargaCedisPendienteEnviado,
     RecargaCedisPointError,
+    RecargaCedisSnapshotObsoleto,
     RecargaCedisSinLineasPoint,
     _ordenes_tramo_carga_actual,
     _registrar_alerta_recarga_sync,
@@ -2313,6 +2314,51 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(delay.call_count, 3)
 
     @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
+    def test_permanencia_cedis_inicial_marca_visita_sin_agendar_recarga(self, delay):
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=1000,
+            nivel_gas_salida="lleno",
+            foto_tablero_salida=SimpleUploadedFile(
+                "tablero-cedis-inicial.gif",
+                b"gif",
+                content_type="image/gif",
+            ),
+        )
+        self.cedis.orden = 99
+        self.cedis.save(update_fields=["orden", "actualizado_en"])
+        self.parada_previa.orden = 2
+        self.parada_previa.save(update_fields=["orden", "actualizado_en"])
+        self.cedis.orden = 1
+        self.cedis.save(update_fields=["orden", "actualizado_en"])
+        payload = {
+            "latitud": str(self.cedis.latitud_geocerca),
+            "longitud": str(self.cedis.longitud_geocerca),
+            "precision_metros": "8.00",
+            "tracking_origen": "automatico_pwa",
+        }
+        registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+        EventoRuta.objects.filter(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            metadata__origen_servicio="registrar_ubicacion_ruta",
+        ).update(creado_en=timezone.now() - timedelta(minutes=6))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+
+        self.cedis.refresh_from_db()
+        self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
+        delay.assert_not_called()
+        self.assertFalse(
+            EventoRuta.objects.filter(
+                clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+            ).exists()
+        )
+
+    @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
     def test_resultado_point_aplica_backoff_durable_y_luego_reintenta(self, delay):
         from .services_rutas_control import _agendar_recarga_cedis_si_pendiente
         from .tasks import procesar_recarga_cedis_automatica
@@ -2418,6 +2464,85 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
                         tipo=EventoRuta.TIPO_RECARGA_CEDIS,
                     ).exists()
                 )
+
+    def test_task_error_no_clasificado_sale_de_en_proceso_y_propaga(self):
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
+        from .tasks import procesar_recarga_cedis_automatica
+
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        lease_token = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
+
+        with patch(
+            "logistica.tasks.registrar_recarga_cedis",
+            side_effect=RecargaCedisSnapshotObsoleto("Snapshot cambió"),
+        ), self.assertRaises(RecargaCedisSnapshotObsoleto):
+            procesar_recarga_cedis_automatica(
+                ruta_id=self.ruta.id,
+                parada_id=self.cedis.id,
+                user_id=self.user.id,
+                lease_token=lease_token,
+            )
+
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        self.assertEqual(lease.metadata["estado"], "BACKOFF")
+        self.assertEqual(lease.metadata["estado_sync"], "SNAPSHOT_OBSOLETO")
+        self.assertEqual(lease.metadata["ultimo_error"], "RecargaCedisSnapshotObsoleto")
+        self.assertIsNotNone(lease.metadata["proximo_intento_en"])
+
+    def test_task_error_token_viejo_no_pisa_nueva_generacion(self):
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
+        from .tasks import procesar_recarga_cedis_automatica
+
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        token_viejo = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
+        tokens_nuevos = []
+
+        def reemplazar_generacion_y_fallar(**kwargs):
+            lease = EventoRuta.objects.get(
+                clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+            )
+            metadata = dict(lease.metadata)
+            metadata["lease_hasta"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+            lease.metadata = metadata
+            lease.save(update_fields=["metadata"])
+            tokens_nuevos.append(
+                _reclamar_lease_recarga_para_encolar(
+                    ruta=self.ruta,
+                    parada=self.cedis,
+                    user=self.user,
+                )
+            )
+            raise ValidationError("Falla posterior de generación vieja")
+
+        with patch(
+            "logistica.tasks.registrar_recarga_cedis",
+            side_effect=reemplazar_generacion_y_fallar,
+        ), self.assertRaises(ValidationError):
+            procesar_recarga_cedis_automatica(
+                ruta_id=self.ruta.id,
+                parada_id=self.cedis.id,
+                user_id=self.user.id,
+                lease_token=token_viejo,
+            )
+
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        self.assertNotEqual(token_viejo, tokens_nuevos[0])
+        self.assertEqual(lease.metadata["lease_token"], tokens_nuevos[0])
+        self.assertEqual(lease.metadata["estado"], "ENCOLADA")
 
     @patch("logistica.tasks.registrar_recarga_cedis")
     def test_task_recarga_exitosa_reporta_evento_reconciliado(self, registrar):
