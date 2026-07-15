@@ -693,8 +693,8 @@ class VentasPosMatchingTests(TestCase):
         self.assertNotIn("productos_pos", filtros)
 
     def test_sin_match_queda_reportado_y_sin_asignacion(self):
-        """'BEBIDAS/OTROS · REFRESCO' no cruza con nada: regla sin asignación."""
-        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        """Un concepto sin equivalente POS ni override queda sin asignación."""
+        rubro = self._rubro("BEBIDAS/OTROS · KOMBUCHA")
         filtros = self._filtros_de(rubro)
         self.assertNotIn("productos_pos", filtros)
         self.assertNotIn("categoria_pos", filtros)
@@ -1153,3 +1153,98 @@ class MatchingProductoSoloTests(TestCase):
         self.assertEqual(
             ReglaFuenteRubro.objects.get(rubro=r_crunch).filtros["productos_pos"], ["Pastel de Crunch Chico"]
         )
+
+
+class MatchingRefinadoTests(TestCase):
+    """Apóstrofes, desempate por producto y overrides de CSV en ventas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        cls.branch = PointBranch.objects.create(external_id="REF-BR", name="Centro")
+        for cat, prod in [
+            ("Pastel Chico", "Pastel de Snickers Chico"),
+            ("Pastel Grande", "Pastel de Fresas Con Crema Grande"),
+            ("Vasos Grande", "Vaso Fresas con Crema Grande"),
+            ("Coca-cola", "COCA-COLA 450 ML"),
+        ]:
+            PointSalesDailyProductFact.objects.create(
+                branch=cls.branch, sale_date=date(2026, 5, 3), sucursal_nombre="Centro",
+                categoria=cat, producto_nombre_historico=prod,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+    def _rubro(self, concepto):
+        r = RubroPresupuesto.objects.create(
+            area=self.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=r, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1")
+        )
+        return r
+
+    def test_apostrofe_no_rompe_el_match(self):
+        """SNICKER'S cruza con Snickers (apóstrofe eliminado, no separado)."""
+        rubro = self._rubro("PASTEL CHICO · SNICKER'S")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        filtros = ReglaFuenteRubro.objects.get(rubro=rubro).filtros
+        self.assertEqual(filtros["productos_pos"], ["Pastel de Snickers Chico"])
+
+    def test_desempate_por_producto_no_por_rubro(self):
+        """El vaso preparado gana SU producto aunque el rubro de pastel tenga
+        mejor score global en el suyo propio."""
+        r_pastel = self._rubro("PASTEL GRANDE · FRESAS CON CREMA")
+        r_vaso = self._rubro("VASO PREPARADO · FRESAS CON CREMA GDE")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        filtros_pastel = ReglaFuenteRubro.objects.get(rubro=r_pastel).filtros
+        filtros_vaso = ReglaFuenteRubro.objects.get(rubro=r_vaso).filtros
+        self.assertIn("Pastel de Fresas Con Crema Grande", filtros_pastel.get("productos_pos", []))
+        self.assertNotIn("Vaso Fresas con Crema Grande", filtros_pastel.get("productos_pos", []))
+        self.assertEqual(filtros_vaso.get("productos_pos"), ["Vaso Fresas con Crema Grande"])
+
+    def test_override_de_csv_manda_sobre_la_autoasignacion(self):
+        """El rubro con override en el CSV recibe UNA regla, la del CSV."""
+        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        reglas = list(ReglaFuenteRubro.objects.filter(rubro=rubro))
+        self.assertEqual(len(reglas), 1)
+        self.assertEqual(reglas[0].filtros.get("categoria_pos"), "Coca-cola")
+
+
+class FueraProyeccionTests(TestCase):
+    """Productos con venta real sin proyección aparecen en su propia sección."""
+
+    def test_producto_no_proyectado_se_reporta(self):
+        from recetas.models import PronosticoVenta, Receta
+
+        from reportes.services_ventas_unidades import comparativo_ventas_unidades
+
+        proyectada = Receta.objects.create(nombre="Bollo Lotus", hash_contenido="fp-lotus")
+        temporada = Receta.objects.create(nombre="Rosca de Reyes", hash_contenido="fp-rosca")
+        PronosticoVenta.objects.create(
+            receta=proyectada, periodo="2026-05", cantidad=Decimal("10"), fuente="PRESUPUESTO_2026"
+        )
+        branch = PointBranch.objects.create(external_id="FP-BR", name="Centro")
+
+        def venta(receta, producto, monto, qty):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 5, 9), sucursal_nombre="Centro",
+                categoria="X", producto_nombre_historico=producto, receta=receta,
+                total_cantidad=Decimal(qty), total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+
+        venta(proyectada, "Bollo Lotus", "500", 10)
+        venta(temporada, "Rosca de Reyes", "800", 4)      # receta sin proyección
+        venta(None, "Producto Nuevo SV", "300", 6)         # sin receta ligada
+
+        resultado = comparativo_ventas_unidades(date(2026, 5, 1), hoy=date(2026, 5, 31))
+        fuera = resultado["fuera_proyeccion"]
+        nombres = [f["producto"] for f in fuera["top"]]
+        self.assertIn("Rosca de Reyes", nombres)
+        self.assertIn("Producto Nuevo SV", nombres)
+        self.assertNotIn("Bollo Lotus", nombres)
+        self.assertEqual(fuera["total_venta"], Decimal("1100"))
+        self.assertEqual(fuera["total_unidades"], Decimal("10"))

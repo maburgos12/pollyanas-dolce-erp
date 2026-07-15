@@ -408,7 +408,9 @@ class PresupuestoMaestroImportService:
         current = " ".join(label for label in current_labels if label)
         if kind == "budget_qty":
             # Columna CANTIDAD de la proyección (unidades propuestas del mes).
-            is_qty = "cant" in current
+            # Algunas hojas cambian el encabezado a "V. UNIDADES" a partir de
+            # cierto mes; ambas variantes cuentan como cantidad.
+            is_qty = ("cant" in current or "unidades" in current) and "venta" not in current
             return is_qty and ("proy" in labels or "proyeccion" in labels)
         is_sale_amount = "venta" in current and "cant" not in current and "cantidad" not in current
         if not is_sale_amount:

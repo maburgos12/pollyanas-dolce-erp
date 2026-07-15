@@ -246,6 +246,34 @@
   {% else %}
   <div class="alert alert-info">Aún no hay unidades proyectadas para este mes. Se cargan al importar la Proyección de Ventas (Presupuesto Maestro → Importadores), que ahora también guarda las cantidades por producto.</div>
   {% endif %}
+
+  {% if ventas_unidades.fuera_proyeccion.total_venta %}
+  <div class="card-header" style="margin-top:20px;">Ventas fuera de la proyección (nuevos / temporada)</div>
+  <p class="muted">Productos que trajeron venta este mes pero nadie proyectó: ${{ ventas_unidades.fuera_proyeccion.total_venta|floatformat:2|intcomma }} en {{ ventas_unidades.fuera_proyeccion.total_unidades|floatformat:0|intcomma }} unidades. Cuentan en la venta real total; considéralos para la siguiente proyección.</p>
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr><th>Producto</th><th>Unidades</th><th>$ Venta</th></tr>
+      </thead>
+      <tbody>
+        {% for fila in ventas_unidades.fuera_proyeccion.top %}
+        <tr>
+          <td>{{ fila.producto }}</td>
+          <td>{{ fila.unidades|floatformat:0|intcomma }}</td>
+          <td>${{ fila.venta|floatformat:2|intcomma }}</td>
+        </tr>
+        {% endfor %}
+        {% if ventas_unidades.fuera_proyeccion.resto_productos %}
+        <tr>
+          <td class="muted">… y {{ ventas_unidades.fuera_proyeccion.resto_productos }} producto(s) más</td>
+          <td></td>
+          <td class="muted">${{ ventas_unidades.fuera_proyeccion.resto_venta|floatformat:2|intcomma }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 

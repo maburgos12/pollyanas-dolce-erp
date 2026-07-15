@@ -39,7 +39,7 @@ ABREVIATURAS = {
     "pz": "piezas",
     "10pz": "10 piezas",
 }
-STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "sabor", "pastel"}
+STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "con", "sabor", "pastel", "preparado", "preparados"}
 
 
 def canon_pos(texto: object) -> str:
@@ -47,6 +47,7 @@ def canon_pos(texto: object) -> str:
     acentos ni signos, abreviaturas expandidas, sin palabras vacías, tokens
     ordenados. "SNICKER'S" y "Snickers" quedan iguales."""
     base = normalize_header_text(texto)
+    base = base.replace("'", "").replace("\u2019", "")  # SNICKER'S == Snickers
     base = re.sub(r"[^a-z0-9 ]+", " ", base)
     tokens: set[str] = set()
     for tok in base.split():
@@ -142,9 +143,18 @@ class Command(BaseCommand):
                     )
 
         # --- ingresos de Ventas: matching difuso contra nombres POS reales ---
+        # Los rubros con regla VENTA_POS definida en el CSV (overrides de
+        # negocio) NO se auto-asignan: el CSV manda.
+        overrides_ventas = {
+            rubro_id
+            for rubro_id, reglas in planes.items()
+            if any(r["tipo_fuente"] == ReglaFuenteRubro.FUENTE_VENTA_POS for r in reglas)
+        }
         asignaciones_ventas: list[str] = []
         if not options["sin_ventas"]:
-            for rubro, filtros, nota in self._asignaciones_ventas(asignaciones_ventas, avisos):
+            for rubro, filtros, nota in self._asignaciones_ventas(
+                asignaciones_ventas, avisos, excluidos=overrides_ventas
+            ):
                 planes.setdefault(rubro.id, []).append(
                     {
                         "tipo_fuente": ReglaFuenteRubro.FUENTE_VENTA_POS,
@@ -222,7 +232,7 @@ class Command(BaseCommand):
     # Matching difuso rubros de Ventas → nombres POS                      #
     # ------------------------------------------------------------------ #
 
-    def _asignaciones_ventas(self, asignaciones: list[str], avisos: list[str]):
+    def _asignaciones_ventas(self, asignaciones: list[str], avisos: list[str], *, excluidos=frozenset()):
         """Asigna cada rubro de Ventas a nombres POS reales.
 
         Devuelve tuplas (rubro, filtros, nota). La asignación se decide por
@@ -246,7 +256,7 @@ class Command(BaseCommand):
 
         ventas = RubroPresupuesto.objects.filter(
             area__codigo="ventas", tipo=RubroPresupuesto.TIPO_INGRESO, activo=True
-        ).select_related("sucursal")
+        ).exclude(id__in=excluidos).select_related("sucursal")
 
         producto_a_categorias: dict[str, set[str]] = {}
         for cat, prod, _canon, _canon_solo in canon_pares:
@@ -266,8 +276,13 @@ class Command(BaseCommand):
             con_score = [c for c in candidatos if c[2] >= SCORE_PRODUCTO]
             if con_score:
                 mejor = max(con_score, key=lambda c: c[2])
-                productos = sorted({prod for _, prod, _ in con_score})
-                propuestas.append([rubro, mejor[2], "", productos, f"POS: {', '.join(productos)}"])
+                scores_producto = {}
+                for _cat, prod, score in con_score:
+                    scores_producto[prod] = max(scores_producto.get(prod, 0), score)
+                productos = sorted(scores_producto)
+                propuestas.append(
+                    [rubro, mejor[2], "", productos, f"POS: {', '.join(productos)}", scores_producto]
+                )
                 continue
 
             # Sin producto: ¿el "producto" del rubro es una categoría POS
@@ -277,30 +292,33 @@ class Command(BaseCommand):
             mejor_cat = max(cat_scores, key=lambda c: c[1], default=None)
             if mejor_cat and mejor_cat[1] >= SCORE_CATEGORIA:
                 propuestas.append(
-                    [rubro, mejor_cat[1], mejor_cat[0], [], f"POS categoría completa: {mejor_cat[0]}"]
+                    [rubro, mejor_cat[1], mejor_cat[0], [], f"POS categoría completa: {mejor_cat[0]}", {}]
                 )
                 continue
 
-            propuestas.append([rubro, 0, "", [], "SIN MATCH POS — asignar en admin"])
+            propuestas.append([rubro, 0, "", [], "SIN MATCH POS — asignar en admin", {}])
 
-        # Un producto POS no puede pertenecer a dos rubros: gana el mayor score.
+        # Un producto POS no puede pertenecer a dos rubros: gana el rubro con
+        # mayor score EN ESE PRODUCTO (no el de mejor score global — un rubro
+        # con match perfecto en su producto propio no debe robar los ajenos).
+        reclamos = []  # (score_producto, orden_estable, propuesta, prod)
+        for orden, propuesta in enumerate(propuestas):
+            for prod in propuesta[3]:
+                reclamos.append((propuesta[5].get(prod, 0), -orden, propuesta, prod))
         dueno_por_producto: dict[str, list] = {}
-        for propuesta in sorted(propuestas, key=lambda p: -p[1]):
-            rubro, score, _cat, productos, _nota = propuesta
-            ganados = []
-            for prod in productos:
-                previo = dueno_por_producto.get(prod)
-                if previo is None:
-                    dueno_por_producto[prod] = propuesta
-                    ganados.append(prod)
-                else:
-                    avisos.append(
-                        f"conflicto POS: '{prod}' lo reclama '{rubro.concepto}' "
-                        f"(score {score:.0f}) pero ya es de '{previo[0].concepto}' (score {previo[1]:.0f})"
-                    )
-            if productos:
-                # Conserva solo los productos realmente ganados por este rubro.
-                propuesta[3][:] = ganados
+        for score_prod, _orden, propuesta, prod in sorted(reclamos, key=lambda r: (-r[0], r[1])):
+            previo = dueno_por_producto.get(prod)
+            if previo is None:
+                dueno_por_producto[prod] = propuesta
+            elif previo is not propuesta:
+                avisos.append(
+                    f"conflicto POS: '{prod}' lo reclama '{propuesta[0].concepto}' "
+                    f"(score {score_prod:.0f}) pero ya es de '{previo[0].concepto}' "
+                    f"(score {previo[5].get(prod, 0):.0f})"
+                )
+        for propuesta in propuestas:
+            if propuesta[3]:
+                propuesta[3][:] = [p for p in propuesta[3] if dueno_por_producto.get(p) is propuesta]
 
         # Exclusividad categoría/producto (hallazgo de auditoría con doble
         # conteo real): una regla de categoría COMPLETA no puede convivir con
@@ -320,7 +338,7 @@ class Command(BaseCommand):
                 propuesta[4] = "SIN MATCH POS (categoría solapada) — asignar en admin"
                 propuesta[1] = 0
 
-        for rubro, score, categoria_pos, productos, nota in propuestas:
+        for rubro, score, categoria_pos, productos, nota, _scores in propuestas:
             filtros: dict[str, object] = {"campo_monto": "total_venta"}
             if productos:
                 filtros["productos_pos"] = productos
