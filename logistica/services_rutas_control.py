@@ -122,7 +122,7 @@ def liberar_ruta_con_turno(
 
     ruta = (
         RutaEntrega.objects.select_for_update(of=("self",))
-        .select_related("repartidor", "unidad_operativa", "bitacora_salida")
+        .select_related("repartidor", "acompanante", "unidad_operativa", "bitacora_salida")
         .get(pk=ruta.pk)
     )
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
@@ -131,6 +131,16 @@ def liberar_ruta_con_turno(
         raise LiberacionRutaError("No se puede liberar la ruta: asigna repartidor.")
     if not ruta.unidad_operativa_id:
         raise LiberacionRutaError("No se puede liberar la ruta: asigna unidad operativa.")
+
+    try:
+        actor_repartidor = actor.repartidor_logistica
+    except (AttributeError, Repartidor.DoesNotExist):
+        actor_repartidor = None
+    operador_turno = (
+        actor_repartidor
+        if repartidor_participa_en_ruta(ruta=ruta, repartidor=actor_repartidor)
+        else ruta.repartidor
+    )
 
     rutas_activas_ajenas = (
         RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA)
@@ -162,7 +172,7 @@ def liberar_ruta_con_turno(
         turnos_abiertos = list(
             BitacoraSalidaLlegada.objects.select_for_update(of=("self",))
             .select_related("repartidor", "unidad")
-            .filter(repartidor_id=ruta.repartidor_id, cerrada=False)
+            .filter(repartidor_id=operador_turno.id, cerrada=False)
             .order_by("-hora_salida", "-id")
             [:2]
         )
@@ -178,7 +188,7 @@ def liberar_ruta_con_turno(
                 .filter(pk=bitacora_solicitada_id, cerrada=False)
                 .first()
             )
-            if bitacora_explicita and bitacora_explicita.repartidor_id != ruta.repartidor_id:
+            if bitacora_explicita and bitacora_explicita.repartidor_id != operador_turno.id:
                 raise LiberacionRutaError(
                     "El turno activo pertenece a otro repartidor.",
                     error_code="repartidor_ruta_distinto",
@@ -194,7 +204,7 @@ def liberar_ruta_con_turno(
             "El repartidor no tiene un turno activo.",
             error_code="sin_turno",
         )
-    if bitacora.repartidor_id != ruta.repartidor_id:
+    if bitacora.repartidor_id != operador_turno.id:
         raise LiberacionRutaError(
             "El turno activo pertenece a otro repartidor.",
             error_code="repartidor_ruta_distinto",
@@ -736,7 +746,7 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
         raise ValidationError("La ruta debe tener una unidad asignada antes de aceptar seguimiento.")
 
     repartidor = _repartidor_usuario(user)
-    if ruta.repartidor_id != repartidor.id:
+    if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
         raise PermissionDenied("Esta ruta está asignada a otro repartidor.")
 
     bitacora = _bitacora_abierta(repartidor, ruta)
