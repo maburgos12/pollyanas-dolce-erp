@@ -1,4 +1,4 @@
-area,concepto,tipo_fuente,categoria_gasto,filtros,notas
+area,concepto,tipo_fuente,categoria_gasto,filtros,notas,signo
 nomina,SUELDO,NOMINA,,"{""campo_monto"": ""salario_base""}",Suma de salario base de todos los departamentos
 nomina,IMSS,MANUAL,,,Sin fuente en ERP
 nomina,INFONAVIT,MANUAL,,,Sin fuente en ERP
@@ -64,3 +64,15 @@ ventas,PAN DE LA CASA · EMPANADA DE MANZANA,VENTA_POS,,"{""productos_pos"": [""
 ventas,PASTEL REBANADAS · 3 LECHES IND,VENTA_POS,,"{""productos_pos"": [""Pastel de 3 Leches Individual""], ""campo_monto"": ""total_venta""}",Override: vive en la categoría Individual
 ventas,PAY REBANADA · GUAYABA,VENTA_POS,,"{""productos_pos"": [""Sabor Guayaba Rebanada""], ""campo_monto"": ""total_venta""}",Override: nombre corto en Point
 ventas,PAY REBANADA · GALLETA Y CAJETA,VENTA_POS,,"{""productos_pos"": [""Sabor Galleta con Cajeta Rebanada""], ""campo_monto"": ""total_venta""}",Override: nombre corto en Point
+nomina,BONOS ASISTENCIA,BONO_PRODUCCION,,"{""campo_monto"": ""monto_asistencia""}",Bono de asistencia producción,
+nomina,BONOS ASISTENCIA,BONO_VENTAS,,"{""campo_monto"": ""monto_asistencia""}",Bono de asistencia ventas,
+nomina,BONOS PUNTUALIDAD,BONO_PRODUCCION,,"{""campo_monto"": ""monto_puntualidad""}",Bono de puntualidad producción,
+nomina,BONOS PUNTUALIDAD,BONO_VENTAS,,"{""campo_monto"": ""monto_puntualidad""}",Bono de puntualidad ventas,
+nomina,BONOS POR RESULTADOS,BONO_PRODUCCION,,"{""campo_monto"": ""total_a_pagar""}",Total bonos producción,
+nomina,BONOS POR RESULTADOS,BONO_PRODUCCION,,"{""campo_monto"": ""monto_asistencia""}",Resta: asistencia va en su rubro,-1
+nomina,BONOS POR RESULTADOS,BONO_PRODUCCION,,"{""campo_monto"": ""monto_puntualidad""}",Resta: puntualidad va en su rubro,-1
+nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""total_a_pagar""}",Total bonos ventas,
+nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""monto_asistencia""}",Resta: asistencia va en su rubro,-1
+nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""monto_puntualidad""}",Resta: puntualidad va en su rubro,-1
+produccion,Bono por resultados,BONO_PRODUCCION,,"{""campo_monto"": ""total_a_pagar""}",Bonos del módulo de producción,
+gastos-venta,Bono por resultados,BONO_VENTAS,,"{""campo_monto"": ""total_a_pagar""}",Bonos de ventas de la sucursal del rubro,

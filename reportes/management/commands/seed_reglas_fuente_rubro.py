@@ -89,6 +89,11 @@ class Command(BaseCommand):
             action="store_true",
             help="No generar reglas VENTA_POS para los rubros de ingresos de Ventas.",
         )
+        parser.add_argument(
+            "--sin-insumos",
+            action="store_true",
+            help="No generar reglas CONSUMO_MP para los insumos de Producción.",
+        )
 
     def handle(self, *args, **options):
         csv_path = Path(options["csv"])
@@ -132,12 +137,19 @@ class Command(BaseCommand):
                 if not rubros:
                     avisos.append(f"fila {idx}: sin rubros para area={area} concepto='{row.get('concepto')}'")
                     continue
+                try:
+                    signo = int(row.get("signo") or 1)
+                except ValueError:
+                    raise CommandError(f"fila {idx}: signo inválido '{row.get('signo')}'")
+                if signo not in (1, -1):
+                    raise CommandError(f"fila {idx}: signo debe ser 1 o -1")
                 for rubro in rubros:
                     planes.setdefault(rubro.id, []).append(
                         {
                             "tipo_fuente": tipo,
                             "categoria_gasto": categoria,
                             "filtros": filtros,
+                            "signo": signo,
                             "notas": (row.get("notas") or "").strip()[:200],
                         }
                     )
@@ -158,6 +170,21 @@ class Command(BaseCommand):
                 planes.setdefault(rubro.id, []).append(
                     {
                         "tipo_fuente": ReglaFuenteRubro.FUENTE_VENTA_POS,
+                        "categoria_gasto": None,
+                        "filtros": filtros,
+                        "notas": nota[:200],
+                    }
+                )
+
+        # --- insumos de Producción: matching difuso contra maestros.Insumo ---
+        asignaciones_insumos: list[str] = []
+        if not options.get("sin_insumos"):
+            for rubro, filtros, nota in self._asignaciones_insumos(
+                asignaciones_insumos, excluidos=set(planes.keys())
+            ):
+                planes.setdefault(rubro.id, []).append(
+                    {
+                        "tipo_fuente": ReglaFuenteRubro.FUENTE_CONSUMO_MP,
                         "categoria_gasto": None,
                         "filtros": filtros,
                         "notas": nota[:200],
@@ -224,6 +251,10 @@ class Command(BaseCommand):
         if asignaciones_ventas:
             self.stdout.write("Asignaciones ventas POS (auditar):")
             for linea in asignaciones_ventas:
+                self.stdout.write(f"  {linea}")
+        if asignaciones_insumos:
+            self.stdout.write("Asignaciones insumos de producción (auditar):")
+            for linea in asignaciones_insumos:
                 self.stdout.write(f"  {linea}")
         for aviso in avisos:
             self.stdout.write(self.style.WARNING(f"AVISO {aviso}"))
@@ -347,3 +378,49 @@ class Command(BaseCommand):
             etiqueta = "SIN MATCH" if not productos and not categoria_pos else f"score {score:.0f}"
             asignaciones.append(f"{rubro.concepto} -> {nota} [{etiqueta}]")
             yield rubro, filtros, nota
+
+    # ------------------------------------------------------------------ #
+    # Matching difuso rubros de Producción → maestros.Insumo              #
+    # ------------------------------------------------------------------ #
+
+    def _asignaciones_insumos(self, asignaciones: list[str], *, excluidos=frozenset()):
+        """Asigna rubros de Producción (materia prima del Excel) a Insumos.
+
+        Solo considera rubros SIN plan previo (el CSV manda). La asignación
+        queda explícita en filtros["insumo_id"]; un insumo no puede pertenecer
+        a dos rubros (gana el mayor score). Sin match → se reporta.
+        """
+        from maestros.models import Insumo
+
+        insumos = [(i.id, i.nombre, canon_pos(i.nombre)) for i in Insumo.objects.all()]
+        if not insumos:
+            return
+
+        rubros = (
+            RubroPresupuesto.objects.filter(area__codigo="produccion", activo=True)
+            .exclude(id__in=excluidos)
+            .order_by("concepto")
+        )
+        propuestas = []  # [rubro, score, insumo_id, nombre]
+        for rubro in rubros:
+            objetivo = canon_pos(rubro.concepto)
+            candidatos = [(iid, nombre, _score(objetivo, canon)) for iid, nombre, canon in insumos]
+            mejor = max(candidatos, key=lambda c: c[2], default=None)
+            if mejor and mejor[2] >= SCORE_PRODUCTO:
+                propuestas.append([rubro, mejor[2], mejor[0], mejor[1]])
+            else:
+                asignaciones.append(f"{rubro.concepto} -> SIN MATCH INSUMO")
+
+        # Exclusividad: un insumo pertenece a un solo rubro (mayor score gana).
+        dueno: dict[int, list] = {}
+        for propuesta in sorted(propuestas, key=lambda p: -p[1]):
+            if propuesta[2] not in dueno:
+                dueno[propuesta[2]] = propuesta
+        for rubro, score, insumo_id, nombre in propuestas:
+            if dueno.get(insumo_id)[0] is not rubro:
+                asignaciones.append(
+                    f"{rubro.concepto} -> conflicto: insumo '{nombre}' ya es de otro rubro"
+                )
+                continue
+            asignaciones.append(f"{rubro.concepto} -> Insumo: {nombre} [score {score:.0f}]")
+            yield rubro, {"insumo_id": insumo_id}, f"Consumo MP: {nombre}"
