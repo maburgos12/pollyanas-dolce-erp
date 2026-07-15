@@ -22,7 +22,12 @@ from django.utils import timezone
 from core.access import ACCESS_MANAGE
 from core.models import Notificacion, Sucursal, UserModuleAccess
 from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
+from pos_bridge.services.open_transfer_sync_service import (
+    OpenTransferSyncService,
+    resolve_requesting_erp_branch,
+)
 from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
+from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .models import (
@@ -44,6 +49,7 @@ from .services_carga_ruta import (
     RecargaCedisSnapshotObsoleto,
     RecargaCedisSinLineasPoint,
     _ordenes_tramo_carga_actual,
+    _point_recibidas_por_ruta,
     _registrar_alerta_recarga_sync,
     _sincronizar_lineas_point_para_ruta,
     checklist_bloquea_salida,
@@ -1081,6 +1087,177 @@ class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
         self.assertFalse(
             checklist.lineas.filter(point_transfer_line=retorno).exists()
         )
+
+    def test_resync_supera_retorno_sucursal_cedis_ya_existente_y_preserva_auditoria(self):
+        origin = PointBranch.objects.create(
+            external_id="INV-RETORNO-PREVIO-SUC",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        destination = PointBranch.objects.create(
+            external_id="INV-RETORNO-PREVIO-CEDIS",
+            name="CEDIS",
+        )
+        retorno = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=self.sucursal,
+            transfer_external_id="INV-RETORNO-PREVIO-1",
+            detail_external_id="INV-RETORNO-PREVIO-D-1",
+            source_hash="invariante-retorno-previo-sucursal-cedis",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Producto devuelto a CEDIS ya capturado",
+            item_code="INV-RETORNO-PREVIO",
+            unit="pz",
+            requested_quantity="3",
+            sent_quantity="3",
+            received_quantity="3",
+            is_open=False,
+            is_received=True,
+            is_finalized=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=retorno,
+            transfer_external_id=retorno.transfer_external_id,
+            detail_external_id=retorno.detail_external_id,
+            source_hash=retorno.source_hash,
+            item_code=retorno.item_code,
+            item_name=retorno.item_name,
+            unit=retorno.unit,
+            cantidad_solicitada=retorno.requested_quantity,
+            cantidad_enviada_esperada=retorno.sent_quantity,
+            cantidad_cargada="3",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+            notas="Captura previa del repartidor.",
+            client_event_id="retorno-previo-auditado",
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        validado_en_original = linea.validado_en
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(linea.cantidad_cargada, Decimal("3"))
+        self.assertEqual(linea.client_event_id, "retorno-previo-auditado")
+        self.assertEqual(linea.validado_por, self.user)
+        self.assertEqual(linea.validado_en, validado_en_original)
+        self.assertIn("Captura previa del repartidor.", linea.notas)
+        self.assertIn("regreso a CEDIS", linea.notas)
+
+    def test_resync_conserva_destino_mapeado_a_sucursal_aunque_nombre_parezca_cedis(self):
+        segunda_sucursal = Sucursal.objects.create(
+            codigo="INV-ALMACEN-GLORIAS",
+            nombre="Almacén Las Glorias",
+            activa=True,
+        )
+        segundo_punto = PuntoLogistico.objects.create(
+            sucursal=segunda_sucursal,
+            nombre=segunda_sucursal.nombre,
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.580000",
+            longitud="-108.480000",
+            radio_geocerca_metros=120,
+        )
+        segunda_parada = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=segundo_punto,
+            orden=2,
+        )
+        origin = PointBranch.objects.create(
+            external_id="INV-ORIGEN-INTERSUCURSAL",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        destination = PointBranch.objects.create(
+            external_id="INV-DESTINO-ALMACEN-GLORIAS",
+            name=segunda_sucursal.nombre,
+            erp_branch=segunda_sucursal,
+        )
+        transferencia = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_origin_branch=self.sucursal,
+            erp_destination_branch=segunda_sucursal,
+            transfer_external_id="INV-INTERSUCURSAL-1",
+            detail_external_id="INV-INTERSUCURSAL-D-1",
+            source_hash="invariante-intersucursal-destino-almacen",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Producto legítimo para Almacén Las Glorias",
+            item_code="INV-INTERSUCURSAL",
+            unit="pz",
+            requested_quantity="4",
+            sent_quantity="4",
+            received_quantity="4",
+            is_open=True,
+            is_received=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        receta = Receta.objects.create(
+            nombre="Producto legítimo para Almacén Las Glorias",
+            codigo_point="INV-INTERSUCURSAL",
+            hash_contenido="hash-invariante-destino-estructurado",
+        )
+        transferencia.receta = receta
+        transferencia.save(update_fields=["receta", "updated_at"])
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+
+        self.assertEqual(resolve_requesting_erp_branch(transferencia), segunda_sucursal)
+        self.assertEqual(
+            OpenTransferSyncService()._requesting_branch_ids(
+                fecha=self.ruta.fecha_ruta,
+                transfer_ids={transferencia.transfer_external_id},
+            ),
+            {segunda_sucursal.id},
+        )
+        recibidas = _point_recibidas_por_ruta(self.ruta)
+        self.assertIn((segunda_sucursal.id, "inv-intersucursal"), recibidas)
+        self.assertNotIn((self.sucursal.id, "inv-intersucursal"), recibidas)
+        ConsolidadoNocturnoCedisService()._crear_solicitudes_desde_point(
+            fecha_operacion=self.ruta.fecha_ruta,
+            usuario=self.user,
+        )
+        self.assertTrue(
+            SolicitudReabastoCedis.objects.filter(
+                fecha_operacion=self.ruta.fecha_ruta,
+                sucursal=segunda_sucursal,
+                lineas__receta=receta,
+            ).exists()
+        )
+        self.assertFalse(
+            SolicitudReabastoCedis.objects.filter(
+                fecha_operacion=self.ruta.fecha_ruta,
+                sucursal=self.sucursal,
+                lineas__receta=receta,
+            ).exists()
+        )
+
+        _sincronizar_lineas_point_para_ruta(
+            ruta=self.ruta,
+            checklist=checklist,
+            solo_abiertas=False,
+        )
+
+        linea = checklist.lineas.get(point_transfer_line=transferencia)
+        self.assertNotEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(linea.parada, segunda_parada)
 
     def test_linea_point_ya_asignada_a_otra_ruta_conserva_captura_como_auditoria(self):
         point_line = self.point_line(
