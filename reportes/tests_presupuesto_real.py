@@ -387,7 +387,7 @@ class PresupuestoRealConsolidacionTests(TestCase):
         """El seed real crea nómina/ventas, no duplica y respeta reglas ADMIN."""
         # El CSV real referencia RENTA_SUC; debe existir o el comando aborta.
         CategoriaGasto.objects.create(
-            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
         )
         nomina = AreaPresupuesto.objects.create(nombre="Nómina seed", codigo="nomina")
         ventas = AreaPresupuesto.objects.create(nombre="Ventas seed", codigo="ventas")
@@ -572,7 +572,7 @@ class PresupuestoRealFixesReviewTests(TestCase):
     def test_seed_elimina_reglas_obsoletas(self):
         """Una regla SEED cuyo rubro salió del mapeo se elimina al re-correr."""
         CategoriaGasto.objects.create(
-            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
         )
         rubro_viejo = RubroPresupuesto.objects.create(
             area=self.area_ventas, concepto="Concepto retirado", tipo=RubroPresupuesto.TIPO_EGRESO
@@ -634,7 +634,7 @@ class VentasPosMatchingTests(TestCase):
     def setUpTestData(cls):
         # El CSV real referencia RENTA_SUC; debe existir o el comando aborta.
         CategoriaGasto.objects.create(
-            codigo="RENTA_SUC", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
         )
         cls.ventas = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
         cls.branch = PointBranch.objects.create(external_id="MATCH-BR", name="Centro")
