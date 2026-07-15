@@ -2,14 +2,20 @@
 
 Idempotente: solo administra reglas con origen=SEED; nunca toca las de
 origen=ADMIN (si un rubro tiene regla ADMIN, el seed lo respeta y lo omite).
-El mapeo vive en ``reportes/data/mapeo_rubros_fuentes.csv``; los ingresos de
-Ventas se generan programáticamente desde el concepto "CATEGORÍA · PRODUCTO".
+El mapeo vive en ``reportes/data/mapeo_rubros_fuentes.csv``.
+
+Los ingresos de Ventas se asignan a nombres POS reales con matching difuso
+(rapidfuzz, el mismo enfoque que usa el ERP para insumos): la asignación
+queda EXPLÍCITA en filtros (categoria_pos / productos_pos con nombres POS
+exactos) y el comando imprime cada asignación con su score para auditoría.
+Dos rubros no pueden reclamar el mismo producto POS (se reporta conflicto).
 """
 
 from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -20,6 +26,41 @@ from reportes.services_presupuesto_maestro import normalize_header_text
 
 CSV_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "mapeo_rubros_fuentes.csv"
 TIPOS_VALIDOS = {choice[0] for choice in ReglaFuenteRubro.FUENTE_CHOICES}
+
+# Umbrales del matching difuso rubro→POS.
+SCORE_PRODUCTO = 90
+SCORE_CATEGORIA = 95
+
+# Abreviaturas usadas en el presupuesto/POS ("CHEESECAKE · TORTUGA R").
+ABREVIATURAS = {
+    "r": "rebanada",
+    "gde": "grande",
+    "ind": "individual",
+    "pz": "piezas",
+    "10pz": "10 piezas",
+}
+STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "sabor", "pastel"}
+
+
+def canon_pos(texto: object) -> str:
+    """Canónico para comparar nombres de presupuesto vs POS: minúsculas, sin
+    acentos ni signos, abreviaturas expandidas, sin palabras vacías, tokens
+    ordenados. "SNICKER'S" y "Snickers" quedan iguales."""
+    base = normalize_header_text(texto)
+    base = re.sub(r"[^a-z0-9 ]+", " ", base)
+    tokens: set[str] = set()
+    for tok in base.split():
+        tok = ABREVIATURAS.get(tok, tok)
+        for parte in tok.split():
+            if parte not in STOPWORDS:
+                tokens.add(parte)
+    return " ".join(sorted(tokens))
+
+
+def _score(a: str, b: str) -> float:
+    from rapidfuzz import fuzz
+
+    return fuzz.token_set_ratio(a, b)
 
 
 class Command(BaseCommand):
@@ -86,22 +127,16 @@ class Command(BaseCommand):
                         }
                     )
 
-        # --- ingresos de Ventas: CATEGORÍA · PRODUCTO ----------------------
+        # --- ingresos de Ventas: matching difuso contra nombres POS reales ---
+        asignaciones_ventas: list[str] = []
         if not options["sin_ventas"]:
-            ventas = RubroPresupuesto.objects.filter(
-                area__codigo="ventas", tipo=RubroPresupuesto.TIPO_INGRESO, activo=True
-            ).select_related("sucursal")
-            for rubro in ventas:
-                partes = [p.strip() for p in rubro.concepto.split("·")]
-                filtros = {"categoria_pos": partes[0], "campo_monto": "total_venta"}
-                if len(partes) > 1 and partes[1]:
-                    filtros["producto_pos"] = partes[1]
+            for rubro, filtros, nota in self._asignaciones_ventas(asignaciones_ventas, avisos):
                 planes.setdefault(rubro.id, []).append(
                     {
                         "tipo_fuente": ReglaFuenteRubro.FUENTE_VENTA_POS,
                         "categoria_gasto": None,
                         "filtros": filtros,
-                        "notas": "Ventas POS por categoría/producto",
+                        "notas": nota[:200],
                     }
                 )
 
@@ -152,6 +187,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Cobertura: {con_regla}/{total} rubros activos con regla")
         for area_codigo in (
             RubroPresupuesto.objects.filter(activo=True)
+            .order_by()  # el ordering del modelo rompe DISTINCT sobre values_list
             .values_list("area__codigo", flat=True)
             .distinct()
         ):
@@ -161,5 +197,94 @@ class Command(BaseCommand):
                 )
             )
             self.stdout.write(f"  {area_codigo}: {len(area_ids & set(planes))}/{len(area_ids)}")
+        if asignaciones_ventas:
+            self.stdout.write("Asignaciones ventas POS (auditar):")
+            for linea in asignaciones_ventas:
+                self.stdout.write(f"  {linea}")
         for aviso in avisos:
             self.stdout.write(self.style.WARNING(f"AVISO {aviso}"))
+
+    # ------------------------------------------------------------------ #
+    # Matching difuso rubros de Ventas → nombres POS                      #
+    # ------------------------------------------------------------------ #
+
+    def _asignaciones_ventas(self, asignaciones: list[str], avisos: list[str]):
+        """Asigna cada rubro de Ventas a nombres POS reales.
+
+        Devuelve tuplas (rubro, filtros, nota). La asignación se decide por
+        score difuso; los productos ganados por un rubro no pueden repetirse
+        en otro (el de mayor score gana y el conflicto se reporta).
+        """
+        from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
+
+        pares_pos = list(
+            PointSalesDailyProductFact.objects.order_by()
+            .values_list("categoria", "producto_nombre_historico")
+            .distinct()
+        )
+        categorias_pos = sorted({cat for cat, _ in pares_pos})
+        canon_pares = [(cat, prod, canon_pos(f"{cat} {prod}")) for cat, prod in pares_pos]
+
+        ventas = RubroPresupuesto.objects.filter(
+            area__codigo="ventas", tipo=RubroPresupuesto.TIPO_INGRESO, activo=True
+        ).select_related("sucursal")
+
+        propuestas = []  # (rubro, score, categoria_pos, productos, nota)
+        for rubro in ventas:
+            partes = [p.strip() for p in rubro.concepto.split("·")]
+            cat_r = partes[0]
+            prod_r = partes[1] if len(partes) > 1 else ""
+            objetivo = canon_pos(f"{cat_r} {prod_r}")
+
+            candidatos = [
+                (cat, prod, _score(objetivo, canon))
+                for cat, prod, canon in canon_pares
+            ]
+            con_score = [c for c in candidatos if c[2] >= SCORE_PRODUCTO]
+            if con_score:
+                mejor = max(con_score, key=lambda c: c[2])
+                productos = sorted({prod for _, prod, _ in con_score})
+                propuestas.append((rubro, mejor[2], "", productos, f"POS: {', '.join(productos)}"))
+                continue
+
+            # Sin producto: ¿el "producto" del rubro es una categoría POS
+            # completa? (BEBIDAS/OTROS · TE → categoría TE)
+            canon_prod = canon_pos(prod_r or cat_r)
+            cat_scores = [(cat, _score(canon_prod, canon_pos(cat))) for cat in categorias_pos]
+            mejor_cat = max(cat_scores, key=lambda c: c[1], default=None)
+            if mejor_cat and mejor_cat[1] >= SCORE_CATEGORIA:
+                propuestas.append(
+                    (rubro, mejor_cat[1], mejor_cat[0], [], f"POS categoría completa: {mejor_cat[0]}")
+                )
+                continue
+
+            propuestas.append((rubro, 0, "", [], "SIN MATCH POS — asignar en admin"))
+
+        # Un producto POS no puede pertenecer a dos rubros: gana el mayor score.
+        dueno_por_producto: dict[str, tuple] = {}
+        for propuesta in sorted(propuestas, key=lambda p: -p[1]):
+            rubro, score, _cat, productos, _nota = propuesta
+            ganados = []
+            for prod in productos:
+                previo = dueno_por_producto.get(prod)
+                if previo is None:
+                    dueno_por_producto[prod] = propuesta
+                    ganados.append(prod)
+                else:
+                    avisos.append(
+                        f"conflicto POS: '{prod}' lo reclama '{rubro.concepto}' "
+                        f"(score {score:.0f}) pero ya es de '{previo[0].concepto}' (score {previo[1]:.0f})"
+                    )
+            if productos:
+                # Conserva solo los productos realmente ganados por este rubro.
+                propuesta[3][:] = ganados
+
+        for rubro, score, categoria_pos, productos, nota in propuestas:
+            filtros: dict[str, object] = {"campo_monto": "total_venta"}
+            if productos:
+                filtros["productos_pos"] = productos
+            if categoria_pos:
+                filtros["categoria_pos"] = categoria_pos
+            etiqueta = "SIN MATCH" if not productos and not categoria_pos else f"score {score:.0f}"
+            asignaciones.append(f"{rubro.concepto} -> {nota} [{etiqueta}]")
+            yield rubro, filtros, nota
