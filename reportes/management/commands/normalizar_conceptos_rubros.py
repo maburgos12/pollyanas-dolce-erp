@@ -15,6 +15,7 @@ viejo no vuelve. Idempotente; --dry-run para previsualizar.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -102,14 +103,21 @@ def normalizar_concepto(texto: str) -> str:
         piezas: list[str] = []
         for parte in partes:
             base = parte.lower()
-            base = TYPOS.get(base, base)
-            base = ACENTOS.get(base, base)
-            if base in ACRONIMOS:
-                piezas.append(base.upper())
-            elif base in GRAFIA:
-                piezas.append(GRAFIA[base])
+            # La clave se compara SIN acentos: "Guamúchil" debe encontrar su
+            # grafía aunque el original ya venga acentuado.
+            clave = "".join(
+                c for c in unicodedata.normalize("NFKD", base) if not unicodedata.combining(c)
+            )
+            clave = TYPOS.get(clave, clave)
+            if clave in ACRONIMOS:
+                piezas.append(clave.upper())
+            elif clave in GRAFIA:
+                piezas.append(GRAFIA[clave])
+            elif clave in ACENTOS:
+                piezas.append(ACENTOS[clave])
             else:
-                piezas.append(base)
+                # Sin regla: conserva la palabra (con sus acentos), en minúscula.
+                piezas.append(TYPOS.get(base, base))
         resultado.append("".join(piezas))
     frase = " ".join(resultado)
     # Primera letra alfabética en mayúscula (sin tocar acrónimos/grafías).
