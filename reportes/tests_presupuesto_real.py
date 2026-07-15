@@ -293,12 +293,15 @@ class PresupuestoRealConsolidacionTests(TestCase):
         # El valor retenido queda marcado visiblemente como fuente sin datos.
         self.assertTrue(linea.metadata["sin_datos_fuente"])
         self.assertIn("fuente_sin_datos_en", linea.metadata)
-        # Y al volver datos de la fuente, la marca se limpia.
-        self.crear_gasto("450")
+        # Y al volver datos de la fuente CON EL MISMO importe retenido, la
+        # marca también se limpia (no queda un badge obsoleto por la ruta
+        # "sin cambio").
+        self.crear_gasto("500")
         self.consolidar()
         linea.refresh_from_db()
-        self.assertEqual(linea.monto_real, Decimal("450.00"))
+        self.assertEqual(linea.monto_real, Decimal("500.00"))
         self.assertFalse(linea.metadata.get("sin_datos_fuente"))
+        self.assertNotIn("fuente_sin_datos_en", linea.metadata)
 
     def test_captura_manual_concurrente_no_se_pisa(self):
         """Si una usuaria captura entre la lectura y la escritura, el UPDATE

@@ -176,8 +176,13 @@ class PresupuestoRealConsolidacionService:
             metadata["real_breakdown"] = breakdown
             metadata["consolidado_en"] = timezone.now().isoformat()
             metadata.pop("sin_datos_fuente", None)
+            metadata.pop("fuente_sin_datos_en", None)
 
-            if linea.monto_real == total and linea.fuente_real == fuente:
+            # "Sin cambio" solo si tampoco hay una advertencia de fuente sin
+            # datos pendiente de limpiar — si la fuente se recuperó con el
+            # mismo importe, hay que persistir la limpieza del badge.
+            tenia_advertencia = bool((linea.metadata or {}).get("sin_datos_fuente"))
+            if linea.monto_real == total and linea.fuente_real == fuente and not tenia_advertencia:
                 summary.sin_cambio += 1
                 continue
 
