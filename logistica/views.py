@@ -188,6 +188,10 @@ def _recepcion_point_rows(checklist) -> list[dict]:
                 estado_label = "Diferencia"
                 estado_tone = "danger"
             recibido_display = recibido
+        elif not point_transfer_enviada(point_line):
+            estado_label = "Solicitado · no enviado"
+            estado_tone = "muted"
+            recibido_display = None
         elif point_transfer_enviada(point_line) and enviado == Decimal("0"):
             estado_label = "Enviado cero · sin recepción requerida"
             estado_tone = "muted"
