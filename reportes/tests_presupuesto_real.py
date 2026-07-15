@@ -1248,3 +1248,82 @@ class FueraProyeccionTests(TestCase):
         self.assertNotIn("Bollo Lotus", nombres)
         self.assertEqual(fuera["total_venta"], Decimal("1100"))
         self.assertEqual(fuera["total_unidades"], Decimal("10"))
+
+
+class RenombradoPointTests(TestCase):
+    """Los rubros de Ventas adoptan los nombres del catálogo Point."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+
+    def _rubro_con_regla(self, concepto, filtros):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS, filtros=filtros
+        )
+        return rubro
+
+    def test_renombra_a_producto_categoria_y_conserva_nombre_excel(self):
+        uno = self._rubro_con_regla(
+            "BOLLO · CHOCOLATE",
+            {"productos_pos": ["Bollo Chocolate", "Bollo Chocolate SV"], "campo_monto": "total_venta"},
+        )
+        cat = self._rubro_con_regla(
+            "BEBIDAS/OTROS · TE", {"categoria_pos": "TE", "campo_monto": "total_venta"}
+        )
+        pendiente = self._rubro_con_regla("CHEESECAKE · FRESA R", {"campo_monto": "total_venta"})
+
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+
+        uno.refresh_from_db(); cat.refresh_from_db(); pendiente.refresh_from_db()
+        self.assertEqual(uno.concepto, "Bollo Chocolate")  # el más corto = producto base
+        self.assertEqual(uno.metadata["nombre_excel"], "BOLLO · CHOCOLATE")
+        self.assertEqual(cat.concepto, "TE")
+        self.assertEqual(pendiente.concepto, "CHEESECAKE · FRESA R")  # sin asignación: intacto
+
+        # Idempotente: segunda corrida no cambia nada ni pisa nombre_excel.
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+        uno.refresh_from_db()
+        self.assertEqual(uno.concepto, "Bollo Chocolate")
+        self.assertEqual(uno.metadata["nombre_excel"], "BOLLO · CHOCOLATE")
+
+    def test_reimport_reconoce_nombre_excel_y_no_duplica(self):
+        """Volver a importar el Excel actualiza el rubro renombrado, sin crear
+        un duplicado con el nombre viejo."""
+        import csv as csv_mod
+        import tempfile
+
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        rubro = self._rubro_con_regla(
+            "BOLLO · CHOCOLATE", {"productos_pos": ["Bollo Chocolate"], "campo_monto": "total_venta"}
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("10")
+        )
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+        rubro.refresh_from_db()
+        self.assertEqual(rubro.concepto, "Bollo Chocolate")
+
+        campos = ["concepto", "tipo", "sucursal"] + [m for m, _ in
+                  [("enero",1),("febrero",2),("marzo",3),("abril",4),("mayo",5),("junio",6),
+                   ("julio",7),("agosto",8),("septiembre",9),("octubre",10),("noviembre",11),("diciembre",12)]]
+        fila = {c: "0" for c in campos}
+        fila.update({"concepto": "BOLLO · CHOCOLATE", "tipo": "INGRESO", "sucursal": "", "enero": "5000.00"})
+        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False, encoding="utf-8")
+        writer = csv_mod.DictWriter(tmp, fieldnames=campos)
+        writer.writeheader(); writer.writerow(fila); tmp.close()
+
+        PresupuestoMaestroImportService().import_file(
+            archivo=tmp.name, area_code="ventas", version="ORIGINAL", year=2026
+        )
+
+        rubros = RubroPresupuesto.objects.filter(area=self.area)
+        self.assertEqual(rubros.count(), 1)  # sin duplicado con nombre Excel
+        rubro.refresh_from_db()
+        self.assertEqual(rubro.concepto, "Bollo Chocolate")  # nombre Point se queda
+        linea = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 1, 1))
+        self.assertEqual(linea.monto_presupuesto, Decimal("5000.00"))  # presupuesto actualizado
