@@ -2323,7 +2323,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         )
         self.assertEqual(ubicacion.ruta, ruta_hoy)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_usa_operacion_y_evento_propios_sin_entrega_ni_geocerca(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -2363,7 +2363,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertFalse(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE).exists())
         self.assertFalse(parada_cedis.evidencias_entrega.exists())
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_con_objeto_obsoleto_retorna_el_mismo_evento(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -2381,7 +2381,7 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertEqual(segundo.id, primero.id)
         self.assertEqual(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(), 1)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_cedis_numera_despues_de_evento_historico_compatible(self, sync_point):
         ruta, _ = self._crear_ruta(estatus=RutaEntrega.ESTATUS_EN_RUTA)
         cedis = PuntoLogistico.objects.create(
@@ -5751,7 +5751,7 @@ class LogisticaControlRutasTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_api_registra_recarga_cedis_desde_pwa(self, sync_point):
         self.client.force_login(self.user)
         cedis = PuntoLogistico.objects.create(
@@ -8250,7 +8250,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(salida.status_code, 200)
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_registrar_recarga_cedis_en_ruta_no_cierra_ni_duplica_ruta(self, sync_point):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         cedis_punto = PuntoLogistico.objects.create(
@@ -8294,7 +8294,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(parada_cedis.punto.tipo, PuntoLogistico.TIPO_CEDIS)
         self.assertEqual(parada_cedis.estado, ParadaRuta.ESTADO_VISITADA)
 
-    def test_tramo_carga_avanza_con_llegada_a_cedis(self):
+    def test_tramo_carga_avanza_con_recarga_cedis(self):
         ruta, primera = self._crear_ruta_planeada_para_carga()
         ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
         ruta.save(update_fields=["estatus", "updated_at"])
@@ -8322,9 +8322,9 @@ class LogisticaControlRutasTests(TestCase):
         EventoRuta.objects.create(
             ruta=ruta,
             parada=cedis,
-            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
             severidad=EventoRuta.SEVERIDAD_OK,
-            descripcion="Llegada detectada en CEDIS.",
+            descripcion="Recarga CEDIS reconciliada.",
             creado_por=self.user,
         )
         checklist = RutaCargaChecklist.objects.create(ruta=ruta)

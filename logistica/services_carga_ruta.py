@@ -147,35 +147,33 @@ def obtener_checklist_carga(ruta: RutaEntrega) -> RutaCargaChecklist:
     return checklist
 
 
+def _ids_paradas_con_recarga_cedis(ruta: RutaEntrega) -> set[int]:
+    return set(
+        EventoRuta.objects.filter(ruta=ruta)
+        .filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(
+                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+            )
+        )
+        .exclude(parada_id__isnull=True)
+        .values_list("parada_id", flat=True)
+    )
+
+
 def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
     paradas = list(ruta.paradas.select_related("punto").order_by("orden", "id"))
     cedis = [parada for parada in paradas if parada.punto and parada.punto.tipo == PuntoLogistico.TIPO_CEDIS]
     if not cedis:
         return None
 
-    cedis_con_llegada = set(
-        EventoRuta.objects.filter(
-            ruta=ruta,
-            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
-            parada_id__in=[parada.id for parada in cedis],
-        ).values_list("parada_id", flat=True)
-    )
+    cedis_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
     inicio = cedis[0].orden if cedis[0].orden == 1 else None
     for cedis_parada in cedis:
         if inicio is not None and cedis_parada.orden <= inicio:
             continue
-        tramo_anterior = [
-            parada
-            for parada in paradas
-            if parada.punto
-            and parada.punto.tipo != PuntoLogistico.TIPO_CEDIS
-            and (inicio is None or parada.orden > inicio)
-            and parada.orden < cedis_parada.orden
-        ]
-        cedis_alcanzado = cedis_parada.estado == ParadaRuta.ESTADO_VISITADA or cedis_parada.id in cedis_con_llegada
-        if cedis_alcanzado or (
-            tramo_anterior and all(parada.estado == ParadaRuta.ESTADO_VISITADA for parada in tramo_anterior)
-        ):
+        if cedis_parada.id in cedis_con_recarga:
             inicio = cedis_parada.orden
             continue
         break
@@ -1025,13 +1023,10 @@ def lineas_tramo_operativo_actual(ruta: RutaEntrega, *, checklist: RutaCargaChec
     if not checklist:
         return RutaCargaChecklistLinea.objects.none()
     lineas = checklist.lineas.all()
-    limite_inferior = 0
-    for parada in ruta.paradas.select_related("punto").filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).order_by("orden", "id"):
-        if parada.estado == ParadaRuta.ESTADO_VISITADA:
-            limite_inferior = max(limite_inferior, parada.orden)
-            continue
-        return lineas.filter(parada__orden__gt=limite_inferior, parada__orden__lt=parada.orden)
-    return lineas.filter(parada__orden__gt=limite_inferior)
+    ordenes = _ordenes_tramo_carga_actual(ruta)
+    if ordenes is None:
+        return lineas
+    return lineas.filter(parada__orden__in=ordenes)
 
 
 @transaction.atomic
@@ -1358,12 +1353,23 @@ def registrar_recarga_cedis(
         .count()
         + 1
     )
+    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
+    cedis_inicial_id = ruta.paradas.filter(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+        orden=1,
+    ).values_list("id", flat=True).first()
     parada_cedis = (
         ruta.paradas.select_for_update()
         .filter(
             punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            estado__in=[
+                ParadaRuta.ESTADO_PENDIENTE,
+                ParadaRuta.ESTADO_OMITIDA,
+                ParadaRuta.ESTADO_VISITADA,
+            ],
         )
+        .exclude(pk__in=paradas_con_recarga)
+        .exclude(pk=cedis_inicial_id)
         .order_by("orden", "id")
         .first()
     )
@@ -1420,12 +1426,24 @@ def _validar_parada_recarga_pre_sync(
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         return ruta, parada
 
+    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
+    cedis_inicial_id = ruta.paradas.filter(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+        orden=1,
+    ).values_list("id", flat=True).first()
+    estados_candidatos = [
+        ParadaRuta.ESTADO_PENDIENTE,
+        ParadaRuta.ESTADO_OMITIDA,
+        ParadaRuta.ESTADO_VISITADA,
+    ]
     siguiente = (
         ruta.paradas.select_related("punto")
         .filter(
             punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+            estado__in=estados_candidatos,
         )
+        .exclude(pk__in=paradas_con_recarga)
+        .exclude(pk=cedis_inicial_id)
         .order_by("orden", "id")
         .first()
     )
@@ -1437,8 +1455,10 @@ def _validar_parada_recarga_pre_sync(
             .filter(
                 pk=parada.pk,
                 punto__tipo=PuntoLogistico.TIPO_CEDIS,
-                estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+                estado__in=estados_candidatos,
             )
+            .exclude(pk__in=paradas_con_recarga)
+            .exclude(pk=cedis_inicial_id)
             .first()
         )
     if parada is None:
@@ -1479,7 +1499,7 @@ def _orquestar_recarga_cedis(
     estado_sync = "ACTUALIZADO"
     if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
         try:
-            sincronizar_checklist_carga_desde_point(ruta=ruta, user=user, ejecutar_sync=True)
+            sincronizar_checklist_recarga_desde_point(ruta=ruta, user=user)
         except PointSyncUnavailableError as exc:
             snapshot = _snapshot_siguiente_tramo(ruta, parada, actor=user)
             detalle_error = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)

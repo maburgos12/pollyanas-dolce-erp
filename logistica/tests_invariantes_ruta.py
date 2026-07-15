@@ -38,6 +38,7 @@ from .models import (
 from .services_carga_ruta import (
     PointSyncUnavailableError,
     RecargaCedisPendienteEnviado,
+    _ordenes_tramo_carga_actual,
     _registrar_alerta_recarga_sync,
     _sincronizar_lineas_point_para_ruta,
     checklist_bloquea_salida,
@@ -1523,8 +1524,27 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         super().setUp()
         self.ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
         self.ruta.save(update_fields=["estatus", "updated_at"])
-        self.parada.orden = 2
+        self.parada.orden = 3
         self.parada.save(update_fields=["orden", "actualizado_en"])
+        sucursal_previa = Sucursal.objects.create(
+            codigo="INV-RUTA-PREVIA",
+            nombre="Sucursal previa a recarga invariantes",
+            activa=True,
+        )
+        punto_previo = PuntoLogistico.objects.create(
+            sucursal=sucursal_previa,
+            nombre=sucursal_previa.nombre,
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.550000",
+            longitud="-108.450000",
+            radio_geocerca_metros=120,
+        )
+        self.parada_previa = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=punto_previo,
+            orden=1,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
         self.cedis_punto = PuntoLogistico.objects.create(
             nombre="CEDIS invariantes",
             tipo=PuntoLogistico.TIPO_CEDIS,
@@ -1532,7 +1552,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             longitud="-108.460000",
             radio_geocerca_metros=120,
         )
-        self.cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=self.cedis_punto, orden=1)
+        self.cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=self.cedis_punto, orden=2)
         self.manager = User.objects.create_superuser(
             username="jefe.logistica.invariantes",
             email="jefe-invariantes@example.com",
@@ -1668,7 +1688,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
 
         self.assertEqual(captured.exception.sync_job, failed_job)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_error_inesperado_no_es_autorizable_ni_marca_cedis(self, sync):
         reviewed_hash = self._crear_alerta_revisable()
         sync.side_effect = RuntimeError("fallo de programación")
@@ -1690,29 +1710,80 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).exists()
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
-    def test_parada_cedis_visitada_se_rechaza_antes_de_sincronizar(self, sync):
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
+    def test_recarga_acepta_cedis_visitada(self, sync):
+        enviada = self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now(),
+            is_enviado=True,
+        )
+        self.sync_line(enviada)
+        sync.side_effect = lambda **kwargs: self._sync_summary()
         self.cedis.estado = ParadaRuta.ESTADO_VISITADA
         self.cedis.save(update_fields=["estado", "actualizado_en"])
 
-        with self.assertRaises(ValidationError):
-            registrar_recarga_cedis(
+        evento = registrar_recarga_cedis(
+            ruta=self.ruta,
+            user=self.user,
+            parada=self.cedis,
+            notas="Recarga después de permanencia",
+            autorizar_sin_sync=False,
+            motivo_autorizacion="",
+        )
+
+        self.assertEqual(evento.tipo, EventoRuta.TIPO_RECARGA_CEDIS)
+        self.assertEqual(evento.parada_id, self.cedis.id)
+        self.assertEqual(
+            EventoRuta.objects.filter(
                 ruta=self.ruta,
-                user=self.user,
                 parada=self.cedis,
-                notas="Inválida",
-                autorizar_sin_sync=False,
-                motivo_autorizacion="",
-            )
+                tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            ).count(),
+            1,
+        )
+        sync.assert_called_once_with(ruta=self.ruta, user=self.user)
 
-        sync.assert_not_called()
+    def test_visita_cedis_no_abre_tramo_sin_recarga(self):
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+        self.assertNotIn(
+            self.parada.orden,
+            _ordenes_tramo_carga_actual(self.ruta),
+        )
+
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            descripcion="Recarga reconciliada",
+        )
+
+        self.assertIn(
+            self.parada.orden,
+            _ordenes_tramo_carga_actual(self.ruta),
+        )
+
+    def test_geocerca_cedis_no_abre_tramo_sin_recarga(self):
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            descripcion="Llegada detectada",
+        )
+
+        self.assertNotIn(
+            self.parada.orden,
+            _ordenes_tramo_carga_actual(self.ruta),
+        )
+
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_parada_cedis_no_siguiente_se_rechaza_antes_de_sincronizar(self, sync):
         otra_cedis = ParadaRuta.objects.create(
             ruta=self.ruta,
             punto=self.cedis_punto,
-            orden=3,
+            orden=4,
         )
 
         with self.assertRaises(ValidationError):
@@ -1727,7 +1798,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
 
         sync.assert_not_called()
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_sincroniza_antes_de_marcar_visita(self, sync):
         enviada = self.point_line(
             requested="2",
@@ -1747,9 +1818,9 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["estado_sync"], "ACTUALIZADO")
-        sync.assert_called_once_with(ruta=self.ruta, user=self.user, ejecutar_sync=True)
+        sync.assert_called_once_with(ruta=self.ruta, user=self.user)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_tramo_con_sucursal_planeada_sin_lineas_point_bloquea_y_alerta(self, sync):
         RutaCargaChecklist.objects.create(ruta=self.ruta)
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -1768,7 +1839,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             ).exists()
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_jefe_puede_autorizar_tramo_planeado_sin_lineas_con_motivo(self, sync):
         RutaCargaChecklist.objects.create(ruta=self.ruta)
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -1785,7 +1856,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["estado_sync"], "AUTORIZADO")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_tramo_realmente_sin_sucursales_no_exige_lineas_point(self, sync):
         self.parada.delete()
         RutaCargaChecklist.objects.create(ruta=self.ruta)
@@ -1796,7 +1867,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["estado_sync"], "ACTUALIZADO")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_recarga_fallida_no_desbloquea_y_notifica_una_vez(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")
 
@@ -1810,7 +1881,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.cedis, metadata__estado_sync="ERROR_POINT").count(), 1)
         self.assertEqual(Notificacion.objects.filter(usuario=self.manager, objeto_tipo="logistica.EventoRuta").count(), 1)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_error_point_snapshot_lista_sucursal_planeada_sin_lineas_cacheadas(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")
 
@@ -1828,7 +1899,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             [{"id": self.sucursal.id, "nombre": self.sucursal.nombre}],
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_error_point_sin_snapshot_externo_previo_no_es_autorizable(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")
         bloqueo = self._post()
@@ -1849,7 +1920,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).exists()
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_retry_alerta_repara_notificacion_faltante_sin_duplicar(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")
 
@@ -1876,7 +1947,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             1,
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_solicitud_sin_enviado_solicita_autorizacion_y_alerta_una_vez(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -1902,7 +1973,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.cedis, metadata__estado_sync="PENDIENTE_ENVIADO").count(), 1)
         self.assertEqual(Notificacion.objects.filter(usuario=self.manager, objeto_tipo="logistica.EventoRuta").count(), 1)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_jefe_autoriza_snapshot_con_motivo_sin_convertir_cero(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -1925,7 +1996,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(evento.metadata["autorizacion"]["actor_id"], self.manager.id)
         self.assertEqual(evento.metadata["autorizacion"]["motivo"], "Point pendiente; conteo físico revisado")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_jefe_autoriza_ultimo_snapshot_cacheado_cuando_sync_falla(self, sync):
         pending = self._pending_next_segment()
         self._mark_external_snapshot_valid()
@@ -1951,7 +2022,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(recarga.metadata["autorizacion"]["parada_id"], self.cedis.id)
         self.assertEqual(recarga.metadata["snapshot"]["sync_error"], "Point no respondió")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_alerta_snapshot_identifica_tramo_hora_y_actor(self, sync):
         self._pending_next_segment()
         checklist = self._mark_external_snapshot_valid()
@@ -1973,7 +2044,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(alerta.metadata["actor_id"], self.user.id)
         self.assertEqual(alerta.metadata["capturado_en"], snapshot["capturado_en"])
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_cambio_entre_snapshot_y_confirmacion_rechaza_como_obsoleto(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2012,7 +2083,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).exists()
         )
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_repartidor_no_puede_autorizar_snapshot(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2023,7 +2094,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_PENDIENTE)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_retry_autorizado_no_duplica_evento_y_autorizacion_es_por_parada(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2041,7 +2112,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.cedis, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(), 1)
         self.assertEqual(sync.call_count, 2)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_en_ruta_envia_parada_cedis_explicita_y_rechaza_omision(self, sync):
         RutaCargaChecklist.objects.create(ruta=self.ruta)
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2061,7 +2132,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).exists())
         sync.assert_not_called()
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_error_point_conserva_contexto_y_mensaje_especifico(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")
         detail_url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
@@ -2079,7 +2150,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(response.redirect_chain[-1][0], detail_url)
         self.assertContains(response, "No fue posible consultar Point")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_pendiente_enviado_conserva_contexto_y_mensaje_especifico(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2098,7 +2169,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(response.redirect_chain[-1][0], detail_url)
         self.assertContains(response, "Point todavía no confirma Enviado")
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_muestra_autorizacion_motivada_solo_a_jefatura_y_la_aplica(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2148,7 +2219,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(conductor.status_code, 302)
         self.assertNotIn("autorizar_sin_sync", conductor.content.decode("utf-8"))
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_autorizacion_rechaza_si_point_cambia_desde_snapshot_revisado(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2191,7 +2262,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_PENDIENTE)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_autorizacion_acepta_resync_sin_cambio_de_contenido(self, sync):
         self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2226,7 +2297,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_api_no_reutiliza_alerta_anterior_a_la_ultima_bloqueante(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2251,7 +2322,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_PENDIENTE)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_api_reobservacion_a_b_a_renueva_a_y_solo_autoriza_a(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2325,7 +2396,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
 
-    @patch("logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point")
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_snapshot_obsoleto_conserva_contexto_y_mensaje_especifico(self, sync):
         pending = self._pending_next_segment()
         sync.side_effect = lambda **kwargs: self._sync_summary()
@@ -2872,7 +2943,7 @@ if (operation === "segment") {
         )
 
         with patch(
-            "logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point",
+            "logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point",
             side_effect=lambda **kwargs: self.sync_cache(),
         ) as sync:
             evento = registrar_recarga_cedis(
@@ -2933,7 +3004,7 @@ if (operation === "segment") {
         self.sync_cache()
 
         with patch(
-            "logistica.services_carga_ruta.sincronizar_checklist_carga_desde_point",
+            "logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point",
             side_effect=lambda **kwargs: self.sync_cache(),
         ):
             with self.assertRaises(RecargaCedisPendienteEnviado) as captured:
