@@ -214,7 +214,10 @@
             <td class="text-end">{{ r.paradas_incidencia }}</td>
             <td>
               {% if r.point_bloqueo_lineas %}
-              <span class="badge bg-danger">{{ r.point_bloqueo_lineas }} sin enviado</span>
+              <span
+                class="badge bg-danger"
+                title="Cuenta líneas vigentes de toda la ruta, antes y después de CEDIS."
+              >{{ r.point_bloqueo_lineas }} línea{{ r.point_bloqueo_lineas|pluralize:"s" }} solicitada{{ r.point_bloqueo_lineas|pluralize:"s" }} sin enviar</span>
               {% else %}
               <span class="badge bg-success">OK</span>
               {% endif %}
