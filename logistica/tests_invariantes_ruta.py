@@ -4660,10 +4660,20 @@ if (operation === "segment") {
     item_code: row.item_code, item_name: row.item_name, unit: row.unit,
     esperado: row.esperado, ids: row.lineas.map((linea) => linea.id)
   }))));
+} else if (operation === "product-draft-identity") {
+  const previous = {item_code: "ANTERIOR", item_name: "Producto anterior", unit: "PZA", esperado: 9};
+  const current = {item_code: "0160", item_name: "Bollo Lotus", unit: "PZA", esperado: 2};
+  const previousKey = vm.runInContext(`productoCargaKey(${JSON.stringify(previous)})`, context);
+  const currentKey = vm.runInContext(`productoCargaKey(${JSON.stringify(current)})`, context);
+  vm.runInContext(`cargaProductoDraftFor(${JSON.stringify(previousKey)}, 9).cantidad = "9.000"`, context);
+  const currentDraft = vm.runInContext(`cargaProductoDraftFor(${JSON.stringify(currentKey)}, 2)`, context);
+  process.stdout.write(JSON.stringify({previousKey, currentKey, currentQuantity: currentDraft.cantidad}));
 } else if (operation === "recarga-status") {
   void (async () => {
     async function run(status, payload) {
       vm.runInContext(`state.rutaActiva = {ruta: {id: 9}}`, context);
+      vm.runInContext(`state.rutaCargaDraft = {77: {cantidad: "4"}}; state.rutaCargaProductoDraft = {"CODIGO:OLD|UNIDAD:PZA": {cantidad: "8"}};`, context);
+      vm.runInContext(`saveOfflineMutationQueue([{id: "old-load", path: "/rutas/9/carga-checklist/productos/validar/", method: "POST", username: "", queued_at: new Date().toISOString(), attempts: 0, body: {kind: "text", value: "{}"}}]);`, context);
       context.responseStatus = status;
       context.responsePayload = payload;
       vm.runInContext(`
@@ -4671,7 +4681,9 @@ if (operation === "segment") {
         renderRutaActiva = (message, title) => ({screen: "activa", message, title, rutaActiva: state.rutaActiva});
         renderRutaCarga = (message) => ({screen: "carga", message, rutaActiva: state.rutaActiva});
       `, context);
-      return await vm.runInContext(`registrarRecargaCedis(9, 4)`, context);
+      const rendered = await vm.runInContext(`registrarRecargaCedis(9, 4)`, context);
+      const drafts = vm.runInContext(`({lineas: Object.keys(state.rutaCargaDraft).length, productos: Object.keys(state.rutaCargaProductoDraft).length, encoladas: loadOfflineMutationQueue().length})`, context);
+      return {rendered, drafts};
     }
     const results = {
       conflict: await run(409, {detail: "Point aún no confirma Enviado"}),
@@ -4782,21 +4794,31 @@ if (operation === "segment") {
         self.assertEqual(fallback["esperado"], 3)
         self.assertEqual(fallback["ids"], [23, 24])
 
+    def test_pwa_borrador_total_se_identifica_por_producto_y_no_por_posicion(self):
+        result = json.loads(self.run_pwa_contract("product-draft-identity"))
+
+        self.assertNotEqual(result["previousKey"], result["currentKey"])
+        self.assertEqual(result["currentQuantity"], "2.000")
+
     def test_pwa_recarga_mantiene_contexto_en_409_503_y_recarga_en_estados_exitosos(self):
         result = json.loads(self.run_pwa_contract("recarga-status"))
 
-        self.assertEqual(result["conflict"]["screen"], "activa")
-        self.assertIn("Enviado", result["conflict"]["message"])
-        self.assertIsNotNone(result["conflict"]["rutaActiva"])
-        self.assertEqual(result["unavailable"]["screen"], "activa")
-        self.assertIn("no disponible", result["unavailable"]["message"])
-        self.assertIsNotNone(result["unavailable"]["rutaActiva"])
-        self.assertEqual(result["authorized"]["screen"], "carga")
-        self.assertIn("autorizada", result["authorized"]["message"])
-        self.assertIsNone(result["authorized"]["rutaActiva"])
-        self.assertEqual(result["updated"]["screen"], "carga")
-        self.assertIn("sincronizado", result["updated"]["message"])
-        self.assertIsNone(result["updated"]["rutaActiva"])
+        self.assertEqual(result["conflict"]["rendered"]["screen"], "activa")
+        self.assertIn("Enviado", result["conflict"]["rendered"]["message"])
+        self.assertIsNotNone(result["conflict"]["rendered"]["rutaActiva"])
+        self.assertEqual(result["conflict"]["drafts"], {"lineas": 1, "productos": 1, "encoladas": 1})
+        self.assertEqual(result["unavailable"]["rendered"]["screen"], "activa")
+        self.assertIn("no disponible", result["unavailable"]["rendered"]["message"])
+        self.assertIsNotNone(result["unavailable"]["rendered"]["rutaActiva"])
+        self.assertEqual(result["unavailable"]["drafts"], {"lineas": 1, "productos": 1, "encoladas": 1})
+        self.assertEqual(result["authorized"]["rendered"]["screen"], "carga")
+        self.assertIn("autorizada", result["authorized"]["rendered"]["message"])
+        self.assertIsNone(result["authorized"]["rendered"]["rutaActiva"])
+        self.assertEqual(result["authorized"]["drafts"], {"lineas": 0, "productos": 0, "encoladas": 0})
+        self.assertEqual(result["updated"]["rendered"]["screen"], "carga")
+        self.assertIn("sincronizado", result["updated"]["rendered"]["message"])
+        self.assertIsNone(result["updated"]["rendered"]["rutaActiva"])
+        self.assertEqual(result["updated"]["drafts"], {"lineas": 0, "productos": 0, "encoladas": 0})
 
     def test_pwa_recarga_cedis_sin_red_no_se_encola_pero_otras_mutaciones_si(self):
         result = json.loads(self.run_pwa_contract("recarga-offline"))
@@ -5078,5 +5100,5 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v66-carga-estable")
-        self.assertIn("?v=route-control-v66-carga-estable", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v67-carga-tramo-segura")
+        self.assertIn("?v=route-control-v67-carga-tramo-segura", html)
