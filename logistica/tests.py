@@ -2464,6 +2464,22 @@ class LogisticaEmailTemplateTests(SimpleTestCase):
 
 
 class LogisticaControlRutasTemplateTests(SimpleTestCase):
+    def test_ruta_detail_nombra_estado_como_visita_geocerca(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn("<th>Visita / geocerca</th>", source)
+        self.assertNotIn("<th>Estado</th>", source)
+
+    def test_rutas_aclara_que_point_pendiente_cubre_toda_la_ruta(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "rutas.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertIn('línea{{ r.point_bloqueo_lineas|pluralize:"s" }}', source)
+        self.assertIn('solicitada{{ r.point_bloqueo_lineas|pluralize:"s" }} sin enviar', source)
+        self.assertIn("toda la ruta, antes y después de CEDIS", source)
+        self.assertNotIn("{{ r.point_bloqueo_lineas }} sin enviado", source)
+
     def test_bitacoras_muestra_preview_y_semaforo_de_tickets_combustible(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "bitacoras_lista.html"
         source = template_path.read_text(encoding="utf-8")
@@ -3017,8 +3033,9 @@ class LogisticaViewsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual([ruta.id for ruta in rutas], [ruta_bloqueada.id])
         self.assertEqual(rutas[0].point_bloqueo_lineas, 1)
-        self.assertContains(resp, "Point sin enviado")
-        self.assertContains(resp, "1 sin enviado")
+        self.assertContains(resp, "Solicitado sin enviar en Point")
+        self.assertContains(resp, "Considera toda la ruta, antes y después de CEDIS.")
+        self.assertContains(resp, "1 línea solicitada sin enviar")
         self.assertNotContains(resp, ruta_ok.nombre)
 
         listado = self.client.get(reverse("logistica:rutas"))

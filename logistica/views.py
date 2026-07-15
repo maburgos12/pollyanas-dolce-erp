@@ -815,9 +815,9 @@ def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
         },
         {
             "key": "POINT_BLOQUEO",
-            "label": "Point sin enviado",
+            "label": "Solicitado sin enviar en Point",
             "count": point_blocked_routes,
-            "detail": "Rutas con carga solicitada en Point que aún no aparece como enviada.",
+            "detail": "Considera toda la ruta, antes y después de CEDIS.",
             "url": reverse("logistica:rutas") + "?enterprise_focus=POINT_BLOQUEO",
         },
     ]
