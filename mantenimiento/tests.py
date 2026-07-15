@@ -1,9 +1,11 @@
 from datetime import timedelta
+from pathlib import Path
 import re
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
@@ -879,6 +881,45 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(str(servicio.costo), "980.00")
         self.assertEqual(servicio.proveedor, "Taller Unidad QA")
 
+    def test_can_register_logistics_unit_service_without_branch(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mantenimiento:crear-servicio"),
+            {
+                "modo_servicio": "realizado",
+                "alcance": "flota",
+                "unidad_id": self.other_unidad.id,
+                "fecha_objetivo": timezone.localdate().isoformat(),
+                "descripcion": "Afinación de unidad sin sucursal operativa.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn(
+            "Selecciona una sucursal.",
+            [message.message for message in response.wsgi_request._messages],
+        )
+        servicio = ServicioRealizadoUnidad.objects.get(
+            tipo_servicio__nombre="Afinación de unidad sin sucursal operativa."
+        )
+        self.assertEqual(servicio.unidad, self.other_unidad)
+
+    def test_service_form_does_not_require_or_filter_branch_for_fleet(self):
+        self.client.force_login(self.user)
+
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+
+        self.assertIn('id="ordenServicioSucursalField"', source)
+        self.assertIn("sucursalField.hidden = esUnidad;", source)
+        self.assertIn("sucursal.required = !esUnidad;", source)
+        self.assertIn("sucursal.disabled = esUnidad;", source)
+        self.assertIn('option.textContent = "Seleccionar unidad...";', source)
+        self.assertIn("const visible = esUnidad ||", source)
+        self.assertIn("20260714-flota-sin-sucursal-v1", source)
+        css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
+        self.assertIn(".mant-field[hidden]{display:none}", css)
+
     def test_one_off_future_logistics_unit_service_is_scheduled(self):
         self.client.force_login(self.user)
         fecha_objetivo = timezone.localdate() + timedelta(days=15)
@@ -920,9 +961,8 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(OrdenMantenimiento.objects.count(), ordenes_before)
 
-    def test_unit_service_rejects_unit_from_other_branch(self):
+    def test_unit_service_ignores_branch_assignment(self):
         self.client.force_login(self.user)
-        servicios_before = ServicioRealizadoUnidad.objects.count()
 
         response = self.client.post(
             reverse("mantenimiento:crear-servicio"),
@@ -932,12 +972,15 @@ class MantenimientoUnifiedInboxTests(TestCase):
                 "sucursal_id": self.branch.id,
                 "unidad_id": self.other_unidad.id,
                 "fecha_objetivo": timezone.localdate().isoformat(),
-                "descripcion": "Intento cruzado de unidad.",
+                "descripcion": "Servicio de unidad independiente de sucursal.",
             },
         )
 
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(ServicioRealizadoUnidad.objects.count(), servicios_before)
+        self.assertEqual(response.status_code, 302)
+        servicio = ServicioRealizadoUnidad.objects.get(
+            tipo_servicio__nombre="Servicio de unidad independiente de sucursal."
+        )
+        self.assertEqual(servicio.unidad, self.other_unidad)
 
     def test_can_register_installation_service_by_branch_without_asset_selection(self):
         self.client.force_login(self.user)

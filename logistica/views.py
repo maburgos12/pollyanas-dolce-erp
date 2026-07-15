@@ -23,6 +23,7 @@ from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
 
+from .domain_ruta import point_transfer_enviada
 from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
@@ -57,12 +58,19 @@ from .services_carga_ruta import (
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
     registrar_recarga_cedis,
+    ultima_alerta_recarga_cedis_revisable,
+    ruta_tiene_paradas_entregables_pendientes,
     ruta_tiene_movimiento_point_nuevo,
     sincronizar_checklist_carga_desde_point,
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
 )
-from .services_rutas_control import distancia_metros, resumen_control_rutas
+from .services_rutas_control import (
+    LiberacionRutaError,
+    distancia_metros,
+    liberar_ruta_con_turno,
+    resumen_control_rutas,
+)
 from .services_entregas import confirmar_entrega_parada, resolver_alerta_historica, revisar_entrega_excepcional
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
@@ -129,7 +137,13 @@ def _recepcion_point_rows(checklist) -> list[dict]:
     rows = []
     lineas = list(
         checklist.lineas.select_related("parada", "point_transfer_line")
-        .filter(Q(point_transfer_line__isnull=True) | Q(point_transfer_line__is_cancelled=False))
+        .filter(
+            Q(point_transfer_line__isnull=True)
+            | Q(
+                point_transfer_line__is_cancelled=False,
+                point_transfer_line__is_current_snapshot=True,
+            )
+        )
         .order_by("parada__orden", "item_name", "id")
     )
     evidencias = {
@@ -150,7 +164,11 @@ def _recepcion_point_rows(checklist) -> list[dict]:
         recibido = Decimal("0")
         received_at = point_line.received_at if point_line else None
         received_by = point_line.received_by if point_line else ""
-        if not point_line:
+        if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+            estado_label = "Superada (Point corrigió el envío)"
+            estado_tone = "muted"
+            recibido_display = None
+        elif not point_line:
             estado_label = "Sin transferencia Point"
             estado_tone = "danger"
             recibido_display = None
@@ -170,6 +188,14 @@ def _recepcion_point_rows(checklist) -> list[dict]:
                 estado_label = "Diferencia"
                 estado_tone = "danger"
             recibido_display = recibido
+        elif not point_transfer_enviada(point_line):
+            estado_label = "Solicitado · no enviado"
+            estado_tone = "muted"
+            recibido_display = None
+        elif point_transfer_enviada(point_line) and enviado == Decimal("0"):
+            estado_label = "Enviado cero · sin recepción requerida"
+            estado_tone = "muted"
+            recibido_display = Decimal("0")
         elif not cargado_validado:
             estado_label = "Carga sin validar"
             estado_tone = "warning"
@@ -733,15 +759,28 @@ def _logistica_release_gate_rows(
     ]
 
 
+def _point_sin_enviado_q() -> Q:
+    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
+    prefix = "checklist_carga__lineas__point_transfer_line__"
+    return (
+        Q(estatus__in=[RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA])
+        & Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        & Q(**{f"{prefix}is_current_snapshot": True})
+        & Q(**{f"{prefix}is_cancelled": False})
+        & Q(**{f"{prefix}is_received": False})
+        & Q(**{f"{prefix}sent_at__isnull": True})
+        & (
+            Q(**{f"{prefix}raw_payload__transfer__isEnviado": False})
+            | Q(**{f"{prefix}raw_payload__transfer__isEnviado__isnull": True})
+        )
+    )
+
+
 def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
     today = timezone.localdate()
     point_blocked_routes = (
-        RutaEntrega.objects.filter(
-            fecha_ruta=today,
-            checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-            checklist_carga__lineas__cantidad_enviada_esperada__lte=0,
-        )
-        .exclude(estatus__in=[RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA])
+        RutaEntrega.objects.filter(fecha_ruta=today)
+        .filter(_point_sin_enviado_q())
         .distinct()
         .count()
     )
@@ -1943,14 +1982,7 @@ def rutas(request):
             paradas__entrega_estado__in=[ParadaRuta.ENTREGA_CON_DIFERENCIA, ParadaRuta.ENTREGA_NO_ENTREGADA],
         ).exclude(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS).distinct()
     elif enterprise_focus == "POINT_BLOQUEO":
-        rutas_qs = (
-            rutas_qs.filter(
-                checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
-                checklist_carga__lineas__cantidad_enviada_esperada__lte=0,
-            )
-            .exclude(estatus__in=[RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA])
-            .distinct()
-        )
+        rutas_qs = rutas_qs.filter(_point_sin_enviado_q()).distinct()
 
     rutas_total = RutaEntrega.objects.count()
     rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=today).count()
@@ -2038,8 +2070,7 @@ def rutas(request):
             ),
             point_bloqueo_lineas=Count(
                 "checklist_carga__lineas",
-                filter=Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-                & Q(checklist_carga__lineas__cantidad_enviada_esperada__lte=0),
+                filter=_point_sin_enviado_q(),
                 distinct=True,
             ),
             monto_transferido_point=Coalesce(
@@ -2296,13 +2327,49 @@ def ruta_detail(request, pk: int):
 
         if action == "registrar_recarga_cedis":
             try:
+                parada_cedis = None
+                if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+                    parada_cedis_id = int(request.POST.get("parada_cedis_id") or 0)
+                    parada_cedis = (
+                        ruta.paradas.select_related("punto")
+                        .filter(pk=parada_cedis_id, punto__tipo=PuntoLogistico.TIPO_CEDIS)
+                        .first()
+                    )
+                    if parada_cedis is None:
+                        raise ValidationError("Selecciona la próxima parada CEDIS pendiente de esta ruta.")
                 evento = registrar_recarga_cedis(
                     ruta=ruta,
                     user=request.user,
+                    parada=parada_cedis,
                     notas=(request.POST.get("notas_recarga_cedis") or "").strip(),
+                    autorizar_sin_sync=(request.POST.get("autorizar_sin_sync") or "").strip() == "1",
+                    motivo_autorizacion=(request.POST.get("motivo_autorizacion") or "").strip(),
+                    expected_snapshot_hash=(request.POST.get("expected_snapshot_hash") or "").strip(),
                 )
-            except ValidationError as exc:
-                messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+            except (ValueError, ValidationError) as exc:
+                estado_sync = getattr(exc, "estado_sync", "")
+                mensaje_estado = {
+                    "ERROR_POINT": (
+                        "No fue posible consultar Point. La recarga sigue pendiente y logística fue notificada."
+                    ),
+                    "PENDIENTE_ENVIADO": (
+                        "Point todavía no confirma Enviado para todas las solicitudes del siguiente tramo."
+                    ),
+                    "SIN_LINEAS_POINT": (
+                        "Point no devolvió líneas para las sucursales planeadas del siguiente tramo. "
+                        "La recarga sigue pendiente y requiere revisión de jefatura."
+                    ),
+                    "SNAPSHOT_OBSOLETO": (
+                        "El snapshot quedó obsoleto porque la carga cambió; actualiza y vuelve a revisar."
+                    ),
+                }
+                messages.error(
+                    request,
+                    mensaje_estado.get(
+                        estado_sync,
+                        "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc),
+                    ),
+                )
             else:
                 messages.success(request, evento.descripcion)
             return redirect("logistica:ruta_detail", pk=ruta.id)
@@ -2616,39 +2683,22 @@ def ruta_detail(request, pk: int):
                     messages.error(request, "La ruta ya inició seguimiento y no puede regresar a planeada.")
                     return redirect("logistica:ruta_detail", pk=ruta.id)
                 if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA:
-                    blockers = []
-                    if not ruta.repartidor_id:
-                        blockers.append("asigna repartidor")
-                    if not ruta.unidad_operativa_id:
-                        blockers.append("asigna unidad operativa")
-                    if not ruta.paradas.exists():
-                        blockers.append("agrega al menos una parada")
-                    if (
-                        ruta.repartidor_id
-                        and RutaEntrega.objects.filter(
-                            repartidor_id=ruta.repartidor_id,
-                            estatus=RutaEntrega.ESTATUS_EN_RUTA,
-                        )
-                        .exclude(pk=ruta.pk)
-                        .exists()
-                    ):
-                        blockers.append("el repartidor ya tiene otra ruta en curso")
-                    if (
-                        ruta.unidad_operativa_id
-                        and RutaEntrega.objects.filter(
-                            unidad_operativa_id=ruta.unidad_operativa_id,
-                            estatus=RutaEntrega.ESTATUS_EN_RUTA,
-                        )
-                        .exclude(pk=ruta.pk)
-                        .exists()
-                    ):
-                        blockers.append("la unidad ya tiene otra ruta en curso")
-                    checklist_blocker = checklist_bloquea_salida(ruta)
-                    if checklist_blocker:
-                        blockers.append(checklist_blocker)
-                    if blockers:
-                        messages.error(request, "No se puede liberar la ruta: " + ", ".join(blockers) + ".")
+                    from_status = ruta.estatus
+                    try:
+                        ruta = liberar_ruta_con_turno(ruta=ruta, actor=request.user)
+                    except LiberacionRutaError as exc:
+                        messages.error(request, "; ".join(exc.messages))
                         return redirect("logistica:ruta_detail", pk=ruta.id)
+                    if from_status != ruta.estatus:
+                        log_event(
+                            request.user,
+                            "UPDATE",
+                            "logistica.RutaEntrega",
+                            str(ruta.id),
+                            {"from": from_status, "to": ruta.estatus, "folio": ruta.folio},
+                        )
+                    messages.success(request, f"Ruta {ruta.folio} en {ruta.estatus}.")
+                    return redirect("logistica:ruta_detail", pk=ruta.id)
                 if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA:
                     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
                         messages.error(request, "Solo puedes completar una ruta que ya está en seguimiento.")
@@ -2656,10 +2706,7 @@ def ruta_detail(request, pk: int):
                     if not ruta.repartidor_id or not ruta.unidad_operativa_id or not ruta.paradas.exists():
                         messages.error(request, "No se puede completar la ruta: falta repartidor, unidad o paradas.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta.paradas.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(
-                        estado=ParadaRuta.ESTADO_PENDIENTE,
-                        entrega_estado=ParadaRuta.ENTREGA_PENDIENTE,
-                    ).exists():
+                    if ruta_tiene_paradas_entregables_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas pendientes por visitar u omitir.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
                     if ruta_tiene_entregas_pendientes(ruta):
@@ -2671,23 +2718,9 @@ def ruta_detail(request, pk: int):
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
                     ruta.estatus = estatus_nuevo
-                    if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not ruta.hora_inicio_real:
-                        ruta.hora_inicio_real = timezone.now()
                     if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not ruta.hora_cierre_real:
                         ruta.hora_cierre_real = timezone.now()
-                    try:
-                        ruta.save(update_fields=["estatus", "hora_inicio_real", "hora_cierre_real", "updated_at"])
-                    except IntegrityError:
-                        messages.error(request, "No se puede liberar la ruta: el repartidor o la unidad ya tiene otra ruta en curso.")
-                        return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if estatus_nuevo == RutaEntrega.ESTATUS_EN_RUTA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_SALIDA).exists():
-                        EventoRuta.objects.create(
-                            ruta=ruta,
-                            tipo=EventoRuta.TIPO_SALIDA,
-                            severidad=EventoRuta.SEVERIDAD_INFO,
-                            descripcion="Ruta liberada para seguimiento operativo.",
-                            creado_por=request.user,
-                        )
+                    ruta.save(update_fields=["estatus", "hora_cierre_real", "updated_at"])
                     if estatus_nuevo == RutaEntrega.ESTATUS_COMPLETADA and not EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_CIERRE).exists():
                         EventoRuta.objects.create(
                             ruta=ruta,
@@ -2859,11 +2892,22 @@ def ruta_detail(request, pk: int):
         and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
         and checklist_carga.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
     )
+    proxima_parada_cedis = (
+        ruta.paradas.select_related("punto")
+        .filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
+        )
+        .order_by("orden", "id")
+        .first()
+        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
+        else None
+    )
     recarga_cedis_disponible = bool(
         checklist_carga
         and can_manage_submodule(request.user, "logistica", "rutas")
         and (
-            ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
+            (ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and proxima_parada_cedis is not None)
             or (
                 ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
                 and checklist_carga.estatus == RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
@@ -2871,6 +2915,12 @@ def ruta_detail(request, pk: int):
             )
         )
     )
+    alerta_recarga_cedis_revisable = None
+    if recarga_cedis_disponible and proxima_parada_cedis is not None:
+        alerta_recarga_cedis_revisable = ultima_alerta_recarga_cedis_revisable(
+            ruta=ruta,
+            parada=proxima_parada_cedis,
+        )
     diferencia_carga_pendiente_autorizar = bool(
         checklist_carga
         and can_manage_submodule(request.user, "logistica", "rutas")
@@ -2880,7 +2930,7 @@ def ruta_detail(request, pk: int):
     cierre_diferencia_disponible = bool(
         can_manage_submodule(request.user, "logistica", "rutas")
         and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
-        and not ruta.paradas.filter(estado=ParadaRuta.ESTADO_PENDIENTE).exists()
+        and not ruta_tiene_paradas_entregables_pendientes(ruta)
         and not ruta_tiene_entregas_pendientes(ruta)
         and ruta_tiene_diferencias_entrega(ruta)
     )
@@ -2920,6 +2970,8 @@ def ruta_detail(request, pk: int):
         "checklist_carga": checklist_carga,
         "carga_manual_pendiente": carga_manual_pendiente,
         "recarga_cedis_disponible": recarga_cedis_disponible,
+        "proxima_parada_cedis": proxima_parada_cedis,
+        "alerta_recarga_cedis_revisable": alerta_recarga_cedis_revisable,
         "diferencia_carga_pendiente_autorizar": diferencia_carga_pendiente_autorizar,
         "cierre_diferencia_disponible": cierre_diferencia_disponible,
         "revisiones_entrega": revisiones_entrega,

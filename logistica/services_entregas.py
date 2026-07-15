@@ -8,11 +8,13 @@ from datetime import datetime
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from core.access import can_manage_submodule
 from core.models import Notificacion
 from core.notificaciones import crear_notificaciones
+from logistica.domain_ruta import parada_resuelta_operativamente
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -152,6 +154,7 @@ def _snapshot_dominio_parada(*, parada: ParadaRuta, geocerca_confiable: bool) ->
             ),
             "entrega_notas": parada.entrega_notas,
             "geocerca_confiable": geocerca_confiable,
+            "operativamente_resuelta": parada_resuelta_operativamente(parada),
             "revision_entrega_estado": parada.revision_entrega_estado,
             "revision_entrega_causa": parada.revision_entrega_causa,
             "revision_entrega_datos": parada.revision_entrega_datos,
@@ -291,6 +294,30 @@ def guardar_respuesta_idempotente(*, evidencia: ParadaEntregaEvidencia, respuest
     evidencia.save(update_fields=["metadata"])
 
 
+def _cedis_intermedios_sin_recarga(*, ruta: RutaEntrega, orden_destino: int) -> set[int]:
+    cedis_ids = set(
+        ruta.paradas.filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            orden__gt=1,
+            orden__lt=orden_destino,
+        ).values_list("id", flat=True)
+    )
+    if not cedis_ids:
+        return set()
+    resueltos = set(
+        EventoRuta.objects.filter(ruta=ruta, parada_id__in=cedis_ids)
+        .filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(
+                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+            )
+        )
+        .values_list("parada_id", flat=True)
+    )
+    return cedis_ids - resueltos
+
+
 def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entrega_estado, motivo, client_event_id):
     if parada.ruta_id != ruta.id:
         raise ValidationError("La parada no pertenece a la ruta indicada.")
@@ -298,11 +325,7 @@ def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entre
         raise ValidationError("Solo se pueden confirmar entregas de una ruta en seguimiento.")
     if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
         raise ValidationError("CEDIS usa su operación de recarga y no admite confirmación de entrega.")
-    if ruta.paradas.filter(
-        punto__tipo=PuntoLogistico.TIPO_CEDIS,
-        estado=ParadaRuta.ESTADO_PENDIENTE,
-        orden__lt=parada.orden,
-    ).exists():
+    if _cedis_intermedios_sin_recarga(ruta=ruta, orden_destino=parada.orden):
         raise ValidationError("Primero registra la recarga CEDIS del tramo anterior.")
     if not _actor_puede_confirmar(actor=actor, ruta=ruta):
         raise PermissionDenied("No puedes confirmar entregas de esta ruta.")

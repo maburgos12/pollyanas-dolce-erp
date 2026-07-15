@@ -1,4 +1,7 @@
 from pathlib import Path
+import subprocess
+import shutil
+import unittest
 
 from django.test import SimpleTestCase
 
@@ -7,6 +10,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ERPActionContractTests(SimpleTestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js no está disponible en este runtime")
+    def test_helper_ejecutable_cubre_redirect_error_y_doble_submit(self):
+        result = subprocess.run(
+            ["node", str(ROOT / "core" / "tests" / "erp_actions_harness.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("erp_actions harness: ok", result.stdout)
+
     def test_base_carga_toast_y_helper_global_accesible(self):
         html = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
 
@@ -27,6 +41,25 @@ class ERPActionContractTests(SimpleTestCase):
         self.assertIn('form.getAttribute("action") || window.location.href', js)
         self.assertIn("target.outerHTML = payload.html", js)
         self.assertIn("showToast", js)
+
+    def test_helper_usa_label_exacto_y_solo_navega_a_redirect_local(self):
+        js = (ROOT / "static" / "js" / "erp_actions.js").read_text(encoding="utf-8")
+
+        self.assertIn('"Procesando…"', js)
+        self.assertIn("safeNavigationUrl(payload.redirect)", js)
+        self.assertIn('url.protocol !== "http:"', js)
+        self.assertIn("url.origin !== window.location.origin", js)
+        self.assertIn("url.username || url.password", js)
+        self.assertIn("window.location.assign(redirectUrl.href)", js)
+
+    def test_solo_acciones_de_stock_objetivo_son_async(self):
+        recepciones = (ROOT / "compras" / "templates" / "compras" / "recepciones.html").read_text(encoding="utf-8")
+        ajustes = (ROOT / "inventario" / "templates" / "inventario" / "ajustes.html").read_text(encoding="utf-8")
+
+        self.assertEqual(recepciones.count("data-async-action"), 2)
+        self.assertIn('data-pending-label="Procesando…"', recepciones)
+        self.assertEqual(ajustes.count("data-async-action"), 1)
+        self.assertIn('data-pending-label="Procesando…"', ajustes)
 
     def test_toast_respeta_safe_area_y_movimiento_reducido(self):
         css = (ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")

@@ -51,6 +51,7 @@ from compras.views import (
     _build_consumo_vs_plan_dashboard,
     _default_fecha_requerida,
     _parse_date_value,
+    _recepcion_apply_succeeded,
     _build_provider_dashboard,
     _filtered_solicitudes,
     _resolve_proveedor_name,
@@ -1433,6 +1434,7 @@ class ComprasOrdenStatusUpdateView(APIView):
 class ComprasOrdenCreateRecepcionView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, orden_id: int):
         if not can_manage_compras(request.user):
             return Response(
@@ -1467,7 +1469,13 @@ class ComprasOrdenCreateRecepcionView(APIView):
         )
 
         if recepcion.estatus == RecepcionCompra.STATUS_CERRADA:
-            _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            apply_result = _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            if not _recepcion_apply_succeeded(apply_result):
+                transaction.set_rollback(True)
+                return Response(
+                    {"detail": "No se pudo aplicar la recepción al inventario. Corrige sus datos e inténtalo de nuevo."},
+                    status=status.HTTP_409_CONFLICT,
+                )
             if orden.estatus != OrdenCompra.STATUS_CERRADA:
                 orden_prev = orden.estatus
                 orden.estatus = OrdenCompra.STATUS_CERRADA
@@ -1498,6 +1506,7 @@ class ComprasOrdenCreateRecepcionView(APIView):
 class ComprasRecepcionStatusUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, recepcion_id: int):
         if not can_manage_compras(request.user):
             return Response(
@@ -1511,7 +1520,7 @@ class ComprasRecepcionStatusUpdateView(APIView):
         estatus_new = ser.validated_data["estatus"]
         estatus_prev = recepcion.estatus
 
-        if estatus_prev == estatus_new:
+        if estatus_prev == estatus_new and estatus_new != RecepcionCompra.STATUS_CERRADA:
             return Response(
                 {
                     "id": recepcion.id,
@@ -1524,24 +1533,32 @@ class ComprasRecepcionStatusUpdateView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        if not _can_transition_recepcion(estatus_prev, estatus_new):
+        if estatus_prev != estatus_new and not _can_transition_recepcion(estatus_prev, estatus_new):
             return Response(
                 {"detail": f"Transición inválida de recepción: {estatus_prev} -> {estatus_new}."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        recepcion.estatus = estatus_new
-        recepcion.save(update_fields=["estatus"])
-        log_event(
-            request.user,
-            "APPROVE",
-            "compras.RecepcionCompra",
-            recepcion.id,
-            {"from": estatus_prev, "to": estatus_new, "folio": recepcion.folio, "source": "api"},
-        )
+        transitioned = estatus_prev != estatus_new
+        if transitioned:
+            recepcion.estatus = estatus_new
+            recepcion.save(update_fields=["estatus"])
+            log_event(
+                request.user,
+                "APPROVE",
+                "compras.RecepcionCompra",
+                recepcion.id,
+                {"from": estatus_prev, "to": estatus_new, "folio": recepcion.folio, "source": "api"},
+            )
 
         if estatus_new == RecepcionCompra.STATUS_CERRADA:
-            _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            apply_result = _apply_recepcion_to_inventario(recepcion, acted_by=request.user)
+            if not _recepcion_apply_succeeded(apply_result):
+                transaction.set_rollback(True)
+                return Response(
+                    {"detail": "No se pudo aplicar la recepción al inventario. Corrige sus datos e inténtalo de nuevo."},
+                    status=status.HTTP_409_CONFLICT,
+                )
             if recepcion.orden.estatus != OrdenCompra.STATUS_CERRADA:
                 orden_prev = recepcion.orden.estatus
                 recepcion.orden.estatus = OrdenCompra.STATUS_CERRADA
@@ -1560,13 +1577,11 @@ class ComprasRecepcionStatusUpdateView(APIView):
                 "folio": recepcion.folio,
                 "from": estatus_prev,
                 "to": estatus_new,
-                "updated": True,
+                "updated": transitioned,
                 "orden_id": recepcion.orden_id,
                 "orden_folio": recepcion.orden.folio,
                 "orden_estatus": recepcion.orden.estatus,
             },
             status=status.HTTP_200_OK,
         )
-
-
 

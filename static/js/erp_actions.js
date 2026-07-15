@@ -6,6 +6,46 @@
   var confirmMessage = document.getElementById("erp-confirm-message");
   var confirmTrigger = null;
   var confirmForm = null;
+  var pendingToastKey = "pollyanas.erpActions.pendingToast.v1";
+
+  function safeNavigationUrl(value) {
+    try {
+      var url = new URL(value, window.location.href);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      if (url.origin !== window.location.origin) return null;
+      if (url.username || url.password) return null;
+      return url;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function normalizedToast(toast, fallbackType) {
+    var allowedTypes = ["success", "info", "warning", "error"];
+    var type = toast && allowedTypes.indexOf(toast.type) !== -1 ? toast.type : fallbackType || "info";
+    var message = toast && typeof toast.message === "string" ? toast.message.slice(0, 500) : "Acción completada.";
+    return { type: type, message: message, persistent: Boolean(toast && toast.persistent) };
+  }
+
+  function storePendingToast(toast) {
+    try {
+      window.sessionStorage.setItem(pendingToastKey, JSON.stringify(normalizedToast(toast, "success")));
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function consumePendingToast() {
+    try {
+      var raw = window.sessionStorage.getItem(pendingToastKey);
+      if (!raw) return;
+      window.sessionStorage.removeItem(pendingToastKey);
+      showToast(normalizedToast(JSON.parse(raw), "info"));
+    } catch (_error) {
+      try { window.sessionStorage.removeItem(pendingToastKey); } catch (_ignored) {}
+    }
+  }
 
   function closeConfirm() {
     if (!confirmDialog) return;
@@ -67,6 +107,7 @@
     if (form.dataset.confirmMessage && form.dataset.confirmed !== "true" && openConfirm(form, submitter)) return;
     form.dataset.confirmed = "false";
     var originalLabel = submitter ? submitter.textContent : "";
+    var navigating = false;
     form.dataset.actionPending = "true";
     if (submitter) {
       submitter.disabled = true;
@@ -82,6 +123,16 @@
         headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
         credentials: "same-origin"
       });
+      var contentType = response.headers && response.headers.get("content-type") || "";
+      if (contentType.indexOf("application/json") === -1) {
+        var responseUrl = response.redirected ? safeNavigationUrl(response.url) : null;
+        if (responseUrl) {
+          navigating = true;
+          window.location.assign(responseUrl.href);
+          return;
+        }
+        throw { toast: { type: "error", message: "El servidor devolvió una respuesta inesperada. Recarga la página e inténtalo de nuevo.", persistent: true } };
+      }
       var payload = await response.json();
       if (!response.ok || !payload.ok) throw payload;
 
@@ -89,6 +140,21 @@
       if (target && payload.html) {
         target.outerHTML = payload.html;
         bind(document);
+      }
+      if (payload.redirect) {
+        var redirectUrl = safeNavigationUrl(payload.redirect);
+        if (!redirectUrl) {
+          throw { toast: { type: "error", message: "La acción terminó, pero se rechazó un destino de navegación inseguro.", persistent: true } };
+        }
+        navigating = true;
+        var redirectToast = normalizedToast(payload.toast, "success");
+        if (storePendingToast(redirectToast)) {
+          window.location.assign(redirectUrl.href);
+        } else {
+          showToast(redirectToast);
+          window.setTimeout(function () { window.location.assign(redirectUrl.href); }, 900);
+        }
+        return;
       }
       showToast(payload.toast || { type: "success", message: "Acción completada." });
     } catch (error) {
@@ -99,10 +165,12 @@
       };
       showToast(toast);
     } finally {
-      form.dataset.actionPending = "false";
-      if (submitter && document.contains(submitter)) {
-        submitter.disabled = false;
-        submitter.textContent = originalLabel;
+      if (!navigating) {
+        form.dataset.actionPending = "false";
+        if (submitter && document.contains(submitter)) {
+          submitter.disabled = false;
+          submitter.textContent = originalLabel;
+        }
       }
     }
   }
@@ -120,6 +188,7 @@
       window.setTimeout(function () { toast.remove(); }, 4500);
     }
   });
+  consumePendingToast();
   if (confirmDialog) {
     confirmDialog.querySelectorAll("[data-confirm-cancel]").forEach(function (button) {
       button.addEventListener("click", closeConfirm);

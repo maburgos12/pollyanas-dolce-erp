@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Captura de gasto real{% endblock %}
+{% block page_title %}Presupuesto · Captura de gasto real{% endblock %}
+{% block body_class %}page-reportes-presupuesto-captura{% endblock %}
+
+{% block extra_css %}
+<style>
+  .prc-fuente { display:inline-flex; align-items:center; font-size:0.78rem; border-radius:var(--radius-sm); padding:2px 8px; }
+  .prc-fuente.is-auto { background:var(--rosa); color:var(--vino); }
+  .prc-fuente.is-manual { background:var(--gris-suave); color:var(--texto); border:1px solid var(--dorado); }
+  .prc-fuente.is-pendiente { background:var(--gris-suave); color:var(--texto-light); }
+  .prc-monto-input { max-width:160px; }
+  .prc-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if module_tabs %}
+<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
+  {% for tab in module_tabs %}
+  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Captura de gasto real · {{ selected_month_name|capfirst }} {{ selected_year }}</div>
+  <p class="muted">Solo se capturan los conceptos que el sistema no llena automáticamente (los automáticos aparecen bloqueados con su fuente). Lo capturado nunca lo pisa el sistema.</p>
+
+  <form method="get" novalidate>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="prc-area">Área</label>
+        <select class="input-field" id="prc-area" name="area">
+          {% for area in areas %}
+          <option value="{{ area.codigo }}" {% if selected_area == area.codigo %}selected{% endif %}>{{ area.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="prc-month">Mes</label>
+        <select class="input-field" id="prc-month" name="month">
+          {% for month_name, month_number in month_options %}
+          <option value="{{ month_number }}" {% if selected_month == month_number %}selected{% endif %}>{{ month_name|capfirst }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="prc-year">Año</label>
+        <input class="input-field" id="prc-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}">
+      </div>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="btn btn-primary" type="submit">Cambiar</button>
+    </div>
+  </form>
+</section>
+
+<section class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-number">{{ completos }} / {{ total_filas }}</div>
+    <div class="kpi-label">Conceptos con dato del mes</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Conceptos del área</div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Sucursal</th>
+          <th>Presupuesto</th>
+          <th>Real</th>
+          <th>Fuente</th>
+          <th>Captura</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in filas %}
+        <tr id="linea-{{ fila.linea.id }}">
+          <td>{{ fila.linea.rubro.concepto }}</td>
+          <td>{{ fila.linea.rubro.sucursal.codigo|default:"—" }}</td>
+          <td>${{ fila.linea.monto_presupuesto|floatformat:2|intcomma }}</td>
+          <td>{% if fila.con_real %}${{ fila.linea.monto_real|floatformat:2|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td><span class="prc-fuente is-{{ fila.fuente.kind }}">{{ fila.fuente.label }}</span></td>
+          <td>
+            {% if fila.capturable %}
+            <form class="prc-form" method="post" action="{% url 'reportes:presupuesto_real_captura_guardar' %}" data-async-action>
+              {% csrf_token %}
+              <input type="hidden" name="linea_id" value="{{ fila.linea.id }}">
+              <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+              <input class="input-field prc-monto-input" type="text" inputmode="decimal" name="monto"
+                     value="{% if fila.con_real %}{{ fila.linea.monto_real|floatformat:2 }}{% endif %}"
+                     placeholder="0.00" aria-label="Monto real de {{ fila.linea.rubro.concepto }}">
+              <button class="btn btn-primary btn-sm" type="submit" data-pending-label="Guardando…">Guardar</button>
+            </form>
+            {% else %}
+            <span class="muted">Automático — no se captura</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="muted">No hay líneas de presupuesto para esta área y mes.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

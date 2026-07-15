@@ -20,6 +20,12 @@ def is_cedis_like_name(value: str) -> bool:
 
 
 def resolve_requesting_erp_branch(line: PointTransferLine):
+    # El vínculo ERP es la fuente estructurada y debe prevalecer sobre el nombre
+    # visible de Point. Algunas sucursales legítimas incluyen palabras como
+    # "Almacén" o "Producción", que solo sirven como heurística cuando Point no
+    # logró mapear el destino.
+    if line.erp_destination_branch_id:
+        return line.erp_destination_branch
     if line.destination_branch_id and not is_cedis_like_name(line.destination_branch.name):
         return line.erp_destination_branch
     return line.erp_origin_branch or line.erp_destination_branch

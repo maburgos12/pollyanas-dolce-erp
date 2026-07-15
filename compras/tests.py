@@ -1,11 +1,16 @@
-from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
+from threading import Barrier, BrokenBarrierError
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.db import close_old_connections, connection
+from django.db.models.query import QuerySet
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -19,6 +24,7 @@ from compras.models import (
     RecepcionCompra,
     SolicitudCompra,
 )
+from compras.views import _apply_recepcion_to_inventario
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from recetas.models import (
@@ -29,6 +35,118 @@ from recetas.models import (
     SolicitudVenta,
     VentaHistorica,
 )
+
+
+class RecepcionInventarioConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.proveedor = Proveedor.objects.create(nombre="Proveedor Concurrente", activo=True)
+        self.unidad = UnidadMedida.objects.create(
+            codigo="kg-concurrente",
+            nombre="Kilogramo Concurrente",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="Insumo Concurrente",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
+        solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="tester",
+            insumo=self.insumo,
+            proveedor_sugerido=self.proveedor,
+            cantidad=Decimal("4"),
+            fecha_requerida=date(2026, 7, 14),
+            estatus=SolicitudCompra.STATUS_APROBADA,
+        )
+        orden = OrdenCompra.objects.create(
+            solicitud=solicitud,
+            proveedor=self.proveedor,
+            fecha_emision=date(2026, 7, 14),
+            monto_estimado=Decimal("40"),
+            estatus=OrdenCompra.STATUS_ENVIADA,
+        )
+        self.recepcion = RecepcionCompra.objects.create(
+            orden=orden,
+            fecha_recepcion=date(2026, 7, 14),
+            conformidad_pct=Decimal("100"),
+            estatus=RecepcionCompra.STATUS_PENDIENTE,
+            observaciones="",
+        )
+        ExistenciaInsumo.objects.create(insumo=self.insumo, stock_actual=Decimal("10"))
+
+    def test_aplicaciones_concurrentes_incrementan_stock_una_sola_vez(self):
+        start_barrier = Barrier(2)
+        before_exists_barrier = Barrier(2)
+        after_exists_barrier = Barrier(2)
+        original_exists = QuerySet.exists
+        recepcion_pk = self.recepcion.pk
+
+        def coordinated_movement_exists(queryset):
+            if queryset.model is not MovimientoInventario:
+                return original_exists(queryset)
+
+            try:
+                before_exists_barrier.wait(timeout=2)
+            except BrokenBarrierError:
+                # Con el lock real, el segundo worker no puede llegar a este
+                # chequeo hasta que el primero confirme su transacción.
+                return original_exists(queryset)
+
+            result = original_exists(queryset)
+            after_exists_barrier.wait(timeout=2)
+            return result
+
+        def apply_from_separate_connection():
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '5s'")
+                    cursor.execute("SET statement_timeout = '8s'")
+                recepcion = RecepcionCompra.objects.get(pk=recepcion_pk)
+                start_barrier.wait(timeout=5)
+                return _apply_recepcion_to_inventario(recepcion)
+            finally:
+                close_old_connections()
+
+        executor = ThreadPoolExecutor(max_workers=2)
+        futures = []
+        try:
+            with patch.object(QuerySet, "exists", new=coordinated_movement_exists):
+                futures = [executor.submit(apply_from_separate_connection) for _ in range(2)]
+                results = [future.result(timeout=10) for future in futures]
+        except BaseException:
+            start_barrier.abort()
+            before_exists_barrier.abort()
+            after_exists_barrier.abort()
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            start_barrier.abort()
+            before_exists_barrier.abort()
+            after_exists_barrier.abort()
+            executor.shutdown(wait=True, cancel_futures=True)
+
+        source_hash = f"recepcion:{self.recepcion.pk}:entrada"
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=source_hash,
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=self.insumo).stock_actual,
+            Decimal("14"),
+        )
+        self.assertEqual(sum(result["applied"] is True for result in results), 1)
+        self.assertEqual(
+            sum(result == {"applied": False, "reason": "ya_aplicado"} for result in results),
+            1,
+        )
 
 
 class ComprasFase2FiltersTests(TestCase):
@@ -2415,6 +2533,147 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertEqual(
             MovimientoInventario.objects.filter(source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada").count(),
             1,
+        )
+
+        result = _apply_recepcion_to_inventario(self.recepcion_pendiente, acted_by=self.user)
+        existencia.refresh_from_db()
+        self.assertEqual(result, {"applied": False, "reason": "ya_aplicado"})
+        self.assertEqual(existencia.stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada"
+            ).count(),
+            1,
+        )
+
+    def test_cerrar_recepcion_responde_json_aplicado_e_idempotente(self):
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+        headers = {"HTTP_ACCEPT": "application/json", "HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+
+        applied = self.client.post(url, {"return_query": "estatus=PENDIENTE"}, **headers)
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(applied.json()["toast"]["type"], "success")
+        self.assertIn("aplicada", applied.json()["toast"]["message"].lower())
+        self.assertEqual(
+            applied.json()["redirect"],
+            f"{reverse('compras:recepciones')}?estatus=PENDIENTE#recepcion-{self.recepcion_pendiente.id}",
+        )
+
+        idempotent = self.client.post(url, **headers)
+        self.assertEqual(idempotent.status_code, 200)
+        self.assertEqual(idempotent.json()["toast"]["type"], "info")
+        self.assertIn("stock no cambió nuevamente", idempotent.json()["toast"]["message"])
+
+    def test_retry_repara_recepcion_cerrada_sin_movimiento_y_luego_es_idempotente(self):
+        self.recepcion_pendiente.estatus = RecepcionCompra.STATUS_CERRADA
+        self.recepcion_pendiente.save(update_fields=["estatus"])
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        repaired = self.client.post(url, HTTP_ACCEPT="application/json")
+        repeated = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(repaired.status_code, 200)
+        self.assertEqual(repaired.json()["toast"]["type"], "success")
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["toast"]["type"], "info")
+        self.assertEqual(ExistenciaInsumo.objects.get(insumo=self.insumo).stock_actual, Decimal("2"))
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada"
+            ).count(),
+            1,
+        )
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_retry_recepcion_cerrada_no_aplicable_reporta_error_sin_desmarcar_historia(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "sin_solicitud_o_insumo"}
+        self.recepcion_pendiente.estatus = RecepcionCompra.STATUS_CERRADA
+        self.recepcion_pendiente.save(update_fields=["estatus"])
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        html_response = self.client.post(url)
+        html_messages = [str(message) for message in get_messages(html_response.wsgi_request)]
+        response = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(html_response.status_code, 302)
+        self.assertTrue(any("No se pudo aplicar" in message for message in html_messages))
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "error")
+        self.recepcion_pendiente.refresh_from_db()
+        self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_CERRADA)
+        self.assertFalse(MovimientoInventario.objects.filter(referencia=self.recepcion_pendiente.folio).exists())
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_crear_recepcion_cerrada_no_aplicable_no_persiste_cierre(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        initial_count = RecepcionCompra.objects.count()
+
+        response = self.client.post(
+            reverse("compras:recepciones"),
+            {
+                "orden_id": self.orden_enviada.id,
+                "fecha_recepcion": "2026-02-22",
+                "conformidad_pct": "100",
+                "estatus": RecepcionCompra.STATUS_CERRADA,
+                "observaciones": "cierre fallido",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(RecepcionCompra.objects.count(), initial_count)
+        self.orden_enviada.refresh_from_db()
+        self.assertNotEqual(self.orden_enviada.estatus, OrdenCompra.STATUS_CERRADA)
+
+    def test_cerrar_recepcion_post_html_conserva_redirect_tradicional_con_fragmento(self):
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{reverse('compras:recepciones')}#recepcion-{self.recepcion_pendiente.id}",
+        )
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_cerrar_recepcion_json_no_aplicable_hace_rollback_completo(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=self.insumo)
+        stock_inicial = existencia.stock_actual
+        orden_estado_inicial = self.recepcion_pendiente.orden.estatus
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        response = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "error")
+        self.assertTrue(response.json()["toast"]["persistent"])
+        self.recepcion_pendiente.refresh_from_db()
+        self.recepcion_pendiente.orden.refresh_from_db()
+        existencia.refresh_from_db()
+        self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_PENDIENTE)
+        self.assertEqual(self.recepcion_pendiente.orden.estatus, orden_estado_inicial)
+        self.assertEqual(existencia.stock_actual, stock_inicial)
+        self.assertFalse(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada"
+            ).exists()
         )
 
     def test_recepcion_con_diferencias_sin_observaciones_muestra_bloqueo_erp(self):

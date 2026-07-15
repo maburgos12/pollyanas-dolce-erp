@@ -10,6 +10,7 @@ from core.access import (
     can_manage_submodule,
     can_view_submodule,
     is_branch_capture_only,
+    is_mermas_only,
     is_repartidor_only,
     primary_role,
 )
@@ -69,6 +70,8 @@ def _can_use_mantenimiento(user) -> bool:
 def _can_use_bitacoras(user) -> bool:
     if user.is_superuser:
         return True
+    if is_mermas_only(user):
+        return False
     return (
         can_view_module(user, "produccion")
         or can_view_module(user, "logistica")

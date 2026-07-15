@@ -367,10 +367,17 @@ class OperacionAppTests(TestCase):
 
         response = self.client.get("/app/")
         dashboard = self.client.get("/dashboard/")
+        bitacoras = self.client.get("/app/bitacoras/")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Registrar merma")
         self.assertContains(response, "/mermas/app/?modo=captura")
+        self.assertNotContains(response, "Bitácoras")
+        self.assertNotContains(response, "/app/bitacoras/")
+        self.assertEqual(dashboard.status_code, 302)
+        self.assertEqual(dashboard["Location"], "/mermas/app/")
+        self.assertEqual(bitacoras.status_code, 302)
+        self.assertEqual(bitacoras["Location"], "/mermas/app/")
 
     def test_produccion_user_gets_bitacoras_tile(self):
         user = self._user("produccion.bitacoras")
@@ -614,16 +621,15 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'name="bloque_0"')
         self.assertNotContains(response, "Existencia_fisica")
 
-    def test_merma_recepcion_stays_on_existing_mermas_app(self):
+    def test_mermas_only_reception_user_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")
         self._grant(user, "mermas.recepcion", ACCESS_MANAGE)
         self.client.force_login(user)
 
         response = self.client.get("/app/bitacoras/")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "/mermas/app/?modo=recepcion")
-        self.assertNotContains(response, "Logística móvil")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/mermas/app/")
 
     def test_sucursal_user_gets_only_assigned_operational_actions(self):
         user = self._user("sucursal.colosio", sucursal=self.sucursal)

@@ -801,4 +801,26 @@ class Command(BaseCommand):
             },
         )
 
+        # Presupuesto vs real: consolidación nocturna del mes en curso
+        # (y del mes anterior los primeros 5 días — cierre). 23:50 Mazatlán,
+        # después de que Point cargó las ventas del día.
+        presupuesto_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="50",
+            hour="23",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="reportes: consolidar presupuesto real nocturno",
+            defaults={
+                "task": "reportes.consolidar_presupuesto_real",
+                "crontab": presupuesto_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         self.stdout.write(self.style.SUCCESS("Schedules operativos registrados en django-celery-beat."))

@@ -50,10 +50,14 @@ class Insumo(models.Model):
     TIPO_MATERIA_PRIMA = "MATERIA_PRIMA"
     TIPO_INTERNO = "INSUMO_INTERNO"
     TIPO_EMPAQUE = "EMPAQUE"
+    # Herramientas y equipo de cocina NO son materia prima (instrucción de
+    # dirección): no entran a recetas ni a consumo de MP.
+    TIPO_HERRAMIENTA = "HERRAMIENTA"
     TIPO_CHOICES = [
         (TIPO_MATERIA_PRIMA, "Materia prima (compra directa)"),
         (TIPO_INTERNO, "Insumo interno (producido)"),
         (TIPO_EMPAQUE, "Empaque"),
+        (TIPO_HERRAMIENTA, "Herramienta / equipo"),
     ]
 
     codigo = models.CharField(max_length=60, blank=True, default="")

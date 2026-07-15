@@ -1,10 +1,11 @@
+import logging
 from datetime import date, timedelta
 
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.db import OperationalError, transaction
+from django.db import OperationalError, connection, transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
@@ -26,7 +27,22 @@ from .models import (
 )
 from .services_combustible_auditoria import auditar_carga_combustible
 from .services_auditoria_entregas import auditar_entregas_ruta
-from .services_rutas_control import detectar_gps_perdido
+from .services_carga_ruta import (
+    RecargaCedisPendienteEnviado,
+    RecargaCedisPointError,
+    RecargaCedisSinLineasPoint,
+    registrar_recarga_cedis,
+)
+from .services_rutas_control import (
+    RECARGA_CEDIS_BACKOFF,
+    RECARGA_CEDIS_LEASE_ENCOLADA,
+    _actualizar_lease_recarga,
+    _lease_token_recarga_es_actual,
+    _reclamar_lease_recarga_para_procesar,
+    detectar_gps_perdido,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _emails_de_grupo(nombre_grupo: str) -> list[str]:
@@ -92,6 +108,122 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
         "rutas_revisadas": revisadas,
         "eventos_gps_perdido": len(set(eventos)),
     }
+
+
+@shared_task(
+    name="logistica.tasks.procesar_recarga_cedis_automatica",
+    autoretry_for=(OperationalError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def procesar_recarga_cedis_automatica(
+    *, ruta_id: int, parada_id: int, user_id: int | None = None, lease_token: str | None = None
+):
+    if not lease_token or not _lease_token_recarga_es_actual(
+        ruta_id=ruta_id,
+        parada_id=parada_id,
+        lease_token=lease_token,
+    ):
+        return {
+            "estado_sync": "OBSOLETA",
+            "ruta_id": ruta_id,
+            "parada_id": parada_id,
+        }
+
+    lock_adquirido = False
+    if connection.vendor == "postgresql":
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s, %s)", [ruta_id, parada_id])
+            lock_adquirido = bool(cursor.fetchone()[0])
+    if not lock_adquirido:
+        return {
+            "estado_sync": "EN_PROCESO",
+            "ruta_id": ruta_id,
+            "parada_id": parada_id,
+        }
+
+    try:
+        reclamada, estado_lease = _reclamar_lease_recarga_para_procesar(
+            ruta_id=ruta_id,
+            parada_id=parada_id,
+            lease_token=lease_token,
+            user_id=user_id,
+        )
+        if not reclamada:
+            return {
+                "estado_sync": estado_lease,
+                "ruta_id": ruta_id,
+                "parada_id": parada_id,
+            }
+
+        ruta = RutaEntrega.objects.get(pk=ruta_id)
+        parada = ruta.paradas.get(pk=parada_id)
+        user = get_user_model().objects.filter(pk=user_id).first() if user_id is not None else None
+        try:
+            evento = registrar_recarga_cedis(
+                ruta=ruta,
+                parada=parada,
+                user=user,
+                notas="Recarga CEDIS reconciliada automáticamente al confirmar permanencia.",
+            )
+        except (RecargaCedisPendienteEnviado, RecargaCedisSinLineasPoint, RecargaCedisPointError) as exc:
+            _actualizar_lease_recarga(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                estado="BACKOFF",
+                estado_sync=exc.estado_sync,
+                proximo_intento_duracion=RECARGA_CEDIS_BACKOFF,
+                lease_token=lease_token,
+            )
+            return {
+                "estado_sync": exc.estado_sync,
+                "ruta_id": ruta_id,
+                "parada_id": parada_id,
+            }
+        except OperationalError:
+            _actualizar_lease_recarga(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                estado="ENCOLADA",
+                lease_duracion=RECARGA_CEDIS_LEASE_ENCOLADA,
+                lease_token=lease_token,
+            )
+            raise
+        except Exception as exc:
+            _actualizar_lease_recarga(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                estado="BACKOFF",
+                estado_sync=getattr(exc, "estado_sync", "ERROR_NO_CLASIFICADO"),
+                proximo_intento_duracion=RECARGA_CEDIS_BACKOFF,
+                error=exc,
+                lease_token=lease_token,
+            )
+            raise
+
+        estado_sync = (evento.metadata or {}).get("estado_sync", "ACTUALIZADO")
+        _actualizar_lease_recarga(
+            ruta_id=ruta_id,
+            parada_id=parada_id,
+            estado="SUPERADA",
+            estado_sync=estado_sync,
+            lease_token=lease_token,
+        )
+        return {
+            "estado_sync": estado_sync,
+            "evento_id": evento.id,
+        }
+    finally:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_unlock(%s, %s)", [ruta_id, parada_id])
+        except Exception:
+            logger.exception(
+                "No se pudo liberar advisory lock de recarga para ruta=%s parada=%s.",
+                ruta_id,
+                parada_id,
+            )
+            connection.close()
 
 
 @shared_task(

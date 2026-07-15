@@ -37,7 +37,9 @@ POINT_BRANCH_CODE_ALIASES = {
 
 POINT_BRANCH_CANONICAL_NAMES = {
     "COLOSIO": "Sucursal Colosio",
-    "CRUCERO": "Sucursal Crucero",
+    # La licencia/código histórico CRUCERO continúa siendo la misma sucursal;
+    # únicamente cambió su nombre comercial y ubicación física a Bamoa.
+    "CRUCERO": "Sucursal Bamoa",
     "EL_TUNEL": "Sucursal El Túnel",
     "GUAMUCHIL": "Sucursal Guamuchil",
     "LAS_GLORIAS": "Sucursal Las Glorias",

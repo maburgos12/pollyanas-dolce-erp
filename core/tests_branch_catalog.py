@@ -25,11 +25,13 @@ class CanonizarCatalogoSucursalesCommandTests(TestCase):
         Sucursal.objects.create(codigo="EL_TUNEL", nombre="El Túnel", activa=True)
         Sucursal.objects.create(codigo="LAS_GLORIAS", nombre="Las Glorias", activa=True)
         Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        Sucursal.objects.create(codigo="CRUCERO", nombre="Sucursal Crucero", activa=True)
         stdout = StringIO()
 
         call_command("canonizar_catalogo_sucursales", "--apply", stdout=stdout)
 
-        self.assertIn("2 sucursales actualizadas", stdout.getvalue())
+        self.assertIn("3 sucursales actualizadas", stdout.getvalue())
         self.assertEqual(Sucursal.objects.get(codigo="EL_TUNEL").nombre, "Sucursal El Túnel")
         self.assertEqual(Sucursal.objects.get(codigo="LAS_GLORIAS").nombre, "Sucursal Las Glorias")
         self.assertEqual(Sucursal.objects.get(codigo="MATRIZ").nombre, "Sucursal Matriz")
+        self.assertEqual(Sucursal.objects.get(codigo="CRUCERO").nombre, "Sucursal Bamoa")

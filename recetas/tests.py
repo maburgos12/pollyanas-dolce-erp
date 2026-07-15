@@ -4431,6 +4431,10 @@ class SolicitudVentasForecastTests(TestCase):
             response["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        self.assertEqual(response["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(response["Pragma"], "no-cache")
+        self.assertEqual(response["Expires"], "0")
+        self.assertIn("calculo_insumos_", response["Content-Disposition"])
         wb = load_workbook(BytesIO(response.content), data_only=True)
         self.assertEqual(
             wb.sheetnames,

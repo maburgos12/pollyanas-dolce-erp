@@ -153,7 +153,7 @@
         </thead>
         <tbody>
           {% for a in ajustes %}
-          <tr>
+          <tr id="ajuste-{{ a.id }}">
             <td>{{ a.folio }}</td>
             <td>
               {{ a.insumo.display_name }}
@@ -208,12 +208,12 @@
             {% if can_approve_ajustes %}
             <td>
               {% if a.estatus == "PENDIENTE" %}
-              <form method="post" class="d-flex gap-2 flex-wrap">
+              <form method="post" class="d-flex gap-2 flex-wrap" data-async-action>
                 {% csrf_token %}
                 <input type="hidden" name="action" value="approve">
                 <input type="hidden" name="ajuste_id" value="{{ a.id }}">
                 <input class="input-field" name="comentario_revision" placeholder="Comentario (opcional)">
-                <button class="btn btn-primary btn-small" type="submit">Aprobar y aplicar</button>
+                <button class="btn btn-primary btn-small" type="submit" data-pending-label="Procesando…">Aprobar y aplicar</button>
               </form>
               <form method="post" class="d-flex gap-2 mt-1">
                 {% csrf_token %}

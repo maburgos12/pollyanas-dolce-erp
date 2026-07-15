@@ -132,6 +132,13 @@ class PresupuestoMaestroTests(TestCase):
         PresupuestoMaestroImportService().import_file(archivo=path, area_code="ventas", version="ORIGINAL", year=2026)
         EmpresaResultadoMensual.objects.create(periodo=date(2026, 1, 1), venta_total=Decimal("120.00"))
 
+        # El fallback a EmpresaResultadoMensual aplica solo con actual_key
+        # EXPLÍCITO en el rubro (un producto individual no debe absorber el
+        # total de ventas de la empresa por accidente).
+        rubro = RubroPresupuesto.objects.get(concepto="Pay de Queso Grande")
+        rubro.metadata = {**(rubro.metadata or {}), "actual_key": "ventas"}
+        rubro.save(update_fields=["metadata"])
+
         summary = PresupuestoMaestroService().build_consolidado(periodo="2026-01", version="ORIGINAL")
         ventas = summary["areas"][0]["rubros"][0]
 
@@ -262,14 +269,22 @@ class PresupuestoMaestroTests(TestCase):
             ]
         )
         PresupuestoMaestroImportService().import_file(archivo=admin_path, area_code="administracion", version="ORIGINAL", year=2026)
-        EmpresaResultadoMensual.objects.create(periodo=date(2026, 1, 1), venta_total=Decimal("120.00"))
+        # El KPI del área usa SU métrica (gasto fijo = comercial + corporativo),
+        # no las ventas de la empresa (corrección de auditoría).
+        EmpresaResultadoMensual.objects.create(
+            periodo=date(2026, 1, 1),
+            venta_total=Decimal("999999.00"),
+            gasto_comercial_total=Decimal("80.00"),
+            gasto_corporativo_total=Decimal("40.00"),
+        )
 
         kpis = PresupuestoMaestroService().executive_kpis(year=2026, month=1, version="ORIGINAL", area="administracion")
 
         self.assertEqual(kpis["annual_budget"], Decimal("-300.00"))
         self.assertEqual(kpis["monthly_budget"], Decimal("-100.00"))
-        self.assertEqual(kpis["real_month"], Decimal("120.00"))
-        self.assertEqual(kpis["variance"], Decimal("220.00"))
+        # Real del área en la misma escala con signo que su presupuesto.
+        self.assertEqual(kpis["real_month"], Decimal("-120.00"))
+        self.assertEqual(kpis["variance"], Decimal("-20.00"))
         self.assertEqual(kpis["budget_scope"], "area_signed")
 
     def test_api_actualiza_celda(self):

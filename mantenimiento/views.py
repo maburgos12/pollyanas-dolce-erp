@@ -1497,7 +1497,7 @@ def crear_servicio_mantenimiento(request):
         fecha_objetivo = timezone.localdate()
 
     errores = []
-    if not sucursal_id:
+    if alcance != "unidad" and not sucursal_id:
         errores.append("Selecciona una sucursal.")
     if alcance == "activo" and not activo_id:
         errores.append("Selecciona un activo o equipo.")
@@ -1525,20 +1525,8 @@ def crear_servicio_mantenimiento(request):
         msg.error(request, "El archivo supera el límite de 30 MB.")
         return redirect("mantenimiento:dashboard")
 
-    branch_ids = authorized_branch_ids(request.user)
-    sucursales = Sucursal.objects.filter(activa=True)
-    if branch_ids is not None:
-        sucursales = sucursales.filter(pk__in=branch_ids)
-    sucursal = sucursales.filter(pk=sucursal_id).first()
-    if not sucursal:
-        msg.error(request, "Selecciona una sucursal válida.")
-        return redirect("mantenimiento:dashboard")
-
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True, sucursal=sucursal)
-        if unidad.sucursal_id != sucursal.id:
-            msg.error(request, "La unidad logística no pertenece a la sucursal seleccionada.")
-            return redirect("mantenimiento:dashboard")
+        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
         tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
             nombre=descripcion[:100],
             defaults={
@@ -1564,6 +1552,15 @@ def crear_servicio_mantenimiento(request):
             msg.success(request, f"Servicio de unidad programado: {unidad.codigo} · {fecha_objetivo:%d/%m/%Y}.")
         else:
             msg.success(request, f"Servicio de unidad registrado: {unidad.codigo}.")
+        return redirect("mantenimiento:dashboard")
+
+    branch_ids = authorized_branch_ids(request.user)
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = sucursales.filter(pk=sucursal_id).first()
+    if not sucursal:
+        msg.error(request, "Selecciona una sucursal válida.")
         return redirect("mantenimiento:dashboard")
 
     proveedor_obj = _ensure_provider(proveedor_nombre)

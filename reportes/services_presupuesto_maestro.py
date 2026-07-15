@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils.text import slugify
 from openpyxl import load_workbook
 
@@ -162,6 +162,8 @@ class VentasReimportSummary:
     lines_updated: int
     skipped_rows: int
     monthly_totals: dict[str, Decimal]
+    unidades_upsertadas: int = 0
+    unidades_sin_receta: tuple[str, ...] = ()
 
 
 def normalize_area_code(value: str) -> str:
@@ -325,6 +327,9 @@ class PresupuestoMaestroImportService:
             for month_name, col_idx in layout["actual_columns"].items():
                 value = row[col_idx] if col_idx < len(row) else None
                 output[f"{month_name}_real"] = value
+            for month_name, col_idx in layout.get("qty_columns", {}).items():
+                value = row[col_idx] if col_idx < len(row) else None
+                output[f"{month_name}_qty"] = value
             if has_value:
                 yield output
 
@@ -351,6 +356,7 @@ class PresupuestoMaestroImportService:
             header_row_indexes = list(range(month_row_idx + 1, min(month_row_idx + 5, len(rows))))
             budget_columns: dict[str, int] = {}
             actual_columns: dict[str, int] = {}
+            qty_columns: dict[str, int] = {}
             for pos, (month_name, start_idx) in enumerate(month_starts):
                 end_idx = next((boundary for boundary in boundaries if boundary > start_idx), len(month_row))
                 for col_idx in range(start_idx, end_idx):
@@ -358,6 +364,8 @@ class PresupuestoMaestroImportService:
                         budget_columns[month_name] = col_idx
                     if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="actual"):
                         actual_columns[month_name] = col_idx
+                    if self._is_sales_value_column(rows, header_row_indexes, col_idx, kind="budget_qty"):
+                        qty_columns[month_name] = col_idx
                 if month_name not in budget_columns:
                     continue
 
@@ -378,6 +386,7 @@ class PresupuestoMaestroImportService:
                     "data_start": min(last_header_idx + 1, len(rows)),
                     "budget_columns": budget_columns,
                     "actual_columns": actual_columns,
+                    "qty_columns": qty_columns,
                 }
         return None
 
@@ -397,6 +406,12 @@ class PresupuestoMaestroImportService:
             previous_labels.append(normalize_header_text(row[col_idx - 1] if col_idx > 0 and col_idx - 1 < len(row) else ""))
         labels = " ".join(label for label in current_labels + previous_labels if label)
         current = " ".join(label for label in current_labels if label)
+        if kind == "budget_qty":
+            # Columna CANTIDAD de la proyección (unidades propuestas del mes).
+            # Algunas hojas cambian el encabezado a "V. UNIDADES" a partir de
+            # cierto mes; ambas variantes cuentan como cantidad.
+            is_qty = ("cant" in current or "unidades" in current) and "venta" not in current
+            return is_qty and ("proy" in labels or "proyeccion" in labels)
         is_sale_amount = "venta" in current and "cant" not in current and "cantidad" not in current
         if not is_sale_amount:
             return False
@@ -426,6 +441,7 @@ class PresupuestoMaestroImportService:
             budget_columns = self._month_budget_columns(rows, header_idx)
             if not budget_columns:
                 continue
+            real_columns = self._month_real_columns(rows, header_idx, budget_columns)
             concept_col = self._concept_column(rows, header_idx)
             if concept_col is None:
                 continue
@@ -446,9 +462,39 @@ class PresupuestoMaestroImportService:
                     value = row[col_idx] if col_idx < len(row) else None
                     output[month_name] = value
                     has_value = has_value or money(value) != 0
+                for month_name, col_idx in real_columns.items():
+                    value = row[col_idx] if col_idx < len(row) else None
+                    # Solo REAL con contenido: un cero del Excel no debe
+                    # marcar el mes como "capturado" (allá el vacío y el 0
+                    # se confunden; acá el vacío significa pendiente).
+                    if value not in (None, "") and money(value) != 0:
+                        output[f"{month_name}_real"] = value
+                        has_value = True
                 if has_value:
                     yield output
             return
+
+    def _month_real_columns(
+        self,
+        rows: list[tuple[object, ...]],
+        header_idx: int,
+        budget_columns: dict[str, int],
+    ) -> dict[str, int]:
+        """Columna REAL de cada mes en las hojas de gastos.
+
+        El patrón del paquete es PRESUPUESTADO | REAL | VARIACIÓN bajo el
+        encabezado del mes: se busca la subcolumna "real" en las 3 celdas
+        siguientes a la de presupuesto.
+        """
+        next_row = rows[header_idx + 1] if header_idx + 1 < len(rows) else ()
+        columns: dict[str, int] = {}
+        for month_name, budget_idx in budget_columns.items():
+            for offset in (1, 2, 3):
+                idx = budget_idx + offset
+                if idx < len(next_row) and self._normalize_cell(next_row[idx]) == "real":
+                    columns[month_name] = idx
+                    break
+        return columns
 
     def _month_budget_columns(self, rows: list[tuple[object, ...]], header_idx: int) -> dict[str, int]:
         header = rows[header_idx]
@@ -569,40 +615,77 @@ class PresupuestoMaestroImportService:
             branch = self._resolve_branch(row.get("sucursal"))
             account_code = str(row.get("codigo_cuenta") or row.get("cuenta") or "").strip()
             rubro_type = infer_rubro_type(row.get("tipo"), normalized_area, concept)
-            rubro, was_created = RubroPresupuesto.objects.update_or_create(
-                area=area,
-                concepto=concept,
-                codigo_cuenta=account_code,
-                sucursal=branch,
-                defaults={
-                    "tipo": rubro_type,
-                    "activo": True,
-                    "metadata": {
-                        "source": source,
-                        "source_file": path.name,
-                        "actual_key": normalize_actual_key(concept, account_code, area.codigo),
-                    },
-                },
+
+            # Fuente de verdad = Point: si el rubro fue renombrado al nombre
+            # del catálogo Point, el concepto viejo del Excel vive en
+            # metadata["nombre_excel"] — el re-import lo reconoce ahí y NO
+            # resucita el nombre del Excel ni duplica el rubro.
+            renombrado = next(
+                (
+                    r
+                    for r in RubroPresupuesto.objects.filter(area=area, sucursal=branch)
+                    if normalize_concept_text((r.metadata or {}).get("nombre_excel"))
+                    == normalize_concept_text(concept)
+                ),
+                None,
             )
+            if renombrado is not None:
+                metadata_r = dict(renombrado.metadata or {})
+                metadata_r["source"] = source
+                metadata_r["source_file"] = path.name
+                renombrado.metadata = metadata_r
+                renombrado.activo = True
+                renombrado.save(update_fields=["metadata", "activo", "actualizado_en"])
+                rubro, was_created = renombrado, False
+            else:
+                rubro, was_created = RubroPresupuesto.objects.update_or_create(
+                    area=area,
+                    concepto=concept,
+                    codigo_cuenta=account_code,
+                    sucursal=branch,
+                    defaults={
+                        "tipo": rubro_type,
+                        "activo": True,
+                        "metadata": {
+                            "source": source,
+                            "source_file": path.name,
+                            "actual_key": normalize_actual_key(concept, account_code, area.codigo),
+                        },
+                    },
+                )
             rubros_created += int(was_created)
             rubros_updated += int(not was_created)
             for month_name, month_number in MONTH_COLUMNS:
                 period = date(year, month_number, 1)
                 amount = money(row.get(month_name))
-                line_defaults = {
-                    "monto_presupuesto": amount,
-                    "metadata": {
-                        "source": source,
-                        "source_file": path.name,
-                    },
-                }
+                existente = LineaPresupuestoMensual.objects.filter(
+                    rubro=rubro, periodo=period, version=version
+                ).first()
+
+                # El importador de presupuesto SOLO manda sobre monto_presupuesto.
+                # La metadata se fusiona (no se reemplaza) para no destruir el
+                # historial de capturas ni el desglose de la consolidación, y el
+                # real del archivo (columna _real) jamás pisa una captura
+                # MANUAL:* ni un consolidado AUTO:* vigente.
+                metadata = dict(existente.metadata or {}) if existente else {}
+                metadata["source"] = source
+                metadata["source_file"] = path.name
+                line_defaults = {"monto_presupuesto": amount, "metadata": metadata}
+
                 if f"{month_name}_real" in row:
-                    line_defaults.update(
-                        {
-                            "monto_real": money(row.get(f"{month_name}_real")),
-                            "fuente_real": source,
-                        }
-                    )
+                    fuente_actual = str(existente.fuente_real or "") if existente else ""
+                    protegida = fuente_actual.startswith("MANUAL:") or fuente_actual.startswith("AUTO:")
+                    if not protegida:
+                        line_defaults.update(
+                            {
+                                # Namespace re-escribible: la consolidación viva
+                                # (POS/nómina) puede reemplazarlo después.
+                                "monto_real": money(row.get(f"{month_name}_real")),
+                                "fuente_real": "AUTO:LEGADO",
+                            }
+                        )
+                        metadata["fuente_import"] = source
+
                 _, line_created = LineaPresupuestoMensual.objects.update_or_create(
                     rubro=rubro,
                     periodo=period,
@@ -674,7 +757,26 @@ class PresupuestoMaestroImportService:
 
         with transaction.atomic():
             if clear_first:
+                from .models import ReglaFuenteRubro
+
                 rubros_qs = RubroPresupuesto.objects.filter(area=area)
+                protegidas = (
+                    LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs)
+                    .filter(
+                        Q(fuente_real__startswith="MANUAL:")
+                        | Q(fuente_real__startswith="AUTO:")
+                    )
+                    .count()
+                )
+                reglas_admin = ReglaFuenteRubro.objects.filter(
+                    rubro__in=rubros_qs, origen=ReglaFuenteRubro.ORIGEN_ADMIN
+                ).count()
+                if protegidas or reglas_admin:
+                    raise ValueError(
+                        f"El área tiene {protegidas} línea(s) con real protegido "
+                        f"(MANUAL/AUTO) y {reglas_admin} regla(s) de mapeo ADMIN; "
+                        "clear_first las destruiría. Resuélvelas antes de limpiar."
+                    )
                 deleted_rubros = rubros_qs.count()
                 deleted_lines = LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).count()
                 LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).delete()
@@ -686,6 +788,9 @@ class PresupuestoMaestroImportService:
                 version=version,
                 year=year,
                 source_name=source_name or path.stem.upper(),
+            )
+            unidades_upsertadas, unidades_sin_receta = self._upsert_pronostico_unidades(
+                path=path, year=year
             )
             monthly_totals = {
                 month_name: money(
@@ -711,7 +816,72 @@ class PresupuestoMaestroImportService:
             lines_updated=summary.lines_updated,
             skipped_rows=summary.skipped_rows,
             monthly_totals=monthly_totals,
+            unidades_upsertadas=unidades_upsertadas,
+            unidades_sin_receta=tuple(unidades_sin_receta),
         )
+
+    def _upsert_pronostico_unidades(self, *, path: Path, year: int) -> tuple[int, list[str]]:
+        """Guarda las CANTIDADES proyectadas del Excel en recetas.PronosticoVenta.
+
+        El concepto del Excel se cruza con la Receta por matching difuso (el
+        mismo criterio que el seed de reglas POS). Solo se pisan pronósticos
+        cuya fuente sea de presupuesto (PRESUPUESTO_*) o esté vacía — un
+        pronóstico capturado manualmente en recetas no se toca.
+        """
+        from rapidfuzz import fuzz
+
+        from recetas.models import PronosticoVenta, Receta
+        from reportes.management.commands.seed_reglas_fuente_rubro import canon_pos
+
+        # Receta no tiene campo "activo"; se cruzan todas (fabricado y reventa).
+        recetas = [(receta, canon_pos(receta.nombre)) for receta in Receta.objects.all()]
+
+        # Cantidades por concepto×mes (la hoja GENERAL ya es toda la empresa).
+        cantidades: dict[str, dict[int, Decimal]] = {}
+        for row in self._rows(path):
+            concepto = str(row.get("concepto") or "").strip()
+            if not concepto:
+                continue
+            for month_name, month_number in MONTH_COLUMNS:
+                qty = row.get(f"{month_name}_qty")
+                if qty in (None, ""):
+                    continue
+                try:
+                    valor = Decimal(str(qty))
+                except Exception:  # noqa: BLE001 — celdas con texto se ignoran
+                    continue
+                if valor == 0:
+                    continue
+                cantidades.setdefault(concepto, {})
+                cantidades[concepto][month_number] = (
+                    cantidades[concepto].get(month_number, Decimal("0")) + valor
+                )
+
+        fuente = f"PRESUPUESTO_{year}"
+        upsertadas = 0
+        sin_receta: list[str] = []
+        for concepto, meses in cantidades.items():
+            objetivo = canon_pos(concepto)
+            candidatos = [(receta, fuzz.token_set_ratio(objetivo, canon)) for receta, canon in recetas]
+            mejor = max(candidatos, key=lambda c: c[1], default=None)
+            if mejor is None or mejor[1] < 90:
+                sin_receta.append(concepto)
+                continue
+            receta = mejor[0]
+            for month_number, cantidad in meses.items():
+                periodo = f"{year}-{month_number:02d}"
+                existente = PronosticoVenta.objects.filter(receta=receta, periodo=periodo).first()
+                if existente is not None and not (
+                    not existente.fuente or existente.fuente.startswith("PRESUPUESTO")
+                ):
+                    continue  # capturado manualmente en recetas: no pisar
+                PronosticoVenta.objects.update_or_create(
+                    receta=receta,
+                    periodo=periodo,
+                    defaults={"cantidad": cantidad, "fuente": fuente},
+                )
+                upsertadas += 1
+        return upsertadas, sin_receta
 
 
 class PresupuestoMaestroService:
@@ -781,8 +951,24 @@ class PresupuestoMaestroService:
             if line.periodo == period:
                 monthly_budget += signed_amount
 
-        result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
-        real_month = money(result.venta_total) if result is not None else Decimal("0")
+        # El real del KPI debe ser la métrica DE ESA ÁREA, no siempre ventas
+        # (hallazgo de auditoría: Nómina/Producción se comparaban contra
+        # venta_total). Área sin métrica mapeada = sin dato, no un dato ajeno.
+        actuals = self.actuals_for_period(period)
+        actual_key = self.AREA_ACTUAL_KEYS.get(area_code, "ventas") if area_code else "ventas"
+        real_month = actuals.get(actual_key)
+        sin_dato = real_month is None
+        if area_code and area_code not in self.AREA_ACTUAL_KEYS:
+            real_month = None
+            sin_dato = True
+        if area_code:
+            # KPI de área usa presupuesto con signo; el real de un área de
+            # gasto también se compara en su propia escala (positivo).
+            real_month = real_month if real_month is not None else Decimal("0")
+            if actual_key != "ventas":
+                real_month = -real_month
+        else:
+            real_month = real_month if real_month is not None else Decimal("0")
         variance = real_month - monthly_budget
         return {
             "year": year,
@@ -794,13 +980,18 @@ class PresupuestoMaestroService:
             "real_month": real_month,
             "variance": variance,
             "variance_pct": variance_pct(variance, monthly_budget),
-            "real_source": "reportes.EmpresaResultadoMensual" if result is not None else "",
-            "real_note": "" if result is not None else "Sin datos",
+            "real_source": "" if sin_dato else "reportes.EmpresaResultadoMensual",
+            "real_note": "Sin dato para esta área" if sin_dato else "",
             "budget_scope": "area_signed" if area_code else "ventas_ingreso",
         }
 
     def _line_actual(self, line: LineaPresupuestoMensual, actuals: dict[str, Decimal], consumed: set[str]) -> tuple[Decimal | None, str]:
         rubro = line.rubro
+        # El real consolidado (AUTO:*) o capturado (MANUAL:*) tiene precedencia
+        # sobre el fallback heurístico de EmpresaResultadoMensual.
+        fuente = str(line.fuente_real or "")
+        if line.monto_real is not None and (fuente.startswith("AUTO:") or fuente.startswith("MANUAL:")):
+            return line.monto_real, line.fuente_real
         actual_key = str((rubro.metadata or {}).get("actual_key") or "")
         if not actual_key:
             actual_key = normalize_actual_key(rubro.codigo_cuenta, rubro.concepto, rubro.area.codigo)

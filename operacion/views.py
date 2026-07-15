@@ -12,7 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 
-from core.access import can_manage_module, can_view_module, can_view_submodule
+from core.access import can_manage_module, can_view_module, can_view_submodule, is_mermas_only
 from core.models import Sucursal
 from inventario.models import ALMACEN_CHOICES, LoteProduccion
 from maestros.models import Insumo, UnidadMedida
@@ -73,6 +73,8 @@ def app_sw(request):
 def _can_use_bitacoras(user) -> bool:
     if user.is_superuser:
         return True
+    if is_mermas_only(user):
+        return False
     return (
         can_view_module(user, "produccion")
         or can_view_module(user, "logistica")

@@ -866,6 +866,137 @@ class LineaPresupuestoMensual(models.Model):
         return f"{self.periodo:%Y-%m} · {self.rubro.concepto} · {self.version}"
 
 
+class AreaPresupuestoResponsable(models.Model):
+    """Usuaria responsable de capturar el gasto real de un área del presupuesto.
+
+    Da acceso a la pantalla de captura SOLO para su(s) área(s); los perfiles
+    con acceso al módulo de reportes ven todas las áreas.
+    """
+
+    area = models.ForeignKey(
+        AreaPresupuesto,
+        on_delete=models.CASCADE,
+        related_name="responsables",
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="areas_presupuesto",
+    )
+    puede_capturar = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Responsable de área de presupuesto"
+        verbose_name_plural = "Responsables de área de presupuesto"
+        constraints = [
+            models.UniqueConstraint(fields=["area", "usuario"], name="uniq_area_presu_responsable")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.usuario} → {self.area.nombre}"
+
+
+class ReglaFuenteRubro(models.Model):
+    """Mapea un rubro de presupuesto a la fuente ERP que llena su monto real.
+
+    Un rubro puede tener varias reglas (se suman con su signo). Un rubro sin
+    regla activa se captura manualmente; el tipo MANUAL marca explícitamente
+    "nunca automatizar".
+    """
+
+    FUENTE_GASTO_OPERATIVO = "GASTO_OPERATIVO"
+    FUENTE_NOMINA = "NOMINA"
+    FUENTE_BONO_PRODUCCION = "BONO_PRODUCCION"
+    FUENTE_BONO_VENTAS = "BONO_VENTAS"
+    FUENTE_VENTA_POS = "VENTA_POS"
+    FUENTE_CONSUMO_MP = "CONSUMO_MP"
+    FUENTE_MANUAL = "MANUAL"
+    FUENTE_CHOICES = [
+        (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
+        (FUENTE_NOMINA, "Nómina RRHH"),
+        (FUENTE_BONO_PRODUCCION, "Bonos producción"),
+        (FUENTE_BONO_VENTAS, "Bonos ventas"),
+        (FUENTE_VENTA_POS, "Ventas POS Point"),
+        (FUENTE_CONSUMO_MP, "Consumo materia prima"),
+        (FUENTE_MANUAL, "Captura manual"),
+    ]
+
+    ORIGEN_SEED = "SEED"
+    ORIGEN_ADMIN = "ADMIN"
+    ORIGEN_CHOICES = [
+        (ORIGEN_SEED, "Seed automático"),
+        (ORIGEN_ADMIN, "Ajuste manual"),
+    ]
+
+    rubro = models.ForeignKey(
+        RubroPresupuesto,
+        on_delete=models.CASCADE,
+        related_name="reglas_fuente",
+    )
+    tipo_fuente = models.CharField(max_length=30, choices=FUENTE_CHOICES, db_index=True)
+    categoria_gasto = models.ForeignKey(
+        CategoriaGasto,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reglas_fuente_rubro",
+        help_text="Para GASTO_OPERATIVO: categoría a agregar.",
+    )
+    centro_costo = models.ForeignKey(
+        CentroCosto,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reglas_fuente_rubro",
+        help_text="Para GASTO_OPERATIVO: centro explícito (si no, se usa la sucursal).",
+    )
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reglas_fuente_rubro",
+        help_text="Dimensión sucursal; si es nula se usa la del rubro.",
+    )
+    filtros = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            'Parámetros por fuente, p.ej. {"departamento": "VENTAS", '
+            '"campo_monto": "salario_base", "categoria_pos": "BOLLO", '
+            '"producto_pos": "CHOCOLATE", "centro_tipo": "CORPORATIVO"}'
+        ),
+    )
+    signo = models.SmallIntegerField(default=1)
+    activa = models.BooleanField(default=True)
+    origen = models.CharField(max_length=10, choices=ORIGEN_CHOICES, default=ORIGEN_ADMIN, db_index=True)
+    notas = models.CharField(max_length=200, blank=True, default="")
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["rubro__area__orden", "rubro__concepto", "tipo_fuente"]
+        verbose_name = "Regla de fuente de rubro"
+        verbose_name_plural = "Reglas de fuente de rubro"
+        indexes = [
+            models.Index(fields=["rubro", "tipo_fuente"], name="regla_fuente_rubro_tipo_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(signo__in=(1, -1)),
+                name="regla_fuente_rubro_signo_valido",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.rubro} ← {self.tipo_fuente}"
+
+    def sucursal_efectiva(self):
+        return self.sucursal or self.rubro.sucursal
+
+
 class FactVentaDiaria(models.Model):
     SOURCE_AUTHORITATIVE = "AUTHORITATIVE"
     SOURCE_V2 = "V2_FACT"

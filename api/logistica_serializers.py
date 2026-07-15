@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -28,6 +29,7 @@ from logistica.models import (
     UbicacionRuta,
     Unidad,
 )
+from logistica.domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from logistica.services_entregas import geocercas_confiables_por_parada, tiene_llegada_geocerca_confiable
 from logistica.services_rutas_control import validar_coordenadas
 from rrhh.services_identidad import nombre_operativo_usuario
@@ -214,6 +216,44 @@ class PuntoLogisticoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "sucursal_nombre"]
 
 
+class ParadaRutaListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        iterable = data.all() if hasattr(data, "all") else data
+        paradas = list(iterable)
+        if "_geocercas_confiables" not in self.context:
+            self.context["_geocercas_confiables"] = geocercas_confiables_por_parada(paradas)
+        cedis_iniciales = {
+            parada.id
+            for parada in paradas
+            if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS and parada.orden == 1
+        }
+        if "_recarga_cedis_parada_ids" not in self.context:
+            cedis_ids = [
+                parada.id
+                for parada in paradas
+                if parada.punto.tipo == PuntoLogistico.TIPO_CEDIS
+            ]
+            self.context["_recarga_cedis_parada_ids"] = (
+                set(
+                    EventoRuta.objects.filter(parada_id__in=cedis_ids)
+                    .filter(
+                        Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+                        | Q(
+                            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                            metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+                        )
+                    )
+                    .values_list("parada_id", flat=True)
+                )
+                if cedis_ids
+                else set()
+            )
+        self.context["_recarga_cedis_parada_ids"] = set(
+            self.context["_recarga_cedis_parada_ids"]
+        ) | cedis_iniciales
+        return [self.child.to_representation(parada) for parada in paradas]
+
+
 class ParadaRutaSerializer(serializers.ModelSerializer):
     punto = PuntoLogisticoSerializer(read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
@@ -221,11 +261,14 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     entrega_estado_display = serializers.SerializerMethodField()
     entrega_confirmada_por_nombre = serializers.SerializerMethodField()
     geocerca_confiable = serializers.SerializerMethodField()
+    operativamente_resuelta = serializers.SerializerMethodField()
+    recarga_cedis_resuelta = serializers.SerializerMethodField()
     revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
     revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ParadaRuta
+        list_serializer_class = ParadaRutaListSerializer
         fields = [
             "id",
             "ruta",
@@ -246,6 +289,8 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "entrega_confirmada_por_nombre",
             "entrega_notas",
             "geocerca_confiable",
+            "operativamente_resuelta",
+            "recarga_cedis_resuelta",
             "revision_entrega_estado",
             "revision_entrega_causa",
             "revision_entrega_datos",
@@ -274,14 +319,31 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         return nombre_operativo_usuario(obj.entrega_confirmada_por)
 
     def get_geocerca_confiable(self, obj):
-        root_instance = getattr(self.root, "instance", None)
-        if root_instance is not None and not isinstance(root_instance, ParadaRuta):
-            cache = self.context.get("_geocercas_confiables")
-            if cache is None:
-                cache = geocercas_confiables_por_parada(root_instance)
-                self.context["_geocercas_confiables"] = cache
+        cache = self.context.get("_geocercas_confiables")
+        if cache is not None:
             return obj.id in cache
         return tiene_llegada_geocerca_confiable(ruta=obj.ruta, parada=obj)
+
+    def get_operativamente_resuelta(self, obj):
+        return parada_resuelta_operativamente(obj)
+
+    def get_recarga_cedis_resuelta(self, obj):
+        if obj.punto.tipo != PuntoLogistico.TIPO_CEDIS:
+            return False
+        if obj.orden == 1:
+            return True
+
+        cache = self.context.get("_recarga_cedis_parada_ids")
+        if cache is not None:
+            return obj.id in cache
+
+        return EventoRuta.objects.filter(ruta_id=obj.ruta_id, parada_id=obj.id).filter(
+            Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+            | Q(
+                tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+            )
+        ).exists()
 
     def get_revision_entrega_revisada_por_nombre(self, obj):
         if not obj.revision_entrega_revisada_por_id:
@@ -360,6 +422,7 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
     point_received_at = serializers.SerializerMethodField()
     point_received_by = serializers.SerializerMethodField()
     point_recepcion_estado = serializers.SerializerMethodField()
+    point_enviada = serializers.SerializerMethodField()
 
     class Meta:
         model = RutaCargaChecklistLinea
@@ -379,6 +442,7 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
             "cantidad_solicitada_point",
             "cantidad_enviada_esperada",
             "cantidad_enviada_point",
+            "point_enviada",
             "cantidad_cargada",
             "cantidad_cargada_pwa",
             "estatus",
@@ -418,6 +482,10 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         if point_line:
             return _format_quantity(point_line.sent_quantity)
         return _format_quantity(obj.cantidad_enviada_esperada)
+
+    def get_point_enviada(self, obj):
+        point_line = self._point_line(obj)
+        return bool(point_line and point_transfer_enviada(point_line))
 
     def get_cantidad_cargada(self, obj):
         return self.get_cantidad_cargada_pwa(obj)
@@ -530,6 +598,14 @@ class RutaCargaLineaValidarSerializer(serializers.Serializer):
         default="",
     )
     notas = serializers.CharField(required=False, allow_blank=True, default="")
+    client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
+class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
+    item_code = serializers.CharField(required=False, allow_blank=True, max_length=120, default="")
+    item_name = serializers.CharField(max_length=255)
+    unit = serializers.CharField(required=False, allow_blank=True, max_length=50, default="")
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
 
 
