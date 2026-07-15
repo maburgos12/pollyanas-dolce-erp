@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
-from threading import Barrier, BrokenBarrierError, Thread
+from threading import Barrier, BrokenBarrierError, Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,6 +33,7 @@ from .models import (
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaEntrega,
+    UbicacionRuta,
     Unidad,
 )
 from .services_carga_ruta import (
@@ -55,6 +56,7 @@ from .services_entregas import confirmar_entrega_parada, revisar_entrega_excepci
 from .services_rutas_control import (
     LiberacionRutaConflicto,
     LiberacionRutaError,
+    _marcar_visitada_por_permanencia,
     liberar_ruta_con_turno,
     registrar_ubicacion_ruta,
 )
@@ -191,6 +193,253 @@ class RecargaCedisAlertConcurrencyTests(TransactionTestCase):
                 usuario=self.manager,
                 objeto_tipo="logistica.EventoRuta",
                 objeto_id=str(alerta.id),
+            ).count(),
+            1,
+        )
+
+
+class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.sucursal = Sucursal.objects.create(
+            codigo="INV-AUTO-CONC",
+            nombre="Sucursal automatización concurrente",
+            activa=True,
+        )
+        self.user = User.objects.create_user(username="actor.auto.recarga.concurrente")
+        self.unidad = Unidad.objects.create(
+            codigo="INV-AUTO-CONC",
+            descripcion="Unidad automatización concurrente",
+            sucursal=self.sucursal,
+        )
+        self.repartidor = Repartidor.objects.create(
+            user=self.user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+        )
+        self.ruta = RutaEntrega.objects.create(
+            nombre="Ruta automatización concurrente",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        punto_previo = PuntoLogistico.objects.create(
+            sucursal=self.sucursal,
+            nombre="Sucursal previa automatización",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.550000",
+            longitud="-108.450000",
+        )
+        self.previa = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=punto_previo,
+            orden=1,
+            estado=ParadaRuta.ESTADO_VISITADA,
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA,
+        )
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS automatización concurrente",
+            tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.560000",
+            longitud="-108.460000",
+            radio_geocerca_metros=120,
+        )
+        self.cedis = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=cedis,
+            orden=2,
+            estado=ParadaRuta.ESTADO_VISITADA,
+        )
+        self.sucursal_siguiente = Sucursal.objects.create(
+            codigo="INV-AUTO-SIG",
+            nombre="Sucursal siguiente automatización",
+            activa=True,
+        )
+        destino = PuntoLogistico.objects.create(
+            sucursal=self.sucursal_siguiente,
+            nombre=self.sucursal_siguiente.nombre,
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.570000",
+            longitud="-108.470000",
+        )
+        self.siguiente = ParadaRuta.objects.create(
+            ruta=self.ruta,
+            punto=destino,
+            orden=3,
+        )
+
+    def test_transicion_visitada_concurrente_tiene_un_solo_ganador(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("La prueba de transición condicional requiere PostgreSQL real.")
+
+        self.cedis.estado = ParadaRuta.ESTADO_PENDIENTE
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        llegada = UbicacionRuta.objects.create(
+            ruta=self.ruta,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            latitud=self.cedis.latitud_geocerca,
+            longitud=self.cedis.longitud_geocerca,
+        )
+        llegada_evento = EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            ubicacion=llegada,
+            tipo=EventoRuta.TIPO_LLEGADA_GEOFENCE,
+            latitud=llegada.latitud,
+            longitud=llegada.longitud,
+            metadata={
+                "origen_servicio": "registrar_ubicacion_ruta",
+                "ubicacion_confiable": True,
+                "ruta_id": self.ruta.id,
+                "repartidor_id": self.repartidor.id,
+                "unidad_id": self.unidad.id,
+            },
+        )
+        EventoRuta.objects.filter(pk=llegada_evento.pk).update(
+            creado_en=timezone.now() - timedelta(minutes=6)
+        )
+        ubicaciones = [
+            UbicacionRuta.objects.create(
+                ruta=self.ruta,
+                repartidor=self.repartidor,
+                unidad=self.unidad,
+                latitud=self.cedis.latitud_geocerca,
+                longitud=self.cedis.longitud_geocerca,
+            )
+            for _ in range(2)
+        ]
+        inicio = Barrier(2)
+        resultados = []
+        errores = []
+
+        def marcar(ubicacion_id):
+            close_old_connections()
+            try:
+                ruta = RutaEntrega.objects.get(pk=self.ruta.id)
+                parada = ParadaRuta.objects.get(pk=self.cedis.id)
+                ubicacion = UbicacionRuta.objects.get(pk=ubicacion_id)
+                inicio.wait(timeout=5)
+                resultados.append(
+                    _marcar_visitada_por_permanencia(
+                        ruta=ruta,
+                        parada=parada,
+                        ubicacion_actual=ubicacion,
+                        distancia_metros_value=0,
+                    )
+                )
+            except Exception as exc:
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        hilos = [Thread(target=marcar, args=(ubicacion.id,)) for ubicacion in ubicaciones]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join(timeout=10)
+
+        self.assertFalse(any(hilo.is_alive() for hilo in hilos))
+        self.assertEqual(errores, [])
+        self.assertCountEqual(resultados, [True, False])
+        self.cedis.refresh_from_db()
+        self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
+
+    def test_tareas_concurrentes_hacen_una_sola_sincronizacion_completa(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("La prueba de bloqueo de tarea requiere PostgreSQL real.")
+
+        origen = PointBranch.objects.create(external_id="INV-AUTO-CEDIS", name="CEDIS")
+        destino = PointBranch.objects.create(
+            external_id="INV-AUTO-SUC",
+            name=self.sucursal_siguiente.nombre,
+            erp_branch=self.sucursal_siguiente,
+        )
+        PointTransferLine.objects.create(
+            origin_branch=origen,
+            destination_branch=destino,
+            erp_destination_branch=self.sucursal_siguiente,
+            transfer_external_id="INV-AUTO-T",
+            detail_external_id="INV-AUTO-D",
+            source_hash="inv-auto-concurrente",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Pastel automatización concurrente",
+            item_code="INV-AUTO-PASTEL",
+            unit="pz",
+            requested_quantity="2",
+            sent_quantity="2",
+            received_quantity="0",
+            is_open=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        resumen = sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
+        sync_iniciado = Event()
+        liberar_sync = Event()
+        errores = []
+        resultados = []
+
+        def sync_bloqueado(**kwargs):
+            sync_iniciado.set()
+            if not liberar_sync.wait(timeout=5):
+                raise TimeoutError("La primera sincronización no fue liberada.")
+            return resumen
+
+        def procesar():
+            close_old_connections()
+            try:
+                from .tasks import procesar_recarga_cedis_automatica
+
+                resultados.append(
+                    procesar_recarga_cedis_automatica(
+                        ruta_id=self.ruta.id,
+                        parada_id=self.cedis.id,
+                        user_id=self.user.id,
+                    )
+                )
+            except Exception as exc:
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        with patch(
+            "logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point",
+            side_effect=sync_bloqueado,
+        ) as sync:
+            primero = Thread(target=procesar)
+            segundo = Thread(target=procesar)
+            primero.start()
+            self.assertTrue(sync_iniciado.wait(timeout=5))
+            segundo.start()
+            liberar_sync.set()
+            primero.join(timeout=10)
+            segundo.join(timeout=10)
+
+        self.assertFalse(primero.is_alive() or segundo.is_alive())
+        self.assertEqual(errores, [])
+        self.assertEqual(
+            sync.call_count,
+            1,
+            {
+                "resultados": resultados,
+                "eventos": list(
+                    EventoRuta.objects.filter(ruta=self.ruta).values(
+                        "id", "parada_id", "tipo", "metadata"
+                    )
+                ),
+            },
+        )
+        self.assertEqual(len(resultados), 2)
+        self.assertEqual(resultados[0]["evento_id"], resultados[1]["evento_id"])
+        self.assertEqual(
+            EventoRuta.objects.filter(
+                ruta=self.ruta,
+                parada=self.cedis,
+                tipo=EventoRuta.TIPO_RECARGA_CEDIS,
             ).count(),
             1,
         )
@@ -1633,8 +1882,14 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             creado_por=self.manager,
         )
 
+    @patch("logistica.services_rutas_control.logger.exception")
     @patch("logistica.tasks.procesar_recarga_cedis_automatica.delay")
-    def test_permanencia_cedis_agenda_recarga_una_vez(self, delay):
+    def test_permanencia_cedis_reintenta_broker_y_deja_de_agendar_al_resolverse(
+        self,
+        delay,
+        log_exception,
+    ):
+        delay.side_effect = [RuntimeError("broker no disponible"), None]
         BitacoraSalidaLlegada.objects.create(
             repartidor=self.repartidor,
             unidad=self.unidad,
@@ -1661,7 +1916,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         ).update(creado_en=timezone.now() - timedelta(minutes=6))
 
         with self.captureOnCommitCallbacks(execute=True):
-            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+            segunda_ubicacion = registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
 
         delay.assert_called_once_with(
             ruta_id=self.ruta.id,
@@ -1670,11 +1925,25 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         )
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
+        self.assertTrue(UbicacionRuta.objects.filter(pk=segunda_ubicacion.id).exists())
 
         with self.captureOnCommitCallbacks(execute=True):
             registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
 
-        delay.assert_called_once()
+        self.assertEqual(delay.call_count, 2)
+        log_exception.assert_called_once()
+
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+            descripcion="Recarga compatible registrada por cliente legado",
+            metadata={"tipo": "recarga_cedis_pwa"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
+
+        self.assertEqual(delay.call_count, 2)
 
     def test_task_recarga_no_inventa_exito_si_point_pendiente(self):
         from .tasks import procesar_recarga_cedis_automatica

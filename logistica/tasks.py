@@ -107,26 +107,27 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
     max_retries=3,
 )
 def procesar_recarga_cedis_automatica(*, ruta_id: int, parada_id: int, user_id: int | None = None):
-    ruta = RutaEntrega.objects.get(pk=ruta_id)
-    parada = ruta.paradas.get(pk=parada_id)
-    user = get_user_model().objects.filter(pk=user_id).first() if user_id is not None else None
-    try:
-        evento = registrar_recarga_cedis(
-            ruta=ruta,
-            parada=parada,
-            user=user,
-            notas="Recarga CEDIS reconciliada automáticamente al confirmar permanencia.",
-        )
-    except (RecargaCedisPendienteEnviado, RecargaCedisSinLineasPoint, RecargaCedisPointError) as exc:
+    with transaction.atomic():
+        ruta = RutaEntrega.objects.select_for_update().get(pk=ruta_id)
+        parada = ruta.paradas.select_for_update().get(pk=parada_id)
+        user = get_user_model().objects.filter(pk=user_id).first() if user_id is not None else None
+        try:
+            evento = registrar_recarga_cedis(
+                ruta=ruta,
+                parada=parada,
+                user=user,
+                notas="Recarga CEDIS reconciliada automáticamente al confirmar permanencia.",
+            )
+        except (RecargaCedisPendienteEnviado, RecargaCedisSinLineasPoint, RecargaCedisPointError) as exc:
+            return {
+                "estado_sync": exc.estado_sync,
+                "ruta_id": ruta_id,
+                "parada_id": parada_id,
+            }
         return {
-            "estado_sync": exc.estado_sync,
-            "ruta_id": ruta_id,
-            "parada_id": parada_id,
+            "estado_sync": (evento.metadata or {}).get("estado_sync", "ACTUALIZADO"),
+            "evento_id": evento.id,
         }
-    return {
-        "estado_sync": (evento.metadata or {}).get("estado_sync", "ACTUALIZADO"),
-        "evento_id": evento.id,
-    }
 
 
 @shared_task(

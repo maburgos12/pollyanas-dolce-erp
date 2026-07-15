@@ -409,12 +409,58 @@ def _marcar_visitada_por_permanencia(
         return False
     if primera_llegada.creado_en > timezone.now() - timezone.timedelta(minutes=GEOCERCA_PERMANENCIA_VISITA_MINUTOS):
         return False
+    actualizado_en = timezone.now()
+    filas_actualizadas = (
+        ParadaRuta.objects.filter(pk=parada.pk, estado=parada.estado)
+        .exclude(estado=ParadaRuta.ESTADO_VISITADA)
+        .update(
+            estado=ParadaRuta.ESTADO_VISITADA,
+            hora_llegada_real=primera_llegada.creado_en,
+            distancia_llegada_metros=distancia_metros_value,
+            actualizado_en=actualizado_en,
+        )
+    )
+    if filas_actualizadas != 1:
+        return False
     parada.estado = ParadaRuta.ESTADO_VISITADA
     parada.hora_llegada_real = primera_llegada.creado_en
     parada.distancia_llegada_metros = distancia_metros_value
-    parada.save(update_fields=["estado", "hora_llegada_real", "distancia_llegada_metros", "actualizado_en"])
+    parada.actualizado_en = actualizado_en
     ruta.recompute_route_control()
     ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+    return True
+
+
+def _agendar_recarga_cedis_si_pendiente(*, ruta: RutaEntrega, parada: ParadaRuta, user) -> bool:
+    from .services_carga_ruta import _evento_recarga_existente
+
+    if parada.punto.tipo != PuntoLogistico.TIPO_CEDIS or parada.estado != ParadaRuta.ESTADO_VISITADA:
+        return False
+    if _evento_recarga_existente(ruta_id=ruta.id, parada_id=parada.id):
+        return False
+
+    ruta_id = ruta.id
+    parada_id = parada.id
+    user_id = getattr(user, "id", None)
+
+    def encolar_recarga():
+        from .tasks import procesar_recarga_cedis_automatica
+
+        try:
+            procesar_recarga_cedis_automatica.delay(
+                ruta_id=ruta_id,
+                parada_id=parada_id,
+                user_id=user_id,
+            )
+        except Exception:
+            logger.exception(
+                "No se pudo encolar la recarga CEDIS automática para ruta=%s parada=%s; "
+                "se reintentará con la siguiente ubicación confiable.",
+                ruta_id,
+                parada_id,
+            )
+
+    transaction.on_commit(encolar_recarga)
     return True
 
 
@@ -613,25 +659,12 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                     creado_por=user,
                 )
         if resultado.parada.estado != ParadaRuta.ESTADO_VISITADA:
-            visita_confirmada = _marcar_visitada_por_permanencia(
+            _marcar_visitada_por_permanencia(
                 ruta=ruta,
                 parada=resultado.parada,
                 ubicacion_actual=ubicacion,
                 distancia_metros_value=resultado.distancia_metros,
             )
-            if visita_confirmada and resultado.parada.punto.tipo == PuntoLogistico.TIPO_CEDIS:
-                from .tasks import procesar_recarga_cedis_automatica
-
-                ruta_id = ruta.id
-                parada_id = resultado.parada.id
-                user_id = getattr(user, "id", None)
-                transaction.on_commit(
-                    lambda: procesar_recarga_cedis_automatica.delay(
-                        ruta_id=ruta_id,
-                        parada_id=parada_id,
-                        user_id=user_id,
-                    )
-                )
     elif ruta.paradas.exists() and not resultado.dentro_geocerca_planeada:
         ubicacion.fuera_de_geocerca = True
         ubicacion.save(update_fields=["fuera_de_geocerca"])
@@ -680,6 +713,19 @@ def registrar_ubicacion_ruta(*, user, ruta: RutaEntrega, payload: dict, ip_regis
                 notificar_desvio_ruta_automatico.delay(evento_desvio.id)
             except Exception:
                 logger.exception("No se pudo encolar notificar_desvio_ruta_automatico para evento %s", evento_desvio.id)
+
+    parada_planeada = resultado.parada_planeada_mas_cercana
+    if (
+        ubicacion_confiable
+        and parada_planeada is not None
+        and resultado.distancia_planeada_metros is not None
+        and resultado.distancia_planeada_metros <= parada_planeada.radio_geocerca_metros
+    ):
+        _agendar_recarga_cedis_si_pendiente(
+            ruta=ruta,
+            parada=parada_planeada,
+            user=user,
+        )
 
     ubicacion._alertas_tracking = alertas_tracking
     return ubicacion
