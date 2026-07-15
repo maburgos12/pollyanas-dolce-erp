@@ -2040,6 +2040,13 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
             if received_lines and linea.point_transfer_line_id != received_lines[0].id:
                 linea.point_transfer_line = received_lines[0]
                 linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+        if (
+            not received_lines
+            and point_line is not None
+            and point_transfer_enviada(point_line)
+            and Decimal(str(point_line.sent_quantity or 0)) == Decimal("0")
+        ):
+            continue
         if not received_lines:
             lineas_pendientes_point += 1
             continue

@@ -23,6 +23,7 @@ from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
 
+from .domain_ruta import point_transfer_enviada
 from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
@@ -187,6 +188,10 @@ def _recepcion_point_rows(checklist) -> list[dict]:
                 estado_label = "Diferencia"
                 estado_tone = "danger"
             recibido_display = recibido
+        elif point_transfer_enviada(point_line) and enviado == Decimal("0"):
+            estado_label = "Enviado cero · sin recepción requerida"
+            estado_tone = "muted"
+            recibido_display = Decimal("0")
         elif not cargado_validado:
             estado_label = "Carga sin validar"
             estado_tone = "warning"
