@@ -1,4 +1,20 @@
-from core.access import can_review_seguimiento_global, can_view_submodule
+from core.access import can_review_seguimiento_global, can_view_reportes, can_view_submodule
+
+
+def _puede_capturar_presupuesto(user) -> bool:
+    """Responsables de área de presupuesto (o perfiles de reportes).
+
+    Import perezoso: core no debe depender de reportes al cargar.
+    """
+    if not (user and user.is_authenticated):
+        return False
+    if can_view_reportes(user):
+        return True
+    from reportes.models import AreaPresupuestoResponsable
+
+    return AreaPresupuestoResponsable.objects.filter(
+        usuario=user, puede_capturar=True, area__activa=True
+    ).exists()
 
 
 NAV_GROUPS = [
@@ -239,6 +255,39 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "module": module,
                     "submodule": submodule,
                     "initial": label[:1],
+                }
+            )
+        # Entradas con permiso propio (no dependen del acceso por módulo):
+        # la captura de presupuesto la usan responsables de área que pueden
+        # no tener el módulo de reportes; el tablero es de dirección.
+        if group["key"] == "mi_trabajo" and _puede_capturar_presupuesto(user):
+            url_captura = "/reportes/presupuesto-real/captura/"
+            match_len = len(url_captura) if current_path.startswith(url_captura) else 0
+            best_match_len = max(best_match_len, match_len)
+            items.append(
+                {
+                    "label": "Captura de presupuesto",
+                    "url": url_captura,
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "reportes",
+                    "submodule": "presupuesto_real_captura",
+                    "initial": "C",
+                }
+            )
+        if group["key"] == "direccion" and user and user.is_authenticated and can_view_reportes(user):
+            url_tablero = "/reportes/presupuesto-vs-real/"
+            match_len = len(url_tablero) if current_path.startswith(url_tablero) else 0
+            best_match_len = max(best_match_len, match_len)
+            items.append(
+                {
+                    "label": "Presupuesto vs Real",
+                    "url": url_tablero,
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "reportes",
+                    "submodule": "presupuesto_vs_real",
+                    "initial": "P",
                 }
             )
         if items:

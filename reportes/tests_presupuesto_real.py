@@ -1596,3 +1596,31 @@ class BonosYConsumoTests(TestCase):
 
         regla = ReglaFuenteRubro.objects.get(rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP)
         self.assertEqual(regla.filtros["insumo_id"], azucar.id)
+
+
+class NavegacionCapturaTests(TestCase):
+    """La captura aparece en el menú de responsables sin necesitar la liga."""
+
+    def test_nav_muestra_captura_a_responsable_y_tablero_a_direccion(self):
+        from django.contrib.auth import get_user_model
+
+        from core.navigation import build_nav_groups
+        from reportes.models import AreaPresupuestoResponsable
+
+        User = get_user_model()
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+
+        jefa = User.objects.create_user("jefa_nav", "jn@test.mx", "x")
+        AreaPresupuestoResponsable.objects.create(area=area, usuario=jefa)
+        etiquetas_jefa = [i["label"] for g in build_nav_groups(jefa, "/") for i in g["items"]]
+        self.assertIn("Captura de presupuesto", etiquetas_jefa)
+        self.assertNotIn("Presupuesto vs Real", etiquetas_jefa)
+
+        ajeno = User.objects.create_user("ajeno_nav", "an@test.mx", "x")
+        etiquetas_ajeno = [i["label"] for g in build_nav_groups(ajeno, "/") for i in g["items"]]
+        self.assertNotIn("Captura de presupuesto", etiquetas_ajeno)
+
+        dg = User.objects.create_superuser("dg_nav", "dn@test.mx", "x")
+        etiquetas_dg = [i["label"] for g in build_nav_groups(dg, "/") for i in g["items"]]
+        self.assertIn("Presupuesto vs Real", etiquetas_dg)
+        self.assertIn("Captura de presupuesto", etiquetas_dg)
