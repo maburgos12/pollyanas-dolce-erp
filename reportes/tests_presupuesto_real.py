@@ -2002,3 +2002,17 @@ class PantallaCedulaImssTests(TestCase):
         self.client.force_login(self.dg)
         r = self.client.post(self.URL, {"cedula": SimpleUploadedFile("cedula.pdf", b"x")})
         self.assertIn(".xls", r.context["error"])
+
+
+class AccesoAnonimoTests(TestCase):
+    """Usuarios no autenticados van al login, nunca a un error 500."""
+
+    def test_pantallas_redirigen_a_login(self):
+        for url in [
+            "/reportes/presupuesto-vs-real/",
+            "/reportes/presupuesto-real/captura/",
+            "/reportes/presupuesto-real/cedula-imss/",
+        ]:
+            respuesta = self.client.get(url)
+            self.assertEqual(respuesta.status_code, 302, url)
+            self.assertIn("login", respuesta["Location"], url)
