@@ -1624,3 +1624,51 @@ class NavegacionCapturaTests(TestCase):
         etiquetas_dg = [i["label"] for g in build_nav_groups(dg, "/") for i in g["items"]]
         self.assertIn("Presupuesto vs Real", etiquetas_dg)
         self.assertIn("Captura de presupuesto", etiquetas_dg)
+
+
+class ImportRealGastosExcelTests(TestCase):
+    """El import de gastos captura la columna REAL con las protecciones."""
+
+    def _xlsx_gastos(self, real_enero="1234.56"):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        hoja = wb.active
+        hoja.title = "LOGISTICA"
+        hoja.append(["CUENTA", "DESCRIPCION", "ENERO", "", "", "FEBRERO", "", ""])
+        hoja.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION", "PRESUPUESTADO", "REAL", "VARIACION"])
+        hoja.append(["", "Imss", 5000, real_enero, "", 5000, "", ""])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        return tmp.name
+
+    def test_real_de_excel_entra_como_legado_y_respeta_manual(self):
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        service = PresupuestoMaestroImportService()
+        service.import_file(
+            archivo=self._xlsx_gastos(), area_code="logistica", version="ORIGINAL", year=2026
+        )
+        linea = LineaPresupuestoMensual.objects.get(
+            periodo=date(2026, 1, 1), rubro__concepto="Imss", rubro__area__codigo="logistica"
+        )
+        self.assertEqual(linea.monto_real, Decimal("1234.56"))
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+        # Febrero no traía REAL: queda pendiente, no cero.
+        febrero = LineaPresupuestoMensual.objects.get(
+            periodo=date(2026, 2, 1), rubro__concepto="Imss", rubro__area__codigo="logistica"
+        )
+        self.assertIsNone(febrero.monto_real)
+
+        # Captura manual posterior NO se pisa al re-importar.
+        linea.fuente_real = "MANUAL:paula.lugo"
+        linea.monto_real = Decimal("999")
+        linea.save()
+        service.import_file(
+            archivo=self._xlsx_gastos(real_enero="5555"), area_code="logistica",
+            version="ORIGINAL", year=2026,
+        )
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("999"))
