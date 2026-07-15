@@ -408,7 +408,9 @@ class PresupuestoMaestroImportService:
         current = " ".join(label for label in current_labels if label)
         if kind == "budget_qty":
             # Columna CANTIDAD de la proyección (unidades propuestas del mes).
-            is_qty = "cant" in current
+            # Algunas hojas cambian el encabezado a "V. UNIDADES" a partir de
+            # cierto mes; ambas variantes cuentan como cantidad.
+            is_qty = ("cant" in current or "unidades" in current) and "venta" not in current
             return is_qty and ("proy" in labels or "proyeccion" in labels)
         is_sale_amount = "venta" in current and "cant" not in current and "cantidad" not in current
         if not is_sale_amount:
@@ -582,21 +584,44 @@ class PresupuestoMaestroImportService:
             branch = self._resolve_branch(row.get("sucursal"))
             account_code = str(row.get("codigo_cuenta") or row.get("cuenta") or "").strip()
             rubro_type = infer_rubro_type(row.get("tipo"), normalized_area, concept)
-            rubro, was_created = RubroPresupuesto.objects.update_or_create(
-                area=area,
-                concepto=concept,
-                codigo_cuenta=account_code,
-                sucursal=branch,
-                defaults={
-                    "tipo": rubro_type,
-                    "activo": True,
-                    "metadata": {
-                        "source": source,
-                        "source_file": path.name,
-                        "actual_key": normalize_actual_key(concept, account_code, area.codigo),
-                    },
-                },
+
+            # Fuente de verdad = Point: si el rubro fue renombrado al nombre
+            # del catálogo Point, el concepto viejo del Excel vive en
+            # metadata["nombre_excel"] — el re-import lo reconoce ahí y NO
+            # resucita el nombre del Excel ni duplica el rubro.
+            renombrado = next(
+                (
+                    r
+                    for r in RubroPresupuesto.objects.filter(area=area, sucursal=branch)
+                    if normalize_concept_text((r.metadata or {}).get("nombre_excel"))
+                    == normalize_concept_text(concept)
+                ),
+                None,
             )
+            if renombrado is not None:
+                metadata_r = dict(renombrado.metadata or {})
+                metadata_r["source"] = source
+                metadata_r["source_file"] = path.name
+                renombrado.metadata = metadata_r
+                renombrado.activo = True
+                renombrado.save(update_fields=["metadata", "activo", "actualizado_en"])
+                rubro, was_created = renombrado, False
+            else:
+                rubro, was_created = RubroPresupuesto.objects.update_or_create(
+                    area=area,
+                    concepto=concept,
+                    codigo_cuenta=account_code,
+                    sucursal=branch,
+                    defaults={
+                        "tipo": rubro_type,
+                        "activo": True,
+                        "metadata": {
+                            "source": source,
+                            "source_file": path.name,
+                            "actual_key": normalize_actual_key(concept, account_code, area.codigo),
+                        },
+                    },
+                )
             rubros_created += int(was_created)
             rubros_updated += int(not was_created)
             for month_name, month_number in MONTH_COLUMNS:

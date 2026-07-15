@@ -693,8 +693,8 @@ class VentasPosMatchingTests(TestCase):
         self.assertNotIn("productos_pos", filtros)
 
     def test_sin_match_queda_reportado_y_sin_asignacion(self):
-        """'BEBIDAS/OTROS · REFRESCO' no cruza con nada: regla sin asignación."""
-        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        """Un concepto sin equivalente POS ni override queda sin asignación."""
+        rubro = self._rubro("BEBIDAS/OTROS · KOMBUCHA")
         filtros = self._filtros_de(rubro)
         self.assertNotIn("productos_pos", filtros)
         self.assertNotIn("categoria_pos", filtros)
@@ -1152,4 +1152,235 @@ class MatchingProductoSoloTests(TestCase):
         )
         self.assertEqual(
             ReglaFuenteRubro.objects.get(rubro=r_crunch).filtros["productos_pos"], ["Pastel de Crunch Chico"]
+        )
+
+
+class MatchingRefinadoTests(TestCase):
+    """Apóstrofes, desempate por producto y overrides de CSV en ventas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        cls.branch = PointBranch.objects.create(external_id="REF-BR", name="Centro")
+        for cat, prod in [
+            ("Pastel Chico", "Pastel de Snickers Chico"),
+            ("Pastel Grande", "Pastel de Fresas Con Crema Grande"),
+            ("Vasos Grande", "Vaso Fresas con Crema Grande"),
+            ("Coca-cola", "COCA-COLA 450 ML"),
+        ]:
+            PointSalesDailyProductFact.objects.create(
+                branch=cls.branch, sale_date=date(2026, 5, 3), sucursal_nombre="Centro",
+                categoria=cat, producto_nombre_historico=prod,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+    def _rubro(self, concepto):
+        r = RubroPresupuesto.objects.create(
+            area=self.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=r, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("1")
+        )
+        return r
+
+    def test_apostrofe_no_rompe_el_match(self):
+        """SNICKER'S cruza con Snickers (apóstrofe eliminado, no separado)."""
+        rubro = self._rubro("PASTEL CHICO · SNICKER'S")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        filtros = ReglaFuenteRubro.objects.get(rubro=rubro).filtros
+        self.assertEqual(filtros["productos_pos"], ["Pastel de Snickers Chico"])
+
+    def test_desempate_por_producto_no_por_rubro(self):
+        """El vaso preparado gana SU producto aunque el rubro de pastel tenga
+        mejor score global en el suyo propio."""
+        r_pastel = self._rubro("PASTEL GRANDE · FRESAS CON CREMA")
+        r_vaso = self._rubro("VASO PREPARADO · FRESAS CON CREMA GDE")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        filtros_pastel = ReglaFuenteRubro.objects.get(rubro=r_pastel).filtros
+        filtros_vaso = ReglaFuenteRubro.objects.get(rubro=r_vaso).filtros
+        self.assertIn("Pastel de Fresas Con Crema Grande", filtros_pastel.get("productos_pos", []))
+        self.assertNotIn("Vaso Fresas con Crema Grande", filtros_pastel.get("productos_pos", []))
+        self.assertEqual(filtros_vaso.get("productos_pos"), ["Vaso Fresas con Crema Grande"])
+
+    def test_override_de_csv_manda_sobre_la_autoasignacion(self):
+        """El rubro con override en el CSV recibe UNA regla, la del CSV."""
+        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        reglas = list(ReglaFuenteRubro.objects.filter(rubro=rubro))
+        self.assertEqual(len(reglas), 1)
+        self.assertEqual(reglas[0].filtros.get("categoria_pos"), "Coca-cola")
+
+
+class FueraProyeccionTests(TestCase):
+    """Productos con venta real sin proyección aparecen en su propia sección."""
+
+    def test_producto_no_proyectado_se_reporta(self):
+        from recetas.models import PronosticoVenta, Receta
+
+        from reportes.services_ventas_unidades import comparativo_ventas_unidades
+
+        proyectada = Receta.objects.create(nombre="Bollo Lotus", hash_contenido="fp-lotus")
+        temporada = Receta.objects.create(nombre="Rosca de Reyes", hash_contenido="fp-rosca")
+        PronosticoVenta.objects.create(
+            receta=proyectada, periodo="2026-05", cantidad=Decimal("10"), fuente="PRESUPUESTO_2026"
+        )
+        branch = PointBranch.objects.create(external_id="FP-BR", name="Centro")
+
+        def venta(receta, producto, monto, qty):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 5, 9), sucursal_nombre="Centro",
+                categoria="X", producto_nombre_historico=producto, receta=receta,
+                total_cantidad=Decimal(qty), total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+
+        venta(proyectada, "Bollo Lotus", "500", 10)
+        venta(temporada, "Rosca de Reyes", "800", 4)      # receta sin proyección
+        venta(None, "Producto Nuevo SV", "300", 6)         # sin receta ligada
+
+        resultado = comparativo_ventas_unidades(date(2026, 5, 1), hoy=date(2026, 5, 31))
+        fuera = resultado["fuera_proyeccion"]
+        nombres = [f["producto"] for f in fuera["top"]]
+        self.assertIn("Rosca de Reyes", nombres)
+        self.assertIn("Producto Nuevo SV", nombres)
+        self.assertNotIn("Bollo Lotus", nombres)
+        self.assertEqual(fuera["total_venta"], Decimal("1100"))
+        self.assertEqual(fuera["total_unidades"], Decimal("10"))
+
+
+class RenombradoPointTests(TestCase):
+    """Los rubros de Ventas adoptan los nombres del catálogo Point."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+
+    def _rubro_con_regla(self, concepto, filtros):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS, filtros=filtros
+        )
+        return rubro
+
+    def test_renombra_a_producto_categoria_y_conserva_nombre_excel(self):
+        uno = self._rubro_con_regla(
+            "BOLLO · CHOCOLATE",
+            {"productos_pos": ["Bollo Chocolate", "Bollo Chocolate SV"], "campo_monto": "total_venta"},
+        )
+        cat = self._rubro_con_regla(
+            "BEBIDAS/OTROS · TE", {"categoria_pos": "TE", "campo_monto": "total_venta"}
+        )
+        pendiente = self._rubro_con_regla("CHEESECAKE · FRESA R", {"campo_monto": "total_venta"})
+
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+
+        uno.refresh_from_db(); cat.refresh_from_db(); pendiente.refresh_from_db()
+        self.assertEqual(uno.concepto, "Bollo Chocolate")  # el más corto = producto base
+        self.assertEqual(uno.metadata["nombre_excel"], "BOLLO · CHOCOLATE")
+        self.assertEqual(cat.concepto, "TE")
+        self.assertEqual(pendiente.concepto, "CHEESECAKE · FRESA R")  # sin asignación: intacto
+
+        # Idempotente: segunda corrida no cambia nada ni pisa nombre_excel.
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+        uno.refresh_from_db()
+        self.assertEqual(uno.concepto, "Bollo Chocolate")
+        self.assertEqual(uno.metadata["nombre_excel"], "BOLLO · CHOCOLATE")
+
+    def test_reimport_reconoce_nombre_excel_y_no_duplica(self):
+        """Volver a importar el Excel actualiza el rubro renombrado, sin crear
+        un duplicado con el nombre viejo."""
+        import csv as csv_mod
+        import tempfile
+
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        rubro = self._rubro_con_regla(
+            "BOLLO · CHOCOLATE", {"productos_pos": ["Bollo Chocolate"], "campo_monto": "total_venta"}
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 1, 1), monto_presupuesto=Decimal("10")
+        )
+        call_command("renombrar_rubros_ventas_point", stdout=StringIO())
+        rubro.refresh_from_db()
+        self.assertEqual(rubro.concepto, "Bollo Chocolate")
+
+        campos = ["concepto", "tipo", "sucursal"] + [m for m, _ in
+                  [("enero",1),("febrero",2),("marzo",3),("abril",4),("mayo",5),("junio",6),
+                   ("julio",7),("agosto",8),("septiembre",9),("octubre",10),("noviembre",11),("diciembre",12)]]
+        fila = {c: "0" for c in campos}
+        fila.update({"concepto": "BOLLO · CHOCOLATE", "tipo": "INGRESO", "sucursal": "", "enero": "5000.00"})
+        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False, encoding="utf-8")
+        writer = csv_mod.DictWriter(tmp, fieldnames=campos)
+        writer.writeheader(); writer.writerow(fila); tmp.close()
+
+        PresupuestoMaestroImportService().import_file(
+            archivo=tmp.name, area_code="ventas", version="ORIGINAL", year=2026
+        )
+
+        rubros = RubroPresupuesto.objects.filter(area=self.area)
+        self.assertEqual(rubros.count(), 1)  # sin duplicado con nombre Excel
+        rubro.refresh_from_db()
+        self.assertEqual(rubro.concepto, "Bollo Chocolate")  # nombre Point se queda
+        linea = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 1, 1))
+        self.assertEqual(linea.monto_presupuesto, Decimal("5000.00"))  # presupuesto actualizado
+
+
+class NormalizacionConceptosTests(TestCase):
+    """Nomenclatura unificada: Primera mayúscula, acrónimos, acentos y typos."""
+
+    def test_funcion_de_normalizacion(self):
+        from reportes.management.commands.normalizar_conceptos_rubros import normalizar_concepto
+
+        casos = {
+            "SUELDO": "Sueldo",
+            "Dias festivos": "Días festivos",
+            "Imss": "IMSS",
+            "Mantanimiento equipo/maquinaria": "Mantenimiento equipo/maquinaria",
+            "Material de seguiridad e higiene": "Material de seguridad e higiene",
+            "JUEGO DE LLANTAS PEGEOT": "Juego de llantas Peugeot",
+            "SISTEMA DE REGRIFERACION MANAGER": "Sistema de refrigeración Manager",
+            "Cuotas y suscriciones": "Cuotas y suscripciones",
+            "Impuesto sobre Nómina": "Impuesto sobre nómina",
+            "Mantenimiento eq. de computo": "Mantenimiento eq. de cómputo",
+        }
+        for entrada, esperado in casos.items():
+            self.assertEqual(normalizar_concepto(entrada), esperado, entrada)
+        # Idempotencia: normalizar dos veces da lo mismo.
+        for esperado in casos.values():
+            self.assertEqual(normalizar_concepto(esperado), esperado)
+
+    def test_comando_renombra_conserva_referencia_y_el_csv_sigue_cruzando(self):
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        sueldo = RubroPresupuesto.objects.create(
+            area=nomina, concepto="SUELDO", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        festivo = RubroPresupuesto.objects.create(
+            area=nomina, concepto="FESTIVO", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        festivos = RubroPresupuesto.objects.create(
+            area=nomina, concepto="FESTIVOS", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+        call_command("normalizar_conceptos_rubros", stdout=StringIO())
+
+        sueldo.refresh_from_db(); festivo.refresh_from_db(); festivos.refresh_from_db()
+        self.assertEqual(sueldo.concepto, "Sueldo")
+        self.assertEqual(sueldo.metadata["nombre_excel"], "SUELDO")
+        self.assertEqual(festivo.concepto, "Festivo")
+        self.assertEqual(festivos.concepto, "Festivos")  # distintos, sin colisión
+
+        # El seed sigue cruzando el CSV (matching insensible a caso/acentos):
+        # la fila nomina,SUELDO,NOMINA aplica al rubro renombrado "Sueldo".
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        self.assertTrue(
+            ReglaFuenteRubro.objects.filter(
+                rubro=sueldo, tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA
+            ).exists()
         )

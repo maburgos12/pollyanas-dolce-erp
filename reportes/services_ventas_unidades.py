@@ -150,4 +150,55 @@ def comparativo_ventas_unidades(periodo: date, *, hoy: date | None = None) -> di
         if totales["unidades_proyectadas"] > 0
         else None
     )
-    return {"periodo": periodo, "filas": filas, "totales": totales, "con_proyeccion": bool(filas)}
+
+    # ---- Ventas fuera de la proyección (productos nuevos / temporada) ------
+    # Trajeron venta real pero nadie los proyectó: deben verse, no perderse.
+    fuera = _ventas_fuera_de_proyeccion(periodo, recetas_proyectadas=set(proyeccion.keys()))
+
+    return {
+        "periodo": periodo,
+        "filas": filas,
+        "totales": totales,
+        "con_proyeccion": bool(filas),
+        "fuera_proyeccion": fuera,
+    }
+
+
+FUERA_PROYECCION_TOP = 15
+
+
+def _ventas_fuera_de_proyeccion(periodo: date, *, recetas_proyectadas: set[int]) -> dict[str, object]:
+    """Ventas del mes de productos SIN unidades proyectadas (nuevos/temporada).
+
+    Incluye productos con receta no proyectada y productos sin receta ligada
+    (se agrupan por su nombre histórico de Point). Top N por venta + resto.
+    """
+    from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
+
+    filas_raw = (
+        PointSalesDailyProductFact.objects.filter(
+            sale_date__year=periodo.year, sale_date__month=periodo.month
+        )
+        .exclude(receta_id__in=recetas_proyectadas)
+        .values("receta_id", "receta__nombre", "producto_nombre_historico")
+        .annotate(cantidad=Sum("total_cantidad"), venta=Sum("total_venta"))
+    )
+    agregado: dict[str, dict] = {}
+    for fila in filas_raw:
+        nombre = fila["receta__nombre"] or fila["producto_nombre_historico"] or "(sin nombre)"
+        bucket = agregado.setdefault(nombre, {"producto": nombre, "unidades": ZERO, "venta": ZERO})
+        bucket["unidades"] += fila["cantidad"] or ZERO
+        bucket["venta"] += fila["venta"] or ZERO
+
+    ordenadas = sorted(agregado.values(), key=lambda f: -f["venta"])
+    top = ordenadas[:FUERA_PROYECCION_TOP]
+    resto = ordenadas[FUERA_PROYECCION_TOP:]
+    total_unidades = sum((f["unidades"] for f in ordenadas), ZERO)
+    total_venta = sum((f["venta"] for f in ordenadas), ZERO)
+    return {
+        "top": top,
+        "resto_productos": len(resto),
+        "resto_venta": sum((f["venta"] for f in resto), ZERO),
+        "total_unidades": total_unidades,
+        "total_venta": total_venta,
+    }
