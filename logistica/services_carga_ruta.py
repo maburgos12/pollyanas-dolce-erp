@@ -1036,13 +1036,36 @@ def validar_linea_carga(
     motivo_diferencia: str = "",
     notas: str = "",
     client_event_id: str = "",
+    source_hash: str = "",
+    transfer_external_id: str = "",
+    detail_external_id: str = "",
+    parada_id: int | None = None,
 ) -> RutaCargaChecklistLinea:
     validar_usuario_puede_operar_checklist(user=user, ruta=ruta, repartidor=repartidor)
     checklist = obtener_checklist_carga(ruta)
-    linea = RutaCargaChecklistLinea.objects.select_for_update().select_related("checklist", "parada").get(
-        pk=linea_id,
+    lineas_actuales = RutaCargaChecklistLinea.objects.select_for_update().select_related("checklist", "parada").filter(
         checklist=checklist,
     )
+    linea = lineas_actuales.filter(pk=linea_id).first()
+    if not linea:
+        candidatos = lineas_actuales.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        source_hash = (source_hash or "").strip()
+        transfer_external_id = (transfer_external_id or "").strip()
+        detail_external_id = (detail_external_id or "").strip()
+        if source_hash:
+            candidatos = candidatos.filter(source_hash=source_hash)
+        elif transfer_external_id and detail_external_id:
+            candidatos = candidatos.filter(
+                transfer_external_id=transfer_external_id,
+                detail_external_id=detail_external_id,
+            )
+        else:
+            raise ValidationError("La carga se actualizó desde Point. Actualiza la pantalla y vuelve a confirmar este producto.")
+        if parada_id:
+            candidatos = candidatos.filter(parada_id=parada_id)
+        linea = candidatos.first()
+        if not linea:
+            raise ValidationError("La carga se actualizó desde Point y este producto ya no pertenece al tramo actual.")
     if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
         raise ValidationError("Esta línea fue superada por una transferencia de Point más reciente y ya no admite captura.")
 

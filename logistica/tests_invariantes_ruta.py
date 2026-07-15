@@ -5078,5 +5078,5 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v65-recarga-point")
-        self.assertIn("?v=route-control-v65-recarga-point", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v66-carga-estable")
+        self.assertIn("?v=route-control-v66-carga-estable", html)

@@ -1579,9 +1579,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v65-recarga-point"},
+            {"route-control-v66-carga-estable"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v66-carga-estable", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -3394,6 +3394,30 @@ class LogisticaPwaApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["unidad"], self.unidad.id)
 
+    def test_bitacora_salida_infiere_unidad_asignada_si_el_cliente_no_la_envia(self):
+        RutaEntrega.objects.create(
+            nombre="Ruta Unidad Inferida",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_PLANEADA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_bitacora_salida"),
+            {
+                "km_salida": "1000",
+                "nivel_gas_salida": "lleno",
+                "latitud_salida": "25.570000",
+                "longitud_salida": "-108.470000",
+                "foto_tablero_salida": SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+            },
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["unidad"], self.unidad.id)
+
     def test_bitacora_salida_abre_turno_sin_liberar_ruta_planeada(self):
         ruta = RutaEntrega.objects.create(
             nombre="Ruta PWA",
@@ -4799,9 +4823,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v65-recarga-point", pwa_html)
+        self.assertIn("?v=route-control-v66-carga-estable", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v66-carga-estable", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -4906,7 +4930,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v65-recarga-point", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v66-carga-estable", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8331,9 +8355,11 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("cantidad_total_", pwa_html)
         self.assertIn("carga-checklist/productos/validar/", pwa_html)
         self.assertIn("const total = totalesConCarga.length", pwa_html)
+        self.assertIn("totalProducto.lineas.every(lineaPendientePoint)", pwa_html)
+        self.assertNotIn("totalProducto.lineas.some(lineaPendientePoint)", pwa_html)
         self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v65-recarga-point", pwa_html)
+        self.assertIn("route-control-v66-carga-estable", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -8865,6 +8891,63 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(linea.client_event_id, "evt-carga-1")
         self.assertEqual(checklist.estatus, RutaCargaChecklist.ESTATUS_CONFIRMADA)
+
+    def test_api_reubica_captura_si_la_sincronizacion_reemplazo_la_linea(self):
+        self.client.force_login(self.user)
+        ruta, parada = self._crear_ruta_planeada_para_carga()
+        checklist = RutaCargaChecklist.objects.create(ruta=ruta, estatus=RutaCargaChecklist.ESTATUS_EN_REVISION)
+        linea_vieja = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="point-linea-estable",
+            transfer_external_id="36730",
+            detail_external_id="521147",
+            item_code="0116",
+            item_name="Bollo Chocolate",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+        linea_id_obsoleto = linea_vieja.id
+        linea_vieja.delete()
+        linea_vigente = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=parada,
+            source_hash="point-linea-estable",
+            transfer_external_id="36730",
+            detail_external_id="521147",
+            item_code="0116",
+            item_name="Bollo Chocolate",
+            unit="PZA",
+            cantidad_solicitada="1.000",
+            cantidad_enviada_esperada="1.000",
+        )
+
+        url = reverse(
+            "api_logistica_ruta_carga_linea_validar",
+            kwargs={"ruta_id": ruta.id, "linea_id": linea_id_obsoleto},
+        )
+        response = self.client.post(
+            url,
+            json.dumps(
+                {
+                    "cantidad_cargada": "1.000",
+                    "client_event_id": "evt-linea-reemplazada",
+                    "source_hash": "point-linea-estable",
+                    "transfer_external_id": "36730",
+                    "detail_external_id": "521147",
+                    "parada_id": parada.id,
+                }
+            ),
+            content_type="application/json",
+            secure=True,
+        )
+
+        linea_vigente.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["linea"]["id"], linea_vigente.id)
+        self.assertEqual(linea_vigente.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(linea_vigente.client_event_id, "evt-linea-reemplazada")
 
     def test_api_no_crea_ruta_sin_paradas(self):
         self.client.force_login(self.user)
