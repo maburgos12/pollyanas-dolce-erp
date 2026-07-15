@@ -167,6 +167,23 @@ class LogisticaEntregaDomainTests(TestCase):
             1,
         )
 
+    def test_acompanante_asignado_puede_confirmar_entrega_sin_asumir_tracking(self):
+        user_acompanante = User.objects.create_user(username="acompanante.entregas", password="pass123")
+        user_acompanante.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        acompanante = Repartidor.objects.create(user=user_acompanante, sucursal=self.sucursal)
+        self.ruta.acompanante = acompanante
+        self.ruta.save(update_fields=["acompanante", "updated_at"])
+
+        resultado = self._confirmar(
+            actor=user_acompanante,
+            client_event_id="entrega-acompanante-1",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertTrue(resultado.requiere_revision)
+        self.assertFalse(UbicacionRuta.objects.filter(ruta=self.ruta, repartidor=acompanante).exists())
+
     def test_geocerca_real_no_requiere_revision(self):
         self._registrar_geocerca_real()
 
@@ -4380,6 +4397,49 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(response.json()["paradas"][0]["punto_nombre_snapshot"], "Sucursal Control")
+
+    def test_api_ruta_activa_devuelve_misma_ruta_al_acompanante_asignado(self):
+        self.ruta.acompanante = self.acompanante
+        self.ruta.save(update_fields=["acompanante", "updated_at"])
+        self.client.force_login(self.user_acompanante)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
+        self.assertEqual(response.json()["ruta"]["repartidor"], self.repartidor.id)
+        self.assertEqual(response.json()["ruta"]["acompanante"], self.acompanante.id)
+
+    def test_acompanante_asignado_puede_confirmar_carga_de_la_ruta(self):
+        self.ruta.acompanante = self.acompanante
+        self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
+        self.ruta.save(update_fields=["acompanante", "estatus", "updated_at"])
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            source_hash="carga-acompanante",
+            item_code="ACOMP-1",
+            item_name="Producto acompañado",
+            unit="PZA",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+        )
+
+        validar_linea_carga(
+            user=self.user_acompanante,
+            ruta=self.ruta,
+            repartidor=self.acompanante,
+            linea_id=linea.id,
+            cantidad_cargada="2.000",
+        )
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(linea.validado_por, self.user_acompanante)
 
     def test_api_ruta_activa_refresca_checklist_point_pendiente_viejo(self):
         checklist = RutaCargaChecklist.objects.create(

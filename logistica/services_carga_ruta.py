@@ -36,6 +36,7 @@ from .models import (
     RutaCargaChecklistLinea,
     RutaEntrega,
 )
+from .services_rutas_control import repartidor_participa_en_ruta
 
 POINT_PENDIENTE_ENVIO_NOTA = (
     "La carga aún no aparece enviada en Point. "
@@ -1021,7 +1022,7 @@ def validar_usuario_puede_operar_checklist(*, user, ruta: RutaEntrega, repartido
         raise ValidationError("La ruta no permite confirmar carga en este estatus.")
     if can_manage_submodule(user, "logistica", "rutas"):
         return
-    if not repartidor or ruta.repartidor_id != repartidor.id:
+    if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
         raise PermissionDenied("No tienes permiso para confirmar carga de esta ruta.")
 
 
