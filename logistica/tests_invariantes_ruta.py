@@ -7,6 +7,7 @@ import subprocess
 from threading import Barrier, BrokenBarrierError, Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import UUID
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -268,6 +269,37 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
             orden=3,
         )
 
+    def _preparar_checklist_enviado(self):
+        origen = PointBranch.objects.create(external_id="INV-AUTO-CEDIS", name="CEDIS")
+        destino = PointBranch.objects.create(
+            external_id="INV-AUTO-SUC",
+            name=self.sucursal_siguiente.nombre,
+            erp_branch=self.sucursal_siguiente,
+        )
+        PointTransferLine.objects.create(
+            origin_branch=origen,
+            destination_branch=destino,
+            erp_destination_branch=self.sucursal_siguiente,
+            transfer_external_id="INV-AUTO-T",
+            detail_external_id="INV-AUTO-D",
+            source_hash="inv-auto-concurrente",
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name="Pastel automatización concurrente",
+            item_code="INV-AUTO-PASTEL",
+            unit="pz",
+            requested_quantity="2",
+            sent_quantity="2",
+            received_quantity="0",
+            is_open=True,
+            raw_payload={"transfer": {"isEnviado": True}},
+        )
+        return sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
+
     def test_transicion_visitada_concurrente_tiene_un_solo_ganador(self):
         if connection.vendor != "postgresql":
             self.skipTest("La prueba de transición condicional requiere PostgreSQL real.")
@@ -349,35 +381,15 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
         if connection.vendor != "postgresql":
             self.skipTest("La prueba de bloqueo de tarea requiere PostgreSQL real.")
 
-        origen = PointBranch.objects.create(external_id="INV-AUTO-CEDIS", name="CEDIS")
-        destino = PointBranch.objects.create(
-            external_id="INV-AUTO-SUC",
-            name=self.sucursal_siguiente.nombre,
-            erp_branch=self.sucursal_siguiente,
-        )
-        PointTransferLine.objects.create(
-            origin_branch=origen,
-            destination_branch=destino,
-            erp_destination_branch=self.sucursal_siguiente,
-            transfer_external_id="INV-AUTO-T",
-            detail_external_id="INV-AUTO-D",
-            source_hash="inv-auto-concurrente",
-            registered_at=timezone.now(),
-            sent_at=timezone.now(),
-            item_name="Pastel automatización concurrente",
-            item_code="INV-AUTO-PASTEL",
-            unit="pz",
-            requested_quantity="2",
-            sent_quantity="2",
-            received_quantity="0",
-            is_open=True,
-            raw_payload={"transfer": {"isEnviado": True}},
-        )
-        resumen = sincronizar_checklist_carga_desde_point(
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
+
+        resumen = self._preparar_checklist_enviado()
+        lease_token = _reclamar_lease_recarga_para_encolar(
             ruta=self.ruta,
+            parada=self.cedis,
             user=self.user,
-            ejecutar_sync=False,
         )
+        self.assertTrue(lease_token)
         sync_iniciado = Event()
         liberar_sync = Event()
         errores = []
@@ -400,6 +412,7 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
                         ruta_id=self.ruta.id,
                         parada_id=self.cedis.id,
                         user_id=self.user.id,
+                        lease_token=lease_token,
                     )
                 )
             except Exception as exc:
@@ -455,6 +468,86 @@ class RecargaCedisAutomationConcurrencyTests(TransactionTestCase):
             ).count(),
             1,
         )
+
+    def test_worker_obsoleto_no_pisa_token_nuevo_mientras_lock_sigue_activo(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("El fencing con advisory lock requiere PostgreSQL real.")
+
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
+        from .tasks import procesar_recarga_cedis_automatica
+
+        resumen = self._preparar_checklist_enviado()
+        token_viejo = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
+        sync_iniciado = Event()
+        liberar_sync = Event()
+        resultados_viejo = []
+        errores = []
+
+        def sync_lento(**kwargs):
+            sync_iniciado.set()
+            if not liberar_sync.wait(timeout=5):
+                raise TimeoutError("No se liberó el worker viejo.")
+            return resumen
+
+        def worker_viejo():
+            close_old_connections()
+            try:
+                resultados_viejo.append(
+                    procesar_recarga_cedis_automatica(
+                        ruta_id=self.ruta.id,
+                        parada_id=self.cedis.id,
+                        user_id=self.user.id,
+                        lease_token=token_viejo,
+                    )
+                )
+            except Exception as exc:
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        with patch(
+            "logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point",
+            side_effect=sync_lento,
+        ) as sync:
+            hilo_viejo = Thread(target=worker_viejo)
+            hilo_viejo.start()
+            self.assertTrue(sync_iniciado.wait(timeout=5))
+
+            lease = EventoRuta.objects.get(
+                clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+            )
+            metadata = dict(lease.metadata)
+            metadata["lease_hasta"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+            lease.metadata = metadata
+            lease.save(update_fields=["metadata"])
+            token_nuevo = _reclamar_lease_recarga_para_encolar(
+                ruta=self.ruta,
+                parada=self.cedis,
+                user=self.user,
+            )
+            self.assertNotEqual(token_viejo, token_nuevo)
+
+            segundo = procesar_recarga_cedis_automatica(
+                ruta_id=self.ruta.id,
+                parada_id=self.cedis.id,
+                user_id=self.user.id,
+                lease_token=token_nuevo,
+            )
+            self.assertEqual(segundo["estado_sync"], "EN_PROCESO")
+            liberar_sync.set()
+            hilo_viejo.join(timeout=10)
+
+        self.assertFalse(hilo_viejo.is_alive())
+        self.assertEqual(errores, [])
+        self.assertEqual(sync.call_count, 1)
+        self.assertEqual(resultados_viejo[0]["estado_sync"], "ACTUALIZADO")
+        lease.refresh_from_db()
+        self.assertEqual(lease.metadata["lease_token"], token_nuevo)
+        self.assertEqual(lease.metadata["estado"], "ENCOLADA")
 
 
 class LiberacionRutaConcurrencyTests(TransactionTestCase):
@@ -1934,7 +2027,10 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             ruta_id=self.ruta.id,
             parada_id=self.cedis.id,
             user_id=self.user.id,
+            lease_token=delay.call_args.kwargs["lease_token"],
         )
+        token_fallido = delay.call_args.kwargs["lease_token"]
+        UUID(token_fallido)
         self.cedis.refresh_from_db()
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertTrue(UbicacionRuta.objects.filter(pk=segunda_ubicacion.id).exists())
@@ -1948,6 +2044,9 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             registrar_ubicacion_ruta(user=self.user, ruta=self.ruta, payload=payload)
 
         self.assertEqual(delay.call_count, 2)
+        token_encolado = delay.call_args.kwargs["lease_token"]
+        UUID(token_encolado)
+        self.assertNotEqual(token_fallido, token_encolado)
         log_exception.assert_called_once()
 
         lease.refresh_from_db()
@@ -1999,6 +2098,10 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             )
         self.assertTrue(agendada)
         delay.assert_called_once()
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        lease_token = lease.metadata["lease_token"]
 
         with patch(
             "logistica.tasks.registrar_recarga_cedis",
@@ -2008,6 +2111,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
                 ruta_id=self.ruta.id,
                 parada_id=self.cedis.id,
                 user_id=self.user.id,
+                lease_token=lease_token,
             )
         self.assertEqual(resultado["estado_sync"], "PENDIENTE_ENVIADO")
         lease = EventoRuta.objects.get(
@@ -2038,6 +2142,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(delay.call_count, 2)
 
     def test_task_recarga_no_inventa_exito_si_point_pendiente(self):
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
         from .tasks import procesar_recarga_cedis_automatica
 
         errores_revisables = (
@@ -2049,6 +2154,13 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             EventoRuta.objects.filter(
                 clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
             ).delete()
+            self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+            self.cedis.save(update_fields=["estado", "actualizado_en"])
+            lease_token = _reclamar_lease_recarga_para_encolar(
+                ruta=self.ruta,
+                parada=self.cedis,
+                user=self.user,
+            )
             with self.subTest(estado_sync=estado_sync), patch(
                 "logistica.tasks.registrar_recarga_cedis",
                 side_effect=exception_class("Falla revisable de Point"),
@@ -2057,6 +2169,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
                     ruta_id=self.ruta.id,
                     parada_id=self.cedis.id,
                     user_id=self.user.id,
+                    lease_token=lease_token,
                 )
 
                 self.assertEqual(resultado["estado_sync"], estado_sync)
@@ -2079,17 +2192,26 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
 
     @patch("logistica.tasks.registrar_recarga_cedis")
     def test_task_recarga_exitosa_reporta_evento_reconciliado(self, registrar):
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
         from .tasks import procesar_recarga_cedis_automatica
 
         registrar.return_value = SimpleNamespace(
             id=812,
             metadata={"estado_sync": "ACTUALIZADO"},
         )
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        lease_token = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
 
         resultado = procesar_recarga_cedis_automatica(
             ruta_id=self.ruta.id,
             parada_id=self.cedis.id,
             user_id=self.user.id,
+            lease_token=lease_token,
         )
 
         self.assertEqual(
@@ -2097,6 +2219,61 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             {"estado_sync": "ACTUALIZADO", "evento_id": 812},
         )
         registrar.assert_called_once()
+
+    @patch("logistica.tasks.registrar_recarga_cedis")
+    def test_task_con_token_viejo_se_descarta_sin_tocar_point(self, registrar):
+        from .services_rutas_control import _reclamar_lease_recarga_para_encolar
+        from .tasks import procesar_recarga_cedis_automatica
+
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        token_viejo = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
+        lease = EventoRuta.objects.get(
+            clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+        )
+        metadata = dict(lease.metadata)
+        metadata["lease_hasta"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        lease.metadata = metadata
+        lease.save(update_fields=["metadata"])
+        token_nuevo = _reclamar_lease_recarga_para_encolar(
+            ruta=self.ruta,
+            parada=self.cedis,
+            user=self.user,
+        )
+
+        resultado = procesar_recarga_cedis_automatica(
+            ruta_id=self.ruta.id,
+            parada_id=self.cedis.id,
+            user_id=self.user.id,
+            lease_token=token_viejo,
+        )
+
+        self.assertEqual(resultado["estado_sync"], "OBSOLETA")
+        registrar.assert_not_called()
+        lease.refresh_from_db()
+        self.assertEqual(lease.metadata["lease_token"], token_nuevo)
+
+    @patch("logistica.tasks.registrar_recarga_cedis")
+    def test_task_sin_token_no_reclama_lease_ni_toca_point(self, registrar):
+        from .tasks import procesar_recarga_cedis_automatica
+
+        resultado = procesar_recarga_cedis_automatica(
+            ruta_id=self.ruta.id,
+            parada_id=self.cedis.id,
+            user_id=self.user.id,
+        )
+
+        self.assertEqual(resultado["estado_sync"], "OBSOLETA")
+        registrar.assert_not_called()
+        self.assertFalse(
+            EventoRuta.objects.filter(
+                clave_auditoria=f"recarga-auto-lease:{self.ruta.id}:{self.cedis.id}"
+            ).exists()
+        )
 
     def test_selector_alerta_interpreta_zona_horaria_en_vez_de_ordenar_json(self):
         cronologicamente_nueva = self._evento_alerta_manual(
