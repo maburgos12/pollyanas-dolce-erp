@@ -187,6 +187,65 @@
   </div>
 </section>
 
+{% if ventas_unidades %}
+<section class="card">
+  <div class="card-header">Ventas · unidades proyectadas × precio actual — {{ selected_month_name|capfirst }} {{ selected_year }}</div>
+  <p class="muted">La proyección de ventas se compara en unidades propuestas del mes contra las unidades reales de Point; el importe proyectado usa el precio vigente (ASP de los últimos 30 días o precio de lista), no los pesos del Excel.</p>
+  {% if ventas_unidades.con_proyeccion %}
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-number">{{ ventas_unidades.totales.unidades_proyectadas|floatformat:0|intcomma }}</div>
+      <div class="kpi-label">Unidades proyectadas</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">{{ ventas_unidades.totales.unidades_reales|floatformat:0|intcomma }}</div>
+      <div class="kpi-label">Unidades vendidas{% if ventas_unidades.totales.cumplimiento_pct is not None %} ({{ ventas_unidades.totales.cumplimiento_pct }}%){% endif %}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">${{ ventas_unidades.totales.importe_proyectado|floatformat:0|intcomma }}</div>
+      <div class="kpi-label">Proyectado a precio actual</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-number">${{ ventas_unidades.totales.importe_real|floatformat:0|intcomma }}</div>
+      <div class="kpi-label">Venta real</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>U. proyectadas</th>
+          <th>U. vendidas</th>
+          <th>Cumplimiento</th>
+          <th>Precio actual</th>
+          <th>$ Proyectado</th>
+          <th>$ Real</th>
+          <th>Varianza</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in ventas_unidades.filas %}
+        <tr>
+          <td>{{ fila.producto }}</td>
+          <td>{{ fila.unidades_proyectadas|floatformat:0|intcomma }}</td>
+          <td>{{ fila.unidades_reales|floatformat:0|intcomma }}</td>
+          <td class="pvr-var is-{{ fila.tone }}">{% if fila.cumplimiento_pct is not None %}{{ fila.cumplimiento_pct }}%{% else %}—{% endif %}</td>
+          <td>{% if fila.precio_actual is not None %}${{ fila.precio_actual|floatformat:2 }} <span class="muted" style="font-size:0.72rem;">{{ fila.precio_fuente }}</span>{% else %}<span class="badge bg-warning">Sin precio</span>{% endif %}</td>
+          <td>{% if fila.importe_proyectado is not None %}${{ fila.importe_proyectado|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+          <td>${{ fila.importe_real|floatformat:2|intcomma }}</td>
+          <td class="pvr-var is-{{ fila.tone }}">{% if fila.varianza is not None %}${{ fila.varianza|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert-info">Aún no hay unidades proyectadas para este mes. Se cargan al importar la Proyección de Ventas (Presupuesto Maestro → Importadores), que ahora también guarda las cantidades por producto.</div>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card-header">Cobertura de automatización por área</div>
   <p class="muted">Qué proporción de cada área ya se llena sola desde el ERP. "Manual" = concepto que por naturaleza se captura (IMSS, uniformes, gastos no facturados).</p>

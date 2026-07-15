@@ -709,3 +709,99 @@ class VentasPosMatchingTests(TestCase):
             if r.filtros.get("productos_pos")
         ]
         self.assertEqual(len(con_producto), 1)
+
+
+class VentasUnidadesTests(TestCase):
+    """Comparativo de ventas por unidades × precio actual (regla de dirección)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from recetas.models import PronosticoVenta, Receta
+
+        cls.receta = Receta.objects.create(nombre="Bollo Chocolate", hash_contenido="test-vu-bollo")
+        cls.sin_venta = Receta.objects.create(nombre="Rosca Dulce de Leche", hash_contenido="test-vu-rosca")
+        PronosticoVenta.objects.create(receta=cls.receta, periodo="2026-05", cantidad=Decimal("100"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.sin_venta, periodo="2026-05", cantidad=Decimal("40"), fuente="PRESUPUESTO_2026")
+
+        branch = PointBranch.objects.create(external_id="VU-BR", name="Centro")
+        for day, qty, venta in [(3, 30, 300), (10, 50, 500)]:
+            PointSalesDailyProductFact.objects.create(
+                branch=branch,
+                sale_date=date(2026, 5, day),
+                sucursal_nombre="Centro",
+                categoria="Bollo",
+                producto_nombre_historico="Bollo Chocolate",
+                receta=cls.receta,
+                total_cantidad=Decimal(qty),
+                total_venta=Decimal(venta),
+                total_venta_neta=Decimal(venta),
+            )
+
+    def test_unidades_cumplimiento_e_importe_a_precio_actual(self):
+        """80 de 100 unidades = 80% y el $ proyectado usa el ASP reciente ($10)."""
+        from reportes.services_ventas_unidades import comparativo_ventas_unidades
+
+        resultado = comparativo_ventas_unidades(date(2026, 5, 1), hoy=date(2026, 5, 31))
+        fila = next(f for f in resultado["filas"] if f["receta_id"] == self.receta.id)
+        self.assertEqual(fila["unidades_proyectadas"], Decimal("100"))
+        self.assertEqual(fila["unidades_reales"], Decimal("80"))
+        self.assertEqual(fila["cumplimiento_pct"], Decimal("80.0"))
+        self.assertEqual(fila["precio_actual"], Decimal("10.00"))
+        self.assertEqual(fila["importe_proyectado"], Decimal("1000.00"))
+        self.assertEqual(fila["importe_real"], Decimal("800"))
+        self.assertEqual(fila["varianza"], Decimal("-200.00"))
+
+    def test_producto_sin_venta_ni_precio_queda_marcado(self):
+        """Sin ventas recientes ni precio de lista: fila sin precio, contada."""
+        from reportes.services_ventas_unidades import comparativo_ventas_unidades
+
+        resultado = comparativo_ventas_unidades(date(2026, 5, 1), hoy=date(2026, 5, 31))
+        fila = next(f for f in resultado["filas"] if f["receta_id"] == self.sin_venta.id)
+        self.assertIsNone(fila["precio_actual"])
+        self.assertIsNone(fila["importe_proyectado"])
+        self.assertEqual(resultado["totales"]["sin_precio"], 1)
+
+
+class ImportUnidadesProyeccionTests(TestCase):
+    """El reimport de la proyección guarda las CANTIDADES en PronosticoVenta."""
+
+    def _xlsx_proyeccion(self):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        hoja = wb.active
+        hoja.title = "GENERAL"
+        # Fila de meses + encabezados CANT/VENTA por bloque (proyección 2026).
+        hoja.append(["", "ENERO", "", "", "FEBRERO", "", "", "MARZO", "", ""])
+        hoja.append(["", "PROYECCIÓN 2026", "", "", "PROYECCIÓN 2026", "", "", "PROYECCIÓN 2026", "", ""])
+        hoja.append(["CONCEPTO", "CANT", "VENTA", "", "CANT", "VENTA", "", "CANT", "VENTA", ""])
+        hoja.append(["BOLLO", None, None, None, None, None, None, None, None, None])
+        hoja.append(["CHOCOLATE", 120, 3600, None, 150, 4500, None, 130, 3900, None])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        return tmp.name
+
+    def test_reimport_guarda_unidades_y_respeta_manual(self):
+        from recetas.models import PronosticoVenta, Receta
+
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        receta = Receta.objects.create(nombre="Bollo Chocolate", hash_contenido="test-imp-bollo")
+        # Pronóstico manual previo de enero: NO debe pisarse.
+        PronosticoVenta.objects.create(receta=receta, periodo="2026-01", cantidad=Decimal("999"), fuente="MANUAL")
+
+        resumen = PresupuestoMaestroImportService().reimport_sales_projection(
+            archivo=self._xlsx_proyeccion(), year=2026
+        )
+
+        enero = PronosticoVenta.objects.get(receta=receta, periodo="2026-01")
+        febrero = PronosticoVenta.objects.get(receta=receta, periodo="2026-02")
+        marzo = PronosticoVenta.objects.get(receta=receta, periodo="2026-03")
+        self.assertEqual(enero.cantidad, Decimal("999"))
+        self.assertEqual(enero.fuente, "MANUAL")
+        self.assertEqual(febrero.cantidad, Decimal("150"))
+        self.assertEqual(febrero.fuente, "PRESUPUESTO_2026")
+        self.assertEqual(marzo.cantidad, Decimal("130"))
+        self.assertEqual(resumen.unidades_upsertadas, 2)
