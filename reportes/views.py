@@ -28,6 +28,7 @@ from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
     can_build_product_closure,
+    can_manage_module,
     can_manage_orquestacion,
     can_lock_product_closure,
     can_rebuild_product_closure,
@@ -4380,6 +4381,10 @@ def _budget_area_cards(history_rows: list[dict[str, object]]) -> list[dict[str, 
 def presupuesto_importar_por_area(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
+    # Importar modifica el presupuesto: exige nivel de administración del
+    # módulo, no solo lectura (hallazgo de auditoría).
+    if request.method == "POST" and not can_manage_module(request.user, "reportes"):
+        raise PermissionDenied("Solo administración de Reportes puede importar presupuesto.")
 
     service = BudgetAreaUploadService()
     if request.method == "POST":
@@ -4454,6 +4459,8 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
         selected_area = ""
 
     if request.method == "POST":
+        if not can_manage_module(request.user, "reportes"):
+            raise PermissionDenied("Solo administración de Reportes puede modificar el presupuesto.")
         action = (request.POST.get("action") or "").strip()
         try:
             if action == "add_rubro":

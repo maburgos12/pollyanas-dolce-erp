@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils.text import slugify
 from openpyxl import load_workbook
 
@@ -602,20 +602,34 @@ class PresupuestoMaestroImportService:
             for month_name, month_number in MONTH_COLUMNS:
                 period = date(year, month_number, 1)
                 amount = money(row.get(month_name))
-                line_defaults = {
-                    "monto_presupuesto": amount,
-                    "metadata": {
-                        "source": source,
-                        "source_file": path.name,
-                    },
-                }
+                existente = LineaPresupuestoMensual.objects.filter(
+                    rubro=rubro, periodo=period, version=version
+                ).first()
+
+                # El importador de presupuesto SOLO manda sobre monto_presupuesto.
+                # La metadata se fusiona (no se reemplaza) para no destruir el
+                # historial de capturas ni el desglose de la consolidación, y el
+                # real del archivo (columna _real) jamás pisa una captura
+                # MANUAL:* ni un consolidado AUTO:* vigente.
+                metadata = dict(existente.metadata or {}) if existente else {}
+                metadata["source"] = source
+                metadata["source_file"] = path.name
+                line_defaults = {"monto_presupuesto": amount, "metadata": metadata}
+
                 if f"{month_name}_real" in row:
-                    line_defaults.update(
-                        {
-                            "monto_real": money(row.get(f"{month_name}_real")),
-                            "fuente_real": source,
-                        }
-                    )
+                    fuente_actual = str(existente.fuente_real or "") if existente else ""
+                    protegida = fuente_actual.startswith("MANUAL:") or fuente_actual.startswith("AUTO:")
+                    if not protegida:
+                        line_defaults.update(
+                            {
+                                # Namespace re-escribible: la consolidación viva
+                                # (POS/nómina) puede reemplazarlo después.
+                                "monto_real": money(row.get(f"{month_name}_real")),
+                                "fuente_real": "AUTO:LEGADO",
+                            }
+                        )
+                        metadata["fuente_import"] = source
+
                 _, line_created = LineaPresupuestoMensual.objects.update_or_create(
                     rubro=rubro,
                     periodo=period,
@@ -687,7 +701,26 @@ class PresupuestoMaestroImportService:
 
         with transaction.atomic():
             if clear_first:
+                from .models import ReglaFuenteRubro
+
                 rubros_qs = RubroPresupuesto.objects.filter(area=area)
+                protegidas = (
+                    LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs)
+                    .filter(
+                        Q(fuente_real__startswith="MANUAL:")
+                        | Q(fuente_real__startswith="AUTO:")
+                    )
+                    .count()
+                )
+                reglas_admin = ReglaFuenteRubro.objects.filter(
+                    rubro__in=rubros_qs, origen=ReglaFuenteRubro.ORIGEN_ADMIN
+                ).count()
+                if protegidas or reglas_admin:
+                    raise ValueError(
+                        f"El área tiene {protegidas} línea(s) con real protegido "
+                        f"(MANUAL/AUTO) y {reglas_admin} regla(s) de mapeo ADMIN; "
+                        "clear_first las destruiría. Resuélvelas antes de limpiar."
+                    )
                 deleted_rubros = rubros_qs.count()
                 deleted_lines = LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).count()
                 LineaPresupuestoMensual.objects.filter(rubro__in=rubros_qs).delete()
@@ -862,8 +895,24 @@ class PresupuestoMaestroService:
             if line.periodo == period:
                 monthly_budget += signed_amount
 
-        result = EmpresaResultadoMensual.objects.filter(periodo=period).first()
-        real_month = money(result.venta_total) if result is not None else Decimal("0")
+        # El real del KPI debe ser la métrica DE ESA ÁREA, no siempre ventas
+        # (hallazgo de auditoría: Nómina/Producción se comparaban contra
+        # venta_total). Área sin métrica mapeada = sin dato, no un dato ajeno.
+        actuals = self.actuals_for_period(period)
+        actual_key = self.AREA_ACTUAL_KEYS.get(area_code, "ventas") if area_code else "ventas"
+        real_month = actuals.get(actual_key)
+        sin_dato = real_month is None
+        if area_code and area_code not in self.AREA_ACTUAL_KEYS:
+            real_month = None
+            sin_dato = True
+        if area_code:
+            # KPI de área usa presupuesto con signo; el real de un área de
+            # gasto también se compara en su propia escala (positivo).
+            real_month = real_month if real_month is not None else Decimal("0")
+            if actual_key != "ventas":
+                real_month = -real_month
+        else:
+            real_month = real_month if real_month is not None else Decimal("0")
         variance = real_month - monthly_budget
         return {
             "year": year,
@@ -875,8 +924,8 @@ class PresupuestoMaestroService:
             "real_month": real_month,
             "variance": variance,
             "variance_pct": variance_pct(variance, monthly_budget),
-            "real_source": "reportes.EmpresaResultadoMensual" if result is not None else "",
-            "real_note": "" if result is not None else "Sin datos",
+            "real_source": "" if sin_dato else "reportes.EmpresaResultadoMensual",
+            "real_note": "Sin dato para esta área" if sin_dato else "",
             "budget_scope": "area_signed" if area_code else "ventas_ingreso",
         }
 
