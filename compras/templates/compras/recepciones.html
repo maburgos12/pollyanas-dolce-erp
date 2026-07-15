@@ -143,7 +143,7 @@
         </thead>
         <tbody>
           {% for r in recepciones %}
-          <tr>
+          <tr id="recepcion-{{ r.id }}">
             <td><strong>{{ r.folio }}</strong></td>
             <td>
               {{ r.orden.folio }}
@@ -176,9 +176,9 @@
               <div class="recipe-actions">
                 {% if r.estatus == "PENDIENTE" %}
                 <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'DIFERENCIAS' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><button class="btn btn-secondary" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Diferencias</button></form>
-                <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><button class="btn btn-success" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
+                <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form" data-async-action>{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><button class="btn btn-success" type="submit" data-pending-label="Procesando…" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
                 {% elif r.estatus == "DIFERENCIAS" %}
-                <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form">{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><button class="btn btn-primary" type="submit" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
+                <form method="post" action="{% url 'compras:recepcion_estatus' r.id 'CERRADA' %}" class="inline-form" data-async-action>{% csrf_token %}<input type="hidden" name="return_query" value="{{ current_query }}"><button class="btn btn-primary" type="submit" data-pending-label="Procesando…" {% if r.has_workflow_blockers %}disabled title="{{ r.workflow_blockers|join:', ' }}"{% endif %}>Cerrar</button></form>
                 {% else %}
                 <span class="muted">Aplicada</span>
                 {% endif %}

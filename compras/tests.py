@@ -2545,6 +2545,69 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
             1,
         )
 
+    def test_cerrar_recepcion_responde_json_aplicado_e_idempotente(self):
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+        headers = {"HTTP_ACCEPT": "application/json", "HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+
+        applied = self.client.post(url, {"return_query": "estatus=PENDIENTE"}, **headers)
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(applied.json()["toast"]["type"], "success")
+        self.assertIn("aplicada", applied.json()["toast"]["message"].lower())
+        self.assertEqual(
+            applied.json()["redirect"],
+            f"{reverse('compras:recepciones')}?estatus=PENDIENTE#recepcion-{self.recepcion_pendiente.id}",
+        )
+
+        idempotent = self.client.post(url, **headers)
+        self.assertEqual(idempotent.status_code, 200)
+        self.assertEqual(idempotent.json()["toast"]["type"], "info")
+        self.assertIn("stock no cambió nuevamente", idempotent.json()["toast"]["message"])
+
+    def test_cerrar_recepcion_post_html_conserva_redirect_tradicional_con_fragmento(self):
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{reverse('compras:recepciones')}#recepcion-{self.recepcion_pendiente.id}",
+        )
+
+    @patch("compras.views._apply_recepcion_to_inventario")
+    def test_cerrar_recepcion_json_no_aplicable_hace_rollback_completo(self, apply_mock):
+        apply_mock.return_value = {"applied": False, "reason": "cantidad_no_positiva"}
+        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=self.insumo)
+        stock_inicial = existencia.stock_actual
+        orden_estado_inicial = self.recepcion_pendiente.orden.estatus
+        url = reverse(
+            "compras:recepcion_estatus",
+            kwargs={"pk": self.recepcion_pendiente.id, "estatus": RecepcionCompra.STATUS_CERRADA},
+        )
+
+        response = self.client.post(url, HTTP_ACCEPT="application/json")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "error")
+        self.assertTrue(response.json()["toast"]["persistent"])
+        self.recepcion_pendiente.refresh_from_db()
+        self.recepcion_pendiente.orden.refresh_from_db()
+        existencia.refresh_from_db()
+        self.assertEqual(self.recepcion_pendiente.estatus, RecepcionCompra.STATUS_PENDIENTE)
+        self.assertEqual(self.recepcion_pendiente.orden.estatus, orden_estado_inicial)
+        self.assertEqual(existencia.stock_actual, stock_inicial)
+        self.assertFalse(
+            MovimientoInventario.objects.filter(
+                source_hash=f"recepcion:{self.recepcion_pendiente.id}:entrada"
+            ).exists()
+        )
+
     def test_recepcion_con_diferencias_sin_observaciones_muestra_bloqueo_erp(self):
         recepcion = RecepcionCompra.objects.create(
             orden=self.orden_enviada,

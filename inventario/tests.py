@@ -2541,6 +2541,47 @@ class InventarioAjustesApprovalTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_aprobar_ajuste_responde_json_aplicado_e_idempotente(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("8"),
+            motivo="Conteo JSON",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+        headers = {"HTTP_ACCEPT": "application/json", "HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+        payload = {"action": "approve", "ajuste_id": ajuste.id, "comentario_revision": "Validado"}
+
+        applied = self.client.post(reverse("inventario:ajustes"), payload, **headers)
+        self.assertEqual(applied.status_code, 200)
+        self.assertEqual(applied.json()["toast"]["type"], "success")
+        self.assertEqual(applied.json()["redirect"], f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}")
+
+        idempotent = self.client.post(reverse("inventario:ajustes"), payload, **headers)
+        self.assertEqual(idempotent.status_code, 200)
+        self.assertEqual(idempotent.json()["toast"]["type"], "info")
+        self.assertIn("stock no cambió nuevamente", idempotent.json()["toast"]["message"])
+
+    def test_aprobar_ajuste_post_html_conserva_redirect_tradicional_con_fragmento(self):
+        ajuste = AjusteInventario.objects.create(
+            insumo=self.insumo,
+            cantidad_sistema=Decimal("10"),
+            cantidad_fisica=Decimal("9"),
+            motivo="Conteo HTML",
+            estatus=AjusteInventario.STATUS_PENDIENTE,
+            solicitado_por=self.almacen,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("inventario:ajustes"),
+            {"action": "approve", "ajuste_id": ajuste.id},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}")
+
 
 class InventarioAjusteCreateAndApplyTransactionTests(TransactionTestCase):
     def test_admin_crea_y_aplica_ajuste_en_autocommit(self):

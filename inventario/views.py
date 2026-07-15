@@ -90,6 +90,13 @@ SOURCE_TO_FILENAME = {
 FILENAME_TO_SOURCE = {v: k for k, v in SOURCE_TO_FILENAME.items()}
 
 
+def _wants_progressive_response(request: HttpRequest) -> bool:
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
 def _insumo_display_name(insumo: Insumo | None) -> str:
     if not insumo:
         return ""
@@ -5605,6 +5612,7 @@ def ajustes(request: HttpRequest) -> HttpResponse:
         action = (request.POST.get("action") or "create").strip().lower()
 
         if action in {"approve", "reject", "apply"}:
+            wants_json = _wants_progressive_response(request)
             if not can_approve_ajustes:
                 raise PermissionDenied("No tienes permisos para aprobar/rechazar ajustes.")
             ajuste_id = request.POST.get("ajuste_id")
@@ -5616,7 +5624,13 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                     .first()
                 )
                 if not ajuste:
-                    messages.error(request, "No se encontró el ajuste seleccionado.")
+                    message = "No se encontró el ajuste seleccionado."
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+                            status=404,
+                        )
+                    messages.error(request, message)
                     return redirect("inventario:ajustes")
 
                 comentario = (request.POST.get("comentario_revision") or "").strip()[:255]
@@ -5649,15 +5663,33 @@ def ajustes(request: HttpRequest) -> HttpResponse:
                     return redirect("inventario:ajustes")
 
                 if ajuste.estatus == AjusteInventario.STATUS_APLICADO:
-                    messages.info(request, f"El ajuste {ajuste.folio} ya estaba aplicado.")
-                    return redirect("inventario:ajustes")
+                    message = f"El ajuste {ajuste.folio} ya estaba aplicado. El stock no cambió nuevamente."
+                    redirect_url = f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}"
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": True, "toast": {"type": "info", "message": message}, "redirect": redirect_url}
+                        )
+                    messages.info(request, message)
+                    return redirect(redirect_url)
                 if ajuste.estatus == AjusteInventario.STATUS_RECHAZADO:
-                    messages.error(request, f"El ajuste {ajuste.folio} fue rechazado y no puede aplicarse.")
+                    message = f"El ajuste {ajuste.folio} fue rechazado y no puede aplicarse."
+                    if wants_json:
+                        return JsonResponse(
+                            {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+                            status=409,
+                        )
+                    messages.error(request, message)
                     return redirect("inventario:ajustes")
 
                 _apply_ajuste(ajuste, request.user, comentario=comentario)
-                messages.success(request, f"Ajuste {ajuste.folio} aprobado y aplicado.")
-                return redirect("inventario:ajustes")
+                message = f"Ajuste {ajuste.folio} aprobado y aplicado."
+                redirect_url = f"{reverse('inventario:ajustes')}#ajuste-{ajuste.id}"
+                if wants_json:
+                    return JsonResponse(
+                        {"ok": True, "toast": {"type": "success", "message": message}, "redirect": redirect_url}
+                    )
+                messages.success(request, message)
+                return redirect(redirect_url)
 
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para registrar ajustes.")
