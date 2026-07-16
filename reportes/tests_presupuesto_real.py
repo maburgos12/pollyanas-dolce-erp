@@ -2179,6 +2179,8 @@ class EstadoResultadosTests(TestCase):
     def setUpTestData(cls):
         from django.contrib.auth import get_user_model
 
+        from maestros.models import Insumo
+
         cls.superuser = get_user_model().objects.create_superuser(
             "dg_pnl", "dgp@test.mx", "clave-test"
         )
@@ -2213,6 +2215,13 @@ class EstadoResultadosTests(TestCase):
             filtros={},
         )
         linea(rubro_mp, "400", "350")
+        # Roll-up del Excel e insumo suelto sin regla: tampoco deben sumar
+        linea(rubro(produccion, "Costo de producción"), "800", "700")
+        Insumo.objects.create(nombre="Chocolate Blanco Turín")
+        linea(rubro(produccion, "Chocolate blanco turin"), "60", "55")
+        # Herramienta con nombre en catálogo: SÍ suma (no es materia prima)
+        Insumo.objects.create(nombre="Mesa de trabajo", tipo_item=Insumo.TIPO_HERRAMIENTA)
+        linea(rubro(produccion, "Mesa de trabajo"), "30", "20")
         linea(rubro(capex, "Horno nuevo"), "200", "100")
         linea(rubro(nomina, "Sueldos control"), "9999", "9999")
         # Marzo: solo presupuesto, sin real → columnas reales en blanco
@@ -2228,14 +2237,16 @@ class EstadoResultadosTests(TestCase):
         # Utilidad bruta = 1000-400 ppto, 900-350 real
         self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["ppto"], Decimal("600"))
         self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["real"], Decimal("550"))
-        # Producción excluye MP (solo mano de obra 50/40)
-        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["ppto"], Decimal("50"))
-        # Operativa = 600-150 ppto, 550-130 real
-        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["ppto"], Decimal("450"))
-        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["real"], Decimal("420"))
+        # Producción excluye MP con regla, roll-up e insumo suelto;
+        # queda mano de obra (50/40) + herramienta (30/20)
+        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["ppto"], Decimal("80"))
+        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["real"], Decimal("60"))
+        # Operativa = 600-180 ppto, 550-150 real
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["ppto"], Decimal("420"))
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["real"], Decimal("400"))
         # Resultado final = operativa - capex
-        self.assertEqual(filas["Resultado final"]["meses"][feb]["ppto"], Decimal("250"))
-        self.assertEqual(filas["Resultado final"]["meses"][feb]["real"], Decimal("320"))
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["ppto"], Decimal("220"))
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["real"], Decimal("300"))
 
     def test_mes_sin_real_queda_en_blanco_y_nomina_fuera(self):
         filas = {f["label"]: f for f in self._get().context["filas"]}
@@ -2246,7 +2257,7 @@ class EstadoResultadosTests(TestCase):
         anual_egresos = sum(f["anual_ppto"] for f in filas.values() if f["kind"] == "linea")
         self.assertLess(anual_egresos, Decimal("9999"))
         # Anual real de utilidad solo suma meses con ingresos reales
-        self.assertEqual(filas["Resultado final"]["anual_real"], Decimal("320"))
+        self.assertEqual(filas["Resultado final"]["anual_real"], Decimal("300"))
 
     def test_requiere_login(self):
         response = self.client.get("/reportes/estado-resultados/")

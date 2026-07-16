@@ -712,6 +712,29 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
             tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP, activa=True
         ).values_list("rubro_id", flat=True)
     )
+    # La hoja de producción del Excel traía su roll-up "Costo de producción"
+    # (idéntico al renglón Costos del P&L) MÁS el detalle por insumo; ambos
+    # duplicarían "Costos", así que también se excluyen los rubros cuyo nombre
+    # es un insumo de materia prima del catálogo.
+    from unidecode import unidecode
+
+    from maestros.models import Insumo
+
+    def _norm(texto: str) -> str:
+        return " ".join(unidecode(texto or "").lower().strip().split())
+
+    nombres_mp = set(
+        Insumo.objects.filter(
+            activo=True, tipo_item=Insumo.TIPO_MATERIA_PRIMA
+        ).values_list("nombre_normalizado", flat=True)
+    )
+    nombres_mp.add("costo de produccion")
+
+    def _es_materia_prima(linea) -> bool:
+        return (
+            linea.rubro_id in rubros_mp
+            or _norm(linea.rubro.concepto) in nombres_mp
+        )
 
     buckets = {clave: _er_bucket() for clave, _ in _ER_AREAS_EGRESO}
     buckets.update(ingresos=_er_bucket(), costos=_er_bucket(), capex=_er_bucket())
@@ -724,7 +747,7 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
         area = linea.rubro.area.codigo
         if area == "resultados":
             clave = "ingresos" if linea.rubro.tipo == RubroPresupuesto.TIPO_INGRESO else "costos"
-        elif area == "produccion" and linea.rubro_id in rubros_mp:
+        elif area == "produccion" and _es_materia_prima(linea):
             continue  # la materia prima ya está en "Costos" del P&L
         elif area in egreso_keys or area == "capex":
             clave = area
