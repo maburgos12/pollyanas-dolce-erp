@@ -955,6 +955,7 @@ class Repartidor(models.Model):
     motivo_autorizacion = models.CharField(max_length=240, blank=True, default="")
     autorizado_por = models.CharField(max_length=160, blank=True, default="")
     notas_identidad = models.TextField(blank=True, default="")
+    tutorial_carga_sucursal_visto_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["user__username"]

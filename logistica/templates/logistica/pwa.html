@@ -1419,6 +1419,49 @@
           transition: transform 120ms ease-out, width 220ms ease-out;
         }
       }
+      .tutorial-carga-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        background: rgba(44, 25, 37, .55);
+        backdrop-filter: blur(3px);
+      }
+      .tutorial-carga-sheet {
+        width: min(100%, 460px);
+        max-height: calc(100dvh - 18px);
+        overflow: auto;
+        border-radius: 28px 28px 0 0;
+        background: #fffafc;
+        box-shadow: 0 -18px 50px rgba(79, 21, 52, .25);
+        padding: 12px 20px max(20px, env(safe-area-inset-bottom));
+        animation: tutorial-sheet-in 220ms ease-out both;
+      }
+      .tutorial-carga-handle { width: 42px; height: 5px; margin: 0 auto 12px; border-radius: 99px; background: #d9cbd2; }
+      .tutorial-carga-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+      .tutorial-carga-kicker { margin:0; color:#a30b55; font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+      .tutorial-carga-close { width:40px; height:40px; border:0; border-radius:50%; background:#f4e7ed; color:#4f263c; font-size:24px; }
+      .tutorial-carga-sheet h2 { margin:10px 0 8px; color:#8b174b; font-family:Georgia, serif; font-size:30px; line-height:1.05; }
+      .tutorial-carga-copy { margin:0 0 14px; color:#5f5260; font-size:16px; line-height:1.45; }
+      .tutorial-carga-visual { min-height:180px; border:1px solid #ead9e2; border-radius:20px; background:#fff; padding:14px; }
+      .tutorial-demo-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-bottom:1px solid #f0e4ea; font-weight:800; }
+      .tutorial-demo-row:last-child { border-bottom:0; }
+      .tutorial-demo-input { width:76px; min-height:44px; border:2px solid #c92d71; border-radius:12px; background:#fff8fb; text-align:center; font-size:18px; font-weight:900; }
+      .tutorial-demo-branch { display:block; width:100%; margin-bottom:10px; border:1px solid #ead9e2; border-radius:14px; background:#fff; padding:13px; color:#2f252b; text-align:left; font-weight:900; }
+      .tutorial-demo-branch.done { border-color:#56a970; background:#eff9f2; color:#24603a; }
+      .tutorial-demo-change { padding:12px; border-radius:14px; background:#fff3d8; color:#75520a; font-weight:800; }
+      .tutorial-carga-dots { display:flex; justify-content:center; gap:7px; margin:16px 0; }
+      .tutorial-carga-dot { width:8px; height:8px; border-radius:50%; background:#dbc8d2; }
+      .tutorial-carga-dot.active { width:24px; border-radius:99px; background:#a30b55; }
+      .tutorial-carga-actions { display:grid; grid-template-columns:1fr 1.6fr; gap:10px; }
+      .tutorial-carga-actions.one { grid-template-columns:1fr; }
+      .tutorial-carga-later { width:100%; margin-top:8px; }
+      @keyframes tutorial-sheet-in { from { opacity:0; transform:translateY(42px); } to { opacity:1; transform:translateY(0); } }
+      @media (prefers-reduced-motion: reduce) {
+        .tutorial-carga-sheet { animation:none; }
+      }
     </style>
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
   </head>
@@ -1473,6 +1516,7 @@
         routeAutoTrackingBusy: false,
         routeAutoTrackingLastSentAt: "",
         routeAutoTrackingStatus: "idle",
+        tutorialCarga: { abierto: false, paso: 0, guardando: false, inicioX: null },
         routeTrackingFailedCount: 0,
         operationalModal: null,
         unidades: [],
@@ -2430,6 +2474,7 @@
           ${offlineMutationBanner(pendientesOffline)}
           ${content}
           ${operationalModalHtml()}
+          ${renderTutorialCarga()}
           <div class="footer">Pollyana's Dolce © 2026</div>
         `;
       }
@@ -2561,9 +2606,106 @@
         state.previewOptions = raw?.preview?.opciones || [];
         state.previewRepartidor = raw?.preview?.repartidor_id ? String(raw.preview.repartidor_id) : state.previewRepartidor;
         state.perfil = normalizePerfil(raw);
+        state.tutorialCarga.abierto = Boolean(raw?.mostrar_tutorial_carga_sucursal);
+        state.tutorialCarga.paso = 0;
         purgeRutaTrackingQueue();
         purgeOfflineMutationQueue();
         flushOfflineMutationQueue().catch(() => {});
+      }
+
+      const tutorialCargaPasos = [
+        {
+          titulo: "Revisa una sucursal a la vez",
+          texto: "Selecciona primero la sucursal que vas a cargar. Sus productos aparecerán en orden alfabético y podrás buscarlos.",
+          visual: `<button class="tutorial-demo-branch" type="button">Las Glorias <span style="float:right">›</span></button><button class="tutorial-demo-branch" type="button">Leyva <span style="float:right">›</span></button>`,
+        },
+        {
+          titulo: "Todas las cantidades son editables",
+          texto: "Cada producto muestra por defecto lo enviado. Si físicamente llevan otra cantidad, edita ese campo.",
+          visual: `<div class="tutorial-demo-row"><span>Pastel Crunch Chico</span><input class="tutorial-demo-input" value="2" aria-label="Cantidad de ejemplo"></div><div class="tutorial-demo-row"><span>Tarta de fruta</span><input class="tutorial-demo-input" value="4" aria-label="Cantidad de ejemplo"></div>`,
+        },
+        {
+          titulo: "Confirma toda la sucursal una sola vez",
+          texto: "Ya no tienes que confirmar producto por producto. Revisa la lista completa y guarda todos los ajustes con un solo botón.",
+          visual: `<div class="tutorial-demo-row"><span>12 productos revisados</span><span style="color:#287244">✓</span></div><button class="primary-btn" type="button" tabindex="-1">Confirmar sucursal</button>`,
+        },
+        {
+          titulo: "Explica únicamente las diferencias",
+          texto: "Si cambiaste una cantidad, se abrirá un resumen. Selecciona el motivo y agrega una nota solo si hace falta; la ruta no se detiene.",
+          visual: `<div class="tutorial-demo-change">Pastel Crunch Chico<br><span style="font-weight:600">Enviado 3 → Cargado 2</span></div><div class="field" style="margin-top:10px"><label>Motivo</label><select tabindex="-1"><option>Faltante físico</option></select></div>`,
+        },
+        {
+          titulo: "Listo para salir a ruta",
+          texto: "Cuando todas las sucursales del tramo estén guardadas, se habilita Salir a ruta. La bitácora y la revisión de unidad siguen siendo obligatorias.",
+          visual: `<button class="tutorial-demo-branch done" type="button">Las Glorias <span style="float:right">✓</span></button><button class="tutorial-demo-branch done" type="button">Leyva <span style="float:right">✓</span></button><button class="primary-btn" type="button" tabindex="-1">Salir a ruta</button>`,
+        },
+      ];
+
+      function renderTutorialCarga() {
+        if (!state.tutorialCarga.abierto) return "";
+        const paso = state.tutorialCarga.paso;
+        const item = tutorialCargaPasos[paso];
+        const esUltimo = paso === tutorialCargaPasos.length - 1;
+        return `
+          <div class="tutorial-carga-overlay" onclick="if(event.target===this) cerrarTutorialCarga()">
+            <section class="tutorial-carga-sheet" role="dialog" aria-modal="true" aria-labelledby="tutorial-carga-title" aria-describedby="tutorial-carga-copy" ontouchstart="iniciarDeslizarTutorial(event)" ontouchend="terminarDeslizarTutorial(event)">
+              <div class="tutorial-carga-handle" aria-hidden="true"></div>
+              <div class="tutorial-carga-top"><p class="tutorial-carga-kicker">Nueva carga por sucursal · ${paso + 1} de 5</p><button class="tutorial-carga-close" type="button" onclick="cerrarTutorialCarga()" aria-label="Ver después">×</button></div>
+              <h2 id="tutorial-carga-title">${item.titulo}</h2>
+              <p class="tutorial-carga-copy" id="tutorial-carga-copy">${item.texto}</p>
+              <div class="tutorial-carga-visual">${item.visual}</div>
+              <div class="tutorial-carga-dots" aria-label="Paso ${paso + 1} de 5">${tutorialCargaPasos.map((_, index) => `<span class="tutorial-carga-dot ${index === paso ? "active" : ""}"></span>`).join("")}</div>
+              <div class="tutorial-carga-actions ${paso === 0 ? "one" : ""}">
+                ${paso > 0 ? `<button class="secondary-btn" type="button" onclick="cambiarPasoTutorialCarga(-1)">Atrás</button>` : ""}
+                <button class="primary-btn" type="button" onclick="${esUltimo ? "confirmarTutorialCarga(this)" : "cambiarPasoTutorialCarga(1)"}">${esUltimo ? "Entendido, comenzar" : "Siguiente"}</button>
+              </div>
+              ${paso === 0 ? `<button class="link-btn tutorial-carga-later" type="button" onclick="cerrarTutorialCarga()">Ahora no</button>` : ""}
+            </section>
+          </div>`;
+      }
+
+      function refrescarTutorialCarga() {
+        const anterior = document.querySelector(".tutorial-carga-overlay");
+        if (anterior) anterior.outerHTML = renderTutorialCarga();
+        window.setTimeout(() => document.querySelector(".tutorial-carga-sheet .primary-btn")?.focus(), 20);
+      }
+
+      function cambiarPasoTutorialCarga(delta) {
+        state.tutorialCarga.paso = Math.max(0, Math.min(tutorialCargaPasos.length - 1, state.tutorialCarga.paso + delta));
+        refrescarTutorialCarga();
+      }
+
+      function cerrarTutorialCarga() {
+        state.tutorialCarga.abierto = false;
+        document.querySelector(".tutorial-carga-overlay")?.remove();
+      }
+
+      function iniciarDeslizarTutorial(event) { state.tutorialCarga.inicioX = event.touches?.[0]?.clientX ?? null; }
+      function terminarDeslizarTutorial(event) {
+        const fin = event.changedTouches?.[0]?.clientX;
+        if (state.tutorialCarga.inicioX == null || fin == null) return;
+        const delta = fin - state.tutorialCarga.inicioX;
+        if (Math.abs(delta) > 45) cambiarPasoTutorialCarga(delta < 0 ? 1 : -1);
+        state.tutorialCarga.inicioX = null;
+      }
+
+      async function confirmarTutorialCarga(button) {
+        if (state.tutorialCarga.guardando) return;
+        state.tutorialCarga.guardando = true;
+        button.disabled = true;
+        button.textContent = "Guardando…";
+        try {
+          const response = await apiFetch("/tutorial-carga-sucursal/confirmar/", { method: "POST" });
+          if (!response.ok && !responseQueuedOffline(response)) throw new Error("No se pudo confirmar");
+          state.tutorialCarga.abierto = false;
+          cerrarTutorialCarga();
+        } catch (error) {
+          button.disabled = false;
+          button.textContent = "Entendido, comenzar";
+          showOperationalModal("No se pudo guardar", "Conservamos la explicación pendiente. Revisa tu conexión e inténtalo de nuevo.");
+        } finally {
+          state.tutorialCarga.guardando = false;
+        }
       }
 
       async function loadReportes() {
@@ -5513,7 +5655,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v69-km-salida-ios", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v70-tutorial-carga-sucursal", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
@@ -5523,6 +5665,22 @@
           if (!document.hidden && state.pantallaActual === "ruta_activa") renderRutaActiva();
         });
         window.addEventListener("pagehide", () => stopRutaAutoTracking());
+        document.addEventListener("keydown", (event) => {
+          if (!state.tutorialCarga.abierto) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cerrarTutorialCarga();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const dialog = document.querySelector(".tutorial-carga-sheet");
+          const focusables = [...(dialog?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])];
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        });
 
         try {
           if (await useDjangoSessionToken()) {

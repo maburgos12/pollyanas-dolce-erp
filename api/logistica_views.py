@@ -62,6 +62,7 @@ from logistica.services_carga_ruta import (
     validar_producto_tramo_carga,
 )
 from logistica.services_carga_sucursal import CargaSucursalError, ConflictoIdempotencia, guardar_carga_sucursal
+from logistica.services_tutorial_carga import debe_mostrar_tutorial_carga
 from logistica.services_contexto_operativo import (
     ContextoOperativoObsoleto,
     construir_contexto_operativo,
@@ -332,6 +333,9 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             "roles": list(request.user.groups.values_list("name", flat=True)),
             "repartidor": LogisticaRepartidorSerializer(repartidor).data if repartidor else None,
             "ultimos_servicios": [],
+            "mostrar_tutorial_carga_sucursal": bool(
+                repartidor and not preview_activo and debe_mostrar_tutorial_carga(repartidor)
+            ),
             "preview": {
                 "activo": preview_activo,
                 "solo_lectura": preview_activo,
@@ -350,6 +354,27 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             )[:10]
             data["ultimos_servicios"] = LogisticaReporteSerializer(servicios, many=True).data
         return Response(data, status=status.HTTP_200_OK)
+
+
+class LogisticaTutorialCargaConfirmarView(_LogisticaBaseView):
+    def post(self, request):
+        # La vista superadmin nunca debe consumir la novedad de otro repartidor.
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response(
+                {"detail": "No tienes perfil de repartidor registrado."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if repartidor.tutorial_carga_sucursal_visto_en is None:
+            repartidor.tutorial_carga_sucursal_visto_en = timezone.now()
+            repartidor.save(update_fields=["tutorial_carga_sucursal_visto_en"])
+        return Response(
+            {
+                "confirmado": True,
+                "visto_en": repartidor.tutorial_carga_sucursal_visto_en,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogisticaResumenSemanalView(_LogisticaBaseView):
