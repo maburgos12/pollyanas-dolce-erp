@@ -85,7 +85,7 @@ def _payload(contexto: ContextoOperativo, lineas: tuple[RutaCargaChecklistLinea,
 def _ruta_actual(ruta: RutaEntrega, *, bloquear: bool) -> RutaEntrega:
     queryset = RutaEntrega.objects.select_related("repartidor", "repartidor__user", "unidad_operativa")
     if bloquear:
-        queryset = queryset.select_for_update()
+        queryset = queryset.select_for_update(of=("self",))
     return queryset.get(pk=ruta.pk)
 
 
