@@ -2106,3 +2106,65 @@ class OverrideDirigidoTests(TestCase):
             HTTP_ACCEPT="application/json",
         )
         self.assertEqual(r.status_code, 403)
+
+
+class AreaResultadosTests(TestCase):
+    """El bloque P&L de empresa sale de administración a un área de control."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        cls.superuser = get_user_model().objects.create_superuser(
+            "dg_resultados", "dgr@test.mx", "clave-test"
+        )
+        cls.periodo = date(2026, 3, 1)
+        cls.admin_area = AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        cls.rubro_pnl = RubroPresupuesto.objects.create(
+            area=cls.admin_area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        cls.rubro_gasto = RubroPresupuesto.objects.create(
+            area=cls.admin_area, concepto="Sueldo", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+    def test_comando_mueve_solo_rubros_pnl(self):
+        salida = StringIO()
+        call_command("mover_rubros_resultados", stdout=salida)
+        self.rubro_pnl.refresh_from_db()
+        self.rubro_gasto.refresh_from_db()
+        area = AreaPresupuesto.objects.get(codigo="resultados")
+        self.assertEqual(self.rubro_pnl.area, area)
+        self.assertEqual(self.rubro_gasto.area, self.admin_area)
+        # Idempotente: segunda corrida no truena ni duplica el área.
+        call_command("mover_rubros_resultados", stdout=salida)
+        self.assertEqual(AreaPresupuesto.objects.filter(codigo="resultados").count(), 1)
+
+    def test_dry_run_no_mueve(self):
+        salida = StringIO()
+        call_command("mover_rubros_resultados", "--dry-run", stdout=salida)
+        self.rubro_pnl.refresh_from_db()
+        self.assertEqual(self.rubro_pnl.area, self.admin_area)
+        self.assertFalse(AreaPresupuesto.objects.filter(codigo="resultados").exists())
+
+    def test_kpi_global_excluye_area_resultados(self):
+        call_command("mover_rubros_resultados", stdout=StringIO())
+        LineaPresupuestoMensual.objects.create(
+            rubro=self.rubro_pnl, periodo=self.periodo,
+            monto_presupuesto=Decimal("4000000.00"), monto_real=Decimal("3500000.00"),
+            fuente_real="AUTO:LEGADO",
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=self.rubro_gasto, periodo=self.periodo,
+            monto_presupuesto=Decimal("100.00"), monto_real=Decimal("80.00"),
+            fuente_real="AUTO:NOMINA",
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["presupuesto"], Decimal("100.00"))
+        self.assertEqual(kpis["real"], Decimal("80.00"))
+        # Seleccionando el área de control sí se ve su propio total.
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
+        self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("4000000.00"))

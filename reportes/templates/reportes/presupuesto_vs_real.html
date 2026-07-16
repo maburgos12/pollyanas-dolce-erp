@@ -96,7 +96,7 @@
 </section>
 
 {% if not selected_area %}
-<div class="alert alert-info">El área <strong>Nómina</strong> se muestra como vista de control y no se suma a los KPI: sus sueldos ya están incluidos dentro de cada área.</div>
+<div class="alert alert-info">Las áreas <strong>Nómina</strong> y <strong>Resultados (P&amp;L)</strong> se muestran como vistas de control y no se suman a los KPI: los sueldos ya están dentro de cada área, y la venta y costos totales de la empresa ya viven en Ventas y Producción.</div>
 {% endif %}
 {% if kpis.retenidos %}
 <div class="alert alert-info">{{ kpis.retenidos }} concepto(s) muestran el último valor consolidado porque su fuente no tiene datos este mes (marcados "Fuente sin datos"); pueden estar desactualizados.</div>
