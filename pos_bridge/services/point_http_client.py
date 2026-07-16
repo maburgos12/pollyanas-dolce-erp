@@ -366,6 +366,7 @@ class PointHttpSessionClient:
         page_limit: int | None = None,
         max_term_len: int = 4,
         max_failures: int = 10,
+        pause_seconds: float = 0.15,
     ) -> list[dict]:
         limit = page_limit or self.CATALOG_PAGE_LIMIT
         found: dict[object, dict] = {}
@@ -377,16 +378,20 @@ class PointHttpSessionClient:
             try:
                 rows = fetch(term)
             except ExtractionError:
+                # Point regresa 500s transitorios cuando se le consulta muy
+                # seguido (visto en producción a ~1,500 consultas): backoff,
+                # relogin al mismo workspace y re-encolar el término para no
+                # perder cobertura. Solo se aborta si el patrón persiste.
                 failures += 1
                 if failures > max_failures:
                     raise
-                # La sesión puede expirar a media enumeración: relogin al mismo
-                # workspace y un reintento.
-                self.login(branch_hint=getattr(self, "_last_branch_hint", None))
+                time.sleep(min(failures * 2, 15))
                 try:
-                    rows = fetch(term)
-                except ExtractionError:
-                    continue
+                    self.login(branch_hint=getattr(self, "_last_branch_hint", None))
+                except (AuthenticationError, ExtractionError):
+                    time.sleep(min(failures * 5, 30))
+                pending.append(term)
+                continue
             queries += 1
             for row in rows:
                 pk = row.get(pk_field)
@@ -394,6 +399,8 @@ class PointHttpSessionClient:
                     found[pk] = row
             if len(rows) >= limit and len(term) < max_term_len:
                 pending.extend(term + char for char in self._ENUM_REFINE)
+            if pause_seconds:
+                time.sleep(pause_seconds)
         self._audit(
             "catalog_enumeration",
             message=f"catálogo de {label} enumerado completo",
