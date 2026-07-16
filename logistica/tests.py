@@ -1597,9 +1597,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v68-carga-sucursal-contexto"},
+            {"route-control-v69-km-salida-ios"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v68-carga-sucursal-contexto", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v69-km-salida-ios", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -4972,9 +4972,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v68-carga-sucursal-contexto", pwa_html)
+        self.assertIn("?v=route-control-v69-km-salida-ios", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v68-carga-sucursal-contexto", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v69-km-salida-ios", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5070,6 +5070,26 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
 
+    def test_pwa_inicio_turno_lee_km_visible_antes_de_enviar(self):
+        import re
+        from pathlib import Path
+
+        pwa_html = (
+            Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html"
+        ).read_text(encoding="utf-8")
+        guardar_salida = re.search(
+            r"async function guardarSalida\(event\) \{(?P<body>.*?)\n      \}",
+            pwa_html,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(guardar_salida)
+        body = guardar_salida.group("body")
+        self.assertIn('document.getElementById("km_salida")', body)
+        self.assertIn("draft.km_salida = kmSalida", body)
+        self.assertIn("!kmSalida", body)
+        self.assertIn('payload.append("km_salida", kmSalida)', body)
+
     def test_pwa_sw_se_sirve_sin_cache_de_borde(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
@@ -5079,7 +5099,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v68-carga-sucursal-contexto", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v69-km-salida-ios", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8508,7 +8528,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("totalProducto.lineas.some(lineaPendientePoint)", pwa_html)
         self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v68-carga-sucursal-contexto", pwa_html)
+        self.assertIn("route-control-v69-km-salida-ios", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
