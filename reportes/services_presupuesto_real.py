@@ -393,6 +393,14 @@ class PresupuestoRealConsolidacionService:
         campo = filtros.get("campo_monto", "total_venta")
         if campo not in VENTA_POS_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de ventas inválido: {campo}")
+        if filtros.get("total_empresa"):
+            # Venta total Point (renglón Ingresos del P&L): todo el índice.
+            total = Decimal("0")
+            hubo_datos = False
+            for montos in (ventas_index or {}).values():
+                total += montos[campo]
+                hubo_datos = True
+            return (total, hubo_datos)
         categoria = normalize_header_text(filtros.get("categoria_pos", ""))
         productos_raw = filtros.get("productos_pos")
         if not productos_raw and filtros.get("producto_pos"):
@@ -481,7 +489,13 @@ class PresupuestoRealConsolidacionService:
     def _monto_consumo_mp(
         self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal]
     ) -> tuple[Decimal, bool]:
-        insumo_id = (regla.filtros or {}).get("insumo_id")
+        filtros = regla.filtros or {}
+        if filtros.get("total_empresa"):
+            # Consumo de MP de toda la empresa (renglón Costos del P&L).
+            if not consumo_index:
+                return (Decimal("0"), False)
+            return (sum(consumo_index.values(), Decimal("0")), True)
+        insumo_id = filtros.get("insumo_id")
         if not insumo_id:
             raise ValueError("regla CONSUMO_MP sin insumo_id en filtros")
         if int(insumo_id) not in consumo_index:
@@ -505,7 +519,8 @@ def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
     rubros_sin_asignacion = [
         regla.rubro_id
         for regla in reglas
-        if not (regla.filtros or {}).get("categoria_pos")
+        if not (regla.filtros or {}).get("total_empresa")
+        and not (regla.filtros or {}).get("categoria_pos")
         and not (regla.filtros or {}).get("productos_pos")
         and not (regla.filtros or {}).get("producto_pos")
     ]
