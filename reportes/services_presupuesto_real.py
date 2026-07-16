@@ -267,7 +267,7 @@ class PresupuestoRealConsolidacionService:
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_CONSUMO_MP:
             if "consumo" not in indices:
                 indices["consumo"] = self._build_consumo_index(periodo)
-            return self._monto_consumo_mp(regla, indices["consumo"])
+            return self._monto_consumo_mp(regla, indices["consumo"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -487,9 +487,15 @@ class PresupuestoRealConsolidacionService:
         }
 
     def _monto_consumo_mp(
-        self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal]
+        self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal], periodo: date
     ) -> tuple[Decimal, bool]:
         filtros = regla.filtros or {}
+        desde = str(filtros.get("desde") or "")
+        if desde and periodo.strftime("%Y-%m") < desde:
+            # El consumo del ERP no es confiable antes de esta fecha (meses
+            # incompletos y ajustes erróneos): se reporta "sin datos" para que
+            # la línea conserve el valor legado del Excel.
+            return (Decimal("0"), False)
         if filtros.get("total_empresa"):
             # Consumo de MP de toda la empresa (renglón Costos del P&L).
             if not consumo_index:

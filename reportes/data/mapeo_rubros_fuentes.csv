@@ -77,4 +77,4 @@ nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""monto_puntualidad"
 produccion,Bono por resultados,BONO_PRODUCCION,,"{""campo_monto"": ""total_a_pagar""}",Bonos del módulo de producción,
 gastos-venta,Bono por resultados,BONO_VENTAS,,"{""campo_monto"": ""total_a_pagar""}",Bonos de ventas de la sucursal del rubro,
 resultados,Venta postres,VENTA_POS,,"{""total_empresa"": true, ""campo_monto"": ""total_venta""}",P&L: ingresos = venta total Point (fuente viva; sustituye al Excel),1
-resultados,Costos insumos/productos,CONSUMO_MP,,"{""total_empresa"": true}",P&L: costos = consumo MP total del ERP (fuente viva; sustituye al Excel),1
+resultados,Costos insumos/productos,CONSUMO_MP,,"{""total_empresa"": true, ""desde"": ""2026-06""}",P&L: costos = consumo MP total (confiable desde jun-2026; antes rige el Excel),1
