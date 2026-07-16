@@ -499,3 +499,66 @@ def analizar_todas(request):
     periodo = _get_periodo(request)
     resultados = analizar_todas_sucursales(periodo=periodo)
     return JsonResponse({"ok": True, "resultados": resultados})
+
+
+@login_required
+def reporte_mensual(request):
+    """Reporte mensual consolidado (últimos 12 meses).
+
+    Cruza ingresos (P&L canónico), nómina con horas extra como línea aparte,
+    nómina como % de ventas, utilidad neta (6 líneas de gasto) y variación YoY.
+    ?formato=json|csv exporta; ?sucursal=<id> filtra a una sucursal.
+    """
+    from django.http import HttpResponse
+
+    from core.models import Sucursal
+    from .services_reporte_mensual import (
+        build_reporte_mensual_consolidado,
+        reporte_a_json,
+    )
+
+    _require_view_rentabilidad(request.user)
+
+    hasta = None
+    param_hasta = request.GET.get("hasta")
+    if param_hasta:
+        try:
+            year, month = map(int, param_hasta.split("-"))
+            hasta = date(year, month, 1)
+        except (ValueError, AttributeError):
+            hasta = None
+
+    sucursal_id = None
+    param_sucursal = request.GET.get("sucursal")
+    if param_sucursal and param_sucursal.isdigit():
+        sucursal_id = int(param_sucursal)
+
+    reporte = build_reporte_mensual_consolidado(hasta=hasta, meses=12, sucursal_id=sucursal_id)
+
+    formato = request.GET.get("formato", "html")
+    if formato == "json":
+        return JsonResponse(reporte_a_json(reporte))
+    if formato == "csv":
+        from django.core.management import call_command
+        from io import StringIO
+
+        buffer = StringIO()
+        args = ["--formato", "csv", "--detalle", "--hasta", reporte["hasta"].strftime("%Y-%m")]
+        if sucursal_id:
+            args += ["--sucursal", str(sucursal_id)]
+        call_command("reporte_mensual_consolidado", *args, stdout=buffer)
+        response = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = (
+            f"attachment; filename=reporte_mensual_{reporte['hasta'].strftime('%Y_%m')}.csv"
+        )
+        return response
+
+    sucursales = Sucursal.objects.filter(activa=True).order_by("nombre")
+    filas = list(reversed(reporte["filas"]))  # más reciente primero en pantalla
+    return render(request, "rentabilidad/reporte_mensual.html", {
+        "reporte": reporte,
+        "filas": filas,
+        "sucursales": sucursales,
+        "sucursal_id": sucursal_id,
+        "hasta_str": reporte["hasta"].strftime("%Y-%m"),
+    })
