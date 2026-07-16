@@ -5100,5 +5100,37 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v67-carga-tramo-segura")
-        self.assertIn("?v=route-control-v67-carga-tramo-segura", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v68-carga-sucursal-contexto")
+        self.assertIn("?v=route-control-v68-carga-sucursal-contexto", html)
+
+    def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("function renderResumenSucursalesCarga", html)
+        self.assertIn("function renderCapturaSucursal", html)
+        self.assertIn("function abrirModalDiferencias", html)
+        self.assertIn("async function guardarCargaSucursal", html)
+        self.assertIn("contexto_operativo", html)
+        self.assertIn("version_checklist", html)
+        self.assertIn("client_event_id", html)
+        self.assertIn("/carga-checklist/sucursales/", html)
+        self.assertNotIn("/carga-checklist/productos/validar/", html)
+
+    def test_pwa_carga_sucursal_incluye_busqueda_y_orden_alfabetico(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn('localeCompare(b.item_name, "es"', html)
+        self.assertIn('type="search"', html)
+        self.assertIn("Buscar producto o código", html)
+        self.assertIn("Guardar sucursal", html)
+        self.assertIn("Explica los cambios", html)
+
+    def test_pwa_recepcion_compara_cargado_recibido_en_un_popup(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("function abrirRecepcionParada", html)
+        self.assertIn("function renderModalRecepcion", html)
+        self.assertIn("Cargado", html)
+        self.assertIn("Recibido", html)
+        self.assertIn("motivo_diferencia", html)
+        self.assertIn("Confirmar recepción", html)

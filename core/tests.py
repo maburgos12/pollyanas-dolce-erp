@@ -31,7 +31,7 @@ from core.access import (
     primary_role,
 )
 from core.branch_catalog import eligible_operational_branch_qs
-from core.middleware import CanonicalLocalHostMiddleware
+from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddleware
 from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
@@ -1941,3 +1941,13 @@ class UsersAccessTests(TestCase):
         self.assertContains(response, "Editar Usuario")
         self.assertContains(response, "Sin departamento")
         self.assertNotContains(response, "Sin bloqueos críticos")
+
+
+class RepartidorServiceWorkerMiddlewareTests(SimpleTestCase):
+    @patch("core.middleware.is_repartidor_only", return_value=True)
+    def test_service_worker_logistica_no_se_redirige_para_repartidor(self, _is_repartidor):
+        request = RequestFactory().get("/logistica/sw.js")
+        request.user = SimpleNamespace(is_authenticated=True)
+        response = RepartidorOnlyMiddleware(lambda _request: SimpleNamespace(status_code=200))(request)
+
+        self.assertEqual(response.status_code, 200)

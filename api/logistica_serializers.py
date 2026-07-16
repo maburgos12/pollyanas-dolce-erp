@@ -192,6 +192,7 @@ class LogisticaEntregaCreateSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=EntregaRuta.ESTATUS_CHOICES, required=False, default=EntregaRuta.ESTATUS_PENDIENTE)
     monto_estimado = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
     comentario = serializers.CharField(required=False, allow_blank=True, default="")
+    motivo_diferencia = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
 
 
 class PuntoLogisticoSerializer(serializers.ModelSerializer):
@@ -613,6 +614,26 @@ class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
 
 
+class RutaCargaSucursalLineaSerializer(serializers.Serializer):
+    linea_id = serializers.IntegerField(min_value=1)
+    source_hash = serializers.CharField(max_length=64)
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
+    motivo_diferencia = serializers.ChoiceField(
+        choices=RutaCargaChecklistLinea.MOTIVO_CHOICES,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RutaCargaSucursalGuardarSerializer(serializers.Serializer):
+    contexto_token = serializers.CharField()
+    version_checklist = serializers.CharField(max_length=64)
+    client_event_id = serializers.CharField(max_length=80)
+    lineas = RutaCargaSucursalLineaSerializer(many=True, allow_empty=False)
+
+
 class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
     linea_carga_id = serializers.IntegerField(required=False, allow_null=True)
     tipo = serializers.ChoiceField(
@@ -654,6 +675,8 @@ class ParadaEntregaConfirmarSerializer(serializers.Serializer):
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
     client_context = serializers.DictField(required=False, default=dict)
+    contexto_token = serializers.CharField(required=False, allow_blank=True, default="")
+    version_checklist = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
     evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):

@@ -61,6 +61,14 @@ from logistica.services_carga_ruta import (
     validar_linea_carga,
     validar_producto_tramo_carga,
 )
+from logistica.services_carga_sucursal import CargaSucursalError, ConflictoIdempotencia, guardar_carga_sucursal
+from logistica.services_contexto_operativo import (
+    ContextoOperativoObsoleto,
+    construir_contexto_operativo,
+    contexto_operativo_dict,
+    validar_contexto_operativo,
+)
+from logistica.services_discrepancias import registrar_discrepancias_recepcion
 from logistica.services_rutas_control import (
     LiberacionRutaError,
     liberar_ruta_con_turno,
@@ -110,6 +118,7 @@ from .logistica_serializers import (
     RutaCargaChecklistLineaSerializer,
     RutaCargaLineaValidarSerializer,
     RutaCargaProductoTramoValidarSerializer,
+    RutaCargaSucursalGuardarSerializer,
     UbicacionRutaCreateSerializer,
     UbicacionRutaSerializer,
 )
@@ -1327,6 +1336,13 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        if payload.get("contexto_token"):
+            try:
+                contexto = validar_contexto_operativo(token=payload["contexto_token"], ruta=ruta, actor=request.user)
+            except ContextoOperativoObsoleto as exc:
+                return Response({"error": exc.codigo, "mensaje": str(exc)}, status=status.HTTP_409_CONFLICT)
+            if payload.get("version_checklist") != contexto.version_checklist:
+                return Response({"error": "checklist_actualizado", "mensaje": "La recepción ya no coincide con el checklist vigente."}, status=status.HTTP_409_CONFLICT)
         client_context = payload.get("client_context") or {}
         offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
         legacy_v59_contract = is_exact_v59_replay_contract(
@@ -1501,6 +1517,16 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
         evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
         evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
+        motivos_recepcion = {
+            int(item["linea_carga_id"]): item.get("motivo_diferencia", "")
+            for item in evidencias_servicio
+            if item.get("linea_carga_id")
+        }
+        registrar_discrepancias_recepcion(
+            evidencias=list(evidencias),
+            actor=request.user,
+            motivos=motivos_recepcion,
+        )
 
         log_event(
             request.user,
@@ -1622,9 +1648,17 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
             .values_list("parada_id", flat=True)
         )
 
+        try:
+            contexto_operativo = contexto_operativo_dict(construir_contexto_operativo(ruta=ruta, actor=request.user))
+            contexto_advertencia = ""
+        except ValidationError as exc:
+            contexto_operativo = None
+            contexto_advertencia = "; ".join(exc.messages)
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
+                "contexto_operativo": contexto_operativo,
+                "contexto_operativo_advertencia": contexto_advertencia,
                 "paradas": ParadaRutaSerializer(
                     ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"),
                     many=True,
@@ -1710,7 +1744,16 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
         solo_tramo_actual = repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor)
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
-        return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
+        data = dict(RutaCargaChecklistSerializer(checklist, context={"request": request}).data)
+        if solo_tramo_actual:
+            try:
+                contexto = construir_contexto_operativo(ruta=ruta, actor=request.user)
+            except ValidationError as exc:
+                data["contexto_operativo"] = None
+                data["contexto_operativo_advertencia"] = "; ".join(exc.messages)
+            else:
+                data["contexto_operativo"] = contexto_operativo_dict(contexto)
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
@@ -1832,6 +1875,54 @@ class LogisticaRutaCargaProductoTramoValidarView(_LogisticaBaseView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class LogisticaRutaCargaSucursalGuardarView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int, parada_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _can_operate_pwa(request.user):
+            return Response(
+                {"error": "usuario_no_autorizado", "mensaje": "Solo el chofer titular puede guardar la carga."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        serializer = RutaCargaSucursalGuardarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        try:
+            resultado = guardar_carga_sucursal(
+                actor=request.user,
+                ruta=ruta,
+                contexto_token=payload["contexto_token"],
+                parada_id=parada_id,
+                client_event_id=payload["client_event_id"],
+                lineas=payload["lineas"],
+            )
+        except PermissionDenied as exc:
+            return Response(
+                {"error": "usuario_no_autorizado", "mensaje": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ContextoOperativoObsoleto as exc:
+            return Response(
+                {
+                    "error": exc.codigo,
+                    "mensaje": str(exc),
+                    "productos_afectados": list(exc.productos_afectados),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ConflictoIdempotencia as exc:
+            return Response(
+                {"error": exc.codigo, "mensaje": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except CargaSucursalError as exc:
+            return Response(
+                {"error": exc.codigo, "mensaje": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(resultado, status=status.HTTP_200_OK)
 
 
 class LogisticaRutasControlView(_LogisticaBaseView):

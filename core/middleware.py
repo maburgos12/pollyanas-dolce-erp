@@ -153,6 +153,7 @@ class RepartidorOnlyMiddleware:
     ALLOWED_PREFIXES = (
         "/app/",
         "/logistica/app/",
+        "/logistica/sw.js",
         "/api/logistica/",
         "/logout/",
         "/login/",
