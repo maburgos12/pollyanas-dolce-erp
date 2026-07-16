@@ -5103,8 +5103,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v71-reglas-point-sucursal")
-        self.assertIn("?v=route-control-v71-reglas-point-sucursal", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v72-copy-inicio-gps")
+        self.assertIn("?v=route-control-v72-copy-inicio-gps", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
