@@ -2497,3 +2497,15 @@ class CorregirPronosticoNombresPointTests(TestCase):
         call_command("corregir_pronostico_nombres_point", "--dry-run", stdout=StringIO())
         self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv).count(), 1)
         self.assertEqual(PronosticoVenta.objects.filter(receta=self.flan).count(), 1)
+
+
+class ProductosDescontinuadosTests(TestCase):
+    """Los productos descontinuados salen del pronóstico (dirección 2026-07-16)."""
+
+    def test_elimina_descontinuados(self):
+        from recetas.models import PronosticoVenta, Receta
+
+        receta = Receta.objects.create(nombre="Brownie Rebanada", hash_contenido="t-br")
+        PronosticoVenta.objects.create(receta=receta, periodo="2026-05", cantidad=Decimal("8"), fuente="PRESUPUESTO_2026")
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.filter(receta=receta).count(), 0)
