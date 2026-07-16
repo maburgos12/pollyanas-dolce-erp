@@ -30,7 +30,7 @@ class EnumeracionCatalogoTests(SimpleTestCase):
         catalog = [{"PK": i, "nombre": f"pastel {i:03d}"} for i in range(60)]
         client = _client()
         rows = client._enumerate_catalog(
-            _fake_point(catalog, limit=10), pk_field="PK", label="test", page_limit=10, pause_seconds=0
+            _fake_point(catalog, limit=10), pk_field="PK", label="test", page_limit=10, pause_seconds=0, relogin_every=0
         )
         self.assertEqual(len(rows), 60)
 
@@ -41,7 +41,7 @@ class EnumeracionCatalogoTests(SimpleTestCase):
         ]
         client = _client()
         rows = client._enumerate_catalog(
-            _fake_point(catalog, limit=150), pk_field="PK", label="test", pause_seconds=0
+            _fake_point(catalog, limit=150), pk_field="PK", label="test", pause_seconds=0, relogin_every=0
         )
         # "azucar" matchea con a, z, u, c, r… pero entra una sola vez.
         self.assertEqual(sorted(r["PK"] for r in rows), [1, 2])
@@ -115,3 +115,33 @@ class ConversionUnidadSyncAlmacenTests(SimpleTestCase):
         cantidad, nota = _cantidad_en_unidad_erp(Decimal("10"), "ml", insumo_kg)
         self.assertEqual(cantidad, Decimal("10"))
         self.assertIn("INCOMPATIBLE", nota)
+
+
+class EnumeracionV4Tests(SimpleTestCase):
+    def test_cache_por_instancia_no_reenumera(self):
+        client = _client()
+        contador = {"llamadas": 0}
+        catalog = [{"PK_Producto": 1, "Nombre": "pastel"}]
+
+        def fake_get_products(*, text_art="", **kw):
+            contador["llamadas"] += 1
+            return [r for r in catalog if text_art in r["Nombre"]]
+
+        client.get_products = fake_get_products
+        primera = client.get_all_products()
+        llamadas_primera = contador["llamadas"]
+        segunda = client.get_all_products()
+        self.assertEqual(primera, segunda)
+        self.assertEqual(contador["llamadas"], llamadas_primera)  # sin consultas nuevas
+
+    def test_relogin_proactivo_cada_n_consultas(self):
+        client = _client()
+        client._last_branch_hint = "Matriz"
+        logins = {"n": 0}
+        client.login = lambda **kw: logins.__setitem__("n", logins["n"] + 1)
+        catalog = [{"PK": i, "nombre": ch} for i, ch in enumerate("abcdefgh")]
+        client._enumerate_catalog(
+            _fake_point(catalog, limit=150), pk_field="PK", label="test",
+            pause_seconds=0, relogin_every=3,
+        )
+        self.assertGreaterEqual(logins["n"], 2)
