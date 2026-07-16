@@ -93,6 +93,9 @@ class PointHttpSessionClient:
         raise ExtractionError(f"Point no respondió correctamente en {path}.")
 
     def login(self, *, branch_hint: str | None = None) -> dict:
+        # Recordado para que un relogin automático (p.ej. a media enumeración
+        # de catálogo) regrese al MISMO workspace y no al default.
+        self._last_branch_hint = branch_hint
         if not self.settings.base_url:
             raise ConfigurationError("Falta POINT_BASE_URL para abrir Point.")
         if not self.settings.username or not self.settings.password:
@@ -377,8 +380,9 @@ class PointHttpSessionClient:
                 failures += 1
                 if failures > max_failures:
                     raise
-                # La sesión puede expirar a media enumeración: relogin y un reintento.
-                self.login()
+                # La sesión puede expirar a media enumeración: relogin al mismo
+                # workspace y un reintento.
+                self.login(branch_hint=getattr(self, "_last_branch_hint", None))
                 try:
                     rows = fetch(term)
                 except ExtractionError:

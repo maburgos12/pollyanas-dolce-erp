@@ -55,10 +55,19 @@ class EnumeracionCatalogoTests(SimpleTestCase):
             return _fake_point(catalog, limit=150)(term)
 
         client = _client()
-        client.login = lambda **kw: estado.__setitem__("logins", estado["logins"] + 1)
+        client._last_branch_hint = "Matriz"
+        capturado = {}
+
+        def fake_login(**kw):
+            estado["logins"] += 1
+            capturado.update(kw)
+
+        client.login = fake_login
         rows = client._enumerate_catalog(fetch, pk_field="PK", label="test")
         self.assertEqual([r["PK"] for r in rows], [1])
         self.assertEqual(estado["logins"], 1)
+        # El relogin regresa al mismo workspace, no al default.
+        self.assertEqual(capturado.get("branch_hint"), "Matriz")
 
     def test_demasiadas_fallas_aborta(self):
         def fetch(term):
