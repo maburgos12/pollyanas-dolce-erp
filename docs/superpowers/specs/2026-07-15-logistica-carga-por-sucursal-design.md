@@ -45,6 +45,46 @@ contexto_operativo
 6. Toda mutación incluye un identificador idempotente.
 7. El servidor valida de nuevo el contexto dentro de la transacción de guardado.
 
+### Diagrama integral y punto único de coincidencia
+
+```mermaid
+flowchart TD
+    POINT["Point: transferencias y cantidades Enviado"] --> SYNC["Sincronización ERP"]
+    RRHH["RRHH: empleado, jefe directo y departamento"] --> PLAN["Planeación de ruta"]
+    FLOTA["Flota: unidad operativa"] --> PLAN
+    PLAN --> RUTA["Ruta: chofer titular, acompañante, unidad y paradas ordenadas"]
+    SYNC --> CTX
+    RUTA --> CTX
+
+    CTX["Constructor backend de contexto_operativo versionado"]
+    CTX -->|"firma vigente"| PWA["PWA del chofer autorizado"]
+
+    PWA --> CEDIS["Tramo abierto en CEDIS"]
+    CEDIS --> CAPTURA["Captura atómica por sucursal"]
+    CAPTURA --> VALIDAR{"Validar la misma firma dentro de la transacción"}
+    VALIDAR -->|"usuario, ruta, unidad, tramo, parada, versión y líneas coinciden"| GUARDAR["Guardar Enviado → Cargado"]
+    VALIDAR -->|"cualquier dato cambió"| RECHAZAR["Rechazar todo y devolver contexto actualizado"]
+    GUARDAR --> SALIR{"¿Todas las sucursales están guardadas con la versión vigente?"}
+    SALIR -->|"No"| CEDIS
+    SALIR -->|"Sí"| RECORRIDO["Cerrar tramo y salir a ruta"]
+
+    RECORRIDO --> ENTREGA["Recepción por sucursal"]
+    ENTREGA --> VALIDAR_ENTREGA{"Revalidar firma, parada y línea de carga"}
+    VALIDAR_ENTREGA -->|"válida"| RECIBIR["Guardar Cargado → Recibido"]
+    VALIDAR_ENTREGA -->|"obsoleta o ajena"| RECHAZAR_ENTREGA["Rechazar sin escritura parcial"]
+
+    GUARDAR -->|"diferencia"| CASO["Caso auditable"]
+    RECIBIR -->|"diferencia"| CASO
+    CASO --> JEFE["Jefe inmediato / Ventas / fallback Logística-DG"]
+    JEFE --> TRAZA["Enviado → Cargado → Recibido"]
+    TRAZA --> DECISION["Validar real · Marcar incorrecta · Solicitar aclaración"]
+    DECISION --> GATE["Compuerta de Planeación del día siguiente"]
+```
+
+La PWA no compara por separado todos estos identificadores para decidir qué hacer. Recibe una firma opaca del contexto; el backend es quien resuelve sus componentes y la invalida cuando cambia cualquiera de ellos. Esto reduce múltiples coincidencias simultáneas a una sola condición operacional: **la firma presentada sigue siendo la vigente y todas las líneas pertenecen a ella**.
+
+La firma no sustituye las llaves de auditoría. Ruta, chofer, unidad, tramo, parada, sucursal y línea se siguen guardando de forma explícita para poder explicar cualquier rechazo o diferencia.
+
 ## Flujo del repartidor
 
 ### 1. Resumen del tramo
@@ -245,6 +285,39 @@ ACLARACION_SOLICITADA → VALIDADA_REAL | MARCADA_INCORRECTA
 19. Una diferencia de recepción genera un caso auditable sin impedir finalizar la entrega.
 20. Planeación posterior se bloquea por pendientes vencidos y se habilita al clasificarlos.
 21. PWA validada en celular, consola y Network; service worker versionado y desplegado.
+
+### Matriz contra recurrencia diaria
+
+Estas pruebas se escribirán primero y deberán fallar antes de implementar el contexto canónico:
+
+| Escenario forzado | Resultado obligatorio |
+| --- | --- |
+| El acompañante reutiliza una URL o payload del chofer | `403`; cero cambios |
+| El chofer cambia de unidad después de abrir el PWA | `contexto_obsoleto`; cero cambios |
+| Planeación reasigna chofer o unidad durante la captura | Firma invalidada; recarga obligatoria |
+| Point cambia una cantidad con la sucursal abierta | `checklist_actualizado`; se informa la línea afectada |
+| La ruta avanza al siguiente tramo con una petición offline pendiente | `tramo_cambiado`; no se aplica al tramo nuevo |
+| Se reenvía el mismo `client_event_id` con el mismo payload | Devuelve el resultado anterior; un solo evento |
+| Se reenvía el mismo `client_event_id` con otro payload | Conflicto de idempotencia; cero cambios |
+| Una línea de 25 no pertenece a la sucursal o versión | Se revierten las 25 líneas |
+| Dos dispositivos guardan la misma sucursal simultáneamente | Solo una versión gana; la otra recibe contexto obsoleto |
+| Se intenta editar carga después de `Salir a ruta` | Rechazo; historial intacto |
+| Recepción referencia una línea `SUPERADA` o de otro tramo | Rechazo; entrega no se corrompe |
+| `Recibido` difiere de `Cargado` | Entrega finaliza y crea caso de recepción separado |
+| Falla la asignación del jefe directo | Se usa Ventas y después fallback Logística/DG |
+| Existen pendientes vencidos al abrir Planeación | Solo abre la bandeja; crear/editar queda bloqueado |
+
+Además de pruebas unitarias, habrá pruebas transaccionales con PostgreSQL usando `select_for_update`, dos clientes concurrentes y verificación posterior de conteos. La validación final repetirá el flujo en un celular real con cola offline, cambio de tramo, consola, Network y service worker actualizado.
+
+### Condición para afirmar que el problema quedó reducido
+
+No bastará con que el flujo normal funcione. Solo se considerará resuelto el riesgo de “varios datos que deben coincidir” cuando:
+
+1. Todas las mutaciones de carga y recepción exijan la firma canónica.
+2. Ningún endpoint operativo reconstruya permisos o tramo con una regla paralela.
+3. Las pruebas de desincronización y concurrencia anteriores pasen en PostgreSQL.
+4. Los rechazos de contexto no produzcan escrituras parciales ni mensajes genéricos.
+5. El mismo recorrido pase online, offline/reintento y después de actualizar el service worker.
 
 ## Entrega y validación
 
