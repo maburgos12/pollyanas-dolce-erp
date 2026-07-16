@@ -92,9 +92,12 @@ class ContextoOperativoTests(TestCase):
         self.assertEqual(contexto.productos_permitidos, (self.linea.id,))
         self.assertTrue(contexto.token)
 
-    def test_acompanante_no_recibe_contexto(self):
-        with self.assertRaises(PermissionDenied):
-            construir_contexto_operativo(ruta=self.ruta, actor=self.user_acompanante)
+    def test_acompanante_recibe_contexto_propio_para_la_misma_ruta(self):
+        contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user_acompanante)
+
+        self.assertEqual(contexto.ruta_id, self.ruta.id)
+        self.assertEqual(contexto.chofer_autorizado_id, self.acompanante.id)
+        self.assertTrue(contexto.token)
 
     def test_cambio_de_checklist_invalida_firma_anterior(self):
         firmado = construir_contexto_operativo(ruta=self.ruta, actor=self.user_chofer).token

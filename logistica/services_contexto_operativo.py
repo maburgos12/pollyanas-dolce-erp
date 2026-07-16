@@ -83,7 +83,13 @@ def _payload(contexto: ContextoOperativo, lineas: tuple[RutaCargaChecklistLinea,
 
 
 def _ruta_actual(ruta: RutaEntrega, *, bloquear: bool) -> RutaEntrega:
-    queryset = RutaEntrega.objects.select_related("repartidor", "repartidor__user", "unidad_operativa")
+    queryset = RutaEntrega.objects.select_related(
+        "repartidor",
+        "repartidor__user",
+        "acompanante",
+        "acompanante__user",
+        "unidad_operativa",
+    )
     if bloquear:
         queryset = queryset.select_for_update(of=("self",))
     return queryset.get(pk=ruta.pk)
@@ -91,8 +97,14 @@ def _ruta_actual(ruta: RutaEntrega, *, bloquear: bool) -> RutaEntrega:
 
 def _construir_contexto(*, ruta: RutaEntrega, actor, firmar: bool, bloquear: bool = False):
     ruta = _ruta_actual(ruta, bloquear=bloquear)
-    if not ruta.repartidor_id or ruta.repartidor.user_id != getattr(actor, "id", None):
-        raise PermissionDenied("Solo el chofer titular puede operar esta ruta.")
+    actor_id = getattr(actor, "id", None)
+    participantes = {
+        ruta.repartidor.user_id: ruta.repartidor_id,
+        ruta.acompanante.user_id: ruta.acompanante_id,
+    } if ruta.acompanante_id else {ruta.repartidor.user_id: ruta.repartidor_id}
+    operador_id = participantes.get(actor_id)
+    if not operador_id:
+        raise PermissionDenied("Solo el equipo asignado puede operar esta ruta.")
     if not ruta.unidad_operativa_id:
         raise ValidationError("La ruta no tiene unidad operativa asignada.")
 
@@ -114,7 +126,7 @@ def _construir_contexto(*, ruta: RutaEntrega, actor, firmar: bool, bloquear: boo
     )
     contexto = ContextoOperativo(
         ruta_id=ruta.id,
-        chofer_autorizado_id=ruta.repartidor_id,
+        chofer_autorizado_id=operador_id,
         unidad_id=ruta.unidad_operativa_id,
         tramo_id=tramo_id,
         parada_cedis_origen_id=origen.id,

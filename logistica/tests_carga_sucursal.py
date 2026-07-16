@@ -351,21 +351,22 @@ class CargaSucursalApiTests(GuardarCargaSucursalTests):
         self.assertEqual(contexto["ruta_id"], self.ruta.id)
         self.assertEqual(contexto["tramo_id"], self.contexto.tramo_id)
 
-    def test_api_acompanante_no_puede_guardar(self):
+    def test_api_acompanante_puede_guardar_con_su_contexto(self):
         user_acompanante = User.objects.create_user(username="acompanante.api")
         acompanante = Repartidor.objects.create(user=user_acompanante, sucursal=self.sucursal)
         self.ruta.acompanante = acompanante
         self.ruta.save(update_fields=["acompanante", "updated_at"])
+        contexto = construir_contexto_operativo(ruta=self.ruta, actor=user_acompanante)
         self.client.force_login(user_acompanante)
 
         response = self.client.post(
             self.url(),
-            data=json.dumps(self.api_payload()),
+            data=json.dumps(self.api_payload(token=contexto.token)),
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 403, response.content)
-        self.assertFalse(RutaCargaSucursalEvento.objects.exists())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(RutaCargaSucursalEvento.objects.exists())
 
     def test_api_contexto_obsoleto_devuelve_conflicto_sin_escribir(self):
         self.client.force_login(self.user)

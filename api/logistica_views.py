@@ -74,7 +74,7 @@ from logistica.services_rutas_control import (
     LiberacionRutaError,
     liberar_ruta_con_turno,
     registrar_ubicacion_ruta,
-    repartidor_es_chofer_de_ruta,
+    repartidor_participa_en_ruta,
     resumen_control_rutas,
     ruta_operativa_para_repartidor,
 )
@@ -1307,7 +1307,7 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
                 RutaEntrega.objects.select_for_update(),
                 pk=ruta_id,
             )
-            if not repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor):
+            if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
                 return Response(
                     {"detail": "No puedes finalizar una ruta asignada a otro equipo."},
                     status=status.HTTP_403_FORBIDDEN,
@@ -1354,7 +1354,7 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
         can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
         repartidor = _get_repartidor_for_user(request.user)
-        if not can_manage_rutas and not repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor):
+        if not can_manage_rutas and not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
             return Response({"detail": "No puedes confirmar entregas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
@@ -1582,7 +1582,7 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
         ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
         can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
         repartidor = _get_repartidor_for_user(request.user)
-        if not can_manage_rutas and not repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor):
+        if not can_manage_rutas and not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
             return Response({"detail": "No puedes registrar recargas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
         if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
             return Response({"detail": "Solo puedes registrar recarga CEDIS en una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1764,13 +1764,13 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
         repartidor = _get_repartidor_for_request(request)
-        can_view = can_view_submodule(request.user, "logistica", "rutas") or repartidor_es_chofer_de_ruta(
+        can_view = can_view_submodule(request.user, "logistica", "rutas") or repartidor_participa_en_ruta(
             ruta=ruta,
             repartidor=repartidor,
         )
         if not can_view:
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
-        solo_tramo_actual = repartidor_es_chofer_de_ruta(ruta=ruta, repartidor=repartidor)
+        solo_tramo_actual = repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor)
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
         data = dict(RutaCargaChecklistSerializer(checklist, context={"request": request}).data)
         if solo_tramo_actual:
@@ -1996,7 +1996,7 @@ class LogisticaRutaTrackingView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
         repartidor = _get_repartidor_for_request(request)
-        can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or repartidor_es_chofer_de_ruta(
+        can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or repartidor_participa_en_ruta(
             ruta=ruta,
             repartidor=repartidor,
         )
