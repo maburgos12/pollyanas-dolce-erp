@@ -8,6 +8,25 @@
   <div class="table-responsive"><table class="table table-striped">
     <thead><tr><th>Ruta</th><th>Sucursal</th><th>Repartidor</th><th>Causa / hora</th><th>Acción</th></tr></thead>
     <tbody>
+    {% for caso in discrepancias_logistica %}<tr id="discrepancia-{{ caso.id }}">
+      <td>{{ caso.ruta.folio }}</td><td>{{ caso.parada.punto_nombre_snapshot }}</td>
+      <td>{{ caso.creado_por.get_full_name|default:caso.creado_por.username }}</td>
+      <td>
+        <strong>{{ caso.linea_carga.item_name }}</strong><br>
+        Enviado {{ caso.cantidad_enviada }} → Cargado {{ caso.cantidad_cargada|default:"—" }} → Recibido {{ caso.cantidad_recibida|default:"—" }}<br>
+        {{ caso.get_origen_display }} · {{ caso.motivo }} · {{ caso.creado_en|date:"Y-m-d H:i" }}
+      </td>
+      <td>
+        <form method="post" data-async-action data-target="#discrepancia-{{ caso.id }}">{% csrf_token %}
+          <input type="hidden" name="discrepancia_id" value="{{ caso.id }}">
+          <label for="resolucion-{{ caso.id }}">Resolución</label>
+          <input id="resolucion-{{ caso.id }}" name="resolucion" required placeholder="Qué se verificó">
+          <button class="btn btn-primary btn-small" name="accion" value="validar_real" type="submit">Confirmar real</button>
+          <button class="btn btn-secondary btn-small" name="accion" value="marcar_incorrecta" type="submit">Marcar incorrecta</button>
+          <button class="btn btn-secondary btn-small" name="accion" value="solicitar_aclaracion" type="submit">Pedir aclaración</button>
+        </form>
+      </td>
+    </tr>{% endfor %}
     {% for parada in paradas_revision %}<tr>
       <td>{{ parada.ruta.folio }}</td><td>{{ parada.punto_nombre_snapshot }}</td>
       <td>{{ parada.ruta.repartidor.user.get_full_name|default:parada.ruta.repartidor.user.username }}</td>
@@ -28,7 +47,7 @@
         </form>
       </td>
     </tr>{% endfor %}
-    {% if not paradas_revision and not alertas_historicas %}<tr><td colspan="5" class="muted">No hay revisiones pendientes.</td></tr>{% endif %}
+    {% if not discrepancias_logistica and not paradas_revision and not alertas_historicas %}<tr><td colspan="5" class="muted">No hay revisiones pendientes.</td></tr>{% endif %}
     </tbody>
   </table></div>
 </section>

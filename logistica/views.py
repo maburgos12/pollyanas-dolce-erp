@@ -28,6 +28,7 @@ from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     DocumentoUnidad,
+    DiscrepanciaLogistica,
     EntregaEcommerce,
     EntregaRuta,
     EventoRuta,
@@ -72,6 +73,7 @@ from .services_rutas_control import (
     resumen_control_rutas,
 )
 from .services_entregas import confirmar_entrega_parada, resolver_alerta_historica, revisar_entrega_excepcional
+from .services_discrepancias import pendientes_vencidos_para_planeacion, resolver_discrepancia
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
@@ -1339,9 +1341,31 @@ def control_rutas(request):
 
 @login_required
 def revisiones_entrega(request):
-    if not can_manage_submodule(request.user, "logistica", "rutas"):
+    gestiona_rutas = can_manage_submodule(request.user, "logistica", "rutas")
+    tiene_asignadas = DiscrepanciaLogistica.objects.filter(asignado_a=request.user).exists()
+    if not gestiona_rutas and not tiene_asignadas:
         raise PermissionDenied("No tienes permisos para revisar entregas de Logística")
     if request.method == "POST":
+        discrepancia_id = (request.POST.get("discrepancia_id") or "").strip()
+        if discrepancia_id:
+            caso = get_object_or_404(DiscrepanciaLogistica, pk=int(discrepancia_id) if discrepancia_id.isdigit() else 0)
+            try:
+                resolver_discrepancia(
+                    caso=caso,
+                    actor=request.user,
+                    accion=request.POST.get("accion"),
+                    comentario=request.POST.get("resolucion"),
+                )
+            except (ValidationError, PermissionDenied) as exc:
+                mensaje = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    return JsonResponse({"ok": False, "toast": {"type": "error", "message": mensaje}}, status=422)
+                messages.error(request, mensaje)
+            else:
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    return JsonResponse({"ok": True, "remove": f"#discrepancia-{caso.id}", "toast": {"type": "success", "message": "Discrepancia atendida con trazabilidad."}})
+                messages.success(request, "Discrepancia atendida con trazabilidad.")
+            return redirect("logistica:revisiones_entrega")
         evento_id = (request.POST.get("evento_id") or "").strip()
         evento = get_object_or_404(
             EventoRuta,
@@ -1374,6 +1398,19 @@ def revisiones_entrega(request):
         .select_related("ruta", "ruta__repartidor__user", "parada", "parada__punto")
         .order_by("-creado_en", "-id")
     )
+    discrepancias_qs = DiscrepanciaLogistica.objects.filter(
+            estado__in=[
+                DiscrepanciaLogistica.ESTADO_PENDIENTE_JEFE,
+                DiscrepanciaLogistica.ESTADO_ACLARACION_SOLICITADA,
+            ]
+        )
+    if not gestiona_rutas:
+        discrepancias_qs = discrepancias_qs.filter(asignado_a=request.user)
+    discrepancias = list(
+        discrepancias_qs
+        .select_related("ruta", "parada", "linea_carga", "asignado_a")
+        .order_by("creado_en", "id")
+    )
     return render(
         request,
         "logistica/revisiones_entrega.html",
@@ -1381,7 +1418,8 @@ def revisiones_entrega(request):
             "module_tabs": _module_tabs("revisiones_entrega", request.user),
             "paradas_revision": paradas,
             "alertas_historicas": alertas,
-            "revisiones_count": len(paradas) + len(alertas),
+            "discrepancias_logistica": discrepancias,
+            "revisiones_count": len(paradas) + len(alertas) + len(discrepancias),
         },
     )
 
@@ -1832,6 +1870,13 @@ def rutas(request):
     if not can_view_submodule(request.user, "logistica", "rutas"):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
+    discrepancias_vencidas = pendientes_vencidos_para_planeacion(request.user, timezone.localdate())
+    if request.method == "POST" and discrepancias_vencidas:
+        return JsonResponse(
+            {"detail": "Aclara las diferencias pendientes antes de planear una ruta nueva."},
+            status=403,
+        )
+
     if request.method == "POST":
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
@@ -2055,6 +2100,7 @@ def rutas(request):
         "module_tabs": _module_tabs("rutas", request.user),
         "revisiones_globales_count": _revisiones_globales_count(),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
+        "discrepancias_vencidas": discrepancias_vencidas,
         "rutas": rutas_qs.annotate(
             paradas_entrega_total=Count("paradas", filter=~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS), distinct=True),
             paradas_entregadas=Count(

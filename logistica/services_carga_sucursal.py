@@ -15,6 +15,7 @@ from logistica.models import (
     RutaEntrega,
 )
 from logistica.services_contexto_operativo import validar_contexto_operativo
+from logistica.services_discrepancias import jefe_inmediato_para_actor
 
 
 class CargaSucursalError(Exception):
@@ -121,6 +122,7 @@ def _aplicar_linea(*, linea, captura, actor):
                 "cantidad_recibida": None,
                 "motivo": motivo,
                 "notas": linea.notas,
+                "asignado_a": jefe_inmediato_para_actor(actor),
                 "creado_por": actor,
             },
         )

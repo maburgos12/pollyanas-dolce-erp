@@ -3675,6 +3675,8 @@
               entrega_estado: estado,
               notas,
               client_event_id: clientEventId,
+              contexto_token: state.rutaActiva?.contexto_operativo?.token || "",
+              version_checklist: state.rutaActiva?.contexto_operativo?.version_checklist || "",
               client_context: {
                 causa: fueraDeGeocerca ? (draft.latitud && draft.longitud ? "FUERA_DE_RADIO" : "GPS_SIN_SENAL") : "DENTRO_GEOFENCE",
                 client_timestamp: new Date().toISOString(),

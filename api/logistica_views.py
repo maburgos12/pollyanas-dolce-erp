@@ -66,7 +66,9 @@ from logistica.services_contexto_operativo import (
     ContextoOperativoObsoleto,
     construir_contexto_operativo,
     contexto_operativo_dict,
+    validar_contexto_operativo,
 )
+from logistica.services_discrepancias import registrar_discrepancias_recepcion
 from logistica.services_rutas_control import (
     LiberacionRutaError,
     liberar_ruta_con_turno,
@@ -1334,6 +1336,13 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        if payload.get("contexto_token"):
+            try:
+                contexto = validar_contexto_operativo(token=payload["contexto_token"], ruta=ruta, actor=request.user)
+            except ContextoOperativoObsoleto as exc:
+                return Response({"error": exc.codigo, "mensaje": str(exc)}, status=status.HTTP_409_CONFLICT)
+            if payload.get("version_checklist") != contexto.version_checklist:
+                return Response({"error": "checklist_actualizado", "mensaje": "La recepción ya no coincide con el checklist vigente."}, status=status.HTTP_409_CONFLICT)
         client_context = payload.get("client_context") or {}
         offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
         legacy_v59_contract = is_exact_v59_replay_contract(
@@ -1508,6 +1517,16 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
         evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
         evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
+        motivos_recepcion = {
+            int(item["linea_carga_id"]): item.get("motivo_diferencia", "")
+            for item in evidencias_servicio
+            if item.get("linea_carga_id")
+        }
+        registrar_discrepancias_recepcion(
+            evidencias=list(evidencias),
+            actor=request.user,
+            motivos=motivos_recepcion,
+        )
 
         log_event(
             request.user,

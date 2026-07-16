@@ -94,7 +94,13 @@
   <section class="ops-grid-2">
     <article class="card">
       <div class="card-header">Planear ruta del día</div>
-      {% if can_manage_logistica %}
+      {% if discrepancias_vencidas %}
+      <div class="route-create-note">
+        <strong>Aclara las diferencias pendientes antes de planear.</strong>
+        <p>Tienes {{ discrepancias_vencidas|length }} caso{{ discrepancias_vencidas|length|pluralize }} del día anterior sin atender.</p>
+        <a class="btn btn-primary" href="{% url 'logistica:revisiones_entrega' %}">Revisar diferencias</a>
+      </div>
+      {% elif can_manage_logistica %}
       <form method="post" class="route-create-form" style="margin-bottom:0;">
         {% csrf_token %}
         <div class="route-create-grid">
