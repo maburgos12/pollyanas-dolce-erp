@@ -561,6 +561,101 @@ class RutaCargaChecklistLinea(models.Model):
         return f"{self.checklist.ruta.folio} · {self.item_name} · {self.get_estatus_display()}"
 
 
+class RutaCargaSucursalEvento(models.Model):
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.PROTECT, related_name="eventos_carga_sucursal")
+    parada = models.ForeignKey(ParadaRuta, on_delete=models.PROTECT, related_name="eventos_carga_sucursal")
+    client_event_id = models.CharField(max_length=80)
+    payload_hash = models.CharField(max_length=64)
+    contexto_version = models.CharField(max_length=64)
+    respuesta = models.JSONField(default=dict)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="eventos_carga_sucursal_creados",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ruta", "client_event_id"],
+                name="carga_sucursal_evento_unico",
+            ),
+        ]
+
+
+class DiscrepanciaLogistica(models.Model):
+    ORIGEN_CARGA = "CARGA_CEDIS"
+    ORIGEN_RECEPCION = "RECEPCION_SUCURSAL"
+    ORIGEN_CHOICES = [
+        (ORIGEN_CARGA, "Carga en CEDIS"),
+        (ORIGEN_RECEPCION, "Recepción en sucursal"),
+    ]
+
+    ESTADO_PENDIENTE_JEFE = "PENDIENTE_JEFE"
+    ESTADO_VALIDADA_REAL = "VALIDADA_REAL"
+    ESTADO_MARCADA_INCORRECTA = "MARCADA_INCORRECTA"
+    ESTADO_ACLARACION_SOLICITADA = "ACLARACION_SOLICITADA"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE_JEFE, "Pendiente del jefe"),
+        (ESTADO_VALIDADA_REAL, "Validada como real"),
+        (ESTADO_MARCADA_INCORRECTA, "Marcada como incorrecta"),
+        (ESTADO_ACLARACION_SOLICITADA, "Aclaración solicitada"),
+    ]
+
+    ruta = models.ForeignKey(RutaEntrega, on_delete=models.PROTECT, related_name="discrepancias")
+    parada = models.ForeignKey(ParadaRuta, on_delete=models.PROTECT, related_name="discrepancias")
+    linea_carga = models.ForeignKey(
+        RutaCargaChecklistLinea,
+        on_delete=models.PROTECT,
+        related_name="discrepancias",
+    )
+    origen = models.CharField(max_length=30, choices=ORIGEN_CHOICES)
+    cantidad_enviada = models.DecimalField(max_digits=18, decimal_places=3)
+    cantidad_cargada = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)
+    cantidad_recibida = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)
+    motivo = models.CharField(max_length=40)
+    notas = models.TextField(blank=True, default="")
+    estado = models.CharField(max_length=30, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE_JEFE)
+    asignado_a = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="discrepancias_logistica_asignadas",
+    )
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="discrepancias_logistica_creadas",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="discrepancias_logistica_revisadas",
+    )
+    revisado_en = models.DateTimeField(null=True, blank=True)
+    resolucion = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        indexes = [
+            models.Index(fields=["asignado_a", "estado", "creado_en"]),
+            models.Index(fields=["ruta", "parada", "origen"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["linea_carga", "origen"],
+                condition=Q(estado__in=["PENDIENTE_JEFE", "ACLARACION_SOLICITADA"]),
+                name="discrepancia_logistica_abierta_unica",
+            ),
+        ]
+
+
 class ParadaEntregaEvidencia(models.Model):
     TIPO_FOTO_ENTREGA = "FOTO_ENTREGA"
     TIPO_INCIDENCIA = "INCIDENCIA"
