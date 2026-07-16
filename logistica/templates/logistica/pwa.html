@@ -5016,7 +5016,7 @@
                   <div class="form-salida">
                     <div class="field">
                       <label for="km_salida">KM salida</label>
-                      <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="state.bitacoraSalidaDraft.km_salida = this.value">
+                      <input id="km_salida" name="km_salida" type="number" min="0" required value="${escapeHtml(draft.km_salida)}" oninput="this.setCustomValidity(''); state.bitacoraSalidaDraft.km_salida = this.value">
                     </div>
                     <div class="field">
                       <label>Nivel gas salida</label>
@@ -5149,12 +5149,21 @@
         if (event) event.preventDefault();
         if (previewBlocked("El inicio de turno está bloqueado en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
+        const kmSalidaInput = document.getElementById("km_salida");
+        const kmSalida = String(kmSalidaInput?.value ?? draft.km_salida ?? "").trim();
+        draft.km_salida = kmSalida;
+        if (!kmSalida) {
+          kmSalidaInput?.setCustomValidity("Captura el kilometraje de salida.");
+          kmSalidaInput?.reportValidity();
+          kmSalidaInput?.focus();
+          return;
+        }
         if (!draft.unidad || !draft.nivel_gas_salida || !draft.foto_tablero_salida || !draft.latitud_salida) {
           return renderBitacoraSalida("Completa unidad, gas, foto y ubicación.");
         }
         const payload = new FormData();
         payload.append("unidad", draft.unidad);
-        payload.append("km_salida", draft.km_salida);
+        payload.append("km_salida", kmSalida);
         payload.append("nivel_gas_salida", draft.nivel_gas_salida);
         payload.append("foto_tablero_salida", draft.foto_tablero_salida);
         payload.append("latitud_salida", draft.latitud_salida);
@@ -5504,7 +5513,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v68-carga-sucursal-contexto", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v69-km-salida-ios", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
