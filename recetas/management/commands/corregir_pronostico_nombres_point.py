@@ -37,6 +37,8 @@ INSUMOS_INTERNOS = [
     "Pan Zanahoria Mediano",
     "Pan Zanahoria Grande",
     "Pan 3 Leches Mediano",
+    # Base de galleta para pays: existe como maestros.Insumo INSUMO_INTERNO.
+    "Galleta Pay",
 ]
 
 
