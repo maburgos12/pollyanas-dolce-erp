@@ -202,6 +202,7 @@ def _reportes_module_tabs(active: str) -> list[dict[str, str | bool]]:
         ("financiero", reverse("reportes:financiero"), "Financiero"),
         ("presupuesto_maestro", reverse("reportes:presupuesto_maestro"), "Presupuesto Maestro"),
         ("presupuesto_vs_real", reverse("reportes:presupuesto_vs_real"), "Presupuesto vs Real"),
+        ("estado_resultados", reverse("reportes:estado_resultados"), "Estado de resultados"),
         ("mermas_devoluciones", reverse("reportes:mermas_devoluciones"), "Mermas y Devoluciones"),
         ("auditoria_insumos", reverse("reportes:auditoria_insumos"), "Auditoría Insumos"),
         ("proyeccion_produccion", reverse("reportes:proyeccion_produccion"), "Proyección Producción"),

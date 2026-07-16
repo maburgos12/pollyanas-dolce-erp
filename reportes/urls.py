@@ -35,6 +35,11 @@ urlpatterns = [
         name="presupuesto_vs_real",
     ),
     path(
+        "estado-resultados/",
+        views_presupuesto_real.estado_resultados,
+        name="estado_resultados",
+    ),
+    path(
         "presupuesto-real/captura/",
         views_presupuesto_real.presupuesto_real_captura,
         name="presupuesto_real_captura",

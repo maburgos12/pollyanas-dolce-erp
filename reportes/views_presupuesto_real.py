@@ -621,3 +621,158 @@ def presupuesto_real_liberar(request: HttpRequest) -> HttpResponse:
         linea.save(update_fields=["fuente_real", "metadata", "actualizado_en"])
 
     return responder(True, f"{linea.rubro.concepto}: liberado — el automático lo rellenará en la próxima consolidación.")
+
+
+# ---------------------------------------------------------------------------
+# Estado de resultados (P&L empresa completa)
+# ---------------------------------------------------------------------------
+# Réplica honesta de la pestaña "GENERAL" del Excel de administración:
+# Ingresos − Costos = Utilidad bruta − Egresos por área = Utilidad operativa
+# − Inversiones (CAPEX) = Resultado final. A diferencia del Excel, los
+# egresos incluyen TODAS las áreas de gasto (no solo administración), y a
+# producción se le excluye la materia prima porque ya está en "Costos".
+
+_ER_AREAS_EGRESO = [
+    ("gastos-venta", "Gastos de venta"),
+    ("administracion", "Administración"),
+    ("produccion", "Producción (sin materia prima)"),
+    ("logistica", "Logística"),
+]
+
+
+def _er_bucket() -> dict[int, dict[str, object]]:
+    return {m: {"ppto": ZERO, "real": ZERO, "con_real": False} for m in range(1, 13)}
+
+
+def _er_fila(label: str, bucket, kind: str = "linea", area: str = "") -> dict[str, object]:
+    meses = []
+    anual_ppto = ZERO
+    anual_real = ZERO
+    hay_real = False
+    for m in range(1, 13):
+        celda = bucket[m]
+        ppto = celda["ppto"]
+        real = celda["real"] if celda["con_real"] else None
+        anual_ppto += ppto
+        if real is not None:
+            anual_real += real
+            hay_real = True
+        meses.append({
+            "ppto": ppto,
+            "real": real,
+            "var": (real - ppto) if real is not None else None,
+        })
+    return {
+        "label": label,
+        "kind": kind,
+        "area": area,
+        "meses": meses,
+        "anual_ppto": anual_ppto,
+        "anual_real": anual_real if hay_real else None,
+        "anual_var": (anual_real - anual_ppto) if hay_real else None,
+    }
+
+
+def _er_resta(bucket_a, bucket_b) -> dict[int, dict[str, object]]:
+    """a − b por mes; el real solo existe donde a lo tiene (gate: ingresos)."""
+    out = _er_bucket()
+    for m in range(1, 13):
+        out[m]["ppto"] = bucket_a[m]["ppto"] - bucket_b[m]["ppto"]
+        if bucket_a[m]["con_real"]:
+            real_b = bucket_b[m]["real"] if bucket_b[m]["con_real"] else ZERO
+            out[m]["real"] = bucket_a[m]["real"] - real_b
+            out[m]["con_real"] = True
+    return out
+
+
+def _er_suma(*buckets) -> dict[int, dict[str, object]]:
+    out = _er_bucket()
+    for m in range(1, 13):
+        for b in buckets:
+            out[m]["ppto"] += b[m]["ppto"]
+            if b[m]["con_real"]:
+                out[m]["real"] += b[m]["real"]
+                out[m]["con_real"] = True
+    return out
+
+
+@login_required
+def estado_resultados(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+    from .views import _reportes_module_tabs  # import tardío: views.py es pesado
+
+    hoy = timezone.localdate()
+    selected_year = max(2020, min(_parse_int(request.GET.get("year"), hoy.year), 2035))
+    selected_version = normalize_version(request.GET.get("version"))
+
+    rubros_mp = set(
+        ReglaFuenteRubro.objects.filter(
+            tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP, activa=True
+        ).values_list("rubro_id", flat=True)
+    )
+
+    buckets = {clave: _er_bucket() for clave, _ in _ER_AREAS_EGRESO}
+    buckets.update(ingresos=_er_bucket(), costos=_er_bucket(), capex=_er_bucket())
+    egreso_keys = {clave for clave, _ in _ER_AREAS_EGRESO}
+
+    lineas = LineaPresupuestoMensual.objects.filter(
+        periodo__year=selected_year, version=selected_version, rubro__activo=True
+    ).select_related("rubro", "rubro__area")
+    for linea in lineas:
+        area = linea.rubro.area.codigo
+        if area == "resultados":
+            clave = "ingresos" if linea.rubro.tipo == RubroPresupuesto.TIPO_INGRESO else "costos"
+        elif area == "produccion" and linea.rubro_id in rubros_mp:
+            continue  # la materia prima ya está en "Costos" del P&L
+        elif area in egreso_keys or area == "capex":
+            clave = area
+        else:
+            continue  # ventas por producto ya vive en Ingresos; nómina es control
+        celda = buckets[clave][linea.periodo.month]
+        celda["ppto"] += linea.monto_presupuesto or ZERO
+        if str(linea.fuente_real or "").strip():
+            celda["real"] += linea.monto_real or ZERO
+            celda["con_real"] = True
+
+    utilidad_bruta = _er_resta(buckets["ingresos"], buckets["costos"])
+    egresos_total = _er_suma(*(buckets[clave] for clave in egreso_keys))
+    utilidad_operativa = _er_resta(utilidad_bruta, egresos_total)
+    resultado_final = _er_resta(utilidad_operativa, buckets["capex"])
+
+    filas = [
+        _er_fila("Ingresos", buckets["ingresos"], area="resultados"),
+        _er_fila("Costos", buckets["costos"], area="resultados"),
+        _er_fila("Utilidad bruta", utilidad_bruta, kind="total"),
+    ]
+    filas.extend(
+        _er_fila(nombre, buckets[clave], area=clave) for clave, nombre in _ER_AREAS_EGRESO
+    )
+    filas.append(_er_fila("Utilidad operativa", utilidad_operativa, kind="total"))
+    filas.append(_er_fila("Inversiones (CAPEX)", buckets["capex"], area="capex"))
+    filas.append(_er_fila("Resultado final", resultado_final, kind="total"))
+
+    por_label = {fila["label"]: fila for fila in filas}
+    kpis = {
+        "ingresos_real": por_label["Ingresos"]["anual_real"],
+        "utilidad_bruta_real": por_label["Utilidad bruta"]["anual_real"],
+        "utilidad_operativa_real": por_label["Utilidad operativa"]["anual_real"],
+        "resultado_final_real": por_label["Resultado final"]["anual_real"],
+    }
+    if kpis["ingresos_real"]:
+        kpis["margen_operativo_pct"] = (
+            (kpis["utilidad_operativa_real"] or ZERO) / kpis["ingresos_real"] * 100
+        )
+    else:
+        kpis["margen_operativo_pct"] = None
+
+    return render(request, "reportes/estado_resultados.html", {
+        "module_tabs": _reportes_module_tabs("estado_resultados"),
+        "filas": filas,
+        "kpis": kpis,
+        "month_options": MONTH_COLUMNS,
+        "selected_year": selected_year,
+        "selected_version": selected_version,
+        "versions": [v for v, _ in LineaPresupuestoMensual.VERSION_CHOICES],
+    })

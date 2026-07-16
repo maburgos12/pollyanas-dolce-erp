@@ -308,6 +308,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "initial": "P",
                 }
             )
+            url_estado = "/reportes/estado-resultados/"
+            match_len = len(url_estado) if current_path.startswith(url_estado) else 0
+            best_match_len = max(best_match_len, match_len)
+            items.append(
+                {
+                    "label": "Estado de resultados",
+                    "url": url_estado,
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "reportes",
+                    "submodule": "estado_resultados",
+                    "initial": "E",
+                }
+            )
         if items:
             group_url = group.get("url")
             group_active = bool(
