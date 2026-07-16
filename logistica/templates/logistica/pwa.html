@@ -1463,6 +1463,7 @@
         rutaCargaProductoDraft: {},
         cargaSucursal: { paradaId: null, busqueda: "", drafts: {}, guardando: false, modalAbierto: false },
         entregaNotasDraft: {},
+        recepcionSucursal: { paradaId: null, rutaId: null, drafts: {} },
         trackingQueueCount: 0,
         offlineMutationQueueCount: 0,
         offlineMutationFailedCount: 0,
@@ -3240,6 +3241,44 @@
         `;
       }
 
+      function abrirRecepcionParada(rutaId, paradaId) {
+        state.recepcionSucursal.rutaId = Number(rutaId);
+        state.recepcionSucursal.paradaId = Number(paradaId);
+        const lineas = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
+        lineas.forEach((linea) => {
+          state.recepcionSucursal.drafts[linea.id] = state.recepcionSucursal.drafts[linea.id] || {
+            cantidad: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
+            motivo: "",
+          };
+        });
+        renderRutaActiva();
+      }
+
+      function cerrarRecepcionParada() {
+        state.recepcionSucursal.paradaId = null;
+        state.recepcionSucursal.rutaId = null;
+        renderRutaActiva();
+      }
+
+      function renderModalRecepcion() {
+        const paradaId = state.recepcionSucursal.paradaId;
+        if (!paradaId) return "";
+        const lineas = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
+        return `<section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="receipt-title"><article class="fuel-modal operational">
+          <button class="secondary-btn" type="button" onclick="cerrarRecepcionParada()">Cerrar</button>
+          <p class="brand-subtitle">Recepción en sucursal</p><h2 id="receipt-title">Confirma lo recibido</h2>
+          <p>Lo cargado aparece por defecto. Ajusta únicamente si la sucursal recibe otra cantidad.</p>
+          <div class="difference-list">${lineas.map((linea) => {
+            const draft = state.recepcionSucursal.drafts[linea.id];
+            return `<div class="difference-item"><strong>${escapeHtml(linea.item_name)}</strong><p>Cargado ${escapeHtml(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? 0)} → Recibido</p>
+              <label for="recibido-${linea.id}">Cantidad recibida</label><input id="recibido-${linea.id}" type="number" min="0" step="0.001" inputmode="decimal" value="${escapeHtml(draft.cantidad)}" oninput="state.recepcionSucursal.drafts[${linea.id}].cantidad=this.value">
+              <label for="motivo-recibido-${linea.id}">Motivo si existe diferencia</label><select id="motivo-recibido-${linea.id}" onchange="state.recepcionSucursal.drafts[${linea.id}].motivo=this.value"><option value="">Sin diferencia</option><option value="faltante_fisico" ${draft.motivo === "faltante_fisico" ? "selected" : ""}>Faltante físico</option><option value="producto_danado" ${draft.motivo === "producto_danado" ? "selected" : ""}>Producto dañado</option><option value="conteo_incorrecto" ${draft.motivo === "conteo_incorrecto" ? "selected" : ""}>Conteo incorrecto</option><option value="otro" ${draft.motivo === "otro" ? "selected" : ""}>Otro</option></select>
+            </div>`;
+          }).join("")}</div>
+          <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(state.recepcionSucursal.rutaId)}, ${Number(paradaId)}, this, 'ENTREGADA', true)">Confirmar recepción</button>
+        </article></section>`;
+      }
+
       function evidenciasEntregaParada(paradaId) {
         const draft = ensureRutaTrackingDraft();
         const conUbicacion = (row) => {
@@ -3259,13 +3298,17 @@
             client_event_id: newClientEventId()
           })];
         }
-        return lineas.map((linea) => conUbicacion({
+        return lineas.map((linea) => {
+          const recepcion = state.recepcionSucursal.drafts[linea.id] || {};
+          return conUbicacion({
           linea_carga_id: linea.id,
           tipo: "CONFIRMACION",
-          cantidad_entregada: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
+          cantidad_entregada: String(recepcion.cantidad ?? linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
+          motivo_diferencia: recepcion.motivo || "",
           comentario: `Entrega confirmada: ${linea.item_name || "Producto"}`,
           client_event_id: `${newClientEventId()}-${linea.id}`
-        }));
+          });
+        });
       }
 
       async function renderRutaActiva(message = "", alertTitle = "No se puede continuar") {
@@ -3384,6 +3427,7 @@
             ${renderEventosRuta(rutaData.eventos || [])}
           </section>
           ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")}
+          ${renderModalRecepcion()}
         `));
         ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk && !state.previewReadOnly);
       }
@@ -3643,10 +3687,17 @@
         }
       }
 
-      async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA") {
+      async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA", recepcionConfirmada = false) {
         if (previewBlocked("La confirmación de entrega está bloqueada en vista como repartidor.")) return;
         rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
+        if (estado === "ENTREGADA" && !recepcionConfirmada) return abrirRecepcionParada(rutaId, paradaId);
+        const lineasRecepcion = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
+        if (estado === "ENTREGADA" && lineasRecepcion.some((linea) => !String(state.recepcionSucursal.drafts[linea.id]?.cantidad ?? "").trim() || Number(state.recepcionSucursal.drafts[linea.id]?.cantidad) < 0)) return renderRutaActiva("Completa las cantidades recibidas.");
+        if (estado === "ENTREGADA" && lineasRecepcion.some((linea) => {
+          const draft = state.recepcionSucursal.drafts[linea.id];
+          return Number(draft?.cantidad) !== Number(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? 0) && !draft?.motivo;
+        })) return renderRutaActiva("Selecciona un motivo para cada diferencia de recepción.");
         const notasDraft = entregaNotasDraftFor(paradaId);
         const parada = (state.rutaActiva?.paradas || []).find((row) => Number(row.id) === Number(paradaId));
         const fueraDeGeocerca = parada?.geocerca_confiable !== true;
@@ -3694,10 +3745,12 @@
           }
           if (responseQueuedOffline(response)) {
             delete state.entregaNotasDraft[paradaId];
+            state.recepcionSucursal = { paradaId: null, rutaId: null, drafts: {} };
             state.rutaActiva = null;
             return renderRutaActiva(queuedSuccessMessage("Entrega de parada"));
           }
           delete state.entregaNotasDraft[paradaId];
+          state.recepcionSucursal = { paradaId: null, rutaId: null, drafts: {} };
           state.rutaActiva = null;
           const data = await response.json().catch(() => ({}));
           return renderRutaActiva(data.warning ? `✅ Entrega registrada. ${data.warning}` : "✅ Entrega registrada.");

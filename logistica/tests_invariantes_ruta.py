@@ -5124,3 +5124,13 @@ if (operation === "segment") {
         self.assertIn("Buscar producto o código", html)
         self.assertIn("Guardar sucursal", html)
         self.assertIn("Explica los cambios", html)
+
+    def test_pwa_recepcion_compara_cargado_recibido_en_un_popup(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("function abrirRecepcionParada", html)
+        self.assertIn("function renderModalRecepcion", html)
+        self.assertIn("Cargado", html)
+        self.assertIn("Recibido", html)
+        self.assertIn("motivo_diferencia", html)
+        self.assertIn("Confirmar recepción", html)
