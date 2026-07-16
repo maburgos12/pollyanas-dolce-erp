@@ -1597,9 +1597,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v70-tutorial-carga-sucursal"},
+            {"route-control-v71-reglas-point-sucursal"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v70-tutorial-carga-sucursal", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v71-reglas-point-sucursal", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -4627,7 +4627,7 @@ class LogisticaControlRutasTests(TestCase):
         response = self.client.get(reverse("api_logistica_ruta_activa"), {"preview_repartidor": self.repartidor.id})
         perfil = self.client.get(reverse("api_logistica_mi_perfil"), {"preview_repartidor": self.repartidor.id})
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["ruta"]["id"], self.ruta.id)
         self.assertEqual(response.json()["paradas"][0]["id"], self.parada.id)
         self.assertEqual(perfil.status_code, 200)
@@ -4972,9 +4972,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v70-tutorial-carga-sucursal", pwa_html)
+        self.assertIn("?v=route-control-v71-reglas-point-sucursal", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v70-tutorial-carga-sucursal", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v71-reglas-point-sucursal", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5039,7 +5039,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("confirmarEntregaParada", pwa_html)
         self.assertIn("function evidenciasEntregaParada(paradaId)", pwa_html)
         self.assertIn("linea_carga_id: linea.id", pwa_html)
-        self.assertIn("cantidad_entregada: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? \"0\")", pwa_html)
+        self.assertIn("cantidad_entregada: String(recepcion.cantidad ?? linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? \"0\")", pwa_html)
         self.assertIn("evidenciasEntregaParada(paradaId)", pwa_html)
         self.assertIn("entregables = (paradas || []).filter(paradaRequiereEntrega)", pwa_html)
         self.assertIn("entregadas = entregables.filter(paradaOperativamenteResuelta)", pwa_html)
@@ -5099,7 +5099,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v70-tutorial-carga-sucursal", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v71-reglas-point-sucursal", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8518,17 +8518,14 @@ class LogisticaControlRutasTests(TestCase):
 
         pwa_html = (Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
 
-        self.assertIn("validarCargaProductoTramo", pwa_html)
-        self.assertIn("Ver desglose por sucursal", pwa_html)
-        self.assertIn("<details class=\"route-load-breakdown\">", pwa_html)
-        self.assertIn("cantidad_total_", pwa_html)
-        self.assertIn("carga-checklist/productos/validar/", pwa_html)
-        self.assertIn("const total = totalesConCarga.length", pwa_html)
-        self.assertIn("totalProducto.lineas.every(lineaPendientePoint)", pwa_html)
-        self.assertNotIn("totalProducto.lineas.some(lineaPendientePoint)", pwa_html)
-        self.assertIn('${confirmadas} de ${total} producto${total === 1 ? "" : "s"}', pwa_html)
+        self.assertIn("renderResumenSucursalesCarga", pwa_html)
+        self.assertIn("renderCapturaSucursal", pwa_html)
+        self.assertIn("Guardar sucursal", pwa_html)
+        self.assertIn("carga-checklist/sucursales/", pwa_html)
+        self.assertIn("lineas.some(lineaPendientePoint)", pwa_html)
+        self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v70-tutorial-carga-sucursal", pwa_html)
+        self.assertIn("route-control-v71-reglas-point-sucursal", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()

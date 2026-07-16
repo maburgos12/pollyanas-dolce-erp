@@ -14,6 +14,7 @@ from logistica.models import (
     RutaCargaSucursalEvento,
     RutaEntrega,
 )
+from logistica.domain_ruta import point_transfer_enviada
 from logistica.services_contexto_operativo import validar_contexto_operativo
 from logistica.services_discrepancias import jefe_inmediato_para_actor
 
@@ -83,6 +84,13 @@ def _estatus_cantidad(*, esperada: Decimal, cargada: Decimal) -> str:
 def _aplicar_linea(*, linea, captura, actor):
     cargada = Decimal(str(captura["cantidad_cargada"]))
     esperada = Decimal(str(linea.cantidad_enviada_esperada))
+    if linea.estatus == RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED:
+        if cargada != 0:
+            raise CargaSucursalError(
+                f"{linea.item_name} fue confirmado por Point con Enviado = 0 y no admite captura.",
+                codigo="enviado_cero_no_editable",
+            )
+        return
     motivo = str(captura.get("motivo_diferencia") or "").strip()
     if cargada != esperada and not motivo:
         raise CargaSucursalError(
@@ -168,9 +176,34 @@ def guardar_carga_sucursal(
     )
     if not esperadas:
         raise CargaSucursalError("La sucursal no pertenece al tramo vigente.", codigo="sucursal_no_permitida")
+    point_lineas = {
+        linea.id: linea.point_transfer_line
+        for linea in RutaCargaChecklistLinea.objects.filter(id__in=[row.id for row in esperadas])
+        .exclude(point_transfer_line_id__isnull=True)
+        .select_related("point_transfer_line")
+    }
+    pendientes_point = {
+        linea.id
+        for linea in esperadas
+        if (
+        linea.estatus == RutaCargaChecklistLinea.ESTATUS_PENDIENTE
+        and linea.point_transfer_line_id
+        and not point_transfer_enviada(point_lineas[linea.id])
+        )
+    }
+    capturables = [
+        linea
+        for linea in esperadas
+        if linea.id not in pendientes_point and linea.estatus != RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+    ]
+    if not capturables:
+        raise CargaSucursalError(
+            "Esta sucursal todavía no tiene productos enviados que requieran captura.",
+            codigo="sin_productos_capturables",
+        )
     esperadas_por_id, recibidas_por_id = _validar_cobertura(
         contexto=contexto,
-        esperadas=esperadas,
+        esperadas=capturables,
         recibidas=normalizadas,
     )
     for linea_id in sorted(esperadas_por_id):
@@ -191,7 +224,7 @@ def guardar_carga_sucursal(
     respuesta = {
         "ruta_id": ruta_bloqueada.id,
         "parada_id": int(parada_id),
-        "lineas_guardadas": len(esperadas),
+        "lineas_guardadas": len(capturables),
         "version_checklist": contexto.version_checklist,
     }
     RutaCargaSucursalEvento.objects.create(

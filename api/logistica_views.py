@@ -1633,7 +1633,9 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
 
 class LogisticaRutaActivaView(_LogisticaBaseView):
     def get(self, request):
-        if not _can_operate_pwa(request.user):
+        if not _can_operate_pwa(request.user) and not (
+            request.user.is_superuser and _is_pwa_preview_request(request)
+        ):
             return Response({"detail": "No tienes permisos para consultar ruta activa."}, status=status.HTTP_403_FORBIDDEN)
 
         repartidor = _get_repartidor_for_request(request)
@@ -1674,7 +1676,8 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         )
 
         try:
-            contexto_operativo = contexto_operativo_dict(construir_contexto_operativo(ruta=ruta, actor=request.user))
+            contexto_actor = repartidor.user if _is_pwa_preview_request(request) else request.user
+            contexto_operativo = contexto_operativo_dict(construir_contexto_operativo(ruta=ruta, actor=contexto_actor))
             contexto_advertencia = ""
         except ValidationError as exc:
             contexto_operativo = None
