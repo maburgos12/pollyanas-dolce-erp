@@ -146,6 +146,23 @@ Cuando el contexto cambie, la respuesta incluirá los productos afectados para q
 
 Las diferencias no bloquean la ruta actual.
 
+### Dos momentos de discrepancia
+
+El sistema distingue el lugar operativo donde apareció la diferencia:
+
+1. **Diferencia de carga en CEDIS:** compara la cantidad `Enviado` de Point contra la cantidad físicamente `Cargado` y confirmada antes de salir.
+2. **Diferencia de recepción en sucursal:** compara la cantidad `Cargado` que salió de CEDIS contra la cantidad `Recibido` al cerrar la entrega.
+
+No se sobrescribe una diferencia con la otra. Cada evento conserva su propio motivo, nota, responsable, fecha y evidencia. El jefe recibe una trazabilidad conjunta por producto:
+
+```text
+Enviado por Point → Cargado en CEDIS → Recibido en sucursal
+```
+
+Esto permite distinguir entre un faltante de origen, una incidencia durante el traslado y una diferencia en la recepción o captura de la sucursal.
+
+Cuando `Cargado` y `Recibido` no coincidan, el cierre de entrega solicitará motivo y nota; la evidencia será obligatoria únicamente para los motivos que la política operativa defina. La discrepancia se registra y la entrega puede finalizar sin quedar bloqueada.
+
 Al guardar una sucursal con diferencias se crea un caso auditable por producto y se asigna a:
 
 1. `jefe_directo` del empleado vinculado al chofer en RRHH.
@@ -223,8 +240,11 @@ ACLARACION_SOLICITADA → VALIDADA_REAL | MARCADA_INCORRECTA
 14. Diferencias asignadas al jefe directo/Ventas y fallback Logística/DG.
 15. Las tres decisiones del jefe quedan auditadas.
 16. La ruta actual nunca se bloquea por diferencias.
-17. Planeación posterior se bloquea por pendientes vencidos y se habilita al clasificarlos.
-18. PWA validada en celular, consola y Network; service worker versionado y desplegado.
+17. El cierre de entrega compara `Cargado` contra `Recibido` sin sustituir la diferencia de carga previa.
+18. El jefe visualiza `Enviado → Cargado → Recibido` y el origen operativo de cada discrepancia.
+19. Una diferencia de recepción genera un caso auditable sin impedir finalizar la entrega.
+20. Planeación posterior se bloquea por pendientes vencidos y se habilita al clasificarlos.
+21. PWA validada en celular, consola y Network; service worker versionado y desplegado.
 
 ## Entrega y validación
 
