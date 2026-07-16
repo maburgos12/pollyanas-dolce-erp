@@ -342,20 +342,36 @@ class PointHttpSessionClient:
     _ENUM_REFINE = "abcdefghijklmnopqrstuvwxyz0123456789 "
 
     def get_all_products(self, **kwargs) -> list[dict]:
-        """Catálogo completo de productos (rodea el tope de 150 filas)."""
-        return self._enumerate_catalog(
-            lambda term: self.get_products(text_art=term, **kwargs),
-            pk_field="PK_Producto",
-            label="productos",
-        )
+        """Catálogo completo de productos (rodea el tope de 150 filas).
+
+        Cacheado por instancia: la enumeración cuesta ~1,500 consultas, así
+        que dentro de una misma sesión de sync nunca se repite.
+        """
+        cache = getattr(self, "_catalog_cache", None)
+        if cache is None:
+            cache = self._catalog_cache = {}
+        cache_key = ("productos", tuple(sorted(kwargs.items())))
+        if cache_key not in cache:
+            cache[cache_key] = self._enumerate_catalog(
+                lambda term: self.get_products(text_art=term, **kwargs),
+                pk_field="PK_Producto",
+                label="productos",
+            )
+        return list(cache[cache_key])
 
     def get_all_articulos(self, *, category: int | str | None = None) -> list[dict]:
         """Catálogo completo de insumos/artículos (rodea el tope de 150 filas)."""
-        return self._enumerate_catalog(
-            lambda term: self.get_articulos(search=term, category=category),
-            pk_field="PK_Articulo",
-            label="insumos",
-        )
+        cache = getattr(self, "_catalog_cache", None)
+        if cache is None:
+            cache = self._catalog_cache = {}
+        cache_key = ("insumos", category)
+        if cache_key not in cache:
+            cache[cache_key] = self._enumerate_catalog(
+                lambda term: self.get_articulos(search=term, category=category),
+                pk_field="PK_Articulo",
+                label="insumos",
+            )
+        return list(cache[cache_key])
 
     def _enumerate_catalog(
         self,
@@ -366,7 +382,8 @@ class PointHttpSessionClient:
         page_limit: int | None = None,
         max_term_len: int = 4,
         max_failures: int = 10,
-        pause_seconds: float = 0.15,
+        pause_seconds: float = 0.05,
+        relogin_every: int = 400,
     ) -> list[dict]:
         limit = page_limit or self.CATALOG_PAGE_LIMIT
         found: dict[object, dict] = {}
@@ -375,6 +392,14 @@ class PointHttpSessionClient:
         failures = 0
         while pending:
             term = pending.pop()
+            if relogin_every and queries and queries % relogin_every == 0:
+                # La sesión de Point muere a ~50 min (visto en producción:
+                # respuestas vacías al final de una enumeración larga):
+                # relogin PROACTIVO antes de que caduque.
+                try:
+                    self.login(branch_hint=getattr(self, "_last_branch_hint", None))
+                except (AuthenticationError, ExtractionError):
+                    pass  # el camino reactivo de abajo lo cubre
             try:
                 rows = fetch(term)
             except ExtractionError:
