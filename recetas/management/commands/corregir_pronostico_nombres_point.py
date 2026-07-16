@@ -41,6 +41,14 @@ INSUMOS_INTERNOS = [
     "Galleta Pay",
 ]
 
+# Productos descontinuados (confirmado por dirección 2026-07-16: "ya no
+# funcionan"): existen en Point pero no se venden ni se venderán — su
+# proyección solo ensucia el comparativo.
+PRODUCTOS_DESCONTINUADOS = [
+    "Brownie Rebanada",
+    "Pay de Queso C Brownie Mediano",
+]
+
 
 class Command(BaseCommand):
     help = "Reasigna pronósticos de venta a recetas Point vigentes y saca los insumos internos"
@@ -88,11 +96,13 @@ class Command(BaseCommand):
                         pron.save(update_fields=["receta", "actualizado_en"])
                 movidos += 1
 
-        for nombre in INSUMOS_INTERNOS:
+        for nombre, motivo in [(n, "insumo interno") for n in INSUMOS_INTERNOS] + [
+            (n, "producto descontinuado") for n in PRODUCTOS_DESCONTINUADOS
+        ]:
             qs = PronosticoVenta.objects.filter(receta__nombre__iexact=nombre)
             n = qs.count()
             if n:
-                self.stdout.write(f"  eliminar {n} pronóstico(s) de insumo interno '{nombre}'")
+                self.stdout.write(f"  eliminar {n} pronóstico(s) de {motivo} '{nombre}'")
                 eliminados += n
                 if not dry_run:
                     qs.delete()
