@@ -23,6 +23,8 @@ No cambia las reglas de carga, discrepancias, bitácora, unidad o liberación de
 
 La hoja aparece después de autenticar al repartidor y cargar correctamente su perfil. La PWA sigue visible y desenfocada detrás para conservar el contexto.
 
+Si el repartidor ya tiene una ruta `EN_RUTA` cuando se publica la actualización, el tutorial no interrumpe la operación actual. Queda pendiente y aparece en su siguiente inicio de sesión sin ruta activa.
+
 La hoja ocupa aproximadamente 85 % de la altura disponible, respeta las áreas seguras del teléfono y se presenta desde la parte inferior. El tutorial usa los colores vino, crema y dorado, tipografía y controles existentes de Pollyana's Dolce.
 
 ### Contenido
@@ -79,6 +81,8 @@ El endpoint de perfil devuelve una bandera explícita para mostrar el tutorial. 
 7. El backend registra la fecha de confirmación y devuelve éxito.
 8. La PWA cierra la hoja y continúa al panel.
 
+La bandera permanece falsa durante una ruta activa aunque el repartidor todavía no haya confirmado el tutorial. Abrir o trabajar una ruta no registra el aviso como visto.
+
 Si la confirmación no puede enviarse por falta de conexión, la PWA no detiene el trabajo. Oculta el tutorial durante la sesión actual y coloca la confirmación en la cola offline existente. Hasta que se sincronice, el aviso podría aparecer en otro dispositivo.
 
 ## Relación con la liberación de ruta
@@ -113,6 +117,7 @@ La transición resultante es:
 - Otro usuario no puede confirmar por un repartidor distinto.
 - Repartidor creado después del lanzamiento no recibe el tutorial.
 - Usuario sin perfil de repartidor no recibe el tutorial.
+- Repartidor con ruta `EN_RUTA` no es interrumpido y conserva pendiente la confirmación.
 
 ### PWA
 
