@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
+from unittest.mock import patch
+
 from pos_bridge.services.point_http_client import PointHttpSessionClient
 from pos_bridge.utils.exceptions import ExtractionError
 
@@ -28,7 +30,7 @@ class EnumeracionCatalogoTests(SimpleTestCase):
         catalog = [{"PK": i, "nombre": f"pastel {i:03d}"} for i in range(60)]
         client = _client()
         rows = client._enumerate_catalog(
-            _fake_point(catalog, limit=10), pk_field="PK", label="test", page_limit=10
+            _fake_point(catalog, limit=10), pk_field="PK", label="test", page_limit=10, pause_seconds=0
         )
         self.assertEqual(len(rows), 60)
 
@@ -39,7 +41,7 @@ class EnumeracionCatalogoTests(SimpleTestCase):
         ]
         client = _client()
         rows = client._enumerate_catalog(
-            _fake_point(catalog, limit=150), pk_field="PK", label="test"
+            _fake_point(catalog, limit=150), pk_field="PK", label="test", pause_seconds=0
         )
         # "azucar" matchea con a, z, u, c, r… pero entra una sola vez.
         self.assertEqual(sorted(r["PK"] for r in rows), [1, 2])
@@ -63,7 +65,8 @@ class EnumeracionCatalogoTests(SimpleTestCase):
             capturado.update(kw)
 
         client.login = fake_login
-        rows = client._enumerate_catalog(fetch, pk_field="PK", label="test")
+        with patch("pos_bridge.services.point_http_client.time.sleep"):
+            rows = client._enumerate_catalog(fetch, pk_field="PK", label="test", pause_seconds=0)
         self.assertEqual([r["PK"] for r in rows], [1])
         self.assertEqual(estado["logins"], 1)
         # El relogin regresa al mismo workspace, no al default.
@@ -75,8 +78,8 @@ class EnumeracionCatalogoTests(SimpleTestCase):
 
         client = _client()
         client.login = lambda **kw: None
-        with self.assertRaises(ExtractionError):
-            client._enumerate_catalog(fetch, pk_field="PK", label="test", max_failures=3)
+        with patch("pos_bridge.services.point_http_client.time.sleep"), self.assertRaises(ExtractionError):
+            client._enumerate_catalog(fetch, pk_field="PK", label="test", max_failures=3, pause_seconds=0)
 
 
 class ConversionUnidadSyncAlmacenTests(SimpleTestCase):
