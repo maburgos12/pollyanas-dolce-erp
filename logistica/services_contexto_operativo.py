@@ -134,6 +134,21 @@ def construir_contexto_operativo(*, ruta: RutaEntrega, actor) -> ContextoOperati
     return _construir_contexto(ruta=ruta, actor=actor, firmar=True)
 
 
+def contexto_operativo_dict(contexto: ContextoOperativo) -> dict:
+    return {
+        "ruta_id": contexto.ruta_id,
+        "chofer_autorizado_id": contexto.chofer_autorizado_id,
+        "unidad_id": contexto.unidad_id,
+        "tramo_id": contexto.tramo_id,
+        "parada_cedis_origen_id": contexto.parada_cedis_origen_id,
+        "version_checklist": contexto.version_checklist,
+        "sucursales_permitidas": list(contexto.sucursales_permitidas),
+        "productos_permitidos": list(contexto.productos_permitidos),
+        "acciones_permitidas": list(contexto.acciones_permitidas),
+        "token": contexto.token,
+    }
+
+
 def validar_contexto_operativo(*, token: str, ruta: RutaEntrega, actor, bloquear: bool = False) -> ContextoOperativo:
     try:
         firmado = signing.loads(token, salt=CONTEXT_SALT, max_age=CONTEXT_MAX_AGE_SECONDS)

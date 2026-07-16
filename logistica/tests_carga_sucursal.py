@@ -1,8 +1,10 @@
 from decimal import Decimal
+import json
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -225,6 +227,105 @@ class GuardarCargaSucursalTests(PersistenciaCargaSucursalTests):
 
         self.assertEqual(primera, segunda)
         self.assertEqual(RutaCargaSucursalEvento.objects.count(), 1)
+
+
+class CargaSucursalApiTests(GuardarCargaSucursalTests):
+    def url(self):
+        return reverse(
+            "api_logistica_ruta_carga_sucursal",
+            kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id},
+        )
+
+    def api_payload(self, *, token=None, event_id="evt-api-1"):
+        return {
+            "contexto_token": token or self.contexto.token,
+            "version_checklist": self.contexto.version_checklist,
+            "client_event_id": event_id,
+            "lineas": [
+                {
+                    "linea_id": self.linea.id,
+                    "source_hash": self.linea.source_hash,
+                    "cantidad_cargada": "10",
+                    "motivo_diferencia": "",
+                    "notas": "",
+                },
+                {
+                    "linea_id": self.linea_2.id,
+                    "source_hash": self.linea_2.source_hash,
+                    "cantidad_cargada": "5",
+                    "motivo_diferencia": "",
+                    "notas": "",
+                },
+            ],
+        }
+
+    def test_api_guarda_sucursal_completa(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            self.url(),
+            data=json.dumps(self.api_payload()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["lineas_guardadas"], 2)
+        self.assertEqual(RutaCargaSucursalEvento.objects.count(), 1)
+
+    def test_api_checklist_incluye_contexto_operativo(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("api_logistica_ruta_carga_checklist", kwargs={"ruta_id": self.ruta.id})
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        contexto = response.json()["contexto_operativo"]
+        self.assertEqual(contexto["ruta_id"], self.ruta.id)
+        self.assertEqual(contexto["chofer_autorizado_id"], self.repartidor.id)
+        self.assertEqual(contexto["unidad_id"], self.unidad.id)
+        self.assertTrue(contexto["token"])
+
+    def test_api_ruta_activa_incluye_contexto_para_pwa(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("api_logistica_ruta_activa"))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        contexto = response.json()["contexto_operativo"]
+        self.assertEqual(contexto["ruta_id"], self.ruta.id)
+        self.assertEqual(contexto["tramo_id"], self.contexto.tramo_id)
+
+    def test_api_acompanante_no_puede_guardar(self):
+        user_acompanante = User.objects.create_user(username="acompanante.api")
+        acompanante = Repartidor.objects.create(user=user_acompanante, sucursal=self.sucursal)
+        self.ruta.acompanante = acompanante
+        self.ruta.save(update_fields=["acompanante", "updated_at"])
+        self.client.force_login(user_acompanante)
+
+        response = self.client.post(
+            self.url(),
+            data=json.dumps(self.api_payload()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(RutaCargaSucursalEvento.objects.exists())
+
+    def test_api_contexto_obsoleto_devuelve_conflicto_sin_escribir(self):
+        self.client.force_login(self.user)
+        self.linea.cantidad_enviada_esperada = Decimal("11")
+        self.linea.save(update_fields=["cantidad_enviada_esperada", "actualizado_en"])
+
+        response = self.client.post(
+            self.url(),
+            data=json.dumps(self.api_payload()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()["error"], "checklist_actualizado")
+        self.assertFalse(RutaCargaSucursalEvento.objects.exists())
 
     def test_reintento_distinto_rechaza_conflicto(self):
         self.guardar()
