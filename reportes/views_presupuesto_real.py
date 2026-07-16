@@ -42,7 +42,7 @@ ZERO = Decimal("0")
 # El área "Nómina" replica los sueldos que ya viven dentro de cada área
 # (Gastos de Venta, Administración, Logística, Producción). Se muestra como
 # vista de control pero NO se suma a los KPI globales para no duplicar dinero.
-AREAS_NO_SUMABLES = {"nomina"}
+AREAS_NO_SUMABLES = {"nomina", "resultados"}
 
 
 def _parse_int(value, default: int) -> int:
