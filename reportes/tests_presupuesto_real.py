@@ -2122,8 +2122,9 @@ class AreaResultadosTests(TestCase):
         cls.admin_area = AreaPresupuesto.objects.create(
             nombre="Administración", codigo="administracion"
         )
+        # El import del Excel tipó las ventas como EGRESO; el comando lo corrige.
         cls.rubro_pnl = RubroPresupuesto.objects.create(
-            area=cls.admin_area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+            area=cls.admin_area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_EGRESO
         )
         cls.rubro_gasto = RubroPresupuesto.objects.create(
             area=cls.admin_area, concepto="Sueldo", tipo=RubroPresupuesto.TIPO_EGRESO
@@ -2136,6 +2137,7 @@ class AreaResultadosTests(TestCase):
         self.rubro_gasto.refresh_from_db()
         area = AreaPresupuesto.objects.get(codigo="resultados")
         self.assertEqual(self.rubro_pnl.area, area)
+        self.assertEqual(self.rubro_pnl.tipo, RubroPresupuesto.TIPO_INGRESO)
         self.assertEqual(self.rubro_gasto.area, self.admin_area)
         # Idempotente: segunda corrida no truena ni duplica el área.
         call_command("mover_rubros_resultados", stdout=salida)

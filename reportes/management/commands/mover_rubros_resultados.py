@@ -19,6 +19,9 @@ CONCEPTOS_PNL = [
     "Costos complementos",
     "Merma",
 ]
+# El import del Excel de administración tipó todo como EGRESO; las ventas
+# del P&L son ingresos (el estado de resultados las necesita bien tipadas).
+CONCEPTOS_INGRESO = ["Venta postres", "Venta complementos"]
 
 
 class Command(BaseCommand):
@@ -35,6 +38,7 @@ class Command(BaseCommand):
         )
         if not rubros.exists():
             self.stdout.write("Nada que mover (¿ya se ejecutó?).")
+            self._corregir_tipo_ingreso(dry_run)
             return
 
         ultimo_orden = (
@@ -55,3 +59,19 @@ class Command(BaseCommand):
 
         movidos = rubros.update(area=area)
         self.stdout.write(self.style.SUCCESS(f"{movidos} rubro(s) movidos a Resultados (P&L)."))
+        self._corregir_tipo_ingreso(dry_run)
+
+    def _corregir_tipo_ingreso(self, dry_run: bool) -> None:
+        mal_tipados = RubroPresupuesto.objects.filter(
+            area__codigo="resultados", concepto__in=CONCEPTOS_INGRESO
+        ).exclude(tipo=RubroPresupuesto.TIPO_INGRESO)
+        for rubro in mal_tipados:
+            self.stdout.write(f"  corregir tipo {rubro.id} '{rubro.concepto}' → INGRESO")
+        if dry_run:
+            if mal_tipados.exists():
+                self.stdout.write(self.style.WARNING("DRY RUN: tipos sin corregir."))
+                transaction.set_rollback(True)
+            return
+        corregidos = mal_tipados.update(tipo=RubroPresupuesto.TIPO_INGRESO)
+        if corregidos:
+            self.stdout.write(self.style.SUCCESS(f"{corregidos} rubro(s) de venta tipados INGRESO."))
