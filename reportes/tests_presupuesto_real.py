@@ -2450,3 +2450,50 @@ class ConsumoDesdeFiltroTests(TestCase):
         # Idempotente
         call_command("restaurar_costos_pnl_legado", stdout=salida)
         self.assertIn("ya restaurado", salida.getvalue())
+
+
+class CorregirPronosticoNombresPointTests(TestCase):
+    """Reasignación de pronósticos a recetas Point vigentes (regla de dirección)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from recetas.models import PronosticoVenta, Receta
+
+        cls.sv = Receta.objects.create(nombre="3 Pecados Mini SV", hash_contenido="t-sv")
+        cls.vigente = Receta.objects.create(nombre="Pastel 3 Pecados Mini", hash_contenido="t-mini")
+        cls.sv_chico = Receta.objects.create(
+            nombre="Pastel Fresas con Crema San Valentín Chico", hash_contenido="t-svc"
+        )
+        cls.chico = Receta.objects.create(
+            nombre="Pastel de Fresas Con Crema Chico", hash_contenido="t-chico"
+        )
+        cls.flan = Receta.objects.create(nombre="Flan 3 Pecados Chico", hash_contenido="t-flan")
+        PronosticoVenta.objects.create(receta=cls.sv, periodo="2026-05", cantidad=Decimal("194"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.sv_chico, periodo="2026-05", cantidad=Decimal("485"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.chico, periodo="2026-05", cantidad=Decimal("100"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.flan, periodo="2026-05", cantidad=Decimal("555"), fuente="PRESUPUESTO_2026")
+
+    def test_reasigna_suma_y_elimina_internos(self):
+        from recetas.models import PronosticoVenta
+
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        # SV sin destino previo: se movió la fila entera
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv).count(), 0)
+        movido = PronosticoVenta.objects.get(receta=self.vigente, periodo="2026-05")
+        self.assertEqual(movido.cantidad, Decimal("194"))
+        # SV con destino previo: se sumaron cantidades
+        sumado = PronosticoVenta.objects.get(receta=self.chico, periodo="2026-05")
+        self.assertEqual(sumado.cantidad, Decimal("585"))
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv_chico).count(), 0)
+        # Insumo interno: eliminado del comparativo de ventas
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.flan).count(), 0)
+        # Idempotente
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.get(receta=self.vigente, periodo="2026-05").cantidad, Decimal("194"))
+
+    def test_dry_run_no_toca(self):
+        from recetas.models import PronosticoVenta
+
+        call_command("corregir_pronostico_nombres_point", "--dry-run", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv).count(), 1)
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.flan).count(), 1)
