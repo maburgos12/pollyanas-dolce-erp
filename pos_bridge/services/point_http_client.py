@@ -322,3 +322,77 @@ class PointHttpSessionClient:
     def get_articulo_detail(self, articulo_id: int | str) -> dict:
         response = self._request("GET", "/Catalogos/ArticuloGetbyid", params={"pkArticulo": articulo_id})
         return self._parse_json(response, label="detalle de insumo Point")
+
+    # ------------------------------------------------------------------
+    # Catálogo completo — Point corta CADA respuesta de catálogo a 150
+    # filas (verificado 2026-07-15: el catálogo real tiene 334 productos y
+    # 353 insumos, pero get_products()/get_articulos() sin filtro solo
+    # devuelven 150). Para ver el catálogo entero se enumera con términos
+    # de búsqueda: si un término satura el tope, se refina agregando una
+    # letra, hasta que ninguna consulta llegue al límite.
+    # ------------------------------------------------------------------
+
+    CATALOG_PAGE_LIMIT = 150
+    _ENUM_SEEDS = "abcdefghijklmnopqrstuvwxyz0123456789"
+    # El refinamiento incluye dígitos: hay insumos que solo se discriminan
+    # por número ("AL-22", "1414", "Rp25").
+    _ENUM_REFINE = "abcdefghijklmnopqrstuvwxyz0123456789 "
+
+    def get_all_products(self, **kwargs) -> list[dict]:
+        """Catálogo completo de productos (rodea el tope de 150 filas)."""
+        return self._enumerate_catalog(
+            lambda term: self.get_products(text_art=term, **kwargs),
+            pk_field="PK_Producto",
+            label="productos",
+        )
+
+    def get_all_articulos(self, *, category: int | str | None = None) -> list[dict]:
+        """Catálogo completo de insumos/artículos (rodea el tope de 150 filas)."""
+        return self._enumerate_catalog(
+            lambda term: self.get_articulos(search=term, category=category),
+            pk_field="PK_Articulo",
+            label="insumos",
+        )
+
+    def _enumerate_catalog(
+        self,
+        fetch,
+        *,
+        pk_field: str,
+        label: str,
+        page_limit: int | None = None,
+        max_term_len: int = 4,
+        max_failures: int = 10,
+    ) -> list[dict]:
+        limit = page_limit or self.CATALOG_PAGE_LIMIT
+        found: dict[object, dict] = {}
+        pending = list(self._ENUM_SEEDS)
+        queries = 0
+        failures = 0
+        while pending:
+            term = pending.pop()
+            try:
+                rows = fetch(term)
+            except ExtractionError:
+                failures += 1
+                if failures > max_failures:
+                    raise
+                # La sesión puede expirar a media enumeración: relogin y un reintento.
+                self.login()
+                try:
+                    rows = fetch(term)
+                except ExtractionError:
+                    continue
+            queries += 1
+            for row in rows:
+                pk = row.get(pk_field)
+                if pk is not None:
+                    found[pk] = row
+            if len(rows) >= limit and len(term) < max_term_len:
+                pending.extend(term + char for char in self._ENUM_REFINE)
+        self._audit(
+            "catalog_enumeration",
+            message=f"catálogo de {label} enumerado completo",
+            context={"total": len(found), "queries": queries, "failures": failures},
+        )
+        return list(found.values())

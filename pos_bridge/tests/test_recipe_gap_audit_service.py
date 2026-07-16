@@ -27,6 +27,10 @@ class FakePointAuditHttpClient:
     def get_products(self):
         return list(self.payload["products"])
 
+    def get_all_products(self, **kwargs):
+        # Los catálogos de prueba son chicos: equivale al listado plano.
+        return self.get_products()
+
     def get_product_detail(self, product_id):
         return dict(self.payload["details"][product_id])
 
