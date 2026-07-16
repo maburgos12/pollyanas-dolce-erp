@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reportes - Estado de resultados{% endblock %}
+{% block page_title %}Reportes · Estado de resultados{% endblock %}
+{% block body_class %}page-reportes-estado-resultados{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* Toggle de métrica: solo se pinta el valor de la vista activa */
+  .er-table .er-val { display: none; }
+  .er-table.er-show-real .er-val-real { display: inline; }
+  .er-table.er-show-ppto .er-val-ppto { display: inline; }
+  .er-table.er-show-var .er-val-var { display: inline; }
+  .er-row-total td { font-weight: 700; background: var(--rosa); }
+  .er-row-total td:first-child { color: var(--vino); }
+  .er-neg { color: var(--rojo); }
+  .er-metric-btns .btn.active { background: var(--vino); border-color: var(--vino); color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
+  {% for tab in module_tabs %}
+  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="card-header">Estado de resultados · {{ selected_year }}</div>
+  <p class="muted">P&amp;L de la empresa completa: ingresos y costos consolidados, egresos de todas las áreas (a producción se le excluye la materia prima, que ya está en Costos) e inversiones. El real se llena conforme las fuentes consolidan cada mes.</p>
+
+  <form method="get" novalidate>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="er-year">Año</label>
+        <input class="input-field" id="er-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}">
+      </div>
+      <div class="form-group">
+        <label for="er-version">Versión</label>
+        <select class="input-field" id="er-version" name="version">
+          {% for version in versions %}
+          <option value="{{ version }}" {% if selected_version == version %}selected{% endif %}>{{ version }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" type="submit">Actualizar</button>
+      <a class="btn btn-secondary" href="{% url 'reportes:presupuesto_vs_real' %}?year={{ selected_year }}">Ver detalle por área</a>
+    </div>
+  </form>
+</section>
+
+<section class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-number">{% if kpis.ingresos_real is not None %}${{ kpis.ingresos_real|floatformat:0|intcomma }}{% else %}—{% endif %}</div>
+    <div class="kpi-label">Ingresos reales acumulados</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">{% if kpis.utilidad_bruta_real is not None %}${{ kpis.utilidad_bruta_real|floatformat:0|intcomma }}{% else %}—{% endif %}</div>
+    <div class="kpi-label">Utilidad bruta</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if kpis.utilidad_operativa_real is not None and kpis.utilidad_operativa_real < 0 %}is-danger{% else %}is-success{% endif %}">{% if kpis.utilidad_operativa_real is not None %}${{ kpis.utilidad_operativa_real|floatformat:0|intcomma }}{% else %}—{% endif %}</div>
+    <div class="kpi-label">Utilidad operativa{% if kpis.margen_operativo_pct is not None %} ({{ kpis.margen_operativo_pct|floatformat:1 }}%){% endif %}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if kpis.resultado_final_real is not None and kpis.resultado_final_real < 0 %}is-danger{% else %}is-success{% endif %}">{% if kpis.resultado_final_real is not None %}${{ kpis.resultado_final_real|floatformat:0|intcomma }}{% else %}—{% endif %}</div>
+    <div class="kpi-label">Resultado final (después de inversiones)</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">Resumen mensual</div>
+  <div class="er-metric-btns" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+    <button type="button" class="btn btn-secondary btn-sm active" data-er-view="real">Real</button>
+    <button type="button" class="btn btn-secondary btn-sm" data-er-view="ppto">Presupuesto</button>
+    <button type="button" class="btn btn-secondary btn-sm" data-er-view="var">Variación</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped er-table er-show-real" id="er-table">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          {% for month_name, month_number in month_options %}
+          <th>{{ month_name|slice:":3"|capfirst }}</th>
+          {% endfor %}
+          <th>Anual</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in filas %}
+        <tr{% if fila.kind == "total" %} class="er-row-total"{% endif %}>
+          <td>
+            {% if fila.area %}<a href="{% url 'reportes:presupuesto_vs_real' %}?year={{ selected_year }}&area={{ fila.area }}">{{ fila.label }}</a>{% else %}{{ fila.label }}{% endif %}
+          </td>
+          {% for celda in fila.meses %}
+          <td>
+            <span class="er-val er-val-real{% if celda.real is not None and celda.real < 0 %} er-neg{% endif %}">{% if celda.real is not None %}${{ celda.real|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+            <span class="er-val er-val-ppto{% if celda.ppto < 0 %} er-neg{% endif %}">${{ celda.ppto|floatformat:0|intcomma }}</span>
+            <span class="er-val er-val-var{% if celda.var is not None and celda.var < 0 %} er-neg{% endif %}">{% if celda.var is not None %}${{ celda.var|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+          </td>
+          {% endfor %}
+          <td>
+            <span class="er-val er-val-real{% if fila.anual_real is not None and fila.anual_real < 0 %} er-neg{% endif %}">{% if fila.anual_real is not None %}${{ fila.anual_real|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+            <span class="er-val er-val-ppto{% if fila.anual_ppto < 0 %} er-neg{% endif %}">${{ fila.anual_ppto|floatformat:0|intcomma }}</span>
+            <span class="er-val er-val-var{% if fila.anual_var is not None and fila.anual_var < 0 %} er-neg{% endif %}">{% if fila.anual_var is not None %}${{ fila.anual_var|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">Variación = real − presupuesto. En la vista Real, el acumulado "Anual" suma solo los meses que ya tienen datos; el real anual de utilidades usa como base los meses con ingresos consolidados, así que si a un área le falta consolidar un mes la utilidad de ese mes puede venir incompleta.</p>
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var tabla = document.getElementById("er-table");
+    var botones = document.querySelectorAll("[data-er-view]");
+    botones.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        tabla.classList.remove("er-show-real", "er-show-ppto", "er-show-var");
+        tabla.classList.add("er-show-" + btn.dataset.erView);
+        botones.forEach(function (b) { b.classList.remove("active"); });
+        btn.classList.add("active");
+      });
+    });
+  })();
+</script>
+{% endblock %}

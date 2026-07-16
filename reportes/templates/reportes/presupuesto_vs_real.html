@@ -70,6 +70,7 @@
       <button class="btn btn-primary" type="submit">Actualizar</button>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=xlsx">Exportar Excel</a>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=csv">Exportar CSV</a>
+      <a class="btn btn-secondary" href="{% url 'reportes:estado_resultados' %}?year={{ selected_year }}">Estado de resultados</a>
       <a class="btn btn-secondary" href="{% url 'reportes:presupuesto_real_captura' %}?year={{ selected_year }}&month={{ selected_month }}">Ir a captura</a>
       <a class="btn btn-secondary" href="{% url 'reportes:cedula_imss_importar' %}">Cédulas IMSS</a>
     </div>

@@ -2168,3 +2168,85 @@ class AreaResultadosTests(TestCase):
         # Seleccionando el área de control sí se ve su propio total.
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
         self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("4000000.00"))
+
+
+class EstadoResultadosTests(TestCase):
+    """P&L empresa completa: utilidades calculadas y MP sin doble conteo."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        cls.superuser = get_user_model().objects.create_superuser(
+            "dg_pnl", "dgp@test.mx", "clave-test"
+        )
+        cls.periodo = date(2026, 2, 1)
+
+        def rubro(area, concepto, tipo=RubroPresupuesto.TIPO_EGRESO):
+            return RubroPresupuesto.objects.create(area=area, concepto=concepto, tipo=tipo)
+
+        def linea(rubro_obj, ppto, real=None, periodo=None):
+            return LineaPresupuestoMensual.objects.create(
+                rubro=rubro_obj, periodo=periodo or cls.periodo,
+                monto_presupuesto=Decimal(ppto),
+                monto_real=Decimal(real) if real is not None else None,
+                fuente_real="AUTO:LEGADO" if real is not None else "",
+            )
+
+        resultados = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        gastos = AreaPresupuesto.objects.create(nombre="Gastos de venta", codigo="gastos-venta")
+        produccion = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        capex = AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+
+        linea(rubro(resultados, "Venta postres", RubroPresupuesto.TIPO_INGRESO), "1000", "900")
+        linea(rubro(resultados, "Costos insumos"), "400", "350")
+        linea(rubro(gastos, "Renta"), "100", "90")
+        rubro_mo = rubro(produccion, "Mano de obra")
+        linea(rubro_mo, "50", "40")
+        # Materia prima en producción: tiene regla CONSUMO_MP → NO debe sumar
+        rubro_mp = rubro(produccion, "Queso crema")
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro_mp, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={},
+        )
+        linea(rubro_mp, "400", "350")
+        linea(rubro(capex, "Horno nuevo"), "200", "100")
+        linea(rubro(nomina, "Sueldos control"), "9999", "9999")
+        # Marzo: solo presupuesto, sin real → columnas reales en blanco
+        linea(rubro(gastos, "Renta marzo"), "100", periodo=date(2026, 3, 1))
+
+    def _get(self):
+        self.client.force_login(self.superuser)
+        return self.client.get("/reportes/estado-resultados/?year=2026")
+
+    def test_utilidades_y_exclusiones(self):
+        filas = {f["label"]: f for f in self._get().context["filas"]}
+        feb = 1  # índice del mes 2
+        # Utilidad bruta = 1000-400 ppto, 900-350 real
+        self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["ppto"], Decimal("600"))
+        self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["real"], Decimal("550"))
+        # Producción excluye MP (solo mano de obra 50/40)
+        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["ppto"], Decimal("50"))
+        # Operativa = 600-150 ppto, 550-130 real
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["ppto"], Decimal("450"))
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["real"], Decimal("420"))
+        # Resultado final = operativa - capex
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["ppto"], Decimal("250"))
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["real"], Decimal("320"))
+
+    def test_mes_sin_real_queda_en_blanco_y_nomina_fuera(self):
+        filas = {f["label"]: f for f in self._get().context["filas"]}
+        mar = 2
+        self.assertIsNone(filas["Gastos de venta"]["meses"][mar]["real"])
+        self.assertEqual(filas["Gastos de venta"]["meses"][mar]["ppto"], Decimal("100"))
+        # Nómina (control) no aparece en ninguna fila
+        anual_egresos = sum(f["anual_ppto"] for f in filas.values() if f["kind"] == "linea")
+        self.assertLess(anual_egresos, Decimal("9999"))
+        # Anual real de utilidad solo suma meses con ingresos reales
+        self.assertEqual(filas["Resultado final"]["anual_real"], Decimal("320"))
+
+    def test_requiere_login(self):
+        response = self.client.get("/reportes/estado-resultados/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response["Location"])
