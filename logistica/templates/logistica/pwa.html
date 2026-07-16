@@ -3174,6 +3174,7 @@
       }
 
       function segmentoCargaOperativo(lineas, paradas) {
+        lineas = (lineas || []).filter((linea) => linea.point_enviada === true);
         const todas = (paradas || []).map((parada) => ({
           orden: Number(parada.orden || 0),
           tipo: (parada.punto?.tipo || "").toUpperCase(),
@@ -5663,7 +5664,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v72-copy-inicio-gps", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v73-solo-enviado-point", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

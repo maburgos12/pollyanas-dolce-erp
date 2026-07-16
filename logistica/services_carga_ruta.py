@@ -413,6 +413,23 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             lineas_superadas += 1
     for linea in checklist_lines:
         point_line = linea.point_transfer_line
+        if (
+            linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            and point_line is not None
+            and not point_transfer_enviada(point_line)
+        ):
+            linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+            linea.superada_por = None
+            nota = "Solicitud Point sin Enviado; se conserva solo para auditoría."
+            if nota not in linea.notas:
+                linea.notas = " ".join(
+                    value for value in [linea.notas.strip(), nota] if value
+                )
+            linea.save(
+                update_fields=["estatus", "superada_por", "notas", "actualizado_en"]
+            )
+            lineas_superadas += 1
+            continue
         retorno_a_cedis = bool(
             point_line
             and point_line.erp_origin_branch_id in branch_ids
@@ -465,6 +482,9 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     actualizadas = lineas_superadas
     omitidas = 0
     for line in candidates:
+        if not point_transfer_enviada(line):
+            omitidas += 1
+            continue
         branch = resolve_requesting_erp_branch(line)
         if branch is None or branch.id not in paradas_by_branch:
             omitidas += 1
@@ -956,14 +976,27 @@ def _actualizar_checklist_carga_desde_point(
     checklist.save(update_fields=sync_fields)
     omitidas = checklist.lineas.filter(parada__punto__tipo=PuntoLogistico.TIPO_CEDIS, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()[0]
 
-    creadas, actualizadas, omitidas_consolidado = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
-    omitidas += omitidas_consolidado
-    if creadas or actualizadas:
-        checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exclude(
-            source_hash__startswith="cedis-reabasto-"
-        ).delete()
-        checklist.notas = "Carga esperada generada desde consolidado CEDIS."
-        checklist.save(update_fields=["notas", "actualizado_en"])
+    creadas = 0
+    actualizadas = 0
+    solicitudes_consolidadas = list(
+        checklist.lineas.filter(
+            point_transfer_line__isnull=True,
+            source_hash__startswith="cedis-reabasto-",
+        ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+    )
+    for solicitud in solicitudes_consolidadas:
+        solicitud.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        solicitud.superada_por = None
+        nota = "Solicitud CEDIS sin Enviado Point; se conserva solo para auditoría."
+        if nota not in solicitud.notas:
+            solicitud.notas = " ".join(
+                value for value in [solicitud.notas.strip(), nota] if value
+            )
+        solicitud.save(
+            update_fields=["estatus", "superada_por", "notas", "actualizado_en"]
+        )
+        actualizadas += 1
+    omitidas += len(solicitudes_consolidadas)
     creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(
         ruta=ruta,
         checklist=checklist,
@@ -1220,7 +1253,16 @@ def validar_producto_tramo_carga(
 
 def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     checklist = getattr(ruta, "checklist_carga", None)
-    if not checklist or not checklist.lineas.exists():
+    if not checklist:
+        return None
+    if (
+        checklist.sincronizado_en
+        or checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA
+    ) and not checklist.lineas.exclude(
+        estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+    ).exists():
+        return "sincroniza la carga enviada desde Point antes de liberar la ruta"
+    if not checklist.lineas.exists():
         return None
     if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
         lineas_salida = lineas_tramo_operativo_actual(

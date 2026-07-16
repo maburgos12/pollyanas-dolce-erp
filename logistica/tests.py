@@ -1597,9 +1597,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v72-copy-inicio-gps"},
+            {"route-control-v73-solo-enviado-point"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v72-copy-inicio-gps", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v73-solo-enviado-point", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -2153,6 +2153,28 @@ class LogisticaReglasAdyacentesStabilizationTests(TestCase):
         self.assertEqual(linea.client_event_id, "")
         self.assertFalse(linea.evidencias_entrega.exists())
         self.assertIsNone(checklist_bloquea_salida(ruta))
+
+    def test_solicitud_sin_enviado_no_entra_al_checklist_operativo(self):
+        ruta, _ = self._crear_ruta()
+        transferencia = self._crear_transferencia(
+            requested="3.000",
+            sent="0.000",
+            source_hash="solo-solicitado",
+        )
+        PointTransferLine.objects.filter(pk=transferencia.pk).update(sent_at=None)
+        transferencia.refresh_from_db()
+
+        resumen = sincronizar_checklist_carga_desde_point(
+            ruta=ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
+
+        self.assertFalse(
+            resumen.checklist.lineas.exclude(
+                estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            ).filter(point_transfer_line=transferencia).exists()
+        )
 
     def _linea_validada_con_cuatro(self, *, source_hash):
         ruta, _ = self._crear_ruta()
@@ -4984,9 +5006,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v72-copy-inicio-gps", pwa_html)
+        self.assertIn("?v=route-control-v73-solo-enviado-point", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v72-copy-inicio-gps", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v73-solo-enviado-point", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5111,7 +5133,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v72-copy-inicio-gps", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v73-solo-enviado-point", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -7135,25 +7157,22 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta API Directa").exists())
 
-    def test_checklist_carga_se_genera_desde_solicitud_cedis_enviada(self):
-        ruta, parada = self._crear_ruta_planeada_para_carga()
-        solicitud, linea_solicitud, receta = self._crear_solicitud_cedis(ruta=ruta)
+    def test_checklist_carga_no_se_genera_desde_solicitud_cedis(self):
+        ruta, _ = self._crear_ruta_planeada_para_carga()
+        self._crear_solicitud_cedis(ruta=ruta)
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        self.assertEqual(resumen.creadas, 1)
-        linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist)
-        self.assertEqual(linea.parada, parada)
-        self.assertIsNone(linea.point_transfer_line)
-        self.assertEqual(linea.transfer_external_id, solicitud.folio)
-        self.assertEqual(linea.item_code, receta.codigo_point)
-        self.assertEqual(linea.cantidad_solicitada, Decimal(str(linea_solicitud.solicitado)))
-        self.assertEqual(linea.cantidad_enviada_esperada, Decimal("0.000"))
-        self.assertIn("Point", linea.notas)
-        self.assertEqual(linea.source_hash, f"cedis-reabasto-{ruta.fecha_ruta:%Y%m%d}-{self.sucursal.id}-{receta.id}")
+        self.assertEqual(resumen.creadas, 0)
+        self.assertFalse(
+            resumen.checklist.lineas.exclude(
+                estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            ).exists()
+        )
+        ruta.refresh_from_db()
         self.assertEqual(
             checklist_bloquea_salida(ruta),
-            "confirma todas las líneas de carga antes de liberar la ruta",
+            "sincroniza la carga enviada desde Point antes de liberar la ruta",
         )
 
     def test_checklist_carga_mantiene_folios_distintos_independientes(self):
@@ -7172,12 +7191,13 @@ class LogisticaControlRutasTests(TestCase):
 
         resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=self.user, ejecutar_sync=False)
 
-        linea_cero = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=sin_enviado.source_hash)
-        self.assertEqual(linea_cero.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertEqual(linea_cero.cantidad_enviada_esperada, Decimal("0.000"))
-        self.assertIn("aún no registra Enviado", linea_cero.notas)
+        self.assertFalse(
+            RutaCargaChecklistLinea.objects.filter(
+                checklist=resumen.checklist,
+                source_hash=sin_enviado.source_hash,
+            ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA).exists()
+        )
         linea = RutaCargaChecklistLinea.objects.get(checklist=resumen.checklist, source_hash=enviado.source_hash)
-        self.assertIsNone(linea_cero.superada_por)
         self.assertNotEqual(linea.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
         self.assertEqual(linea.cantidad_enviada_esperada, Decimal("5.000"))
 
@@ -8537,7 +8557,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("lineas.some(lineaPendientePoint)", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v72-copy-inicio-gps", pwa_html)
+        self.assertIn("route-control-v73-solo-enviado-point", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()

@@ -4601,8 +4601,8 @@ if (operation === "segment") {
     {orden: 4, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true},
     {orden: 5, punto: {tipo: "SUCURSAL"}, estado: "PENDIENTE", entrega_estado: "PENDIENTE", operativamente_resuelta: false}
   ];
-  const oldLine = {id: 1, parada_orden: 2, item_name: "Tramo anterior"};
-  const newLine = {id: 2, parada_orden: 5, item_name: "Tramo actual"};
+  const oldLine = {id: 1, parada_orden: 2, item_name: "Tramo anterior", point_enviada: true};
+  const newLine = {id: 2, parada_orden: 5, item_name: "Tramo actual", point_enviada: true};
   const current = vm.runInContext(`segmentoCargaOperativo(${JSON.stringify([oldLine, newLine])}, ${JSON.stringify(stops)})`, context);
   const empty = vm.runInContext(`segmentoCargaOperativo(${JSON.stringify([oldLine])}, ${JSON.stringify(stops)})`, context);
   process.stdout.write(JSON.stringify({current: current.lineas.map((row) => row.id), empty: empty.lineas.map((row) => row.id)}));
@@ -4767,22 +4767,23 @@ if (operation === "segment") {
         self.assertNotIn("validarCargaProductoTramo", rendered)
         self.assertNotIn("Guardar sucursal", rendered)
 
-    def test_pwa_cantidad_positiva_sin_transicion_enviado_bloquea_captura(self):
+    def test_pwa_cantidad_solo_solicitada_no_se_muestra_en_captura(self):
         rendered = self.run_pwa_contract("positive-untransitioned")
 
-        self.assertIn("espera confirmación de Enviado en Point", rendered)
+        self.assertNotIn("espera confirmación de Enviado en Point", rendered)
+        self.assertNotIn("Producto pendiente Point", rendered)
         self.assertNotIn("Confirmar</button>", rendered)
         self.assertNotIn('id="cantidad-sucursal-', rendered)
         self.assertNotIn("validarCargaProductoTramo", rendered)
         self.assertNotIn("Guardar sucursal", rendered)
 
-    def test_pwa_pendiente_de_point_permanece_bloqueado_y_no_cuenta_como_revisado(self):
+    def test_pwa_pendiente_solo_solicitado_no_aparece_en_sucursal(self):
         result = json.loads(self.run_pwa_contract("pending-point"))
 
-        self.assertEqual(result["summary"], "0 de 1 producto revisado.")
-        self.assertIn("0 de 1 productos revisados", result["branches"])
-        self.assertIn("espera confirmación de Enviado en Point", result["rendered"])
-        self.assertIn("bloqueada", result["rendered"])
+        self.assertEqual(result["summary"], "Sin carga física pendiente en este tramo.")
+        self.assertNotIn("0 de 1 productos revisados", result["branches"])
+        self.assertNotIn("espera confirmación de Enviado en Point", result["rendered"])
+        self.assertNotIn("bloqueada", result["rendered"])
         self.assertNotIn("Carga revisada.", result["rendered"])
         self.assertNotIn('id="cantidad-sucursal-', result["rendered"])
 
@@ -5017,7 +5018,7 @@ if (operation === "segment") {
         self.ruta.refresh_from_db()
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
-    def test_solicitud_sin_transicion_bloquea_recarga_y_genera_alerta(self):
+    def test_solicitud_sin_enviado_equivale_a_sin_lineas_para_recarga(self):
         first, second, _third = self.branch_stops
         first.estado = ParadaRuta.ESTADO_VISITADA
         first.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
@@ -5041,7 +5042,7 @@ if (operation === "segment") {
             "logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point",
             side_effect=lambda **kwargs: self.sync_cache(),
         ):
-            with self.assertRaises(RecargaCedisPendienteEnviado) as captured:
+            with self.assertRaises(RecargaCedisSinLineasPoint) as captured:
                 registrar_recarga_cedis(
                     ruta=self.ruta,
                     user=self.user,
@@ -5049,14 +5050,14 @@ if (operation === "segment") {
                     notas="No debe avanzar",
                 )
 
-        self.assertEqual(getattr(captured.exception, "estado_sync", None), "PENDIENTE_ENVIADO")
+        self.assertEqual(getattr(captured.exception, "estado_sync", None), "SIN_LINEAS_POINT")
         self.cedis_regreso.refresh_from_db()
         self.assertEqual(self.cedis_regreso.estado, ParadaRuta.ESTADO_PENDIENTE)
         self.assertTrue(
             EventoRuta.objects.filter(
                 ruta=self.ruta,
                 parada=self.cedis_regreso,
-                metadata__estado_sync="PENDIENTE_ENVIADO",
+                metadata__estado_sync="SIN_LINEAS_POINT",
             ).exists()
         )
         pending.refresh_from_db()
@@ -5103,8 +5104,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v72-copy-inicio-gps")
-        self.assertIn("?v=route-control-v72-copy-inicio-gps", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v73-solo-enviado-point")
+        self.assertIn("?v=route-control-v73-solo-enviado-point", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
