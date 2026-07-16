@@ -1648,12 +1648,17 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
             .values_list("parada_id", flat=True)
         )
 
+        try:
+            contexto_operativo = contexto_operativo_dict(construir_contexto_operativo(ruta=ruta, actor=request.user))
+            contexto_advertencia = ""
+        except ValidationError as exc:
+            contexto_operativo = None
+            contexto_advertencia = "; ".join(exc.messages)
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
-                "contexto_operativo": contexto_operativo_dict(
-                    construir_contexto_operativo(ruta=ruta, actor=request.user)
-                ),
+                "contexto_operativo": contexto_operativo,
+                "contexto_operativo_advertencia": contexto_advertencia,
                 "paradas": ParadaRutaSerializer(
                     ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"),
                     many=True,
@@ -1741,8 +1746,13 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
         data = dict(RutaCargaChecklistSerializer(checklist, context={"request": request}).data)
         if solo_tramo_actual:
-            contexto = construir_contexto_operativo(ruta=ruta, actor=request.user)
-            data["contexto_operativo"] = contexto_operativo_dict(contexto)
+            try:
+                contexto = construir_contexto_operativo(ruta=ruta, actor=request.user)
+            except ValidationError as exc:
+                data["contexto_operativo"] = None
+                data["contexto_operativo_advertencia"] = "; ".join(exc.messages)
+            else:
+                data["contexto_operativo"] = contexto_operativo_dict(contexto)
         return Response(data, status=status.HTTP_200_OK)
 
 
