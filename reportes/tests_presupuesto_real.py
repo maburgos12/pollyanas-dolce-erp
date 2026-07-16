@@ -2328,3 +2328,73 @@ class HojaGeneralNoImportaTests(TestCase):
         call_command("desactivar_rubros_hoja_general", "--dry-run", stdout=StringIO())
         fantasma.refresh_from_db()
         self.assertTrue(fantasma.activo)
+
+
+class TotalEmpresaReglasTests(TestCase):
+    """Reglas total_empresa: los renglones del P&L leen fuentes vivas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.periodo = date(2026, 6, 1)
+        cls.area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        cls.rubro_ventas = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        cls.rubro_costos = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Costos insumos/productos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=cls.rubro_ventas, periodo=cls.periodo,
+            monto_presupuesto=Decimal("100"), monto_real=Decimal("55"),
+            fuente_real="AUTO:LEGADO",  # el Excel parcial que debe pisarse
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=cls.rubro_costos, periodo=cls.periodo, monto_presupuesto=Decimal("50"),
+        )
+
+    def test_venta_total_empresa_pisa_legado(self):
+        sucursal = Sucursal.objects.create(nombre="Matriz", codigo="MATRIZ")
+        branch = PointBranch.objects.create(external_id="b1", name="Matriz", erp_branch=sucursal)
+        for categoria, producto, monto in (("PASTELES", "Pastel X", "30"), ("BOLLOS", "Bollo Y", "12")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=self.periodo, sucursal_nombre=branch.name,
+                categoria=categoria, producto_nombre_historico=producto,
+                total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_ventas, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True, "campo_monto": "total_venta"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_ventas, periodo=self.periodo)
+        self.assertEqual(linea.monto_real, Decimal("42"))
+        self.assertEqual(linea.fuente_real, "AUTO:VENTA_POS")
+
+    def test_consumo_total_empresa(self):
+        from inventario.models import ConsumoInsumoMensual
+        from maestros.models import Insumo
+
+        a = Insumo.objects.create(nombre="Harina P&L")
+        b = Insumo.objects.create(nombre="Azúcar P&L")
+        ConsumoInsumoMensual.objects.create(insumo=a, periodo=self.periodo, costo_real=Decimal("20"))
+        ConsumoInsumoMensual.objects.create(insumo=b, periodo=self.periodo, costo_real=Decimal("15"))
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_costos, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"total_empresa": True},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_costos, periodo=self.periodo)
+        self.assertEqual(linea.monto_real, Decimal("35"))
+        self.assertEqual(linea.fuente_real, "AUTO:CONSUMO_MP")
+
+    def test_limpiar_sin_asignacion_respeta_total_empresa(self):
+        from reportes.services_presupuesto_real import limpiar_reales_sin_asignacion
+
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_ventas, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True},
+        )
+        limpiadas = limpiar_reales_sin_asignacion()
+        self.assertEqual(limpiadas, 0)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_ventas, periodo=self.periodo)
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
