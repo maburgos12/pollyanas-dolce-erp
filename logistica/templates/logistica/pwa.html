@@ -1975,6 +1975,11 @@
         return normalized;
       }
 
+      function descartarCapturasCargaEncoladas(rutaId) {
+        const prefix = `/rutas/${Number(rutaId)}/carga-checklist/`;
+        saveOfflineMutationQueue(loadOfflineMutationQueue().filter((item) => !String(item?.path || "").startsWith(prefix)));
+      }
+
       function purgeOfflineMutationQueue() {
         saveOfflineMutationQueue(loadOfflineMutationQueue());
       }
@@ -2982,14 +2987,26 @@
         draft[field] = value;
       }
 
-      function cargaProductoDraftFor(index, esperado) {
-        state.rutaCargaProductoDraft[index] = state.rutaCargaProductoDraft[index] || { cantidad: esperado.toFixed(3), guardando: false };
-        return state.rutaCargaProductoDraft[index];
+      function productoCargaKey(producto) {
+        const itemCode = normalizarIdentidadCarga(producto?.item_code);
+        const itemName = normalizarIdentidadCarga(producto?.item_name);
+        const unit = normalizarIdentidadCarga(producto?.unit);
+        return `${itemCode ? `CODIGO:${itemCode}` : `NOMBRE:${itemName}`}|UNIDAD:${unit}`;
+      }
+
+      function cargaProductoDraftFor(productoKey, esperado) {
+        state.rutaCargaProductoDraft[productoKey] = state.rutaCargaProductoDraft[productoKey] || { cantidad: esperado.toFixed(3), guardando: false };
+        return state.rutaCargaProductoDraft[productoKey];
       }
 
       function updateCargaProductoTotal(index, value) {
-        state.rutaCargaProductoDraft[index] = state.rutaCargaProductoDraft[index] || { cantidad: value, guardando: false };
-        state.rutaCargaProductoDraft[index].cantidad = value;
+        const rutaData = state.rutaActiva;
+        const segmento = segmentoCargaOperativo(rutaData?.checklist_carga?.lineas || [], rutaData?.paradas || []);
+        const producto = totalesCargaPorProducto(segmento.lineas).filter(productoCargaVisible)[index];
+        if (!producto) return;
+        const key = productoCargaKey(producto);
+        state.rutaCargaProductoDraft[key] = state.rutaCargaProductoDraft[key] || { cantidad: value, guardando: false };
+        state.rutaCargaProductoDraft[key].cantidad = value;
       }
 
       function segmentoCargaOperativo(lineas, paradas) {
@@ -3123,7 +3140,7 @@
               ${totalesConCarga.map((totalProducto, index) => {
                 const pendienteCaptura = totalProducto.lineas.some(lineaPendienteCaptura);
                 const pendientePoint = totalProducto.lineas.every(lineaPendientePoint);
-                const draftProducto = cargaProductoDraftFor(index, totalProducto.esperado);
+                const draftProducto = cargaProductoDraftFor(productoCargaKey(totalProducto), totalProducto.esperado);
                 return `
                 <section class="route-stop visited">
                   <span class="route-stop-number">Σ</span>
@@ -3434,7 +3451,8 @@
         if (totalProducto.lineas.every(lineaPendientePoint)) {
           return renderRutaScreen("Point aún no confirma Enviado para este producto; la captura sigue bloqueada.");
         }
-        const draft = cargaProductoDraftFor(index, totalProducto.esperado);
+        const productoKey = productoCargaKey(totalProducto);
+        const draft = cargaProductoDraftFor(productoKey, totalProducto.esperado);
         const cantidad = String(draft.cantidad || "").trim();
         if (!cantidad) return renderRutaScreen("Captura la cantidad total cargada.");
         draft.guardando = true;
@@ -3458,7 +3476,7 @@
             const error = await response.json().catch(() => ({}));
             return renderRutaScreen(apiErrorMessage(error, "No se pudo confirmar la carga total."));
           }
-          delete state.rutaCargaProductoDraft[index];
+          delete state.rutaCargaProductoDraft[productoKey];
           state.rutaActiva = null;
           return renderRutaScreen(responseQueuedOffline(response) ? queuedSuccessMessage("Carga total del producto") : "✅ Carga total confirmada.");
         } catch (error) {
@@ -3555,6 +3573,9 @@
           if (responseQueuedOffline(response)) {
             return renderRutaActiva("La recarga CEDIS requiere conexión y no puede quedar pendiente en el dispositivo.");
           }
+          state.rutaCargaDraft = {};
+          state.rutaCargaProductoDraft = {};
+          descartarCapturasCargaEncoladas(rutaId);
           state.rutaActiva = null;
           const estado_sync = data.estado_sync || "ACTUALIZADO";
           if (estado_sync === "AUTORIZADO") {
@@ -5271,7 +5292,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v66-carga-estable", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v67-carga-tramo-segura", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
