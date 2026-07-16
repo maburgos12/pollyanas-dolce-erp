@@ -3262,7 +3262,7 @@
         }, new Map()).values()).sort((a, b) => a.item_name.localeCompare(b.item_name));
       }
 
-      function renderChecklistCarga(checklist, paradas = []) {
+      function renderChecklistCargaLegacyTotales(checklist, paradas = []) {
         if (!checklist) return "";
         const lineas = checklist.lineas || [];
         const segmento = segmentoCargaOperativo(lineas, paradas);
@@ -3694,6 +3694,7 @@
 
       function diferenciasCargaSucursal() {
         return cargaSucursalLineas(state.cargaSucursal.paradaId).filter((linea) => {
+          if (lineaPendientePoint(linea) || linea.estatus === "ZERO_EXPECTED") return false;
           const draft = cargaSucursalDraft(linea);
           return Number(draft.cantidad) !== Number(linea.cantidad_enviada_esperada || 0);
         });
@@ -3701,7 +3702,7 @@
 
       function abrirModalDiferencias() {
         const lineas = cargaSucursalLineas(state.cargaSucursal.paradaId);
-        if (lineas.some((linea) => String(cargaSucursalDraft(linea).cantidad).trim() === "" || Number(cargaSucursalDraft(linea).cantidad) < 0)) {
+        if (lineas.filter((linea) => linea.estatus !== "ZERO_EXPECTED").some((linea) => String(cargaSucursalDraft(linea).cantidad).trim() === "" || Number(cargaSucursalDraft(linea).cantidad) < 0)) {
           return renderRutaCarga("Captura cantidades válidas para todos los productos.");
         }
         if (!diferenciasCargaSucursal().length) return guardarCargaSucursal();
@@ -3769,6 +3770,8 @@
         const nombre = todas[0]?.parada_nombre || "Sucursal";
         const query = normalizarIdentidadCarga(state.cargaSucursal.busqueda);
         const visibles = todas.filter((linea) => !query || normalizarIdentidadCarga(`${linea.item_name} ${linea.item_code}`).includes(query));
+        const capturables = todas.filter((linea) => !lineaPendientePoint(linea) && linea.estatus !== "ZERO_EXPECTED");
+        const pendientesPoint = todas.filter(lineaPendientePoint);
         return `<section class="card route-card-pwa">
           <button class="secondary-btn" type="button" onclick="volverResumenCarga()">← Sucursales</button>
           <h2 style="color:var(--gold-text);">${escapeHtml(nombre)}</h2>
@@ -3776,10 +3779,13 @@
           <div class="load-search"><label for="buscar-carga-sucursal">Buscar producto o código</label><input id="buscar-carga-sucursal" type="search" placeholder="Buscar producto o código" value="${escapeHtml(state.cargaSucursal.busqueda)}" oninput="actualizarBusquedaCarga(this.value)"></div>
           <div class="load-product-list">${visibles.map((linea) => {
             const draft = cargaSucursalDraft(linea);
-            return `<div class="load-product-row"><div><strong>${escapeHtml(linea.item_name)}</strong><span>${escapeHtml(linea.item_code || "Sin código")} · Enviado ${escapeHtml(linea.cantidad_enviada_esperada)} ${escapeHtml(linea.unit || "")}</span></div><label class="sr-only" for="cantidad-sucursal-${linea.id}">Cantidad cargada de ${escapeHtml(linea.item_name)}</label><input id="cantidad-sucursal-${linea.id}" type="number" min="0" step="0.001" inputmode="decimal" value="${escapeHtml(draft.cantidad)}" oninput="actualizarCantidadSucursal(${linea.id}, this.value)"></div>`;
+            const pendientePoint = lineaPendientePoint(linea);
+            const enviadoCero = linea.estatus === "ZERO_EXPECTED";
+            return `<div class="load-product-row"><div><strong>${escapeHtml(linea.item_name)}</strong><span>${escapeHtml(linea.item_code || "Sin código")} · Enviado ${escapeHtml(linea.cantidad_enviada_esperada)} ${escapeHtml(linea.unit || "")}</span>${pendientePoint ? `<div class="daily-banner warning" style="margin-top:10px;">Este producto espera confirmación de Enviado en Point; la carga permanece bloqueada y no solicita captura.</div>` : enviadoCero ? `<div class="daily-banner" style="margin-top:10px;">${escapeHtml(linea.notas || "Point confirmó enviado final en cero; no requiere captura.")}</div>` : ""}</div>${pendientePoint || enviadoCero ? "" : `<label class="sr-only" for="cantidad-sucursal-${linea.id}">Cantidad cargada de ${escapeHtml(linea.item_name)}</label><input id="cantidad-sucursal-${linea.id}" type="number" min="0" step="0.001" inputmode="decimal" value="${escapeHtml(draft.cantidad)}" oninput="actualizarCantidadSucursal(${linea.id}, this.value)">`}</div>`;
           }).join("")}</div>
           ${visibles.length ? "" : `<p class="muted">No hay productos que coincidan con la búsqueda.</p>`}
-          <div class="load-save-bar"><button class="primary-btn" type="button" onclick="abrirModalDiferencias()" ${state.cargaSucursal.guardando ? "disabled" : ""}>${state.cargaSucursal.guardando ? "Guardando…" : "Guardar sucursal"}</button></div>
+          ${pendientesPoint.length ? `<div class="daily-banner warning">Los productos pendientes de Enviado quedan fuera de esta captura y no detienen los que ya están enviados.</div>` : ""}
+          ${capturables.length ? `<div class="load-save-bar"><button class="primary-btn" type="button" onclick="abrirModalDiferencias()" ${state.cargaSucursal.guardando ? "disabled" : ""}>${state.cargaSucursal.guardando ? "Guardando…" : "Guardar sucursal"}</button></div>` : `<div class="daily-banner">La sucursal no requiere captura física por ahora.</div>`}
         </section>${renderModalDiferencias()}`;
       }
 
@@ -3794,7 +3800,9 @@
         const paradaId = state.cargaSucursal.paradaId;
         const contexto = state.rutaActiva?.contexto_operativo;
         const lineas = cargaSucursalLineas(paradaId);
+        const capturables = lineas.filter((linea) => !lineaPendientePoint(linea) && linea.estatus !== "ZERO_EXPECTED");
         if (!rutaId || !paradaId || !contexto?.token) return renderRutaCarga("Actualiza la ruta para recuperar el contexto operativo.");
+        if (!capturables.length) return renderRutaCarga("Esta sucursal todavía no tiene productos enviados que requieran captura.");
         const diferencias = diferenciasCargaSucursal();
         if (diferencias.some((linea) => !cargaSucursalDraft(linea).motivo)) return renderRutaCarga("Selecciona un motivo para cada diferencia.");
         state.cargaSucursal.guardando = true;
@@ -3807,7 +3815,7 @@
               contexto_token: contexto.token,
               version_checklist: contexto.version_checklist,
               client_event_id: newClientEventId(),
-              lineas: lineas.map((linea) => ({ linea_id: linea.id, source_hash: linea.source_hash, cantidad_cargada: cargaSucursalDraft(linea).cantidad, motivo_diferencia: cargaSucursalDraft(linea).motivo, notas: cargaSucursalDraft(linea).notas })),
+              lineas: capturables.map((linea) => ({ linea_id: linea.id, source_hash: linea.source_hash, cantidad_cargada: cargaSucursalDraft(linea).cantidad, motivo_diferencia: cargaSucursalDraft(linea).motivo, notas: cargaSucursalDraft(linea).notas })),
             }),
           });
           if (!response.ok) {
@@ -5655,7 +5663,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v70-tutorial-carga-sucursal", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v71-reglas-point-sucursal", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

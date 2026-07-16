@@ -25,6 +25,7 @@ from logistica.services_carga_sucursal import (
     guardar_carga_sucursal,
 )
 from logistica.services_contexto_operativo import construir_contexto_operativo
+from pos_bridge.models import PointBranch, PointTransferLine
 
 
 User = get_user_model()
@@ -187,6 +188,33 @@ class GuardarCargaSucursalTests(PersistenciaCargaSucursalTests):
             lineas=lineas or self.payload(),
         )
 
+    def asociar_point(self, linea, *, enviada, sent="0"):
+        origin = PointBranch.objects.create(external_id=f"AT-O-{linea.id}", name="CEDIS")
+        destination = PointBranch.objects.create(
+            external_id=f"AT-D-{linea.id}",
+            name=self.sucursal.nombre,
+            erp_branch=self.sucursal,
+        )
+        point_line = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            erp_destination_branch=self.sucursal,
+            transfer_external_id=f"AT-P-{linea.id}",
+            detail_external_id=f"AT-PD-{linea.id}",
+            source_hash=f"at-point-{linea.id}",
+            registered_at=timezone.now(),
+            sent_at=timezone.now() if enviada else None,
+            item_name=linea.item_name,
+            item_code=linea.item_code,
+            unit=linea.unit,
+            requested_quantity=linea.cantidad_solicitada,
+            sent_quantity=sent,
+            raw_payload={"transfer": {"isEnviado": enviada}},
+        )
+        linea.point_transfer_line = point_line
+        linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+        return point_line
+
     def test_guarda_todas_las_lineas_de_la_sucursal(self):
         respuesta = self.guardar()
 
@@ -196,6 +224,33 @@ class GuardarCargaSucursalTests(PersistenciaCargaSucursalTests):
         self.assertEqual(self.linea_2.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
         self.assertEqual(respuesta["parada_id"], self.parada.id)
         self.assertEqual(respuesta["lineas_guardadas"], 2)
+
+    def test_producto_pendiente_point_no_bloquea_los_que_ya_estan_enviados(self):
+        self.asociar_point(self.linea, enviada=False, sent="10")
+        self.contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
+
+        respuesta = self.guardar(lineas=[self.payload()[1]])
+
+        self.linea.refresh_from_db()
+        self.linea_2.refresh_from_db()
+        self.assertEqual(self.linea.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+        self.assertEqual(self.linea_2.estatus, RutaCargaChecklistLinea.ESTATUS_CARGADA)
+        self.assertEqual(respuesta["lineas_guardadas"], 1)
+        self.assertEqual(RutaCargaSucursalEvento.objects.count(), 1)
+
+    def test_enviado_cero_permanece_visible_sin_convertirse_en_cargada(self):
+        self.asociar_point(self.linea, enviada=True, sent="0")
+        self.linea.cantidad_enviada_esperada = Decimal("0")
+        self.linea.cantidad_cargada = Decimal("0")
+        self.linea.estatus = RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED
+        self.linea.save(update_fields=["cantidad_enviada_esperada", "cantidad_cargada", "estatus", "actualizado_en"])
+        self.contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
+
+        self.guardar(lineas=[self.payload(cantidad_1="0")[1]])
+
+        self.linea.refresh_from_db()
+        self.assertEqual(self.linea.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+        self.assertEqual(self.linea.cantidad_cargada, Decimal("0"))
 
     def test_diferencia_exige_motivo_y_revierte_toda_la_sucursal(self):
         with self.assertRaises(CargaSucursalError) as error:

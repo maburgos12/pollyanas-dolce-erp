@@ -4619,7 +4619,8 @@ if (operation === "segment") {
     }]
   };
   const stops = [{orden: 2, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false}];
-  process.stdout.write(vm.runInContext(`renderChecklistCarga(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
+  vm.runInContext(`state.rutaActiva = {checklist_carga: ${JSON.stringify(checklist)}, paradas: ${JSON.stringify(stops)}}; state.cargaSucursal.paradaId = 2;`, context);
+  process.stdout.write(vm.runInContext(`renderCapturaSucursal(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
 } else if (operation === "pending-point") {
   const checklist = {
     estatus: "PENDIENTE", estatus_display: "Pendiente",
@@ -4633,9 +4634,11 @@ if (operation === "segment") {
     }]
   };
   const stops = [{orden: 2, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false}];
-  const rendered = vm.runInContext(`renderChecklistCarga(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context);
+  vm.runInContext(`state.rutaActiva = {checklist_carga: ${JSON.stringify(checklist)}, paradas: ${JSON.stringify(stops)}}; state.cargaSucursal.paradaId = 2;`, context);
+  const rendered = vm.runInContext(`renderCapturaSucursal(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context);
+  const branches = vm.runInContext(`renderResumenSucursalesCarga(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context);
   const summary = vm.runInContext(`resumenCargaRuta(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context);
-  process.stdout.write(JSON.stringify({rendered, summary}));
+  process.stdout.write(JSON.stringify({rendered, branches, summary}));
 } else if (operation === "positive-untransitioned") {
   const checklist = {
     estatus: "PENDIENTE", estatus_display: "Pendiente",
@@ -4647,7 +4650,8 @@ if (operation === "segment") {
     }]
   };
   const stops = [{orden: 2, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false}];
-  process.stdout.write(vm.runInContext(`renderChecklistCarga(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
+  vm.runInContext(`state.rutaActiva = {checklist_carga: ${JSON.stringify(checklist)}, paradas: ${JSON.stringify(stops)}}; state.cargaSucursal.paradaId = 2;`, context);
+  process.stdout.write(vm.runInContext(`renderCapturaSucursal(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
 } else if (operation === "canonical-product") {
   const rows = [
     {id: 21, item_code: " 0117 ", item_name: "Bollo Vainilla", unit: "pza", cantidad_enviada_esperada: "2", cantidad_cargada: null, point_enviada: true, estatus: "PENDIENTE"},
@@ -4757,31 +4761,30 @@ if (operation === "segment") {
         rendered = self.run_pwa_contract("zero")
 
         self.assertIn("Pay enviado en cero", rendered)
-        self.assertIn("cargar 0.000 PZA", rendered)
+        self.assertIn("Enviado 0.000 PZA", rendered)
         self.assertIn("Point confirmó enviado final en cero; no requiere captura.", rendered)
-        self.assertNotIn('id="cantidad_total_', rendered)
+        self.assertNotIn('id="cantidad-sucursal-', rendered)
         self.assertNotIn("validarCargaProductoTramo", rendered)
-        self.assertNotIn("Guardar revisión", rendered)
+        self.assertNotIn("Guardar sucursal", rendered)
 
     def test_pwa_cantidad_positiva_sin_transicion_enviado_bloquea_captura(self):
         rendered = self.run_pwa_contract("positive-untransitioned")
 
         self.assertIn("espera confirmación de Enviado en Point", rendered)
         self.assertNotIn("Confirmar</button>", rendered)
-        self.assertNotIn('id="cantidad_total_', rendered)
+        self.assertNotIn('id="cantidad-sucursal-', rendered)
         self.assertNotIn("validarCargaProductoTramo", rendered)
-        self.assertNotIn("Guardar revisión", rendered)
+        self.assertNotIn("Guardar sucursal", rendered)
 
     def test_pwa_pendiente_de_point_permanece_bloqueado_y_no_cuenta_como_revisado(self):
         result = json.loads(self.run_pwa_contract("pending-point"))
 
         self.assertEqual(result["summary"], "0 de 1 producto revisado.")
-        self.assertIn("0 de 1 producto", result["rendered"])
-        self.assertIn("0%", result["rendered"])
+        self.assertIn("0 de 1 productos revisados", result["branches"])
         self.assertIn("espera confirmación de Enviado en Point", result["rendered"])
         self.assertIn("bloqueada", result["rendered"])
         self.assertNotIn("Carga revisada.", result["rendered"])
-        self.assertNotIn('id="cantidad_total_', result["rendered"])
+        self.assertNotIn('id="cantidad-sucursal-', result["rendered"])
 
     def test_pwa_consolida_por_codigo_y_unidad_normalizados_con_nombre_como_fallback(self):
         totals = json.loads(self.run_pwa_contract("canonical-product"))
@@ -5100,8 +5103,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v70-tutorial-carga-sucursal")
-        self.assertIn("?v=route-control-v70-tutorial-carga-sucursal", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v71-reglas-point-sucursal")
+        self.assertIn("?v=route-control-v71-reglas-point-sucursal", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
@@ -5115,6 +5118,9 @@ if (operation === "segment") {
         self.assertIn("client_event_id", html)
         self.assertIn("/carga-checklist/sucursales/", html)
         self.assertNotIn("/carga-checklist/productos/validar/", html)
+        self.assertEqual(html.count("function renderChecklistCarga("), 1)
+        self.assertIn("lineas.some(lineaPendientePoint)", html)
+        self.assertIn('linea.estatus === "ZERO_EXPECTED"', html)
 
     def test_pwa_carga_sucursal_incluye_busqueda_y_orden_alfabetico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
