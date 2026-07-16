@@ -105,6 +105,11 @@ urlpatterns = [
     ),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
     path("rentabilidad/", views_rentabilidad.dashboard_rentabilidad, name="rentabilidad_dashboard"),
+    path(
+        "rentabilidad/reporte-mensual/",
+        views_rentabilidad.reporte_mensual,
+        name="rentabilidad_reporte_mensual",
+    ),
     path("rentabilidad/<int:pk>/", views_rentabilidad.detalle_sucursal, name="rentabilidad_detalle"),
     path(
         "rentabilidad/<int:pk>/analizar/",
