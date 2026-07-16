@@ -77,3 +77,38 @@ class EnumeracionCatalogoTests(SimpleTestCase):
         client.login = lambda **kw: None
         with self.assertRaises(ExtractionError):
             client._enumerate_catalog(fetch, pk_field="PK", label="test", max_failures=3)
+
+
+class ConversionUnidadSyncAlmacenTests(SimpleTestCase):
+    """La cantidad de Point se convierte a la unidad base del insumo ERP."""
+
+    databases = "__all__"
+
+    def test_ml_a_litros(self):
+        from decimal import Decimal
+
+        from django.test import TestCase  # noqa: F401  (usa BD)
+        from maestros.models import Insumo, UnidadMedida
+        from pos_bridge.management.commands.sync_inventario_desde_point import (
+            _cantidad_en_unidad_erp,
+        )
+
+        ml = UnidadMedida.objects.create(codigo="ml", nombre="Mililitro", tipo="VOLUME", factor_to_base=1)
+        lt = UnidadMedida.objects.create(codigo="lt", nombre="Litro", tipo="VOLUME", factor_to_base=1000)
+        kg = UnidadMedida.objects.create(codigo="kg", nombre="Kilo", tipo="MASS", factor_to_base=1000)
+        insumo = Insumo.objects.create(nombre="Desmoldante test", unidad_base=lt)
+
+        cantidad, nota = _cantidad_en_unidad_erp(Decimal("23000"), "ml", insumo)
+        self.assertEqual(cantidad, Decimal("23"))
+        self.assertIn("convertido", nota)
+
+        # misma unidad: sin cambio
+        cantidad, nota = _cantidad_en_unidad_erp(Decimal("5"), "lt", insumo)
+        self.assertEqual(cantidad, Decimal("5"))
+        self.assertEqual(nota, "")
+
+        # incompatible (masa vs volumen): se reporta, no se convierte
+        insumo_kg = Insumo.objects.create(nombre="Harina test", unidad_base=kg)
+        cantidad, nota = _cantidad_en_unidad_erp(Decimal("10"), "ml", insumo_kg)
+        self.assertEqual(cantidad, Decimal("10"))
+        self.assertIn("INCOMPATIBLE", nota)
