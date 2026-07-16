@@ -99,6 +99,18 @@ class ContextoOperativoTests(TestCase):
         self.assertEqual(contexto.chofer_autorizado_id, self.acompanante.id)
         self.assertTrue(contexto.token)
 
+    def test_tramo_inicial_antes_del_primer_cedis_no_bloquea_la_carga(self):
+        self.cedis_inicial.orden = 3
+        self.cedis_inicial.save(update_fields=["orden", "actualizado_en"])
+        self.parada.orden = 1
+        self.parada.save(update_fields=["orden", "actualizado_en"])
+
+        contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user_acompanante)
+
+        self.assertIsNone(contexto.parada_cedis_origen_id)
+        self.assertEqual(contexto.tramo_id, f"salida-inicial:hasta-{self.cedis_inicial.id}")
+        self.assertEqual(contexto.productos_permitidos, (self.linea.id,))
+
     def test_cambio_de_checklist_invalida_firma_anterior(self):
         firmado = construir_contexto_operativo(ruta=self.ruta, actor=self.user_chofer).token
         self.linea.cantidad_enviada_esperada = Decimal("4")

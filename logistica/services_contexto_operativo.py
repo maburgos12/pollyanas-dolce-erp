@@ -28,7 +28,7 @@ class ContextoOperativo:
     chofer_autorizado_id: int
     unidad_id: int
     tramo_id: str
-    parada_cedis_origen_id: int
+    parada_cedis_origen_id: int | None
     version_checklist: str
     sucursales_permitidas: tuple[int, ...]
     productos_permitidos: tuple[int, ...]
@@ -60,7 +60,11 @@ def _tramo(ruta: RutaEntrega, lineas: tuple[RutaCargaChecklistLinea, ...]):
         parada for parada in cedis if orden_inicio_productos is None or parada.orden < orden_inicio_productos
     ]
     if not candidatos_origen:
-        raise ValidationError("La ruta no tiene una parada CEDIS de origen para el tramo operativo.")
+        siguiente = next(
+            (parada for parada in cedis if orden_inicio_productos is None or parada.orden > orden_inicio_productos),
+            None,
+        )
+        return None, f"salida-inicial:hasta-{siguiente.id if siguiente else 'fin'}"
     origen = candidatos_origen[-1]
     siguiente = next((parada for parada in cedis if parada.orden > origen.orden), None)
     tramo_id = f"cedis-{origen.id}:hasta-{siguiente.id if siguiente else 'fin'}"
@@ -129,7 +133,7 @@ def _construir_contexto(*, ruta: RutaEntrega, actor, firmar: bool, bloquear: boo
         chofer_autorizado_id=operador_id,
         unidad_id=ruta.unidad_operativa_id,
         tramo_id=tramo_id,
-        parada_cedis_origen_id=origen.id,
+        parada_cedis_origen_id=origen.id if origen else None,
         version_checklist=_version_checklist(lineas),
         sucursales_permitidas=sucursales,
         productos_permitidos=tuple(linea.id for linea in lineas),
