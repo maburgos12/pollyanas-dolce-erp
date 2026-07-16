@@ -432,7 +432,14 @@ class PresupuestoMaestroImportService:
             return concept
         return str(row[0] or "").strip() if row else ""
 
+    # Hojas que consolidan/resumen otras hojas del mismo archivo: importarlas
+    # como si fueran una sucursal más duplica el dinero (la hoja GENERAL de
+    # Gastos de Ventas creó 50 rubros sin sucursal con $2.5M repetidos).
+    _SUMMARY_SHEETS = {"general", "lista gastos", "hoja1"}
+
     def _budget_table_rows(self, sheet) -> Iterable[dict[str, object]]:
+        if self._normalize_cell(sheet.title) in self._SUMMARY_SHEETS:
+            return
         rows = list(sheet.iter_rows(values_only=True))
         if not rows:
             return

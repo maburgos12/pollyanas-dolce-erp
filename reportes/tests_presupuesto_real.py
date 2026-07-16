@@ -2263,3 +2263,68 @@ class EstadoResultadosTests(TestCase):
         response = self.client.get("/reportes/estado-resultados/")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response["Location"])
+
+
+class HojaGeneralNoImportaTests(TestCase):
+    """La hoja GENERAL (consolidado) no debe importarse como sucursal fantasma."""
+
+    def _xlsx_con_general(self):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        hoja = wb.active
+        hoja.title = "MATRIZ"
+        hoja.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        hoja.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        hoja.append(["", "Renta", 1000, 900, ""])
+        general = wb.create_sheet("GENERAL")
+        general.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        general.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        general.append(["", "Renta", 1000, 900, ""])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        return tmp.name
+
+    def test_hoja_general_se_ignora(self):
+        from core.models import Sucursal
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        Sucursal.objects.create(nombre="Matriz", codigo="MATRIZ")
+        service = PresupuestoMaestroImportService()
+        service.import_file(
+            archivo=self._xlsx_con_general(), area_code="gastos-venta",
+            version="ORIGINAL", year=2026,
+        )
+        rubros = RubroPresupuesto.objects.filter(area__codigo="gastos-venta", concepto="Renta")
+        self.assertEqual(rubros.count(), 1)
+        self.assertIsNotNone(rubros.first().sucursal_id)
+
+    def test_comando_desactiva_rubros_fantasma(self):
+        area = AreaPresupuesto.objects.create(nombre="Gastos", codigo="gastos-venta")
+        fantasma = RubroPresupuesto.objects.create(
+            area=area, concepto="Renta", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "PAQUETE_2026_REAL"},
+        )
+        otro_origen = RubroPresupuesto.objects.create(
+            area=area, concepto="Rubro legítimo", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "OTRO"},
+        )
+        salida = StringIO()
+        call_command("desactivar_rubros_hoja_general", stdout=salida)
+        fantasma.refresh_from_db()
+        otro_origen.refresh_from_db()
+        self.assertFalse(fantasma.activo)
+        self.assertIn("desactivado_motivo", fantasma.metadata)
+        self.assertTrue(otro_origen.activo)
+
+    def test_dry_run_no_desactiva(self):
+        area = AreaPresupuesto.objects.create(nombre="Gastos", codigo="gastos-venta")
+        fantasma = RubroPresupuesto.objects.create(
+            area=area, concepto="Renta", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "PAQUETE_2026_REAL"},
+        )
+        call_command("desactivar_rubros_hoja_general", "--dry-run", stdout=StringIO())
+        fantasma.refresh_from_db()
+        self.assertTrue(fantasma.activo)
