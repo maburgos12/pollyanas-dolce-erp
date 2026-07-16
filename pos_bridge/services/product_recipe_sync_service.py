@@ -149,7 +149,7 @@ class PointProductRecipeSyncService:
                 root_codes=sorted(selected_codes),
                 max_depth=max(1, int(max_depth or 3)),
             )
-            products = client.get_products()
+            products = client.get_all_products()
             products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
             summary["products_seen"] = len(products)
             visited: dict[str, PointRecipeNode] = {}
@@ -220,7 +220,7 @@ class PointProductRecipeSyncService:
     ) -> dict[str, object]:
         with self._build_http_client() as client:
             workspace = client.login(branch_hint=branch_hint)
-            products = client.get_products()
+            products = client.get_all_products()
             discovery_baseline_at = self._discovery_baseline_at()
             products = self._hydrate_recent_discovery_products(
                 client=client,

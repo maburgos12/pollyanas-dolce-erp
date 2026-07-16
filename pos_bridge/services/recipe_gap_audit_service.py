@@ -119,7 +119,7 @@ class PointRecipeGapAuditService:
         with self._build_http_client(sync_job=sync_job) as client:
             workspace = client.login(branch_hint=branch_hint)
             summary["workspace"] = workspace["branch_name"]
-            products = client.get_products()
+            products = client.get_all_products()
             summary["products_seen"] = len(products)
 
             for product in products:
