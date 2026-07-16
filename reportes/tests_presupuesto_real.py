@@ -2398,3 +2398,55 @@ class TotalEmpresaReglasTests(TestCase):
         self.assertEqual(limpiadas, 0)
         linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_ventas, periodo=self.periodo)
         self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+
+
+class ConsumoDesdeFiltroTests(TestCase):
+    """El filtro 'desde' de CONSUMO_MP protege los meses legados del Excel."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventario.models import ConsumoInsumoMensual
+        from maestros.models import Insumo
+
+        cls.area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        cls.rubro = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Costos insumos/productos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        insumo = Insumo.objects.create(nombre="Harina desde-test")
+        for mes, costo in ((3, "999"), (6, "500")):
+            LineaPresupuestoMensual.objects.create(
+                rubro=cls.rubro, periodo=date(2026, mes, 1),
+                monto_presupuesto=Decimal("1000"),
+                monto_real=Decimal("777"), fuente_real="AUTO:LEGADO",
+            )
+            ConsumoInsumoMensual.objects.create(
+                insumo=insumo, periodo=date(2026, mes, 1), costo_real=Decimal(costo)
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=cls.rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"total_empresa": True, "desde": "2026-06"},
+        )
+
+    def test_antes_de_desde_conserva_legado_y_despues_consolida(self):
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 3, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        marzo = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 3, 1))
+        junio = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 6, 1))
+        self.assertEqual(marzo.monto_real, Decimal("777"))
+        self.assertEqual(marzo.fuente_real, "AUTO:LEGADO")
+        self.assertEqual(junio.monto_real, Decimal("500"))
+        self.assertEqual(junio.fuente_real, "AUTO:CONSUMO_MP")
+
+    def test_restaurar_costos_legado(self):
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 3, 1))
+        linea.monto_real = Decimal("363918")
+        linea.fuente_real = "AUTO:CONSUMO_MP"
+        linea.save()
+        salida = StringIO()
+        call_command("restaurar_costos_pnl_legado", stdout=salida)
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("1247660.66"))
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+        # Idempotente
+        call_command("restaurar_costos_pnl_legado", stdout=salida)
+        self.assertIn("ya restaurado", salida.getvalue())
