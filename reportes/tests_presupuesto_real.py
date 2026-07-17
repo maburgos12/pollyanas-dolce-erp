@@ -2509,3 +2509,33 @@ class ProductosDescontinuadosTests(TestCase):
         PronosticoVenta.objects.create(receta=receta, periodo="2026-05", cantidad=Decimal("8"), fuente="PRESUPUESTO_2026")
         call_command("corregir_pronostico_nombres_point", stdout=StringIO())
         self.assertEqual(PronosticoVenta.objects.filter(receta=receta).count(), 0)
+
+
+class ReclasificarInversionTests(TestCase):
+    """Rubros de inversión se mueven a CAPEX; las refacciones se quedan."""
+
+    def test_mueve_inversion_y_respeta_refacciones(self):
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        inversion = RubroPresupuesto.objects.create(
+            area=gv, concepto="Apertura sucursal", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        refaccion = RubroPresupuesto.objects.create(
+            area=gv, concepto="Refrigerador 1", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        call_command("reclasificar_inversion_capex", stdout=StringIO())
+        inversion.refresh_from_db()
+        refaccion.refresh_from_db()
+        self.assertEqual(inversion.area.codigo, "capex")
+        self.assertEqual(inversion.metadata.get("area_anterior"), "gastos-venta")
+        self.assertEqual(refaccion.area.codigo, "gastos-venta")
+
+    def test_dry_run_no_mueve(self):
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        r = RubroPresupuesto.objects.create(
+            area=gv, concepto="Apertura sucursal", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        call_command("reclasificar_inversion_capex", "--dry-run", stdout=StringIO())
+        r.refresh_from_db()
+        self.assertEqual(r.area.codigo, "gastos-venta")
