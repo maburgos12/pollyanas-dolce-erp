@@ -30,6 +30,7 @@ from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 from recetas.services.consolidado_service import ConsolidadoNocturnoCedisService
 
+from .carga_operativa import limpiar_carga_operativa_rutas_abiertas
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .models import (
     EventoRuta,
@@ -980,7 +981,7 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
             Decimal("5"),
         )
 
-    def test_folio_pendiente_no_se_supera_por_otro_folio_enviado_del_mismo_producto(self):
+    def test_folio_pendiente_se_excluye_y_otro_folio_enviado_permanece_activo(self):
         pendiente = self.point_line(
             requested="2",
             sent="0",
@@ -1015,7 +1016,7 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
         )
         self.assertEqual(
             set(activas.values_list("point_transfer_line_id", flat=True)),
-            {pendiente.id, enviada.id},
+            {enviada.id},
         )
 
     def test_recarga_completa_actualiza_snapshot_con_transferencias_cerradas(self):
@@ -1040,13 +1041,7 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
             user=self.user,
             ejecutar_sync=False,
         )
-        self.assertEqual(
-            sum(
-                (linea.cantidad_solicitada for linea in snapshot_inicial.checklist.lineas.all()),
-                Decimal("0"),
-            ),
-            Decimal("53"),
-        )
+        self.assertFalse(snapshot_inicial.checklist.lineas.exists())
 
         funcion_recarga = getattr(
             services_carga_ruta,
@@ -1181,21 +1176,24 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
 
 
 class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
-    def test_serializer_expone_transicion_enviado_sin_inferir_por_cantidad(self):
+    def test_serializer_no_expone_solicitud_aunque_tenga_cantidad_enviada(self):
         point_line = self.point_line(
             requested="7",
             sent="5",
             sent_at=None,
             is_enviado=False,
         )
-        row = self.sync_line(point_line)
+        resumen = sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
 
-        payload = RutaCargaChecklistLineaSerializer(row).data
+        self.assertFalse(
+            resumen.checklist.lineas.filter(point_transfer_line=point_line).exists()
+        )
 
-        self.assertEqual(payload["cantidad_enviada_point"], "5")
-        self.assertFalse(payload["point_enviada"])
-
-    def test_point_sin_transicion_enviado_permanece_pendiente_y_bloquea(self):
+    def test_point_sin_transicion_enviado_no_crea_carga_operativa(self):
         line = self.point_line(
             requested="7",
             sent="0",
@@ -1203,11 +1201,15 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
             is_enviado=None,
         )
 
-        row = self.sync_line(line)
+        resumen = sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
 
-        self.assertEqual(row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIn("aún no registra Enviado", row.notas)
-        self.assertIsNotNone(checklist_bloquea_salida(self.ruta))
+        self.assertFalse(
+            resumen.checklist.lineas.filter(point_transfer_line=line).exists()
+        )
 
     def test_point_enviado_confirmado_cero_genera_zero_expected_visible(self):
         line = self.point_line(
@@ -1223,7 +1225,7 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(row.cantidad_enviada_esperada, Decimal("0"))
         self.assertEqual(row.cantidad_cargada, Decimal("0"))
 
-    def test_point_is_enviado_false_explicito_permanece_pendiente(self):
+    def test_point_is_enviado_false_explicito_no_crea_carga_operativa(self):
         line = self.point_line(
             requested="7",
             sent="0",
@@ -1231,11 +1233,15 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
             is_enviado=False,
         )
 
-        row = self.sync_line(line)
+        resumen = sincronizar_checklist_carga_desde_point(
+            ruta=self.ruta,
+            user=self.user,
+            ejecutar_sync=False,
+        )
 
-        self.assertEqual(row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIn("aún no registra Enviado", row.notas)
-        self.assertIsNotNone(checklist_bloquea_salida(self.ruta))
+        self.assertFalse(
+            resumen.checklist.lineas.filter(point_transfer_line=line).exists()
+        )
 
     def test_point_enviado_distinto_de_solicitado_usa_enviado(self):
         line = self.point_line(
@@ -1278,6 +1284,88 @@ class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
 
 
 class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
+    def test_limpieza_reporta_y_reconstruye_ruta_abierta_solo_desde_enviado(self):
+        solicitud = self.point_line(
+            requested="4",
+            sent="0",
+            sent_at=None,
+            is_enviado=False,
+        )
+        enviado = self.point_line(
+            requested="4",
+            sent="3",
+            sent_at=timezone.now(),
+            is_enviado=True,
+        )
+        checklist = RutaCargaChecklist.objects.create(
+            ruta=self.ruta,
+            estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
+        )
+        linea_solicitud = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=solicitud,
+            transfer_external_id=solicitud.transfer_external_id,
+            detail_external_id=solicitud.detail_external_id,
+            source_hash=solicitud.source_hash,
+            item_code=solicitud.item_code,
+            item_name=solicitud.item_name,
+            unit=solicitud.unit,
+            cantidad_solicitada=solicitud.requested_quantity,
+            cantidad_enviada_esperada=solicitud.sent_quantity,
+            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        )
+
+        previo = limpiar_carga_operativa_rutas_abiertas(
+            ruta_ids=[self.ruta.id],
+            ejecutar=False,
+        )
+
+        linea_solicitud.refresh_from_db()
+        self.assertEqual(previo.solicitudes_activas, 1)
+        self.assertEqual(linea_solicitud.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
+
+        resultado = limpiar_carga_operativa_rutas_abiertas(
+            ruta_ids=[self.ruta.id],
+            ejecutar=True,
+        )
+
+        linea_solicitud.refresh_from_db()
+        self.assertEqual(linea_solicitud.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertEqual(resultado.solicitudes_activas_despues, 0)
+        self.assertEqual(resultado.duplicados_activos_despues, 0)
+        self.assertTrue(
+            checklist.lineas.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+            .filter(point_transfer_line=enviado)
+            .exists()
+        )
+
+    def test_base_de_datos_impide_dos_lineas_activas_para_la_misma_linea_point(self):
+        point_line = self.point_line(
+            requested="2",
+            sent="2",
+            sent_at=timezone.now(),
+            is_enviado=True,
+        )
+        row = self.sync_line(point_line)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RutaCargaChecklistLinea.objects.create(
+                    checklist=row.checklist,
+                    parada=row.parada,
+                    point_transfer_line=point_line,
+                    transfer_external_id=point_line.transfer_external_id,
+                    detail_external_id=f"{point_line.detail_external_id}-duplicado",
+                    source_hash=f"{point_line.source_hash}-duplicado",
+                    item_code=point_line.item_code,
+                    item_name=point_line.item_name,
+                    unit=point_line.unit,
+                    cantidad_solicitada=point_line.requested_quantity,
+                    cantidad_enviada_esperada=point_line.sent_quantity,
+                    estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                )
+
     def test_resync_deja_una_sola_fila_activa_por_linea_point_y_preserva_auditoria(self):
         point_line = self.point_line(
             requested="1",
@@ -1291,26 +1379,6 @@ class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
             ruta=self.ruta,
             estatus=RutaCargaChecklist.ESTATUS_EN_REVISION,
         )
-        placeholder = RutaCargaChecklistLinea.objects.create(
-            checklist=checklist,
-            parada=self.parada,
-            point_transfer_line=point_line,
-            transfer_external_id="INV-FOLIO-ANTERIOR",
-            detail_external_id="INV-DETALLE-ANTERIOR",
-            source_hash="cedis-reabasto-placeholder-duplicado-interno",
-            item_code=point_line.item_code,
-            item_name=point_line.item_name,
-            unit=point_line.unit,
-            cantidad_solicitada="1",
-            cantidad_enviada_esperada="0",
-            cantidad_cargada="0",
-            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
-            notas="Evidencia histórica del placeholder.",
-            client_event_id="duplicado-interno-auditado",
-            validado_por=self.user,
-            validado_en=timezone.now(),
-        )
-        validado_en_original = placeholder.validado_en
         canonica = RutaCargaChecklistLinea.objects.create(
             checklist=checklist,
             parada=self.parada,
@@ -1326,6 +1394,30 @@ class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
             cantidad_cargada="0",
             estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
         )
+        placeholder = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            point_transfer_line=point_line,
+            transfer_external_id="INV-FOLIO-ANTERIOR",
+            detail_external_id="INV-DETALLE-ANTERIOR",
+            source_hash="cedis-reabasto-placeholder-duplicado-interno",
+            item_code=point_line.item_code,
+            item_name=point_line.item_name,
+            unit=point_line.unit,
+            cantidad_solicitada="1",
+            cantidad_enviada_esperada="0",
+            cantidad_cargada="0",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            superada_por=canonica,
+            notas=(
+                "Evidencia histórica del placeholder. "
+                "Fila duplicada de la misma línea Point; se conserva solo para auditoría."
+            ),
+            client_event_id="duplicado-interno-auditado",
+            validado_por=self.user,
+            validado_en=timezone.now(),
+        )
+        validado_en_original = placeholder.validado_en
 
         _sincronizar_lineas_point_para_ruta(
             ruta=self.ruta,
@@ -1624,8 +1716,12 @@ class PointCargaRouteSelectionInvariantTests(LogisticaInvariantFixtures):
             cantidad_solicitada=point_line.requested_quantity,
             cantidad_enviada_esperada="0",
             cantidad_cargada="1",
-            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
-            notas="Captura física del repartidor conservada.",
+            estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+            superada_por=linea_previa,
+            notas=(
+                "Captura física del repartidor conservada. "
+                "Línea Point ya asignada a otra ruta; se conserva solo para auditoría."
+            ),
             client_event_id="captura-duplicada-auditada",
             validado_por=self.user,
             validado_en=timezone.now(),
@@ -2312,7 +2408,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             Decimal("5"),
         )
 
-    def test_detalle_cero_no_enviado_es_superado_por_reemplazo_positivo_confirmado(self):
+    def test_detalle_cero_no_enviado_no_nace_y_reemplazo_confirmado_es_unico(self):
         old = self.point_line(
             requested="3",
             sent="0",
@@ -2338,12 +2434,11 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         self.sync_all()
 
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        self.assertEqual(old_row.superada_por, new_row)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
+        self.assertNotEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
-    def test_folio_no_enviado_permanece_independiente_de_otro_folio_enviado(self):
+    def test_folio_no_enviado_se_excluye_aunque_otro_folio_si_este_enviado(self):
         old = self.point_line(
             requested="7",
             sent="0",
@@ -2366,10 +2461,8 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         self.sync_all()
 
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIsNone(old_row.superada_por)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
         self.assertNotEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
     def test_dos_folios_enviados_del_mismo_producto_permanecen_activos_y_suman(self):
@@ -2403,7 +2496,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             Decimal("5"),
         )
 
-    def test_folio_no_enviado_de_otro_producto_no_es_superado(self):
+    def test_folio_no_enviado_de_otro_producto_tampoco_entra_a_operacion(self):
         old = self.point_line(
             requested="4",
             sent="0",
@@ -2426,10 +2519,9 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         self.sync_all()
 
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
-        self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
 
-    def test_folio_enviado_en_cero_no_oculta_otro_folio_pendiente(self):
+    def test_folio_enviado_en_cero_es_visible_y_no_enviado_se_excluye(self):
         old = self.point_line(
             requested="4",
             sent="0",
@@ -2452,10 +2544,8 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         self.sync_all()
 
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIsNone(old_row.superada_por)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
         self.assertEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
 
     def test_folio_pendiente_se_actualiza_si_point_lo_confirma_enviado_despues(self):
@@ -2479,9 +2569,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             item_code="INV-PRODUCTO-REACTIVABLE",
         )
         self.sync_all()
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIsNone(old_row.superada_por)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
 
         old.sent_quantity = Decimal("2")
         old.sent_at = timezone.now()
@@ -2490,7 +2578,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
 
         resumen = self.sync_all()
 
-        old_row.refresh_from_db()
+        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
         self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
         self.assertIsNone(old_row.superada_por)
         self.assertEqual(
@@ -2500,67 +2588,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             2,
         )
 
-    def test_reactivacion_preserva_cantidad_evidencia_y_notas_de_captura_humana(self):
-        old = self.point_line(
-            requested="2",
-            sent="0",
-            sent_at=None,
-            is_enviado=False,
-            transfer="INV-FOLIO-REACTIVA-AUDITADO",
-            detail="10",
-            item_code="INV-PRODUCTO-REACTIVA-AUDITADO",
-        )
-        self.sync_all()
-        self.point_line(
-            requested="3",
-            sent="3",
-            sent_at=timezone.now(),
-            is_enviado=True,
-            transfer="INV-FOLIO-POSTERIOR-AUDITADO",
-            detail="20",
-            item_code="INV-PRODUCTO-REACTIVA-AUDITADO",
-        )
-        self.sync_all()
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
-        old_row.cantidad_cargada = Decimal("1")
-        old_row.validado_por = self.user
-        old_row.validado_en = timezone.now()
-        old_row.client_event_id = "captura-humana-reactivada"
-        old_row.notas = f"{old_row.notas} Captura física conservada."
-        old_row.save(
-            update_fields=[
-                "cantidad_cargada",
-                "validado_por",
-                "validado_en",
-                "client_event_id",
-                "notas",
-                "actualizado_en",
-            ]
-        )
-        ParadaEntregaEvidencia.objects.create(
-            ruta=self.ruta,
-            parada=self.parada,
-            linea_carga=old_row,
-            cantidad_entregada=Decimal("1"),
-            comentario="Evidencia humana previa a confirmación tardía Point.",
-            client_event_id="evidencia-reactivada",
-            capturado_por=self.user,
-        )
-
-        old.sent_quantity = Decimal("2")
-        old.sent_at = timezone.now()
-        old.raw_payload = {"transfer": {"isEnviado": True}}
-        old.save(update_fields=["sent_quantity", "sent_at", "raw_payload", "updated_at"])
-        self.sync_all()
-
-        old_row.refresh_from_db()
-        self.assertEqual(old_row.cantidad_cargada, Decimal("1"))
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PARCIAL)
-        self.assertIsNone(old_row.superada_por)
-        self.assertIn("Captura física conservada", old_row.notas)
-        self.assertIn("captura conservada en 1.000", old_row.notas)
-
-    def test_folio_cancelado_no_puede_superar_solicitud_pendiente(self):
+    def test_folio_cancelado_sale_de_operacion_sin_reactivar_no_enviado(self):
         old = self.point_line(
             requested="2",
             sent="0",
@@ -2581,18 +2609,15 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             item_code="INV-PRODUCTO-CANCELADO",
         )
         self.sync_all()
-        old_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=old)
-        old_row.estatus = RutaCargaChecklistLinea.ESTATUS_PENDIENTE
-        old_row.superada_por = None
-        old_row.save(update_fields=["estatus", "superada_por", "actualizado_en"])
+        new_row = RutaCargaChecklistLinea.objects.get(point_transfer_line=new)
         new.is_cancelled = True
         new.save(update_fields=["is_cancelled", "updated_at"])
 
         self.sync_all()
 
-        old_row.refresh_from_db()
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        self.assertIsNone(old_row.superada_por)
+        new_row.refresh_from_db()
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=old).exists())
+        self.assertEqual(new_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
     def test_folio_cancelado_despues_de_cargarse_sale_de_operacion_y_conserva_auditoria(self):
         point_line = self.point_line(
@@ -2619,34 +2644,6 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         self.assertEqual(row.client_event_id, "captura-antes-cancelacion")
         self.assertIn("Captura preservada", row.notas)
         self.assertIn("canceló este folio", row.notas)
-
-    def test_folio_no_enviado_con_captura_humana_no_se_supera_entre_folios(self):
-        old = self.point_line(
-            requested="4",
-            sent="0",
-            sent_at=None,
-            is_enviado=False,
-            transfer="INV-FOLIO-CAPTURADO",
-            detail="10",
-            item_code="INV-PRODUCTO-CAPTURADO",
-        )
-        old_row = self.sync_line(old)
-        old_row.client_event_id = "captura-humana-1"
-        old_row.save(update_fields=["client_event_id"])
-        self.point_line(
-            requested="4",
-            sent="4",
-            sent_at=timezone.now(),
-            is_enviado=True,
-            transfer="INV-FOLIO-POSTERIOR-CAPTURA",
-            detail="20",
-            item_code="INV-PRODUCTO-CAPTURADO",
-        )
-
-        self.sync_all()
-
-        old_row.refresh_from_db()
-        self.assertNotEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
 
     def test_linea_fusionada_cedis_no_puede_reutilizarse_en_otra_ruta(self):
         receta = Receta.objects.create(
@@ -2675,7 +2672,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         )
         first = self.sync_all()
         fused = first.checklist.lineas.get(point_transfer_line=point_line)
-        self.assertTrue(fused.source_hash.startswith("cedis-reabasto-"))
+        self.assertEqual(fused.source_hash, point_line.source_hash)
 
         other_unit = Unidad.objects.create(
             codigo="INV-02",
@@ -2741,7 +2738,7 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
             "La selección debe bloquear específicamente PointTransferLine con FOR UPDATE OF.",
         )
 
-    def test_snapshot_anterior_con_multiples_detalles_se_conserva_superado_sin_inventar_incidencia(self):
+    def test_snapshot_no_enviado_con_multiples_detalles_no_entra_ni_inventa_incidencia(self):
         old_lines = [
             self.point_line(
                 requested="3",
@@ -2775,57 +2772,15 @@ class PointCanonicalLineTests(LogisticaInvariantFixtures):
         old_rows = RutaCargaChecklistLinea.objects.filter(
             point_transfer_line_id__in=[line.id for line in old_lines],
         )
-        self.assertEqual(
-            set(old_rows.values_list("estatus", flat=True)),
-            {RutaCargaChecklistLinea.ESTATUS_SUPERADA},
-        )
+        self.assertFalse(old_rows.exists())
         incidencias = EventoRuta.objects.filter(
             ruta=self.ruta,
             metadata__regla="CARGA_POINT_REEMPLAZO_AMBIGUO",
         )
         self.assertFalse(incidencias.exists())
-        self.assertTrue(
-            old_rows.filter(notas__contains="Snapshot anterior del mismo folio").count(),
-        )
         self.assertNotEqual(
             RutaCargaChecklistLinea.objects.get(point_transfer_line=new_line).estatus,
             RutaCargaChecklistLinea.ESTATUS_SUPERADA,
-        )
-
-    def test_snapshot_anterior_superado_conserva_validado_en_sin_usuario(self):
-        old = self.point_line(
-            requested="3",
-            sent="0",
-            sent_at=None,
-            is_enviado=False,
-            transfer="INV-FOLIO-VALIDADO-EN",
-            detail="10",
-            item_code="INV-PRODUCTO-VALIDADO-EN",
-        )
-        old_row = self.sync_line(old)
-        old_row.validado_en = timezone.now()
-        old_row.save(update_fields=["validado_en"])
-        new = self.point_line(
-            requested="3",
-            sent="3",
-            sent_at=timezone.now(),
-            is_enviado=True,
-            transfer="INV-FOLIO-VALIDADO-EN",
-            detail="11",
-            item_code="INV-PRODUCTO-VALIDADO-EN",
-        )
-        old.is_current_snapshot = False
-        old.is_open = False
-        old.save(update_fields=["is_current_snapshot", "is_open", "updated_at"])
-
-        self.sync_all()
-
-        old_row.refresh_from_db()
-        self.assertEqual(old_row.estatus, RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        self.assertIsNotNone(old_row.validado_en)
-        self.assertEqual(
-            old_row.superada_por,
-            RutaCargaChecklistLinea.objects.get(point_transfer_line=new),
         )
 
     def test_zero_expected_confirmado_pasa_a_positivo_en_misma_linea(self):
@@ -2941,8 +2896,25 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         )
 
     def _pending_next_segment(self):
-        point_line = self.point_line(requested="3", sent="0", sent_at=None, is_enviado=False)
-        row = self.sync_line(point_line)
+        checklist, _ = RutaCargaChecklist.objects.get_or_create(
+            ruta=self.ruta,
+            defaults={"estatus": RutaCargaChecklist.ESTATUS_EN_REVISION},
+        )
+        row, _ = RutaCargaChecklistLinea.objects.get_or_create(
+            checklist=checklist,
+            source_hash="legacy-pending-next-segment",
+            defaults={
+                "parada": self.parada,
+                "transfer_external_id": "LEGACY-PENDING",
+                "detail_external_id": "LEGACY-PENDING-1",
+                "item_code": "LEGACY-PENDING",
+                "item_name": "Línea heredada pendiente de sincronización",
+                "unit": "pz",
+                "cantidad_solicitada": Decimal("3"),
+                "cantidad_enviada_esperada": Decimal("0"),
+                "estatus": RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+            },
+        )
         self.assertEqual(row.parada_id, self.parada.id)
         return row
 
@@ -4652,6 +4624,75 @@ if (operation === "segment") {
   const stops = [{orden: 2, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false}];
   vm.runInContext(`state.rutaActiva = {checklist_carga: ${JSON.stringify(checklist)}, paradas: ${JSON.stringify(stops)}}; state.cargaSucursal.paradaId = 2;`, context);
   process.stdout.write(vm.runInContext(`renderCapturaSucursal(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
+} else if (operation === "branch-status") {
+  const checklist = {
+    estatus: "EN_REVISION", estatus_display: "En revisión",
+    lineas: [
+      {
+        id: 10, parada: 2, parada_orden: 2, parada_nombre: "Las Glorias",
+        item_code: "CONF-1", item_name: "Producto confirmado", unit: "PZA",
+        cantidad_enviada_esperada: "2.000", cantidad_cargada: "2.000",
+        point_enviada: true, estatus: "CARGADA", estatus_display: "Cargada"
+      },
+      {
+        id: 11, parada: 3, parada_orden: 3, parada_nombre: "Leyva",
+        item_code: "PEND-1", item_name: "Producto pendiente", unit: "PZA",
+        cantidad_enviada_esperada: "1.000", cantidad_cargada: null,
+        point_enviada: true, estatus: "PENDIENTE", estatus_display: "Pendiente"
+      }
+    ]
+  };
+  const stops = [
+    {orden: 2, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false},
+    {orden: 3, punto: {tipo: "SUCURSAL"}, operativamente_resuelta: false}
+  ];
+  process.stdout.write(vm.runInContext(`renderResumenSucursalesCarga(${JSON.stringify(checklist)}, ${JSON.stringify(stops)})`, context));
+} else if (operation === "receipt-off-geofence") {
+  void (async () => {
+    vm.runInContext(`
+      state.rutaActiva = {
+        ruta: {id: 9},
+        paradas: [{id: 2, geocerca_confiable: false}],
+        checklist_carga: {lineas: [{id: 31, parada: 2, item_name: "Pastel", cantidad_cargada: "2.000", cantidad_enviada_esperada: "2.000"}]},
+        contexto_operativo: {token: "ctx", version_checklist: "v1"}
+      };
+      state.recepcionSucursal = {rutaId: 9, paradaId: 2, drafts: {31: {cantidad: "2.000", motivo: ""}}, motivoSinGeocerca: ""};
+      posts = 0;
+      lastPayload = null;
+      apiFetch = async (_path, options) => {
+        posts += 1;
+        lastPayload = JSON.parse(options.body);
+        return new Response(JSON.stringify({}), {status: 200, headers: {"Content-Type": "application/json"}});
+      };
+      renderRutaActiva = (message) => ({message});
+    `, context);
+    const missing = await vm.runInContext(`confirmarEntregaParada(9, 2, null, "ENTREGADA", true)`, context);
+    vm.runInContext(`state.recepcionSucursal.motivoSinGeocerca = "GPS sin señal en la sucursal"`, context);
+    const saved = await vm.runInContext(`confirmarEntregaParada(9, 2, null, "ENTREGADA", true)`, context);
+    const stateResult = vm.runInContext(`({posts, lastPayload})`, context);
+    process.stdout.write(JSON.stringify({missing, saved, ...stateResult}));
+  })().catch((error) => { console.error(error); process.exitCode = 1; });
+} else if (operation === "tracking-off-screen") {
+  void (async () => {
+    vm.runInContext(`
+      state.rutaActiva = {ruta: {id: 9, estatus: "EN_RUTA"}};
+      state.pantallaActual = "dashboard";
+      state.routeAutoTrackingBusy = false;
+      posts = 0;
+      captureRoutePosition = async () => ({
+        latitud: 25.57001,
+        longitud: -108.47001,
+        precision_metros: 8,
+        timestamp_dispositivo: new Date().toISOString()
+      });
+      apiFetch = async () => {
+        posts += 1;
+        return new Response(JSON.stringify({}), {status: 201, headers: {"Content-Type": "application/json"}});
+      };
+    `, context);
+    await vm.runInContext(`enviarTrackingAutomaticoRuta(9)`, context);
+    process.stdout.write(JSON.stringify(vm.runInContext(`({posts, status: state.routeAutoTrackingStatus})`, context)));
+  })().catch((error) => { console.error(error); process.exitCode = 1; });
 } else if (operation === "canonical-product") {
   const rows = [
     {id: 21, item_code: " 0117 ", item_name: "Bollo Vainilla", unit: "pza", cantidad_enviada_esperada: "2", cantidad_cargada: null, point_enviada: true, estatus: "PENDIENTE"},
@@ -4676,7 +4717,7 @@ if (operation === "segment") {
   void (async () => {
     async function run(status, payload) {
       vm.runInContext(`state.rutaActiva = {ruta: {id: 9}}`, context);
-      vm.runInContext(`state.rutaCargaDraft = {77: {cantidad: "4"}}; state.rutaCargaProductoDraft = {"CODIGO:OLD|UNIDAD:PZA": {cantidad: "8"}};`, context);
+      vm.runInContext(`state.cargaSucursal = {paradaId: 4, busqueda: "", drafts: {77: {cantidad: "4"}}, guardando: false, modalAbierto: false};`, context);
       vm.runInContext(`saveOfflineMutationQueue([{id: "old-load", path: "/rutas/9/carga-checklist/productos/validar/", method: "POST", username: "", queued_at: new Date().toISOString(), attempts: 0, body: {kind: "text", value: "{}"}}]);`, context);
       context.responseStatus = status;
       context.responsePayload = payload;
@@ -4686,7 +4727,7 @@ if (operation === "segment") {
         renderRutaCarga = (message) => ({screen: "carga", message, rutaActiva: state.rutaActiva});
       `, context);
       const rendered = await vm.runInContext(`registrarRecargaCedis(9, 4)`, context);
-      const drafts = vm.runInContext(`({lineas: Object.keys(state.rutaCargaDraft).length, productos: Object.keys(state.rutaCargaProductoDraft).length, encoladas: loadOfflineMutationQueue().length})`, context);
+      const drafts = vm.runInContext(`({sucursal: Object.keys(state.cargaSucursal.drafts).length, encoladas: loadOfflineMutationQueue().length})`, context);
       return {rendered, drafts};
     }
     const results = {
@@ -4762,7 +4803,7 @@ if (operation === "segment") {
 
         self.assertIn("Pay enviado en cero", rendered)
         self.assertIn("Enviado 0.000 PZA", rendered)
-        self.assertIn("Point confirmó enviado final en cero; no requiere captura.", rendered)
+        self.assertIn("Enviado final en cero; no requiere captura.", rendered)
         self.assertNotIn('id="cantidad-sucursal-', rendered)
         self.assertNotIn("validarCargaProductoTramo", rendered)
         self.assertNotIn("Guardar sucursal", rendered)
@@ -4780,29 +4821,38 @@ if (operation === "segment") {
     def test_pwa_pendiente_solo_solicitado_no_aparece_en_sucursal(self):
         result = json.loads(self.run_pwa_contract("pending-point"))
 
-        self.assertEqual(result["summary"], "Sin carga física pendiente en este tramo.")
+        self.assertEqual(result["summary"], "La carga enviada aún no está disponible. Actualiza en unos momentos.")
         self.assertNotIn("0 de 1 productos revisados", result["branches"])
         self.assertNotIn("espera confirmación de Enviado en Point", result["rendered"])
         self.assertNotIn("bloqueada", result["rendered"])
         self.assertNotIn("Carga revisada.", result["rendered"])
         self.assertNotIn('id="cantidad-sucursal-', result["rendered"])
 
-    def test_pwa_consolida_por_codigo_y_unidad_normalizados_con_nombre_como_fallback(self):
-        totals = json.loads(self.run_pwa_contract("canonical-product"))
+    def test_pwa_resalta_sucursal_confirmada_con_fondo_check_y_texto(self):
+        rendered = self.run_pwa_contract("branch-status")
 
-        self.assertEqual(len(totals), 2)
-        coded = next(row for row in totals if row["item_code"].strip() == "0117")
-        fallback = next(row for row in totals if not row["item_code"])
-        self.assertEqual(coded["esperado"], 7)
-        self.assertEqual(coded["ids"], [21, 22])
-        self.assertEqual(fallback["esperado"], 3)
-        self.assertEqual(fallback["ids"], [23, 24])
+        self.assertIn('class="branch-load-button confirmed"', rendered)
+        self.assertIn(
+            '<span class="branch-load-check" aria-hidden="true">✓</span>',
+            rendered,
+        )
+        self.assertIn('<span class="branch-load-status">', rendered)
+        self.assertIn("Confirmada", rendered)
+        self.assertIn("1 productos por revisar", rendered)
 
-    def test_pwa_borrador_total_se_identifica_por_producto_y_no_por_posicion(self):
-        result = json.loads(self.run_pwa_contract("product-draft-identity"))
+    def test_pwa_fuera_geocerca_pide_motivo_inline_y_envia_una_sola_vez(self):
+        result = json.loads(self.run_pwa_contract("receipt-off-geofence"))
 
-        self.assertNotEqual(result["previousKey"], result["currentKey"])
-        self.assertEqual(result["currentQuantity"], "2.000")
+        self.assertIn("motivo es obligatorio", result["missing"]["message"])
+        self.assertEqual(result["posts"], 1)
+        self.assertIn("GPS sin señal", result["lastPayload"]["notas"])
+        self.assertIn("Entrega registrada", result["saved"]["message"])
+
+    def test_pwa_tracking_sigue_por_ruta_activa_aunque_cambie_de_pantalla(self):
+        result = json.loads(self.run_pwa_contract("tracking-off-screen"))
+
+        self.assertEqual(result["posts"], 1)
+        self.assertEqual(result["status"], "enviado")
 
     def test_pwa_recarga_mantiene_contexto_en_409_503_y_recarga_en_estados_exitosos(self):
         result = json.loads(self.run_pwa_contract("recarga-status"))
@@ -4810,19 +4860,19 @@ if (operation === "segment") {
         self.assertEqual(result["conflict"]["rendered"]["screen"], "activa")
         self.assertIn("Enviado", result["conflict"]["rendered"]["message"])
         self.assertIsNotNone(result["conflict"]["rendered"]["rutaActiva"])
-        self.assertEqual(result["conflict"]["drafts"], {"lineas": 1, "productos": 1, "encoladas": 1})
+        self.assertEqual(result["conflict"]["drafts"], {"sucursal": 1, "encoladas": 1})
         self.assertEqual(result["unavailable"]["rendered"]["screen"], "activa")
         self.assertIn("no disponible", result["unavailable"]["rendered"]["message"])
         self.assertIsNotNone(result["unavailable"]["rendered"]["rutaActiva"])
-        self.assertEqual(result["unavailable"]["drafts"], {"lineas": 1, "productos": 1, "encoladas": 1})
+        self.assertEqual(result["unavailable"]["drafts"], {"sucursal": 1, "encoladas": 1})
         self.assertEqual(result["authorized"]["rendered"]["screen"], "carga")
         self.assertIn("autorizada", result["authorized"]["rendered"]["message"])
         self.assertIsNone(result["authorized"]["rendered"]["rutaActiva"])
-        self.assertEqual(result["authorized"]["drafts"], {"lineas": 0, "productos": 0, "encoladas": 0})
+        self.assertEqual(result["authorized"]["drafts"], {"sucursal": 0, "encoladas": 0})
         self.assertEqual(result["updated"]["rendered"]["screen"], "carga")
         self.assertIn("sincronizado", result["updated"]["rendered"]["message"])
         self.assertIsNone(result["updated"]["rendered"]["rutaActiva"])
-        self.assertEqual(result["updated"]["drafts"], {"lineas": 0, "productos": 0, "encoladas": 0})
+        self.assertEqual(result["updated"]["drafts"], {"sucursal": 0, "encoladas": 0})
 
     def test_pwa_recarga_cedis_sin_red_no_se_encola_pero_otras_mutaciones_si(self):
         result = json.loads(self.run_pwa_contract("recarga-offline"))
@@ -5104,8 +5154,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v73-solo-enviado-point")
-        self.assertIn("?v=route-control-v73-solo-enviado-point", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v78-gps-ruta-activa")
+        self.assertIn("?v=route-control-v78-gps-ruta-activa", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
@@ -5120,8 +5170,12 @@ if (operation === "segment") {
         self.assertIn("/carga-checklist/sucursales/", html)
         self.assertNotIn("/carga-checklist/productos/validar/", html)
         self.assertEqual(html.count("function renderChecklistCarga("), 1)
-        self.assertIn("lineas.some(lineaPendientePoint)", html)
         self.assertIn('linea.estatus === "ZERO_EXPECTED"', html)
+        self.assertNotIn("function renderChecklistCargaLegacyTotales", html)
+        self.assertNotIn("async function validarCargaLinea", html)
+        self.assertNotIn("espera confirmación de Enviado en Point", html)
+        self.assertNotIn("Logística debe sincronizar", html)
+        self.assertIn("sucursales confirmadas", html)
 
     def test_pwa_carga_sucursal_incluye_busqueda_y_orden_alfabetico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")

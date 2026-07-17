@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v73-solo-enviado-point";
+const CACHE_NAME = "pollyanas-logistica-pwa-v78-gps-ruta-activa";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v63-carga-tramos-consolidada",

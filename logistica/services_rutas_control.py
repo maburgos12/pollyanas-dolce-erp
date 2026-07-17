@@ -1041,6 +1041,8 @@ def resumen_control_rutas(*, fecha=None, limit: int = 50) -> dict:
     rows = []
     for ruta in rutas:
         latest = ruta.ubicaciones.order_by("-timestamp_servidor").first()
+        gps_minutos = int((timezone.now() - latest.timestamp_servidor).total_seconds() / 60) if latest else None
+        gps_atrasado = ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and (gps_minutos is None or gps_minutos >= 10)
         eventos_abiertos = ruta.eventos.filter(severidad__in=[EventoRuta.SEVERIDAD_ALERTA, EventoRuta.SEVERIDAD_CRITICA]).count()
         rows.append(
             {
@@ -1049,7 +1051,8 @@ def resumen_control_rutas(*, fecha=None, limit: int = 50) -> dict:
                 "paradas_total": ruta.paradas.count(),
                 "paradas_visitadas": ruta.paradas.filter(estado=ParadaRuta.ESTADO_VISITADA).count(),
                 "eventos_alerta": eventos_abiertos,
-                "gps_minutos": int((timezone.now() - latest.timestamp_servidor).total_seconds() / 60) if latest else None,
+                "gps_minutos": gps_minutos,
+                "gps_atrasado": gps_atrasado,
             }
         )
     return {

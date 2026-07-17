@@ -231,6 +231,22 @@
     border-left-color: var(--route-red);
   }
 
+  .control-route-card.gps-stale {
+    border-left-color: var(--route-red);
+    background: #fff8f6;
+  }
+
+  .route-gps-warning {
+    width: fit-content;
+    padding: 5px 8px;
+    border: 1px solid rgba(198, 45, 45, .34);
+    border-radius: 999px;
+    background: #fff0ed;
+    color: #9f2424;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
   .route-card-head {
     display: flex;
     justify-content: space-between;
@@ -917,7 +933,7 @@
         <span>{{ metricas.rutas }} visibles</span>
       </div>
       {% for row in control.rutas %}
-      <article class="control-route-card {% if forloop.first %}is-active{% endif %} {% if row.eventos_alerta %}is-alert{% endif %}">
+      <article class="control-route-card {% if row.gps_atrasado %}gps-stale{% endif %} {% if forloop.first %}is-active{% endif %} {% if row.eventos_alerta %}is-alert{% endif %}">
         <div class="route-card-head">
           <div>
             <strong>{{ row.ruta.nombre }}</strong>
@@ -939,6 +955,7 @@
           <div>Geocercas<span>{{ row.paradas_visitadas }} / {{ row.paradas_total }}</span></div>
           <div>GPS<span>{% if row.ultima_ubicacion %}{{ row.ultima_ubicacion.timestamp_servidor|naturaltime }}{% else %}Sin señal{% endif %}</span></div>
         </div>
+        {% if row.gps_atrasado %}<div class="route-gps-warning">GPS sin actualizar{% if row.gps_minutos %} · {{ row.gps_minutos }} min{% endif %}</div>{% endif %}
         <a class="btn btn-secondary btn-small" href="{% url 'logistica:ruta_detail' row.ruta.id %}">Abrir detalle</a>
       </article>
       {% empty %}
