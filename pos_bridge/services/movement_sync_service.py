@@ -11,6 +11,7 @@ from control.models import MermaPOS
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
+from pos_bridge.services.unidades import cantidad_en_unidad_erp
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, PointPendingMatch
 from pos_bridge.config import load_point_bridge_settings
@@ -166,19 +167,22 @@ class PointMovementSyncService:
         inventario.save(update_fields=["stock_actual", "actualizado_en"])
 
     def _upsert_inventory_movement(self, *, line: PointProductionLine) -> bool:
+        cantidad_erp, _nota = cantidad_en_unidad_erp(
+            Decimal(str(line.produced_quantity or 0)), line.unit, line.insumo
+        )
         defaults = {
             "fecha": datetime.combine(line.production_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()),
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
-            "cantidad": line.produced_quantity,
+            "cantidad": cantidad_erp,
             "referencia": f"POINT-PROD:{line.production_external_id}",
         }
         existing = MovimientoInventario.objects.filter(source_hash=line.source_hash).first()
         if existing is None:
             MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
-            self._apply_inventory_delta(insumo=line.insumo, delta=Decimal(str(line.produced_quantity or 0)))
+            self._apply_inventory_delta(insumo=line.insumo, delta=cantidad_erp)
             return True
-        new_qty = Decimal(str(line.produced_quantity or 0))
+        new_qty = cantidad_erp
         old_qty = Decimal(str(existing.cantidad or 0))
         if existing.insumo_id == line.insumo_id and old_qty == new_qty:
             return False
@@ -221,19 +225,24 @@ class PointMovementSyncService:
 
     def _upsert_transfer_inventory_movement(self, *, line: PointTransferLine) -> bool:
         movement_at = line.received_at or line.sent_at or line.registered_at
+        # Point reporta en SU unidad (kg/litro); el ERP guarda en la unidad
+        # base del insumo (g/ml) — sin convertir, la entrada queda 1000× corta.
+        cantidad_erp, _nota = cantidad_en_unidad_erp(
+            Decimal(str(line.received_quantity or 0)), line.unit, line.insumo
+        )
         defaults = {
             "fecha": movement_at,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
-            "cantidad": line.received_quantity,
+            "cantidad": cantidad_erp,
             "referencia": f"POINT-TRANSFER:{line.transfer_external_id}",
         }
         existing = MovimientoInventario.objects.filter(source_hash=line.source_hash).first()
         if existing is None:
             MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
-            self._apply_inventory_delta(insumo=line.insumo, delta=Decimal(str(line.received_quantity or 0)))
+            self._apply_inventory_delta(insumo=line.insumo, delta=cantidad_erp)
             return True
-        new_qty = Decimal(str(line.received_quantity or 0))
+        new_qty = cantidad_erp
         old_qty = Decimal(str(existing.cantidad or 0))
         if existing.insumo_id == line.insumo_id and old_qty == new_qty:
             return False
