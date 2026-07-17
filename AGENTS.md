@@ -155,11 +155,22 @@ primero, aparecen migraciones "pendientes" de otras apps que no son de la tarea 
 
 ```bash
 git fetch origin main
-git checkout -b codex/<modulo>-<descripcion> origin/main   # rama limpia desde main actualizado
-python manage.py migrate                                    # aplicar TODO lo que main ya tiene
+git worktree add /Users/mauricioburgos/Downloads/codex_worktrees/<tarea> \
+  -b codex/<modulo>-<descripcion> origin/main
+cd /Users/mauricioburgos/Downloads/codex_worktrees/<tarea>
+bash scripts/git_workspace_preflight.sh --write
+python manage.py migrate                                  # aplicar TODO lo que main ya tiene
 python manage.py migrate --check                           # debe quedar en 0 pendientes
 python manage.py check                                     # debe quedar en 0 errores
 ```
+
+El checkout raíz `/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1` es
+una base de solo lectura. Nunca crear ramas, ejecutar agentes con escritura ni
+implementar tareas dentro de esa carpeta. El preflight es obligatorio antes de
+modificar archivos y debe detener el trabajo ante `detached HEAD`, checkout raíz,
+rama `main`, cambios previos, archivos sin seguimiento o atraso frente a
+`origin/main`. No reparar esas condiciones dentro del mismo árbol: crear o
+recuperar un worktree limpio.
 
 **Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
 y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
@@ -410,6 +421,10 @@ python manage.py runserver                                    # Servidor local
 Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni producción.
 
 - Usar `1 hilo = 1 branch = 1 worktree limpio`.
+- El checkout raíz es base de solo lectura y debe permanecer limpio; no usarlo como worktree de tarea.
+- Ningún worktree de tarea puede apropiarse de `main`; usar siempre `codex/<modulo>-<cambio>`.
+- Si `git branch --show-current` no devuelve una rama, detenerse: `detached HEAD` nunca es válido para trabajar.
+- Ejecutar `bash scripts/git_workspace_preflight.sh --write` antes de la primera modificación.
 - Antes de empezar, revisar `git status --short --branch` y `git worktree list`.
 - No trabajar sobre `main` ni sobre un checkout con cambios no relacionados.
 - Si el árbol actual está mezclado, abrir un worktree limpio desde `origin/main`.
@@ -420,7 +435,7 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 - Preview local, staging y producción son evidencias distintas. No presentar validación local como prueba de producción.
 - No desplegar desde una rama con cambios mezclados o no revisados.
 - Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `CLAUDE.md` en el mismo cambio para mantenerlas alineadas (deben quedar con el mismo contenido).
-- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado y limpiar ramas atoradas que puedan obstruir otros hilos.
+- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado, ejecutar `git worktree prune --dry-run` y limpiar ramas/worktrees atorados que puedan obstruir otros hilos.
 
 ## Acciones que cambian estado — contrato obligatorio
 
