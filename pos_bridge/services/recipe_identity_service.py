@@ -117,8 +117,16 @@ class PointRecipeIdentityService:
 
         update_fields: list[str] = []
         if point_code and insumo.codigo_point != point_code:
-            insumo.codigo_point = point_code[:80]
-            update_fields.append("codigo_point")
+            # Otro insumo activo ya puede tener este código (constraint único):
+            # en ese caso no se reasigna — un choque aquí tumbaba el lote entero.
+            conflicto = (
+                Insumo.objects.filter(activo=True, codigo_point=point_code[:80])
+                .exclude(pk=insumo.pk)
+                .exists()
+            )
+            if not conflicto:
+                insumo.codigo_point = point_code[:80]
+                update_fields.append("codigo_point")
         if point_name and insumo.nombre_point != point_name:
             insumo.nombre_point = point_name[:250]
             update_fields.append("nombre_point")
@@ -175,8 +183,19 @@ class PointRecipeIdentityService:
             )
             return resolved.insumo
 
+        codigo_limpio = (point_code or "").strip().upper()[:80]
+        if codigo_limpio:
+            existente = Insumo.objects.filter(activo=True, codigo_point=codigo_limpio).order_by("id").first()
+            if existente is not None:
+                self.sync_insumo_point_identity(
+                    insumo=existente,
+                    point_code=point_code,
+                    point_name=point_name,
+                    category=categoria,
+                )
+                return canonical_insumo(existente) or existente
         insumo = Insumo.objects.create(
-            codigo_point=(point_code or "").strip().upper()[:80],
+            codigo_point=codigo_limpio,
             nombre_point=(point_name or "").strip()[:250],
             nombre=(point_name or point_code or "Insumo Point")[:250],
             tipo_item=Insumo.TIPO_INTERNO,

@@ -149,8 +149,14 @@ class PointProductRecipeSyncService:
                 root_codes=sorted(selected_codes),
                 max_depth=max(1, int(max_depth or 3)),
             )
-            products = client.get_all_products()
-            products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
+            if selected_codes:
+                # Extracción dirigida: 1 búsqueda por código. Pagar la
+                # enumeración completa (~1,500 consultas) por un lote de 15
+                # productos causaba lotes de 3 horas.
+                products = self._fetch_products_by_codes(client=client, selected_codes=selected_codes)
+            else:
+                products = client.get_all_products()
+                products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
             summary["products_seen"] = len(products)
             visited: dict[str, PointRecipeNode] = {}
 
@@ -412,6 +418,26 @@ class PointProductRecipeSyncService:
                 seen_codes.add(sku_norm)
             seen_external_ids.add(external_id)
         return hydrated
+
+    def _fetch_products_by_codes(self, *, client, selected_codes: set[str]) -> list[dict]:
+        """Trae SOLO los productos pedidos: una consulta dirigida por código,
+        con hidratación desde PointProduct para los que la búsqueda no regrese.
+        """
+        found: list[dict] = []
+        seen: set[str] = set()
+        for code in sorted(selected_codes):
+            if not code:
+                continue
+            try:
+                rows = client.get_products(text_art=code)
+            except Exception:
+                rows = []
+            for row in rows:
+                norm = self._norm_code(row.get("Codigo") or "")
+                if norm == code and norm not in seen:
+                    seen.add(norm)
+                    found.append(row)
+        return self._hydrate_selected_products(client=client, products=found, selected_codes=selected_codes)
 
     def _hydrate_selected_products(self, *, client, products: list[dict], selected_codes: set[str]) -> list[dict]:
         if not selected_codes:
