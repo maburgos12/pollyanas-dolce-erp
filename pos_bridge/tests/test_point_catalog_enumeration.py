@@ -96,9 +96,9 @@ class ConversionUnidadSyncAlmacenTests(SimpleTestCase):
             _cantidad_en_unidad_erp,
         )
 
-        ml = UnidadMedida.objects.create(codigo="ml", nombre="Mililitro", tipo="VOLUME", factor_to_base=1)
-        lt = UnidadMedida.objects.create(codigo="lt", nombre="Litro", tipo="VOLUME", factor_to_base=1000)
-        kg = UnidadMedida.objects.create(codigo="kg", nombre="Kilo", tipo="MASS", factor_to_base=1000)
+        ml, _ = UnidadMedida.objects.get_or_create(codigo="ml", defaults={"nombre": "Mililitro", "tipo": "VOLUME", "factor_to_base": 1})
+        lt, _ = UnidadMedida.objects.get_or_create(codigo="lt", defaults={"nombre": "Litro", "tipo": "VOLUME", "factor_to_base": 1000})
+        kg, _ = UnidadMedida.objects.get_or_create(codigo="kg", defaults={"nombre": "Kilo", "tipo": "MASS", "factor_to_base": 1000})
         insumo = Insumo.objects.create(nombre="Desmoldante test", unidad_base=lt)
 
         cantidad, nota = _cantidad_en_unidad_erp(Decimal("23000"), "ml", insumo)
@@ -145,3 +145,68 @@ class EnumeracionV4Tests(SimpleTestCase):
             pause_seconds=0, relogin_every=3,
         )
         self.assertGreaterEqual(logins["n"], 2)
+
+
+class ConversionTransfersTests(SimpleTestCase):
+    """Transfers y producción convierten la unidad Point a la del ERP."""
+
+    databases = "__all__"
+
+    def _insumo_gramos(self):
+        from maestros.models import Insumo, UnidadMedida
+
+        kg, _ = UnidadMedida.objects.get_or_create(codigo="kg", defaults={"nombre": "Kilo", "tipo": "MASS", "factor_to_base": 1000})
+        g, _ = UnidadMedida.objects.get_or_create(codigo="g", defaults={"nombre": "Gramo", "tipo": "MASS", "factor_to_base": 1})
+        return Insumo.objects.create(nombre="Queso crema conv-test", unidad_base=g)
+
+    def test_transfer_convierte_kg_a_gramos(self):
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from inventario.models import ExistenciaInsumo, MovimientoInventario
+        from pos_bridge.models import PointBranch, PointTransferLine
+        from pos_bridge.services.movement_sync_service import PointMovementSyncService
+
+        insumo = self._insumo_gramos()
+        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv"})
+        line = PointTransferLine.objects.create(
+            transfer_external_id="T-1", source_hash="hash-conv-1", destination_branch=branch, origin_branch=branch,
+            insumo=insumo, received_quantity=Decimal("32"), unit="KG",
+            received_at=timezone.now(), registered_at=timezone.now(),
+        )
+        service = PointMovementSyncService()
+        service._upsert_transfer_inventory_movement(line=line)
+        mov = MovimientoInventario.objects.get(source_hash="hash-conv-1")
+        self.assertEqual(mov.cantidad, Decimal("32000"))
+        self.assertEqual(ExistenciaInsumo.objects.get(insumo=insumo).stock_actual, Decimal("32000"))
+
+    def test_backfill_corrige_movimiento_viejo(self):
+        from decimal import Decimal
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.utils import timezone
+
+        from inventario.models import MovimientoInventario
+        from pos_bridge.models import PointBranch, PointTransferLine
+
+        insumo = self._insumo_gramos()
+        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv"})
+        PointTransferLine.objects.create(
+            transfer_external_id="T-2", source_hash="hash-conv-2", destination_branch=branch, origin_branch=branch,
+            insumo=insumo, received_quantity=Decimal("32"), unit="KG",
+            received_at=timezone.now(), registered_at=timezone.now(),
+        )
+        MovimientoInventario.objects.create(
+            source_hash="hash-conv-2", fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA, insumo=insumo,
+            cantidad=Decimal("32"), referencia="POINT-TRANSFER:T-2",
+        )
+        salida = StringIO()
+        call_command("corregir_unidades_movimientos_point", stdout=salida)
+        mov = MovimientoInventario.objects.get(source_hash="hash-conv-2")
+        self.assertEqual(mov.cantidad, Decimal("32000"))
+        # idempotente
+        call_command("corregir_unidades_movimientos_point", stdout=salida)
+        self.assertEqual(MovimientoInventario.objects.get(source_hash="hash-conv-2").cantidad, Decimal("32000"))

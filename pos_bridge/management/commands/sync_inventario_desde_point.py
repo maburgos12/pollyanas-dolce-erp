@@ -17,37 +17,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from inventario.models import ExistenciaInsumo, MovimientoInventario
-from maestros.models import UnidadMedida
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
-from recetas.utils.costeo_snapshot import POINT_UNIT_ALIASES, _compatible_units, _unit_factor
+from pos_bridge.services.unidades import cantidad_en_unidad_erp as _cantidad_compartida
 
 
-def _cantidad_en_unidad_erp(cantidad: Decimal, unidad_point: str, insumo) -> tuple[Decimal, str]:
-    """Convierte la cantidad reportada por Point a la unidad base del insumo ERP.
-
-    Point maneja algunos insumos en otra unidad (p.ej. Desmoldante en ml,
-    ERP en lt): pasar la cantidad sin convertir infla el stock 1000× y
-    envenena el consumo mensual (caso real: ajuste de −$2.3M en mayo 2026).
-    Si la unidad Point no se reconoce o es incompatible, se conserva la
-    cantidad original y se reporta para revisión.
-    """
-    raw = " ".join(str(unidad_point or "").strip().lower().split())
-    codigo = POINT_UNIT_ALIASES.get(raw)
-    destino = insumo.unidad_base
-    if not codigo or destino is None:
-        return cantidad, ""
-    origen = UnidadMedida.objects.filter(codigo__iexact=codigo).first()
-    if origen is None or origen.id == destino.id:
-        return cantidad, ""
-    if not _compatible_units(origen, destino):
-        return cantidad, f"UNIDAD INCOMPATIBLE: Point '{unidad_point}' vs ERP '{destino.codigo}'"
-    factor_origen = _unit_factor(origen)
-    factor_destino = _unit_factor(destino)
-    if not factor_origen or not factor_destino:
-        return cantidad, ""
-    convertida = (cantidad * factor_origen / factor_destino).quantize(Decimal("0.000001"))
-    return convertida, f"convertido {cantidad} {origen.codigo} → {convertida} {destino.codigo}"
+def _cantidad_en_unidad_erp(cantidad, unidad_point, insumo):
+    """Delegado al helper compartido (pos_bridge.services.unidades)."""
+    return _cantidad_compartida(cantidad, unidad_point, insumo)
 
 
 class Command(BaseCommand):
