@@ -2,8 +2,16 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
 
 jobs:
   test:
