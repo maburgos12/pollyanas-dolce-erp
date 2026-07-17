@@ -116,17 +116,60 @@
   <p class="muted">Variación = real − presupuesto. En la vista Real, el acumulado "Anual" suma solo los meses que ya tienen datos; el real anual de utilidades usa como base los meses con ingresos consolidados, así que si a un área le falta consolidar un mes la utilidad de ese mes puede venir incompleta.</p>
 </section>
 
+<section class="card">
+  <div class="card-header">Desglose por concepto</div>
+  <p class="muted">Cada concepto sumado entre sucursales, agrupado por bloque del P&amp;L — el mismo interruptor de arriba (Real / Presupuesto / Variación) aplica a esta tabla. Para el detalle por sucursal y la fuente de cada dato, usa "Ver detalle por área".</p>
+  <div class="table-responsive">
+    <table class="table table-striped er-table er-show-real">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          {% for month_name, month_number in month_options %}
+          <th>{{ month_name|slice:":3"|capfirst }}</th>
+          {% endfor %}
+          <th>Anual</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bloque in desglose %}
+        <tr class="er-row-total">
+          <td colspan="14">{{ bloque.grupo }}</td>
+        </tr>
+        {% for fila in bloque.conceptos %}
+        <tr>
+          <td>{{ fila.label }}</td>
+          {% for celda in fila.meses %}
+          <td>
+            <span class="er-val er-val-real{% if celda.real is not None and celda.real < 0 %} er-neg{% endif %}">{% if celda.real is not None %}${{ celda.real|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+            <span class="er-val er-val-ppto{% if celda.ppto < 0 %} er-neg{% endif %}">${{ celda.ppto|floatformat:0|intcomma }}</span>
+            <span class="er-val er-val-var{% if celda.var is not None and celda.var < 0 %} er-neg{% endif %}">{% if celda.var is not None %}${{ celda.var|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+          </td>
+          {% endfor %}
+          <td>
+            <span class="er-val er-val-real{% if fila.anual_real is not None and fila.anual_real < 0 %} er-neg{% endif %}">{% if fila.anual_real is not None %}${{ fila.anual_real|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+            <span class="er-val er-val-ppto{% if fila.anual_ppto < 0 %} er-neg{% endif %}">${{ fila.anual_ppto|floatformat:0|intcomma }}</span>
+            <span class="er-val er-val-var{% if fila.anual_var is not None and fila.anual_var < 0 %} er-neg{% endif %}">{% if fila.anual_var is not None %}${{ fila.anual_var|floatformat:0|intcomma }}{% else %}<span class="muted">—</span>{% endif %}</span>
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
   (function () {
-    var tabla = document.getElementById("er-table");
     var botones = document.querySelectorAll("[data-er-view]");
     botones.forEach(function (btn) {
       btn.addEventListener("click", function () {
-        tabla.classList.remove("er-show-real", "er-show-ppto", "er-show-var");
-        tabla.classList.add("er-show-" + btn.dataset.erView);
+        document.querySelectorAll(".er-table").forEach(function (tabla) {
+          tabla.classList.remove("er-show-real", "er-show-ppto", "er-show-var");
+          tabla.classList.add("er-show-" + btn.dataset.erView);
+        });
         botones.forEach(function (b) { b.classList.remove("active"); });
         btn.classList.add("active");
       });
