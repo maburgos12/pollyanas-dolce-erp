@@ -2572,3 +2572,31 @@ class ConsolidacionNocturnaVentanaTests(TestCase):
         self.assertEqual(len(consolidados), 3)
         self.assertEqual(len({p for p in consolidados}), 3)
         self.assertTrue(all(p.day == 1 for p in consolidados))
+
+
+class DesgloseConceptosTests(TestCase):
+    """El desglose por concepto suma sucursales y agrupa por bloque del P&L."""
+
+    def test_concepto_suma_sucursales(self):
+        from django.contrib.auth import get_user_model
+
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        s1 = Sucursal.objects.create(nombre="Uno", codigo="DES-S1")
+        s2 = Sucursal.objects.create(nombre="Dos", codigo="DES-S2")
+        for suc, real in ((s1, "100"), (s2, "150")):
+            rubro = RubroPresupuesto.objects.create(
+                area=gv, concepto="Renta", sucursal=suc, tipo=RubroPresupuesto.TIPO_EGRESO
+            )
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 2, 1),
+                monto_presupuesto=Decimal("120"), monto_real=Decimal(real),
+                fuente_real="AUTO:GASTO_OPERATIVO",
+            )
+        user = get_user_model().objects.create_superuser("dg_desglose", "dgd@test.mx", "clave")
+        self.client.force_login(user)
+        response = self.client.get("/reportes/estado-resultados/?year=2026")
+        desglose = response.context["desglose"]
+        bloque_gv = next(b for b in desglose if b["grupo"] == "Gastos de venta")
+        renta = next(f for f in bloque_gv["conceptos"] if f["label"] == "Renta")
+        self.assertEqual(renta["meses"][1]["real"], Decimal("250"))
+        self.assertEqual(renta["meses"][1]["ppto"], Decimal("240"))

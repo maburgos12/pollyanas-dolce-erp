@@ -745,6 +745,10 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
         capex_proyectos=_er_bucket(), capex_equipo=_er_bucket(),
     )
     egreso_keys = {clave for clave, _ in _ER_AREAS_EGRESO}
+    # Desglose por concepto (pestaña GENERAL del Excel): cada concepto sumado
+    # entre sucursales, agrupado por bloque del P&L, para auditar renglón a
+    # renglón de dónde sale cada total.
+    detalle: dict[tuple[str, str], dict] = {}
 
     lineas = LineaPresupuestoMensual.objects.filter(
         periodo__year=selected_year, version=selected_version, rubro__activo=True
@@ -770,6 +774,11 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
         if str(linea.fuente_real or "").strip():
             celda["real"] += linea.monto_real or ZERO
             celda["con_real"] = True
+        celda_det = detalle.setdefault((clave, linea.rubro.concepto), _er_bucket())[linea.periodo.month]
+        celda_det["ppto"] += linea.monto_presupuesto or ZERO
+        if str(linea.fuente_real or "").strip():
+            celda_det["real"] += linea.monto_real or ZERO
+            celda_det["con_real"] = True
 
     utilidad_bruta = _er_resta(buckets["ingresos"], buckets["costos"])
     egresos_total = _er_suma(*(buckets[clave] for clave in egreso_keys))
@@ -790,6 +799,29 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
     filas.append(_er_fila("Compras de equipo", buckets["capex_equipo"], area="capex"))
     filas.append(_er_fila("Resultado final", resultado_final, kind="total"))
 
+    # ---- desglose por concepto (orden y nombres de los bloques del P&L) ----
+    NOMBRES_GRUPO = {
+        "ingresos": "Ingresos",
+        "costos": "Costos",
+        **dict(_ER_AREAS_EGRESO),
+        "capex_proyectos": "Inversión en proyectos (aperturas)",
+        "capex_equipo": "Compras de equipo",
+    }
+    orden_grupos = ["ingresos", "costos"] + [c for c, _ in _ER_AREAS_EGRESO] + [
+        "capex_proyectos", "capex_equipo",
+    ]
+    desglose = []
+    for grupo in orden_grupos:
+        conceptos = [
+            _er_fila(concepto, bucket)
+            for (g, concepto), bucket in detalle.items()
+            if g == grupo
+        ]
+        if not conceptos:
+            continue
+        conceptos.sort(key=lambda f: -(f["anual_real"] if f["anual_real"] is not None else ZERO))
+        desglose.append({"grupo": NOMBRES_GRUPO[grupo], "conceptos": conceptos})
+
     por_label = {fila["label"]: fila for fila in filas}
     kpis = {
         "ingresos_real": por_label["Ingresos"]["anual_real"],
@@ -807,6 +839,7 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
     return render(request, "reportes/estado_resultados.html", {
         "module_tabs": _reportes_module_tabs("estado_resultados"),
         "filas": filas,
+        "desglose": desglose,
         "kpis": kpis,
         "month_options": MONTH_COLUMNS,
         "selected_year": selected_year,
