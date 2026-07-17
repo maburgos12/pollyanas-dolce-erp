@@ -1,0 +1,27 @@
+name: Repo hygiene
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check whitespace errors
+        run: git diff --check HEAD^
+
+      - name: Validate workspace preflight syntax
+        run: bash -n scripts/git_workspace_preflight.sh
