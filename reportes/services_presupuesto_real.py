@@ -272,6 +272,14 @@ class PresupuestoRealConsolidacionService:
             if "mant_unidad" not in indices:
                 indices["mant_unidad"] = self._build_mant_unidad_index(periodo)
             return self._monto_mantenimiento_unidad(regla, indices["mant_unidad"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_COMBUSTIBLE_UNIDAD:
+            if "combustible" not in indices:
+                indices["combustible"] = self._build_combustible_index(periodo)
+            return self._monto_combustible_unidad(regla, indices["combustible"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO:
+            if "mant_equipo" not in indices:
+                indices["mant_equipo"] = self._build_mant_equipo_index(periodo)
+            return self._monto_mantenimiento_equipo(regla, indices["mant_equipo"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -544,6 +552,86 @@ class PresupuestoRealConsolidacionService:
         if codigo not in mant_index:
             return (Decimal("0"), False)
         return (mant_index[codigo], True)
+
+
+    @staticmethod
+    def _fuera_de_vigencia(regla: ReglaFuenteRubro, periodo: date) -> bool:
+        """Filtro ``desde`` (YYYY-MM): antes de esa fecha la fuente reporta
+        "sin datos" y la línea conserva el legado del Excel."""
+        desde = str((regla.filtros or {}).get("desde") or "")
+        return bool(desde) and periodo.strftime("%Y-%m") < desde
+
+    @staticmethod
+    def _build_combustible_index(periodo: date) -> dict[str, Decimal]:
+        """Cargas de combustible del mes por unidad (bitácora de logística)."""
+        from logistica.models import CargaCombustibleUnidad
+
+        return {
+            fila["unidad__codigo"]: fila["importe"] or Decimal("0")
+            for fila in CargaCombustibleUnidad.objects.filter(
+                fecha_registro__year=periodo.year,
+                fecha_registro__month=periodo.month,
+            )
+            .values("unidad__codigo")
+            .annotate(importe=Sum("importe_total"))
+            if fila["unidad__codigo"]
+        }
+
+    def _monto_combustible_unidad(
+        self, regla: ReglaFuenteRubro, index: dict[str, Decimal], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        unidades = [str(u).strip() for u in (regla.filtros or {}).get("unidades") or [] if str(u).strip()]
+        if not unidades:
+            raise ValueError("regla COMBUSTIBLE_UNIDAD sin lista de unidades en filtros")
+        total = Decimal("0")
+        hubo_datos = False
+        for codigo in unidades:
+            if codigo in index:
+                total += index[codigo]
+                hubo_datos = True
+        return (total, hubo_datos)
+
+    @staticmethod
+    def _build_mant_equipo_index(periodo: date) -> list[dict]:
+        """Órdenes de mantenimiento del mes (activos) con costo, por sucursal
+        y ubicación del activo."""
+        from django.db.models import F as _F
+
+        from activos.models import OrdenMantenimiento
+
+        return list(
+            OrdenMantenimiento.objects.filter(
+                creado_en__year=periodo.year, creado_en__month=periodo.month
+            )
+            .annotate(total=_F("costo_repuestos") + _F("costo_mano_obra") + _F("costo_otros"))
+            .values("activo_ref__sucursal__codigo", "activo_ref__ubicacion")
+            .annotate(monto=Sum("total"))
+        )
+
+    def _monto_mantenimiento_equipo(
+        self, regla: ReglaFuenteRubro, index: list[dict], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        filtros = regla.filtros or {}
+        sucursal_codigo = str(filtros.get("sucursal_codigo") or "").strip()
+        solo_produccion = bool(filtros.get("ubicaciones_produccion"))
+        if not sucursal_codigo and not solo_produccion:
+            raise ValueError("regla MANTENIMIENTO_EQUIPO sin sucursal_codigo ni ubicaciones_produccion")
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in index:
+            ubicacion = str(fila.get("activo_ref__ubicacion") or "").upper()
+            es_produccion = "PRODUCCION" in ubicacion or "HORNOS" in ubicacion or fila.get("activo_ref__sucursal__codigo") == "CEDIS"
+            if solo_produccion != es_produccion:
+                continue
+            if sucursal_codigo and fila.get("activo_ref__sucursal__codigo") != sucursal_codigo:
+                continue
+            total += fila["monto"] or Decimal("0")
+            hubo_datos = True
+        return (total, hubo_datos)
 
 
 def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:

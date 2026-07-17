@@ -2630,3 +2630,81 @@ class MantenimientoUnidadTests(TestCase):
         linea.refresh_from_db()
         self.assertEqual(linea.monto_real, Decimal("12287.00"))
         self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_UNIDAD")
+
+
+class CombustibleYMantEquipoTests(TestCase):
+    """Combustible por unidad y mantenimiento de equipos fluyen desde julio."""
+
+    def test_combustible_suma_unidades_y_respeta_desde(self):
+        from logistica.models import CargaCombustibleUnidad, Repartidor, Unidad
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Diesel", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        for mes, real_previo in ((6, "18000"), (7, None)):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, mes, 1), monto_presupuesto=Decimal("22000"),
+                monto_real=Decimal(real_previo) if real_previo else None,
+                fuente_real="AUTO:LEGADO" if real_previo else "",
+            )
+        suc = Sucursal.objects.create(nombre="Matriz CB", codigo="CB-MTZ")
+        u1 = Unidad.objects.create(codigo="GS-DC1", descripcion="Fiat Ducato", sucursal=suc)
+        u2 = Unidad.objects.create(codigo="GS-PM1", descripcion="Peugeot Manager", sucursal=suc)
+        from django.contrib.auth import get_user_model
+
+        from logistica.models import BitacoraSalidaLlegada
+        user_rep = get_user_model().objects.create_user("rep_cb", "rep@test.mx", "clave")
+        rep = Repartidor.objects.create(user=user_rep, sucursal=suc)
+        bit = BitacoraSalidaLlegada.objects.create(
+            repartidor=rep, unidad=u1, km_salida=1, nivel_gas_salida="1/2",
+        )
+        for u, monto, mes in ((u1, "6600", 7), (u2, "7600", 7), (u1, "12800", 6)):
+            carga = CargaCombustibleUnidad.objects.create(
+                bitacora=bit, unidad=u, repartidor=rep, litros=Decimal("40"),
+                importe_total=Decimal(monto),
+            )
+            # fecha_registro es auto_now_add: fijar el mes vía update
+            CargaCombustibleUnidad.objects.filter(pk=carga.pk).update(
+                fecha_registro=timezone.now().replace(year=2026, month=mes, day=5)
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_COMBUSTIBLE_UNIDAD,
+            filtros={"unidades": ["GS-DC1", "GS-PM1"], "desde": "2026-07"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        jul = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 7, 1))
+        jun = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 6, 1))
+        self.assertEqual(jul.monto_real, Decimal("14200.00"))
+        self.assertEqual(jul.fuente_real, "AUTO:COMBUSTIBLE_UNIDAD")
+        # junio: antes del 'desde' → conserva el legado del Excel
+        self.assertEqual(jun.monto_real, Decimal("18000"))
+        self.assertEqual(jun.fuente_real, "AUTO:LEGADO")
+
+    def test_mantenimiento_equipo_produccion(self):
+        from activos.models import Activo, OrdenMantenimiento
+
+        area = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Mantenimiento equipo/maquinaria", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("7000"),
+        )
+        horno = Activo.objects.create(nombre="Horno Test", ubicacion="HORNOS")
+        vitrina = Activo.objects.create(nombre="Vitrina Test", ubicacion="LEYVA")
+        for activo, costo in ((horno, "1800"), (vitrina, "999")):
+            OrdenMantenimiento.objects.create(
+                activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
+                descripcion="test", costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+            filtros={"ubicaciones_produccion": True, "desde": "2026-07"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        linea = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 7, 1))
+        # solo el horno (HORNOS es producción); la vitrina de LEYVA no
+        self.assertEqual(linea.monto_real, Decimal("1800.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
