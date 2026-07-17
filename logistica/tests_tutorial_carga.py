@@ -123,4 +123,4 @@ class TutorialCargaPwaTests(TutorialCargaBaseTests):
         self.assertIn("mostrar_tutorial_carga_sucursal", html)
         self.assertIn("prefers-reduced-motion", html)
         self.assertIn("confirmarTutorialCarga", html)
-        self.assertIn("v73-solo-enviado-point", html)
+        self.assertIn("v78-gps-ruta-activa", html)

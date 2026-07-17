@@ -135,11 +135,11 @@ REMOVED_PWA_MARKERS = {
 }
 
 REQUIRED_TEMPLATE_MARKERS = {
-    "route-control-v73-solo-enviado-point": "versionado exacto del service worker para forzar actualizacion de la PWA",
+    "route-control-v78-gps-ruta-activa": "versionado exacto del service worker para forzar actualizacion de la PWA",
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
-    "pollyanas-logistica-pwa-v73-solo-enviado-point": "cache versionado de la PWA",
+    "pollyanas-logistica-pwa-v78-gps-ruta-activa": "cache versionado de la PWA",
     'event.request.mode === "navigate"': "estrategia network-first para navegacion",
     'url.pathname === "/logistica/app/"': "estrategia network-first para el app shell",
 }

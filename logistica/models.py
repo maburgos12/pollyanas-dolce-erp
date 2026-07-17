@@ -555,6 +555,11 @@ class RutaCargaChecklistLinea(models.Model):
                 condition=~Q(client_event_id=""),
                 name="rutacarga_linea_evento_cliente_unico",
             ),
+            models.UniqueConstraint(
+                fields=["point_transfer_line"],
+                condition=Q(point_transfer_line__isnull=False) & ~Q(estatus="SUPERADA"),
+                name="rutacarga_point_activa_unica",
+            ),
         ]
 
     def __str__(self) -> str:
