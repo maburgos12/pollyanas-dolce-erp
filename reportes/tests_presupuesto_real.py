@@ -2708,3 +2708,39 @@ class CombustibleYMantEquipoTests(TestCase):
         # solo el horno (HORNOS es producción); la vitrina de LEYVA no
         self.assertEqual(linea.monto_real, Decimal("1800.00"))
         self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
+
+
+class MantEquipoPorSucursalTests(TestCase):
+    """La regla por_sucursal hereda la sucursal del rubro."""
+
+    def test_cada_sucursal_toma_sus_ordenes(self):
+        from activos.models import Activo, OrdenMantenimiento
+
+        area = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        s1 = Sucursal.objects.create(nombre="Matriz ME", codigo="ME-MTZ")
+        s2 = Sucursal.objects.create(nombre="Leyva ME", codigo="ME-LEY")
+        lineas = {}
+        for suc in (s1, s2):
+            rubro = RubroPresupuesto.objects.create(
+                area=area, concepto="Mantenimiento equipo/maquinaria",
+                sucursal=suc, tipo=RubroPresupuesto.TIPO_EGRESO,
+            )
+            lineas[suc.codigo] = LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("1000"),
+            )
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+                filtros={"por_sucursal": True, "desde": "2026-07"},
+            )
+        a1 = Activo.objects.create(nombre="Refri ME1", ubicacion="MATRIZ", sucursal=s1)
+        a2 = Activo.objects.create(nombre="Vitrina ME2", ubicacion="LEYVA", sucursal=s2)
+        for activo, costo in ((a1, "900"), (a2, "400")):
+            OrdenMantenimiento.objects.create(
+                activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
+                descripcion="t", costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+            )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        for codigo, esperado in (("ME-MTZ", "900.00"), ("ME-LEY", "400.00")):
+            linea = LineaPresupuestoMensual.objects.get(pk=lineas[codigo].pk)
+            self.assertEqual(linea.monto_real, Decimal(esperado))
+            self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")

@@ -617,6 +617,13 @@ class PresupuestoRealConsolidacionService:
             return (Decimal("0"), False)
         filtros = regla.filtros or {}
         sucursal_codigo = str(filtros.get("sucursal_codigo") or "").strip()
+        if not sucursal_codigo and filtros.get("por_sucursal"):
+            # La regla hereda la sucursal de su rubro (una fila del CSV cubre
+            # los 8 rubros por sucursal, cada uno con sus propios activos).
+            sucursal = regla.sucursal_efectiva()
+            sucursal_codigo = sucursal.codigo if sucursal is not None else ""
+            if not sucursal_codigo:
+                return (Decimal("0"), False)
         solo_produccion = bool(filtros.get("ubicaciones_produccion"))
         if not sucursal_codigo and not solo_produccion:
             raise ValueError("regla MANTENIMIENTO_EQUIPO sin sucursal_codigo ni ubicaciones_produccion")
