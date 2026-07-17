@@ -737,7 +737,13 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
         )
 
     buckets = {clave: _er_bucket() for clave, _ in _ER_AREAS_EGRESO}
-    buckets.update(ingresos=_er_bucket(), costos=_er_bucket(), capex=_er_bucket())
+    # Las inversiones NO se revuelven (regla de dirección): los proyectos de
+    # apertura (rubros "CAPEX <proyecto> ...") se muestran aparte del equipo
+    # ordinario (adquisiciones/mesas/hornos de producción).
+    buckets.update(
+        ingresos=_er_bucket(), costos=_er_bucket(),
+        capex_proyectos=_er_bucket(), capex_equipo=_er_bucket(),
+    )
     egreso_keys = {clave for clave, _ in _ER_AREAS_EGRESO}
 
     lineas = LineaPresupuestoMensual.objects.filter(
@@ -749,7 +755,13 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
             clave = "ingresos" if linea.rubro.tipo == RubroPresupuesto.TIPO_INGRESO else "costos"
         elif area == "produccion" and _es_materia_prima(linea):
             continue  # la materia prima ya está en "Costos" del P&L
-        elif area in egreso_keys or area == "capex":
+        elif area == "capex":
+            clave = (
+                "capex_proyectos"
+                if linea.rubro.concepto.upper().startswith("CAPEX")
+                else "capex_equipo"
+            )
+        elif area in egreso_keys:
             clave = area
         else:
             continue  # ventas por producto ya vive en Ingresos; nómina es control
@@ -762,7 +774,8 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
     utilidad_bruta = _er_resta(buckets["ingresos"], buckets["costos"])
     egresos_total = _er_suma(*(buckets[clave] for clave in egreso_keys))
     utilidad_operativa = _er_resta(utilidad_bruta, egresos_total)
-    resultado_final = _er_resta(utilidad_operativa, buckets["capex"])
+    inversion_total = _er_suma(buckets["capex_proyectos"], buckets["capex_equipo"])
+    resultado_final = _er_resta(utilidad_operativa, inversion_total)
 
     filas = [
         _er_fila("Ingresos", buckets["ingresos"], area="resultados"),
@@ -773,7 +786,8 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
         _er_fila(nombre, buckets[clave], area=clave) for clave, nombre in _ER_AREAS_EGRESO
     )
     filas.append(_er_fila("Utilidad operativa", utilidad_operativa, kind="total"))
-    filas.append(_er_fila("Inversiones (CAPEX)", buckets["capex"], area="capex"))
+    filas.append(_er_fila("Inversión en proyectos (aperturas)", buckets["capex_proyectos"], area="capex"))
+    filas.append(_er_fila("Compras de equipo", buckets["capex_equipo"], area="capex"))
     filas.append(_er_fila("Resultado final", resultado_final, kind="total"))
 
     por_label = {fila["label"]: fila for fila in filas}

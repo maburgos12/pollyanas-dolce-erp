@@ -2247,6 +2247,9 @@ class EstadoResultadosTests(TestCase):
         # Resultado final = operativa - capex
         self.assertEqual(filas["Resultado final"]["meses"][feb]["ppto"], Decimal("220"))
         self.assertEqual(filas["Resultado final"]["meses"][feb]["real"], Decimal("300"))
+        # Inversiones separadas: "Horno nuevo" no empieza con CAPEX → equipo
+        self.assertEqual(filas["Compras de equipo"]["meses"][feb]["ppto"], Decimal("200"))
+        self.assertEqual(filas["Inversión en proyectos (aperturas)"]["meses"][feb]["ppto"], Decimal("0"))
 
     def test_mes_sin_real_queda_en_blanco_y_nomina_fuera(self):
         filas = {f["label"]: f for f in self._get().context["filas"]}
