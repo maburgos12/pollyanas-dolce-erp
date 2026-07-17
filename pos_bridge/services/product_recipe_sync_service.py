@@ -1153,6 +1153,24 @@ class PointProductRecipeSyncService:
 
         unit = self.identity_service.resolve_unit(unit_raw)
         tipo_item = self._infer_direct_input_type(category=category)
+        # El código puede pertenecer ya a un insumo activo (la resolución por
+        # nombre pudo caer en otro, o el detalle de Point actualizó el código):
+        # crear duplicaría y el constraint único tumbaba el lote entero.
+        codigo_limpio = (point_code or "").strip().upper()[:80]
+        if codigo_limpio:
+            existente = (
+                Insumo.objects.filter(activo=True, codigo_point__iexact=codigo_limpio)
+                .order_by("id")
+                .first()
+            )
+            if existente is not None:
+                self.identity_service.sync_insumo_point_identity(
+                    insumo=existente,
+                    point_code=point_code,
+                    point_name=point_name,
+                    category=category,
+                )
+                return ResolvedInsumo(insumo=existente, score=100.0, method="POINT_CODE"), False
         insumo = Insumo.objects.create(
             codigo_point=point_code[:80],
             nombre_point=point_name[:250],
