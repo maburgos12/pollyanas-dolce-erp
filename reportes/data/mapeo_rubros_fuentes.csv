@@ -82,3 +82,6 @@ logistica,Chevrolet Cheyenne,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-CH1
 logistica,Peugeot Partner,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-P1""}",Flotilla: reportes de unidad con costo de servicio,1
 logistica,Peugeot Manager,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-PM1""}",Flotilla: reportes de unidad con costo de servicio,1
 logistica,Fiat Ducato,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-DC1""}",Flotilla: reportes de unidad con costo de servicio,1
+logistica,Diesel,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-DC1"", ""GS-PM1""], ""desde"": ""2026-07""}",Bitácora de cargas: Ducato y Manager (diésel); antes de jul rige el Excel,1
+logistica,Gasolina,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-CH1"", ""GS-P1""], ""desde"": ""2026-07""}",Bitácora de cargas: Cheyenne y Partner (gasolina); antes de jul rige el Excel,1
+produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones_produccion"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de activos en producción/CEDIS/hornos,1
