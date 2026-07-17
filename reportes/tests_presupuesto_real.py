@@ -2542,3 +2542,33 @@ class ReclasificarInversionTests(TestCase):
         call_command("reclasificar_inversion_capex", "--dry-run", stdout=StringIO())
         r.refresh_from_db()
         self.assertEqual(r.area.codigo, "gastos-venta")
+
+
+class ConsolidacionNocturnaVentanaTests(TestCase):
+    """La nocturna barre el mes corriente + 2 anteriores (fuentes tardías)."""
+
+    def test_sin_argumento_cubre_tres_meses(self):
+        from unittest.mock import patch
+
+        from reportes.tasks import task_consolidar_presupuesto_real
+
+        consolidados = []
+
+        class FakeService:
+            def consolidar(self, periodo):
+                consolidados.append(periodo)
+
+                class R:
+                    def as_dict(self):
+                        return {"periodo": str(periodo)}
+
+                return R()
+
+        with patch(
+            "reportes.services_presupuesto_real.PresupuestoRealConsolidacionService",
+            FakeService,
+        ):
+            task_consolidar_presupuesto_real.run()
+        self.assertEqual(len(consolidados), 3)
+        self.assertEqual(len({p for p in consolidados}), 3)
+        self.assertTrue(all(p.day == 1 for p in consolidados))
