@@ -912,6 +912,7 @@ class ReglaFuenteRubro(models.Model):
     FUENTE_BONO_VENTAS = "BONO_VENTAS"
     FUENTE_VENTA_POS = "VENTA_POS"
     FUENTE_CONSUMO_MP = "CONSUMO_MP"
+    FUENTE_MANTENIMIENTO_UNIDAD = "MANTENIMIENTO_UNIDAD"
     FUENTE_MANUAL = "MANUAL"
     FUENTE_CHOICES = [
         (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
@@ -920,6 +921,7 @@ class ReglaFuenteRubro(models.Model):
         (FUENTE_BONO_VENTAS, "Bonos ventas"),
         (FUENTE_VENTA_POS, "Ventas POS Point"),
         (FUENTE_CONSUMO_MP, "Consumo materia prima"),
+        (FUENTE_MANTENIMIENTO_UNIDAD, "Mantenimiento de unidad vehicular"),
         (FUENTE_MANUAL, "Captura manual"),
     ]
 

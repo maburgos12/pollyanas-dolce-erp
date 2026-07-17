@@ -6,6 +6,7 @@ from io import StringIO
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch
@@ -2600,3 +2601,32 @@ class DesgloseConceptosTests(TestCase):
         renta = next(f for f in bloque_gv["conceptos"] if f["label"] == "Renta")
         self.assertEqual(renta["meses"][1]["real"], Decimal("250"))
         self.assertEqual(renta["meses"][1]["ppto"], Decimal("240"))
+
+
+class MantenimientoUnidadTests(TestCase):
+    """La fuente MANTENIMIENTO_UNIDAD liga rubros de flotilla con ReporteUnidad."""
+
+    def test_costo_servicio_fluye_al_rubro(self):
+        from logistica.models import Repartidor, ReporteUnidad, Unidad
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Peugeot Partner", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        linea = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("5000"),
+        )
+        suc = Sucursal.objects.create(nombre="Matriz MU", codigo="MU-MTZ")
+        unidad = Unidad.objects.create(codigo="GS-P1", descripcion="Peugeot Partner", sucursal=suc)
+        ReporteUnidad.objects.create(
+            unidad=unidad, tipo="FALLA", severidad="MEDIA", descripcion="Servicio frenos",
+            costo_servicio=Decimal("12287"), fecha_reporte=timezone.now().replace(year=2026, month=7, day=10),
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD,
+            filtros={"unidad_codigo": "GS-P1"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("12287.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_UNIDAD")

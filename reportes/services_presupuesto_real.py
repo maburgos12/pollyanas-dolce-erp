@@ -268,6 +268,10 @@ class PresupuestoRealConsolidacionService:
             if "consumo" not in indices:
                 indices["consumo"] = self._build_consumo_index(periodo)
             return self._monto_consumo_mp(regla, indices["consumo"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD:
+            if "mant_unidad" not in indices:
+                indices["mant_unidad"] = self._build_mant_unidad_index(periodo)
+            return self._monto_mantenimiento_unidad(regla, indices["mant_unidad"])
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -507,6 +511,39 @@ class PresupuestoRealConsolidacionService:
         if int(insumo_id) not in consumo_index:
             return (Decimal("0"), False)
         return (consumo_index[int(insumo_id)], True)
+
+
+    @staticmethod
+    def _build_mant_unidad_index(periodo: date) -> dict[str, Decimal]:
+        """Costo de servicio del mes por unidad vehicular (logística).
+
+        Fuente: logistica.ReporteUnidad.costo_servicio — la base ligada de la
+        flotilla (unidad + reporte + costo) que pidió dirección conectar.
+        """
+        from logistica.models import ReporteUnidad
+
+        return {
+            fila["unidad__codigo"]: fila["costo"] or Decimal("0")
+            for fila in ReporteUnidad.objects.filter(
+                fecha_reporte__year=periodo.year,
+                fecha_reporte__month=periodo.month,
+                costo_servicio__isnull=False,
+                costo_servicio__gt=0,
+            )
+            .values("unidad__codigo")
+            .annotate(costo=Sum("costo_servicio"))
+            if fila["unidad__codigo"]
+        }
+
+    def _monto_mantenimiento_unidad(
+        self, regla: ReglaFuenteRubro, mant_index: dict[str, Decimal]
+    ) -> tuple[Decimal, bool]:
+        codigo = str((regla.filtros or {}).get("unidad_codigo") or "").strip()
+        if not codigo:
+            raise ValueError("regla MANTENIMIENTO_UNIDAD sin unidad_codigo en filtros")
+        if codigo not in mant_index:
+            return (Decimal("0"), False)
+        return (mant_index[codigo], True)
 
 
 def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:

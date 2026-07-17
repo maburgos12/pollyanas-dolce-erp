@@ -78,3 +78,7 @@ produccion,Bono por resultados,BONO_PRODUCCION,,"{""campo_monto"": ""total_a_pag
 gastos-venta,Bono por resultados,BONO_VENTAS,,"{""campo_monto"": ""total_a_pagar""}",Bonos de ventas de la sucursal del rubro,
 resultados,Venta postres,VENTA_POS,,"{""total_empresa"": true, ""campo_monto"": ""total_venta""}",P&L: ingresos = venta total Point (fuente viva; sustituye al Excel),1
 resultados,Costos insumos/productos,CONSUMO_MP,,"{""total_empresa"": true, ""desde"": ""2026-06""}",P&L: costos = consumo MP total (confiable desde jun-2026; antes rige el Excel),1
+logistica,Chevrolet Cheyenne,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-CH1""}",Flotilla: reportes de unidad con costo de servicio,1
+logistica,Peugeot Partner,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-P1""}",Flotilla: reportes de unidad con costo de servicio,1
+logistica,Peugeot Manager,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-PM1""}",Flotilla: reportes de unidad con costo de servicio,1
+logistica,Fiat Ducato,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-DC1""}",Flotilla: reportes de unidad con costo de servicio,1
