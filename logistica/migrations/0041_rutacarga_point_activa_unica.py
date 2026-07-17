@@ -49,6 +49,10 @@ def superar_duplicados_point_activos(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # La limpieza confirma sus UPDATE antes de que PostgreSQL construya el
+    # índice parcial; así no quedan eventos de triggers FK pendientes.
+    atomic = False
+
     dependencies = [
         ("logistica", "0040_repartidor_tutorial_carga_sucursal_visto_en"),
     ]
@@ -57,6 +61,7 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             superar_duplicados_point_activos,
             reverse_code=migrations.RunPython.noop,
+            atomic=True,
         ),
         migrations.AddConstraint(
             model_name="rutacargachecklistlinea",

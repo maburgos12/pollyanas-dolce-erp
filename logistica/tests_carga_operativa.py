@@ -1,11 +1,28 @@
 from io import StringIO
+from importlib import import_module
 from types import SimpleNamespace
 
 from django.core.management import call_command
+from django.db import migrations
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from .carga_operativa import ClasificacionLineaPoint, clasificar_linea_point
+
+
+class MigracionCargaOperativaTests(SimpleTestCase):
+    def test_confirma_limpieza_antes_de_crear_indice_parcial(self):
+        migration_module = import_module(
+            "logistica.migrations.0041_rutacarga_point_activa_unica"
+        )
+
+        self.assertFalse(migration_module.Migration.atomic)
+        run_python = next(
+            operation
+            for operation in migration_module.Migration.operations
+            if isinstance(operation, migrations.RunPython)
+        )
+        self.assertTrue(run_python.atomic)
 
 
 class ClasificacionCargaOperativaTests(SimpleTestCase):
