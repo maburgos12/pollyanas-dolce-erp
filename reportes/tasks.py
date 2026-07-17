@@ -250,8 +250,12 @@ def task_monitoreo_variacion_costos_reventa(self):
 def task_consolidar_presupuesto_real(self, periodo: str | None = None):
     """Consolida el monto real del presupuesto maestro para el mes indicado.
 
-    Sin argumento consolida el mes en curso y, los primeros 5 días del mes,
-    también el mes anterior (cierre).
+    Sin argumento consolida el mes en curso y los DOS meses anteriores:
+    las fuentes cierran tarde (la nómina de junio se marcó PAGADA hasta
+    mediados de julio y sus sueldos quedaron invisibles en el tablero
+    porque solo se refrescaba el mes corriente). Re-consolidar meses
+    pasados es seguro: nunca pisa capturas MANUAL y el namespace AUTO
+    solo se re-escribe con datos de su misma fuente.
     """
     from reportes.services_presupuesto_real import PresupuestoRealConsolidacionService
 
@@ -261,10 +265,11 @@ def task_consolidar_presupuesto_real(self, periodo: str | None = None):
         year, month = periodo.split("-")
         periodos = [date(int(year), int(month), 1)]
     else:
-        periodos = [hoy.replace(day=1)]
-        if hoy.day <= 5:
-            previo = hoy.replace(day=1) - timedelta(days=1)
-            periodos.append(previo.replace(day=1))
+        mes = hoy.replace(day=1)
+        periodos = [mes]
+        for _ in range(2):
+            mes = (mes - timedelta(days=1)).replace(day=1)
+            periodos.append(mes)
 
     try:
         return [service.consolidar(periodo=p).as_dict() for p in periodos]
