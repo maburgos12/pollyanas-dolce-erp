@@ -16,8 +16,9 @@ from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.db import IntegrityError, OperationalError, close_old_connections, transaction
+from django.db import IntegrityError, OperationalError, close_old_connections, connection, transaction
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -2907,6 +2908,83 @@ class LogisticaViewsTests(TestCase):
         self.assertNotContains(resp_post, "Centro de mando ERP")
         self.assertNotContains(resp_post, "Cadena documental ERP")
         self.assertNotContains(resp_post, "Mesa de gobierno ERP")
+
+    def test_rutas_view_no_crece_queries_por_fila(self):
+        sucursal = Sucursal.objects.create(nombre="Sucursal Performance", codigo="PERF")
+
+        def crear_ruta(suffix):
+            unidad = Unidad.objects.create(
+                codigo=f"PERF-{suffix}",
+                descripcion=f"Unidad {suffix}",
+                sucursal=sucursal,
+            )
+            chofer_user = User.objects.create_user(
+                username=f"chofer.performance.{suffix}",
+                first_name=f"Chofer {suffix}",
+            )
+            acompanante_user = User.objects.create_user(
+                username=f"acompanante.performance.{suffix}",
+                first_name=f"Acompañante {suffix}",
+            )
+            chofer = Repartidor.objects.create(
+                user=chofer_user,
+                sucursal=sucursal,
+                unidad_asignada=unidad,
+            )
+            acompanante = Repartidor.objects.create(
+                user=acompanante_user,
+                sucursal=sucursal,
+            )
+            return RutaEntrega.objects.create(
+                nombre=f"Ruta Performance {suffix}",
+                fecha_ruta=timezone.localdate(),
+                repartidor=chofer,
+                acompanante=acompanante,
+                unidad_operativa=unidad,
+            )
+
+        primera = crear_ruta("1")
+        with CaptureQueriesContext(connection) as consultas_una_ruta:
+            respuesta_una_ruta = self.client.get(reverse("logistica:rutas"))
+        self.assertEqual(respuesta_una_ruta.status_code, 200)
+        self.assertContains(respuesta_una_ruta, primera.nombre)
+
+        rutas_adicionales = [crear_ruta(str(index)) for index in range(2, 6)]
+        with CaptureQueriesContext(connection) as consultas_cinco_rutas:
+            respuesta_cinco_rutas = self.client.get(reverse("logistica:rutas"))
+
+        self.assertEqual(respuesta_cinco_rutas.status_code, 200)
+        self.assertEqual(
+            [ruta.id for ruta in respuesta_cinco_rutas.context["rutas"]],
+            [ruta.id for ruta in reversed([primera, *rutas_adicionales])],
+        )
+        self.assertLessEqual(
+            len(consultas_cinco_rutas) - len(consultas_una_ruta),
+            2,
+            "El listado no debe agregar consultas por cada repartidor, acompañante o unidad visible.",
+        )
+
+    def test_rutas_view_no_multiplica_paradas_por_lineas_point(self):
+        RutaEntrega.objects.create(
+            nombre="Ruta agregados independientes",
+            fecha_ruta=timezone.localdate(),
+        )
+
+        with CaptureQueriesContext(connection) as consultas:
+            respuesta = self.client.get(reverse("logistica:rutas"))
+
+        self.assertEqual(respuesta.status_code, 200)
+        consulta_listado = next(
+            consulta["sql"]
+            for consulta in consultas.captured_queries
+            if "paradas_entrega_total" in consulta["sql"]
+            and "point_bloqueo_lineas" in consulta["sql"]
+        )
+        self.assertNotIn(
+            'LEFT OUTER JOIN "logistica_rutacargachecklist"',
+            consulta_listado,
+            "El JOIN de paradas no debe multiplicarse por todas las líneas Point de la ruta.",
+        )
 
     def test_rutas_view_usa_paradas_para_resumen_operativo(self):
         ruta = RutaEntrega.objects.create(

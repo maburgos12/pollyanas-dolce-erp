@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, OperationalError, transaction
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -761,21 +761,26 @@ def _logistica_release_gate_rows(
     ]
 
 
-def _point_sin_enviado_q() -> Q:
-    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
-    prefix = "checklist_carga__lineas__point_transfer_line__"
+def _point_linea_sin_enviado_q(*, linea_prefix: str = "", ruta_prefix: str = "") -> Q:
+    """Predicado canónico para una línea cuyo folio vigente no está enviado."""
+    point_prefix = f"{linea_prefix}point_transfer_line__"
     return (
-        Q(estatus__in=[RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA])
-        & Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        & Q(**{f"{prefix}is_current_snapshot": True})
-        & Q(**{f"{prefix}is_cancelled": False})
-        & Q(**{f"{prefix}is_received": False})
-        & Q(**{f"{prefix}sent_at__isnull": True})
+        Q(**{f"{ruta_prefix}estatus__in": [RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA]})
+        & Q(**{f"{linea_prefix}estatus": RutaCargaChecklistLinea.ESTATUS_PENDIENTE})
+        & Q(**{f"{point_prefix}is_current_snapshot": True})
+        & Q(**{f"{point_prefix}is_cancelled": False})
+        & Q(**{f"{point_prefix}is_received": False})
+        & Q(**{f"{point_prefix}sent_at__isnull": True})
         & (
-            Q(**{f"{prefix}raw_payload__transfer__isEnviado": False})
-            | Q(**{f"{prefix}raw_payload__transfer__isEnviado__isnull": True})
+            Q(**{f"{point_prefix}raw_payload__transfer__isEnviado": False})
+            | Q(**{f"{point_prefix}raw_payload__transfer__isEnviado__isnull": True})
         )
     )
+
+
+def _point_sin_enviado_q() -> Q:
+    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
+    return _point_linea_sin_enviado_q(linea_prefix="checklist_carga__lineas__")
 
 
 def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
@@ -1996,7 +2001,13 @@ def rutas(request):
     if date_from and date_to and date_from > date_to:
         date_from, date_to = date_to, date_from
 
-    rutas_qs = RutaEntrega.objects.all()
+    rutas_qs = RutaEntrega.objects.select_related(
+        "repartidor__user__empleado_rrhh",
+        "repartidor__unidad_asignada",
+        "acompanante__user__empleado_rrhh",
+        "acompanante__unidad_asignada",
+        "unidad_operativa",
+    )
     if date_from:
         rutas_qs = rutas_qs.filter(fecha_ruta__gte=date_from)
     if date_to:
@@ -2095,6 +2106,13 @@ def rutas(request):
         )
         .values("total")[:1]
     )
+    point_bloqueo_subquery = (
+        RutaCargaChecklistLinea.objects.filter(checklist__ruta=OuterRef("pk"))
+        .filter(_point_linea_sin_enviado_q(ruta_prefix="checklist__ruta__"))
+        .values("checklist__ruta")
+        .annotate(total=Count("id", distinct=True))
+        .values("total")[:1]
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2114,10 +2132,9 @@ def rutas(request):
                 & ~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS),
                 distinct=True,
             ),
-            point_bloqueo_lineas=Count(
-                "checklist_carga__lineas",
-                filter=_point_sin_enviado_q(),
-                distinct=True,
+            point_bloqueo_lineas=Coalesce(
+                Subquery(point_bloqueo_subquery, output_field=IntegerField()),
+                0,
             ),
             monto_transferido_point=Coalesce(
                 Subquery(monto_transferido_subquery, output_field=DecimalField(max_digits=18, decimal_places=2)),
