@@ -27,7 +27,7 @@ class FakePointHttpClient:
         del branch_hint
         return {"branch_name": "Matriz", "branch_id": 1, "account_id": "acc"}
 
-    def get_products(self):
+    def get_products(self, **kwargs):
         return list(self.payload["products"])
 
     def get_all_products(self, **kwargs):
