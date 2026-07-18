@@ -98,3 +98,4 @@ administracion,Servicios públicos,GASTO_OPERATIVO,SERVICIOS,"{""centro_tipo"": 
 administracion,Servicios públicos,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Luz de oficinas corporativas capturada desglosada,1
 administracion,Servicios públicos,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Agua de oficinas corporativas capturada desglosada,1
 administracion,Servicios públicos,GASTO_OPERATIVO,TELEFONO_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Teléfono/internet de oficinas corporativas capturado desglosado,1
+resultados,Merma,MERMA_PRODUCTO,,"{""desde"": ""2026-06""}",Merma física valuada a costo de receta (módulo mermas vivo desde jun-2026; antes conserva legado Excel),1

@@ -2831,3 +2831,62 @@ class CostoReventaComplementosTests(TestCase):
         self.assertEqual(jun.fuente_real, "AUTO:COSTO_REVENTA")
         self.assertEqual(may.monto_real, Decimal("9000"))  # legado intacto
         self.assertEqual(may.fuente_real, "AUTO:LEGADO")
+
+
+class MermaProductoTests(TestCase):
+    """La fuente MERMA_PRODUCTO valúa la merma física a costo de receta."""
+
+    def test_merma_valuada_respeta_desde_y_cantidad_recibida(self):
+        from django.contrib.auth import get_user_model
+
+        from mermas.models import MermaProducto, MermaRegistro
+        from recetas.models import LineaReceta, Receta
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados (P&L)", codigo="resultados")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Merma", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        jul = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("2000"),
+        )
+        may = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("2000"),
+            monto_real=Decimal("1495.59"), fuente_real="AUTO:LEGADO",
+        )
+        # Receta con costo total 100 y rendimiento 10 → costo unitario 10.
+        receta = Receta.objects.create(
+            nombre="Pastel Merma Test", hash_contenido="t-merma", rendimiento_cantidad=10
+        )
+        LineaReceta.objects.create(
+            receta=receta, insumo_texto="base", costo_linea_excel=Decimal("100"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        suc = Sucursal.objects.create(nombre="Matriz Merma", codigo="MM-MTZ")
+        user = get_user_model().objects.create_user("merma_test", "m@test.mx", "clave-test")
+        registro = MermaRegistro.objects.create(
+            sucursal=suc, registrado_por=user,
+            iniciado_en=timezone.now().replace(year=2026, month=7, day=5),
+        )
+        # Enviada 3 sin recepción → usa 3; enviada 5 pero recibida 2 → usa 2.
+        MermaProducto.objects.create(registro=registro, receta=receta, cantidad_enviada=Decimal("3"))
+        MermaProducto.objects.create(
+            registro=registro, receta=receta,
+            cantidad_enviada=Decimal("5"), cantidad_recibida=Decimal("2"),
+        )
+        # Texto libre sin receta: no se puede valuar, no debe tronar.
+        MermaProducto.objects.create(
+            registro=registro, producto_texto="gelatina suelta", cantidad_enviada=Decimal("1")
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO,
+            filtros={"desde": "2026-06"},
+        )
+        service = PresupuestoRealConsolidacionService()
+        service.consolidar(periodo=date(2026, 7, 1))
+        service.consolidar(periodo=date(2026, 5, 1))
+        jul.refresh_from_db()
+        may.refresh_from_db()
+        self.assertEqual(jul.monto_real, Decimal("50.00"))  # (3 + 2) × 10
+        self.assertEqual(jul.fuente_real, "AUTO:MERMA_PRODUCTO")
+        self.assertEqual(may.monto_real, Decimal("1495.59"))  # legado intacto
+        self.assertEqual(may.fuente_real, "AUTO:LEGADO")
