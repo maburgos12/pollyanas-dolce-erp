@@ -1531,7 +1531,6 @@
         rutaTrackingDraft: null,
         cargaSucursal: { paradaId: null, busqueda: "", drafts: {}, guardando: false, modalAbierto: false },
         entregaNotasDraft: {},
-        recepcionSucursal: { paradaId: null, rutaId: null, drafts: {}, motivoSinGeocerca: "" },
         trackingQueueCount: 0,
         offlineMutationQueueCount: 0,
         offlineMutationFailedCount: 0,
@@ -3195,7 +3194,7 @@
                 <span class="route-stop-meta">${escapeHtml(parada.punto?.tipo_display || parada.punto?.tipo || "Punto")} · Geocerca ${escapeHtml(parada.radio_geocerca_metros || parada.punto?.radio_geocerca_metros || "-")} m</span>
                 <span class="route-stop-meta">${escapeHtml(parada.estado_display || parada.estado || "")}${parada.hora_llegada_real ? ` · llegada ${formatDate(parada.hora_llegada_real)}` : ""}</span>
                 ${resolved && !visited ? `<span class="route-stop-meta">Entrega resuelta · visita física sin confirmar</span>` : ""}
-                <span class="route-stop-meta">${escapeHtml(parada.entrega_notas || (requiereEntrega ? "La ruta puede continuar; cierre final espera recepción Point." : "Parada operativa para recarga CEDIS."))}</span>
+                <span class="route-stop-meta">${escapeHtml(parada.entrega_notas || (requiereEntrega ? "Marca la entrega administrativa al llegar a la sucursal." : "Parada operativa para recarga CEDIS."))}</span>
                 ${recargaPendiente ? `<span class="route-stop-meta">Sincronización de recarga pendiente</span>` : ""}
                 <div class="route-status-row">
                   <span class="route-status-pill ${requiereEntrega ? entregaTone(entrega) : (recargaResuelta ? "ok" : "warn")}">${escapeHtml(entregaLabel(parada))}</span>
@@ -3203,7 +3202,7 @@
                 </div>
                 ${puedeConfirmarEntrega ? `
                   <div class="route-status-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
-                    <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)">Confirmar entrega</button>
+                    <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(rutaId)}, ${Number(parada.id)}, this)">Entrega realizada</button>
                     <button class="secondary-btn" type="button" onclick="toggleEntregaProblema(${Number(parada.id)}, 'CON_DIFERENCIA')">Con diferencia</button>
                     <button class="secondary-btn" type="button" onclick="toggleEntregaProblema(${Number(parada.id)}, 'NO_ENTREGADA')">No entregada</button>
                   </div>
@@ -3277,88 +3276,6 @@
 
       function normalizarIdentidadCarga(value) {
         return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
-      }
-
-      function abrirRecepcionParada(rutaId, paradaId) {
-        if (Number(state.recepcionSucursal.paradaId) !== Number(paradaId)) {
-          state.recepcionSucursal.motivoSinGeocerca = "";
-        }
-        state.recepcionSucursal.rutaId = Number(rutaId);
-        state.recepcionSucursal.paradaId = Number(paradaId);
-        const lineas = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
-        lineas.forEach((linea) => {
-          state.recepcionSucursal.drafts[linea.id] = state.recepcionSucursal.drafts[linea.id] || {
-            cantidad: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
-            motivo: "",
-          };
-        });
-        renderRutaActiva();
-      }
-
-      function cerrarRecepcionParada() {
-        state.recepcionSucursal.paradaId = null;
-        state.recepcionSucursal.rutaId = null;
-        state.recepcionSucursal.motivoSinGeocerca = "";
-        renderRutaActiva();
-      }
-
-      function renderModalRecepcion() {
-        const paradaId = state.recepcionSucursal.paradaId;
-        if (!paradaId) return "";
-        const lineas = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
-        const parada = (state.rutaActiva?.paradas || []).find((row) => Number(row.id) === Number(paradaId));
-        const fueraDeGeocerca = parada?.geocerca_confiable !== true;
-        return `<section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="receipt-title"><article class="fuel-modal operational">
-          <button class="secondary-btn" type="button" onclick="cerrarRecepcionParada()">Cerrar</button>
-          <p class="brand-subtitle">Recepción en sucursal</p><h2 id="receipt-title">Confirma lo recibido</h2>
-          <p>Lo cargado aparece por defecto. Ajusta únicamente si la sucursal recibe otra cantidad.</p>
-          <div class="difference-list">${lineas.map((linea) => {
-            const draft = state.recepcionSucursal.drafts[linea.id];
-            return `<div class="difference-item"><strong>${escapeHtml(linea.item_name)}</strong><p>Cargado ${escapeHtml(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? 0)} → Recibido</p>
-              <label for="recibido-${linea.id}">Cantidad recibida</label><input id="recibido-${linea.id}" type="number" min="0" step="0.001" inputmode="decimal" value="${escapeHtml(draft.cantidad)}" oninput="state.recepcionSucursal.drafts[${linea.id}].cantidad=this.value">
-              <label for="motivo-recibido-${linea.id}">Motivo si existe diferencia</label><select id="motivo-recibido-${linea.id}" onchange="state.recepcionSucursal.drafts[${linea.id}].motivo=this.value"><option value="">Sin diferencia</option><option value="faltante_fisico" ${draft.motivo === "faltante_fisico" ? "selected" : ""}>Faltante físico</option><option value="producto_danado" ${draft.motivo === "producto_danado" ? "selected" : ""}>Producto dañado</option><option value="conteo_incorrecto" ${draft.motivo === "conteo_incorrecto" ? "selected" : ""}>Conteo incorrecto</option><option value="otro" ${draft.motivo === "otro" ? "selected" : ""}>Otro</option></select>
-            </div>`;
-          }).join("")}</div>
-          ${fueraDeGeocerca ? `<div class="daily-banner warning">
-            <strong>Entrega sin geocerca validada</strong>
-            <p>Estás fuera de la sucursal o no pudimos validar tu ubicación. La entrega se registrará, pero será revisada por tu jefe.</p>
-            <label for="motivo-sin-geocerca">Explica por qué confirmas la entrega sin geocerca</label>
-            <textarea id="motivo-sin-geocerca" maxlength="240" placeholder="Ej. GPS sin señal dentro de la sucursal" oninput="state.recepcionSucursal.motivoSinGeocerca=this.value">${escapeHtml(state.recepcionSucursal.motivoSinGeocerca)}</textarea>
-          </div>` : ""}
-          <button class="primary-btn" type="button" onclick="confirmarEntregaParada(${Number(state.recepcionSucursal.rutaId)}, ${Number(paradaId)}, this, 'ENTREGADA', true)">Confirmar recepción</button>
-        </article></section>`;
-      }
-
-      function evidenciasEntregaParada(paradaId) {
-        const draft = ensureRutaTrackingDraft();
-        const conUbicacion = (row) => {
-          if (draft.latitud && draft.longitud) {
-            row.latitud = draft.latitud;
-            row.longitud = draft.longitud;
-            row.precision_metros = draft.precision_metros;
-          }
-          return row;
-        };
-        const lineas = (state.rutaActiva?.checklist_carga?.lineas || [])
-          .filter((linea) => Number(linea.parada) === Number(paradaId));
-        if (!lineas.length) {
-          return [conUbicacion({
-            tipo: "CONFIRMACION",
-            comentario: "Entrega completa confirmada por repartidor en PWA.",
-            client_event_id: newClientEventId()
-          })];
-        }
-        return lineas.map((linea) => {
-          const recepcion = state.recepcionSucursal.drafts[linea.id] || {};
-          return conUbicacion({
-          linea_carga_id: linea.id,
-          tipo: "CONFIRMACION",
-          cantidad_entregada: String(recepcion.cantidad ?? linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
-          motivo_diferencia: recepcion.motivo || "",
-          comentario: `Entrega confirmada: ${linea.item_name || "Producto"}`,
-          client_event_id: `${newClientEventId()}-${linea.id}`
-          });
-        });
       }
 
       async function renderRutaActiva(message = "", alertTitle = "No se puede continuar") {
@@ -3478,7 +3395,6 @@
             ${renderEventosRuta(rutaData.eventos || [])}
           </section>
           ${draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")}
-          ${renderModalRecepcion()}
         `));
         ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk && !state.previewReadOnly);
       }
@@ -3707,24 +3623,18 @@
         }
       }
 
-      async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA", recepcionConfirmada = false) {
+      async function confirmarEntregaParada(rutaId, paradaId, button = null, estado = "ENTREGADA") {
         if (previewBlocked("La confirmación de entrega está bloqueada en vista como repartidor.")) return;
         rutaId = Number(rutaId || state.rutaActiva?.ruta?.id);
         if (!rutaId || !paradaId) return renderRutaActiva("No hay ruta activa para confirmar entrega.");
-        if (estado === "ENTREGADA" && !recepcionConfirmada) return abrirRecepcionParada(rutaId, paradaId);
-        const lineasRecepcion = (state.rutaActiva?.checklist_carga?.lineas || []).filter((linea) => Number(linea.parada) === Number(paradaId));
-        if (estado === "ENTREGADA" && lineasRecepcion.some((linea) => !String(state.recepcionSucursal.drafts[linea.id]?.cantidad ?? "").trim() || Number(state.recepcionSucursal.drafts[linea.id]?.cantidad) < 0)) return renderRutaActiva("Completa las cantidades recibidas.");
-        if (estado === "ENTREGADA" && lineasRecepcion.some((linea) => {
-          const draft = state.recepcionSucursal.drafts[linea.id];
-          return Number(draft?.cantidad) !== Number(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? 0) && !draft?.motivo;
-        })) return renderRutaActiva("Selecciona un motivo para cada diferencia de recepción.");
         const notasDraft = entregaNotasDraftFor(paradaId);
         const parada = (state.rutaActiva?.paradas || []).find((row) => Number(row.id) === Number(paradaId));
         const fueraDeGeocerca = parada?.geocerca_confiable !== true;
-        let notas = estado === "ENTREGADA" ? "Entrega completa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
+        let notas = estado === "ENTREGADA" ? "Entrega administrativa confirmada por repartidor en PWA." : String(notasDraft.notas || "").trim();
         if (fueraDeGeocerca) {
-          notas = String(state.recepcionSucursal.motivoSinGeocerca || notasDraft.notas || "").trim();
-          if (!notas) return renderRutaActiva("El motivo es obligatorio para continuar sin geocerca.");
+          notas = estado === "ENTREGADA"
+            ? "Entrega administrativa confirmada sin geocerca validada."
+            : String(notasDraft.notas || "").trim();
         }
         if (estado !== "ENTREGADA" && !notas) {
           return renderRutaActiva("Describe la diferencia o el motivo antes de guardar.");
@@ -3734,7 +3644,7 @@
           button.textContent = "Enviando...";
         }
         try {
-          const evidencias = estado === "ENTREGADA" ? evidenciasEntregaParada(paradaId) : [];
+          const evidencias = [];
           const clientEventId = newClientEventId();
           const draft = ensureRutaTrackingDraft();
           const response = await apiFetch(`/rutas/${rutaId}/paradas/${paradaId}/entrega/`, {
@@ -3749,7 +3659,7 @@
               client_context: {
                 causa: fueraDeGeocerca ? (draft.latitud && draft.longitud ? "FUERA_DE_RADIO" : "GPS_SIN_SENAL") : "DENTRO_GEOFENCE",
                 client_timestamp: new Date().toISOString(),
-                client_version: "pwa-v60-entregas",
+                client_version: "pwa-v61-entrega-administrativa",
                 latitud: draft.latitud || null,
                 longitud: draft.longitud || null,
                 precision_metros: draft.precision_metros || null
@@ -3763,12 +3673,10 @@
           }
           if (responseQueuedOffline(response)) {
             delete state.entregaNotasDraft[paradaId];
-            state.recepcionSucursal = { paradaId: null, rutaId: null, drafts: {}, motivoSinGeocerca: "" };
             state.rutaActiva = null;
             return renderRutaActiva(queuedSuccessMessage("Entrega de parada"));
           }
           delete state.entregaNotasDraft[paradaId];
-          state.recepcionSucursal = { paradaId: null, rutaId: null, drafts: {}, motivoSinGeocerca: "" };
           state.rutaActiva = null;
           const data = await response.json().catch(() => ({}));
           return renderRutaActiva(data.warning ? `✅ Entrega registrada. ${data.warning}` : "✅ Entrega registrada.");
@@ -5530,7 +5438,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v78-gps-ruta-activa", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v79-entrega-administrativa", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

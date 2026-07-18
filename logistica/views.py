@@ -2775,9 +2775,6 @@ def ruta_detail(request, pk: int):
                     if ruta_tiene_entregas_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta_tiene_diferencias_entrega(ruta):
-                        messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
-                        return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
                     ruta.estatus = estatus_nuevo

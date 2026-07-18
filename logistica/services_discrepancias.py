@@ -72,6 +72,53 @@ def registrar_discrepancias_recepcion(*, evidencias, actor, motivos) -> list[Dis
 
 
 @transaction.atomic
+def registrar_discrepancias_point(*, evidencias, ruta, actor=None) -> list[DiscrepanciaLogistica]:
+    """Crea la deuda administrativa cuando Point recibe distinto a la carga física."""
+    filas = list(
+        ParadaEntregaEvidencia.objects.select_for_update(of=("self",))
+        .filter(id__in=[evidencia.id for evidencia in evidencias if evidencia.linea_carga_id])
+        .select_related("linea_carga", "parada")
+        .order_by("id")
+    )
+    responsable_operativo = getattr(getattr(ruta, "repartidor", None), "user", None)
+    creado_por = actor or getattr(ruta, "created_by", None) or responsable_operativo
+    if creado_por is None:
+        creado_por = get_user_model().objects.filter(is_active=True, is_superuser=True).order_by("id").first()
+    if creado_por is None:
+        return []
+    asignado_a = jefe_inmediato_para_actor(responsable_operativo or creado_por)
+    casos = []
+    for evidencia in filas:
+        linea = evidencia.linea_carga
+        recibida = evidencia.cantidad_entregada
+        cargada = linea.cantidad_cargada
+        if recibida is None or cargada is None or Decimal(recibida) == Decimal(cargada):
+            continue
+        caso, _ = DiscrepanciaLogistica.objects.update_or_create(
+            linea_carga=linea,
+            origen=DiscrepanciaLogistica.ORIGEN_RECEPCION,
+            estado__in=[
+                DiscrepanciaLogistica.ESTADO_PENDIENTE_JEFE,
+                DiscrepanciaLogistica.ESTADO_ACLARACION_SOLICITADA,
+            ],
+            defaults={
+                "ruta": ruta,
+                "parada": evidencia.parada,
+                "cantidad_enviada": linea.cantidad_enviada_esperada,
+                "cantidad_cargada": cargada,
+                "cantidad_recibida": recibida,
+                "motivo": "diferencia_recepcion_point",
+                "notas": "Point registró una cantidad recibida distinta a la carga física.",
+                "asignado_a": asignado_a,
+                "creado_por": creado_por,
+                "estado": DiscrepanciaLogistica.ESTADO_PENDIENTE_JEFE,
+            },
+        )
+        casos.append(caso)
+    return casos
+
+
+@transaction.atomic
 def resolver_discrepancia(*, caso, actor, accion, comentario):
     caso = DiscrepanciaLogistica.objects.select_for_update().get(pk=caso.pk)
     if actor != caso.asignado_a and not can_manage_submodule(actor, "logistica", "rutas"):

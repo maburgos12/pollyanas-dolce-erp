@@ -33,6 +33,7 @@ from .carga_operativa import (
     resolver_duplicados_activos_point,
 )
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
+from .services_discrepancias import registrar_discrepancias_point
 from .models import (
     EventoRuta,
     ParadaEntregaEvidencia,
@@ -2029,6 +2030,7 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
     paradas_actualizadas = 0
     lineas_recibidas = 0
     lineas_pendientes_point = 0
+    evidencias_point = []
 
     for linea in checklist.lineas.exclude(
         estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
@@ -2091,6 +2093,8 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
             evidencia.capturado_en = received_at
             evidencia.metadata = metadata
             evidencia.save(update_fields=["cantidad_entregada", "capturado_por", "capturado_en", "metadata"])
+        evidencias_point.append(evidencia)
+    registrar_discrepancias_point(evidencias=evidencias_point, ruta=ruta, actor=user)
     return RecepcionPointResumen(
         ruta=ruta,
         evidencias_creadas=evidencias_creadas,

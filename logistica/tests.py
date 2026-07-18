@@ -30,6 +30,7 @@ from api.logistica_serializers import ParadaRutaSerializer, RutaCargaChecklistSe
 from logistica.models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
+    DiscrepanciaLogistica,
     EntregaRuta,
     EventoRuta,
     ParadaEntregaEvidencia,
@@ -1602,9 +1603,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v78-gps-ruta-activa"},
+            {"route-control-v79-entrega-administrativa"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v78-gps-ruta-activa", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v79-entrega-administrativa", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -2509,6 +2510,15 @@ class LogisticaEmailTemplateTests(SimpleTestCase):
 
 
 class LogisticaControlRutasTemplateTests(SimpleTestCase):
+    def test_pwa_entrega_es_administrativa_y_no_captura_recepcion_point(self):
+        template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "pwa.html"
+        source = template_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("Confirma lo recibido", source)
+        self.assertNotIn("Cantidad recibida", source)
+        self.assertNotIn("Confirmar recepción", source)
+        self.assertIn("Entrega realizada", source)
+
     def test_ruta_detail_nombra_estado_como_visita_geocerca(self):
         template_path = Path(settings.BASE_DIR) / "logistica" / "templates" / "logistica" / "ruta_detail.html"
         source = template_path.read_text(encoding="utf-8")
@@ -4697,10 +4707,10 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["ruta"]["id"], ruta.id)
 
-    def test_pwa_finaliza_ruta_asignada_completa(self):
+    def test_pwa_finaliza_ruta_con_diferencia_para_revision_posterior(self):
         self.client.force_login(self.user)
         self.parada.estado = ParadaRuta.ESTADO_VISITADA
-        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_CON_DIFERENCIA
         self.parada.hora_llegada_real = timezone.now()
         self.parada.entrega_confirmada_en = timezone.now()
         self.parada.entrega_confirmada_por = self.user
@@ -5091,9 +5101,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v78-gps-ruta-activa", pwa_html)
+        self.assertIn("?v=route-control-v79-entrega-administrativa", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v78-gps-ruta-activa", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v79-entrega-administrativa", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5161,10 +5171,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("Capturar carga pendiente", pwa_html)
         self.assertIn("Logística debe autorizar la salida", pwa_html)
         self.assertIn("confirmarEntregaParada", pwa_html)
-        self.assertIn("function evidenciasEntregaParada(paradaId)", pwa_html)
-        self.assertIn("linea_carga_id: linea.id", pwa_html)
-        self.assertIn("cantidad_entregada: String(recepcion.cantidad ?? linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? \"0\")", pwa_html)
-        self.assertIn("evidenciasEntregaParada(paradaId)", pwa_html)
+        self.assertNotIn("function evidenciasEntregaParada(paradaId)", pwa_html)
+        self.assertNotIn("cantidad_entregada: String(recepcion.cantidad", pwa_html)
+        self.assertIn("const evidencias = [];", pwa_html)
         self.assertIn("entregables = (paradas || []).filter(paradaRequiereEntrega)", pwa_html)
         self.assertIn("entregadas = entregables.filter(paradaOperativamenteResuelta)", pwa_html)
         self.assertIn("return parada?.operativamente_resuelta === true;", pwa_html)
@@ -5190,7 +5199,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn('toUpperCase() !== "CEDIS"', pwa_html)
         self.assertIn('button.textContent = "Enviando...";', pwa_html)
         self.assertNotIn('window.confirm("¿Confirmar entrega completa de esta parada?")', pwa_html)
-        self.assertIn("Confirmar entrega", pwa_html)
+        self.assertIn("Entrega realizada", pwa_html)
         self.assertNotIn('localStorage.setItem("pd_logistica_refresh"', pwa_html)
         self.assertNotIn("localStorage.setItem(REFRESH_TOKEN_KEY", pwa_html)
 
@@ -5223,7 +5232,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v78-gps-ruta-activa", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v79-entrega-administrativa", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -5246,7 +5255,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertLess(pwa_html.index("${renderParadasRuta(paradas, ruta.id, rutaEnSeguimiento)}"), pwa_html.index("showScreen('ruta_carga')"))
         self.assertIn("Pendiente de entrega", pwa_html)
         self.assertIn("Recibido", pwa_html)
-        self.assertIn("La ruta puede continuar; cierre final espera recepción Point.", pwa_html)
+        self.assertIn("Marca la entrega administrativa al llegar a la sucursal.", pwa_html)
         self.assertIn("Finalizar ruta del día", pwa_html)
         self.assertIn("finalizarRutaDia", pwa_html)
         self.assertIn('draft.geoStatus === "idle" ? "" : geoOverlay(draft, "confirmarDesvioRuta")', pwa_html)
@@ -5895,7 +5904,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
-    def test_api_ruta_status_bloquea_completar_con_diferencia_point(self):
+    def test_api_ruta_status_permite_completar_con_diferencia_para_revision_posterior(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self.parada.estado = ParadaRuta.ESTADO_VISITADA
@@ -5910,9 +5919,8 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.ruta.refresh_from_db()
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
-        self.assertIn("diferencias", response.json()["detail"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
     def test_api_confirma_entrega_de_parada_con_evidencia_idempotente(self):
         self.client.force_login(self.user)
@@ -5968,7 +5976,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.ruta.cumplimiento_porcentaje, Decimal("100.00"))
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada, tipo=EventoRuta.TIPO_ENTREGA_EXCEPCIONAL).count(), 1)
 
-    def test_api_confirma_entrega_guarda_evidencia_por_producto(self):
+    def test_api_entrega_administrativa_no_guarda_recepcion_por_producto(self):
         self.client.force_login(self.user)
         self._registrar_llegada_geocerca()
         checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
@@ -6038,11 +6046,63 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.parada.estado, ParadaRuta.ESTADO_VISITADA)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
-        self.assertEqual(evidencias.count(), 2)
-        self.assertEqual([row.linea_carga_id for row in evidencias], [linea_1.id, linea_2.id])
-        self.assertEqual([row.cantidad_entregada for row in evidencias], [Decimal("2.000"), Decimal("3.000")])
+        self.assertEqual(evidencias.count(), 1)
+        evidencia = evidencias.get()
+        self.assertIsNone(evidencia.linea_carga_id)
+        self.assertIsNone(evidencia.cantidad_entregada)
 
-    def test_api_confirmar_entrega_rechaza_linea_carga_id_superada(self):
+    def test_api_entrega_administrativa_ignora_cantidades_legacy_y_no_concilia_point(self):
+        self.client.force_login(self.user)
+        self._registrar_llegada_geocerca()
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist,
+            parada=self.parada,
+            transfer_external_id="T-ENTREGA-ADMIN",
+            detail_external_id="D-ENTREGA-ADMIN",
+            source_hash="entrega-admin",
+            item_code="PFCMINI",
+            item_name="Pastel Fresas con Crema Mini",
+            unit="pz",
+            cantidad_solicitada="2.000",
+            cantidad_enviada_esperada="2.000",
+            cantidad_cargada="2.000",
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+
+        response = self.client.post(
+            reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "notas": "Entrega realizada por repartidor.",
+                    "client_event_id": "entrega-administrativa-payan",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "legacy-pwa",
+                    },
+                    "evidencias": [
+                        {
+                            "linea_carga_id": linea.id,
+                            "cantidad_entregada": "1.000",
+                            "comentario": "Payload de recepción de una PWA anterior",
+                            "client_event_id": "legacy-recepcion-payan",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        self.assertFalse(DiscrepanciaLogistica.objects.filter(ruta=self.ruta).exists())
+        evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
+        self.assertIsNone(evidencia.cantidad_entregada)
+
+    def test_api_entrega_administrativa_ignora_linea_legacy_superada(self):
         self.client.force_login(self.user)
         self._registrar_llegada_geocerca()
         checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
@@ -6087,9 +6147,10 @@ class LogisticaControlRutasTests(TestCase):
         )
 
         self.parada.refresh_from_db()
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
-        self.assertFalse(ParadaEntregaEvidencia.objects.filter(parada=self.parada).exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
+        self.assertIsNone(evidencia.linea_carga_id)
 
     def test_api_no_confirma_entrega_en_parada_cedis(self):
         self.client.force_login(self.user)
@@ -6347,19 +6408,34 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.parada).count(), 0)
 
-    def test_api_entrega_completa_exige_evidencia(self):
+    def test_api_entrega_administrativa_crea_evidencia_sin_productos(self):
         self.client.force_login(self.user)
+        self._registrar_llegada_geocerca()
 
         response = self.client.post(
             reverse("api_logistica_ruta_parada_entrega", kwargs={"ruta_id": self.ruta.id, "parada_id": self.parada.id}),
-            json.dumps({"entrega_estado": ParadaRuta.ENTREGA_ENTREGADA, "evidencias": []}),
+            json.dumps(
+                {
+                    "entrega_estado": ParadaRuta.ENTREGA_ENTREGADA,
+                    "client_event_id": "entrega-administrativa-sin-productos",
+                    "notas": "Entrega administrativa confirmada.",
+                    "client_context": {
+                        "causa": "GEOFENCE_LEGACY_NO_CONFIABLE",
+                        "client_timestamp": timezone.now().isoformat(),
+                        "client_version": "entrega-administrativa-test",
+                    },
+                    "evidencias": [],
+                }
+            ),
             content_type="application/json",
         )
 
         self.parada.refresh_from_db()
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
-        self.assertIn("evidencia", response.json()["detail"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_ENTREGADA)
+        evidencia = ParadaEntregaEvidencia.objects.get(parada=self.parada)
+        self.assertIsNone(evidencia.linea_carga_id)
+        self.assertIsNone(evidencia.cantidad_entregada)
 
     def test_api_confirma_entrega_con_diferencia_exige_motivo(self):
         self.client.force_login(self.user)
@@ -6486,6 +6562,14 @@ class LogisticaControlRutasTests(TestCase):
         self.parada.refresh_from_db()
         self.assertEqual(resumen.evidencias_creadas, 1)
         self.assertEqual(self.parada.entrega_estado, ParadaRuta.ENTREGA_PENDIENTE)
+        discrepancia = DiscrepanciaLogistica.objects.get(
+            ruta=self.ruta,
+            parada=self.parada,
+            origen=DiscrepanciaLogistica.ORIGEN_RECEPCION,
+        )
+        self.assertEqual(discrepancia.cantidad_cargada, Decimal("5.000"))
+        self.assertEqual(discrepancia.cantidad_recibida, Decimal("3.000"))
+        self.assertEqual(discrepancia.motivo, "diferencia_recepcion_point")
 
     def test_sincronizar_recepcion_parcial_point_deja_entrega_pendiente(self):
         checklist, _, _ = self._crear_linea_carga_con_transferencia_recibida(loaded_quantity="5.000", received_quantity="5.000")
@@ -6912,7 +6996,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
         self.assertContains(response, "confirma todas las líneas de carga")
 
-    def test_ruta_detail_bloquea_completar_con_diferencia_point(self):
+    def test_ruta_detail_permite_completar_con_diferencia_para_revision_posterior(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
         self.parada.estado = ParadaRuta.ESTADO_VISITADA
@@ -6928,8 +7012,7 @@ class LogisticaControlRutasTests(TestCase):
 
         self.ruta.refresh_from_db()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_EN_RUTA)
-        self.assertContains(response, "diferencias o entregas no recibidas")
+        self.assertEqual(self.ruta.estatus, RutaEntrega.ESTATUS_COMPLETADA)
 
     def test_ruta_detail_completa_carga_cedis_sin_recepcion_point_pendiente(self):
         self.client.force_login(self.user)
@@ -8586,7 +8669,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v78-gps-ruta-activa", pwa_html)
+        self.assertIn("route-control-v79-entrega-administrativa", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
