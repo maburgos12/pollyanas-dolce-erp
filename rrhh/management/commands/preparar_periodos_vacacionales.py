@@ -75,7 +75,7 @@ class Command(BaseCommand):
                 conflicto_hist = self._preparar_historicos(
                     empleado, candidatos, registros, ejecutar=ejecutar
                 )
-                conflicto_aniv = self._preparar_ultimo_aniversario(
+                conflicto_aniv = self._preparar_periodos_calculados(
                     empleado, candidatos, registros, ejecutar=ejecutar
                 )
                 candidatos_por_empleado[empleado.pk] = list(
@@ -106,6 +106,7 @@ class Command(BaseCommand):
             "PROPUESTA",
             "CREADA",
             "REUTILIZADA",
+            "OMITIDA",
             "REQUIERE_REVISION",
         ):
             self.stdout.write(f"{clasificacion}: {conteos[clasificacion]}")
@@ -229,7 +230,7 @@ class Command(BaseCommand):
                 )
         return conflicto
 
-    def _preparar_ultimo_aniversario(self, empleado, candidatos, registros, *, ejecutar) -> bool:
+    def _preparar_periodos_calculados(self, empleado, candidatos, registros, *, ejecutar) -> bool:
         hoy = timezone.localdate()
         ultimo_aniv = _safe_date(
             hoy.year, empleado.fecha_ingreso.month, empleado.fecha_ingreso.day
@@ -238,82 +239,121 @@ class Command(BaseCommand):
             ultimo_aniv = _safe_date(
                 hoy.year - 1, empleado.fecha_ingreso.month, empleado.fecha_ingreso.day
             )
-        antiguedad = antiguedad_anios(empleado, al=ultimo_aniv)
-        if antiguedad < 1:
-            self._registrar(
-                registros,
-                empleado,
-                periodo_fecha=ultimo_aniv,
-                clasificacion="REQUIERE_REVISION",
-                detalle="El último aniversario no completa un año de antigüedad.",
+        solicitudes = SolicitudVacaciones.objects.filter(
+            empleado=empleado,
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+        ).only("fecha_inicio")
+        aniversarios = {ultimo_aniv}
+        for solicitud in solicitudes:
+            aniversario_solicitud = _safe_date(
+                solicitud.fecha_inicio.year,
+                empleado.fecha_ingreso.month,
+                empleado.fecha_ingreso.day,
             )
-            return True
-        if politica_para_empleado(empleado, al=ultimo_aniv) is None:
-            self._registrar(
-                registros,
-                empleado,
-                periodo_fecha=ultimo_aniv,
-                clasificacion="REQUIERE_REVISION",
-                detalle="No existe política vacacional aplicable al aniversario.",
-            )
-            return True
+            if aniversario_solicitud > solicitud.fecha_inicio:
+                aniversario_solicitud = _safe_date(
+                    solicitud.fecha_inicio.year - 1,
+                    empleado.fecha_ingreso.month,
+                    empleado.fecha_ingreso.day,
+                )
+            aniversarios.add(aniversario_solicitud)
 
-        dias_calculados = dias_generados_para_empleado(empleado, al=ultimo_aniv)
-        periodo = PeriodoVacacional.objects.filter(
-            empleado=empleado, aniversario=ultimo_aniv
-        ).first()
-        if periodo is None:
-            periodo = PeriodoVacacional.objects.create(
-                empleado=empleado,
-                aniversario=ultimo_aniv,
-                fecha_limite=_add_6_months(ultimo_aniv),
-                antiguedad_anios=antiguedad,
-                dias_generados=dias_calculados,
-                origen="calculado",
-            )
-            candidatos[ultimo_aniv] = periodo
-            self._registrar(
-                registros,
-                empleado,
-                periodo=periodo,
-                saldo_propuesto=dias_calculados,
-                clasificacion="CREADA" if ejecutar else "PROPUESTA",
-                detalle="Bolsa calculada para el último aniversario.",
-            )
-            return False
-        elif (
-            periodo.dias_generados == dias_calculados
-            and periodo.origen == "calculado"
-            and periodo.fecha_limite == _add_6_months(ultimo_aniv)
-            and periodo.antiguedad_anios == antiguedad
-        ):
-            candidatos[ultimo_aniv] = periodo
-            saldo = saldo_periodo_vacacional(periodo).disponible_goce
-            self._registrar(
-                registros,
-                empleado,
-                periodo=periodo,
-                saldo_actual=saldo,
-                saldo_propuesto=saldo,
-                clasificacion="REUTILIZADA",
-                detalle="La bolsa calculada existente coincide con la política aplicable.",
-            )
-            return False
-        else:
-            saldo = saldo_periodo_vacacional(periodo).disponible_goce
-            self._registrar(
-                registros,
-                empleado,
-                periodo=periodo,
-                saldo_actual=saldo,
-                saldo_propuesto=saldo,
-                clasificacion="REQUIERE_REVISION",
-                detalle=(
-                    "El aniversario ya tiene una bolsa con origen, días, "
-                    "fecha_limite o antigüedad distintos; no se alteró."
-                ),
-            )
-            return True
+        conflicto = False
+        tiene_solicitudes = solicitudes.exists()
+        for aniversario in sorted(aniversarios):
+            antiguedad = antiguedad_anios(empleado, al=aniversario)
+            if antiguedad < 1:
+                clasificacion = "REQUIERE_REVISION" if tiene_solicitudes else "OMITIDA"
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo_fecha=aniversario,
+                    clasificacion=clasificacion,
+                    detalle="El aniversario todavía no genera derecho vacacional.",
+                )
+                conflicto = conflicto or tiene_solicitudes
+                continue
+            if politica_para_empleado(empleado, al=aniversario) is None:
+                conflicto = True
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo_fecha=aniversario,
+                    clasificacion="REQUIERE_REVISION",
+                    detalle="No existe política vacacional aplicable al aniversario.",
+                )
+                continue
+
+            dias_calculados = dias_generados_para_empleado(empleado, al=aniversario)
+            periodo = PeriodoVacacional.objects.filter(
+                empleado=empleado, aniversario=aniversario
+            ).first()
+            if periodo is None:
+                periodo = PeriodoVacacional.objects.create(
+                    empleado=empleado,
+                    aniversario=aniversario,
+                    fecha_limite=_add_6_months(aniversario),
+                    antiguedad_anios=antiguedad,
+                    dias_generados=dias_calculados,
+                    origen="calculado",
+                )
+                candidatos[aniversario] = periodo
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo=periodo,
+                    saldo_propuesto=dias_calculados,
+                    clasificacion="CREADA" if ejecutar else "PROPUESTA",
+                    detalle="Bolsa calculada para aniversario con goce vigente.",
+                )
+            elif periodo.origen == "saldo_inicial":
+                candidatos[aniversario] = periodo
+                saldo = saldo_periodo_vacacional(periodo).disponible_goce
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo=periodo,
+                    saldo_actual=saldo,
+                    saldo_propuesto=saldo,
+                    clasificacion="REUTILIZADA",
+                    detalle=(
+                        "La bolsa de saldo inicial prevalece sobre el cálculo del "
+                        "mismo aniversario."
+                    ),
+                )
+            elif (
+                periodo.dias_generados == dias_calculados
+                and periodo.origen == "calculado"
+                and periodo.fecha_limite == _add_6_months(aniversario)
+                and periodo.antiguedad_anios == antiguedad
+            ):
+                candidatos[aniversario] = periodo
+                saldo = saldo_periodo_vacacional(periodo).disponible_goce
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo=periodo,
+                    saldo_actual=saldo,
+                    saldo_propuesto=saldo,
+                    clasificacion="REUTILIZADA",
+                    detalle="La bolsa calculada existente coincide con la política aplicable.",
+                )
+            else:
+                conflicto = True
+                saldo = saldo_periodo_vacacional(periodo).disponible_goce
+                self._registrar(
+                    registros,
+                    empleado,
+                    periodo=periodo,
+                    saldo_actual=saldo,
+                    saldo_propuesto=saldo,
+                    clasificacion="REQUIERE_REVISION",
+                    detalle=(
+                        "El aniversario ya tiene una bolsa con origen, días, "
+                        "fecha_limite o antigüedad distintos; no se alteró."
+                    ),
+                )
+        return conflicto
 
     def _aplicar_solicitudes_legacy(
         self,
@@ -454,7 +494,7 @@ class Command(BaseCommand):
                 linea_temporal_ambigua = True
                 continue
             candidatos = []
-            cronologia_invalida = False
+            reflejada_en_saldo_inicial = False
             for periodo in periodos:
                 valido = True
                 if periodo.origen == "saldo_inicial":
@@ -472,57 +512,29 @@ class Command(BaseCommand):
                         valido = False
                     else:
                         corte = baseline.creado_en.date()
-                        valido = (
-                            movimiento.creado_en > baseline.creado_en
-                            and solicitud.fecha_inicio > corte
-                            and (
-                                solicitud.fecha_aprobacion_rrhh is None
-                                or solicitud.fecha_aprobacion_rrhh.date() > corte
-                            )
+                        valido = solicitud.fecha_inicio > corte
+                        reflejada_en_saldo_inicial = (
+                            reflejada_en_saldo_inicial
+                            or solicitud.fecha_inicio <= corte
                         )
                 elif periodo.origen == "calculado":
                     corte = periodo.aniversario
-                    valido = (
-                        movimiento.creado_en.date() > corte
-                        and solicitud.fecha_inicio > corte
-                        and (
-                            solicitud.fecha_aprobacion_rrhh is None
-                            or solicitud.fecha_aprobacion_rrhh.date() > corte
-                        )
-                    )
+                    valido = solicitud.fecha_inicio >= corte
                 if valido:
                     candidatos.append(periodo)
-                else:
-                    cronologia_invalida = True
-                    saldo = saldo_periodo_vacacional(periodo).disponible_goce
+
+            if not candidatos:
+                if reflejada_en_saldo_inicial:
                     self._registrar(
                         registros,
                         empleado,
-                        periodo=periodo,
-                        saldo_actual=saldo,
-                        saldo_propuesto=saldo,
-                        clasificacion="REQUIERE_REVISION",
+                        clasificacion="REUTILIZADA",
                         detalle=(
-                            f"La cronología de la solicitud {solicitud.folio} "
-                            "no es compatible con esta bolsa."
+                            f"La solicitud {solicitud.folio} es anterior al saldo "
+                            "inicial y ya está reflejada en ese corte."
                         ),
                     )
-
-            # Fix #1: si CUALQUIER bolsa falla cronología, cero aplicaciones para la solicitud
-            if cronologia_invalida:
-                self._registrar(
-                    registros,
-                    empleado,
-                    clasificacion="REQUIERE_REVISION",
-                    detalle=(
-                        f"La solicitud {solicitud.folio} tiene bolsas con cronología "
-                        "inválida; se omiten todas las aplicaciones de esta solicitud."
-                    ),
-                )
-                linea_temporal_ambigua = True
-                continue
-
-            if not candidatos:
+                    continue
                 self._registrar(
                     registros,
                     empleado,
