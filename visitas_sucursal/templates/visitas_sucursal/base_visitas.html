@@ -22,6 +22,9 @@
   .visit-field input:not([type="checkbox"]), .visit-field select, .visit-field textarea { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #d8c7d0; border-radius: 10px; padding: 10px 12px; font: inherit; background: #fff; color: #27151f; }
   .visit-field input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px !important; padding: 0; accent-color: #8b2252; }
   .visit-field textarea { min-height: 84px; resize: vertical; }
+  /* Safari iOS ignora width en date inputs con apariencia nativa y se desbordan del card */
+  .visit-field input[type="date"] { -webkit-appearance: none; appearance: none; display: block; width: 100%; max-width: 100%; min-height: 44px; text-align: left; }
+  .visit-manage-form .visit-field { flex: 1 1 200px; min-width: 0; }
   .visit-table-wrap { overflow-x: auto; border: 1px solid #eadde4; border-radius: 12px; background: #fff; }
   .visit-table { width: 100%; border-collapse: collapse; min-width: 820px; }
   .visit-table th, .visit-table td { padding: 12px 14px; border-bottom: 1px solid #f0e7ec; text-align: left; vertical-align: top; }
