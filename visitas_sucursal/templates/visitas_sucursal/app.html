@@ -217,8 +217,9 @@
           </label>
           <label>Sucursal
             <select name="sucursal" onchange="this.form.submit()">
+              {% if app_mode == "auditor" %}<option value="">Todas</option>{% endif %}
               {% for item in sucursales_preview %}
-                <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id %}selected{% endif %}>{{ item|branch_label }}</option>
+                <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id or filtro_sucursal and item.id == filtro_sucursal.id %}selected{% endif %}>{{ item|branch_label }}</option>
               {% endfor %}
             </select>
           </label>
@@ -259,7 +260,7 @@
       <section class="card" aria-label="Visitas recientes">
         <div class="visits-list">
           {% for item in visitas %}
-            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% endif %}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal|branch_label }} · {{ item.get_estatus_display }}</a>
+            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% endif %}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% elif filtro_sucursal %}&sucursal={{ filtro_sucursal.id }}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal|branch_label }} · {{ item.get_estatus_display }}</a>
           {% endfor %}
         </div>
         {% if can_manage %}
