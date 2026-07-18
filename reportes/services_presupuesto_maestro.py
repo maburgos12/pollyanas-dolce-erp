@@ -281,8 +281,18 @@ class PresupuestoMaestroImportService:
         with path.open("r", newline="", encoding="utf-8-sig") as fh:
             yield from csv.DictReader(fh)
 
-    def _xlsx_rows(self, path: Path) -> Iterable[dict[str, object]]:
+    def _xlsx_rows(self, path: Path, area_code: str = "") -> Iterable[dict[str, object]]:
         workbook = load_workbook(path, read_only=True, data_only=True)
+        if area_code == "nomina":
+            # El archivo de nómina trae GENERAL (total empresa) + hojas por
+            # departamento. El área de control "nomina" es el GENERAL; las
+            # hojas de departamento repiten dinero que ya vive en el archivo
+            # de cada área (importarlas aquí las mezclaba en un solo rubro,
+            # ganando la última hoja procesada).
+            for sheet in workbook.worksheets:
+                if self._normalize_cell(sheet.title) == "general":
+                    yield from self._budget_table_rows(sheet, incluir_resumen=True)
+            return
         general_sheet = self._find_general_sales_sheet(workbook)
         if general_sheet is not None:
             yield from self._sales_projection_rows(general_sheet)
@@ -437,8 +447,8 @@ class PresupuestoMaestroImportService:
     # Gastos de Ventas creó 50 rubros sin sucursal con $2.5M repetidos).
     _SUMMARY_SHEETS = {"general", "lista gastos", "hoja1"}
 
-    def _budget_table_rows(self, sheet) -> Iterable[dict[str, object]]:
-        if self._normalize_cell(sheet.title) in self._SUMMARY_SHEETS:
+    def _budget_table_rows(self, sheet, incluir_resumen: bool = False) -> Iterable[dict[str, object]]:
+        if not incluir_resumen and self._normalize_cell(sheet.title) in self._SUMMARY_SHEETS:
             return
         rows = list(sheet.iter_rows(values_only=True))
         if not rows:
@@ -566,12 +576,12 @@ class PresupuestoMaestroImportService:
             return ""
         return title
 
-    def _rows(self, path: Path) -> Iterable[dict[str, object]]:
+    def _rows(self, path: Path, area_code: str = "") -> Iterable[dict[str, object]]:
         suffix = path.suffix.lower()
         if suffix == ".csv":
             return self._csv_rows(path)
         if suffix in {".xlsx", ".xlsm"}:
-            return self._xlsx_rows(path)
+            return self._xlsx_rows(path, area_code=area_code)
         raise ValueError("Formato no soportado. Usa CSV o XLSX.")
 
     def _resolve_branch(self, value: object) -> Sucursal | None:
@@ -614,7 +624,7 @@ class PresupuestoMaestroImportService:
         skipped_rows = 0
         source = source_name or path.stem.upper()
 
-        for row in self._rows(path):
+        for row in self._rows(path, area_code=normalized_area):
             concept = str(row.get("concepto") or row.get("concept") or "").strip()
             if is_totalizer_budget_concept(concept, area_code=normalized_area):
                 skipped_rows += 1
