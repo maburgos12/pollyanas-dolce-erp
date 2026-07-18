@@ -280,6 +280,10 @@ class PresupuestoRealConsolidacionService:
             if "mant_equipo" not in indices:
                 indices["mant_equipo"] = self._build_mant_equipo_index(periodo)
             return self._monto_mantenimiento_equipo(regla, indices["mant_equipo"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_COSTO_REVENTA:
+            if "costo_reventa" not in indices:
+                indices["costo_reventa"] = self._build_costo_reventa_index(periodo)
+            return self._monto_costo_reventa(regla, indices["costo_reventa"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -671,6 +675,71 @@ class PresupuestoRealConsolidacionService:
             total += fila["monto"] or Decimal("0")
             hubo_datos = True
         return (total, hubo_datos)
+
+
+    def _build_costo_reventa_index(self, periodo: date) -> dict:
+        """Costo de los complementos vendidos en el mes: unidades vendidas de
+        cada producto del catálogo curado × su costo de reventa (histórico
+        mensual si existe; si no, la vigencia más reciente)."""
+        from pos_bridge.models import PointProduct, PointProductCategory
+        from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
+
+        clasificados = {
+            normalize_header_text(n)
+            for n in PointProductCategory.objects.values_list("nombre", flat=True)
+        }
+        ventas = (
+            PointSalesDailyProductFact.objects.filter(
+                sale_date__year=periodo.year,
+                sale_date__month=periodo.month,
+                point_product__isnull=False,
+            )
+            .values("point_product_id", "point_product__name")
+            .annotate(unidades=Sum("total_cantidad"))
+        )
+        total = Decimal("0")
+        con_datos = False
+        sin_costo = 0
+        ids = [
+            v["point_product_id"]
+            for v in ventas
+            if normalize_header_text(v["point_product__name"]) in clasificados
+        ]
+        productos = {
+            p.id: p
+            for p in PointProduct.objects.filter(id__in=ids).prefetch_related(
+                "costos_reventa", "costos_reventa_historicos_mensuales"
+            )
+        }
+        corte = periodo.replace(day=28)
+        for v in ventas:
+            producto = productos.get(v["point_product_id"])
+            if producto is None:
+                continue
+            historico = next(
+                (h for h in producto.costos_reventa_historicos_mensuales.all() if h.periodo == periodo),
+                None,
+            )
+            if historico is not None and historico.costo_promedio:
+                costo = Decimal(historico.costo_promedio)
+            else:
+                vigencias = [
+                    c for c in producto.costos_reventa.all() if c.fecha_vigencia <= corte
+                ]
+                if not vigencias:
+                    sin_costo += 1
+                    continue
+                costo = Decimal(max(vigencias, key=lambda c: c.fecha_vigencia).costo_unitario)
+            total += (v["unidades"] or Decimal("0")) * costo
+            con_datos = True
+        return {"total": total.quantize(Decimal("0.01")), "con_datos": con_datos, "sin_costo": sin_costo}
+
+    def _monto_costo_reventa(
+        self, regla: ReglaFuenteRubro, index: dict, periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        return (index["total"], index["con_datos"])
 
 
 def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
