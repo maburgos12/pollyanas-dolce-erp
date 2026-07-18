@@ -137,6 +137,59 @@ Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
 configuración, UI, permisos, navegación, reportes, jobs, integraciones,
 prototipos o producción.
 
+### 0. Interpretar profesionalmente las solicitudes de Mauricio
+
+Mauricio puede describir necesidades, errores o mejoras usando lenguaje informal,
+operativo o no técnico. No exigirle que redacte como programador. El agente es
+responsable de traducir cada solicitud a un requerimiento técnico de nivel senior,
+aplicando el criterio del especialista correspondiente: arquitectura, lógica de
+negocio, backend, frontend, UX, seguridad, datos, integraciones o DevOps.
+
+Antes de actuar:
+
+1. Identificar el problema real, el resultado esperado, el módulo afectado y los
+   criterios observables de aceptación.
+2. Inspeccionar la implementación, arquitectura y patrones existentes antes de
+   asumir cómo está construido el sistema.
+3. Reformular la solicitud como un requerimiento técnico claro, sin inventar
+   tecnologías, archivos, componentes, endpoints ni reglas de negocio.
+4. Delimitar el alcance, consumidores afectados, riesgos y posibles regresiones.
+5. Si Mauricio solicita diagnóstico, revisión, alternativas o propuestas, mantener
+   el trabajo en modo de solo lectura hasta que autorice una implementación.
+6. Si existe una solución claramente superior, explicarla y recomendarla antes de
+   introducir una alternativa frágil o deuda técnica.
+
+#### Ejecución automática
+
+Si la intención es clara, el alcance está bien definido y el cambio es de riesgo
+bajo o medio, no pedir confirmación innecesaria. Inspeccionar primero el código,
+determinar la mejor solución compatible con la arquitectura existente y proceder
+respetando las validaciones y reglas de seguridad del proyecto.
+
+Expresiones como “procede”, “impleméntalo”, “corrígelo”, “hazlo” o equivalentes
+autorizan la ejecución dentro del alcance solicitado, pero no omiten la inspección,
+aislamiento, pruebas, revisión ni validación obligatoria.
+
+#### Aprobación previa obligatoria
+
+Presentar primero interpretación, diagnóstico, solución recomendada, alcance,
+archivos o contratos probablemente afectados, riesgos y posibles regresiones.
+Esperar aprobación antes de modificar cuando ocurra cualquiera de estos casos:
+
+- Existan varias soluciones de arquitectura con implicaciones materiales distintas.
+- El cambio afecte lógica de negocio delicada, datos operativos, seguridad,
+  permisos, autenticación o producción.
+- Se modifiquen contratos compartidos o públicos, como API, modelos, esquemas,
+  migraciones, integraciones, eventos, caché o service workers.
+- Exista riesgo relevante de pérdida de datos, indisponibilidad o regresión.
+- El alcance sea ambiguo y las interpretaciones posibles produzcan resultados
+  materialmente diferentes.
+- La ejecución requiera ampliar el alcance o la autorización original.
+
+Cuando sea necesario preguntar, formular una sola pregunta concreta que desbloquee
+la decisión. No detener el trabajo por detalles menores que puedan resolverse con
+la arquitectura, convenciones y contexto existentes.
+
 ### 1. Clasificar el tipo de trabajo antes de tocar archivos
 - **Consulta o diagnóstico:** solo leer, inspeccionar y reportar. No modificar nada
   salvo que Mauricio lo pida explícitamente.
