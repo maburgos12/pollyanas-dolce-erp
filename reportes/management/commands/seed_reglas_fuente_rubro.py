@@ -150,10 +150,18 @@ class Command(BaseCommand):
                 except json.JSONDecodeError as exc:
                     raise CommandError(f"fila {idx}: filtros JSON inválido: {exc}")
 
+                # "solo_sucursal" se consume aquí (no llega al motor): limita la
+                # fila a los rubros de UNA sucursal (ej. el 35% del recibo
+                # compartido va solo al renglón de Matriz, no a las 9).
+                solo_sucursal = normalize_header_text(filtros.pop("solo_sucursal", "") or "")
                 rubros = [
                     r
                     for r in RubroPresupuesto.objects.filter(area__codigo=area, activo=True)
                     if normalize_header_text(r.concepto) == concepto
+                    and (
+                        not solo_sucursal
+                        or solo_sucursal in normalize_header_text(getattr(r.sucursal, "nombre", "") or "")
+                    )
                 ]
                 if not rubros:
                     avisos.append(f"fila {idx}: sin rubros para area={area} concepto='{row.get('concepto')}'")

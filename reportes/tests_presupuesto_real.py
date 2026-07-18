@@ -2926,3 +2926,51 @@ class ImportNominaHojaGeneralTests(TestCase):
                 area__codigo="nomina", concepto__iexact="playera"
             ).exists()
         )
+
+
+class RecihoCompartidoPorcentajeTests(TestCase):
+    """El recibo compartido Matriz+CEDIS se reparte por porcentaje de la regla."""
+
+    def test_porcentaje_sobre_centro_compartido(self):
+        from reportes.models import CentroCosto
+
+        prod = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        matriz = Sucursal.objects.create(nombre="Sucursal Matriz", codigo="RC-MTZ")
+        r_prod = RubroPresupuesto.objects.create(
+            area=prod, concepto="Energía eléctrica", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        r_mtz = RubroPresupuesto.objects.create(
+            area=gv, concepto="Energía eléctrica", sucursal=matriz,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        l_prod = LineaPresupuestoMensual.objects.create(
+            rubro=r_prod, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("30000"),
+        )
+        l_mtz = LineaPresupuestoMensual.objects.create(
+            rubro=r_mtz, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("15000"),
+        )
+        cat = CategoriaGasto.objects.create(
+            codigo="LUZ_SUC", nombre="Luz y energía eléctrica",
+            capa_objetivo=CategoriaGasto.CAPA_SUCURSAL,
+        )
+        centro = CentroCosto.objects.create(
+            codigo="COMPARTIDO_MC", nombre="Compartido Matriz-CEDIS", tipo="COMPARTIDO"
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=date(2026, 7, 1), categoria_gasto=cat, centro_costo=centro,
+            monto=Decimal("40000"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=r_prod, tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=cat, filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 65},
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=r_mtz, tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=cat, filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 35},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        l_prod.refresh_from_db()
+        l_mtz.refresh_from_db()
+        self.assertEqual(l_prod.monto_real, Decimal("26000.00"))  # 65%
+        self.assertEqual(l_mtz.monto_real, Decimal("14000.00"))  # 35%

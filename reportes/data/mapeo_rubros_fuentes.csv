@@ -134,3 +134,7 @@ produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CEDIS""}",
 produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""PRODUCCION""}",Agua potable de planta de producción,1
 produccion,Gas,GASTO_OPERATIVO,GAS,"{""centro_tipo"": ""CEDIS""}",Gas de CEDIS,1
 produccion,Gas,GASTO_OPERATIVO,GAS,"{""centro_tipo"": ""PRODUCCION""}",Gas de planta de producción,1
+produccion,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 65}",Recibo compartido Matriz+CEDIS: 65% a producción (reparto de dirección 2026-07-18),1
+gastos-venta,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 35, ""solo_sucursal"": ""Matriz""}",Recibo compartido: 35% a Sucursal Matriz,1
+produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 65}",Recibo compartido de agua: 65% a producción,1
+gastos-venta,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 35, ""solo_sucursal"": ""Matriz""}",Recibo compartido de agua: 35% a Sucursal Matriz,1
