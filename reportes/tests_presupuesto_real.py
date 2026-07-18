@@ -2786,3 +2786,48 @@ class ComplementosClasificadosTests(TestCase):
         self.assertEqual(lc.monto_real, Decimal("50.00"))
         # suma = total Point; nada doble, nada perdido
         self.assertEqual(lp.monto_real + lc.monto_real, Decimal("1050.00"))
+
+
+class CostoReventaComplementosTests(TestCase):
+    """Costos complementos = unidades vendidas × costo de reventa, desde junio."""
+
+    def test_unidades_por_costo_con_desde(self):
+        from pos_bridge.models import PointBranch, PointProduct, PointProductCategory
+        from reportes.models import ProductoReventaCosto
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Costos complementos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        for mes, legado in ((5, "9000"), (6, None)):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, mes, 1), monto_presupuesto=Decimal("10000"),
+                monto_real=Decimal(legado) if legado else None,
+                fuente_real="AUTO:LEGADO" if legado else "",
+            )
+        PointProductCategory.objects.create(codigo_point="CR1", nombre="Vela Magica", category="SERVICIO_ACCESORIO")
+        producto = PointProduct.objects.create(external_id="cr-1", sku="CR1", name="Vela Magica")
+        ProductoReventaCosto.objects.create(
+            producto_point=producto, costo_unitario=Decimal("4.50"),
+            fecha_vigencia=date(2026, 1, 10), fuente="TEST", source_hash="cr-hash-1",
+        )
+        branch = PointBranch.objects.create(external_id="cr-br", name="Matriz CR")
+        for mes, unidades in ((5, "100"), (6, "200")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, mes, 10), sucursal_nombre="Matriz CR",
+                categoria="Accesorios", producto_nombre_historico="Vela Magica",
+                point_product=producto, total_cantidad=Decimal(unidades),
+                total_venta=Decimal("1"), total_venta_neta=Decimal("1"),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_COSTO_REVENTA,
+            filtros={"desde": "2026-06"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 5, 1))
+        jun = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 6, 1))
+        may = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 5, 1))
+        self.assertEqual(jun.monto_real, Decimal("900.00"))  # 200 × 4.50
+        self.assertEqual(jun.fuente_real, "AUTO:COSTO_REVENTA")
+        self.assertEqual(may.monto_real, Decimal("9000"))  # legado intacto
+        self.assertEqual(may.fuente_real, "AUTO:LEGADO")
