@@ -147,11 +147,11 @@
         <tbody>
           {% for hallazgo in hallazgos %}
           <tr>
-            <td>{{ hallazgo.categoria }}</td>
-            <td>{{ hallazgo.descripcion }}</td>
-            <td>{{ hallazgo.accion_correctiva|default:"Pendiente" }}</td>
-            <td><span class="visit-badge {% if hallazgo.prioridad == 'CRITICA' or hallazgo.prioridad == 'ALTA' %}danger{% endif %}">{{ hallazgo.get_prioridad_display }}</span></td>
-            <td>
+            <td data-label="Categoría">{{ hallazgo.categoria }}</td>
+            <td data-label="Descripción">{{ hallazgo.descripcion }}</td>
+            <td data-label="Acción">{{ hallazgo.accion_correctiva|default:"Pendiente" }}</td>
+            <td data-label="Prioridad"><span class="visit-badge {% if hallazgo.prioridad == 'CRITICA' or hallazgo.prioridad == 'ALTA' %}danger{% endif %}">{{ hallazgo.get_prioridad_display }}</span></td>
+            <td data-label="Falla">
               {% if hallazgo.reporte_falla %}
               <span class="visit-badge">Falla #{{ hallazgo.reporte_falla_id }}</span>
               {% elif hallazgo.requiere_falla and can_manage %}

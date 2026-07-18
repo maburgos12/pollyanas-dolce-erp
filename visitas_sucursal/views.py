@@ -216,6 +216,7 @@ def lista_visitas(request):
         {"day": day, "date": date(first_day.year, first_day.month, day), "is_sunday": date(first_day.year, first_day.month, day).weekday() == 6}
         for day in range(1, last_day.day + 1)
     ]
+    month_weeks = calendar.Calendar().monthdatescalendar(first_day.year, first_day.month)
     rows = []
     for sucursal in sucursales:
         row_visits = 0
@@ -225,14 +226,44 @@ def lista_visitas(request):
             visita = visitas[0] if visitas else None
             row_visits += len(visitas)
             cells.append({"day": day, "visita": visita, "count": len(visitas)})
+        weeks = [
+            [
+                {
+                    "pad": cell_date.month != first_day.month,
+                    "date": cell_date,
+                    "visita": (visitas_by_cell.get((sucursal.id, cell_date.day), [None])[0]
+                               if cell_date.month == first_day.month else None),
+                    "es_hoy": cell_date == hoy,
+                }
+                for cell_date in week
+            ]
+            for week in month_weeks
+        ]
         rows.append(
             {
                 "sucursal": sucursal,
                 "cells": cells,
+                "weeks": weeks,
                 "avance": round((row_visits / total_programadas) * 100) if total_programadas else 0,
                 "visitas_count": row_visits,
             }
         )
+
+    vista_movil = request.GET.get("vista") or "dia"
+    if vista_movil not in ("dia", "sucursal"):
+        vista_movil = "dia"
+    visitas_por_dia = {}
+    for visita in visitas_mes:
+        visitas_por_dia.setdefault(visita.fecha_programada, []).append(visita)
+    agenda_dias = [
+        {
+            "fecha": fecha,
+            "visitas": items,
+            "es_hoy": fecha == hoy,
+            "vencida": fecha < hoy and any(v.estatus == VisitaSucursal.ESTATUS_PROGRAMADA for v in items),
+        }
+        for fecha, items in sorted(visitas_por_dia.items())
+    ]
 
     daily_estimated = []
     daily_real = []
@@ -269,6 +300,9 @@ def lista_visitas(request):
             visita__sucursal__in=_sucursales_visitables(),
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
         ).count(),
+        "vista_movil": vista_movil,
+        "agenda_dias": agenda_dias,
+        "hoy": hoy,
         "avance_estimado": 100 if total_programadas else 0,
         "avance_real": round((total_realizadas / total_programadas) * 100) if total_programadas else 0,
         "daily_estimated": daily_estimated,
@@ -303,6 +337,8 @@ def nueva_visita(request):
                 _crear_checklist_base(visita)
             messages.success(request, "Visita creada con checklist base.")
             return redirect("visitas_sucursal:detalle", pk=visita.pk)
+    preset_sucursal = request.GET.get("sucursal") or ""
+    preset_fecha = _parse_date(request.GET.get("fecha")) or timezone.localdate()
     return render(
         request,
         "visitas_sucursal/nueva.html",
@@ -310,7 +346,8 @@ def nueva_visita(request):
             "sucursales": sucursales,
             "users": users,
             "tipo_choices": VisitaSucursal.TIPO_CHOICES,
-            "today": timezone.localdate(),
+            "today": preset_fecha,
+            "preset_sucursal": preset_sucursal,
         },
     )
 

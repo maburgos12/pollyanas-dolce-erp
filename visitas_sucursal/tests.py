@@ -399,3 +399,60 @@ class VisitasSucursalTests(TestCase):
             [item.sucursal_id for item in response.context["visitas"]],
             [otra.id],
         )
+
+    def test_lista_agenda_por_dia_es_default(self):
+        VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.get(reverse("visitas_sucursal:lista"), {"anio": 2026, "mes": 6})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["vista_movil"], "dia")
+        agenda = response.context["agenda_dias"]
+        self.assertEqual(len(agenda), 1)
+        self.assertEqual(str(agenda[0]["fecha"]), "2026-06-24")
+        self.assertEqual(len(agenda[0]["visitas"]), 1)
+        self.assertContains(response, "Por sucursal")
+
+    def test_lista_vista_sucursal_por_parametro(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "sucursal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["vista_movil"], "sucursal")
+
+    def test_lista_vista_invalida_regresa_a_dia(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "xxx"},
+        )
+
+        self.assertEqual(response.context["vista_movil"], "dia")
+
+    def test_nueva_precarga_sucursal_y_fecha_desde_get(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:nueva"),
+            {"sucursal": self.sucursal.id, "fecha": "2026-06-28"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'value="{self.sucursal.id}" selected')
+        self.assertContains(response, 'value="2026-06-28"')
+
+    def test_lista_vista_sucursal_muestra_mini_calendario(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "sucursal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "visit-mini-cal")
+        self.assertContains(response, reverse("visitas_sucursal:detalle", args=[visita.id]))
+        self.assertContains(response, f"?sucursal={self.sucursal.id}&fecha=2026-06-01")

@@ -12,8 +12,8 @@
       <p class="visit-copy">Visitas mensuales por sucursal.</p>
     </div>
     <div class="visit-actions">
-      <a class="visit-btn secondary compact" href="?anio={{ prev_month.anio }}&mes={{ prev_month.mes }}" aria-label="Mes anterior">←</a>
-      <a class="visit-btn secondary compact" href="?anio={{ next_month.anio }}&mes={{ next_month.mes }}" aria-label="Mes siguiente">→</a>
+      <a class="visit-btn secondary compact" href="?anio={{ prev_month.anio }}&mes={{ prev_month.mes }}&vista={{ vista_movil }}" aria-label="Mes anterior">←</a>
+      <a class="visit-btn secondary compact" href="?anio={{ next_month.anio }}&mes={{ next_month.mes }}&vista={{ vista_movil }}" aria-label="Mes siguiente">→</a>
       <a class="visit-btn secondary" href="{% url 'visitas_sucursal:app' %}">App</a>
       <a class="visit-btn" href="{% url 'visitas_sucursal:nueva' %}">+ Visita</a>
     </div>
@@ -31,30 +31,70 @@
       <span>Real {{ avance_real }}% · Plan {{ avance_estimado }}%</span>
     </div>
     <div class="visit-mobile-schedule" aria-label="Agenda móvil de visitas">
-      {% for row in rows %}
-        <article class="visit-mobile-branch">
-          <div class="visit-mobile-branch-head">
-            <strong>{{ row.sucursal.nombre }}</strong>
-            <span>{{ row.visitas_count }} visita{% if row.visitas_count != 1 %}s{% endif %}</span>
-          </div>
-          {% if row.visitas_count %}
-            <div class="visit-mobile-days">
-              {% for cell in row.cells %}
-                {% if cell.visita %}
-                  <a class="visit-mobile-day {{ cell.visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" title="{{ cell.visita.sucursal.nombre }} · {{ cell.visita.get_estatus_display }}">
-                    {{ cell.day.day }}
-                    {% if cell.visita.estatus == "REALIZADA" %}R{% elif cell.visita.estatus == "CANCELADA" %}C{% else %}P{% endif %}
-                  </a>
-                {% endif %}
+      <nav class="visit-view-toggle" aria-label="Cambiar vista de agenda">
+        <a class="visit-view-chip {% if vista_movil == 'dia' %}active{% endif %}" href="?anio={{ year }}&mes={{ month }}&vista=dia">Por día</a>
+        <a class="visit-view-chip {% if vista_movil == 'sucursal' %}active{% endif %}" href="?anio={{ year }}&mes={{ month }}&vista=sucursal">Por sucursal</a>
+      </nav>
+
+      {% if vista_movil == "dia" %}
+        {% for dia in agenda_dias %}
+          <article class="visit-mobile-branch {% if dia.es_hoy %}is-today{% endif %}">
+            <div class="visit-mobile-branch-head">
+              <strong>{{ dia.fecha|date:"D d/m" }}{% if dia.es_hoy %} · Hoy{% endif %}</strong>
+              <span>
+                {% if dia.vencida %}<span class="visit-badge danger">Vencida</span>{% endif %}
+                {% if can_manage %}<a class="visit-mobile-add" href="{% url 'visitas_sucursal:nueva' %}?fecha={{ dia.fecha|date:'Y-m-d' }}" aria-label="Programar visita el {{ dia.fecha|date:'d/m/Y' }}">+</a>{% endif %}
+              </span>
+            </div>
+            <div class="visit-mobile-rows">
+              {% for visita in dia.visitas %}
+                <a class="visit-mobile-row" href="{% url 'visitas_sucursal:detalle' visita.id %}">
+                  <span class="visit-dot {% if visita.estatus == 'REALIZADA' %}done{% elif visita.estatus == 'CANCELADA' %}canceled{% else %}planned{% endif %}"></span>
+                  <strong>{{ visita.sucursal|branch_label }}</strong>
+                  <span>{{ visita.get_estatus_display }}</span>
+                </a>
               {% endfor %}
             </div>
-          {% else %}
-            <p class="visit-mobile-empty">Sin visitas este mes.</p>
-          {% endif %}
-        </article>
-      {% empty %}
-        <div class="visit-empty">No hay sucursales operativas configuradas.</div>
-      {% endfor %}
+          </article>
+        {% empty %}
+          <div class="visit-empty">
+            Sin visitas este mes.
+            {% if can_manage %}<a class="visit-btn" href="{% url 'visitas_sucursal:nueva' %}">+ Programar visita</a>{% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        {% for row in rows %}
+          <article class="visit-mobile-branch">
+            <div class="visit-mobile-branch-head">
+              <strong>{{ row.sucursal.nombre }}</strong>
+              <span>{{ row.visitas_count }} visita{% if row.visitas_count != 1 %}s{% endif %}</span>
+            </div>
+            <div class="visit-mini-cal" aria-label="Calendario de {{ row.sucursal.nombre }}">
+              <div class="visit-mini-row visit-mini-weekdays" aria-hidden="true">
+                <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+              </div>
+              {% for week in row.weeks %}
+                <div class="visit-mini-row">
+                  {% for cell in week %}
+                    {% if cell.pad %}
+                      <span class="visit-mini-day pad"></span>
+                    {% elif cell.visita %}
+                      <a class="visit-mini-day {{ cell.visita.estatus|lower }} {% if cell.es_hoy %}is-today{% endif %}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" aria-label="{{ cell.date|date:'d/m' }} · {{ cell.visita.get_estatus_display }}">{{ cell.date.day }}</a>
+                    {% elif can_manage %}
+                      <a class="visit-mini-day free {% if cell.es_hoy %}is-today{% endif %}" href="{% url 'visitas_sucursal:nueva' %}?sucursal={{ row.sucursal.id }}&fecha={{ cell.date|date:'Y-m-d' }}" aria-label="Programar {{ row.sucursal.nombre }} el {{ cell.date|date:'d/m/Y' }}">{{ cell.date.day }}</a>
+                    {% else %}
+                      <span class="visit-mini-day {% if cell.es_hoy %}is-today{% endif %}">{{ cell.date.day }}</span>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              {% endfor %}
+            </div>
+            {% if can_manage %}<p class="visit-mobile-empty">Toca un día libre para programar.</p>{% endif %}
+          </article>
+        {% empty %}
+          <div class="visit-empty">No hay sucursales operativas configuradas.</div>
+        {% endfor %}
+      {% endif %}
     </div>
     <div class="visit-calendar-wrap">
       <table class="visit-calendar">
@@ -87,7 +127,7 @@
                       <input type="hidden" name="mes" value="{{ month }}">
                       <input type="hidden" name="sucursal" value="{{ row.sucursal.id }}">
                       <input type="hidden" name="fecha_programada" value="{{ cell.day.date|date:'Y-m-d' }}">
-                      <button type="submit" title="Programar {{ row.sucursal|branch_label }} el {{ cell.day.date|date:'d/m/Y' }}">+</button>
+                      <button type="submit" title="Programar {{ row.sucursal|branch_label }} el {{ cell.day.date|date:'d/m/Y' }}" aria-label="Programar {{ row.sucursal|branch_label }} el {{ cell.day.date|date:'d/m/Y' }}">+</button>
                     </form>
                   {% endif %}
                 </td>
