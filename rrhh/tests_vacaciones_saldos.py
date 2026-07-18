@@ -1142,7 +1142,7 @@ class PrepararPeriodosVacacionalesTests(TestCase):
         self.assertEqual(periodo.dias_generados, Decimal("10.00"))
         self.assertIn("REQUIERE_REVISION", salida)
 
-    def test_ambiguo_consumido_antes_baseline_no_aplica(self):
+    def test_goce_posterior_al_baseline_aplica_aunque_se_aprobara_antes(self):
         from datetime import datetime
 
         from django.utils import timezone
@@ -1153,8 +1153,8 @@ class PrepararPeriodosVacacionalesTests(TestCase):
 
         salida = self._ejecutar(ejecutar=True)
 
-        self.assertFalse(self.solicitud.aplicaciones_goce.exists())
-        self.assertIn("REQUIERE_REVISION", salida)
+        self.assertTrue(self.solicitud.aplicaciones_goce.exists())
+        self.assertIn("CREADA", salida)
 
     def test_saldo_insuficiente_no_crea_parciales(self):
         self.solicitud.dias_laborables = Decimal("30.00")
@@ -1196,22 +1196,20 @@ class PrepararPeriodosVacacionalesTests(TestCase):
         finally:
             os.unlink(ruta)
 
-    def test_cronologia_una_bolsa_invalida_bloquea_toda_solicitud(self):
-        """Fix #1: si cualquier bolsa falla cronología, cero aplicaciones para la solicitud."""
+    def test_fecha_del_goce_define_bolsas_elegibles_no_fecha_del_movimiento(self):
         from datetime import datetime
 
         from django.utils import timezone
 
-        # consumido ANTES del aniversario 2026-03-15 → la bolsa calculada falla cronología;
-        # la bolsa saldo_inicial sigue pasando, pero fix #1 debe bloquear toda la solicitud.
         MovimientoVacaciones.objects.filter(pk=self.consumido.pk).update(
             creado_en=timezone.make_aware(datetime(2026, 3, 10, 9))
         )
 
         salida = self._ejecutar(ejecutar=True)
 
-        self.assertFalse(self.solicitud.aplicaciones_goce.exists())
-        self.assertIn("REQUIERE_REVISION", salida)
+        aplicacion = self.solicitud.aplicaciones_goce.get()
+        self.assertEqual(aplicacion.periodo.aniversario, date(2025, 3, 15))
+        self.assertNotIn("REQUIERE_REVISION: 1", salida)
 
     def test_consumido_dias_distintos_bloquea_solicitud(self):
         """Fix #2: movimiento.dias != solicitud.dias_laborables → cero aplicaciones."""
@@ -1378,20 +1376,98 @@ class PrepararPeriodosVacacionalesTests(TestCase):
                 )
                 self.assertIn("REQUIERE_REVISION", salida)
 
-    def test_cronologia_fecha_inicio_retroactiva_cero_aplicaciones(self):
-        """Fix #1 retroactivo: creado_en después del corte pero fecha_inicio anterior → cero aplicaciones."""
-        # baseline.creado_en.date() = 2025-03-16; consumido.creado_en = 2026-04-01 (posterior) → OK en creado_en
-        # fecha_inicio retroactiva (2025-03-10) anterior al corte → debe bloquear
+    def test_goce_anterior_al_corte_usa_aniversario_calculado_previo(self):
         self.solicitud.fecha_inicio = date(2025, 3, 10)
         self.solicitud.save(update_fields=["fecha_inicio"])
 
         salida = self._ejecutar(ejecutar=True)
 
-        self.assertFalse(self.solicitud.aplicaciones_goce.exists())
-        self.assertIn("REQUIERE_REVISION", salida)
+        aplicacion = self.solicitud.aplicaciones_goce.get()
+        self.assertEqual(aplicacion.periodo.aniversario, date(2024, 3, 15))
+        self.assertIn("REQUIERE_REVISION: 0", salida)
+
+    def test_saldo_inicial_prevalece_si_coincide_con_ultimo_aniversario(self):
+        empleado = Empleado.objects.create(
+            nombre="Empleado saldo en aniversario vigente",
+            fecha_ingreso=date(2020, 10, 2),
+            activo=True,
+        )
+        MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+            dias=Decimal("17.00"),
+            periodo_anio=2025,
+            descripcion="Pendiente de goce 2025",
+        )
+
+        salida = self._ejecutar(ejecutar=True, empleado_id=empleado.pk)
+
+        periodo = empleado.periodos_vacacionales.get()
+        self.assertEqual(periodo.aniversario, date(2025, 10, 2))
+        self.assertEqual(periodo.origen, "saldo_inicial")
+        self.assertEqual(periodo.dias_generados, Decimal("17.00"))
+        self.assertIn("REQUIERE_REVISION: 0", salida)
+
+    def test_solicitud_retroactiva_genera_periodo_calculado_anterior(self):
+        from datetime import datetime
+
+        from django.utils import timezone
+
+        empleado = Empleado.objects.create(
+            nombre="Empleado goce antes de aniversario",
+            fecha_ingreso=date(2020, 5, 28),
+            activo=True,
+        )
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=empleado,
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+            fecha_inicio=date(2026, 5, 13),
+            fecha_fin=date(2026, 5, 17),
+            dias_laborables=Decimal("5.00"),
+            fecha_aprobacion_rrhh=timezone.make_aware(datetime(2026, 7, 15, 9)),
+            aprobado_rrhh_por=self.actor,
+        )
+        MovimientoVacaciones.objects.create(
+            empleado=empleado,
+            solicitud=solicitud,
+            tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
+            dias=Decimal("5.00"),
+            periodo_anio=2026,
+            descripcion="Consumo legacy retroactivo",
+            actor=self.actor,
+        )
+
+        salida = self._ejecutar(ejecutar=True, empleado_id=empleado.pk)
+
+        self.assertEqual(
+            list(
+                empleado.periodos_vacacionales.order_by("aniversario").values_list(
+                    "aniversario", flat=True
+                )
+            ),
+            [date(2025, 5, 28), date(2026, 5, 28)],
+        )
+        self.assertEqual(
+            solicitud.aplicaciones_goce.get().periodo.aniversario,
+            date(2025, 5, 28),
+        )
+        self.assertIn("REQUIERE_REVISION: 0", salida)
+
+    def test_empleado_sin_primer_aniversario_se_omite_sin_conflicto(self):
+        empleado = Empleado.objects.create(
+            nombre="Empleado sin primer aniversario",
+            fecha_ingreso=date(2025, 12, 15),
+            activo=True,
+        )
+
+        salida = self._ejecutar(ejecutar=True, empleado_id=empleado.pk)
+
+        self.assertFalse(empleado.periodos_vacacionales.exists())
+        self.assertIn("OMITIDA: 1", salida)
+        self.assertIn("REQUIERE_REVISION: 0", salida)
 
     def test_politica_ausente_bloquea_aplicaciones_legacy(self):
-        """Fix #2: sin política _preparar_ultimo_aniversario retorna True → bloquea aplicaciones."""
+        """Sin política, la preparación marca conflicto y bloquea aplicaciones."""
         from rrhh.models import PoliticaVacaciones
 
         PoliticaVacaciones.objects.all().delete()
