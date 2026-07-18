@@ -65,11 +65,17 @@
   .visit-mobile-branch-head strong { color: #8b2252; font-size: .96rem; line-height: 1.2; }
   .visit-mobile-branch-head > span { display: inline-flex; align-items: center; gap: 8px; color: #2f1724; font-weight: 900; text-align: right; }
   .visit-mobile-add { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; border: 1px solid #d9bdcb; border-radius: 10px; background: #fff; color: #7c1f49; font-size: 1.2rem; font-weight: 900; text-decoration: none; }
-  .visit-mobile-days { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
-  .visit-mobile-day { display: inline-flex; min-width: 46px; min-height: 44px; align-items: center; justify-content: center; gap: 3px; border-radius: 8px; background: #f4ecf0; color: #5d2742; font-weight: 900; text-decoration: none; }
-  .visit-mobile-day.programada { background: #c59645; color: #1f151b; }
-  .visit-mobile-day.realizada { background: #2e8b66; color: #fff; }
-  .visit-mobile-day.cancelada { background: #d8c7d0; color: #4b3642; }
+  .visit-mini-cal { display: grid; gap: 4px; padding: 12px; }
+  /* 7 tracks explícitos: un calendario semanal es de 7 columnas por diseño (regla hallmark rigid-wide-grid) */
+  .visit-mini-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px; }
+  .visit-mini-weekdays span { display: flex; align-items: center; justify-content: center; min-height: 22px; color: #715d68; font-size: .74rem; font-weight: 900; }
+  .visit-mini-day { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: #faf6f8; color: #715d68; font-size: .9rem; font-weight: 850; text-decoration: none; }
+  .visit-mini-day.pad { background: transparent; }
+  .visit-mini-day.free { background: #fff; border: 1px dashed #e3d2da; color: #a58b98; }
+  .visit-mini-day.programada { background: #c59645; color: #1f151b; }
+  .visit-mini-day.realizada { background: #2e8b66; color: #fff; }
+  .visit-mini-day.cancelada { background: #d8c7d0; color: #4b3642; }
+  .visit-mini-day.is-today { outline: 2px solid #8b2252; outline-offset: -2px; }
   .visit-mobile-empty { padding: 0 12px 12px; color: #715d68; font-size: .88rem; }
   .visit-mobile-rows { display: grid; }
   .visit-mobile-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; min-height: 48px; padding: 6px 12px; border-top: 1px solid #f0e7ec; color: #2f1724; text-decoration: none; }

@@ -441,3 +441,18 @@ class VisitasSucursalTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f'value="{self.sucursal.id}" selected')
         self.assertContains(response, 'value="2026-06-28"')
+
+    def test_lista_vista_sucursal_muestra_mini_calendario(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "sucursal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "visit-mini-cal")
+        self.assertContains(response, reverse("visitas_sucursal:detalle", args=[visita.id]))
+        self.assertContains(response, f"?sucursal={self.sucursal.id}&fecha=2026-06-01")

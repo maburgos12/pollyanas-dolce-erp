@@ -216,6 +216,7 @@ def lista_visitas(request):
         {"day": day, "date": date(first_day.year, first_day.month, day), "is_sunday": date(first_day.year, first_day.month, day).weekday() == 6}
         for day in range(1, last_day.day + 1)
     ]
+    month_weeks = calendar.Calendar().monthdatescalendar(first_day.year, first_day.month)
     rows = []
     for sucursal in sucursales:
         row_visits = 0
@@ -225,10 +226,24 @@ def lista_visitas(request):
             visita = visitas[0] if visitas else None
             row_visits += len(visitas)
             cells.append({"day": day, "visita": visita, "count": len(visitas)})
+        weeks = [
+            [
+                {
+                    "pad": cell_date.month != first_day.month,
+                    "date": cell_date,
+                    "visita": (visitas_by_cell.get((sucursal.id, cell_date.day), [None])[0]
+                               if cell_date.month == first_day.month else None),
+                    "es_hoy": cell_date == hoy,
+                }
+                for cell_date in week
+            ]
+            for week in month_weeks
+        ]
         rows.append(
             {
                 "sucursal": sucursal,
                 "cells": cells,
+                "weeks": weeks,
                 "avance": round((row_visits / total_programadas) * 100) if total_programadas else 0,
                 "visitas_count": row_visits,
             }
