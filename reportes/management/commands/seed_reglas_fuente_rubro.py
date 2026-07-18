@@ -27,6 +27,16 @@ from reportes.services_presupuesto_maestro import normalize_header_text
 CSV_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "mapeo_rubros_fuentes.csv"
 TIPOS_VALIDOS = {choice[0] for choice in ReglaFuenteRubro.FUENTE_CHOICES}
 
+# Categorías que el propio seed aprovisiona (get_or_create) porque el CSV las
+# referencia; cualquier otro código desconocido sigue abortando (protege de typos).
+# Nombres calculados para el matching por keyword de rentabilidad (una keyword c/u).
+CATEGORIAS_SEED = {
+    "SERVICIOS": ("Servicios públicos", CategoriaGasto.CAPA_SUCURSAL),
+    "LUZ_SUC": ("Luz y energía eléctrica", CategoriaGasto.CAPA_SUCURSAL),
+    "AGUA_SUC": ("Agua potable", CategoriaGasto.CAPA_SUCURSAL),
+    "TELEFONO_SUC": ("Servicio de teléfono e internet", CategoriaGasto.CAPA_SUCURSAL),
+}
+
 # Umbrales del matching difuso rubro→POS.
 SCORE_PRODUCTO = 90
 SCORE_CATEGORIA = 95
@@ -116,6 +126,16 @@ class Command(BaseCommand):
                 if (row.get("categoria_gasto") or "").strip():
                     codigo = row["categoria_gasto"].strip()
                     categoria = CategoriaGasto.objects.filter(codigo=codigo).first()
+                    if categoria is None and codigo in CATEGORIAS_SEED:
+                        nombre, capa = CATEGORIAS_SEED[codigo]
+                        categoria = CategoriaGasto.objects.create(
+                            codigo=codigo,
+                            nombre=nombre,
+                            capa_objetivo=capa,
+                            bucket=CategoriaGasto.BUCKET_COMERCIAL,
+                            impacta_contribucion_sucursal=True,
+                        )
+                        self.stdout.write(f"categoria creada: {codigo} · {nombre}")
                     if categoria is None:
                         # Abortar ANTES de escribir: si esta fila se omitiera, la
                         # reconciliación borraría la regla SEED previa del rubro
