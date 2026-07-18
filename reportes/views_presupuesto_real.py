@@ -103,6 +103,11 @@ def _cobertura_por_area() -> list[dict[str, object]]:
     filas = sorted(acumulado.values(), key=lambda item: item["orden"])
     for fila in filas:
         fila["pct_auto"] = int(round(fila["auto"] * 100 / fila["total"])) if fila["total"] else 0
+        # Con fuente = automatizado + manual declarado (un rubro MANUAL está
+        # resuelto por diseño, no pendiente — ej. CAPEX se captura a mano).
+        fila["pct_con_fuente"] = (
+            int(round((fila["auto"] + fila["manual"]) * 100 / fila["total"])) if fila["total"] else 0
+        )
     return filas
 
 

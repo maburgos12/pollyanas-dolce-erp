@@ -304,8 +304,8 @@
           <td>{{ fila.manual }}</td>
           <td>{% if fila.sin_mapear %}<span class="badge bg-warning">{{ fila.sin_mapear }}</span>{% else %}0{% endif %}</td>
           <td>
-            <div class="pvr-cobertura-bar" role="img" aria-label="{{ fila.pct_auto }}% automatizado"><span style="--pct:{{ fila.pct_auto }}%"></span></div>
-            <span class="muted" style="font-size:0.75rem;">{{ fila.pct_auto }}%</span>
+            <div class="pvr-cobertura-bar" role="img" aria-label="{{ fila.pct_con_fuente }}% con fuente ({{ fila.pct_auto }}% automatizado)"><span style="--pct:{{ fila.pct_con_fuente }}%"></span></div>
+            <span class="muted" style="font-size:0.75rem;" title="{{ fila.pct_auto }}% automatizado">{{ fila.pct_con_fuente }}%</span>
           </td>
         </tr>
         {% empty %}
