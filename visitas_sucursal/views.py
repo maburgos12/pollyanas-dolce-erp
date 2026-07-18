@@ -234,6 +234,22 @@ def lista_visitas(request):
             }
         )
 
+    vista_movil = request.GET.get("vista") or "dia"
+    if vista_movil not in ("dia", "sucursal"):
+        vista_movil = "dia"
+    visitas_por_dia = {}
+    for visita in visitas_mes:
+        visitas_por_dia.setdefault(visita.fecha_programada, []).append(visita)
+    agenda_dias = [
+        {
+            "fecha": fecha,
+            "visitas": items,
+            "es_hoy": fecha == hoy,
+            "vencida": fecha < hoy and any(v.estatus == VisitaSucursal.ESTATUS_PROGRAMADA for v in items),
+        }
+        for fecha, items in sorted(visitas_por_dia.items())
+    ]
+
     daily_estimated = []
     daily_real = []
     for day in days:
@@ -269,6 +285,9 @@ def lista_visitas(request):
             visita__sucursal__in=_sucursales_visitables(),
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
         ).count(),
+        "vista_movil": vista_movil,
+        "agenda_dias": agenda_dias,
+        "hoy": hoy,
         "avance_estimado": 100 if total_programadas else 0,
         "avance_real": round((total_realizadas / total_programadas) * 100) if total_programadas else 0,
         "daily_estimated": daily_estimated,
@@ -303,6 +322,8 @@ def nueva_visita(request):
                 _crear_checklist_base(visita)
             messages.success(request, "Visita creada con checklist base.")
             return redirect("visitas_sucursal:detalle", pk=visita.pk)
+    preset_sucursal = request.GET.get("sucursal") or ""
+    preset_fecha = _parse_date(request.GET.get("fecha")) or timezone.localdate()
     return render(
         request,
         "visitas_sucursal/nueva.html",
@@ -310,7 +331,8 @@ def nueva_visita(request):
             "sucursales": sucursales,
             "users": users,
             "tipo_choices": VisitaSucursal.TIPO_CHOICES,
-            "today": timezone.localdate(),
+            "today": preset_fecha,
+            "preset_sucursal": preset_sucursal,
         },
     )
 
