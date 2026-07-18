@@ -2744,3 +2744,45 @@ class MantEquipoPorSucursalTests(TestCase):
             linea = LineaPresupuestoMensual.objects.get(pk=lineas[codigo].pk)
             self.assertEqual(linea.monto_real, Decimal(esperado))
             self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
+
+
+class ComplementosClasificadosTests(TestCase):
+    """Complementos = productos del catálogo curado; postres los excluye."""
+
+    def test_separacion_sin_doble_conteo(self):
+        from pos_bridge.models import PointBranch, PointProductCategory
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        postres = RubroPresupuesto.objects.create(
+            area=area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        compl = RubroPresupuesto.objects.create(
+            area=area, concepto="Venta complementos", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        for rubro in (postres, compl):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("100"),
+            )
+        PointProductCategory.objects.create(codigo_point="V1", nombre="Vela Granmark", category="SERVICIO_ACCESORIO")
+        branch = PointBranch.objects.create(external_id="cc-br", name="Matriz CC")
+        for producto, monto in (("Pastel X", "1000"), ("Vela Granmark", "50")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 6, 5), sucursal_nombre="Matriz CC",
+                categoria="Cat", producto_nombre_historico=producto,
+                total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=postres, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True, "excluir_clasificados": True},
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=compl, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"clasificacion_catalogo": ["REVENTA", "SERVICIO_ACCESORIO", "TOPPING"]},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        lp = LineaPresupuestoMensual.objects.get(rubro=postres)
+        lc = LineaPresupuestoMensual.objects.get(rubro=compl)
+        self.assertEqual(lp.monto_real, Decimal("1000.00"))
+        self.assertEqual(lc.monto_real, Decimal("50.00"))
+        # suma = total Point; nada doble, nada perdido
+        self.assertEqual(lp.monto_real + lc.monto_real, Decimal("1050.00"))
