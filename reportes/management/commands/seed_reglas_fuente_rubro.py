@@ -35,6 +35,7 @@ CATEGORIAS_SEED = {
     "LUZ_SUC": ("Luz y energía eléctrica", CategoriaGasto.CAPA_SUCURSAL),
     "AGUA_SUC": ("Agua potable", CategoriaGasto.CAPA_SUCURSAL),
     "TELEFONO_SUC": ("Servicio de teléfono e internet", CategoriaGasto.CAPA_SUCURSAL),
+    "GAS": ("Gas", CategoriaGasto.CAPA_SUCURSAL),
 }
 
 # Umbrales del matching difuso rubro→POS.
