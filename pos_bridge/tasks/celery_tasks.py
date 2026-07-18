@@ -277,6 +277,7 @@ def task_product_recipe_sync(
     *,
     branch_hint: str | None = None,
     product_codes: list[str] | None = None,
+    articulo_codes: list[str] | None = None,
     include_without_recipe: bool = False,
     triggered_by_id: int | None = None,
 ):
@@ -285,6 +286,7 @@ def task_product_recipe_sync(
         triggered_by_id=triggered_by_id,
         branch_hint=branch_hint,
         product_codes=product_codes,
+        articulo_codes=articulo_codes,
         include_without_recipe=include_without_recipe,
     )
 
