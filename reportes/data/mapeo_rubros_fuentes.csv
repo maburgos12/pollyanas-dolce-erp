@@ -114,3 +114,18 @@ produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 421, ""desde"": ""2026-06"
 produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 163, ""desde"": ""2026-06""}",Consumo MP: EtiquetaChica,1
 produccion,Avena,CONSUMO_MP,,"{""insumo_id"": 130, ""desde"": ""2026-06""}",Consumo MP: AVENA INTEGRAL,1
 produccion,Levadura,CONSUMO_MP,,"{""insumo_id"": 236, ""desde"": ""2026-06""}",Consumo MP: LEVADURA INSTANTANEA,1
+capex,Adquisición de equipo/maquinaria,MANUAL,,,Inversión: se captura a mano por diseño (no hay fuente automática),1
+capex,Bascula 1,MANUAL,,,Inversión capturada a mano,1
+capex,Batidora,MANUAL,,,Inversión capturada a mano,1
+capex,CAPEX Guamúchil arquitecta,MANUAL,,,Proyecto Guamúchil: captura manual,1
+capex,CAPEX Guamúchil equipo,MANUAL,,,Proyecto Guamúchil: captura manual,1
+capex,CAPEX Guamúchil local,MANUAL,,,Proyecto Guamúchil: captura manual,1
+capex,Horno,MANUAL,,,Inversión capturada a mano,1
+capex,Horno baxter,MANUAL,,,Inversión capturada a mano,1
+capex,Horno turbolino,MANUAL,,,Inversión capturada a mano,1
+capex,Horno turbolino 1,MANUAL,,,Inversión capturada a mano,1
+capex,Horno turbolino 2,MANUAL,,,Inversión capturada a mano,1
+capex,Horno zucchelli,MANUAL,,,Inversión capturada a mano,1
+capex,Hornos,MANUAL,,,Inversión capturada a mano,1
+capex,Mesa de trabajo,MANUAL,,,Inversión capturada a mano,1
+capex,Refrigerador,MANUAL,,,Inversión capturada a mano,1
