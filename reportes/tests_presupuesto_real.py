@@ -2877,6 +2877,13 @@ class MermaProductoTests(TestCase):
         MermaProducto.objects.create(
             registro=registro, producto_texto="gelatina suelta", cantidad_enviada=Decimal("1")
         )
+        # Producto terminado sin rendimiento: el costo total es por pieza.
+        producto = Receta.objects.create(nombre="Piñatero Merma Test", hash_contenido="t-merma-p")
+        LineaReceta.objects.create(
+            receta=producto, insumo_texto="base", costo_linea_excel=Decimal("40"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        MermaProducto.objects.create(registro=registro, receta=producto, cantidad_enviada=Decimal("1"))
         ReglaFuenteRubro.objects.create(
             rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO,
             filtros={"desde": "2026-06"},
@@ -2886,7 +2893,7 @@ class MermaProductoTests(TestCase):
         service.consolidar(periodo=date(2026, 5, 1))
         jul.refresh_from_db()
         may.refresh_from_db()
-        self.assertEqual(jul.monto_real, Decimal("50.00"))  # (3 + 2) × 10
+        self.assertEqual(jul.monto_real, Decimal("90.00"))  # (3 + 2) × 10 + 1 × 40
         self.assertEqual(jul.fuente_real, "AUTO:MERMA_PRODUCTO")
         self.assertEqual(may.monto_real, Decimal("1495.59"))  # legado intacto
         self.assertEqual(may.fuente_real, "AUTO:LEGADO")

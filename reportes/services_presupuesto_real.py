@@ -583,7 +583,11 @@ class PresupuestoRealConsolidacionService:
             hubo_datos = True
             if not linea.receta_id:
                 continue
+            # Recetas de lote traen rendimiento (costo/pieza = total/rendimiento);
+            # en recetas de producto terminado el costo total YA es por pieza.
             costo_unitario = linea.receta.costo_por_unidad_rendimiento
+            if not costo_unitario or costo_unitario <= 0:
+                costo_unitario = linea.receta.costo_total_estimado_decimal
             if not costo_unitario or costo_unitario <= 0:
                 continue
             cantidad = (
