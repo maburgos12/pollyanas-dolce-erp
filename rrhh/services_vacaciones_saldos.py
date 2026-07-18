@@ -27,20 +27,41 @@ class SaldoPeriodoVacacional:
 
 
 def saldo_periodo_vacacional(periodo: PeriodoVacacional) -> SaldoPeriodoVacacional:
-    totales = periodo.aplicaciones_goce.aggregate(
-        reservado=Sum(
-            "dias",
-            filter=Q(estado=AplicacionGoceVacaciones.ESTADO_RESERVADA),
-            default=Decimal("0"),
-        ),
-        gozado=Sum(
-            "dias",
-            filter=Q(estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA),
-            default=Decimal("0"),
-        ),
+    aplicaciones_cache = getattr(periodo, "_prefetched_objects_cache", {}).get(
+        "aplicaciones_goce"
     )
-    reservado = totales["reservado"] or Decimal("0")
-    gozado = totales["gozado"] or Decimal("0")
+    if aplicaciones_cache is not None:
+        reservado = sum(
+            (
+                aplicacion.dias
+                for aplicacion in aplicaciones_cache
+                if aplicacion.estado == AplicacionGoceVacaciones.ESTADO_RESERVADA
+            ),
+            Decimal("0"),
+        )
+        gozado = sum(
+            (
+                aplicacion.dias
+                for aplicacion in aplicaciones_cache
+                if aplicacion.estado == AplicacionGoceVacaciones.ESTADO_CONSUMIDA
+            ),
+            Decimal("0"),
+        )
+    else:
+        totales = periodo.aplicaciones_goce.aggregate(
+            reservado=Sum(
+                "dias",
+                filter=Q(estado=AplicacionGoceVacaciones.ESTADO_RESERVADA),
+                default=Decimal("0"),
+            ),
+            gozado=Sum(
+                "dias",
+                filter=Q(estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA),
+                default=Decimal("0"),
+            ),
+        )
+        reservado = totales["reservado"] or Decimal("0")
+        gozado = totales["gozado"] or Decimal("0")
     disponible = max(periodo.dias_generados - reservado - gozado, Decimal("0"))
     return SaldoPeriodoVacacional(
         periodo_id=periodo.pk,
@@ -50,6 +71,70 @@ def saldo_periodo_vacacional(periodo: PeriodoVacacional) -> SaldoPeriodoVacacion
         gozado=gozado,
         disponible_goce=disponible,
     )
+
+
+def desglose_periodos_vacacionales(empleado) -> list[dict]:
+    """Expone el saldo de goce por aniversario sin información de nómina."""
+    filas = []
+    periodos_cache = getattr(empleado, "_prefetched_objects_cache", {}).get(
+        "periodos_vacacionales"
+    )
+    if periodos_cache is None:
+        periodos = (
+            PeriodoVacacional.objects.filter(empleado=empleado)
+            .prefetch_related("aplicaciones_goce")
+            .order_by("aniversario", "id")
+        )
+    else:
+        periodos = sorted(
+            periodos_cache,
+            key=lambda periodo: (periodo.aniversario, periodo.id),
+        )
+    for periodo in periodos:
+        saldo = saldo_periodo_vacacional(periodo)
+        filas.append(
+            {
+                "periodo_id": saldo.periodo_id,
+                "anio": saldo.aniversario.year,
+                "aniversario": saldo.aniversario,
+                "fecha_limite": periodo.fecha_limite,
+                "generado": saldo.dias_generados,
+                "reservado": saldo.reservado,
+                "gozado": saldo.gozado,
+                "disponible_goce": saldo.disponible_goce,
+            }
+        )
+    return filas
+
+
+def proponer_goce_fifo(empleado, dias: Decimal) -> dict:
+    """Calcula una distribución FIFO informativa sin crear aplicaciones."""
+    dias = Decimal(dias)
+    if dias <= 0:
+        raise ValidationError("Los días a proponer deben ser mayores que cero.")
+
+    pendiente = dias
+    distribucion = []
+    for periodo in desglose_periodos_vacacionales(empleado):
+        aplicado = min(periodo["disponible_goce"], pendiente)
+        if aplicado > 0:
+            distribucion.append(
+                {
+                    "periodo_id": periodo["periodo_id"],
+                    "anio": periodo["anio"],
+                    "dias": aplicado,
+                }
+            )
+            pendiente -= aplicado
+        if pendiente == 0:
+            break
+
+    return {
+        "dias_solicitados": dias,
+        "suficiente": pendiente == 0,
+        "faltante": pendiente,
+        "distribucion": distribucion,
+    }
 
 
 @transaction.atomic

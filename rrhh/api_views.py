@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from django.db.models import Q
@@ -11,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from core.access import can_manage_rrhh, can_view_rrhh
+from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.notificaciones import (
     notificar_hora_extra_solicitada,
     notificar_prestamo_para_direccion,
@@ -32,11 +33,16 @@ from .services_permisos import resolver_permiso_direccion
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
     can_gestionar_vacaciones_jefe,
+    contar_dias_laborables,
     crear_solicitud_vacaciones,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
     vacaciones_jefe_q,
+)
+from .services_vacaciones_saldos import (
+    desglose_periodos_vacacionales,
+    proponer_goce_fifo,
 )
 
 
@@ -258,7 +264,7 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
             raise ValidationError({"empleado": "No se pudo vincular el usuario con un empleado activo."})
         empleado_actual = empleado_de_usuario(request.user)
         puede_crear = (
-            can_view_rrhh(request.user)
+            can_view_submodule(request.user, "rrhh", "vacaciones")
             or empleado == empleado_actual
             or can_gestionar_vacaciones_jefe(request.user, empleado)
         )
@@ -299,10 +305,77 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
 
     @action(detail=False, methods=["get"])
     def saldo(self, request):
-        empleado = empleado_de_usuario(request.user)
+        empleado_actual = empleado_de_usuario(request.user)
+        empleado_id = request.query_params.get("empleado")
+        if empleado_id:
+            empleado = Empleado.objects.filter(pk=empleado_id, activo=True).first()
+            if not empleado:
+                raise ValidationError({"empleado": "Selecciona un empleado activo válido."})
+        else:
+            empleado = empleado_actual
         if not empleado:
             return Response({"empleado": None, "saldo": None})
-        return Response({"empleado": empleado.id, "saldo": saldo_vacaciones_empleado(empleado)})
+        if not (
+            can_view_submodule(request.user, "rrhh", "vacaciones")
+            or empleado == empleado_actual
+            or can_gestionar_vacaciones_jefe(request.user, empleado)
+        ):
+            raise PermissionDenied("No puedes consultar el saldo vacacional de ese empleado.")
+
+        saldo = saldo_vacaciones_empleado(empleado)
+        periodos = desglose_periodos_vacacionales(empleado)
+        disponible = sum(
+            (periodo["disponible_goce"] for periodo in periodos), Decimal("0")
+        )
+        generado = (
+            sum((periodo["generado"] for periodo in periodos), Decimal("0"))
+            if periodos
+            else saldo["generado"]
+        )
+        consumido = (
+            sum((periodo["gozado"] for periodo in periodos), Decimal("0"))
+            if periodos
+            else saldo["consumido"]
+        )
+        reservado = (
+            sum((periodo["reservado"] for periodo in periodos), Decimal("0"))
+            if periodos
+            else saldo["reservado"]
+        )
+        payload = {
+            "empleado": empleado.id,
+            "saldo": saldo,
+            "periodos": periodos,
+            "periodo_anio": saldo["periodo_anio"],
+            "generado": generado,
+            "consumido": consumido,
+            "reservado": reservado,
+            "disponible": disponible if periodos else saldo["disponible"],
+        }
+
+        fecha_inicio_raw = request.query_params.get("fecha_inicio")
+        fecha_fin_raw = request.query_params.get("fecha_fin")
+        if bool(fecha_inicio_raw) != bool(fecha_fin_raw):
+            raise ValidationError("Captura fecha inicial y fecha final.")
+        if fecha_inicio_raw and fecha_fin_raw:
+            try:
+                fecha_inicio = date.fromisoformat(fecha_inicio_raw)
+                fecha_fin = date.fromisoformat(fecha_fin_raw)
+            except ValueError:
+                raise ValidationError("Captura fechas válidas en formato AAAA-MM-DD.")
+            dias_laborables = contar_dias_laborables(fecha_inicio, fecha_fin)
+            if dias_laborables <= 0:
+                raise ValidationError("El periodo no contiene días laborables.")
+            propuesta = proponer_goce_fifo(empleado, dias_laborables)
+            payload.update(
+                {
+                    "dias_laborables": dias_laborables,
+                    "propuesta_fifo": propuesta["distribucion"],
+                    "saldo_suficiente": propuesta["suficiente"],
+                    "faltante": propuesta["faltante"],
+                }
+            )
+        return Response(payload)
 
 
 class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):

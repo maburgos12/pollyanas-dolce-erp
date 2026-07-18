@@ -226,6 +226,30 @@ class ReservarGoceFifoTests(TestCase):
             ],
         )
 
+    def test_propuesta_fifo_es_inmutable_y_usa_los_periodos_mas_antiguos(self):
+        from rrhh.services_vacaciones_saldos import proponer_goce_fifo
+
+        propuesta = proponer_goce_fifo(self.empleado, Decimal("10.00"))
+
+        self.assertTrue(propuesta["suficiente"])
+        self.assertEqual(propuesta["faltante"], Decimal("0"))
+        self.assertEqual(
+            [(fila["anio"], fila["dias"]) for fila in propuesta["distribucion"]],
+            [(2025, Decimal("7.00")), (2026, Decimal("3.00"))],
+        )
+        self.assertFalse(self.solicitud.aplicaciones_goce.exists())
+
+    def test_desglose_periodos_no_expone_importes(self):
+        from rrhh.services_vacaciones_saldos import desglose_periodos_vacacionales
+
+        filas = desglose_periodos_vacacionales(self.empleado)
+
+        self.assertEqual([fila["anio"] for fila in filas], [2025, 2026])
+        self.assertEqual(filas[0]["fecha_limite"], date(2025, 9, 7))
+        self.assertEqual(filas[0]["generado"], Decimal("7.00"))
+        self.assertEqual(filas[0]["disponible_goce"], Decimal("7.00"))
+        self.assertNotIn("importe", filas[0])
+
     def test_saldo_insuficiente_revierte_toda_aplicacion_parcial(self):
         from rrhh.services_vacaciones_saldos import reservar_goce_fifo
 

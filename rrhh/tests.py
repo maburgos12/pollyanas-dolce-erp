@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import (
+    AplicacionGoceVacaciones,
     AsistenciaEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -577,6 +578,101 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Ajuste manual")
         self.assertContains(response, "Carolina Cayetano")
 
+    def test_vacaciones_list_muestra_desglose_fifo_en_saldos_y_solicitudes(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(
+            username="paula.fifo", is_superuser=True, is_staff=True
+        )
+        empleado = Empleado.objects.create(
+            nombre="Carolina FIFO",
+            fecha_ingreso=date(2022, 3, 7),
+            activo=True,
+        )
+        periodo_2025 = PeriodoVacacional.objects.create(
+            empleado=empleado,
+            aniversario=date(2025, 3, 7),
+            fecha_limite=date(2025, 9, 7),
+            antiguedad_anios=3,
+            dias_generados=Decimal("7.00"),
+        )
+        periodo_2026 = PeriodoVacacional.objects.create(
+            empleado=empleado,
+            aniversario=date(2026, 3, 7),
+            fecha_limite=date(2026, 9, 7),
+            antiguedad_anios=4,
+            dias_generados=Decimal("18.00"),
+        )
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 7, 20),
+            fecha_fin=date(2026, 7, 31),
+            dias_laborables=Decimal("10.00"),
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud,
+            periodo=periodo_2025,
+            dias=Decimal("7.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_RESERVADA,
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud,
+            periodo=periodo_2026,
+            dias=Decimal("3.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_RESERVADA,
+        )
+
+        self.client.force_login(rrhh_user)
+        response = self.client.get(reverse("rrhh:rrhh_vacaciones_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Desglose por periodo")
+        self.assertContains(response, "2025 · 7.00 días")
+        self.assertContains(response, "2026 · 3.00 días")
+        self.assertContains(response, "Cómo se aplicarán los días")
+        self.assertContains(response, "data-async-action")
+        self.assertNotContains(response, "salario_diario")
+
+    def test_vacaciones_list_responde_json_y_conserva_filtro_y_ancla(self):
+        from datetime import date
+
+        rrhh_user = User.objects.create_user(
+            username="paula.async", is_superuser=True, is_staff=True
+        )
+        empleado = Empleado.objects.create(
+            nombre="Carolina Async",
+            fecha_ingreso=date(2022, 3, 7),
+            activo=True,
+        )
+        PeriodoVacacional.objects.create(
+            empleado=empleado,
+            aniversario=date(2026, 3, 7),
+            fecha_limite=date(2026, 9, 7),
+            antiguedad_anios=4,
+            dias_generados=Decimal("18.00"),
+        )
+        self.client.force_login(rrhh_user)
+
+        response = self.client.post(
+            f"{reverse('rrhh:rrhh_vacaciones_list')}?q=Carolina",
+            {
+                "action": "crear",
+                "empleado_id": empleado.id,
+                "fecha_inicio": "2026-07-20",
+                "fecha_fin": "2026-07-24",
+                "motivo": "Cobertura validada",
+            },
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["toast"]["type"], "success")
+        self.assertTrue(payload["reload"])
+        self.assertIn("?q=Carolina", payload["redirect"])
+        self.assertIn("#vac-solicitud-", payload["redirect"])
+
     def test_vacaciones_historial_filtra_y_concilia_saldo(self):
         from datetime import date
 
@@ -1103,6 +1199,113 @@ class CapitalHumanoAPITests(TestCase):
     def assertHoraLocal(self, dt, hora, minuto=0):
         local_dt = timezone.localtime(dt)
         self.assertEqual((local_dt.hour, local_dt.minute), (hora, minuto))
+
+    def test_vacaciones_saldo_agrega_periodos_y_propuesta_fifo_sin_importes(self):
+        from datetime import date
+
+        PeriodoVacacional.objects.create(
+            empleado=self.empleado,
+            aniversario=date(2025, 3, 7),
+            fecha_limite=date(2025, 9, 7),
+            antiguedad_anios=3,
+            dias_generados=Decimal("7.00"),
+        )
+        PeriodoVacacional.objects.create(
+            empleado=self.empleado,
+            aniversario=date(2026, 3, 7),
+            fecha_limite=date(2026, 9, 7),
+            antiguedad_anios=4,
+            dias_generados=Decimal("18.00"),
+        )
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"),
+            {
+                "empleado": self.empleado.id,
+                "fecha_inicio": "2026-07-20",
+                "fecha_fin": "2026-07-30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("saldo", response.data)
+        self.assertIn("disponible", response.data)
+        self.assertEqual([fila["anio"] for fila in response.data["periodos"]], [2025, 2026])
+        self.assertEqual(
+            [(fila["anio"], fila["dias"]) for fila in response.data["propuesta_fifo"]],
+            [(2025, Decimal("7.00")), (2026, Decimal("3.00"))],
+        )
+        self.assertEqual(response.data["dias_laborables"], Decimal("10"))
+        self.assertNotIn("importe", str(response.data).lower())
+
+    def test_vacaciones_saldo_sin_periodos_conserva_totales_legacy(self):
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=0,
+            antiguedad_hasta=0,
+            dias_laborables=Decimal("12.00"),
+        )
+        response = self.client.get(reverse("rrhh:vacaciones-saldo"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["generado"], response.data["saldo"]["generado"])
+        self.assertEqual(response.data["reservado"], response.data["saldo"]["reservado"])
+        self.assertEqual(response.data["consumido"], response.data["saldo"]["consumido"])
+        self.assertEqual(response.data["disponible"], response.data["saldo"]["disponible"])
+
+    def test_vacaciones_saldo_no_expone_otro_empleado_sin_permiso(self):
+        otro = Empleado.objects.create(nombre="Otro empleado privado")
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"), {"empleado": otro.id}
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_vacaciones_saldo_rrhh_puede_consultar_empleado_autorizado(self):
+        rrhh_user = User.objects.create_user(username="rrhh.saldos")
+        rrhh_group, _ = Group.objects.get_or_create(name="RRHH")
+        rrhh_user.groups.add(rrhh_group)
+        otro = Empleado.objects.create(nombre="Empleado consultado RRHH")
+        self.client.force_authenticate(user=rrhh_user)
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"), {"empleado": otro.id}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["empleado"], otro.id)
+
+    def test_vacaciones_saldo_permiso_explicito_de_vacaciones_puede_consultar(self):
+        user = User.objects.create_user(username="vacaciones.consulta")
+        UserModuleAccess.objects.create(
+            user=user,
+            module="rrhh.vacaciones",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        otro = Empleado.objects.create(nombre="Empleado visible vacaciones")
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"), {"empleado": otro.id}
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_vacaciones_saldo_otro_submodulo_rrhh_no_otorga_acceso(self):
+        user = User.objects.create_user(username="vacantes.sin.vacaciones")
+        UserModuleAccess.objects.create(
+            user=user,
+            module="rrhh.vacantes",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        otro = Empleado.objects.create(nombre="Empleado privado vacaciones")
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"), {"empleado": otro.id}
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_permiso_api_crea_folio_para_empleado_actual(self):
         resp = self.client.post(
