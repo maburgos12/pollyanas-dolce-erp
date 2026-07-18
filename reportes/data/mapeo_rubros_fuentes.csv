@@ -88,3 +88,7 @@ produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones
 gastos-venta,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""por_sucursal"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de los activos de cada sucursal,1
 resultados,Venta complementos,VENTA_POS,,"{""clasificacion_catalogo"": [""REVENTA"", ""SERVICIO_ACCESORIO"", ""TOPPING""], ""campo_monto"": ""total_venta""}",P&L: complementos = productos clasificados en el catálogo curado,1
 resultados,Costos complementos,COSTO_REVENTA,,"{""desde"": ""2026-04""}",P&L: unidades x costo reventa desde abril (el Excel solo capturó ene-mar),1
+gastos-venta,Servicios públicos,GASTO_OPERATIVO,SERVICIOS,,Bolsa histórica de servicios por sucursal (capturas sin desglosar),1
+gastos-venta,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,,Recibo CFE capturado desglosado (diseño dirección 2026-07-18),1
+gastos-venta,Agua potable,GASTO_OPERATIVO,AGUA_SUC,,Recibo de agua capturado desglosado,1
+gastos-venta,Teléfono e internet,GASTO_OPERATIVO,TELEFONO_SUC,,Recibo telefonía/internet capturado desglosado,1
