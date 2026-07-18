@@ -2834,12 +2834,10 @@ class CostoReventaComplementosTests(TestCase):
 
 
 class MermaProductoTests(TestCase):
-    """La fuente MERMA_PRODUCTO valúa la merma física a costo de receta."""
+    """La fuente MERMA_PRODUCTO valúa la merma Point (MermaPOS) a costo de receta."""
 
-    def test_merma_valuada_respeta_desde_y_cantidad_recibida(self):
-        from django.contrib.auth import get_user_model
-
-        from mermas.models import MermaProducto, MermaRegistro
+    def test_merma_point_valuada_respeta_desde(self):
+        from control.models import MermaPOS
         from recetas.models import LineaReceta, Receta
 
         area = AreaPresupuesto.objects.create(nombre="Resultados (P&L)", codigo="resultados")
@@ -2862,28 +2860,18 @@ class MermaProductoTests(TestCase):
             match_status=LineaReceta.STATUS_AUTO,
         )
         suc = Sucursal.objects.create(nombre="Matriz Merma", codigo="MM-MTZ")
-        user = get_user_model().objects.create_user("merma_test", "m@test.mx", "clave-test")
-        registro = MermaRegistro.objects.create(
-            sucursal=suc, registrado_por=user,
-            iniciado_en=timezone.now().replace(year=2026, month=7, day=5),
-        )
-        # Enviada 3 sin recepción → usa 3; enviada 5 pero recibida 2 → usa 2.
-        MermaProducto.objects.create(registro=registro, receta=receta, cantidad_enviada=Decimal("3"))
-        MermaProducto.objects.create(
-            registro=registro, receta=receta,
-            cantidad_enviada=Decimal("5"), cantidad_recibida=Decimal("2"),
-        )
-        # Texto libre sin receta: no se puede valuar, no debe tronar.
-        MermaProducto.objects.create(
-            registro=registro, producto_texto="gelatina suelta", cantidad_enviada=Decimal("1")
-        )
+        # Sucursal y CEDIS suman igual: 3 × 10 + 2 × 10.
+        MermaPOS.objects.create(receta=receta, sucursal=suc, fecha=date(2026, 7, 5), cantidad=Decimal("3"))
+        MermaPOS.objects.create(receta=receta, fecha=date(2026, 7, 6), cantidad=Decimal("2"))
+        # Sin receta ligada: no se puede valuar, no debe tronar.
+        MermaPOS.objects.create(producto_texto="gelatina suelta", fecha=date(2026, 7, 6), cantidad=Decimal("1"))
         # Producto terminado sin rendimiento: el costo total es por pieza.
         producto = Receta.objects.create(nombre="Piñatero Merma Test", hash_contenido="t-merma-p")
         LineaReceta.objects.create(
             receta=producto, insumo_texto="base", costo_linea_excel=Decimal("40"),
             match_status=LineaReceta.STATUS_AUTO,
         )
-        MermaProducto.objects.create(registro=registro, receta=producto, cantidad_enviada=Decimal("1"))
+        MermaPOS.objects.create(receta=producto, fecha=date(2026, 7, 8), cantidad=Decimal("1"))
         ReglaFuenteRubro.objects.create(
             rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO,
             filtros={"desde": "2026-06"},
