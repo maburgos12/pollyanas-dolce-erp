@@ -12,6 +12,11 @@ from core.access import can_manage_rrhh
 
 from .models import Empleado, IncapacidadEmpleado, MovimientoVacaciones, PoliticaVacaciones, SolicitudVacaciones
 from .services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
+from .services_vacaciones_saldos import (
+    consumir_reservas_goce,
+    liberar_reservas_goce,
+    reservar_goce_fifo,
+)
 
 
 DESCANSOS_OFICIALES_FIJOS = {
@@ -178,9 +183,7 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
             raise ValidationError(
                 f"El periodo cruza incapacidad{folio} del {incapacidad.fecha_inicio:%Y-%m-%d} al {incapacidad.fecha_fin:%Y-%m-%d}."
             )
-        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=fecha_inicio.year, al=fecha_inicio)
-        if dias > saldo["disponible"]:
-            raise ValidationError(f"Saldo insuficiente. Disponible: {saldo['disponible']} días.")
+        actor_autenticado = actor if getattr(actor, "is_authenticated", False) else None
         solicitud = SolicitudVacaciones.objects.create(
             empleado=empleado,
             fecha_inicio=fecha_inicio,
@@ -188,17 +191,19 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
             dias_laborables=dias,
             motivo=motivo,
             jefe_directo=usuario_jefe_directo_vacaciones(empleado),
-            creado_por=actor if getattr(actor, "is_authenticated", False) else None,
+            creado_por=actor_autenticado,
         )
-        MovimientoVacaciones.objects.create(
-            empleado=empleado,
-            solicitud=solicitud,
-            tipo=MovimientoVacaciones.TIPO_RESERVADO,
-            dias=dias,
-            periodo_anio=fecha_inicio.year,
-            descripcion=f"Reserva por solicitud {solicitud.folio}",
-            actor=actor if getattr(actor, "is_authenticated", False) else None,
-        )
+        aplicaciones = reservar_goce_fifo(solicitud, dias, actor=actor_autenticado)
+        for aplicacion in aplicaciones:
+            MovimientoVacaciones.objects.create(
+                empleado=empleado,
+                solicitud=solicitud,
+                tipo=MovimientoVacaciones.TIPO_RESERVADO,
+                dias=aplicacion.dias,
+                periodo_anio=aplicacion.periodo.aniversario.year,
+                descripcion=f"Reserva por solicitud {solicitud.folio}",
+                actor=actor_autenticado,
+            )
     return solicitud
 
 
@@ -217,16 +222,12 @@ def preautorizar_solicitud_vacaciones_jefe(
         if aprobar:
             solicitud.estado = SolicitudVacaciones.ESTADO_PREAUTORIZADA
         else:
-            solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
-            MovimientoVacaciones.objects.create(
-                empleado=solicitud.empleado,
-                solicitud=solicitud,
-                tipo=MovimientoVacaciones.TIPO_LIBERADO,
-                dias=solicitud.dias_laborables,
-                periodo_anio=solicitud.fecha_inicio.year,
-                descripcion=f"Liberación por rechazo de jefe {solicitud.folio}",
+            liberar_reservas_goce(
+                solicitud,
                 actor=user,
+                descripcion=f"Liberación por rechazo de jefe {solicitud.folio}",
             )
+            solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
         solicitud.save(update_fields=["estado", "preautorizado_por", "fecha_preautorizacion", "actualizado_en"])
     return solicitud
 
@@ -238,28 +239,11 @@ def aprobar_solicitud_vacaciones_rrhh(solicitud: SolicitudVacaciones, user) -> S
             raise PermissionDenied("Solo Capital Humano puede aprobar vacaciones.")
         if solicitud.estado not in {SolicitudVacaciones.ESTADO_SOLICITADA, SolicitudVacaciones.ESTADO_PREAUTORIZADA}:
             raise ValidationError("La solicitud ya fue resuelta.")
+        consumir_reservas_goce(solicitud, actor=user)
         solicitud.estado = SolicitudVacaciones.ESTADO_APROBADA
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
-        MovimientoVacaciones.objects.create(
-            empleado=solicitud.empleado,
-            solicitud=solicitud,
-            tipo=MovimientoVacaciones.TIPO_LIBERADO,
-            dias=solicitud.dias_laborables,
-            periodo_anio=solicitud.fecha_inicio.year,
-            descripcion=f"Cierre de reserva por aprobación {solicitud.folio}",
-            actor=user,
-        )
-        MovimientoVacaciones.objects.create(
-            empleado=solicitud.empleado,
-            solicitud=solicitud,
-            tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
-            dias=solicitud.dias_laborables,
-            periodo_anio=solicitud.fecha_inicio.year,
-            descripcion=f"Consumo por aprobación {solicitud.folio}",
-            actor=user,
-        )
     return solicitud
 
 
@@ -270,17 +254,13 @@ def rechazar_solicitud_vacaciones(solicitud: SolicitudVacaciones, user) -> Solic
             raise PermissionDenied("Solo Capital Humano puede rechazar vacaciones.")
         if solicitud.estado in {SolicitudVacaciones.ESTADO_APROBADA, SolicitudVacaciones.ESTADO_RECHAZADA, SolicitudVacaciones.ESTADO_CANCELADA}:
             raise ValidationError("La solicitud ya fue resuelta.")
+        liberar_reservas_goce(
+            solicitud,
+            actor=user,
+            descripcion=f"Liberación por rechazo {solicitud.folio}",
+        )
         solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
-        MovimientoVacaciones.objects.create(
-            empleado=solicitud.empleado,
-            solicitud=solicitud,
-            tipo=MovimientoVacaciones.TIPO_LIBERADO,
-            dias=solicitud.dias_laborables,
-            periodo_anio=solicitud.fecha_inicio.year,
-            descripcion=f"Liberación por rechazo {solicitud.folio}",
-            actor=user,
-        )
     return solicitud

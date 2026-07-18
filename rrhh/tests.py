@@ -29,6 +29,7 @@ from rrhh.models import (
     MovimientoVacaciones,
     PlantillaAutorizada,
     PermisoSalida,
+    PeriodoVacacional,
     PoliticaVacaciones,
     Prestamo,
     PrestamoCuota,
@@ -66,6 +67,13 @@ class CapitalHumanoServiceTests(TestCase):
             antiguedad_hasta=5,
             dias_laborables=Decimal("12.00"),
             vigente_desde=date(2026, 1, 1),
+        )
+        PeriodoVacacional.objects.create(
+            empleado=empleado,
+            aniversario=date(2026, 1, 1),
+            fecha_limite=date(2026, 7, 1),
+            antiguedad_anios=1,
+            dias_generados=Decimal("12.00"),
         )
 
         solicitud = crear_solicitud_vacaciones(
@@ -247,6 +255,13 @@ class CapitalHumanoServiceTests(TestCase):
             dias_laborables=Decimal("12.00"),
             vigente_desde=date(2026, 1, 1),
         )
+        PeriodoVacacional.objects.create(
+            empleado=empleado,
+            aniversario=date(2026, 12, 1),
+            fecha_limite=date(2027, 6, 1),
+            antiguedad_anios=1,
+            dias_generados=Decimal("12.00"),
+        )
 
         with patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 6, 16)):
             solicitud = crear_solicitud_vacaciones(
@@ -283,6 +298,13 @@ class CapitalHumanoServiceTests(TestCase):
             antiguedad_hasta=5,
             dias_laborables=Decimal("12.00"),
             vigente_desde=date(2026, 1, 1),
+        )
+        PeriodoVacacional.objects.create(
+            empleado=colaborador,
+            aniversario=date(2026, 1, 1),
+            fecha_limite=date(2026, 7, 1),
+            antiguedad_anios=1,
+            dias_generados=Decimal("12.00"),
         )
 
         self.client.force_login(jefe_user)
@@ -330,6 +352,13 @@ class CapitalHumanoServiceTests(TestCase):
             antiguedad_hasta=5,
             dias_laborables=Decimal("12.00"),
             vigente_desde=date(2026, 1, 1),
+        )
+        PeriodoVacacional.objects.create(
+            empleado=empleada,
+            aniversario=date(2026, 1, 1),
+            fecha_limite=date(2026, 7, 1),
+            antiguedad_anios=1,
+            dias_generados=Decimal("12.00"),
         )
 
         solicitud = crear_solicitud_vacaciones(
