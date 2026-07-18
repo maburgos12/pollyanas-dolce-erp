@@ -2885,3 +2885,44 @@ class MermaProductoTests(TestCase):
         self.assertEqual(jul.fuente_real, "AUTO:MERMA_PRODUCTO")
         self.assertEqual(may.monto_real, Decimal("1495.59"))  # legado intacto
         self.assertEqual(may.fuente_real, "AUTO:LEGADO")
+
+
+class ImportNominaHojaGeneralTests(TestCase):
+    """El archivo de nómina alimenta el área de control SOLO con la hoja GENERAL."""
+
+    def test_nomina_toma_general_e_ignora_departamentos(self):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        wb = Workbook()
+        general = wb.active
+        general.title = "GENERAL"
+        general.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        general.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        general.append(["", "SUELDO", 632149, "", ""])
+        admin = wb.create_sheet("ADMINISTRACION")
+        admin.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        admin.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        admin.append(["", "SUELDO", 134197, "", ""])
+        admin.append(["", "PLAYERA", 300, "", ""])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+
+        PresupuestoMaestroImportService().import_file(
+            archivo=tmp.name, area_code="nomina", version="ORIGINAL", year=2026
+        )
+        linea = LineaPresupuestoMensual.objects.get(
+            periodo=date(2026, 1, 1), rubro__concepto__iexact="sueldo",
+            rubro__area__codigo="nomina",
+        )
+        # Gana la hoja GENERAL, no la última hoja de departamento.
+        self.assertEqual(linea.monto_presupuesto, Decimal("632149"))
+        # Los conceptos exclusivos de hojas de departamento no entran al control.
+        self.assertFalse(
+            RubroPresupuesto.objects.filter(
+                area__codigo="nomina", concepto__iexact="playera"
+            ).exists()
+        )
