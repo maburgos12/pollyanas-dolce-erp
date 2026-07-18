@@ -94,3 +94,7 @@ gastos-venta,Agua potable,GASTO_OPERATIVO,AGUA_SUC,,Recibo de agua capturado des
 gastos-venta,Teléfono e internet,GASTO_OPERATIVO,TELEFONO_SUC,,Recibo telefonía/internet capturado desglosado,1
 administracion,Arrendamiento local,GASTO_OPERATIVO,RENTA,"{""centro_tipo"": ""CORPORATIVO""}",Renta de oficinas corporativas (centros tipo CORPORATIVO; no pisa las rentas por sucursal),1
 administracion,Bono por resultados (despensa),MANUAL,,,"La despensa ya viaja en fuentes conectadas: complemento dentro de sueldo (nómina), bonos de prod/ventas y bono_extra en fechas fuertes. Conectarla duplicaría; captura manual solo para casos por fuera",1
+administracion,Servicios públicos,GASTO_OPERATIVO,SERVICIOS,"{""centro_tipo"": ""CORPORATIVO""}",Servicios de oficinas corporativas (bolsa histórica; el legado ene-may traía sucursales registradas centralmente),1
+administracion,Servicios públicos,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Luz de oficinas corporativas capturada desglosada,1
+administracion,Servicios públicos,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Agua de oficinas corporativas capturada desglosada,1
+administracion,Servicios públicos,GASTO_OPERATIVO,TELEFONO_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Teléfono/internet de oficinas corporativas capturado desglosado,1
