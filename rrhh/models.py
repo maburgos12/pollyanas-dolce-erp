@@ -1656,6 +1656,17 @@ class AplicacionGoceVacaciones(models.Model):
             models.CheckConstraint(check=models.Q(dias__gt=0), name="ck_aplicacion_goce_dias_pos"),
         ]
 
+    def clean(self):
+        if self.solicitud_id and self.periodo_id:
+            if self.solicitud.empleado_id != self.periodo.empleado_id:
+                raise ValidationError(
+                    "La solicitud y el periodo vacacional deben pertenecer al mismo empleado."
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
         return f"{self.solicitud_id} · {self.periodo_id} · {self.dias} ({self.estado})"
 

@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
@@ -56,7 +57,7 @@ class PeriodoVacacionalModelTests(TestCase):
                 )
 
     def test_aplicacion_requiere_dias_positivos(self):
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises((IntegrityError, ValidationError)):
             with transaction.atomic():
                 AplicacionGoceVacaciones.objects.create(
                     solicitud=self.solicitud, periodo=self.periodo,
@@ -68,9 +69,28 @@ class PeriodoVacacionalModelTests(TestCase):
             solicitud=self.solicitud, periodo=self.periodo,
             dias=Decimal("3"), estado="reservada",
         )
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises((IntegrityError, ValidationError)):
             with transaction.atomic():
                 AplicacionGoceVacaciones.objects.create(
                     solicitud=self.solicitud, periodo=self.periodo,
                     dias=Decimal("2"), estado="reservada",
                 )
+
+    def test_aplicacion_rechaza_solicitud_y_periodo_de_empleados_distintos(self):
+        otro_empleado = Empleado.objects.create(
+            nombre="Otro Empleado", fecha_ingreso=date(2021, 1, 15)
+        )
+        periodo_otro = PeriodoVacacional.objects.create(
+            empleado=otro_empleado,
+            aniversario=date(2025, 1, 15),
+            fecha_limite=date(2025, 7, 15),
+            antiguedad_anios=4,
+            dias_generados=Decimal("18.00"),
+        )
+        with self.assertRaises(ValidationError):
+            AplicacionGoceVacaciones.objects.create(
+                solicitud=self.solicitud,
+                periodo=periodo_otro,
+                dias=Decimal("3"),
+                estado="reservada",
+            )
