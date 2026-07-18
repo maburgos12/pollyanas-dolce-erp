@@ -99,7 +99,6 @@ administracion,Servicios públicos,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""
 administracion,Servicios públicos,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Agua de oficinas corporativas capturada desglosada,1
 administracion,Servicios públicos,GASTO_OPERATIVO,TELEFONO_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Teléfono/internet de oficinas corporativas capturado desglosado,1
 resultados,Merma,MERMA_PRODUCTO,,"{""desde"": ""2026-01""}",Merma Point valuada a costo de receta todo 2026 (meses sin datos Point conservan legado),1
-produccion,Rp25,CONSUMO_MP,,"{""insumo_id"": 189, ""desde"": ""2026-06""}",Consumo MP: Rebanada Pay RP25,1
 produccion,Rp25,CONSUMO_MP,,"{""insumo_id"": 423, ""desde"": ""2026-06""}",Consumo MP: Rebanada Triangular RP25,1
 produccion,Aluminio al-28,CONSUMO_MP,,"{""insumo_id"": 92, ""desde"": ""2026-06""}",Consumo MP: MOLDE ALUMINIO G AL-28,1
 produccion,Aluminio al-22,CONSUMO_MP,,"{""insumo_id"": 95, ""desde"": ""2026-06""}",Consumo MP: MOLDE ALUMINIO CH AL-22,1
