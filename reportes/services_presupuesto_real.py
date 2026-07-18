@@ -563,22 +563,18 @@ class PresupuestoRealConsolidacionService:
 
     @staticmethod
     def _build_merma_producto_total(periodo: date) -> tuple[Decimal, bool]:
-        """Valor de la merma física del mes: líneas del módulo de mermas
-        valuadas a costo unitario vigente de la receta (capa MP del costeo).
-        Las líneas de texto libre (sin receta ligada) no se pueden valuar y
-        quedan fuera; se prefiere la cantidad confirmada en CEDIS si existe."""
-        from mermas.models import MermaProducto
+        """Valor de la merma del mes según el registro madre de Point
+        (control.MermaPOS, sync /Mermas/get_mermas): cubre todas las
+        sucursales, CEDIS y almacén. Se valúa a costo vigente de la receta
+        (capa MP del costeo). El módulo PWA de mermas es el rastreo logístico
+        del mismo evento (trae ticket_point) — usarlo aquí duplicaría."""
+        from control.models import MermaPOS
 
         total = Decimal("0")
         hubo_datos = False
-        lineas = (
-            MermaProducto.objects.filter(
-                registro__iniciado_en__year=periodo.year,
-                registro__iniciado_en__month=periodo.month,
-            )
-            .exclude(registro__estatus="CANCELADO")
-            .select_related("receta")
-        )
+        lineas = MermaPOS.objects.filter(
+            fecha__year=periodo.year, fecha__month=periodo.month
+        ).select_related("receta")
         for linea in lineas:
             hubo_datos = True
             if not linea.receta_id:
@@ -590,12 +586,7 @@ class PresupuestoRealConsolidacionService:
                 costo_unitario = linea.receta.costo_total_estimado_decimal
             if not costo_unitario or costo_unitario <= 0:
                 continue
-            cantidad = (
-                linea.cantidad_recibida
-                if linea.cantidad_recibida is not None
-                else linea.cantidad_enviada
-            )
-            total += Decimal(str(cantidad)) * costo_unitario
+            total += Decimal(str(linea.cantidad)) * costo_unitario
         return (total.quantize(Decimal("0.01")), hubo_datos)
 
     def _monto_merma_producto(
