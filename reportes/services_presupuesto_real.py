@@ -324,12 +324,20 @@ class PresupuestoRealConsolidacionService:
                 if fila["centro_costo_id"] != regla.centro_costo_id:
                     continue
             else:
-                if sucursal_id is not None and fila["centro_costo__sucursal_id"] != sucursal_id:
-                    continue
-                if centro_tipo and fila["centro_costo__tipo"] != centro_tipo:
+                if centro_tipo:
+                    if fila["centro_costo__tipo"] != centro_tipo:
+                        continue
+                elif sucursal_id is not None and fila["centro_costo__sucursal_id"] != sucursal_id:
                     continue
             total += fila["monto"] or Decimal("0")
             hubo_datos = True
+        # Recibos compartidos entre centros (un medidor Matriz+CEDIS): la
+        # regla toma su % del monto capturado completo en el centro compartido.
+        porcentaje = (regla.filtros or {}).get("porcentaje")
+        if porcentaje is not None:
+            total = (total * Decimal(str(porcentaje)) / Decimal("100")).quantize(
+                Decimal("0.01")
+            )
         return (total, hubo_datos)
 
     @staticmethod
