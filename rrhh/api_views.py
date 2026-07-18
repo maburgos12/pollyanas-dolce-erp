@@ -35,6 +35,7 @@ from .services_vacaciones import (
     can_gestionar_vacaciones_jefe,
     contar_dias_laborables,
     crear_solicitud_vacaciones,
+    goce_vacacional_fifo_activo,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
@@ -323,7 +324,8 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
             raise PermissionDenied("No puedes consultar el saldo vacacional de ese empleado.")
 
         saldo = saldo_vacaciones_empleado(empleado)
-        periodos = desglose_periodos_vacacionales(empleado)
+        fifo_activo = goce_vacacional_fifo_activo()
+        periodos = desglose_periodos_vacacionales(empleado) if fifo_activo else []
         disponible = sum(
             (periodo["disponible_goce"] for periodo in periodos), Decimal("0")
         )
@@ -345,6 +347,7 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
         payload = {
             "empleado": empleado.id,
             "saldo": saldo,
+            "fifo_activo": fifo_activo,
             "periodos": periodos,
             "periodo_anio": saldo["periodo_anio"],
             "generado": generado,
@@ -366,7 +369,15 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
             dias_laborables = contar_dias_laborables(fecha_inicio, fecha_fin)
             if dias_laborables <= 0:
                 raise ValidationError("El periodo no contiene días laborables.")
-            propuesta = proponer_goce_fifo(empleado, dias_laborables)
+            if fifo_activo:
+                propuesta = proponer_goce_fifo(empleado, dias_laborables)
+            else:
+                faltante = max(dias_laborables - saldo["disponible"], Decimal("0"))
+                propuesta = {
+                    "distribucion": [],
+                    "suficiente": faltante == 0,
+                    "faltante": faltante,
+                }
             payload.update(
                 {
                     "dias_laborables": dias_laborables,

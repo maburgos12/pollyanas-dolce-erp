@@ -101,6 +101,7 @@ from .services_vacaciones import (
     can_gestionar_vacaciones_jefe,
     can_resolver_vacaciones_jefe,
     crear_solicitud_vacaciones,
+    goce_vacacional_fifo_activo,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
@@ -2976,9 +2977,10 @@ def vacaciones_list(request):
         .values("empleado_id")
         .annotate(total=Sum("dias"))
     }
+    fifo_activo = goce_vacacional_fifo_activo()
     empleados_historial = []
     for empleado in empleados_revision:
-        periodos = desglose_periodos_vacacionales(empleado)
+        periodos = desglose_periodos_vacacionales(empleado) if fifo_activo else []
         if periodos:
             saldo = {
                 "periodo_anio": periodos[-1]["anio"],
@@ -3043,7 +3045,9 @@ def vacaciones_list(request):
         rows = list(qs[:120])
         for solicitud in rows:
             solicitud.puede_preautorizar_jefe = can_resolver_vacaciones_jefe(request.user, solicitud)
-            solicitud.distribucion_goce = list(solicitud.aplicaciones_goce.all())
+            solicitud.distribucion_goce = (
+                list(solicitud.aplicaciones_goce.all()) if fifo_activo else []
+            )
         return rows
 
     columnas = [
@@ -3082,6 +3086,7 @@ def vacaciones_list(request):
             "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,
+            "vacaciones_goce_fifo_activo": fifo_activo,
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "user_id": request.user.id,
             "tiene_equipo_vacaciones": tiene_equipo,

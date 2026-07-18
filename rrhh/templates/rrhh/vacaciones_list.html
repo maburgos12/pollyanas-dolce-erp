@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260718-vacaciones-fifo-v4">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260718-vacaciones-fifo-v5">
 {% endblock %}
 
 {% block content %}
@@ -351,6 +351,19 @@
           item.textContent = fila.anio + " · " + fila.dias + " días";
           list.appendChild(item);
         });
+        if (!payload.fifo_activo) {
+          const rollout = document.createElement("span");
+          rollout.textContent = "Se validará con el saldo anual actual mientras se prepara el control por periodos.";
+          if (!payload.saldo_suficiente) {
+            preview.classList.add("is-warning");
+            const warning = document.createElement("span");
+            warning.textContent = "Saldo insuficiente: faltan " + payload.faltante + " días.";
+            previewContent.replaceChildren(summary, rollout, warning);
+          } else {
+            previewContent.replaceChildren(summary, rollout);
+          }
+          return;
+        }
         if (!payload.saldo_suficiente) {
           preview.classList.add("is-warning");
           const warning = document.createElement("span");

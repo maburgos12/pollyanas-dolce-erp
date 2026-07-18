@@ -13,7 +13,7 @@ from django.db import (
     connections,
     transaction,
 )
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from rrhh.models import (
@@ -21,6 +21,7 @@ from rrhh.models import (
     Empleado,
     MovimientoVacaciones,
     PeriodoVacacional,
+    PoliticaVacaciones,
     SolicitudVacaciones,
 )
 
@@ -381,6 +382,7 @@ class ReservarGoceFifoConcurrenciaTests(TransactionTestCase):
         )
 
 
+@override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
 class CicloGoceVacacionesFifoTests(TestCase):
     def setUp(self):
         self.rrhh_user = User.objects.create_user(username="paula.fifo")
@@ -594,6 +596,94 @@ class CicloGoceVacacionesFifoTests(TestCase):
         self.assertFalse(MovimientoVacaciones.objects.filter(solicitud=solicitud).exists())
 
 
+@override_settings(VACACIONES_GOCE_FIFO_ACTIVO=False)
+class CompatibilidadActivacionGoceVacacionesTests(TestCase):
+    def setUp(self):
+        self.rrhh_user = User.objects.create_user(username="paula.compatibilidad")
+        self.rrhh_user.groups.add(Group.objects.create(name="RRHH"))
+        self.empleada = Empleado.objects.create(
+            nombre="Empleada Compatibilidad",
+            fecha_ingreso=date(2022, 3, 7),
+            activo=True,
+        )
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=0,
+            antiguedad_hasta=None,
+            dias_laborables=Decimal("18.00"),
+        )
+
+    def _crear_solicitud_legacy(self):
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones
+
+        return crear_solicitud_vacaciones(
+            empleado=self.empleada,
+            fecha_inicio=date(2026, 8, 10),
+            fecha_fin=date(2026, 8, 14),
+            motivo="Solicitud durante despliegue seguro",
+            actor=self.rrhh_user,
+        )
+
+    def test_modo_inactivo_conserva_flujo_anterior_sin_periodos_fifo(self):
+        solicitud = self._crear_solicitud_legacy()
+
+        self.assertFalse(solicitud.aplicaciones_goce.exists())
+        self.assertEqual(
+            list(
+                MovimientoVacaciones.objects.filter(solicitud=solicitud)
+                .values_list("tipo", "periodo_anio", "dias")
+            ),
+            [(MovimientoVacaciones.TIPO_RESERVADO, 2026, Decimal("5.00"))],
+        )
+
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
+    def test_solicitud_legacy_se_puede_aprobar_despues_de_activar_fifo(self):
+        with override_settings(VACACIONES_GOCE_FIFO_ACTIVO=False):
+            solicitud = self._crear_solicitud_legacy()
+
+        from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
+
+        aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_APROBADA)
+        self.assertEqual(
+            list(
+                MovimientoVacaciones.objects.filter(solicitud=solicitud)
+                .order_by("id")
+                .values_list("tipo", "periodo_anio", "dias")
+            ),
+            [
+                (MovimientoVacaciones.TIPO_RESERVADO, 2026, Decimal("5.00")),
+                (MovimientoVacaciones.TIPO_LIBERADO, 2026, Decimal("5.00")),
+                (MovimientoVacaciones.TIPO_CONSUMIDO, 2026, Decimal("5.00")),
+            ],
+        )
+
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
+    def test_solicitud_legacy_se_puede_rechazar_despues_de_activar_fifo(self):
+        with override_settings(VACACIONES_GOCE_FIFO_ACTIVO=False):
+            solicitud = self._crear_solicitud_legacy()
+
+        from rrhh.services_vacaciones import rechazar_solicitud_vacaciones
+
+        rechazar_solicitud_vacaciones(solicitud, self.rrhh_user)
+
+        solicitud.refresh_from_db()
+        self.assertEqual(solicitud.estado, SolicitudVacaciones.ESTADO_RECHAZADA)
+        self.assertEqual(
+            list(
+                MovimientoVacaciones.objects.filter(solicitud=solicitud)
+                .order_by("id")
+                .values_list("tipo", "periodo_anio", "dias")
+            ),
+            [
+                (MovimientoVacaciones.TIPO_RESERVADO, 2026, Decimal("5.00")),
+                (MovimientoVacaciones.TIPO_LIBERADO, 2026, Decimal("5.00")),
+            ],
+        )
+
+
+@override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
 class CicloGoceVacacionesConcurrenciaTests(TransactionTestCase):
     def setUp(self):
         self.rrhh_user = User.objects.create_user(username="paula.concurrente")

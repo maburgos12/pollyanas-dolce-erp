@@ -578,6 +578,7 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Ajuste manual")
         self.assertContains(response, "Carolina Cayetano")
 
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
     def test_vacaciones_list_muestra_desglose_fifo_en_saldos_y_solicitudes(self):
         from datetime import date
 
@@ -633,6 +634,7 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "data-async-action")
         self.assertNotContains(response, "salario_diario")
 
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
     def test_vacaciones_list_responde_json_y_conserva_filtro_y_ancla(self):
         from datetime import date
 
@@ -1200,6 +1202,7 @@ class CapitalHumanoAPITests(TestCase):
         local_dt = timezone.localtime(dt)
         self.assertEqual((local_dt.hour, local_dt.minute), (hora, minuto))
 
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
     def test_vacaciones_saldo_agrega_periodos_y_propuesta_fifo_sin_importes(self):
         from datetime import date
 
@@ -1236,7 +1239,31 @@ class CapitalHumanoAPITests(TestCase):
             [(2025, Decimal("7.00")), (2026, Decimal("3.00"))],
         )
         self.assertEqual(response.data["dias_laborables"], Decimal("10"))
+        self.assertTrue(response.data["fifo_activo"])
         self.assertNotIn("importe", str(response.data).lower())
+
+    @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=False)
+    def test_vacaciones_saldo_no_promete_fifo_mientras_esta_inactivo(self):
+        PoliticaVacaciones.objects.create(
+            antiguedad_desde=0,
+            antiguedad_hasta=None,
+            dias_laborables=Decimal("18.00"),
+        )
+
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"),
+            {
+                "empleado": self.empleado.id,
+                "fecha_inicio": "2026-07-20",
+                "fecha_fin": "2026-07-24",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["fifo_activo"])
+        self.assertEqual(response.data["propuesta_fifo"], [])
+        self.assertTrue(response.data["saldo_suficiente"])
+        self.assertEqual(response.data["faltante"], Decimal("0"))
 
     def test_vacaciones_saldo_sin_periodos_conserva_totales_legacy(self):
         PoliticaVacaciones.objects.create(

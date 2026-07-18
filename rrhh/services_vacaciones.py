@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
@@ -149,6 +150,38 @@ def can_resolver_vacaciones_jefe(user, solicitud: SolicitudVacaciones) -> bool:
     return can_gestionar_vacaciones_jefe(user, solicitud.empleado)
 
 
+def goce_vacacional_fifo_activo() -> bool:
+    return bool(getattr(settings, "VACACIONES_GOCE_FIFO_ACTIVO", False))
+
+
+def _solicitud_usa_goce_fifo(solicitud: SolicitudVacaciones) -> bool:
+    return solicitud.aplicaciones_goce.exists()
+
+
+def _solicitud_tiene_reserva_legacy(solicitud: SolicitudVacaciones) -> bool:
+    return solicitud.movimientos.filter(
+        tipo=MovimientoVacaciones.TIPO_RESERVADO
+    ).exists()
+
+
+def _registrar_movimiento_legacy(
+    solicitud: SolicitudVacaciones,
+    *,
+    tipo: str,
+    descripcion: str,
+    actor=None,
+) -> MovimientoVacaciones:
+    return MovimientoVacaciones.objects.create(
+        empleado=solicitud.empleado,
+        solicitud=solicitud,
+        tipo=tipo,
+        dias=solicitud.dias_laborables,
+        periodo_anio=solicitud.fecha_inicio.year,
+        descripcion=descripcion,
+        actor=actor if getattr(actor, "is_authenticated", False) else None,
+    )
+
+
 def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_fin: date, motivo: str, actor=None) -> SolicitudVacaciones:
     if not empleado or not empleado.activo:
         raise ValidationError("Selecciona un empleado activo.")
@@ -183,6 +216,16 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
             raise ValidationError(
                 f"El periodo cruza incapacidad{folio} del {incapacidad.fecha_inicio:%Y-%m-%d} al {incapacidad.fecha_fin:%Y-%m-%d}."
             )
+        if not goce_vacacional_fifo_activo():
+            saldo = saldo_vacaciones_empleado(
+                empleado,
+                periodo_anio=fecha_inicio.year,
+                al=fecha_inicio,
+            )
+            if dias > saldo["disponible"]:
+                raise ValidationError(
+                    f"Saldo insuficiente. Disponible: {saldo['disponible']} días."
+                )
         actor_autenticado = actor if getattr(actor, "is_authenticated", False) else None
         solicitud = SolicitudVacaciones.objects.create(
             empleado=empleado,
@@ -193,14 +236,22 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
             jefe_directo=usuario_jefe_directo_vacaciones(empleado),
             creado_por=actor_autenticado,
         )
-        aplicaciones = reservar_goce_fifo(solicitud, dias, actor=actor_autenticado)
-        for aplicacion in aplicaciones:
-            MovimientoVacaciones.objects.create(
-                empleado=empleado,
-                solicitud=solicitud,
+        if goce_vacacional_fifo_activo():
+            aplicaciones = reservar_goce_fifo(solicitud, dias, actor=actor_autenticado)
+            for aplicacion in aplicaciones:
+                MovimientoVacaciones.objects.create(
+                    empleado=empleado,
+                    solicitud=solicitud,
+                    tipo=MovimientoVacaciones.TIPO_RESERVADO,
+                    dias=aplicacion.dias,
+                    periodo_anio=aplicacion.periodo.aniversario.year,
+                    descripcion=f"Reserva por solicitud {solicitud.folio}",
+                    actor=actor_autenticado,
+                )
+        else:
+            _registrar_movimiento_legacy(
+                solicitud,
                 tipo=MovimientoVacaciones.TIPO_RESERVADO,
-                dias=aplicacion.dias,
-                periodo_anio=aplicacion.periodo.aniversario.year,
                 descripcion=f"Reserva por solicitud {solicitud.folio}",
                 actor=actor_autenticado,
             )
@@ -222,11 +273,18 @@ def preautorizar_solicitud_vacaciones_jefe(
         if aprobar:
             solicitud.estado = SolicitudVacaciones.ESTADO_PREAUTORIZADA
         else:
-            liberar_reservas_goce(
-                solicitud,
-                actor=user,
-                descripcion=f"Liberación por rechazo de jefe {solicitud.folio}",
-            )
+            descripcion = f"Liberación por rechazo de jefe {solicitud.folio}"
+            if _solicitud_usa_goce_fifo(solicitud):
+                liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
+            elif _solicitud_tiene_reserva_legacy(solicitud) or not goce_vacacional_fifo_activo():
+                _registrar_movimiento_legacy(
+                    solicitud,
+                    tipo=MovimientoVacaciones.TIPO_LIBERADO,
+                    descripcion=descripcion,
+                    actor=user,
+                )
+            else:
+                liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
             solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
         solicitud.save(update_fields=["estado", "preautorizado_por", "fecha_preautorizacion", "actualizado_en"])
     return solicitud
@@ -239,7 +297,23 @@ def aprobar_solicitud_vacaciones_rrhh(solicitud: SolicitudVacaciones, user) -> S
             raise PermissionDenied("Solo Capital Humano puede aprobar vacaciones.")
         if solicitud.estado not in {SolicitudVacaciones.ESTADO_SOLICITADA, SolicitudVacaciones.ESTADO_PREAUTORIZADA}:
             raise ValidationError("La solicitud ya fue resuelta.")
-        consumir_reservas_goce(solicitud, actor=user)
+        if _solicitud_usa_goce_fifo(solicitud):
+            consumir_reservas_goce(solicitud, actor=user)
+        elif _solicitud_tiene_reserva_legacy(solicitud) or not goce_vacacional_fifo_activo():
+            _registrar_movimiento_legacy(
+                solicitud,
+                tipo=MovimientoVacaciones.TIPO_LIBERADO,
+                descripcion=f"Cierre de reserva por aprobación {solicitud.folio}",
+                actor=user,
+            )
+            _registrar_movimiento_legacy(
+                solicitud,
+                tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
+                descripcion=f"Consumo por aprobación {solicitud.folio}",
+                actor=user,
+            )
+        else:
+            consumir_reservas_goce(solicitud, actor=user)
         solicitud.estado = SolicitudVacaciones.ESTADO_APROBADA
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()
@@ -254,11 +328,18 @@ def rechazar_solicitud_vacaciones(solicitud: SolicitudVacaciones, user) -> Solic
             raise PermissionDenied("Solo Capital Humano puede rechazar vacaciones.")
         if solicitud.estado in {SolicitudVacaciones.ESTADO_APROBADA, SolicitudVacaciones.ESTADO_RECHAZADA, SolicitudVacaciones.ESTADO_CANCELADA}:
             raise ValidationError("La solicitud ya fue resuelta.")
-        liberar_reservas_goce(
-            solicitud,
-            actor=user,
-            descripcion=f"Liberación por rechazo {solicitud.folio}",
-        )
+        descripcion = f"Liberación por rechazo {solicitud.folio}"
+        if _solicitud_usa_goce_fifo(solicitud):
+            liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
+        elif _solicitud_tiene_reserva_legacy(solicitud) or not goce_vacacional_fifo_activo():
+            _registrar_movimiento_legacy(
+                solicitud,
+                tipo=MovimientoVacaciones.TIPO_LIBERADO,
+                descripcion=descripcion,
+                actor=user,
+            )
+        else:
+            liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
         solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()

@@ -57,6 +57,7 @@ APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
 IS_DEVELOPMENT_ENV = APP_ENV in {"development", "dev", "local", "test"}
 RUNNING_TESTS = "test" in sys.argv or bool(os.getenv("PYTEST_CURRENT_TEST"))
 DEBUG = env_bool("DEBUG", default=IS_DEVELOPMENT_ENV)
+VACACIONES_GOCE_FIFO_ACTIVO = env_bool("VACACIONES_GOCE_FIFO_ACTIVO", default=False)
 
 if APP_ENV in {"production", "staging"} and DEBUG:
     raise ValueError("DEBUG must remain disabled when APP_ENV is production or staging.")
