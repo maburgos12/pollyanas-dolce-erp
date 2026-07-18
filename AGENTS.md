@@ -13,9 +13,26 @@ Sistema de uso interno para el equipo operativo.
 - Rama principal: main · Repo: github.com/maburgos12/pollyanas-dolce-erp (privado)
 
 ## Stack
-- Backend: Django 5.0.1 + DRF 3.14 · DB: PostgreSQL 16 (prod) / SQLite (dev)
+- Backend: Django 5.0.1 + DRF 3.14 · DB: PostgreSQL 16 (producción, desarrollo y pruebas)
 - Deploy: Docker + VPS propio (NO Railway)
 - Servidor: Gunicorn + WhiteNoise · Zona horaria: America/Mazatlan · Moneda: MXN
+
+### Base de datos local obligatoria
+
+- PostgreSQL 16 es la única base operativa soportada para ejecutar Django,
+  migraciones, checks y pruebas.
+- SQLite nunca debe utilizarse como fallback. Los archivos o scripts SQLite
+  existentes son únicamente herramientas históricas de recuperación o análisis;
+  no representan la base de desarrollo del ERP.
+- Antes de ejecutar cualquier comando `manage.py`, verificar una configuración
+  PostgreSQL válida mediante `DATABASE_URL` o `DB_HOST` junto con las variables
+  `DB_*`, y confirmar conectividad con la base.
+- En worktrees paralelos, levantar PostgreSQL/Docker de forma aislada con un
+  `COMPOSE_PROJECT_NAME` único, un `DB_HOST_PORT` propio y volúmenes separados.
+- Si PostgreSQL no está disponible, preparar primero el entorno local aislado.
+  Solo reportar un bloqueo cuando exista una causa concreta que no pueda
+  resolverse localmente, indicando el comando fallido y la variable o servicio
+  faltante; no intentar SQLite.
 
 ## Otros sistemas en el mismo servidor
 | Sistema | Directorio | Puerto | Dominio |
@@ -212,6 +229,14 @@ git worktree add /Users/mauricioburgos/Downloads/codex_worktrees/<tarea> \
   -b codex/<modulo>-<descripcion> origin/main
 cd /Users/mauricioburgos/Downloads/codex_worktrees/<tarea>
 bash scripts/git_workspace_preflight.sh --write
+# Sustituir ambos valores por un nombre y un puerto libre exclusivos del worktree.
+export COMPOSE_PROJECT_NAME=erp_modulo_descripcion
+export DB_HOST_PORT=puerto_libre_asignado
+docker compose up -d db
+export APP_ENV=development
+export ALLOW_INSECURE_LOCAL_SECRET_KEY=1                 # solo desarrollo local temporal
+export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${DB_HOST_PORT}/pastelerias_erp"
+docker compose exec -T db pg_isready -U postgres
 python manage.py migrate                                  # aplicar TODO lo que main ya tiene
 python manage.py migrate --check                           # debe quedar en 0 pendientes
 python manage.py check                                     # debe quedar en 0 errores
