@@ -3184,7 +3184,7 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
             "const puedeConfirmarEntrega = requiereEntrega && rutaEnSeguimiento && !resolved",
             body,
         )
-        self.assertIn("Confirmar entrega</button>", body)
+        self.assertIn("Entrega realizada</button>", body)
 
     def test_pwa_bloquea_tramo_por_recarga_real_y_exenta_cedis_inicial(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
@@ -4840,12 +4840,12 @@ if (operation === "segment") {
         self.assertIn("Confirmada", rendered)
         self.assertIn("1 productos por revisar", rendered)
 
-    def test_pwa_fuera_geocerca_pide_motivo_inline_y_envia_una_sola_vez(self):
+    def test_pwa_fuera_geocerca_no_bloquea_entrega_administrativa(self):
         result = json.loads(self.run_pwa_contract("receipt-off-geofence"))
 
-        self.assertIn("motivo es obligatorio", result["missing"]["message"])
-        self.assertEqual(result["posts"], 1)
-        self.assertIn("GPS sin señal", result["lastPayload"]["notas"])
+        self.assertIn("Entrega registrada", result["missing"]["message"])
+        self.assertEqual(result["posts"], 2)
+        self.assertIn("sin geocerca validada", result["lastPayload"]["notas"])
         self.assertIn("Entrega registrada", result["saved"]["message"])
 
     def test_pwa_tracking_sigue_por_ruta_activa_aunque_cambie_de_pantalla(self):
@@ -5154,8 +5154,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v78-gps-ruta-activa")
-        self.assertIn("?v=route-control-v78-gps-ruta-activa", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v79-entrega-administrativa")
+        self.assertIn("?v=route-control-v79-entrega-administrativa", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
@@ -5186,12 +5186,11 @@ if (operation === "segment") {
         self.assertIn("Guardar sucursal", html)
         self.assertIn("Explica los cambios", html)
 
-    def test_pwa_recepcion_compara_cargado_recibido_en_un_popup(self):
+    def test_pwa_entrega_administrativa_no_captura_recepcion_point(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
 
-        self.assertIn("function abrirRecepcionParada", html)
-        self.assertIn("function renderModalRecepcion", html)
-        self.assertIn("Cargado", html)
-        self.assertIn("Recibido", html)
-        self.assertIn("motivo_diferencia", html)
-        self.assertIn("Confirmar recepción", html)
+        self.assertNotIn("function abrirRecepcionParada", html)
+        self.assertNotIn("function renderModalRecepcion", html)
+        self.assertNotIn("Cantidad recibida", html)
+        self.assertNotIn("Confirmar recepción", html)
+        self.assertIn("Entrega realizada", html)

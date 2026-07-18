@@ -53,7 +53,6 @@ from logistica.services_carga_ruta import (
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     registrar_evento_checklist_confirmado,
-    ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
     ruta_tiene_paradas_entregables_pendientes,
     sincronizar_checklist_carga_desde_point,
@@ -69,7 +68,6 @@ from logistica.services_contexto_operativo import (
     contexto_operativo_dict,
     validar_contexto_operativo,
 )
-from logistica.services_discrepancias import registrar_discrepancias_recepcion
 from logistica.services_rutas_control import (
     LiberacionRutaError,
     liberar_ruta_con_turno,
@@ -1267,8 +1265,6 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta_tiene_diferencias_entrega(ruta):
-                return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
@@ -1320,8 +1316,6 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
                 return Response({"detail": "No se puede finalizar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede finalizar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta_tiene_diferencias_entrega(ruta):
-                return Response({"detail": "No se puede finalizar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
 
             ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
             ruta.hora_cierre_real = ruta.hora_cierre_real or timezone.now()
@@ -1361,6 +1355,11 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA:
+            # "Entregado" en la PWA es un hito administrativo del recorrido.
+            # La recepción por producto pertenece exclusivamente a Point y se
+            # concilia después; ignoramos cantidades de clientes PWA antiguos.
+            evidencias_payload = []
         if payload.get("contexto_token"):
             try:
                 contexto = validar_contexto_operativo(token=payload["contexto_token"], ruta=ruta, actor=request.user)
@@ -1481,12 +1480,6 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             orden__lt=parada.orden,
         ).exists():
             return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
-        if (
-            payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA
-            and not evidencias_payload
-            and not legacy_v59_replay
-        ):
-            return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
         if not payload.get("client_event_id"):
             return Response({"client_event_id": ["client_event_id es obligatorio."]}, status=status.HTTP_400_BAD_REQUEST)
         linea_ids = {item.get("linea_carga_id") for item in evidencias_payload if item.get("linea_carga_id")}
@@ -1542,17 +1535,6 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
         evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
         evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
-        motivos_recepcion = {
-            int(item["linea_carga_id"]): item.get("motivo_diferencia", "")
-            for item in evidencias_servicio
-            if item.get("linea_carga_id")
-        }
-        registrar_discrepancias_recepcion(
-            evidencias=list(evidencias),
-            actor=request.user,
-            motivos=motivos_recepcion,
-        )
-
         log_event(
             request.user,
             "CREATE",
