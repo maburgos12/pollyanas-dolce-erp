@@ -284,6 +284,10 @@ class PresupuestoRealConsolidacionService:
             if "costo_reventa" not in indices:
                 indices["costo_reventa"] = self._build_costo_reventa_index(periodo)
             return self._monto_costo_reventa(regla, indices["costo_reventa"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO:
+            if "merma_producto" not in indices:
+                indices["merma_producto"] = self._build_merma_producto_total(periodo)
+            return self._monto_merma_producto(regla, indices["merma_producto"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -556,6 +560,46 @@ class PresupuestoRealConsolidacionService:
             return (Decimal("0"), False)
         return (consumo_index[int(insumo_id)], True)
 
+
+    @staticmethod
+    def _build_merma_producto_total(periodo: date) -> tuple[Decimal, bool]:
+        """Valor de la merma física del mes: líneas del módulo de mermas
+        valuadas a costo unitario vigente de la receta (capa MP del costeo).
+        Las líneas de texto libre (sin receta ligada) no se pueden valuar y
+        quedan fuera; se prefiere la cantidad confirmada en CEDIS si existe."""
+        from mermas.models import MermaProducto
+
+        total = Decimal("0")
+        hubo_datos = False
+        lineas = (
+            MermaProducto.objects.filter(
+                registro__iniciado_en__year=periodo.year,
+                registro__iniciado_en__month=periodo.month,
+            )
+            .exclude(registro__estatus="CANCELADO")
+            .select_related("receta")
+        )
+        for linea in lineas:
+            hubo_datos = True
+            if not linea.receta_id:
+                continue
+            costo_unitario = linea.receta.costo_por_unidad_rendimiento
+            if not costo_unitario or costo_unitario <= 0:
+                continue
+            cantidad = (
+                linea.cantidad_recibida
+                if linea.cantidad_recibida is not None
+                else linea.cantidad_enviada
+            )
+            total += Decimal(str(cantidad)) * costo_unitario
+        return (total.quantize(Decimal("0.01")), hubo_datos)
+
+    def _monto_merma_producto(
+        self, regla: ReglaFuenteRubro, merma_total: tuple[Decimal, bool], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        return merma_total
 
     @staticmethod
     def _build_mant_unidad_index(periodo: date) -> dict[str, Decimal]:
