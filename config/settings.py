@@ -341,6 +341,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "rrhh.tasks.alertar_cuotas_quincena",
         "schedule": crontab(day_of_month="14,29", hour=8, minute=0),
     },
+    "rrhh-consumir-goce-vacaciones-completado": {
+        "task": "rrhh.tasks.consumir_goce_vacaciones_completado",
+        "schedule": crontab(hour=0, minute=10),
+        "options": {"timezone": TIME_ZONE},
+    },
     "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,

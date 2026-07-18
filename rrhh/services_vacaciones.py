@@ -10,13 +10,22 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from core.access import can_manage_rrhh
+from core.models import AuditLog
 
-from .models import Empleado, IncapacidadEmpleado, MovimientoVacaciones, PoliticaVacaciones, SolicitudVacaciones
+from .models import (
+    AplicacionGoceVacaciones,
+    Empleado,
+    IncapacidadEmpleado,
+    MovimientoVacaciones,
+    PoliticaVacaciones,
+    SolicitudVacaciones,
+)
 from .services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
 from .services_vacaciones_saldos import (
     consumir_reservas_goce,
     liberar_reservas_goce,
     reservar_goce_fifo,
+    validar_reservas_goce,
 )
 
 
@@ -298,7 +307,10 @@ def aprobar_solicitud_vacaciones_rrhh(solicitud: SolicitudVacaciones, user) -> S
         if solicitud.estado not in {SolicitudVacaciones.ESTADO_SOLICITADA, SolicitudVacaciones.ESTADO_PREAUTORIZADA}:
             raise ValidationError("La solicitud ya fue resuelta.")
         if _solicitud_usa_goce_fifo(solicitud):
-            consumir_reservas_goce(solicitud, actor=user)
+            if solicitud.fecha_fin < timezone.localdate():
+                consumir_reservas_goce(solicitud, actor=user)
+            else:
+                validar_reservas_goce(solicitud)
         elif _solicitud_tiene_reserva_legacy(solicitud) or not goce_vacacional_fifo_activo():
             _registrar_movimiento_legacy(
                 solicitud,
@@ -319,6 +331,115 @@ def aprobar_solicitud_vacaciones_rrhh(solicitud: SolicitudVacaciones, user) -> S
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
     return solicitud
+
+
+def consumir_solicitudes_vacaciones_completadas(*, fecha_corte: date | None = None) -> int:
+    """Consume reservas aprobadas únicamente después de terminar el goce programado."""
+    fecha_corte = fecha_corte or timezone.localdate()
+    solicitud_ids = list(
+        SolicitudVacaciones.objects.filter(
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+            fecha_fin__lt=fecha_corte,
+            aplicaciones_goce__estado=AplicacionGoceVacaciones.ESTADO_RESERVADA,
+        )
+        .values_list("id", flat=True)
+        .distinct()
+    )
+    consumidas = 0
+    for solicitud_id in solicitud_ids:
+        with transaction.atomic():
+            solicitud = SolicitudVacaciones.objects.select_for_update().get(pk=solicitud_id)
+            if (
+                solicitud.estado != SolicitudVacaciones.ESTADO_APROBADA
+                or solicitud.fecha_fin >= fecha_corte
+                or not solicitud.aplicaciones_goce.filter(
+                    estado=AplicacionGoceVacaciones.ESTADO_RESERVADA
+                ).exists()
+            ):
+                continue
+            consumir_reservas_goce(solicitud, actor=None)
+            consumidas += 1
+    return consumidas
+
+
+def reclasificar_solicitudes_futuras_consumidas(
+    *,
+    fecha_corte: date | None = None,
+    aplicar: bool = False,
+) -> dict[str, int]:
+    """Devuelve a reserva el goce futuro consumido por el comportamiento anterior."""
+    fecha_corte = fecha_corte or timezone.localdate()
+    solicitud_ids = list(
+        SolicitudVacaciones.objects.filter(
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+            fecha_fin__gte=fecha_corte,
+            aplicaciones_goce__estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        )
+        .values_list("id", flat=True)
+        .distinct()
+    )
+    if not aplicar:
+        aplicaciones = AplicacionGoceVacaciones.objects.filter(
+            solicitud_id__in=solicitud_ids,
+            estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        ).count()
+        return {"solicitudes": len(solicitud_ids), "aplicaciones": aplicaciones}
+
+    solicitudes_actualizadas = 0
+    aplicaciones_actualizadas = 0
+    for solicitud_id in solicitud_ids:
+        with transaction.atomic():
+            solicitud = SolicitudVacaciones.objects.select_for_update().get(pk=solicitud_id)
+            if (
+                solicitud.estado != SolicitudVacaciones.ESTADO_APROBADA
+                or solicitud.fecha_fin < fecha_corte
+            ):
+                continue
+            aplicaciones = list(
+                solicitud.aplicaciones_goce.select_for_update()
+                .select_related("periodo")
+                .filter(estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA)
+            )
+            if not aplicaciones:
+                continue
+            for aplicacion in aplicaciones:
+                aplicacion.estado = AplicacionGoceVacaciones.ESTADO_RESERVADA
+                aplicacion.save(update_fields=["estado"])
+                MovimientoVacaciones.objects.create(
+                    empleado_id=solicitud.empleado_id,
+                    solicitud=solicitud,
+                    tipo=MovimientoVacaciones.TIPO_AJUSTE,
+                    dias=Decimal("0"),
+                    periodo_anio=aplicacion.periodo.aniversario.year,
+                    descripcion=(
+                        "[regularización-goce-futuro] "
+                        f"{aplicacion.dias} días pasan de consumidos a reservados "
+                        f"hasta {solicitud.fecha_fin.isoformat()}."
+                    ),
+                )
+            AuditLog.objects.create(
+                action="REGULARIZE",
+                model="rrhh.SolicitudVacaciones",
+                object_id=str(solicitud.pk),
+                payload={
+                    "folio": solicitud.folio,
+                    "motivo": "goce_futuro_consumido_a_reservado",
+                    "fecha_corte": fecha_corte.isoformat(),
+                    "aplicaciones": [
+                        {
+                            "periodo": aplicacion.periodo.aniversario.year,
+                            "dias": str(aplicacion.dias),
+                        }
+                        for aplicacion in aplicaciones
+                    ],
+                },
+            )
+            solicitudes_actualizadas += 1
+            aplicaciones_actualizadas += len(aplicaciones)
+    return {
+        "solicitudes": solicitudes_actualizadas,
+        "aplicaciones": aplicaciones_actualizadas,
+    }
 
 
 def rechazar_solicitud_vacaciones(solicitud: SolicitudVacaciones, user) -> SolicitudVacaciones:

@@ -239,15 +239,7 @@ def consumir_reservas_goce(
     *,
     actor,
 ) -> list[AplicacionGoceVacaciones]:
-    aplicaciones = aplicaciones_reservadas_bloqueadas(solicitud)
-    if not aplicaciones:
-        raise ValidationError("La solicitud no tiene reservas de goce vigentes.")
-
-    total_reservado = sum((aplicacion.dias for aplicacion in aplicaciones), Decimal("0"))
-    if total_reservado != solicitud.dias_laborables:
-        raise ValidationError(
-            "La suma de reservas de goce no coincide con los días de la solicitud."
-        )
+    aplicaciones = validar_reservas_goce(solicitud)
 
     for aplicacion in aplicaciones:
         aplicacion.estado = AplicacionGoceVacaciones.ESTADO_CONSUMIDA
@@ -256,12 +248,27 @@ def consumir_reservas_goce(
             aplicacion,
             tipo=MovimientoVacaciones.TIPO_LIBERADO,
             actor=actor,
-            descripcion=f"Cierre de reserva por aprobación {solicitud.folio}",
+            descripcion=f"Cierre de reserva por goce completado {solicitud.folio}",
         )
         _crear_movimiento_aplicacion(
             aplicacion,
             tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
             actor=actor,
-            descripcion=f"Consumo por aprobación {solicitud.folio}",
+            descripcion=f"Consumo por goce completado {solicitud.folio}",
+        )
+    return aplicaciones
+
+
+def validar_reservas_goce(
+    solicitud: SolicitudVacaciones,
+) -> list[AplicacionGoceVacaciones]:
+    aplicaciones = aplicaciones_reservadas_bloqueadas(solicitud)
+    if not aplicaciones:
+        raise ValidationError("La solicitud no tiene reservas de goce vigentes.")
+
+    total_reservado = sum((aplicacion.dias for aplicacion in aplicaciones), Decimal("0"))
+    if total_reservado != solicitud.dias_laborables:
+        raise ValidationError(
+            "La suma de reservas de goce no coincide con los días de la solicitud."
         )
     return aplicaciones

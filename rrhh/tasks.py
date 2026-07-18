@@ -16,6 +16,20 @@ def sync_asistencia_point():
 
 
 @shared_task
+def consumir_goce_vacaciones_completado():
+    """Convierte reservas aprobadas en goce consumido al día siguiente de su fin."""
+    from .services_vacaciones import consumir_solicitudes_vacaciones_completadas
+
+    fecha_corte = timezone.localdate()
+    consumidas = consumir_solicitudes_vacaciones_completadas(fecha_corte=fecha_corte)
+    return {
+        "ok": True,
+        "consumidas": consumidas,
+        "fecha_corte": fecha_corte.isoformat(),
+    }
+
+
+@shared_task
 def sync_asistencia_hikvision_isapi(dias: int = 1):
     """
     Sincroniza asistencia desde el checador por ISAPI/IP.
