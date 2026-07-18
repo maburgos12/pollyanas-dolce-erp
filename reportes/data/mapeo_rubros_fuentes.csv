@@ -128,3 +128,9 @@ capex,Horno zucchelli,MANUAL,,,Inversión capturada a mano,1
 capex,Hornos,MANUAL,,,Inversión capturada a mano,1
 capex,Mesa de trabajo,MANUAL,,,Inversión capturada a mano,1
 capex,Refrigerador,MANUAL,,,Inversión capturada a mano,1
+produccion,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""CEDIS""}",Luz de CEDIS capturada desglosada,1
+produccion,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""PRODUCCION""}",Luz de planta de producción capturada desglosada,1
+produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CEDIS""}",Agua potable de CEDIS,1
+produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""PRODUCCION""}",Agua potable de planta de producción,1
+produccion,Gas,GASTO_OPERATIVO,GAS,"{""centro_tipo"": ""CEDIS""}",Gas de CEDIS,1
+produccion,Gas,GASTO_OPERATIVO,GAS,"{""centro_tipo"": ""PRODUCCION""}",Gas de planta de producción,1
