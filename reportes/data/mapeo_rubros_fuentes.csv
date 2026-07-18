@@ -99,3 +99,18 @@ administracion,Servicios públicos,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""
 administracion,Servicios públicos,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Agua de oficinas corporativas capturada desglosada,1
 administracion,Servicios públicos,GASTO_OPERATIVO,TELEFONO_SUC,"{""centro_tipo"": ""CORPORATIVO""}",Teléfono/internet de oficinas corporativas capturado desglosado,1
 resultados,Merma,MERMA_PRODUCTO,,"{""desde"": ""2026-06""}",Merma física valuada a costo de receta (módulo mermas vivo desde jun-2026; antes conserva legado Excel),1
+produccion,Rp25,CONSUMO_MP,,"{""insumo_id"": 189, ""desde"": ""2026-06""}",Consumo MP: Rebanada Pay RP25,1
+produccion,Rp25,CONSUMO_MP,,"{""insumo_id"": 423, ""desde"": ""2026-06""}",Consumo MP: Rebanada Triangular RP25,1
+produccion,Aluminio al-28,CONSUMO_MP,,"{""insumo_id"": 92, ""desde"": ""2026-06""}",Consumo MP: MOLDE ALUMINIO G AL-28,1
+produccion,Aluminio al-22,CONSUMO_MP,,"{""insumo_id"": 95, ""desde"": ""2026-06""}",Consumo MP: MOLDE ALUMINIO CH AL-22,1
+produccion,1414,CONSUMO_MP,,"{""insumo_id"": 190, ""desde"": ""2026-06""}",Consumo MP: Rebanada Cuadrada 1414,1
+produccion,Plato 14,CONSUMO_MP,,"{""insumo_id"": 86, ""desde"": ""2026-06""}",Consumo MP: Charola 14 Pastel Grande (mismo artículo con otro nombre),1
+produccion,Chocolate blanco turin,CONSUMO_MP,,"{""insumo_id"": 179, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE BLANCO,1
+produccion,Crunch rocks,CONSUMO_MP,,"{""insumo_id"": 168, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE CRUNCH ROCKS,1
+produccion,Galleta lotus,CONSUMO_MP,,"{""insumo_id"": 134, ""desde"": ""2026-06""}",Consumo MP: GALLETA LOTUS BISCOFF (la molida ya es de otro renglón),1
+produccion,Caja grande,CONSUMO_MP,,"{""insumo_id"": 75, ""desde"": ""2026-06""}",Consumo MP: CAJA G,1
+produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 104, ""desde"": ""2026-06""}",Consumo MP: CUCHARA G,1
+produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 421, ""desde"": ""2026-06""}",Consumo MP: CUCHARA CH,1
+produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 163, ""desde"": ""2026-06""}",Consumo MP: EtiquetaChica,1
+produccion,Avena,CONSUMO_MP,,"{""insumo_id"": 130, ""desde"": ""2026-06""}",Consumo MP: AVENA INTEGRAL,1
+produccion,Levadura,CONSUMO_MP,,"{""insumo_id"": 236, ""desde"": ""2026-06""}",Consumo MP: LEVADURA INSTANTANEA,1
