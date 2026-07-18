@@ -17,7 +17,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError, OperationalError, close_old_connections, connection, transaction
-from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings, tag
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -2919,6 +2919,7 @@ class LogisticaViewsTests(TestCase):
         self.assertNotContains(resp_post, "Cadena documental ERP")
         self.assertNotContains(resp_post, "Mesa de gobierno ERP")
 
+    @tag("performance")
     def test_rutas_view_no_crece_queries_por_fila(self):
         sucursal = Sucursal.objects.create(nombre="Sucursal Performance", codigo="PERF")
 
@@ -2973,7 +2974,13 @@ class LogisticaViewsTests(TestCase):
             2,
             "El listado no debe agregar consultas por cada repartidor, acompañante o unidad visible.",
         )
+        self.assertLessEqual(
+            len(consultas_cinco_rutas),
+            46,
+            "El listado debe respetar el presupuesto absoluto de consultas.",
+        )
 
+    @tag("performance")
     def test_rutas_view_no_multiplica_paradas_por_lineas_point(self):
         RutaEntrega.objects.create(
             nombre="Ruta agregados independientes",

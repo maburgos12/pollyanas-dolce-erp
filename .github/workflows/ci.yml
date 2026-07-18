@@ -64,6 +64,13 @@ jobs:
             pos_bridge.tests.test_movement_sync_service.PointMovementSyncServiceTests \
             pos_bridge.tests.test_sales_sync_tasks.PointSalesSyncTaskRoutingTests.test_run_monthly_product_closure_targets_previous_month_by_default
 
+      - name: Enforce critical page query budgets
+        run: >-
+          python manage.py test
+          logistica.tests.LogisticaViewsTests
+          --tag=performance
+          --verbosity=2
+
       - name: Run legacy full test suite
         continue-on-error: true
         run: python manage.py test
