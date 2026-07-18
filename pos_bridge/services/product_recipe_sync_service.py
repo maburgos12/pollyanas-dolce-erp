@@ -1272,6 +1272,19 @@ class PointProductRecipeSyncService:
                     if named_internal is not None and named_internal.id != internal.id:
                         stale_internal = internal
                         internal = named_internal
+                # El insumo viejo suelta el código PRIMERO: guardarlo al
+                # nuevo con el viejo aún activo viola el constraint único
+                # (crash real: lote de panes con 01VARCMINI).
+                if stale_internal is not None:
+                    stale_updates: list[str] = []
+                    if stale_internal.codigo_point:
+                        stale_internal.codigo_point = ""
+                        stale_updates.append("codigo_point")
+                    if stale_internal.nombre_point:
+                        stale_internal.nombre_point = ""
+                        stale_updates.append("nombre_point")
+                    if stale_updates:
+                        stale_internal.save(update_fields=stale_updates)
                 updates: list[str] = []
                 if point_code and internal.codigo_point != point_code:
                     internal.codigo_point = point_code[:80]
@@ -1287,16 +1300,6 @@ class PointProductRecipeSyncService:
                     updates.append("unidad_base")
                 if updates:
                     internal.save(update_fields=updates)
-                if stale_internal is not None:
-                    stale_updates: list[str] = []
-                    if stale_internal.codigo_point:
-                        stale_internal.codigo_point = ""
-                        stale_updates.append("codigo_point")
-                    if stale_internal.nombre_point:
-                        stale_internal.nombre_point = ""
-                        stale_updates.append("nombre_point")
-                    if stale_updates:
-                        stale_internal.save(update_fields=stale_updates)
                 return internal, False
 
         if normalized_name:
