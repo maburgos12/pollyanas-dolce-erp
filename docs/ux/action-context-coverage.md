@@ -9,7 +9,8 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Logística / PWA / Carga por sucursal | Guardar todas las cantidades y justificar diferencias | Sí, guardado atómico con botón bloqueado | Borrador conservado y reintento en la misma sucursal | `tests_carga_sucursal` + `RutaJourneyInvariantTests` | Cubierto |
 | Logística / PWA / Tutorial de carga | Confirmar una sola vez la explicación del flujo | Sí, botón bloqueado e idempotencia por repartidor | Si falla, conserva el popup y permite reintentar | `tests_tutorial_carga` | Cubierto |
 | Logística / Revisiones | Validar diferencia, marcar incorrecta o pedir aclaración | Sí, elimina la fila y muestra toast | Redirect a bandeja | `tests_discrepancias` | Cubierto; navegador pendiente |
-| RRHH | Aprobar, autorizar, rechazar, cancelar, guardar | No inventariado por pantalla | No | No | Pendiente etapa 2 |
+| RRHH / Vacaciones | Crear, conciliar, preautorizar, aprobar y rechazar | Sí, toast y redirect seguro | Sí, `#vac-solicitud-<id>` y `#saldo-empleado-<id>` | `CapitalHumanoServiceTests` | Cubierto |
+| RRHH / Resto de pantallas | Aprobar, autorizar, rechazar, cancelar, guardar | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Seguimiento | Resolver, aprobar, entregar a revisión | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Compras / Recepciones | Cerrar y aplicar inventario desde recepción pendiente o con diferencias | Sí, toast y redirect seguro | Sí, `#recepcion-<id>` | `ComprasOrdenesRecepcionesFiltersTests` + `ERPActionContractTests` | Parcial: solo cierre/aplicación |
 | Compras | Solicitudes, órdenes y demás acciones de recepciones | No inventariado por pantalla | No | No | Pendiente etapa 2 |

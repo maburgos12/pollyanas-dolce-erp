@@ -42,6 +42,21 @@
   }
   .vac-employee-card strong { color: var(--texto); font-size: 14px; }
   .vac-employee-card span { font-size: 12px; }
+  .vac-fifo-preview {
+    background: #fbf6f8;
+    border: 1px solid var(--rosa);
+    border-left: 4px solid var(--dorado);
+    border-radius: 8px;
+    color: var(--texto-light);
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+  .vac-fifo-preview[hidden] { display: none; }
+  .vac-fifo-preview > strong { color: var(--vino); }
+  .vac-fifo-preview-content { display: grid; font-size: 13px; gap: 5px; }
+  .vac-fifo-preview-content ul { margin: 0 0 0 18px; padding: 0; }
+  .vac-fifo-preview.is-warning { border-left-color: var(--rojo); }
   .vac-review-tools {
     display: grid;
     gap: 8px;
@@ -72,6 +87,19 @@
     text-transform: uppercase;
   }
   .vac-history-metrics strong { color: var(--vino); font-size: 14px; }
+  .vac-period-breakdown { display: grid; gap: 6px; }
+  .vac-period-breakdown > strong, .vac-request-breakdown > strong { color: var(--vino); font-size: 12px; text-transform: uppercase; }
+  .vac-period-list { display: grid; gap: 5px; }
+  .vac-period-line {
+    background: #fff;
+    border-left: 3px solid var(--dorado);
+    color: var(--texto-light);
+    display: grid;
+    font-size: 12px;
+    gap: 2px;
+    padding: 6px 8px;
+  }
+  .vac-period-line strong { color: var(--texto); }
   .vac-movement-list { display: grid; gap: 5px; }
   .vac-movement-line {
     background: #fbf6f8;
@@ -136,6 +164,8 @@
   .vac-row-item strong { color: var(--texto); display: block; font-size: 15px; }
   .vac-row-item span, .vac-row-item div, .vac-row-item p { color: var(--texto-light); font-size: 13px; }
   .vac-row-item p { margin: 8px 0 0; }
+  .vac-request-breakdown { display: grid; gap: 3px; margin-top: 7px; }
+  .vac-request-breakdown span { display: block; }
   .vac-row-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .vac-badges { display: flex; flex-wrap: wrap; gap: 6px; }
   .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }

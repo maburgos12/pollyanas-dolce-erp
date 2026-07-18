@@ -8,11 +8,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from rrhh.models import (
+    AplicacionGoceVacaciones,
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
     IncidenciaAsistencia,
     PermisoSalida,
+    PeriodoVacacional,
     SolicitudVacaciones,
     Turno,
 )
@@ -237,6 +239,40 @@ class ReglasAsistenciaRRHHTests(TestCase):
             dias_laborables=Decimal("1"),
             motivo="Vacaciones aprobadas",
             estado=SolicitudVacaciones.ESTADO_APROBADA,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+        self.assertEqual(falta.solicitud_vacaciones, solicitud)
+
+    def test_vacacion_2026_aplicada_a_2025_justifica_fecha_2026(self):
+        fecha = date(2026, 7, 20)
+        periodo_2025 = PeriodoVacacional.objects.create(
+            empleado=self.empleado,
+            aniversario=date(2025, 1, 1),
+            fecha_limite=date(2025, 7, 1),
+            antiguedad_anios=1,
+            dias_generados=Decimal("7.00"),
+        )
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=fecha,
+            fecha_fin=fecha,
+            dias_laborables=Decimal("1.00"),
+            motivo="Goce 2026 contra saldo 2025",
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud,
+            periodo=periodo_2025,
+            dias=Decimal("1.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
         )
 
         evaluar_dia_empleado(self.empleado, fecha)

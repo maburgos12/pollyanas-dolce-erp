@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Vacaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260623-status-rows-v3">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-vacaciones-list.css?v=20260718-vacaciones-fifo-v5">
 {% endblock %}
 
 {% block content %}
@@ -38,8 +38,9 @@
     <ul>
       <li>Las vacaciones se pagan con salario íntegro conforme al artículo 76 de la LFT.</li>
       <li>Solo cuentan días laborables; se excluye descanso semanal y días oficiales.</li>
-      <li>No se acumulan periodos: deben disfrutarse antes del siguiente aniversario.</li>
-      <li>El flujo reserva saldo al solicitar y consume saldo hasta que RRHH aprueba.</li>
+      <li>El pago en nómina y el goce físico se controlan por separado.</li>
+      <li>El goce se aplica primero a los periodos pendientes más antiguos.</li>
+      <li>El flujo reserva saldo al solicitar y registra el goce cuando RRHH aprueba.</li>
     </ul>
   </details>
 
@@ -48,7 +49,13 @@
       <div class="vac-entry-grid">
         <div>
           <h2>Nueva solicitud</h2>
-          <form class="vac-form" method="post">
+          <form
+            id="vac-nueva-solicitud"
+            class="vac-form"
+            method="post"
+            data-async-action
+            data-saldo-url="{% url 'rrhh:vacaciones-saldo' %}"
+          >
             {% csrf_token %}
             <input type="hidden" name="action" value="crear">
             <div class="vac-field">
@@ -85,7 +92,11 @@
               <label for="motivo">Motivo / notas</label>
               <textarea id="motivo" name="motivo" placeholder="Cobertura, comentarios de RRHH o contexto operativo"></textarea>
             </div>
-            <button class="btn btn-primary" type="submit">Reservar y solicitar</button>
+            <div class="vac-fifo-preview" id="vacFifoPreview" aria-live="polite" hidden>
+              <strong>Cómo se aplicarán los días</strong>
+              <div class="vac-fifo-preview-content"></div>
+            </div>
+            <button class="btn btn-primary" type="submit" data-pending-label="Reservando…">Reservar y solicitar</button>
           </form>
         </div>
 
@@ -119,7 +130,7 @@
           </form>
           <div class="vac-history-list">
             {% for row in empleados_historial %}
-              <article class="vac-history-row">
+              <article class="vac-history-row" id="saldo-empleado-{{ row.empleado.id }}">
                 <div class="vac-history-top">
                   <div>
                     <div class="vac-saldo-main">{{ row.empleado.nombre }}</div>
@@ -142,6 +153,19 @@
                   Último aniversario: {{ row.ultimo_aniversario|date:"Y-m-d"|default:"Sin fecha" }} ·
                   Fecha límite legal: {{ row.fecha_limite|date:"Y-m-d"|default:"Sin fecha" }}
                 </div>
+                {% if row.periodos %}
+                  <div class="vac-period-breakdown">
+                    <strong>Desglose por periodo</strong>
+                    <div class="vac-period-list">
+                      {% for periodo in row.periodos %}
+                        <div class="vac-period-line">
+                          <span><strong>{{ periodo.anio }}</strong> · límite {{ periodo.fecha_limite|date:"Y-m-d" }}</span>
+                          <span>Generado {{ periodo.generado }} · reservado {{ periodo.reservado }} · gozado {{ periodo.gozado }} · disponible {{ periodo.disponible_goce }}</span>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endif %}
                 <div class="vac-movement-list">
                   {% for movimiento in row.movimientos %}
                     <div class="vac-movement-line">
@@ -156,7 +180,7 @@
                 {% if can_manage_rrhh %}
                   <details class="vac-adjust">
                     <summary>Conciliar / ajustar</summary>
-                    <form class="vac-adjust-form" method="post">
+                    <form class="vac-adjust-form" method="post" data-async-action>
                       {% csrf_token %}
                       <input type="hidden" name="action" value="ajustar_saldo">
                       <input type="hidden" name="empleado_id" value="{{ row.empleado.id }}">
@@ -172,7 +196,7 @@
                         Nota RRHH
                         <input type="text" name="descripcion" maxlength="180" placeholder="Ej. pago timbrado, corrección o conciliación sin cambio" required>
                       </label>
-                      <button class="btn btn-primary" type="submit">Guardar ajuste</button>
+                      <button class="btn btn-primary" type="submit" data-pending-label="Guardando…">Guardar ajuste</button>
                     </form>
                     <div class="vac-meta">Positivo suma, negativo resta, 0 solo deja evidencia de conciliación.</div>
                   </details>
@@ -200,7 +224,7 @@
       {% for key, label, items in columnas %}
         <div id="estado-{{ key }}" class="vac-state-group">
         {% for solicitud in items %}
-          <article class="vac-row-item">
+          <article class="vac-row-item" id="vac-solicitud-{{ solicitud.id }}">
             <div>
               <strong>{{ solicitud.empleado.nombre }}</strong>
               <span>{{ solicitud.folio }}</span>
@@ -210,24 +234,32 @@
             <div>
               {% if solicitud.jefe_directo %}Jefe: {{ solicitud.jefe_directo.get_full_name|default:solicitud.jefe_directo.username }}{% endif %}
               {% if solicitud.aprobado_rrhh_por %}{% if solicitud.jefe_directo %}<br>{% endif %}RRHH: {{ solicitud.aprobado_rrhh_por }}{% endif %}
+              {% if solicitud.distribucion_goce %}
+                <div class="vac-request-breakdown">
+                  <strong>Aplicación FIFO</strong>
+                  {% for aplicacion in solicitud.distribucion_goce %}
+                    <span>{{ aplicacion.periodo.aniversario.year }} · {{ aplicacion.dias }} días · {{ aplicacion.get_estado_display }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
             </div>
             <div class="vac-row-badges">
               <span class="vac-badge">{{ solicitud.dias_laborables }} días</span>
               <span class="vac-badge gold">{{ solicitud.get_estado_display }}</span>
             </div>
             {% if solicitud.puede_preautorizar_jefe %}
-              <form class="vac-card-actions" method="post">
+              <form class="vac-card-actions" method="post" data-async-action>
                 {% csrf_token %}
                 <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
-                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Preautorizar</button>
-                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
+                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe" data-pending-label="Preautorizando…">Preautorizar</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe" data-pending-label="Rechazando…">Rechazar</button>
               </form>
             {% elif can_manage_rrhh and solicitud.estado == "solicitada" or can_manage_rrhh and solicitud.estado == "preautorizada" %}
-              <form class="vac-card-actions" method="post">
+              <form class="vac-card-actions" method="post" data-async-action>
                 {% csrf_token %}
                 <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
-                <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh">Aprobar RRHH</button>
-                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh">Rechazar</button>
+                <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh" data-pending-label="Aprobando…">Aprobar RRHH</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh" data-pending-label="Rechazando…">Rechazar</button>
               </form>
             {% endif %}
           </article>
@@ -246,9 +278,15 @@
 {% block extra_js %}
 <script>
   (function () {
+    const form = document.getElementById("vac-nueva-solicitud");
     const empleadoSelect = document.getElementById("empleado_id");
     const empleadoInfo = document.getElementById("vacEmpleadoInfo");
-    if (!empleadoSelect || !empleadoInfo) return;
+    const fechaInicio = document.getElementById("fecha_inicio");
+    const fechaFin = document.getElementById("fecha_fin");
+    const preview = document.getElementById("vacFifoPreview");
+    const previewContent = preview ? preview.querySelector(".vac-fifo-preview-content") : null;
+    let previewController = null;
+    if (!form || !empleadoSelect || !empleadoInfo) return;
 
     function renderEmpleadoInfo() {
       const option = empleadoSelect.options[empleadoSelect.selectedIndex];
@@ -271,8 +309,86 @@
       empleadoInfo.replaceChildren(title, detail);
     }
 
-    empleadoSelect.addEventListener("change", renderEmpleadoInfo);
+    function hidePreview() {
+      if (!preview || !previewContent) return;
+      preview.hidden = true;
+      preview.classList.remove("is-warning");
+      previewContent.replaceChildren();
+    }
+
+    async function actualizarPropuesta() {
+      if (!preview || !previewContent || !fechaInicio || !fechaFin) return;
+      if (!empleadoSelect.value || !fechaInicio.value || !fechaFin.value) {
+        hidePreview();
+        return;
+      }
+      if (previewController) previewController.abort();
+      previewController = new AbortController();
+      preview.hidden = false;
+      preview.classList.remove("is-warning");
+      const loading = document.createElement("span");
+      loading.textContent = "Calculando días laborables y periodos…";
+      previewContent.replaceChildren(loading);
+
+      const url = new URL(form.dataset.saldoUrl, window.location.origin);
+      url.searchParams.set("empleado", empleadoSelect.value);
+      url.searchParams.set("fecha_inicio", fechaInicio.value);
+      url.searchParams.set("fecha_fin", fechaFin.value);
+      try {
+        const response = await fetch(url, {
+          headers: { "Accept": "application/json" },
+          credentials: "same-origin",
+          signal: previewController.signal
+        });
+        const payload = await response.json();
+        if (!response.ok) throw payload;
+
+        const summary = document.createElement("span");
+        summary.textContent = payload.dias_laborables + " días laborables";
+        const list = document.createElement("ul");
+        (payload.propuesta_fifo || []).forEach(function (fila) {
+          const item = document.createElement("li");
+          item.textContent = fila.anio + " · " + fila.dias + " días";
+          list.appendChild(item);
+        });
+        if (!payload.fifo_activo) {
+          const rollout = document.createElement("span");
+          rollout.textContent = "Se validará con el saldo anual actual mientras se prepara el control por periodos.";
+          if (!payload.saldo_suficiente) {
+            preview.classList.add("is-warning");
+            const warning = document.createElement("span");
+            warning.textContent = "Saldo insuficiente: faltan " + payload.faltante + " días.";
+            previewContent.replaceChildren(summary, rollout, warning);
+          } else {
+            previewContent.replaceChildren(summary, rollout);
+          }
+          return;
+        }
+        if (!payload.saldo_suficiente) {
+          preview.classList.add("is-warning");
+          const warning = document.createElement("span");
+          warning.textContent = "Saldo insuficiente: faltan " + payload.faltante + " días.";
+          previewContent.replaceChildren(summary, list, warning);
+        } else {
+          previewContent.replaceChildren(summary, list);
+        }
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        preview.classList.add("is-warning");
+        const message = document.createElement("span");
+        message.textContent = "No se pudo calcular el desglose. Revisa las fechas e inténtalo de nuevo.";
+        previewContent.replaceChildren(message);
+      }
+    }
+
+    empleadoSelect.addEventListener("change", function () {
+      renderEmpleadoInfo();
+      actualizarPropuesta();
+    });
+    if (fechaInicio) fechaInicio.addEventListener("change", actualizarPropuesta);
+    if (fechaFin) fechaFin.addEventListener("change", actualizarPropuesta);
     renderEmpleadoInfo();
+    actualizarPropuesta();
   })();
 </script>
 {% endblock %}
