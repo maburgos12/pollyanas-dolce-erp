@@ -76,7 +76,7 @@ nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""monto_asistencia""
 nomina,BONOS POR RESULTADOS,BONO_VENTAS,,"{""campo_monto"": ""monto_puntualidad""}",Resta: puntualidad va en su rubro,-1
 produccion,Bono por resultados,BONO_PRODUCCION,,"{""campo_monto"": ""total_a_pagar""}",Bonos del módulo de producción,
 gastos-venta,Bono por resultados,BONO_VENTAS,,"{""campo_monto"": ""total_a_pagar""}",Bonos de ventas de la sucursal del rubro,
-resultados,Venta postres,VENTA_POS,,"{""total_empresa"": true, ""campo_monto"": ""total_venta""}",P&L: ingresos = venta total Point (fuente viva; sustituye al Excel),1
+resultados,Venta postres,VENTA_POS,,"{""total_empresa"": true, ""excluir_clasificados"": true, ""campo_monto"": ""total_venta""}",P&L: venta Point SIN complementos (reventa/accesorios/toppings van aparte),1
 resultados,Costos insumos/productos,CONSUMO_MP,,"{""total_empresa"": true, ""desde"": ""2026-06""}",P&L: costos = consumo MP total (confiable desde jun-2026; antes rige el Excel),1
 logistica,Chevrolet Cheyenne,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-CH1""}",Flotilla: reportes de unidad con costo de servicio,1
 logistica,Peugeot Partner,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-P1""}",Flotilla: reportes de unidad con costo de servicio,1
@@ -86,3 +86,4 @@ logistica,Diesel,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-DC1"", ""GS-PM1""], "
 logistica,Gasolina,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-CH1"", ""GS-P1""], ""desde"": ""2026-07""}",Bitácora de cargas: Cheyenne y Partner (gasolina); antes de jul rige el Excel,1
 produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones_produccion"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de activos en producción/CEDIS/hornos,1
 gastos-venta,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""por_sucursal"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de los activos de cada sucursal,1
+resultados,Venta complementos,VENTA_POS,,"{""clasificacion_catalogo"": [""REVENTA"", ""SERVICIO_ACCESORIO"", ""TOPPING""], ""campo_monto"": ""total_venta""}",P&L: complementos = productos clasificados en el catálogo curado,1

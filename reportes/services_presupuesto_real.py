@@ -405,13 +405,30 @@ class PresupuestoRealConsolidacionService:
         campo = filtros.get("campo_monto", "total_venta")
         if campo not in VENTA_POS_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de ventas inválido: {campo}")
+        clasificaciones = filtros.get("clasificacion_catalogo") or []
+        excluir_clasificados = bool(filtros.get("excluir_clasificados"))
+        if clasificaciones or excluir_clasificados:
+            # "Complementos" = productos del catálogo curado (PointProductCategory:
+            # REVENTA / SERVICIO_ACCESORIO / TOPPING). El renglón de postres usa
+            # excluir_clasificados para no contarlos doble.
+            productos_clasificados = self._productos_clasificados(set(clasificaciones) or None)
         if filtros.get("total_empresa"):
             # Venta total Point (renglón Ingresos del P&L): todo el índice.
             total = Decimal("0")
             hubo_datos = False
-            for montos in (ventas_index or {}).values():
+            for (branch_id, cat, prod), montos in (ventas_index or {}).items():
+                if excluir_clasificados and prod in self._productos_clasificados(None):
+                    continue
                 total += montos[campo]
                 hubo_datos = True
+            return (total, hubo_datos)
+        if clasificaciones:
+            total = Decimal("0")
+            hubo_datos = False
+            for (branch_id, cat, prod), montos in (ventas_index or {}).items():
+                if prod in productos_clasificados:
+                    total += montos[campo]
+                    hubo_datos = True
             return (total, hubo_datos)
         categoria = normalize_header_text(filtros.get("categoria_pos", ""))
         productos_raw = filtros.get("productos_pos")
@@ -437,6 +454,21 @@ class PresupuestoRealConsolidacionService:
             hubo_datos = True
         return (total, hubo_datos)
 
+
+    def _productos_clasificados(self, categorias: set[str] | None) -> set[str]:
+        """Nombres (normalizados) de productos del catálogo curado de reventa/
+        accesorios/toppings (pos_bridge.PointProductCategory). Cacheado por
+        instancia; con ``categorias=None`` regresa TODOS los clasificados."""
+        cache = getattr(self, "_clasificados_cache", None)
+        if cache is None:
+            from pos_bridge.models import PointProductCategory
+
+            cache = self._clasificados_cache = {}
+            for fila in PointProductCategory.objects.all().values("nombre", "category"):
+                cache.setdefault(fila["category"], set()).add(normalize_header_text(fila["nombre"]))
+        if categorias is None:
+            return set().union(*cache.values()) if cache else set()
+        return set().union(*(cache.get(c, set()) for c in categorias)) if cache else set()
 
     @staticmethod
     def _build_bono_prod_index(periodo: date) -> list[dict]:
