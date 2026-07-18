@@ -87,4 +87,4 @@ logistica,Gasolina,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-CH1"", ""GS-P1""], 
 produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones_produccion"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de activos en producción/CEDIS/hornos,1
 gastos-venta,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""por_sucursal"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de los activos de cada sucursal,1
 resultados,Venta complementos,VENTA_POS,,"{""clasificacion_catalogo"": [""REVENTA"", ""SERVICIO_ACCESORIO"", ""TOPPING""], ""campo_monto"": ""total_venta""}",P&L: complementos = productos clasificados en el catálogo curado,1
-resultados,Costos complementos,COSTO_REVENTA,,"{""desde"": ""2026-06""}",P&L: unidades vendidas de complementos x costo de reventa (antes rige el Excel),1
+resultados,Costos complementos,COSTO_REVENTA,,"{""desde"": ""2026-04""}",P&L: unidades x costo reventa desde abril (el Excel solo capturó ene-mar),1
