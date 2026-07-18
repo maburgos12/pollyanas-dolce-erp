@@ -102,6 +102,7 @@ class PointProductRecipeSyncService:
         *,
         branch_hint: str | None = None,
         product_codes: list[str] | None = None,
+        articulo_codes: list[str] | None = None,
         limit: int | None = None,
         include_without_recipe: bool = False,
         sync_job=None,
@@ -109,6 +110,7 @@ class PointProductRecipeSyncService:
     ) -> PointRecipeSyncResult:
         seed_unidades_basicas()
         selected_codes = {self._norm_code(code) for code in (product_codes or []) if (code or "").strip()}
+        selected_articulos = [c.strip() for c in (articulo_codes or []) if (c or "").strip()]
         summary = {
             "workspace": "",
             "products_seen": 0,
@@ -213,6 +215,36 @@ class PointProductRecipeSyncService:
             )
             run.summary = summary
             run.save(update_fields=["summary", "updated_at"])
+            for codigo_articulo in selected_articulos:
+                # Raíz por ARTÍCULO (sí-o-sí de dirección 2026-07-17): insumos con
+                # receta propia que ningún producto referencia (panes/variantes).
+                try:
+                    rows_art = client.get_articulos(search=codigo_articulo)
+                except Exception:
+                    rows_art = []
+                fila_art = next(
+                    (
+                        r
+                        for r in rows_art
+                        if self._norm_code(str(r.get("Codigo_Articulo") or "")) == self._norm_code(codigo_articulo)
+                    ),
+                    None,
+                )
+                if fila_art is None:
+                    summary.setdefault("articulos_no_encontrados", []).append(codigo_articulo)
+                    continue
+                summary["products_selected"] += 1
+                self._extract_insumo_node(
+                    client=client,
+                    run=run,
+                    articulo_row=fila_art,
+                    depth=0,
+                    max_depth=max_depth,
+                    visited=visited,
+                    summary=summary,
+                    node_outcomes=node_outcomes,
+                )
+
 
         raw_export_path = self._write_raw_export(run=run, payload=self._serialize_run(run))
         summary["run_id"] = run.id
