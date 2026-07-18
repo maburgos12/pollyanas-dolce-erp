@@ -90,6 +90,18 @@ class ConsumoVentaServicioTests(TestCase):
         self.assertEqual(movs.count(), 1)
         self.assertEqual(movs.first().cantidad, Decimal("40"))
 
+    def test_rerun_actualiza_movimiento_cuando_cambia_el_bom(self):
+        VentaHistorica.objects.create(
+            receta=self.rebanada, fecha=date(2026, 6, 5), cantidad=Decimal("40")
+        )
+        service = ConsumoInsumoAutoService()
+        service.generar_consumos_produccion(date(2026, 6, 1), date(2026, 6, 30))
+        LineaReceta.objects.filter(receta=self.rebanada).update(cantidad=Decimal("2"))
+        summary = service.generar_consumos_produccion(date(2026, 6, 1), date(2026, 6, 30))
+        self.assertEqual(summary.movimientos_actualizados, 1)
+        mov = MovimientoInventario.objects.get(insumo=self.plato)
+        self.assertEqual(mov.cantidad, Decimal("80"))
+
     def test_teorico_incluye_ventas_de_servicio(self):
         VentaHistorica.objects.create(
             receta=self.rebanada, fecha=date(2026, 6, 5), cantidad=Decimal("40")

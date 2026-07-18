@@ -357,7 +357,7 @@ class ConsumoInsumoAutoService:
         )
         if not changed:
             return False, False
-        if existing.insumo_id == item.insumo_id:
+        if existing.insumo_id == item.insumo.id:
             self._apply_stock_delta(item.insumo, -(new_qty - old_qty))
         else:
             self._apply_stock_delta(existing.insumo, old_qty)
