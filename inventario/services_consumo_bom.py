@@ -47,6 +47,7 @@ class ConsumoBomSummary:
     dry_run: bool
     producciones_procesadas: int = 0
     lineas_produccion_procesadas: int = 0
+    recetas_venta_servicio_procesadas: int = 0
     movimientos_generados: int = 0
     movimientos_creados: int = 0
     movimientos_actualizados: int = 0
@@ -79,7 +80,8 @@ class ConsumoInsumoAutoService:
         summary = ConsumoBomSummary(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, dry_run=dry_run)
         production_items = self._build_production_consumption(fecha_inicio, fecha_fin, summary)
         resale_items = self._build_resale_consumption(fecha_inicio, fecha_fin, summary)
-        items = list(production_items.values()) + list(resale_items.values())
+        service_items = self._build_service_sale_consumption(fecha_inicio, fecha_fin, summary)
+        items = list(production_items.values()) + list(resale_items.values()) + list(service_items.values())
         summary.items = items
         summary.movimientos_generados = len(items)
         summary.insumos_actualizados = len({item.insumo.id for item in items})
@@ -205,6 +207,89 @@ class ConsumoInsumoAutoService:
                 origen="CONSUMO_VENTA",
                 recetas={row["receta__nombre"]},
             )
+        return items
+
+    def _build_service_sale_consumption(
+        self,
+        fecha_inicio: date,
+        fecha_fin: date,
+        summary: ConsumoBomSummary,
+    ) -> dict[str, ConsumoBomItem]:
+        """Consumo por venta de recetas de servicio: productos FABRICADO que se venden
+        sin registrarse jamás en producción Point (rebanadas, sabores, vasos). Su BOM
+        trae los insumos que salen al servir (plato RP25/1414, cuchara, etiqueta,
+        toppings), así que se descuentan contra la venta. Las recetas con producción
+        Point quedan fuera para no duplicar la vía BOM_PRODUCCION."""
+        ventas = (
+            VentaHistorica.objects.filter(
+                fecha__range=(fecha_inicio, fecha_fin),
+                receta__modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+                cantidad__gt=0,
+            )
+            .values("fecha", "receta_id", "receta__nombre")
+            .annotate(total=Sum("cantidad"))
+            .order_by("fecha", "receta_id")
+        )
+        receta_ids = {int(row["receta_id"]) for row in ventas}
+        if not receta_ids:
+            return {}
+        producidas = set(
+            PointProductionLine.objects.filter(
+                receta_id__in=receta_ids, production_date__lte=fecha_fin
+            ).values_list("receta_id", flat=True)
+        )
+        receta_ids -= producidas
+        bom_by_receta = self._bom_by_receta(receta_ids)
+        costs = self._costos_for_bom(bom_by_receta, fecha_fin)
+
+        items: dict[str, ConsumoBomItem] = {}
+        recetas_procesadas: set[int] = set()
+        for row in ventas:
+            receta_id = int(row["receta_id"])
+            if receta_id in producidas:
+                continue
+            bom = bom_by_receta.get(receta_id) or []
+            if not bom:
+                summary.omitidos_bom_incompleto += 1
+                continue
+            vendido = Decimal(str(row["total"] or 0))
+            if vendido <= 0:
+                continue
+            recetas_procesadas.add(receta_id)
+            for bom_line in bom:
+                qty = self._converted_bom_qty(bom_line, vendido)
+                if qty is None:
+                    summary.omitidos_unidad_incompatible += 1
+                    continue
+                if qty <= 0:
+                    continue
+                key = self._source_hash(
+                    "VENTA_SERV", row["fecha"].isoformat(), receta_id, bom_line.insumo_id
+                )
+                item = items.get(key)
+                cost_info = costs.get(bom_line.insumo_id)
+                unit_cost = cost_info.costo if cost_info else DECIMAL_ZERO
+                if item is None:
+                    item = ConsumoBomItem(
+                        insumo=bom_line.insumo,
+                        cantidad=DECIMAL_ZERO,
+                        costo_unitario=unit_cost,
+                        costo_total=DECIMAL_ZERO,
+                        fecha=row["fecha"],
+                        source_hash=key,
+                        referencia=f"VENTA-SERV-{row['fecha'].isoformat()}",
+                        fuente=(cost_info.fuente if cost_info else "SIN_COSTO"),
+                        origen="BOM_VENTA_SERVICIO",
+                        recetas={row["receta__nombre"]},
+                    )
+                    items[key] = item
+                item.cantidad += qty
+                item.costo_total = _money(item.cantidad * item.costo_unitario)
+                item.recetas.add(row["receta__nombre"])
+        summary.recetas_venta_servicio_procesadas = len(recetas_procesadas)
+        for item in items.values():
+            item.cantidad = _q3(item.cantidad)
+            item.costo_total = _money(item.cantidad * item.costo_unitario)
         return items
 
     def _bom_by_receta(self, receta_ids: set[int]) -> dict[int, list[LineaReceta]]:
