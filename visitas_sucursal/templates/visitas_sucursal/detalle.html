@@ -14,6 +14,35 @@
     <a class="visit-btn secondary" href="{% url 'visitas_sucursal:lista' %}">Volver</a>
   </header>
 
+  {% if can_manage and visita.estatus != "REALIZADA" %}
+  <section class="visit-panel visit-manage" aria-label="Gestión de programación">
+    <h2>Gestión de programación</h2>
+    <div class="visit-manage-actions">
+      {% if visita.estatus == "PROGRAMADA" %}
+      <form method="post" class="visit-manage-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reprogramar">
+        <label class="visit-field">Nueva fecha
+          <input type="date" name="nueva_fecha" value="{{ visita.fecha_programada|date:'Y-m-d' }}" required>
+        </label>
+        <button class="visit-btn" type="submit">Reprogramar</button>
+      </form>
+      <form method="post" class="visit-manage-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="cancelar">
+        <button class="visit-btn secondary" type="submit">Cancelar visita</button>
+      </form>
+      {% endif %}
+      <form method="post" class="visit-manage-form" onsubmit="return confirm('¿Eliminar esta visita del cronograma? Se borra junto con su checklist.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="eliminar">
+        <button class="visit-btn secondary visit-btn-danger" type="submit">Eliminar</button>
+      </form>
+    </div>
+    <p class="visit-muted">Reprogramar mueve la visita a otro día. Cancelar la conserva como C en el cronograma. Eliminar la borra por completo.</p>
+  </section>
+  {% endif %}
+
   <form method="post" class="visit-split">
     {% csrf_token %}
     <section class="visit-panel">

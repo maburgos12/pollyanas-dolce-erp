@@ -309,3 +309,93 @@ class VisitasSucursalTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sucursal Payán")
+
+    def test_detalle_reprogramar_visita(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "reprogramar", "nueva_fecha": "2026-06-26"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        visita.refresh_from_db()
+        self.assertEqual(str(visita.fecha_programada), "2026-06-26")
+        self.assertEqual(visita.estatus, VisitaSucursal.ESTATUS_PROGRAMADA)
+
+    def test_detalle_reprogramar_rechaza_dia_ocupado(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+        VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-26", creado_por=self.user
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "reprogramar", "nueva_fecha": "2026-06-26"},
+        )
+
+        visita.refresh_from_db()
+        self.assertEqual(str(visita.fecha_programada), "2026-06-24")
+
+    def test_detalle_cancelar_visita(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "cancelar"},
+        )
+
+        visita.refresh_from_db()
+        self.assertEqual(visita.estatus, VisitaSucursal.ESTATUS_CANCELADA)
+
+    def test_detalle_eliminar_visita_programada(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "eliminar"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("anio=2026", response.url)
+        self.assertFalse(VisitaSucursal.objects.filter(pk=visita.pk).exists())
+
+    def test_detalle_no_elimina_visita_realizada(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal,
+            fecha_programada="2026-06-24",
+            estatus=VisitaSucursal.ESTATUS_REALIZADA,
+            creado_por=self.user,
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "eliminar"},
+        )
+
+        self.assertTrue(VisitaSucursal.objects.filter(pk=visita.pk).exists())
+
+    def test_app_auditor_filtra_por_sucursal(self):
+        otra = Sucursal.objects.create(codigo="OTR", nombre="Otra", activa=True)
+        VisitaSucursal.objects.create(sucursal=self.sucursal, creado_por=self.user)
+        visita_otra = VisitaSucursal.objects.create(sucursal=otra, creado_por=self.user)
+
+        response = self.client.get(
+            reverse("visitas_sucursal:app"),
+            {"modo": "auditor", "sucursal": otra.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["visita"].id, visita_otra.id)
+        self.assertEqual(
+            [item.sucursal_id for item in response.context["visitas"]],
+            [otra.id],
+        )
