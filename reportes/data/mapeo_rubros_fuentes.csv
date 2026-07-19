@@ -143,3 +143,5 @@ produccion,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""COMP
 gastos-venta,Energía eléctrica,GASTO_OPERATIVO,LUZ_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 35, ""solo_sucursal"": ""Matriz""}",Recibo compartido: 35% a Sucursal Matriz,1
 produccion,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 65}",Recibo compartido de agua: 65% a producción,1
 gastos-venta,Agua potable,GASTO_OPERATIVO,AGUA_SUC,"{""centro_tipo"": ""COMPARTIDO"", ""porcentaje"": 35, ""solo_sucursal"": ""Matriz""}",Recibo compartido de agua: 35% a Sucursal Matriz,1
+gastos-venta,"Etiquetas, bolsas, cajas y empaques",GASTO_OPERATIVO,EMPAQUE,,Empaques comprados por la sucursal (captura con centro de la sucursal),1
+administracion,"Etiquetas, bolsas, cajas y empaques",GASTO_OPERATIVO,EMPAQUE,"{""centro_tipo"": ""CORPORATIVO""}",Empaques corporativos: solo compras capturadas con centro Corporativo (el legado del Excel era agregado de sucursales),1
