@@ -191,10 +191,28 @@ class Command(BaseCommand):
             for rubro_id, reglas in planes.items()
             if any(r["tipo_fuente"] == ReglaFuenteRubro.FUENTE_VENTA_POS for r in reglas)
         }
+        # Exclusividad con los overrides: los productos y categorías POS que el
+        # CSV ya reclama salen del pool del matching difuso — un producto Point
+        # jamás puede quedar en dos reglas (doble conteo de venta).
+        productos_override: set[str] = set()
+        categorias_override: set[str] = set()
+        for reglas in planes.values():
+            for r in reglas:
+                if r["tipo_fuente"] != ReglaFuenteRubro.FUENTE_VENTA_POS:
+                    continue
+                f = r["filtros"] or {}
+                nombres = f.get("productos_pos") or ([f["producto_pos"]] if f.get("producto_pos") else [])
+                productos_override |= {normalize_header_text(p) for p in nombres if str(p).strip()}
+                if f.get("categoria_pos"):
+                    categorias_override.add(normalize_header_text(f["categoria_pos"]))
         asignaciones_ventas: list[str] = []
         if not options["sin_ventas"]:
             for rubro, filtros, nota in self._asignaciones_ventas(
-                asignaciones_ventas, avisos, excluidos=overrides_ventas
+                asignaciones_ventas,
+                avisos,
+                excluidos=overrides_ventas,
+                productos_override=productos_override,
+                categorias_override=categorias_override,
             ):
                 planes.setdefault(rubro.id, []).append(
                     {
@@ -292,12 +310,21 @@ class Command(BaseCommand):
     # Matching difuso rubros de Ventas → nombres POS                      #
     # ------------------------------------------------------------------ #
 
-    def _asignaciones_ventas(self, asignaciones: list[str], avisos: list[str], *, excluidos=frozenset()):
+    def _asignaciones_ventas(
+        self,
+        asignaciones: list[str],
+        avisos: list[str],
+        *,
+        excluidos=frozenset(),
+        productos_override=frozenset(),
+        categorias_override=frozenset(),
+    ):
         """Asigna cada rubro de Ventas a nombres POS reales.
 
         Devuelve tuplas (rubro, filtros, nota). La asignación se decide por
         score difuso; los productos ganados por un rubro no pueden repetirse
-        en otro (el de mayor score gana y el conflicto se reporta).
+        en otro (el de mayor score gana y el conflicto se reporta). Los
+        productos y categorías reclamados por overrides del CSV no participan.
         """
         from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
 
@@ -306,6 +333,19 @@ class Command(BaseCommand):
             .values_list("categoria", "producto_nombre_historico")
             .distinct()
         )
+        # Categorías POS de los productos reclamados por override: una regla de
+        # categoría completa sobre ellas duplicaría esa venta (se anula abajo).
+        categorias_de_override: set[str] = {
+            cat
+            for cat, prod in pares_pos
+            if normalize_header_text(prod) in productos_override
+        }
+        pares_pos = [
+            (cat, prod)
+            for cat, prod in pares_pos
+            if normalize_header_text(prod) not in productos_override
+            and normalize_header_text(cat) not in categorias_override
+        ]
         categorias_pos = sorted({cat for cat, _ in pares_pos})
         # Dos canónicos por producto: con y sin el nombre de la categoría POS.
         # La categoría a veces aporta contexto ("Pastel Mediano") y a veces solo
@@ -384,7 +424,7 @@ class Command(BaseCommand):
         # conteo real): una regla de categoría COMPLETA no puede convivir con
         # productos de esa misma categoría asignados a otros rubros — sumaría
         # dos veces la misma venta. La categoría-completa se anula y se avisa.
-        categorias_de_asignados: set[str] = set()
+        categorias_de_asignados: set[str] = set(categorias_de_override)
         for prod in dueno_por_producto:
             categorias_de_asignados |= producto_a_categorias.get(prod, set())
         for propuesta in propuestas:

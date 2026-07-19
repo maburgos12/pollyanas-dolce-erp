@@ -59,7 +59,11 @@ produccion,Vacaciones,MANUAL,,,Sin fuente en ERP
 produccion,Prima Vacacional,MANUAL,,,Sin fuente en ERP
 produccion,COEPRIS,MANUAL,,,Trámite sanitario
 capex,Apertura sucursal,MANUAL,,,Decisión de dirección
-ventas,BEBIDAS/OTROS · REFRESCO,VENTA_POS,,"{""categoria_pos"": ""Coca-cola"", ""campo_monto"": ""total_venta""}",Override: en Point los refrescos son la categoría Coca-cola
+ventas,Bebidas,VENTA_POS,,"{""categoria_pos"": ""Coca-cola"", ""campo_monto"": ""total_venta""}",Refrescos: en Point es la categoría Coca-cola
+ventas,Bebidas,VENTA_POS,,"{""categoria_pos"": ""TE"", ""campo_monto"": ""total_venta""}",Té e infusiones (categoría Point TE)
+ventas,Bebidas,VENTA_POS,,"{""categoria_pos"": ""Café"", ""campo_monto"": ""total_venta""}",Bebidas de café (categoría Point Café)
+ventas,Otros,VENTA_POS,,"{""categoria_pos"": ""Otros postres"", ""campo_monto"": ""total_venta""}",Extras/servicios y postres sin renglón propio (categoría Point Otros postres)
+ventas,Especiales/Temporada,VENTA_POS,,"{""productos_pos"": [""Pastel Arcoíris Chico 🌈"", ""Pastel Arcoíris Mediano 🌈"", ""Pastel Arcoíris Mini 🌈"", ""Bollo Arcoíris Mini🌈"", ""Pastel Lotus Chico"", ""Pastel Lotus Mediano"", ""Pastel Lotus Mini"", ""Pastel Lotus R"", ""Pastel de Arándano Chico"", ""Cheesecake Limón Individual"", ""Galleta M&MS"", ""Crunch Mini SV"", ""Bollo Chocolate Mini SV"", ""Bollo Vainilla Mini SV"", ""Pastel de Ciruela Chico"", ""Pastel de Ciruela Mediano"", ""Pastel de Ciruela R""], ""campo_monto"": ""total_venta""}",Lista de temporada aprobada por dirección 2026-07-18
 ventas,PAN DE LA CASA · EMPANADA DE MANZANA,VENTA_POS,,"{""productos_pos"": [""Empanada de Manzana""], ""campo_monto"": ""total_venta""}",Override: vive en la categoría Empanadas
 ventas,PASTEL REBANADAS · 3 LECHES IND,VENTA_POS,,"{""productos_pos"": [""Pastel de 3 Leches Individual""], ""campo_monto"": ""total_venta""}",Override: vive en la categoría Individual
 ventas,PAY REBANADA · GUAYABA,VENTA_POS,,"{""productos_pos"": [""Sabor Guayaba Rebanada""], ""campo_monto"": ""total_venta""}",Override: nombre corto en Point
