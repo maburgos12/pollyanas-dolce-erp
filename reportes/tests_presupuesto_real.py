@@ -1207,12 +1207,14 @@ class MatchingRefinadoTests(TestCase):
         self.assertEqual(filtros_vaso.get("productos_pos"), ["Vaso Fresas con Crema Grande"])
 
     def test_override_de_csv_manda_sobre_la_autoasignacion(self):
-        """El rubro con override en el CSV recibe UNA regla, la del CSV."""
-        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        """El rubro con override en el CSV recibe SOLO las reglas del CSV."""
+        rubro = self._rubro("Bebidas")
         call_command("seed_reglas_fuente_rubro", stdout=StringIO())
         reglas = list(ReglaFuenteRubro.objects.filter(rubro=rubro))
-        self.assertEqual(len(reglas), 1)
-        self.assertEqual(reglas[0].filtros.get("categoria_pos"), "Coca-cola")
+        self.assertEqual(len(reglas), 3)
+        self.assertEqual(
+            {r.filtros.get("categoria_pos") for r in reglas}, {"Coca-cola", "TE", "Café"}
+        )
 
 
 class FueraProyeccionTests(TestCase):
@@ -2974,3 +2976,150 @@ class RecihoCompartidoPorcentajeTests(TestCase):
         l_mtz.refresh_from_db()
         self.assertEqual(l_prod.monto_real, Decimal("26000.00"))  # 65%
         self.assertEqual(l_mtz.monto_real, Decimal("14000.00"))  # 35%
+
+
+class ReestructuraBebidasOtrosTemporadaTests(TestCase):
+    """Separación del renglón BEBIDAS/OTROS · ESPECIAL/TEMPORADA (2026-07-18)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+
+        def rubro(concepto, lineas):
+            r = RubroPresupuesto.objects.create(
+                area=cls.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+            )
+            for periodo, ppto, real, fuente in lineas:
+                LineaPresupuestoMensual.objects.create(
+                    rubro=r,
+                    periodo=periodo,
+                    monto_presupuesto=Decimal(ppto),
+                    monto_real=Decimal(real) if real is not None else None,
+                    fuente_real=fuente,
+                )
+            return r
+
+        jun, jul = date(2026, 6, 1), date(2026, 7, 1)
+        cls.mixto = rubro(
+            "BEBIDAS/OTROS · ESPECIAL/TEMPORADA",
+            [(jun, "152475", "448", "AUTO:LEGADO"), (jul, "424400", None, "")],
+        )
+        cls.galleta = rubro(
+            "GALLETA · ESPECIAL/TEMPORADA",
+            [(jun, "1015", "2030", "AUTO:LEGADO"), (jul, "100", "50", "MANUAL:paula")],
+        )
+        cls.coca = rubro("Coca-cola", [(jun, "3200", "1300", "AUTO:VENTA_POS")])
+        cls.te = rubro("TE", [(jun, "2800", "950", "AUTO:VENTA_POS")])
+        ReglaFuenteRubro.objects.create(
+            rubro=cls.coca,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"categoria_pos": "Coca-cola"},
+        )
+
+    def test_reestructura_fusiona_renombra_y_crea_otros(self):
+        salida = StringIO()
+        call_command("reestructurar_bebidas_otros_temporada", stdout=salida)
+
+        temporada = RubroPresupuesto.objects.get(pk=self.mixto.pk)
+        self.assertEqual(temporada.concepto, "Especiales/Temporada")
+        self.assertEqual(
+            temporada.metadata["nombre_excel"], "BEBIDAS/OTROS · ESPECIAL/TEMPORADA"
+        )
+        jun = temporada.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        # Presupuestos sumados y reales AUTO/legado sumados.
+        self.assertEqual(jun.monto_presupuesto, Decimal("153490"))
+        self.assertEqual(jun.monto_real, Decimal("2478"))
+        # El real MANUAL del origen NO se fusiona (nunca se pisa ni se mueve).
+        jul = temporada.lineas_mensuales.get(periodo=date(2026, 7, 1))
+        self.assertEqual(jul.monto_presupuesto, Decimal("424500"))
+        self.assertIsNone(jul.monto_real)
+        self.assertIn("MANUAL", salida.getvalue())
+
+        bebidas = RubroPresupuesto.objects.get(pk=self.coca.pk)
+        self.assertEqual(bebidas.concepto, "Bebidas")
+        jun_beb = bebidas.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        self.assertEqual(jun_beb.monto_presupuesto, Decimal("6000"))
+        self.assertEqual(jun_beb.monto_real, Decimal("2250"))
+
+        for origen in (self.galleta, self.te):
+            origen.refresh_from_db()
+            self.assertFalse(origen.activo)
+            self.assertIn("fusionado", origen.metadata["motivo_desactivacion"])
+
+        otros = RubroPresupuesto.objects.get(area=self.area, concepto="Otros")
+        self.assertEqual(otros.lineas_mensuales.count(), 2)
+        for linea in otros.lineas_mensuales.all():
+            self.assertEqual(linea.monto_presupuesto, Decimal("0"))
+
+    def test_es_idempotente(self):
+        call_command("reestructurar_bebidas_otros_temporada", stdout=StringIO())
+        call_command("reestructurar_bebidas_otros_temporada", stdout=StringIO())
+        temporada = RubroPresupuesto.objects.get(pk=self.mixto.pk)
+        jun = temporada.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        self.assertEqual(jun.monto_presupuesto, Decimal("153490"))
+        self.assertEqual(
+            RubroPresupuesto.objects.filter(area=self.area, concepto="Otros").count(), 1
+        )
+
+
+class ExclusividadOverridesSeedTests(TestCase):
+    """Los productos/categorías reclamados por overrides del CSV no pueden
+    ganarse por matching difuso (ningún producto Point en dos reglas)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        branch = PointBranch.objects.create(external_id="EXC-BR", name="Centro")
+        for cat, prod in [
+            ("Pastel Mediano", "Pastel Lotus Mediano"),
+            ("Café", "Capuchino"),
+            ("Coca-cola", "COCA-COLA 450 ML"),
+            ("TE", "TE DEL JARDIN"),
+            ("Otros postres", "Cubeta de Crema Para Fresas"),
+        ]:
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 6, 3), sucursal_nombre="Centro",
+                categoria=cat, producto_nombre_historico=prod,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+        def rubro(concepto):
+            r = RubroPresupuesto.objects.create(
+                area=cls.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+            )
+            LineaPresupuestoMensual.objects.create(
+                rubro=r, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("1")
+            )
+            return r
+
+        cls.temporada = rubro("Especiales/Temporada")
+        cls.bebidas = rubro("Bebidas")
+        cls.otros = rubro("Otros")
+        cls.competidor = rubro("PASTEL MEDIANO · LOTUS")
+
+    def test_override_saca_sus_productos_y_categorias_del_pool_difuso(self):
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        temporada = ReglaFuenteRubro.objects.get(rubro=self.temporada)
+        self.assertIn("Pastel Lotus Mediano", temporada.filtros["productos_pos"])
+
+        # El rubro que el matching difuso habría cruzado con "Pastel Lotus
+        # Mediano" (score 100) queda SIN asignación: el override manda.
+        competidor = ReglaFuenteRubro.objects.get(rubro=self.competidor)
+        self.assertNotIn("productos_pos", competidor.filtros)
+        self.assertNotIn("categoria_pos", competidor.filtros)
+
+        otros = ReglaFuenteRubro.objects.get(rubro=self.otros)
+        self.assertEqual(otros.filtros.get("categoria_pos"), "Otros postres")
+        self.assertEqual(ReglaFuenteRubro.objects.filter(rubro=self.bebidas).count(), 3)
+
+    def test_consolidacion_suma_las_tres_categorias_de_bebidas(self):
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        linea = self.bebidas.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        # Coca-cola (10) + TE (10) + Café (10); el resto no le pertenece.
+        self.assertEqual(linea.monto_real, Decimal("30.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:VENTA_POS")
