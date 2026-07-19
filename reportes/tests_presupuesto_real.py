@@ -3198,3 +3198,25 @@ class ExclusividadOverridesSeedTests(TestCase):
         # Coca-cola (10) + TE (10) + Café (10); el resto no le pertenece.
         self.assertEqual(linea.monto_real, Decimal("30.00"))
         self.assertEqual(linea.fuente_real, "AUTO:VENTA_POS")
+
+
+class CrearRenglonesFamiliasVentasTests(TestCase):
+    """Renglones ppto-0 para familias vivas nunca presupuestadas (2026-07-19)."""
+
+    def test_crea_renglones_idempotente(self):
+        area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        molde = RubroPresupuesto.objects.create(
+            area=area, concepto="Especiales/Temporada", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        for mes in (6, 7):
+            LineaPresupuestoMensual.objects.create(rubro=molde, periodo=date(2026, mes, 1))
+        call_command("crear_renglones_familias_ventas", stdout=StringIO())
+        call_command("crear_renglones_familias_ventas", stdout=StringIO())
+
+        granmark = RubroPresupuesto.objects.get(area=area, concepto="Granmark", activo=True)
+        self.assertEqual(granmark.lineas_mensuales.count(), 2)
+        for linea in granmark.lineas_mensuales.all():
+            self.assertEqual(linea.monto_presupuesto, Decimal("0"))
+        self.assertEqual(
+            RubroPresupuesto.objects.filter(area=area, concepto="Piñatero Mini").count(), 1
+        )

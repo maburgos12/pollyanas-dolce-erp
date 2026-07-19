@@ -65,6 +65,27 @@ ventas,Bebidas,VENTA_POS,,"{""categoria_pos"": ""Café"", ""campo_monto"": ""tot
 ventas,Otros,VENTA_POS,,"{""categoria_pos"": ""Otros postres"", ""campo_monto"": ""total_venta""}",Extras/servicios y postres sin renglón propio (categoría Point Otros postres)
 ventas,Especiales/Temporada,VENTA_POS,,"{""productos_pos"": [""Pastel Arcoíris Chico 🌈"", ""Pastel Arcoíris Mediano 🌈"", ""Pastel Arcoíris Mini 🌈"", ""Bollo Arcoíris Mini🌈"", ""Pastel Lotus Chico"", ""Pastel Lotus Mediano"", ""Pastel Lotus Mini"", ""Pastel Lotus R"", ""Pastel de Arándano Chico"", ""Cheesecake Limón Individual"", ""Galleta M&MS"", ""Crunch Mini SV"", ""Bollo Chocolate Mini SV"", ""Bollo Vainilla Mini SV"", ""Pastel de Ciruela Chico"", ""Pastel de Ciruela Mediano"", ""Pastel de Ciruela R"", ""Galleta Lotus SV"", ""Pastel Arándano Mediano"", ""Pastel Arándano R"", ""Decoración tag SV"", ""Decoracion 2 Bollo Mini SV"", ""Pay de Queso con Durazno G"", ""Pastel Capricho Fresa Mediano"", ""Bollo Mini Vainilla"", ""Bollo Mini Chocolate""], ""campo_monto"": ""total_venta""}",Lista aprobada 2026-07-18 + regla de dirección 2026-07-19: producto estacional sin renglón propio vive aquí
 ventas,Pastel Fresas con Crema Mini,VENTA_POS,,"{""productos_pos"": [""Fresas Con Crema Mini SV"", ""Pastel Fresas con Crema Mini"", ""Vaso Fresas con Crema Mini""], ""campo_monto"": ""total_venta""}",La venta SV de febrero cuenta en el producto vigente (mismo criterio que 3 Pecados Mini)
+ventas,Pastel de Fresas Con Crema R,VENTA_POS,,"{""productos_pos"": [""Pastel de Fresas Con Crema R""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel de 3 Leches Rebanada,VENTA_POS,,"{""productos_pos"": [""Pastel de 3 Leches Rebanada""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pay de Plátano Grande,VENTA_POS,,"{""productos_pos"": [""Pay de Plátano Grande""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pay de Plátano Rebanada,VENTA_POS,,"{""productos_pos"": [""Pay de Plátano Rebanada""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel de Vainilla Grande,VENTA_POS,,"{""productos_pos"": [""Pastel de Vainilla Grande""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel de Vainilla Mediano,VENTA_POS,,"{""productos_pos"": [""Pastel de Vainilla Mediano""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel de Vainilla Chico,VENTA_POS,,"{""productos_pos"": [""Pastel de Vainilla Chico""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Piñatero Mini,VENTA_POS,,"{""productos_pos"": [""Piñatero Mini""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel Piñatero Mediano,VENTA_POS,,"{""productos_pos"": [""Pastel Piñatero Mediano""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Pastel Piñatero Grande,VENTA_POS,,"{""productos_pos"": [""Pastel Piñatero Grande""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Piñatero Chico,VENTA_POS,,"{""productos_pos"": [""Piñatero Chico""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Cheesecakes Lotus M,VENTA_POS,,"{""productos_pos"": [""Cheesecakes Lotus M""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Cheesecake Tortuga M,VENTA_POS,,"{""productos_pos"": [""Cheesecake Tortuga M""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Cheesecake Rol Canela M,VENTA_POS,,"{""productos_pos"": [""Cheesecake Rol Canela M""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Litro crema,VENTA_POS,,"{""productos_pos"": [""Litro crema""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Vaso con crema grande,VENTA_POS,,"{""productos_pos"": [""Vaso con crema grande""], ""campo_monto"": ""total_venta""}",Familia viva sin renglón en el Excel (ppto 0)
+ventas,Granmark,VENTA_POS,,"{""categoria_pos"": ""Granmark"", ""campo_monto"": ""total_venta""}",Categoría Point completa (ppto 0)
+ventas,Velas Sparklers,VENTA_POS,,"{""categoria_pos"": ""Velas Sparklers"", ""campo_monto"": ""total_venta""}",Categoría Point completa (ppto 0)
+ventas,Accesorios de repostería,VENTA_POS,,"{""categoria_pos"": ""Accesorios de repostería"", ""campo_monto"": ""total_venta""}",Categoría Point completa (ppto 0)
+ventas,Plásticos,VENTA_POS,,"{""categoria_pos"": ""Plásticos"", ""campo_monto"": ""total_venta""}",Categoría Point completa (ppto 0)
+ventas,Plásticos,VENTA_POS,,"{""productos_pos"": [""CAJA BOLLO 1 PZ P7VENTA"", ""CAJA BOLLO 2 PZ P/VENTA"", ""CAJA BOLLO 4 PZ P/VENTA"", ""CAJA BOLLO 6 PZ P/VENTA""], ""campo_monto"": ""total_venta""}",Empaques de bollo vendidos (viven en la categoría Bollo)
 ventas,PAN DE LA CASA · EMPANADA DE MANZANA,VENTA_POS,,"{""productos_pos"": [""Empanada de Manzana""], ""campo_monto"": ""total_venta""}",Override: vive en la categoría Empanadas
 ventas,PASTEL REBANADAS · 3 LECHES IND,VENTA_POS,,"{""productos_pos"": [""Pastel de 3 Leches Individual""], ""campo_monto"": ""total_venta""}",Override: vive en la categoría Individual
 ventas,PAY REBANADA · GUAYABA,VENTA_POS,,"{""productos_pos"": [""Sabor Guayaba Rebanada""], ""campo_monto"": ""total_venta""}",Override: nombre corto en Point
