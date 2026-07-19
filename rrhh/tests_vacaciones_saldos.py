@@ -1,10 +1,13 @@
 from datetime import date
 from decimal import Decimal
+from io import StringIO
 from queue import Queue
 from threading import Barrier, Event, Thread
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import (
     IntegrityError,
     OperationalError,
@@ -433,7 +436,8 @@ class CicloGoceVacacionesFifoTests(TestCase):
             .values_list("tipo", "periodo_anio", "dias")
         )
 
-    def test_caso_carolina_consume_cinco_dias_del_periodo_2025(self):
+    @patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 7, 18))
+    def test_aprobacion_futura_mantiene_cinco_dias_reservados_del_periodo_2025(self, _localdate):
         from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
         from rrhh.services_vacaciones_saldos import saldo_periodo_vacacional
 
@@ -443,6 +447,98 @@ class CicloGoceVacacionesFifoTests(TestCase):
         aplicacion = solicitud.aplicaciones_goce.get()
         self.assertEqual(aplicacion.periodo, self.periodo_2025)
         self.assertEqual(aplicacion.dias, Decimal("5.00"))
+        self.assertEqual(aplicacion.estado, AplicacionGoceVacaciones.ESTADO_RESERVADA)
+        self.assertEqual(
+            self._movimientos(solicitud),
+            [
+                (MovimientoVacaciones.TIPO_RESERVADO, 2025, Decimal("5.00")),
+            ],
+        )
+        saldo_2025 = saldo_periodo_vacacional(self.periodo_2025)
+        self.assertEqual(saldo_2025.reservado, Decimal("5.00"))
+        self.assertEqual(saldo_2025.gozado, Decimal("0.00"))
+        self.assertEqual(
+            saldo_2025.disponible_goce,
+            Decimal("2.00"),
+        )
+        self.assertEqual(
+            saldo_periodo_vacacional(self.periodo_2026).disponible_goce,
+            Decimal("18.00"),
+        )
+
+    @patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 7, 18))
+    def test_dos_dias_gozados_y_cinco_futuros_agotan_periodo_viejo_para_nuevas_solicitudes(
+        self,
+        _localdate,
+    ):
+        from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
+
+        solicitud_gozada = self._crear(date(2026, 6, 29), date(2026, 6, 30))
+        aprobar_solicitud_vacaciones_rrhh(solicitud_gozada, self.rrhh_user)
+
+        solicitud_futura = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        aprobar_solicitud_vacaciones_rrhh(solicitud_futura, self.rrhh_user)
+
+        solicitud_nueva = self._crear(date(2026, 8, 3), date(2026, 8, 3))
+
+        self.assertEqual(
+            list(
+                solicitud_gozada.aplicaciones_goce.values_list(
+                    "periodo_id", "dias", "estado"
+                )
+            ),
+            [
+                (
+                    self.periodo_2025.id,
+                    Decimal("2.00"),
+                    AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+                )
+            ],
+        )
+        self.assertEqual(
+            list(
+                solicitud_futura.aplicaciones_goce.values_list(
+                    "periodo_id", "dias", "estado"
+                )
+            ),
+            [
+                (
+                    self.periodo_2025.id,
+                    Decimal("5.00"),
+                    AplicacionGoceVacaciones.ESTADO_RESERVADA,
+                )
+            ],
+        )
+        self.assertEqual(
+            list(
+                solicitud_nueva.aplicaciones_goce.values_list(
+                    "periodo_id", "dias", "estado"
+                )
+            ),
+            [
+                (
+                    self.periodo_2026.id,
+                    Decimal("1.00"),
+                    AplicacionGoceVacaciones.ESTADO_RESERVADA,
+                )
+            ],
+        )
+
+    @patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 7, 18))
+    def test_cierre_diario_consume_solicitud_aprobada_despues_de_su_fecha_fin(self, _localdate):
+        from rrhh.services_vacaciones import (
+            aprobar_solicitud_vacaciones_rrhh,
+            consumir_solicitudes_vacaciones_completadas,
+        )
+
+        solicitud = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+
+        self.assertEqual(
+            consumir_solicitudes_vacaciones_completadas(fecha_corte=date(2026, 8, 2)),
+            1,
+        )
+        aplicacion = solicitud.aplicaciones_goce.get()
         self.assertEqual(aplicacion.estado, AplicacionGoceVacaciones.ESTADO_CONSUMIDA)
         self.assertEqual(
             self._movimientos(solicitud),
@@ -453,12 +549,151 @@ class CicloGoceVacacionesFifoTests(TestCase):
             ],
         )
         self.assertEqual(
-            saldo_periodo_vacacional(self.periodo_2025).disponible_goce,
-            Decimal("2.00"),
+            consumir_solicitudes_vacaciones_completadas(fecha_corte=date(2026, 8, 2)),
+            0,
+        )
+
+    @patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 7, 18))
+    def test_cierre_diario_no_consume_hasta_que_termine_el_ultimo_dia(self, _localdate):
+        from rrhh.services_vacaciones import (
+            aprobar_solicitud_vacaciones_rrhh,
+            consumir_solicitudes_vacaciones_completadas,
+        )
+
+        solicitud = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+
+        self.assertEqual(
+            consumir_solicitudes_vacaciones_completadas(fecha_corte=date(2026, 8, 1)),
+            0,
         )
         self.assertEqual(
-            saldo_periodo_vacacional(self.periodo_2026).disponible_goce,
-            Decimal("18.00"),
+            solicitud.aplicaciones_goce.get().estado,
+            AplicacionGoceVacaciones.ESTADO_RESERVADA,
+        )
+
+    def test_tarea_diaria_cierra_goce_programado_y_reporta_resultado(self):
+        from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
+        from rrhh.tasks import consumir_goce_vacaciones_completado
+
+        solicitud = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        with patch(
+            "rrhh.services_vacaciones.timezone.localdate",
+            return_value=date(2026, 7, 18),
+        ):
+            aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+
+        with patch(
+            "rrhh.services_vacaciones.timezone.localdate",
+            return_value=date(2026, 8, 2),
+        ):
+            resultado = consumir_goce_vacaciones_completado()
+
+        self.assertEqual(
+            resultado,
+            {"ok": True, "consumidas": 1, "fecha_corte": "2026-08-02"},
+        )
+        self.assertEqual(
+            solicitud.aplicaciones_goce.get().estado,
+            AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        )
+
+    def test_tarea_diaria_esta_programada_despues_del_cierre_del_dia(self):
+        from django.conf import settings
+
+        programacion = settings.CELERY_BEAT_SCHEDULE[
+            "rrhh-consumir-goce-vacaciones-completado"
+        ]
+
+        self.assertEqual(
+            programacion["task"],
+            "rrhh.tasks.consumir_goce_vacaciones_completado",
+        )
+
+    def test_regularizacion_futura_es_dry_run_idempotente_y_auditada(self):
+        from core.models import AuditLog
+        from rrhh.services_vacaciones import (
+            aprobar_solicitud_vacaciones_rrhh,
+            reclasificar_solicitudes_futuras_consumidas,
+        )
+
+        solicitud = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        with patch(
+            "rrhh.services_vacaciones.timezone.localdate",
+            return_value=date(2026, 8, 2),
+        ):
+            aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+        aplicacion = solicitud.aplicaciones_goce.get()
+        self.assertEqual(aplicacion.estado, AplicacionGoceVacaciones.ESTADO_CONSUMIDA)
+
+        resultado_dry_run = reclasificar_solicitudes_futuras_consumidas(
+            fecha_corte=date(2026, 7, 18),
+            aplicar=False,
+        )
+        aplicacion.refresh_from_db()
+        self.assertEqual(resultado_dry_run, {"solicitudes": 1, "aplicaciones": 1})
+        self.assertEqual(aplicacion.estado, AplicacionGoceVacaciones.ESTADO_CONSUMIDA)
+        self.assertFalse(AuditLog.objects.filter(object_id=str(solicitud.id)).exists())
+
+        resultado_apply = reclasificar_solicitudes_futuras_consumidas(
+            fecha_corte=date(2026, 7, 18),
+            aplicar=True,
+        )
+        aplicacion.refresh_from_db()
+        self.assertEqual(resultado_apply, {"solicitudes": 1, "aplicaciones": 1})
+        self.assertEqual(aplicacion.estado, AplicacionGoceVacaciones.ESTADO_RESERVADA)
+        auditoria = AuditLog.objects.get(object_id=str(solicitud.id))
+        self.assertEqual(auditoria.action, "REGULARIZE")
+        self.assertEqual(auditoria.payload["folio"], solicitud.folio)
+        movimiento_regularizacion = MovimientoVacaciones.objects.get(
+            solicitud=solicitud,
+            tipo=MovimientoVacaciones.TIPO_AJUSTE,
+        )
+        self.assertEqual(movimiento_regularizacion.dias, Decimal("0.00"))
+        self.assertEqual(movimiento_regularizacion.periodo_anio, 2025)
+        self.assertIn("5.00 días pasan de consumidos a reservados", movimiento_regularizacion.descripcion)
+
+        self.assertEqual(
+            reclasificar_solicitudes_futuras_consumidas(
+                fecha_corte=date(2026, 7, 18),
+                aplicar=True,
+            ),
+            {"solicitudes": 0, "aplicaciones": 0},
+        )
+
+    def test_comando_regularizacion_exige_apply_para_modificar(self):
+        from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
+
+        solicitud = self._crear(date(2026, 7, 28), date(2026, 8, 1))
+        with patch(
+            "rrhh.services_vacaciones.timezone.localdate",
+            return_value=date(2026, 8, 2),
+        ):
+            aprobar_solicitud_vacaciones_rrhh(solicitud, self.rrhh_user)
+
+        salida = StringIO()
+        call_command(
+            "regularizar_goce_vacaciones_futuro",
+            fecha_corte="2026-07-18",
+            stdout=salida,
+        )
+        self.assertIn("DRY-RUN", salida.getvalue())
+        self.assertEqual(
+            solicitud.aplicaciones_goce.get().estado,
+            AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        )
+
+        salida = StringIO()
+        call_command(
+            "regularizar_goce_vacaciones_futuro",
+            fecha_corte="2026-07-18",
+            apply=True,
+            stdout=salida,
+        )
+        self.assertIn("APLICADO", salida.getvalue())
+        self.assertEqual(
+            solicitud.aplicaciones_goce.get().estado,
+            AplicacionGoceVacaciones.ESTADO_RESERVADA,
         )
 
     def test_solicitud_de_diez_dias_reserva_y_registra_movimientos_por_periodo(self):
@@ -761,7 +996,8 @@ class CicloGoceVacacionesConcurrenciaTests(TransactionTestCase):
             consulta_lock,
         )
 
-    def test_reserva_concurrente_con_aprobacion_termina_sin_deadlock(self):
+    @patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 7, 18))
+    def test_reserva_concurrente_con_aprobacion_termina_sin_deadlock(self, _localdate):
         from rrhh.services_vacaciones import (
             aprobar_solicitud_vacaciones_rrhh,
             crear_solicitud_vacaciones,
@@ -803,7 +1039,7 @@ class CicloGoceVacacionesConcurrenciaTests(TransactionTestCase):
         )
         self.assertEqual(
             solicitud_aprobar.aplicaciones_goce.get().estado,
-            AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+            AplicacionGoceVacaciones.ESTADO_RESERVADA,
         )
         self.assertEqual(
             list(
@@ -813,8 +1049,6 @@ class CicloGoceVacacionesConcurrenciaTests(TransactionTestCase):
             ),
             [
                 (MovimientoVacaciones.TIPO_RESERVADO, 2025, Decimal("5.00")),
-                (MovimientoVacaciones.TIPO_LIBERADO, 2025, Decimal("5.00")),
-                (MovimientoVacaciones.TIPO_CONSUMIDO, 2025, Decimal("5.00")),
             ],
         )
         solicitud_reservada = SolicitudVacaciones.objects.get(
