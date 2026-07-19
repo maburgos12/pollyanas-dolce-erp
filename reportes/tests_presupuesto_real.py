@@ -2978,6 +2978,81 @@ class RecihoCompartidoPorcentajeTests(TestCase):
         self.assertEqual(l_mtz.monto_real, Decimal("14000.00"))  # 35%
 
 
+class EmpaquesGastoOperativoTests(TestCase):
+    """Los rubros "Etiquetas, bolsas, cajas y empaques" se llenan de
+    GASTO_OPERATIVO/EMPAQUE: por sucursal con herencia del rubro y el de
+    administración solo con centros CORPORATIVO. NUNCA de CONSUMO_MP: los
+    insumos EMPAQUE ya generan filas en ConsumoInsumoMensual y el renglón
+    Costos del P&L (total_empresa) las suma — duplicaría a nivel empresa."""
+
+    CONCEPTO = "Etiquetas, bolsas, cajas y empaques"
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        cls.admin = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.sucursal = Sucursal.objects.create(codigo="EMP01", nombre="Sucursal Centro")
+        cls.r_suc = RubroPresupuesto.objects.create(
+            area=cls.gv, concepto=cls.CONCEPTO, sucursal=cls.sucursal,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        cls.r_admin = RubroPresupuesto.objects.create(
+            area=cls.admin, concepto=cls.CONCEPTO, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        cls.periodo = date(2026, 6, 1)
+        cls.l_suc = LineaPresupuestoMensual.objects.create(
+            rubro=cls.r_suc, periodo=cls.periodo, monto_presupuesto=Decimal("2000"),
+        )
+        cls.l_admin = LineaPresupuestoMensual.objects.create(
+            rubro=cls.r_admin, periodo=cls.periodo, monto_presupuesto=Decimal("20000"),
+            monto_real=Decimal("19000"), fuente_real="AUTO:LEGADO",
+        )
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+    def test_seed_crea_reglas_y_autoprovisiona_categoria_empaque(self):
+        cat = CategoriaGasto.objects.get(codigo="EMPAQUE")
+        regla_suc = ReglaFuenteRubro.objects.get(rubro=self.r_suc)
+        self.assertEqual(regla_suc.tipo_fuente, ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO)
+        self.assertEqual(regla_suc.categoria_gasto, cat)
+        self.assertNotIn("centro_tipo", regla_suc.filtros or {})
+        regla_admin = ReglaFuenteRubro.objects.get(rubro=self.r_admin)
+        self.assertEqual(regla_admin.categoria_gasto, cat)
+        self.assertEqual((regla_admin.filtros or {}).get("centro_tipo"), "CORPORATIVO")
+
+    def test_sucursal_hereda_y_admin_solo_toma_corporativo(self):
+        cat = CategoriaGasto.objects.get(codigo="EMPAQUE")
+        centro_suc = CentroCosto.objects.create(
+            codigo="EMP_SUC", nombre="Centro", tipo="SUCURSAL_VENTA", sucursal=self.sucursal
+        )
+        centro_corp = CentroCosto.objects.create(
+            codigo="EMP_CORP", nombre="Oficinas", tipo="CORPORATIVO"
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=self.periodo, categoria_gasto=cat, centro_costo=centro_suc,
+            monto=Decimal("1800"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=self.periodo, categoria_gasto=cat, centro_costo=centro_corp,
+            monto=Decimal("500"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        self.l_suc.refresh_from_db()
+        self.l_admin.refresh_from_db()
+        self.assertEqual(self.l_suc.monto_real, Decimal("1800.00"))
+        self.assertEqual(self.l_suc.fuente_real, "AUTO:GASTO_OPERATIVO")
+        self.assertEqual(self.l_admin.monto_real, Decimal("500.00"))
+
+    def test_admin_sin_captura_corporativa_conserva_legado(self):
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        self.l_admin.refresh_from_db()
+        self.assertEqual(self.l_admin.monto_real, Decimal("19000.00"))
+        self.assertEqual(self.l_admin.fuente_real, "AUTO:LEGADO")
+        self.assertTrue((self.l_admin.metadata or {}).get("sin_datos_fuente"))
+
+
 class ReestructuraBebidasOtrosTemporadaTests(TestCase):
     """Separación del renglón BEBIDAS/OTROS · ESPECIAL/TEMPORADA (2026-07-18)."""
 
