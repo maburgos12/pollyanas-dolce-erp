@@ -193,13 +193,21 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     # ---- KPIs del mes ------------------------------------------------------
     # Sin área seleccionada, las áreas de control (Nómina) no se suman: sus
     # sueldos ya están dentro de las demás áreas y duplicarían el total.
-    kpis = {"presupuesto": ZERO, "real": ZERO, "capturado": 0, "pendiente": 0, "retenidos": 0}
+    # Ingresos y egresos NUNCA se suman juntos: un "total general" que los
+    # mezcla cuadra al peso pero no significa nada para el negocio (hallazgo
+    # de dirección: mayo mostraba $8.9M "presupuestados" = venta + gasto).
+    kpis = {
+        "ppto_ingresos": ZERO, "real_ingresos": ZERO,
+        "ppto_egresos": ZERO, "real_egresos": ZERO,
+        "capturado": 0, "pendiente": 0, "retenidos": 0,
+    }
     for row in detalle:
         if not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
             continue
-        kpis["presupuesto"] += row["presupuesto"]
+        es_ingreso = row["tipo"] == RubroPresupuesto.TIPO_INGRESO
+        kpis["ppto_ingresos" if es_ingreso else "ppto_egresos"] += row["presupuesto"]
         if row["real"] is not None:
-            kpis["real"] += row["real"]
+            kpis["real_ingresos" if es_ingreso else "real_egresos"] += row["real"]
             kpis["capturado"] += 1
             if row["sin_datos_fuente"]:
                 # Valor retenido de una consolidación previa (fuente sin datos
@@ -207,8 +215,8 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
                 kpis["retenidos"] += 1
         else:
             kpis["pendiente"] += 1
-    kpis["varianza"] = kpis["real"] - kpis["presupuesto"]
-    kpis["varianza_pct"] = variance_pct(kpis["varianza"], kpis["presupuesto"])
+    kpis["dif_real"] = kpis["real_ingresos"] - kpis["real_egresos"]
+    kpis["dif_ppto"] = kpis["ppto_ingresos"] - kpis["ppto_egresos"]
 
     # ---- ventas por unidades (regla de dirección: unidades × precio actual) --
     ventas_unidades = None

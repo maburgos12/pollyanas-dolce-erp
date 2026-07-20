@@ -556,11 +556,11 @@ class PresupuestoRealFixesReviewTests(TestCase):
         self.client.force_login(self.superuser)
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
         kpis = response.context["kpis"]
-        self.assertEqual(kpis["presupuesto"], Decimal("50.00"))
-        self.assertEqual(kpis["real"], Decimal("40.00"))
+        self.assertEqual(kpis["ppto_egresos"], Decimal("50.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("40.00"))
         # Con el área nómina seleccionada sí se muestra su propio total.
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=nomina")
-        self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("100.00"))
+        self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("100.00"))
 
     def test_export_neutraliza_formulas(self):
         """Un concepto que empieza con '=' se exporta neutralizado."""
@@ -2168,11 +2168,11 @@ class AreaResultadosTests(TestCase):
         self.client.force_login(self.superuser)
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
         kpis = response.context["kpis"]
-        self.assertEqual(kpis["presupuesto"], Decimal("100.00"))
-        self.assertEqual(kpis["real"], Decimal("80.00"))
+        self.assertEqual(kpis["ppto_egresos"], Decimal("100.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("80.00"))
         # Seleccionando el área de control sí se ve su propio total.
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
-        self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("4000000.00"))
+        self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("4000000.00"))
 
 
 class EstadoResultadosTests(TestCase):
