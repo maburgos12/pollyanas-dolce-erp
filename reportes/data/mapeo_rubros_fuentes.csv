@@ -136,7 +136,25 @@ produccion,Galleta lotus,CONSUMO_MP,,"{""insumo_id"": 134, ""desde"": ""2026-06"
 produccion,Caja grande,CONSUMO_MP,,"{""insumo_id"": 75, ""desde"": ""2026-06""}",Consumo MP: CAJA G,1
 produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 104, ""desde"": ""2026-06""}",Consumo MP: CUCHARA G,1
 produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 421, ""desde"": ""2026-06""}",Consumo MP: CUCHARA CH,1
-produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 163, ""desde"": ""2026-06""}",Consumo MP: EtiquetaChica,1
+produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 419, ""desde"": ""2026-06""}",Consumo MP: ETIQUETA CH (el 163 EtiquetaChica es duplicado legado sin movimientos),1
+produccion,Agua Purificada,CONSUMO_MP,,"{""insumo_id"": 51, ""desde"": ""2026-06""}",Consumo MP: AGUA cód. 013 (el 170 es duplicado legado inactivo),1
+produccion,Chocolate semiamargo,CONSUMO_MP,,"{""insumo_id"": 84, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE SEMI-AMARGO TURIN cód. 049,1
+produccion,Coco rallado,CONSUMO_MP,,"{""insumo_id"": 64, ""desde"": ""2026-06""}",Consumo MP: COCO RALLADO P/PASTEL ZANAHORIA cód. 50327008,1
+produccion,Crunch trozos,CONSUMO_MP,,"{""insumo_id"": 88, ""desde"": ""2026-06""}",Consumo MP: TROZOS CRUNCH cód. 043,1
+produccion,Deleite chocolate,CONSUMO_MP,,"{""insumo_id"": 49, ""desde"": ""2026-06""}",Consumo MP: DELEITE CHOCOLATE CREME CAKE cód. 7502269921,1
+produccion,Fresa,CONSUMO_MP,,"{""insumo_id"": 78, ""desde"": ""2026-06""}",Consumo MP: Fresa Fresca cód. 017 (el 117 es duplicado legado con el mismo código),1
+produccion,La lechera,CONSUMO_MP,,"{""insumo_id"": 44, ""desde"": ""2026-06""}",Consumo MP: LECHERA cód. 004,1
+produccion,Margarina,CONSUMO_MP,,"{""insumo_id"": 45, ""desde"": ""2026-06""}",Consumo MP: MARGARINA DELICIA cód. 037,1
+produccion,Piña,CONSUMO_MP,,"{""insumo_id"": 62, ""desde"": ""2026-06""}",Consumo MP: PIÑA EN TROCITOS cód. 055,1
+produccion,Polvo de merengue,CONSUMO_MP,,"{""insumo_id"": 60, ""desde"": ""2026-06""}",Consumo MP: MERENGUE EN POLVO cód. MER2,1
+produccion,Vaso16oz,CONSUMO_MP,,"{""insumo_id"": 532, ""desde"": ""2026-06""}",Consumo MP: VASO 16 OZ cód. 51503,1
+produccion,Vaso20oz,CONSUMO_MP,,"{""insumo_id"": 533, ""desde"": ""2026-06""}",Consumo MP: VASO 20 OZ cód. 51502,1
+produccion,Tapa vasos domo 16y20oz,CONSUMO_MP,,"{""insumo_id"": 531, ""desde"": ""2026-06""}",Consumo MP: TAPA VASO 16-20 OZ cód. 51504,1
+produccion,Domo cheesecake individual,CONSUMO_MP,,"{""insumo_id"": 529, ""desde"": ""2026-06""}",Consumo MP: DB06 DOMO MINI CHEESECAKE (confirmado por dirección),1
+produccion,Domo pay g,CONSUMO_MP,,"{""insumo_id"": 93, ""desde"": ""2026-06""}",Consumo MP: Domo Pay G BD1268 (BOM Point del Pay Grande),1
+produccion,Oreo trozos,CONSUMO_MP,,"{""insumo_id"": 427, ""desde"": ""2026-06""}",Consumo MP: Galleta Oreo Base cód. 0402 (la molida; la Sandwich 0401 es otro insumo),1
+produccion,Cocktail de frutas,CONSUMO_MP,,"{""insumo_id"": 76, ""desde"": ""2026-06""}",Consumo MP: COCKTEL DE FRUTAS cód. 052,1
+produccion,Monito/rosca,CONSUMO_MP,,"{""insumo_id"": 429, ""desde"": ""2026-06""}",Consumo MP: Mono/Roscas cód. 0620 (estacional Reyes: sin datos fuera de temporada),1
 produccion,Avena,CONSUMO_MP,,"{""insumo_id"": 130, ""desde"": ""2026-06""}",Consumo MP: AVENA INTEGRAL,1
 produccion,Levadura,CONSUMO_MP,,"{""insumo_id"": 236, ""desde"": ""2026-06""}",Consumo MP: LEVADURA INSTANTANEA,1
 capex,Adquisición de equipo/maquinaria,MANUAL,,,Inversión: se captura a mano por diseño (no hay fuente automática),1
