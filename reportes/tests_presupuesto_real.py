@@ -3220,3 +3220,17 @@ class CrearRenglonesFamiliasVentasTests(TestCase):
         self.assertEqual(
             RubroPresupuesto.objects.filter(area=area, concepto="Piñatero Mini").count(), 1
         )
+
+
+class ConciliacionCombustibleTests(TestCase):
+    """El render de conciliación marca montos no redondos sin clasificar."""
+
+    def test_monto_no_redondo_se_marca_revisar(self):
+        from decimal import Decimal as D
+
+        from reportes.services_conciliacion_combustible import _es_monto_redondo
+
+        self.assertTrue(_es_monto_redondo(D("3000")))
+        self.assertTrue(_es_monto_redondo(D("17600.00")))
+        self.assertFalse(_es_monto_redondo(D("1691.02")))
+        self.assertFalse(_es_monto_redondo(D("1250")))  # no múltiplo de 100
