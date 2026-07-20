@@ -2441,6 +2441,9 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp_post, "Empleado Demo")
 
         empleado = Empleado.objects.get(nombre="Empleado Demo")
+        # El view ya solo acepta sucursales del catálogo (sucursal_id o texto que
+        # resuelva a una Sucursal real); el texto libre "Matriz" dejó de ser válido.
+        sucursal_matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
         resp_update = self.client.post(
             reverse("rrhh:empleados"),
             {
@@ -2457,7 +2460,7 @@ class RRHHViewsTests(TestCase):
                 "salario_diario": "500.00",
                 "telefono": "6870000000",
                 "email": "demo@example.com",
-                "sucursal": "Matriz",
+                "sucursal_id": str(sucursal_matriz.id),
                 "activo": "on",
             },
             follow=True,
