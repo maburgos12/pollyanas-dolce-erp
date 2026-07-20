@@ -486,7 +486,10 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
 
     def get_point_enviada(self, obj):
         point_line = self._point_line(obj)
-        return bool(point_line and point_transfer_enviada(point_line))
+        if point_line is None:
+            # Carga manual capturada en el ERP: no depende del Enviado de Point.
+            return True
+        return point_transfer_enviada(point_line)
 
     def get_cantidad_cargada(self, obj):
         return self.get_cantidad_cargada_pwa(obj)
