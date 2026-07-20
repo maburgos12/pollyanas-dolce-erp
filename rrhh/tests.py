@@ -2251,6 +2251,22 @@ class RRHHViewsTests(TestCase):
         inactivos = self.client.get(reverse("rrhh:empleados"), {"estado": "inactivos"})
         self.assertIn(empleado.id, [e.id for e in inactivos.context["empleados"]])
 
+    def test_crear_empleadobaja_directo_desactiva_empleado(self):
+        # Cubre rutas fuera de las vistas (admin de Django, shell, imports).
+        empleado = Empleado.objects.create(
+            nombre="BAJA DIRECTA MODELO",
+            fecha_ingreso=timezone.localdate(),
+            activo=True,
+        )
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            fecha_ingreso=empleado.fecha_ingreso,
+            fecha_baja=timezone.localdate(),
+            motivo=EmpleadoBaja.MOTIVO_OTRO,
+        )
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.activo)
+
     def test_empleados_crea_usuario_repartidor_con_password_y_licencia(self):
         from logistica.models import Repartidor
 

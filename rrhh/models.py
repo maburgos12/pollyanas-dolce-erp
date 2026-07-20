@@ -508,6 +508,7 @@ class EmpleadoBaja(models.Model):
         return self.antiguedad_meses <= Decimal("3")
 
     def save(self, *args, **kwargs):
+        creating = self._state.adding
         if self.empleado_id:
             self.nombre = self.nombre or self.empleado.nombre
             self.area = self.area or self.empleado.area
@@ -515,6 +516,12 @@ class EmpleadoBaja(models.Model):
             self.tipo_contrato = self.tipo_contrato or self.empleado.tipo_contrato
             self.fecha_ingreso = self.fecha_ingreso or self.empleado.fecha_ingreso
         super().save(*args, **kwargs)
+        # Invariante: registrar una baja desactiva al empleado en todo el ERP,
+        # sin importar la ruta de captura (vistas, admin, shell, imports).
+        if creating and self.empleado_id:
+            from rrhh.services_identidad import desactivar_identidad_operativa_empleado
+
+            desactivar_identidad_operativa_empleado(self.empleado)
 
     def __str__(self) -> str:
         return f"{self.nombre} · {self.fecha_baja}"
