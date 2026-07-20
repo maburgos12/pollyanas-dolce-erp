@@ -27,7 +27,13 @@ class SuspensionesRRHHTests(TestCase):
             hora_salida=time(16, 0),
             tolerancia_minutos=10,
         )
-        self.empleado = Empleado.objects.create(nombre="Empleado Suspendido", salario_diario=Decimal("400.00"))
+        # fecha_ingreso explícita: el default es hoy y el motor descarta días
+        # anteriores al ingreso, lo que rompía estos tests al pasar el tiempo.
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Suspendido",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2026, 1, 1),
+        )
         User = get_user_model()
         self.rrhh_user = User.objects.create_superuser(
             username="rrhh",
