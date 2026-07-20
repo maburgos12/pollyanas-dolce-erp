@@ -193,7 +193,10 @@ def enviar_vacante_autorizacion(vacante: VacanteRRHH, user, comentario: str = ""
     requiere_direccion = vacante_requiere_autorizacion_direccion(vacante)
     autorizador = None if requiere_direccion else resolver_autorizador_vacante(vacante)
     if not requiere_direccion and not autorizador:
-        raise ValidationError("No hay jefe directo asignado para autorizar esta vacante. Revisa Organización de Capital Humano.")
+        # Último recurso: sin jefatura del departamento ni cadena de mando del
+        # solicitante, la vacante se escala a Dirección General en lugar de
+        # quedar bloqueada para Capital Humano.
+        requiere_direccion = True
     extra_updates = {
         "validado_rrhh_por": user,
         "fecha_validacion_rrhh": timezone.now(),
@@ -564,8 +567,24 @@ def resolver_autorizador_vacante(vacante: VacanteRRHH, *, exclude_user=None):
     if jefe and jefe.usuario_erp_id:
         return jefe.usuario_erp
 
-    # Sin jefatura configurada no se debe autoautorizar: Capital Humano debe
-    # corregir Organización antes de enviar la vacante.
+    # Fallback: el departamento capturado no tiene jefatura en Organización
+    # (p.ej. vacante marcada LOGISTICA cuando los repartidores cuelgan de VENTAS).
+    # Se resuelve por la cadena de mando del solicitante para no dejar la
+    # vacante sin camino de autorización.
+    empleado = getattr(vacante.solicitado_por, "empleado_rrhh", None)
+    if empleado and empleado_es_liderazgo(empleado) and vacante.solicitado_por_id not in exclude_ids:
+        return vacante.solicitado_por
+    visitados: set[int] = set()
+    jefe = getattr(empleado, "jefe_directo", None)
+    while jefe and jefe.id not in visitados:
+        visitados.add(jefe.id)
+        usuario = jefe.usuario_erp if jefe.activo else None
+        if usuario and usuario.is_active and usuario.id not in exclude_ids:
+            return usuario
+        jefe = jefe.jefe_directo
+
+    # Sin jefatura ni cadena de mando resoluble: el caller decide (se escala
+    # a Dirección General en enviar_vacante_autorizacion).
     return None
 
 

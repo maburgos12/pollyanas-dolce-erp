@@ -45,12 +45,16 @@
       {% endif %}
       <div class="vacante-field">
         <label>Departamento</label>
-        <select name="departamento">
+        <select name="departamento" id="vacante-departamento" data-sin-jefatura="{{ departamentos_sin_jefatura|join:',' }}">
           <option value="">Sin departamento</option>
           {% for value, label in departamento_choices %}
             <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
+        <p class="muted" id="aviso-sin-jefatura" hidden>
+          Este departamento no tiene jefatura en Organización: la vacante se
+          autorizará por el jefe directo del solicitante o por Dirección General.
+        </p>
       </div>
       <div class="vacante-field">
         <label>Sucursal</label>
@@ -104,4 +108,17 @@
     </div>
   </form>
 </section>
+<script>
+  (function () {
+    var select = document.getElementById("vacante-departamento");
+    var aviso = document.getElementById("aviso-sin-jefatura");
+    if (!select || !aviso) return;
+    var sinJefatura = (select.dataset.sinJefatura || "").split(",").filter(Boolean);
+    var toggle = function () {
+      aviso.hidden = !(select.value && sinJefatura.indexOf(select.value) !== -1);
+    };
+    select.addEventListener("change", toggle);
+    toggle();
+  })();
+</script>
 {% endblock %}
