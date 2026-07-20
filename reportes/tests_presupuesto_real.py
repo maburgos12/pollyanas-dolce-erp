@@ -2172,7 +2172,8 @@ class AreaResultadosTests(TestCase):
         self.assertEqual(kpis["real_egresos"], Decimal("80.00"))
         # Seleccionando el área de control sí se ve su propio total.
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
-        self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("4000000.00"))
+        # El rubro del área resultados es tipo INGRESO (ventas del P&L).
+        self.assertEqual(response.context["kpis"]["ppto_ingresos"], Decimal("4000000.00"))
 
 
 class EstadoResultadosTests(TestCase):
