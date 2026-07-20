@@ -134,8 +134,10 @@ produccion,Chocolate blanco turin,CONSUMO_MP,,"{""insumo_id"": 179, ""desde"": "
 produccion,Crunch rocks,CONSUMO_MP,,"{""insumo_id"": 168, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE CRUNCH ROCKS,1
 produccion,Galleta lotus,CONSUMO_MP,,"{""insumo_id"": 134, ""desde"": ""2026-06""}",Consumo MP: GALLETA LOTUS BISCOFF (la molida ya es de otro renglón),1
 produccion,Caja grande,CONSUMO_MP,,"{""insumo_id"": 75, ""desde"": ""2026-06""}",Consumo MP: CAJA G,1
-produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 104, ""desde"": ""2026-06""}",Consumo MP: CUCHARA G,1
-produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 421, ""desde"": ""2026-06""}",Consumo MP: CUCHARA CH,1
+produccion,Cuchara vasos,CONSUMO_MP,,"{""insumo_id"": 104, ""desde"": ""2026-06""}",Consumo MP: CUCHARA G cód. 067 (BOM Point: solo vasos; la CH 421 pasó al rubro Chuchara rebanada),1
+produccion,Chuchara rebanada,CONSUMO_MP,,"{""insumo_id"": 421, ""desde"": ""2026-06""}",Consumo MP: CUCHARA CH cód. 083 (BOM Point: solo rebanadas y toppings rebanada — el concepto trae el typo del Excel),1
+produccion,Colorante mermelada rojo,CONSUMO_MP,,"{""insumo_id"": 79, ""desde"": ""2026-06""}",Consumo MP: CODMAN ROJO FRESA 1KG cód. 008316 (BOM Point: solo Mermelada Fresa Liquida),1
+produccion,Colorante rojo,CONSUMO_MP,,"{""insumo_id"": 57, ""desde"": ""2026-06""}",Consumo MP: COLORANTE ROJO REDVELVET cód. 085 (BOM Point: Red Velvet y Arcoíris),1
 produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 419, ""desde"": ""2026-06""}",Consumo MP: ETIQUETA CH (el 163 EtiquetaChica es duplicado legado sin movimientos),1
 produccion,Agua Purificada,CONSUMO_MP,,"{""insumo_id"": 51, ""desde"": ""2026-06""}",Consumo MP: AGUA cód. 013 (el 170 es duplicado legado inactivo),1
 produccion,Chocolate semiamargo,CONSUMO_MP,,"{""insumo_id"": 84, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE SEMI-AMARGO TURIN cód. 049,1
