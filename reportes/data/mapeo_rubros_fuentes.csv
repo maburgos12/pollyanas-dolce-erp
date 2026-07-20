@@ -141,6 +141,8 @@ produccion,Colorante rojo,CONSUMO_MP,,"{""insumo_id"": 57, ""desde"": ""2026-06"
 produccion,Nuez picada,CONSUMO_MP,,"{""insumo_id"": 63, ""desde"": ""2026-06""}",Consumo MP: Nuez en Trozos cód. 025 (BOM Point: panes de zanahoria y Pan de la Casa; el granillo es del rubro Nuez granillo),1
 produccion,Relleno manzana,CONSUMO_MP,,"{""insumo_id"": 70, ""desde"": ""2026-06""}",Consumo MP: MERMELADA DE MANZANA cód. 077 cruda (la Preparada 01MMP se hace de ésta + canela + mantequilla — ligarla duplicaría),1
 produccion,Tapa vasos domo,CONSUMO_MP,,"{""insumo_id"": 101, ""desde"": ""2026-06""}",Consumo MP: TAPA VASO 12 OZ cód. 0255 (BOM Point: tapa domo de los vasos 12oz; el vaso vive en el rubro Vaso 12oz),1
+produccion,Mermelada fresa preparada,CONSUMO_MP,,"{""insumo_id"": 13, ""desde"": ""2026-06""}",Consumo MP: Mermelada Fresa Liquida 01MF06 valuada a costo receta vía CostoInsumo CALCULO_DIRECCION (el motor excluye RECETA_PREPARACION) — decisión de dirección 2026-07-20,1
+produccion,Nutella,CONSUMO_MP,,"{""insumo_id"": 417, ""desde"": ""2026-06""}",Consumo MP: CREMA AVELLANA cód. 028 (así vive la nutella en Point: BOM de la Galleta Nutella),1
 produccion,Etiqueta chica,CONSUMO_MP,,"{""insumo_id"": 419, ""desde"": ""2026-06""}",Consumo MP: ETIQUETA CH (el 163 EtiquetaChica es duplicado legado sin movimientos),1
 produccion,Agua Purificada,CONSUMO_MP,,"{""insumo_id"": 51, ""desde"": ""2026-06""}",Consumo MP: AGUA cód. 013 (el 170 es duplicado legado inactivo),1
 produccion,Chocolate semiamargo,CONSUMO_MP,,"{""insumo_id"": 84, ""desde"": ""2026-06""}",Consumo MP: CHOCOLATE SEMI-AMARGO TURIN cód. 049,1
