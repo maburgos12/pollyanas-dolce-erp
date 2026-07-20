@@ -79,16 +79,16 @@
 
 <section class="kpi-grid">
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.presupuesto|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Presupuesto · {{ selected_month_name|capfirst }}</div>
+    <div class="kpi-number">${{ kpis.real_ingresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Ingresos reales · {{ selected_month_name|capfirst }} (ppto ${{ kpis.ppto_ingresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Real consolidado</div>
+    <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Egresos reales (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number {% if kpis.varianza < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.varianza|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Varianza ({{ kpis.varianza_pct|floatformat:2 }}%)</div>
+    <div class="kpi-number {% if kpis.dif_real < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.dif_real|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Diferencia ingresos − egresos (ppto ${{ kpis.dif_ppto|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
