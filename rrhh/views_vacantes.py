@@ -140,10 +140,20 @@ def vacante_nueva(request):
             "can_manage_vacantes": can_manage,
             "solicitantes": _usuarios_solicitantes_vacantes(),
             "departamento_choices": Empleado.DEP_CHOICES,
+            "departamentos_sin_jefatura": _departamentos_sin_jefatura(),
             "tipo_choices": VacanteRRHH.TIPO_CHOICES,
             "prioridad_choices": VacanteRRHH.PRIORIDAD_CHOICES,
         },
     )
+
+
+def _departamentos_sin_jefatura() -> list[str]:
+    con_jefatura = set(
+        Empleado.objects.filter(activo=True, usuario_erp__is_active=True)
+        .filter(liderazgo_q())
+        .values_list("departamento", flat=True)
+    )
+    return [value for value, _label in Empleado.DEP_CHOICES if value not in con_jefatura]
 
 
 @login_required
