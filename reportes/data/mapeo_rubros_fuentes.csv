@@ -155,6 +155,11 @@ produccion,Domo pay g,CONSUMO_MP,,"{""insumo_id"": 93, ""desde"": ""2026-06""}",
 produccion,Oreo trozos,CONSUMO_MP,,"{""insumo_id"": 427, ""desde"": ""2026-06""}",Consumo MP: Galleta Oreo Base cód. 0402 (la molida; la Sandwich 0401 es otro insumo),1
 produccion,Cocktail de frutas,CONSUMO_MP,,"{""insumo_id"": 76, ""desde"": ""2026-06""}",Consumo MP: COCKTEL DE FRUTAS cód. 052,1
 produccion,Monito/rosca,CONSUMO_MP,,"{""insumo_id"": 429, ""desde"": ""2026-06""}",Consumo MP: Mono/Roscas cód. 0620 (estacional Reyes: sin datos fuera de temporada),1
+produccion,Polvo dream whip,CONSUMO_MP,,"{""insumo_id"": 59, ""desde"": ""2026-06""}",Consumo MP: SUSTITUTO DE CREMA cód. 009 (no existe polvo en Point; es el componente del Betún Dream Whip sin rubro propio — confirmado por dirección),1
+produccion,Domo 3 leches,CONSUMO_MP,,"{""insumo_id"": 74, ""desde"": ""2026-06""}",Consumo MP: AL-2923 (BOM Point: el Pastel 3 Leches Mediano lleva aluminio; no lleva domo),1
+produccion,Domo 3 leches individual,CONSUMO_MP,,"{""insumo_id"": 82, ""desde"": ""2026-06""}",Consumo MP: AD-1310-300 (BOM Point del 3 Leches Individual; se suma con AL-1310),1
+produccion,Domo 3 leches individual,CONSUMO_MP,,"{""insumo_id"": 83, ""desde"": ""2026-06""}",Consumo MP: AL-1310 (BOM Point del 3 Leches Individual; se suma con AD-1310-300),1
+produccion,Domo pay ch,CONSUMO_MP,,"{""insumo_id"": 96, ""desde"": ""2026-06""}",Consumo MP: Domo Pay Mediano C2525 (Point solo tiene Pay G y Mediano; el ch del Excel es el Mediano — confirmado por dirección),1
 produccion,Avena,CONSUMO_MP,,"{""insumo_id"": 130, ""desde"": ""2026-06""}",Consumo MP: AVENA INTEGRAL,1
 produccion,Levadura,CONSUMO_MP,,"{""insumo_id"": 236, ""desde"": ""2026-06""}",Consumo MP: LEVADURA INSTANTANEA,1
 capex,Adquisición de equipo/maquinaria,MANUAL,,,Inversión: se captura a mano por diseño (no hay fuente automática),1
