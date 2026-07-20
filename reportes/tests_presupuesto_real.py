@@ -562,6 +562,27 @@ class PresupuestoRealFixesReviewTests(TestCase):
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=nomina")
         self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("100.00"))
 
+    def test_kpi_capex_va_aparte_de_egresos(self):
+        """CAPEX es inversión, no gasto: su KPI va aparte y no suma a egresos."""
+        area_capex = AreaPresupuesto.objects.create(nombre="Inversión", codigo="capex")
+        rubro_capex = RubroPresupuesto.objects.create(
+            area=area_capex, concepto="CAPEX Horno nuevo", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro_capex, periodo=self.periodo,
+            monto_presupuesto=Decimal("500.00"), monto_real=Decimal("300.00"),
+            fuente_real="MANUAL:dg",
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["ppto_capex"], Decimal("500.00"))
+        self.assertEqual(kpis["real_capex"], Decimal("300.00"))
+        # Egresos operativos no cambian, y la diferencia operativa tampoco.
+        self.assertEqual(kpis["ppto_egresos"], Decimal("50.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("40.00"))
+        self.assertEqual(kpis["dif_real"], Decimal("0.00") - Decimal("40.00"))
+
     def test_export_neutraliza_formulas(self):
         """Un concepto que empieza con '=' se exporta neutralizado."""
         self.client.force_login(self.superuser)
@@ -2170,9 +2191,9 @@ class AreaResultadosTests(TestCase):
         kpis = response.context["kpis"]
         self.assertEqual(kpis["ppto_egresos"], Decimal("100.00"))
         self.assertEqual(kpis["real_egresos"], Decimal("80.00"))
-        # Seleccionando el área de control sí se ve su propio total.
+        # Seleccionando el área de control sí se ve su propio total (el rubro
+        # del P&L quedó re-tipado a INGRESO, así que cae en el KPI de ingresos).
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
-        # El rubro del área resultados es tipo INGRESO (ventas del P&L).
         self.assertEqual(response.context["kpis"]["ppto_ingresos"], Decimal("4000000.00"))
 
 
