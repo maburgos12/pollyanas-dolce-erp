@@ -84,11 +84,15 @@
   </div>
   <div class="kpi-card">
     <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Egresos reales (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
+    <div class="kpi-label">Egresos operativos reales (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number {% if kpis.dif_real < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.dif_real|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Diferencia ingresos − egresos (ppto ${{ kpis.dif_ppto|floatformat:0|intcomma }})</div>
+    <div class="kpi-label">Diferencia operativa ingresos − egresos (ppto ${{ kpis.dif_ppto|floatformat:0|intcomma }})</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">${{ kpis.real_capex|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Inversión CAPEX (ppto ${{ kpis.ppto_capex|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
@@ -97,7 +101,7 @@
 </section>
 
 {% if not selected_area %}
-<div class="alert alert-info">Las áreas <strong>Nómina</strong> y <strong>Resultados (P&amp;L)</strong> se muestran como vistas de control y no se suman a los KPI: los sueldos ya están dentro de cada área, y la venta y costos totales de la empresa ya viven en Ventas y Producción.</div>
+<div class="alert alert-info">Las áreas <strong>Nómina</strong> y <strong>Resultados (P&amp;L)</strong> se muestran como vistas de control y no se suman a los KPI: los sueldos ya están dentro de cada área, y la venta y costos totales de la empresa ya viven en Ventas y Producción. El <strong>CAPEX</strong> se muestra aparte porque es inversión, no gasto del periodo — no entra a los egresos ni a la diferencia operativa.</div>
 {% endif %}
 {% if kpis.retenidos %}
 <div class="alert alert-info">{{ kpis.retenidos }} concepto(s) muestran el último valor consolidado porque su fuente no tiene datos este mes (marcados "Fuente sin datos"); pueden estar desactualizados.</div>

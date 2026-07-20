@@ -199,15 +199,25 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     kpis = {
         "ppto_ingresos": ZERO, "real_ingresos": ZERO,
         "ppto_egresos": ZERO, "real_egresos": ZERO,
+        "ppto_capex": ZERO, "real_capex": ZERO,
         "capturado": 0, "pendiente": 0, "retenidos": 0,
     }
     for row in detalle:
         if not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
             continue
-        es_ingreso = row["tipo"] == RubroPresupuesto.TIPO_INGRESO
-        kpis["ppto_ingresos" if es_ingreso else "ppto_egresos"] += row["presupuesto"]
+        if row["area_codigo"] == "capex":
+            # CAPEX es inversión (se capitaliza y entra al resultado vía
+            # depreciación), no gasto del periodo: se muestra aparte y no
+            # entra a los egresos ni a la diferencia operativa. Mismo criterio
+            # que estado_resultados (CAPEX después de la utilidad operativa).
+            ppto_key, real_key = "ppto_capex", "real_capex"
+        elif row["tipo"] == RubroPresupuesto.TIPO_INGRESO:
+            ppto_key, real_key = "ppto_ingresos", "real_ingresos"
+        else:
+            ppto_key, real_key = "ppto_egresos", "real_egresos"
+        kpis[ppto_key] += row["presupuesto"]
         if row["real"] is not None:
-            kpis["real_ingresos" if es_ingreso else "real_egresos"] += row["real"]
+            kpis[real_key] += row["real"]
             kpis["capturado"] += 1
             if row["sin_datos_fuente"]:
                 # Valor retenido de una consolidación previa (fuente sin datos
