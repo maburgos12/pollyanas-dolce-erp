@@ -309,3 +309,58 @@
       grid-template-columns: 1fr;
     }
   }
+
+/* Bandeja personal orientada a la siguiente acción. */
+.seguimiento-shell { width: min(100%, 980px); }
+.seg-work-head { display: flex; justify-content: space-between; gap: 16px; margin: 18px 0 12px; }
+.seg-work-head h1 { margin: 4px 0; font-family: "Playfair Display", serif; font-size: clamp(1.8rem, 5vw, 2.6rem); color: var(--texto); }
+.seg-work-head p { margin: 0; color: var(--texto-light); }
+.seg-work-buckets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 14px; background: rgba(139, 34, 82, .09); }
+.seg-work-bucket { min-height: 48px; border: 0; border-radius: 11px; background: transparent; color: #705761; font: 800 .78rem/1.15 Nunito, sans-serif; cursor: pointer; }
+.seg-work-bucket.is-active { background: var(--blanco); color: var(--vino); box-shadow: 0 4px 14px rgba(74, 37, 50, .09); }
+.seg-work-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; margin-left: 4px; padding: 0 5px; border-radius: 7px; background: rgba(139, 34, 82, .10); font-variant-numeric: tabular-nums; }
+.seg-work-priority { margin: 12px 0 9px; padding: 11px 13px; border-left: 4px solid #d36b30; border-radius: 12px; background: #fff0e6; display: flex; justify-content: space-between; align-items: center; }
+.seg-work-priority[hidden] { display: none; }
+.seg-work-priority div { display: grid; gap: 2px; }
+.seg-work-priority span { color: #805e4b; font-size: .82rem; }
+.seguimiento-board, .seguimiento-board.is-detail { display: block; }
+.seguimiento-column { padding: 0; border: 0; background: transparent; box-shadow: none; overflow: visible; }
+.seguimiento-list { display: grid; gap: 9px; max-height: none; overflow: visible; padding: 0; }
+.seg-work-card { padding: 0; border: 1px solid rgba(139, 34, 82, .16); border-radius: 16px; background: rgba(255, 255, 255, .94); overflow: hidden; box-shadow: 0 8px 20px rgba(65, 35, 45, .06); }
+.seg-work-card[hidden] { display: none; }
+.seg-work-card.is-open { border-color: rgba(139, 34, 82, .42); }
+.seg-work-card-toggle { width: 100%; min-height: 64px; padding: 12px 14px; border: 0; background: transparent; color: var(--texto); display: grid; grid-template-columns: 1fr auto; gap: 12px; text-align: left; cursor: pointer; }
+.seg-work-card-toggle > span:first-child { display: grid; gap: 3px; }
+.seg-work-card-toggle strong { font-size: 1rem; line-height: 1.25; }
+.seg-work-card-toggle small { color: var(--texto-light); }
+.seg-work-deadline { color: var(--vino); font-size: .72rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.seg-work-chevron { color: var(--vino); font-size: 1.1rem; transition: transform 160ms ease-out; }
+.seg-work-card.is-open .seg-work-chevron { transform: rotate(180deg); }
+.seg-work-card-detail { padding: 0 14px 14px; display: grid; gap: 10px; }
+.seg-work-card-detail[hidden] { display: none; }
+.seg-work-points-head { display: flex; justify-content: space-between; color: var(--texto-light); font-size: .72rem; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.seg-work-card .seguimiento-checks { display: grid; gap: 7px; }
+.seg-work-card .seguimiento-action-button { width: 100%; min-height: 44px; text-align: left; }
+.seg-work-card .seguimiento-action-button.is-primary { text-align: center; }
+.seg-work-primary-form { grid-template-columns: 1fr; }
+.seg-work-primary-form textarea { min-height: 54px; }
+.seg-work-more-actions { margin-top: 2px; }
+.seg-work-more-actions > summary { min-height: 44px; display: grid; place-items: center; color: var(--vino); font-weight: 800; cursor: pointer; }
+.seg-work-more-panel { display: grid; gap: 10px; padding-top: 8px; }
+.seg-work-waiting { display: grid; gap: 3px; padding: 12px; border-radius: 12px; background: rgba(201, 168, 76, .14); color: #715615; }
+.seg-work-waiting span { font-size: .86rem; }
+.seguimiento-empty { padding: 28px 16px; border-radius: 15px; background: rgba(255, 255, 255, .72); }
+.seg-work-bucket:focus-visible, .seg-work-card-toggle:focus-visible, .seg-work-more-actions > summary:focus-visible { outline: 3px solid rgba(201, 168, 76, .72); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .seguimiento-shell { width: 100%; }
+  .seg-work-head { margin-top: 12px; }
+  .seg-work-buckets { display: flex; overflow-x: auto; scroll-snap-type: x proximity; }
+  .seg-work-bucket { flex: 0 0 104px; scroll-snap-align: start; }
+  .seg-work-card-toggle, .seg-work-card-detail { padding-left: 12px; padding-right: 12px; }
+  .seg-work-card .seguimiento-action-form { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg-work-chevron { transition: none; }
+}
