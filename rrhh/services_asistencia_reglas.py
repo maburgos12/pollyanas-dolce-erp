@@ -87,11 +87,20 @@ def _permiso_aprobado_en_rango(
     )
 
 
-def _vacaciones_aprobadas_en_fecha(empleado: Empleado, fecha: date) -> SolicitudVacaciones | None:
+def _vacaciones_vigentes_en_fecha(empleado: Empleado, fecha: date) -> SolicitudVacaciones | None:
+    """Solicitud de vacaciones que cubre la fecha con reserva viva o goce aprobado.
+
+    Incluye solicitada/preautorizada porque los días ya están reservados en el
+    saldo; si la solicitud se rechaza, el rango se re-evalúa y la falta regresa.
+    """
     return (
         SolicitudVacaciones.objects.filter(
             empleado=empleado,
-            estado=SolicitudVacaciones.ESTADO_APROBADA,
+            estado__in=[
+                SolicitudVacaciones.ESTADO_SOLICITADA,
+                SolicitudVacaciones.ESTADO_PREAUTORIZADA,
+                SolicitudVacaciones.ESTADO_APROBADA,
+            ],
             fecha_inicio__lte=fecha,
             fecha_fin__gte=fecha,
         )
@@ -427,12 +436,14 @@ def _evaluar_hora_extra(asistencia: AsistenciaEmpleado, touched: set[str]) -> tu
 
 
 def _evaluar_falta_sin_registro(empleado: Empleado, fecha: date, touched: set[str]) -> tuple[int, int]:
-    vacaciones = _vacaciones_aprobadas_en_fecha(empleado, fecha)
+    vacaciones = _vacaciones_vigentes_en_fecha(empleado, fecha)
     permiso = None if vacaciones else _permiso_aprobado_en_rango(empleado, fecha)
     estado = IncidenciaAsistencia.ESTADO_CONCILIADO if vacaciones or permiso else IncidenciaAsistencia.ESTADO_PENDIENTE
     detalle = "Falta de registro sin conciliacion."
-    if vacaciones:
+    if vacaciones and vacaciones.estado == SolicitudVacaciones.ESTADO_APROBADA:
         detalle = "Falta de registro conciliada con vacaciones aprobadas."
+    elif vacaciones:
+        detalle = "Falta de registro conciliada con vacaciones en tramite (dias reservados)."
     elif permiso:
         detalle = "Falta de registro conciliada con permiso aprobado."
 

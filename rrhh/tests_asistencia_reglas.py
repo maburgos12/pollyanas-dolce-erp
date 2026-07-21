@@ -459,3 +459,116 @@ class ReglasAsistenciaRRHHTests(TestCase):
                 tipo=IncidenciaAsistencia.TIPO_JORNADA_INCOMPLETA,
             ).exists()
         )
+
+
+class ConexionVacacionesAsistenciaTests(TestCase):
+    """La solicitud de vacaciones (reservada o aprobada) concilia faltas del checador."""
+
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            nombre="Empleada Vacaciones",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2025, 1, 10),
+        )
+
+    def test_falta_sin_registro_se_concilia_con_solicitud_en_tramite(self):
+        fecha = date(2026, 6, 1)
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=fecha,
+            fecha_fin=fecha,
+            dias_laborables=Decimal("1"),
+            motivo="Reserva pendiente de aprobar",
+            estado=SolicitudVacaciones.ESTADO_SOLICITADA,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+        self.assertEqual(falta.solicitud_vacaciones, solicitud)
+        self.assertIn("en tramite", falta.detalle)
+
+    def _crear_periodo_con_saldo(self, dias="12.00"):
+        return PeriodoVacacional.objects.create(
+            empleado=self.empleado,
+            aniversario=date(2026, 1, 10),
+            fecha_limite=date(2026, 7, 10),
+            antiguedad_anios=1,
+            dias_generados=Decimal(dias),
+        )
+
+    def test_captura_retroactiva_concilia_falta_pendiente(self):
+        from django.test import override_settings
+
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones
+
+        fecha = timezone.localdate() - timedelta(days=7)
+        while fecha.weekday() == 6:  # es_dia_laborable excluye domingos
+            fecha -= timedelta(days=1)
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+        )
+        self._crear_periodo_con_saldo()
+
+        with override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True):
+            with self.captureOnCommitCallbacks(execute=True):
+                crear_solicitud_vacaciones(
+                    empleado=self.empleado,
+                    fecha_inicio=fecha,
+                    fecha_fin=fecha,
+                    motivo="Captura retroactiva",
+                )
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+        self.assertIsNotNone(falta.solicitud_vacaciones)
+
+    def test_rechazo_rrhh_regresa_falta_a_pendiente(self):
+        from django.contrib.auth import get_user_model
+        from django.test import override_settings
+
+        from rrhh.services_vacaciones import (
+            crear_solicitud_vacaciones,
+            rechazar_solicitud_vacaciones,
+        )
+
+        fecha = timezone.localdate() - timedelta(days=7)
+        while fecha.weekday() == 6:
+            fecha -= timedelta(days=1)
+        self._crear_periodo_con_saldo()
+        rrhh_user = get_user_model().objects.create_superuser(
+            username="rrhh_admin", password="x", email="rrhh@test.local"
+        )
+
+        with override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True):
+            with self.captureOnCommitCallbacks(execute=True):
+                solicitud = crear_solicitud_vacaciones(
+                    empleado=self.empleado,
+                    fecha_inicio=fecha,
+                    fecha_fin=fecha,
+                    motivo="Captura retroactiva",
+                )
+            falta = IncidenciaAsistencia.objects.get(
+                empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA
+            )
+            self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+
+            with self.captureOnCommitCallbacks(execute=True):
+                rechazar_solicitud_vacaciones(solicitud, rrhh_user)
+
+        falta.refresh_from_db()
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertIsNone(falta.solicitud_vacaciones)
