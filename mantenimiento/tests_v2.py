@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
+from io import StringIO
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
@@ -8,11 +10,12 @@ from django.contrib.auth.models import Group
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import default_storage
+from django.core.management import call_command
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
-from django.urls import resolve
+from django.urls import resolve, reverse
 
 from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
 from core.models import Sucursal, UserModuleAccess, UserProfile
@@ -756,6 +759,80 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         self.client.force_login(limited)
         hidden = self.client.get("/api/mantenimiento/v2/historial/", {"periodo": "todo"}).json()
         self.assertTrue(all(row["costo"] is None for row in hidden["results"]))
+
+    def test_annulled_duplicate_keeps_audit_but_is_excluded_from_history_and_costs(self):
+        valid = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit,
+            tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate(),
+            costo="12287.09",
+            registrado_por=self.actor,
+        )
+        duplicate = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit,
+            tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate() - timedelta(days=4),
+            costo="12287.09",
+            registrado_por=self.actor,
+        )
+
+        self.assertTrue(hasattr(duplicate, "anulado_en"), "Falta trazabilidad formal de anulación")
+        duplicate.anulado_en = timezone.now()
+        duplicate.anulado_por = self.user
+        duplicate.motivo_anulacion = "Duplicado confirmado administrativamente."
+        duplicate.duplicado_de = valid
+        duplicate.save(update_fields=["anulado_en", "anulado_por", "motivo_anulacion", "duplicado_de"])
+
+        history = self.client.get("/api/mantenimiento/v2/historial/", {
+            "tipo": "servicio_unidad", "periodo": "todo", "page_size": 100,
+        }).json()
+        uids = {row["uid"] for row in history["results"]}
+        self.assertIn(f"servicio_unidad:{valid.pk}", uids)
+        self.assertNotIn(f"servicio_unidad:{duplicate.pk}", uids)
+        self.assertEqual(
+            self.client.get(f"/api/mantenimiento/v2/items/servicio_unidad/{duplicate.pk}/").status_code,
+            404,
+        )
+
+        dashboard = self.client.get(reverse("activos:api-dashboard-ejecutivo")).json()
+        self.assertEqual(dashboard["flota"]["servicios_mes"], 1)
+        self.assertEqual(dashboard["flota"]["costo_mes"], 12287.09)
+
+        duplicate.refresh_from_db()
+        self.assertEqual(duplicate.costo, Decimal("12287.09"))
+        self.assertEqual(duplicate.registrado_por, self.actor)
+        self.assertEqual(duplicate.anulado_por, self.user)
+        self.assertEqual(duplicate.duplicado_de, valid)
+
+    def test_guarded_command_annuls_exact_duplicate_with_named_actor_and_is_idempotent(self):
+        valid = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate(), costo="12287.09", registrado_por=self.actor,
+        )
+        duplicate = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type,
+            fecha_servicio=timezone.localdate() - timedelta(days=4), costo="12287.09",
+            registrado_por=self.actor,
+        )
+        output = StringIO()
+        args = {
+            "servicio_id": duplicate.pk,
+            "duplicado_de": valid.pk,
+            "actor_username": self.user.username,
+            "motivo": "Duplicado confirmado por Dirección General.",
+            "apply": True,
+            "stdout": output,
+        }
+
+        call_command("anular_servicio_unidad", **args)
+        call_command("anular_servicio_unidad", **args)
+
+        duplicate.refresh_from_db()
+        self.assertIsNotNone(duplicate.anulado_en)
+        self.assertEqual(duplicate.anulado_por, self.user)
+        self.assertEqual(duplicate.duplicado_de, valid)
+        self.assertEqual(duplicate.costo, Decimal("12287.09"))
+        self.assertIn("ya estaba anulado", output.getvalue())
 
     def test_filters_type_state_scope_search_period_and_stable_pagination(self):
         recent = ServicioRealizadoUnidad.objects.create(

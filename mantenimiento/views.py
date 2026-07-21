@@ -632,7 +632,7 @@ class ServicioListCreateView(generics.ListCreateAPIView):
         return ServicioListSerializer
 
     def get_queryset(self):
-        qs = ServicioRealizadoUnidad.objects.select_related("unidad", "tipo_servicio").order_by("-fecha_servicio", "-id")
+        qs = ServicioRealizadoUnidad.objects.vigentes().select_related("unidad", "tipo_servicio").order_by("-fecha_servicio", "-id")
         unidad = self.request.query_params.get("unidad")
         if unidad:
             qs = qs.filter(unidad_id=unidad)
@@ -1013,7 +1013,7 @@ def resumen_movil(request):
     servicios = []
     vistos = set()
     servicios_qs = (
-        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
+        ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__isnull=False)
         .select_related("unidad", "unidad__sucursal", "tipo_servicio")
         .order_by("proxima_fecha", "id")
     )
@@ -1808,13 +1808,13 @@ def dashboard(request):
     # Servicios de flota — todos con proxima_fecha pendiente, más reciente por unidad+tipo
     from django.db.models import Max
     ultimos_ids = (
-        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
+        ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__isnull=False)
         .values("unidad_id", "tipo_servicio_id")
         .annotate(ultimo_id=Max("id"))
         .values_list("ultimo_id", flat=True)
     )
     servicios_flota = list(
-        ServicioRealizadoUnidad.objects.filter(id__in=ultimos_ids)
+        ServicioRealizadoUnidad.objects.vigentes().filter(id__in=ultimos_ids)
         .select_related("unidad", "unidad__sucursal", "tipo_servicio")
         .order_by("proxima_fecha")[:60]
     )

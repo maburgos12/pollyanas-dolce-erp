@@ -473,13 +473,14 @@ class ServicioRealizadoUnidadAdmin(admin.ModelAdmin):
         "fecha_servicio",
         "km_al_servicio",
         "costo",
+        "anulado_en",
         "proxima_fecha",
         "proximos_km",
     )
-    list_filter = ("tipo_servicio", "unidad")
+    list_filter = ("tipo_servicio", "unidad", "anulado_en")
     search_fields = ("unidad__codigo", "tipo_servicio__nombre", "proveedor", "notas")
-    autocomplete_fields = ("unidad", "tipo_servicio", "registrado_por")
-    readonly_fields = ("fecha_registro", "proxima_fecha", "proximos_km")
+    autocomplete_fields = ("unidad", "tipo_servicio", "registrado_por", "anulado_por", "duplicado_de")
+    readonly_fields = ("fecha_registro", "proxima_fecha", "proximos_km", "anulado_en", "anulado_por", "motivo_anulacion", "duplicado_de")
 
 
 @admin.register(LavadoUnidad)
