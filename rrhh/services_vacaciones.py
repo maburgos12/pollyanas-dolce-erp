@@ -191,6 +191,27 @@ def _registrar_movimiento_legacy(
     )
 
 
+def _reevaluar_asistencia_solicitud(solicitud: SolicitudVacaciones) -> None:
+    """Re-evalúa incidencias de asistencia de los días ya transcurridos del rango.
+
+    Mantiene sincronizado el motor de faltas con el ciclo de vida de la solicitud:
+    una captura retroactiva concilia las faltas de esos días y un rechazo las
+    regresa a pendiente. Se agenda on_commit para leer el estado ya persistido.
+    """
+    fin = min(solicitud.fecha_fin, timezone.localdate())
+    inicio = solicitud.fecha_inicio
+    if inicio > fin:
+        return
+    empleado = solicitud.empleado
+
+    def _correr() -> None:
+        from .services_asistencia_reglas import evaluar_rango_asistencia
+
+        evaluar_rango_asistencia(inicio, fin, empleados=[empleado])
+
+    transaction.on_commit(_correr)
+
+
 def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_fin: date, motivo: str, actor=None) -> SolicitudVacaciones:
     if not empleado or not empleado.activo:
         raise ValidationError("Selecciona un empleado activo.")
@@ -264,6 +285,7 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
                 descripcion=f"Reserva por solicitud {solicitud.folio}",
                 actor=actor_autenticado,
             )
+        _reevaluar_asistencia_solicitud(solicitud)
     return solicitud
 
 
@@ -295,6 +317,7 @@ def preautorizar_solicitud_vacaciones_jefe(
             else:
                 liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
             solicitud.estado = SolicitudVacaciones.ESTADO_RECHAZADA
+            _reevaluar_asistencia_solicitud(solicitud)
         solicitud.save(update_fields=["estado", "preautorizado_por", "fecha_preautorizacion", "actualizado_en"])
     return solicitud
 
@@ -330,6 +353,7 @@ def aprobar_solicitud_vacaciones_rrhh(solicitud: SolicitudVacaciones, user) -> S
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
+        _reevaluar_asistencia_solicitud(solicitud)
     return solicitud
 
 
@@ -465,4 +489,5 @@ def rechazar_solicitud_vacaciones(solicitud: SolicitudVacaciones, user) -> Solic
         solicitud.aprobado_rrhh_por = user
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
+        _reevaluar_asistencia_solicitud(solicitud)
     return solicitud
