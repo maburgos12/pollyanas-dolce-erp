@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260707-mobile-operativo-v7">
-    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
+    <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260721-fecha-mobile-v5">
     <style>
       .compact-item{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:start}.compact-item.no-thumb{grid-template-columns:1fr}.compact-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;background:#eee}.kpi-button{border:0;background:transparent;width:100%;font:inherit;color:inherit;cursor:pointer}.history-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.history-filters label{font-size:.8rem;font-weight:700}.history-filters select{width:100%;margin-top:4px}.history-unit-filter{grid-column:1/-1}.detail-list{display:grid;gap:8px;margin:16px 0}.detail-row{display:grid;grid-template-columns:minmax(100px,35%) 1fr;gap:10px}.timeline{list-style:none;padding:0}.timeline li{padding:0 0 16px 18px;border-left:2px solid #ddd;position:relative}.timeline li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:#8b2252}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gallery button{border:0;padding:0;background:none}.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.image-viewer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.94);display:grid;place-items:center;padding:56px 12px 12px}.image-viewer img{max-width:100%;max-height:100%;object-fit:contain}.viewer-close{position:absolute;right:8px;top:max(8px,env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;border:0;font-size:28px}.error-state{padding:20px;text-align:center}.skeleton{min-height:100px;background:#eee;animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.55}}
       @media (prefers-reduced-motion: reduce) { .image-viewer, .detail-list, .gallery, .skeleton { animation: none !important; transition: none !important; } }
@@ -1054,28 +1054,28 @@
                 <option value="unidad">Flota</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field servicio-scope-field" id="servicio-sucursal-field">
               <label for="servicio-sucursal">Sucursal</label>
               <select id="servicio-sucursal" name="sucursal_id">
                 <option value="">Selecciona</option>
                 ${state.sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join("")}
               </select>
             </div>
-            <div class="field servicio-field servicio-activo">
+            <div class="field servicio-scope-field" id="servicio-activo-field">
               <label for="servicio-activo">Activo / equipo</label>
               <select id="servicio-activo" name="activo_id">
                 <option value="">Selecciona si aplica</option>
                 ${state.activos.map((a) => `<option value="${a.id}">${esc(a.codigo)} · ${esc(a.nombre)}</option>`).join("")}
               </select>
             </div>
-            <div class="field servicio-field servicio-unidad" hidden>
+            <div class="field servicio-scope-field" id="servicio-unidad-field" hidden>
               <label for="servicio-unidad">Unidad logística</label>
               <select id="servicio-unidad" name="unidad_id">
                 <option value="">Selecciona si aplica</option>
                 ${state.unidades.map((u) => `<option value="${u.id}">${esc(u.codigo)} · ${esc(u.descripcion)}</option>`).join("")}
               </select>
             </div>
-            <div class="field servicio-field servicio-instalacion" hidden>
+            <div class="field servicio-scope-field" id="servicio-instalacion-field" hidden>
               <label for="servicio-instalacion">Instalación</label>
               <select id="servicio-instalacion" name="instalacion_categoria">${(c.instalacion_categorias || []).map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("")}</select>
             </div>
@@ -1103,16 +1103,19 @@
             <button class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
           </section>
         `));
+        actualizarAlcanceServicio(document.getElementById("servicio-alcance")?.value || "activo");
       }
 
       async function guardarServicioMovil() {
+        const alcance = document.getElementById("servicio-alcance")?.value || "activo";
+        const esFlota = alcance === "unidad";
         const payload = {
           modo_servicio: document.getElementById("servicio-modo")?.value,
-          alcance: document.getElementById("servicio-alcance")?.value,
-          sucursal_id: document.getElementById("servicio-sucursal")?.value,
-          activo_id: document.getElementById("servicio-activo")?.value,
-          unidad_id: document.getElementById("servicio-unidad")?.value,
-          instalacion_categoria: document.getElementById("servicio-instalacion")?.value,
+          alcance,
+          sucursal_id: esFlota ? null : document.getElementById("servicio-sucursal")?.value,
+          activo_id: alcance === "activo" ? document.getElementById("servicio-activo")?.value : null,
+          unidad_id: esFlota ? document.getElementById("servicio-unidad")?.value : null,
+          instalacion_categoria: alcance === "instalacion" ? document.getElementById("servicio-instalacion")?.value : null,
           fecha_objetivo: document.getElementById("servicio-fecha")?.value,
           proveedor_servicio: document.getElementById("servicio-proveedor")?.value,
           descripcion: document.getElementById("servicio-descripcion")?.value,
@@ -1130,10 +1133,23 @@
         showScreen("pendientes");
       }
 
+      function setServicioFieldState(fieldId, visible, required = false) {
+        const field = document.getElementById(fieldId);
+        if (!field) return;
+        field.hidden = !visible;
+        field.querySelectorAll("input, select, textarea").forEach((control) => {
+          control.disabled = !visible;
+          control.required = visible && required;
+          if (!visible) control.setCustomValidity("");
+        });
+      }
+
       function actualizarAlcanceServicio(alcance) {
-        document.querySelectorAll(".servicio-field").forEach((el) => { el.hidden = true; });
-        const visible = document.querySelector(`.servicio-${alcance || "activo"}`);
-        if (visible) visible.hidden = false;
+        const esFlota = alcance === "unidad";
+        setServicioFieldState("servicio-sucursal-field", !esFlota, !esFlota);
+        setServicioFieldState("servicio-activo-field", alcance === "activo", alcance === "activo");
+        setServicioFieldState("servicio-unidad-field", esFlota, esFlota);
+        setServicioFieldState("servicio-instalacion-field", alcance === "instalacion", alcance === "instalacion");
       }
 
       async function renderNuevoReporteUnidad(error = "") {
@@ -2353,7 +2369,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-cierre-costo-v3", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

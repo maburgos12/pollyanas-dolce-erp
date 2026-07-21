@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-cierre-costo-v3", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -267,6 +267,30 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "formatCurrency(item.costo)")
         self.assertContains(app, ".history-unit-filter{grid-column:1/-1}")
         self.assertContains(app, '<label class="history-unit-filter">Unidad')
+
+    def test_pwa_service_scope_hides_and_disables_irrelevant_fields(self):
+        self.client.force_login(self.mantenimiento)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+        mobile_theme = (Path(settings.BASE_DIR) / "static/operacion/app_theme.css").read_text()
+
+        self.assertIn('id="servicio-sucursal-field"', source)
+        self.assertIn(
+            '<div class="field servicio-scope-field" id="servicio-sucursal-field">\n'
+            '              <label for="servicio-sucursal">Sucursal</label>',
+            source,
+        )
+        self.assertIn('id="servicio-activo-field"', source)
+        self.assertIn('id="servicio-unidad-field"', source)
+        self.assertIn('id="servicio-instalacion-field"', source)
+        self.assertIn("setServicioFieldState", source)
+        self.assertIn('const esFlota = alcance === "unidad";', source)
+        self.assertIn("sucursal_id: esFlota ? null", source)
+        self.assertIn("activo_id: alcance === \"activo\"", source)
+        self.assertIn("instalacion_categoria: alcance === \"instalacion\"", source)
+        self.assertIn('input[type="date"]', mobile_theme)
+        self.assertIn("min-inline-size: 0", mobile_theme)
+        self.assertIn("max-inline-size: 100%", mobile_theme)
 
     def test_pwa_does_not_duplicate_api_prefix_for_v2_requests(self):
         self.client.force_login(self.mantenimiento)
@@ -551,6 +575,27 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertTrue(ReporteFalla.objects.filter(titulo="Fuga en tarja").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion="Programar cambio de empaque").exists())
         self.assertTrue(ReporteUnidad.objects.filter(descripcion="Falla reportada desde mantenimiento móvil.").exists())
+
+    def test_mobile_fleet_service_does_not_require_branch(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/servicios-puntuales/",
+            {
+                "modo_servicio": "pendiente",
+                "alcance": "unidad",
+                "unidad_id": self.other_unidad.id,
+                "fecha_objetivo": (timezone.localdate() + timedelta(days=7)).isoformat(),
+                "descripcion": "Revisión móvil sin sucursal artificial.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        servicio = ServicioRealizadoUnidad.objects.get(
+            tipo_servicio__nombre="Revisión móvil sin sucursal artificial."
+        )
+        self.assertEqual(servicio.unidad, self.other_unidad)
 
     def test_quick_asset_keeps_creator_and_exposes_author_name(self):
         self.client.force_login(self.user)
