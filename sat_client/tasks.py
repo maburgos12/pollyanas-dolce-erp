@@ -42,27 +42,41 @@ def _tipo_cfdi_desde_direccion(direccion: str) -> str:
     return CfdiDescargado.TIPO_EMITIDO if direccion == SolicitudDescarga.DIRECCION_EMITIDOS else CfdiDescargado.TIPO_RECIBIDO
 
 
+# Rechazos definitivos del SAT: 5004 = sin CFDIs en el periodo (resultado final),
+# 5002 = cuota "de por vida" agotada. Reintentarlos quema cuota sin poder prosperar.
+CODIGOS_RECHAZO_DEFINITIVO = ("5002", "5004")
+
+
 def _solicitud_periodo_registrada(fecha_inicial: date, fecha_final: date, direccion: str) -> bool:
     rfc = (getattr(settings, "SAT_RFC", "") or "").strip().upper()
     if not rfc:
         return False
-    return (
-        SolicitudDescarga.objects.filter(
-            fecha_inicial=fecha_inicial,
-            fecha_final=fecha_final,
-            rfc_solicitante=rfc,
-            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
-            direccion=direccion,
+    # Cobertura por rango: una solicitud mensual (backfill) cubre sus dias.
+    base = SolicitudDescarga.objects.filter(
+        fecha_inicial__lte=fecha_inicial,
+        fecha_final__gte=fecha_final,
+        rfc_solicitante=rfc,
+        tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+        direccion=direccion,
+    )
+    activa = (
+        base.filter(
             estado__in=[
                 SolicitudDescarga.ESTADO_ACEPTADA,
                 SolicitudDescarga.ESTADO_EN_PROCESO,
                 SolicitudDescarga.ESTADO_TERMINADA,
-            ],
+            ]
         )
         .exclude(id_solicitud="")
         .exclude(id_solicitud__isnull=True)
         .exists()
     )
+    if activa:
+        return True
+    return base.filter(
+        estado=SolicitudDescarga.ESTADO_RECHAZADA,
+        codigo_estado__in=CODIGOS_RECHAZO_DEFINITIVO,
+    ).exists()
 
 
 def _alertar_error(mensaje: str) -> None:
@@ -90,6 +104,17 @@ def _procesar_periodo_direccion(fecha_inicial: date, fecha_final: date, direccio
         direccion=direccion,
         token=token,
     )
+    if solicitud.estado == SolicitudDescarga.ESTADO_RECHAZADA and not solicitud.id_solicitud:
+        # Rechazo directo del SAT (ej. 5002 cuota agotada): no hay nada que verificar.
+        LogDescargaSat.objects.create(
+            nivel=LogDescargaSat.NIVEL_WARN,
+            mensaje=(
+                f"SAT rechazo solicitud {direccion} {fecha_inicial:%Y-%m-%d}: "
+                f"codigo={solicitud.codigo_estado} {solicitud.error_detalle or ''}".strip()
+            ),
+            solicitud=solicitud,
+        )
+        return {"solicitud_id": "", "descargados": 0, "nuevos": 0}
     if solicitud.estado != SolicitudDescarga.ESTADO_TERMINADA:
         solicitud = verificar_hasta_terminar(solicitud)
 
@@ -147,46 +172,54 @@ def ejecutar_descarga_sat_nocturna(self):
     periodos = periodos_diarios_a_descargar(meses_atras)
     resultados: list[dict[str, int | str]] = []
     omitidos = 0
-    try:
-        for fecha_inicial, fecha_final in periodos:
-            for direccion in (SolicitudDescarga.DIRECCION_EMITIDOS, SolicitudDescarga.DIRECCION_RECIBIDOS):
-                if _solicitud_periodo_registrada(fecha_inicial, fecha_final, direccion):
-                    omitidos += 1
-                    continue
+    fallidos: list[str] = []
+    for fecha_inicial, fecha_final in periodos:
+        for direccion in (SolicitudDescarga.DIRECCION_EMITIDOS, SolicitudDescarga.DIRECCION_RECIBIDOS):
+            if _solicitud_periodo_registrada(fecha_inicial, fecha_final, direccion):
+                omitidos += 1
+                continue
+            try:
                 resultados.extend(_procesar_con_split(fecha_inicial, fecha_final, direccion))
-    except SatConfigurationError as exc:
-        mensaje = f"Descarga SAT no configurada: {exc}"
-        LogDescargaSat.objects.create(
-            nivel=LogDescargaSat.NIVEL_ERROR,
-            mensaje=mensaje,
-            duracion_segundos=int(time.monotonic() - inicio),
-        )
-        _alertar_error(mensaje)
-        return {"status": "configuracion_incompleta", "error": str(exc)}
-    except SatServiceError as exc:
-        mensaje = f"Error SAT: {exc}"
-        LogDescargaSat.objects.create(
-            nivel=LogDescargaSat.NIVEL_ERROR,
-            mensaje=mensaje,
-            duracion_segundos=int(time.monotonic() - inicio),
-        )
-        _alertar_error(mensaje)
-        raise self.retry(exc=exc)
+            except SatConfigurationError as exc:
+                mensaje = f"Descarga SAT no configurada: {exc}"
+                LogDescargaSat.objects.create(
+                    nivel=LogDescargaSat.NIVEL_ERROR,
+                    mensaje=mensaje,
+                    duracion_segundos=int(time.monotonic() - inicio),
+                )
+                _alertar_error(mensaje)
+                return {"status": "configuracion_incompleta", "error": str(exc)}
+            except SatServiceError as exc:
+                # Un dia fallido no debe bloquear el resto del run: registrar y seguir.
+                detalle = f"{direccion} {fecha_inicial:%Y-%m-%d}: {exc}"
+                fallidos.append(detalle)
+                LogDescargaSat.objects.create(
+                    nivel=LogDescargaSat.NIVEL_ERROR,
+                    mensaje=f"Error SAT en {detalle}",
+                )
 
     descargados = sum(int(item["descargados"]) for item in resultados)
     nuevos = sum(int(item["nuevos"]) for item in resultados)
     duracion = int(time.monotonic() - inicio)
     LogDescargaSat.objects.create(
         nivel=LogDescargaSat.NIVEL_INFO,
-        mensaje=f"Descarga SAT nocturna finalizada: {nuevos}/{descargados} CFDIs nuevos, {omitidos} dias omitidos",
+        mensaje=(
+            f"Descarga SAT nocturna finalizada: {nuevos}/{descargados} CFDIs nuevos, "
+            f"{omitidos} dias omitidos, {len(fallidos)} fallidos"
+        ),
         cfdis_descargados=descargados,
         cfdis_nuevos=nuevos,
         duracion_segundos=duracion,
     )
+    if fallidos:
+        _alertar_error(
+            "Descarga SAT nocturna con periodos fallidos:\n" + "\n".join(fallidos)
+        )
     return {
         "status": "ok",
         "periodos": len(periodos),
         "omitidos": omitidos,
+        "fallidos": len(fallidos),
         "descargados": descargados,
         "nuevos": nuevos,
         "duracion_segundos": duracion,

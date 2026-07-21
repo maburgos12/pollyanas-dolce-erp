@@ -56,6 +56,62 @@ class SatTaskRegisteredPeriodTests(TestCase):
         )
 
 
+class SatTaskRechazoDefinitivoTests(TestCase):
+    @override_settings(SAT_RFC="AAA010101AAA")
+    def test_rechazo_5004_cuenta_como_registrado(self):
+        SolicitudDescarga.objects.create(
+            fecha_inicial=date(2026, 4, 5),
+            fecha_final=date(2026, 4, 5),
+            rfc_solicitante="AAA010101AAA",
+            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+            direccion=SolicitudDescarga.DIRECCION_EMITIDOS,
+            estado=SolicitudDescarga.ESTADO_RECHAZADA,
+            codigo_estado="5004",
+        )
+
+        self.assertTrue(
+            _solicitud_periodo_registrada(
+                date(2026, 4, 5), date(2026, 4, 5), SolicitudDescarga.DIRECCION_EMITIDOS
+            )
+        )
+
+    @override_settings(SAT_RFC="AAA010101AAA")
+    def test_rechazo_con_otro_codigo_no_cuenta(self):
+        SolicitudDescarga.objects.create(
+            fecha_inicial=date(2026, 4, 5),
+            fecha_final=date(2026, 4, 5),
+            rfc_solicitante="AAA010101AAA",
+            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+            direccion=SolicitudDescarga.DIRECCION_EMITIDOS,
+            estado=SolicitudDescarga.ESTADO_RECHAZADA,
+            codigo_estado="300",
+        )
+
+        self.assertFalse(
+            _solicitud_periodo_registrada(
+                date(2026, 4, 5), date(2026, 4, 5), SolicitudDescarga.DIRECCION_EMITIDOS
+            )
+        )
+
+    @override_settings(SAT_RFC="AAA010101AAA")
+    def test_solicitud_mensual_cubre_dias_interiores(self):
+        SolicitudDescarga.objects.create(
+            id_solicitud="backfill-enero",
+            fecha_inicial=date(2026, 1, 1),
+            fecha_final=date(2026, 1, 31),
+            rfc_solicitante="AAA010101AAA",
+            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+            direccion=SolicitudDescarga.DIRECCION_RECIBIDOS,
+            estado=SolicitudDescarga.ESTADO_TERMINADA,
+        )
+
+        self.assertTrue(
+            _solicitud_periodo_registrada(
+                date(2026, 1, 15), date(2026, 1, 15), SolicitudDescarga.DIRECCION_RECIBIDOS
+            )
+        )
+
+
 class SatTaskEnabledFlagTests(TestCase):
     @override_settings(SAT_DESCARGA_ENABLED=False)
     def test_task_exits_without_logs_when_disabled(self):
@@ -85,4 +141,32 @@ class SatTaskEnabledFlagTests(TestCase):
             date(2026, 6, 7),
             date(2026, 6, 7),
             SolicitudDescarga.DIRECCION_RECIBIDOS,
+        )
+
+    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1, SAT_RFC="AAA010101AAA")
+    @patch(
+        "sat_client.tasks.periodos_diarios_a_descargar",
+        return_value=[(date(2026, 6, 7), date(2026, 6, 7)), (date(2026, 6, 8), date(2026, 6, 8))],
+    )
+    @patch("sat_client.tasks._alertar_error")
+    @patch("sat_client.tasks._procesar_con_split")
+    def test_un_periodo_fallido_no_aborta_el_run(self, procesar, alertar, _periodos):
+        from sat_client.services.base import SatServiceError
+
+        procesar.side_effect = [
+            SatServiceError("Se han agotado las solicitudes de por vida", code="5002"),
+            [{"solicitud_id": "ok", "descargados": 3, "nuevos": 3}],
+            [{"solicitud_id": "ok2", "descargados": 2, "nuevos": 1}],
+            [{"solicitud_id": "ok3", "descargados": 1, "nuevos": 0}],
+        ]
+
+        result = ejecutar_descarga_sat_nocturna.run()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["fallidos"], 1)
+        self.assertEqual(result["descargados"], 6)
+        self.assertEqual(procesar.call_count, 4)
+        alertar.assert_called_once()
+        self.assertTrue(
+            LogDescargaSat.objects.filter(nivel=LogDescargaSat.NIVEL_ERROR).exists()
         )
