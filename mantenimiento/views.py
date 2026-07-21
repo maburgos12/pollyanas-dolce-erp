@@ -1544,7 +1544,11 @@ def crear_servicio_mantenimiento(request):
         return redirect("mantenimiento:dashboard")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+        unidades = Unidad.objects.filter(activa=True)
+        branch_ids = authorized_branch_ids(request.user)
+        if branch_ids is not None:
+            unidades = unidades.filter(sucursal_id__in=branch_ids)
+        unidad = get_object_or_404(unidades, pk=unidad_id)
         tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
             nombre=descripcion[:100],
             defaults={
