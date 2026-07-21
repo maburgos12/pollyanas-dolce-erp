@@ -1176,10 +1176,6 @@ def crear_servicio_movil(request):
         return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
 
     branch_ids = authorized_branch_ids(request.user)
-    sucursales = Sucursal.objects.filter(activa=True)
-    if branch_ids is not None:
-        sucursales = sucursales.filter(pk__in=branch_ids)
-    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
     if not fecha_objetivo:
         fecha_objetivo = timezone.localdate()
@@ -1189,7 +1185,10 @@ def crear_servicio_movil(request):
     costo_total = _parse_decimal(request.data.get("costo_total")) or Decimal("0")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad_id")), activa=True, sucursal=sucursal)
+        unidades = Unidad.objects.filter(activa=True)
+        if branch_ids is not None:
+            unidades = unidades.filter(sucursal_id__in=branch_ids)
+        unidad = get_object_or_404(unidades, pk=_safe_int(request.data.get("unidad_id")))
         tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
             nombre=descripcion[:100],
             defaults={"tipo_intervalo": TipoServicioUnidad.INTERVALO_TIEMPO, "activo": True},
@@ -1206,6 +1205,10 @@ def crear_servicio_movil(request):
         )
         return Response(ServicioListSerializer(servicio).data, status=201)
 
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     proveedor_obj = _ensure_provider(proveedor_nombre)
     if alcance == "instalacion":
         activo_obj = _get_installation_asset(

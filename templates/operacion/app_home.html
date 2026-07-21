@@ -16,7 +16,7 @@
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
   <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260708-mobile-polish-v4">
   <link rel="stylesheet" href="/static/css/template_modules/templates-operacion-app-home.css?v=20260711-pull-refresh-v3">
-  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-mobile-polish-v4">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260721-fecha-mobile-v5">
 </head>
 <body class="operacion-app-body">
   <div class="pull-refresh" aria-hidden="true">Actualizar</div>
@@ -92,7 +92,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260711-pull-refresh-v3", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260721-fecha-mobile-v4", { scope: "/app/" }).catch(function () {});
     }
     (function () {
       var startY = 0;
