@@ -212,7 +212,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
         self.assertContains(response, 'reportMaintenanceInitFailure')
         self.assertContains(response, 'class="mant-money-prefix"')
-        self.assertContains(response, 'v=20260707-mant-tabs-row-v10')
+        self.assertContains(response, 'v=20260721-mantenimiento-pruebas-v3')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
 
     def test_pwa_shows_order_traceability_fields(self):
@@ -1234,8 +1234,8 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         service_worker = (Path(settings.BASE_DIR) / "static/erp-sw.js").read_text()
         searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
-        self.assertIn("20260715-mantenimiento-guardar-v16", base)
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
-        self.assertIn("pollyanas-erp-shell-v16-mantenimiento-guardar", service_worker)
+        self.assertIn("20260721-mantenimiento-pruebas-v19", base)
+        self.assertIn("pollyanas-erp-shell-v19-mantenimiento-pruebas", service_worker)
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)

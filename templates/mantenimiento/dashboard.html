@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260715-mantenimiento-guardar-v2">
+<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260721-mantenimiento-pruebas-v3">
 {% endblock %}
 
 {% block content %}
@@ -658,10 +658,16 @@
           </div>
         </div>
         <label class="mant-field">Cotización
-          <input class="mant-input" name="costo_estimado" id="mantDrawerEstimated" type="number" min="0" step="0.01" placeholder="0.00">
+          <span class="mant-money-field">
+            <span class="mant-money-prefix" aria-hidden="true">$</span>
+            <input class="mant-input mant-money-input" name="costo_estimado" id="mantDrawerEstimated" type="number" min="0" step="0.01" placeholder="0.00">
+          </span>
         </label>
         <label class="mant-field">Costo final / factura
-          <input class="mant-input" name="costo_real" id="mantDrawerReal" type="number" min="0" step="0.01" placeholder="0.00">
+          <span class="mant-money-field">
+            <span class="mant-money-prefix" aria-hidden="true">$</span>
+            <input class="mant-input mant-money-input" name="costo_real" id="mantDrawerReal" type="number" min="0" step="0.01" placeholder="0.00">
+          </span>
         </label>
         <label class="mant-field full">Comentario de avance
           <textarea class="mant-input" name="comentario" placeholder="Diagnóstico, autorización, proveedor, folio de factura o cierre del trabajo."></textarea>
@@ -910,6 +916,30 @@
 
 {% block extra_js %}
 <script>
+function reportMaintenanceInitFailure(scope, missingIds) {
+  const message = `[mantenimiento] ${scope} sin inicializar. Faltan nodos: ${missingIds.join(", ")}`;
+  console.error(message);
+  if (document.getElementById("mantInitError")) return;
+  const shell = document.querySelector(".module-shell.bi-shell");
+  if (!shell) return;
+  const alert = document.createElement("div");
+  alert.id = "mantInitError";
+  alert.className = "alert alert-danger";
+  alert.textContent = "Mantenimiento cargó incompleto. Recarga la página; si sigue igual, reporta a sistemas.";
+  shell.insertAdjacentElement("afterbegin", alert);
+}
+
+function requireElements(scope, elementMap) {
+  const missing = Object.entries(elementMap)
+    .filter(([, element]) => !element)
+    .map(([key]) => key);
+  if (missing.length) {
+    reportMaintenanceInitFailure(scope, missing);
+    return null;
+  }
+  return elementMap;
+}
+
 // ── Tab switching ──
 (() => {
   const tabs = document.querySelectorAll("[data-tab]");
@@ -921,13 +951,31 @@
     try { sessionStorage.setItem("mant_tab", tabId); } catch(e) {}
   }
 
+  function syncTabFromHash() {
+    const hash = location.hash.replace("#", "");
+    if (hash && document.getElementById(hash)) {
+      activateTab(hash);
+      return true;
+    }
+    return false;
+  }
+
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+    tab.addEventListener("click", (event) => {
+      event.preventDefault();
+      const tabId = tab.dataset.tab;
+      if (location.hash === `#${tabId}`) {
+        activateTab(tabId);
+        return;
+      }
+      location.hash = tabId;
+    });
   });
 
+  window.addEventListener("hashchange", syncTabFromHash);
+
   // Restore on load or activate from URL hash
-  const hash = location.hash.replace("#", "");
-  const saved = (hash && document.getElementById(hash)) ? hash : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
+  const saved = syncTabFromHash() ? null : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
   if (saved && document.getElementById(saved)) {
     activateTab(saved);
   } else {
@@ -972,6 +1020,11 @@
   const date = document.getElementById("mantDrawerDate");
   const latestBlock = document.getElementById("mantDrawerLatestBlock");
   const latestNote = document.getElementById("mantDrawerLatestNote");
+  if (!requireElements("drawer-seguimiento", {
+    drawer, form, title, meta, status, provider, estimated, real, asset, assetField,
+    descBlock, descBox, evidence, photo, photoLink, reporter, area, category,
+    priority, date, latestBlock, latestNote,
+  })) return;
 
   function setFact(element, value) {
     if (element) element.textContent = (value || "").trim() || "-";
@@ -1008,13 +1061,15 @@
 	    }
 	    if (photo && photoLink) {
 	      if (photoUrl) {
-	        photo.src = photoUrl;
-	        photoLink.href = photoUrl;
-	        photoLink.classList.remove("pd-is-hidden");
-	      } else {
+        photo.src = photoUrl;
+        photoLink.href = photoUrl;
+        photoLink.classList.remove("pd-is-hidden");
+        evidence.classList.remove("is-without-photo");
+      } else {
 	        photo.removeAttribute("src");
-	        photoLink.removeAttribute("href");
-	        photoLink.classList.add("pd-is-hidden");
+        photoLink.removeAttribute("href");
+        photoLink.classList.add("pd-is-hidden");
+        evidence.classList.add("is-without-photo");
 	      }
 	    }
     setFact(reporter, button.dataset.reporter);
@@ -1042,8 +1097,10 @@
 
   if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
-  document.querySelectorAll("[data-open-follow]").forEach((button) => {
-    button.addEventListener("click", () => openDrawer(button));
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-open-follow]");
+    if (!button) return;
+    openDrawer(button);
   });
   document.querySelectorAll("[data-close-drawer]").forEach((button) => {
     button.addEventListener("click", () => drawer.classList.remove("is-open"));
@@ -1071,12 +1128,15 @@
   const motivoInput = document.getElementById("mantMotivoInput");
   const submitBtn = document.getElementById("mantCancelarSubmit");
   const cerrar = document.getElementById("mantCancelarCerrar");
-  if (!modal || !form) return;
+  if (!requireElements("cancelacion-seguimiento", {
+    modal, form, titulo, label, motivoBlock, motivoInput, submitBtn, cerrar,
+  })) return;
 
-  document.querySelectorAll("[data-open-cancelar]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const esDG = btn.dataset.esDg === "1";
-      form.action = btn.dataset.action;
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-open-cancelar]");
+    if (!btn) return;
+    const esDG = btn.dataset.esDg === "1";
+    form.action = btn.dataset.action;
 	      if (esDG) {
 	        titulo.textContent = "Eliminar reporte";
 	        label.textContent = `¿Confirmas eliminar "${btn.dataset.label}"? Esta acción no se puede deshacer.`;
@@ -1092,7 +1152,6 @@
         submitBtn.textContent = "Enviar solicitud";
       }
       modal.classList.add("is-open");
-    });
   });
   cerrar.addEventListener("click", () => modal.classList.remove("is-open"));
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("is-open"); });
@@ -1102,9 +1161,11 @@
 (() => {
   const modal = document.getElementById("modalNuevaFalla");
   const btnAbrir = document.getElementById("btnNuevaFalla");
-  if (!modal || !btnAbrir) return;
+  if (!requireElements("nueva-falla", { modal, btnAbrir })) return;
 
-  btnAbrir.addEventListener("click", () => modal.classList.add("is-open"));
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#btnNuevaFalla")) modal.classList.add("is-open");
+  });
 
   document.querySelectorAll("[data-close-nueva-falla]").forEach((btn) => {
     btn.addEventListener("click", () => modal.classList.remove("is-open"));
@@ -1124,7 +1185,6 @@
   const modal = document.getElementById("modalOrdenServicio");
   const btnRealizado = document.getElementById("btnServicioRealizado");
   const btnPendiente = document.getElementById("btnServicioPendiente");
-  if (!modal || !btnRealizado || !btnPendiente) return;
 
   const modoInput = document.getElementById("ordenServicioModo");
   const titulo = document.getElementById("modalOrdenServicioTitulo");
@@ -1147,6 +1207,11 @@
   const form = document.getElementById("ordenServicioForm");
   const error = document.getElementById("ordenServicioError");
   const submit = document.getElementById("ordenServicioSubmit");
+  if (!requireElements("orden-servicio", {
+    modal, btnRealizado, btnPendiente, modoInput, titulo, subtitulo, fechaLabel, fecha,
+    tipo, origen, alcance, sucursal, sucursalField, activo, instalacion, unidad,
+    activoField, instalacionField, unidadField, cierreBlock, cerrar, form, error, submit,
+  })) return;
   const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
   const activoOnly = modal.querySelectorAll("[data-activo-only]");
   const instalacionCategorias = new Set([
@@ -1353,8 +1418,10 @@
     submit.disabled = true;
     submit.textContent = "Guardando…";
   });
-  btnRealizado.addEventListener("click", () => open("realizado"));
-  btnPendiente.addEventListener("click", () => open("pendiente"));
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#btnServicioRealizado")) open("realizado");
+    if (event.target.closest("#btnServicioPendiente")) open("pendiente");
+  });
   document.querySelectorAll("[data-close-orden-servicio]").forEach((button) => {
     button.addEventListener("click", () => modal.classList.remove("is-open"));
   });
