@@ -48,3 +48,26 @@ class DescargarSatMesCommandTests(TestCase):
     def test_mes_invalido_lanza_error(self):
         with self.assertRaises(CommandError):
             call_command("descargar_sat_mes", "--mes", "enero")
+
+    @patch("sat_client.management.commands.descargar_sat_mes.time.sleep")
+    @patch("sat_client.management.commands.descargar_sat_mes._procesar_con_split")
+    def test_error_transitorio_reintenta_y_continua_con_los_demas(self, procesar, _sleep):
+        from sat_client.services.base import SatServiceError
+
+        procesar.side_effect = [
+            SatServiceError("Error no controlado.", code="404"),
+            SatServiceError("Error no controlado.", code="404"),
+            SatServiceError("Error no controlado.", code="404"),
+            [{"solicitud_id": "ok", "descargados": 2, "nuevos": 2}],
+        ]
+        out, err = StringIO(), StringIO()
+
+        call_command(
+            "descargar_sat_mes", "--mes", "2026-01", "--reintentos", "3",
+            stdout=out, stderr=err,
+        )
+
+        self.assertEqual(procesar.call_count, 4)
+        self.assertIn("emitidos", err.getvalue())
+        self.assertIn("Periodos fallidos", err.getvalue())
+        self.assertIn("2 CFDIs nuevos", out.getvalue())
