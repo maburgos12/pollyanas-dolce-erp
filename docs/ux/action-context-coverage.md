@@ -12,6 +12,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | RRHH / Vacaciones | Crear, conciliar, preautorizar, aprobar y rechazar | Sí, toast y redirect seguro | Sí, `#vac-solicitud-<id>` y `#saldo-empleado-<id>` | `CapitalHumanoServiceTests` | Cubierto |
 | RRHH / Resto de pantallas | Aprobar, autorizar, rechazar, cancelar, guardar | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Seguimiento | Resolver, aprobar, entregar a revisión | No inventariado por pantalla | No | No | Pendiente etapa 2 |
+| Seguimiento / Mi calendario | Editar, completar y eliminar una actividad propia | Sí, conserva el mes y actualiza detalle con toast; confirmación accesible para eliminar | N/A, acción local sobre el calendario | `seguimiento.tests.CalendarioTests` + navegador local | Parcial: solo actividades del calendario |
 | Compras / Recepciones | Cerrar y aplicar inventario desde recepción pendiente o con diferencias | Sí, toast y redirect seguro | Sí, `#recepcion-<id>` | `ComprasOrdenesRecepcionesFiltersTests` + `ERPActionContractTests` | Parcial: solo cierre/aplicación |
 | Compras | Solicitudes, órdenes y demás acciones de recepciones | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Inventario / Ajustes | Aprobar y aplicar ajuste pendiente | Sí, toast y redirect seguro | Sí, `#ajuste-<id>` | `InventarioAjustesApprovalTests` + `ERPActionContractTests` | Parcial: solo aprobación/aplicación |
