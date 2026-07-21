@@ -346,6 +346,16 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=0, minute=10),
         "options": {"timezone": TIME_ZONE},
     },
+    "rrhh-evaluar-asistencia-diaria": {
+        "task": "rrhh.tasks.evaluar_asistencia_diaria",
+        "schedule": crontab(hour=7, minute=0),
+        "options": {"timezone": TIME_ZONE},
+    },
+    "rrhh-auditar-vacaciones-diaria": {
+        "task": "rrhh.tasks.auditar_vacaciones_diaria",
+        "schedule": crontab(hour=7, minute=30),
+        "options": {"timezone": TIME_ZONE},
+    },
     "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
         "schedule": 60 * 60,
