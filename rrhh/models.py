@@ -147,6 +147,11 @@ class Empleado(models.Model):
     banco = models.CharField(max_length=80, blank=True, default="")
     cuenta_clabe = models.CharField(max_length=18, blank=True, default="")
     numero_cuenta = models.CharField(max_length=20, blank=True, default="")
+    exento_checador = models.BooleanField(
+        default=False,
+        help_text="No genera falta automática cuando no hay checada (remoto, oficina sin checador).",
+    )
+    exento_checador_motivo = models.CharField(max_length=120, blank=True, default="")
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

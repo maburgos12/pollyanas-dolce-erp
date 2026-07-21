@@ -605,9 +605,12 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
         )
 
     if not asistencia:
-        creados_falta, actualizados_falta = _evaluar_falta_sin_registro(empleado, fecha, touched)
-        creados += creados_falta
-        actualizados += actualizados_falta
+        # Exento (remoto / oficina sin checador): no se genera falta y, al no
+        # tocar el tipo, el resolver de stale limpia faltas previas del día.
+        if not empleado.exento_checador:
+            creados_falta, actualizados_falta = _evaluar_falta_sin_registro(empleado, fecha, touched)
+            creados += creados_falta
+            actualizados += actualizados_falta
     else:
         creados_entrada, actualizados_entrada = _evaluar_entrada(asistencia, touched)
         creados += creados_entrada
