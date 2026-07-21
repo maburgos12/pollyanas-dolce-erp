@@ -520,6 +520,40 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/dashboard/")
 
+    def test_dg_que_abre_mi_trabajo_es_enviado_al_panel_del_equipo(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.panel", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/")
+
+        self.assertRedirects(response, "/seguimiento/panel/", fetch_redirect_response=False)
+
+    def test_dg_que_abre_minutas_personales_es_enviado_al_panel_filtrado(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.minutas", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertRedirects(response, "/seguimiento/panel/?tab=MINUTA", fetch_redirect_response=False)
+
+    def test_navegacion_dg_apunta_al_panel_y_conserva_filtro_por_tipo(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.nav", password="test12345")
+        dg_user.groups.add(dg_group)
+
+        groups = build_nav_groups(dg_user, "/seguimiento/panel/")
+        mi_trabajo = next(group for group in groups if group["key"] == "mi_trabajo")
+        urls = {item["label"]: item["url"] for item in mi_trabajo["items"]}
+
+        self.assertEqual(mi_trabajo["url"], "/seguimiento/panel/")
+        self.assertEqual(urls["Minutas"], "/seguimiento/panel/?tab=MINUTA")
+        self.assertEqual(urls["Proyectos"], "/seguimiento/panel/?tab=PROYECTO")
+        self.assertEqual(urls["Compromisos"], "/seguimiento/panel/?tab=COMPROMISO")
+
     def test_colaborador_staff_aprueba_paso_designado_desde_mi_trabajo(self):
         ventas, _ = Group.objects.get_or_create(name="VENTAS")
         johana = get_user_model().objects.create_user(

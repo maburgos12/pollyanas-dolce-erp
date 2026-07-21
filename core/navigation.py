@@ -239,11 +239,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     current_path = current_path or ""
     visible_groups = []
     best_match_len = 0
+    es_revisor_seguimiento = can_review_seguimiento_global(user)
+    rutas_panel_dg = {
+        "minutas": "/seguimiento/panel/?tab=MINUTA",
+        "proyectos": "/seguimiento/panel/?tab=PROYECTO",
+        "compromisos": "/seguimiento/panel/?tab=COMPROMISO",
+    }
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
             if not can_view_submodule(user, module, submodule):
                 continue
+            if es_revisor_seguimiento and module == "seguimiento" and submodule in rutas_panel_dg:
+                url = rutas_panel_dg[submodule]
+                prefixes = [url]
             match_len = max((len(prefix) for prefix in prefixes if current_path.startswith(prefix)), default=0)
             best_match_len = max(best_match_len, match_len)
             items.append(
@@ -324,6 +333,8 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
         if items:
             group_url = group.get("url")
+            if es_revisor_seguimiento and group["key"] == "mi_trabajo":
+                group_url = "/seguimiento/panel/"
             group_active = bool(
                 group_url
                 and current_path.rstrip("/") == group_url.rstrip("/")
