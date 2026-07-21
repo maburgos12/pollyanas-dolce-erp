@@ -678,20 +678,82 @@ class PresupuestoRealConsolidacionService:
 
     @staticmethod
     def _build_mant_equipo_index(periodo: date) -> list[dict]:
-        """Órdenes de mantenimiento del mes (activos) con costo, por sucursal
-        y ubicación del activo."""
-        from django.db.models import F as _F
+        """Trabajos concluidos del mes, agrupados por sucursal y ubicación.
+
+        Las órdenes usan únicamente su fecha de cierre. Los reportes históricos
+        cerrados/resueltos usan costo real y, cuando nunca se capturó, conservan
+        el importe estimado con el que ya fueron concluidos.
+        """
+        from datetime import datetime, time
+
+        from django.db.models import DecimalField, F as _F, Q, Value
+        from django.db.models.functions import Coalesce
 
         from activos.models import OrdenMantenimiento
+        from fallas.models import ReporteFalla
 
-        return list(
+        inicio = date(periodo.year, periodo.month, 1)
+        siguiente = date(periodo.year + (periodo.month == 12), 1 if periodo.month == 12 else periodo.month + 1, 1)
+        inicio_dt = timezone.make_aware(datetime.combine(inicio, time.min))
+        siguiente_dt = timezone.make_aware(datetime.combine(siguiente, time.min))
+        acumulado: dict[tuple[str, str], Decimal] = {}
+
+        ordenes = (
             OrdenMantenimiento.objects.filter(
-                creado_en__year=periodo.year, creado_en__month=periodo.month
+                estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+                fecha_cierre__gte=inicio,
+                fecha_cierre__lt=siguiente,
             )
             .annotate(total=_F("costo_repuestos") + _F("costo_mano_obra") + _F("costo_otros"))
+            .filter(total__gt=0)
             .values("activo_ref__sucursal__codigo", "activo_ref__ubicacion")
             .annotate(monto=Sum("total"))
         )
+        for fila in ordenes:
+            clave = (
+                fila["activo_ref__sucursal__codigo"] or "",
+                fila["activo_ref__ubicacion"] or "",
+            )
+            acumulado[clave] = acumulado.get(clave, Decimal("0")) + (fila["monto"] or Decimal("0"))
+
+        cerrados = [ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO]
+        reportes = (
+            ReporteFalla.objects.filter(estatus__in=cerrados)
+            .filter(
+                Q(fecha_cierre__gte=inicio_dt, fecha_cierre__lt=siguiente_dt)
+                | Q(
+                    fecha_cierre__isnull=True,
+                    fecha_resolucion__gte=inicio_dt,
+                    fecha_resolucion__lt=siguiente_dt,
+                )
+            )
+            .annotate(
+                monto_final=Coalesce(
+                    "costo_real",
+                    "costo_estimado",
+                    Value(Decimal("0")),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+            .filter(monto_final__gt=0)
+            .values("sucursal__codigo", "activo_relacionado__ubicacion")
+            .annotate(monto=Sum("monto_final"))
+        )
+        for fila in reportes:
+            clave = (
+                fila["sucursal__codigo"] or "",
+                fila["activo_relacionado__ubicacion"] or "",
+            )
+            acumulado[clave] = acumulado.get(clave, Decimal("0")) + (fila["monto"] or Decimal("0"))
+
+        return [
+            {
+                "activo_ref__sucursal__codigo": sucursal,
+                "activo_ref__ubicacion": ubicacion,
+                "monto": monto,
+            }
+            for (sucursal, ubicacion), monto in sorted(acumulado.items())
+        ]
 
     def _monto_mantenimiento_equipo(
         self, regla: ReglaFuenteRubro, index: list[dict], periodo: date

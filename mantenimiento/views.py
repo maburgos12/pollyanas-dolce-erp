@@ -1298,6 +1298,22 @@ def actualizar_item(request, tipo, pk):
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteFalla.ESTATUS}:
             return Response({"error": "Estatus no válido."}, status=400)
+        estatus_finales = {ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO}
+        finalizando = estatus_anterior not in estatus_finales and estatus in estatus_finales
+        estimado_final = costo_estimado if costo_estimado is not None else reporte.costo_estimado
+        confirmar_estimado = str(request.data.get("confirmar_costo_estimado") or "").strip().lower() in {
+            "1",
+            "true",
+            "si",
+            "sí",
+            "yes",
+            "on",
+        }
+        if finalizando and estimado_final is not None and costo_real is None and not confirmar_estimado:
+            return Response(
+                {"error": "Confirma el importe final o captura uno distinto antes de finalizar."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         now = timezone.now()
         reporte.estatus = estatus
         reporte.asignado_a = request.user
@@ -1324,6 +1340,8 @@ def actualizar_item(request, tipo, pk):
             reporte.costo_estimado = costo_estimado
         if costo_real is not None:
             reporte.costo_real = costo_real
+        elif finalizando and confirmar_estimado:
+            reporte.costo_real = estimado_final
         reporte.save()
         # Si la falla se cierra, restaurar el activo vinculado a OPERATIVO
         if estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO):
