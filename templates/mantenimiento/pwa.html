@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-pwa.css?v=20260707-mobile-operativo-v7">
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
     <style>
-      .compact-item{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:start}.compact-item.no-thumb{grid-template-columns:1fr}.compact-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;background:#eee}.kpi-button{border:0;background:transparent;width:100%;font:inherit;color:inherit;cursor:pointer}.history-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.history-filters label{font-size:.8rem;font-weight:700}.history-filters select{width:100%;margin-top:4px}.detail-list{display:grid;gap:8px;margin:16px 0}.detail-row{display:grid;grid-template-columns:minmax(100px,35%) 1fr;gap:10px}.timeline{list-style:none;padding:0}.timeline li{padding:0 0 16px 18px;border-left:2px solid #ddd;position:relative}.timeline li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:#8b2252}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gallery button{border:0;padding:0;background:none}.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.image-viewer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.94);display:grid;place-items:center;padding:56px 12px 12px}.image-viewer img{max-width:100%;max-height:100%;object-fit:contain}.viewer-close{position:absolute;right:8px;top:max(8px,env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;border:0;font-size:28px}.error-state{padding:20px;text-align:center}.skeleton{min-height:100px;background:#eee;animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.55}}
+      .compact-item{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:start}.compact-item.no-thumb{grid-template-columns:1fr}.compact-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;background:#eee}.kpi-button{border:0;background:transparent;width:100%;font:inherit;color:inherit;cursor:pointer}.history-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.history-filters label{font-size:.8rem;font-weight:700}.history-filters select{width:100%;margin-top:4px}.history-unit-filter{grid-column:1/-1}.detail-list{display:grid;gap:8px;margin:16px 0}.detail-row{display:grid;grid-template-columns:minmax(100px,35%) 1fr;gap:10px}.timeline{list-style:none;padding:0}.timeline li{padding:0 0 16px 18px;border-left:2px solid #ddd;position:relative}.timeline li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:#8b2252}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gallery button{border:0;padding:0;background:none}.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.image-viewer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.94);display:grid;place-items:center;padding:56px 12px 12px}.image-viewer img{max-width:100%;max-height:100%;object-fit:contain}.viewer-close{position:absolute;right:8px;top:max(8px,env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;border:0;font-size:28px}.error-state{padding:20px;text-align:center}.skeleton{min-height:100px;background:#eee;animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.55}}
       @media (prefers-reduced-motion: reduce) { .image-viewer, .detail-list, .gallery, .skeleton { animation: none !important; transition: none !important; } }
     </style>
   </head>
@@ -50,7 +50,7 @@
         bandeja: [],
         bandejaFiltro: "todos",
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
-        history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1, results: [], hasNext: false},
+        history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1, results: [], hasNext: false},
         detailCache: new Map(),
         detailReturn: {screen: "pendientes", uid: null},
         requestGeneration: {inbox: 0, history: 0, detail: 0},
@@ -421,6 +421,13 @@
         const [year, month, day] = String(value).split("-");
         if (!year || !month || !day) return value;
         return `${day}/${month}`;
+      }
+
+      function formatCurrency(value) {
+        if (value === null || value === undefined || value === "") return "";
+        const amount = Number(value);
+        if (!Number.isFinite(amount)) return "";
+        return amount.toLocaleString("es-MX", {style: "currency", currency: "MXN"});
       }
 
       function agendaLabel(item) {
@@ -1286,6 +1293,12 @@
         state.sucursales = res.ok ? await parseListResponse(res) : [];
       }
 
+      async function ensureUnidades() {
+        if (state.unidades.length) return;
+        const res = await apiFetch("/unidades/");
+        state.unidades = res.ok ? await parseListResponse(res) : [];
+      }
+
       function activoCard(activo) {
         const selected = state.equipoDraft.activo === activo.id ? "selected" : "";
         return `
@@ -1517,9 +1530,17 @@
         renderOrdenDetalle();
       }
 
-      function abrirBandejaItemPorUid(uid) {
-        const item = state.bandeja.find((i) => i.uid === uid);
+      async function abrirBandejaItemPorUid(uid) {
+        let item = state.bandeja.find((i) => i.uid === uid);
         if (!item) return showScreen("pendientes");
+        if (!item.estatus) {
+          const origen = uid.startsWith("reporte_unidad:") ? "logistica" : "sucursales";
+          const res = await apiFetch(`/bandeja/?origen=${origen}`);
+          if (!res.ok) return showScreen("pendientes");
+          const data = await res.json();
+          item = (data.items || []).find((row) => row.uid === uid);
+          if (!item) return showScreen("pendientes");
+        }
         if (item.tipo === "orden") return abrirOrden(item.id);
         if (item.tipo === "falla") return renderFallaDetalle(item);
         if (item.tipo === "unidad") return renderUnidadDetalle(item);
@@ -1559,6 +1580,11 @@
               <input id="falla-costo" type="number" step="0.01" min="0" placeholder="0.00" value="${esc(String(item.costo_estimado || ""))}">
             </div>
             <div class="field">
+              <label>Costo final (MXN)</label>
+              <input id="falla-costo-real" type="number" step="0.01" min="0" placeholder="Captúralo solo si cambió" value="${esc(String(item.costo_real || ""))}">
+              <p id="falla-costo-error" class="muted" role="alert"></p>
+            </div>
+            <div class="field">
               <label>Comentario</label>
               <textarea id="falla-comentario" placeholder="Notas del seguimiento"></textarea>
             </div>
@@ -1571,16 +1597,39 @@
         const estatus = document.getElementById("falla-estatus")?.value || "";
         const proveedor = document.getElementById("falla-proveedor")?.value || "";
         const costo = document.getElementById("falla-costo")?.value || "";
+        const costoReal = document.getElementById("falla-costo-real")?.value || "";
         const comentario = document.getElementById("falla-comentario")?.value || "";
+        const finalizando = estatus === "resuelto" || estatus === "cerrado";
+        let confirmarCostoEstimado = false;
+        if (finalizando && costo && !costoReal) {
+          confirmarCostoEstimado = window.confirm(`¿El importe final fue el mismo que el estimado de $${costo}?`);
+          if (!confirmarCostoEstimado) {
+            const error = document.getElementById("falla-costo-error");
+            if (error) error.textContent = "Captura el importe final para terminar el trabajo.";
+            document.getElementById("falla-costo-real")?.focus();
+            return;
+          }
+        }
         const res = await apiFetch(`/bandeja/falla/${id}/actualizar/`, {
-          method: "PATCH",
+          method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_estimado: costo || null, comentario}),
+          body: JSON.stringify({
+            estatus,
+            proveedor_servicio: proveedor,
+            costo_estimado: costo || null,
+            costo_real: costoReal || null,
+            confirmar_costo_estimado: confirmarCostoEstimado,
+            comentario,
+          }),
         });
         if (res.ok) {
           invalidateDetail(`falla:${id}`);
           state.bandeja = [];
           showScreen("pendientes");
+        } else {
+          const payload = await res.json().catch(() => ({}));
+          const error = document.getElementById("falla-costo-error");
+          if (error) error.textContent = payload.error || "No fue posible guardar el seguimiento.";
         }
       }
 
@@ -1614,7 +1663,7 @@
             </div>
             <div class="field">
               <label>Costo real (MXN)</label>
-              <input id="unidad-costo" type="number" step="0.01" min="0" placeholder="0.00">
+              <input id="unidad-costo" type="number" step="0.01" min="0" placeholder="0.00" value="${esc(String(item.costo_real || item.costo_estimado || ""))}">
             </div>
             <div class="field">
               <label>Notas</label>
@@ -1631,7 +1680,7 @@
         const costo = document.getElementById("unidad-costo")?.value || "";
         const comentario = document.getElementById("unidad-comentario")?.value || "";
         const res = await apiFetch(`/bandeja/unidad/${id}/actualizar/`, {
-          method: "PATCH",
+          method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({estatus, proveedor_servicio: proveedor, costo_real: costo || null, comentario}),
         });
@@ -2100,6 +2149,7 @@
         return `<article class="card report-card compact-item no-thumb">
           <div><div class="card-head"><div><p class="card-title">${esc(item.titulo || "Movimiento")}</p><p class="muted">${esc(item.sucursal?.label || "Sin sucursal")} · ${esc(item.sujeto?.label || item.tipo)}</p></div><span class="status-chip">${esc(item.estado)}</span></div>
           <p class="muted card-copy-muted">${esc(item.descripcion || "Sin descripción")}</p>
+          ${item.costo !== null && item.costo !== undefined ? `<p class="history-cost"><strong>Importe:</strong> ${esc(formatCurrency(item.costo))}</p>` : ""}
           <div class="card-actions"><button data-maintenance-uid="${esc(item.parent_uid || item.uid)}">Ver detalle</button></div></div>
         </article>`;
       }
@@ -2108,11 +2158,11 @@
         if (state.historyLoading) return;
         state.historyLoading = true;
         const generation = ++state.requestGeneration.history;
-        await ensureSucursales();
+        await Promise.all([ensureSucursales(), ensureUnidades()]);
         if (generation !== state.requestGeneration.history) { state.historyLoading = false; return; }
         const requestedPage = state.history.page;
         if (!loadMore) render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1><div class="skeleton" aria-label="Cargando historial"></div>`));
-        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&page=${requestedPage}&page_size=25`;
+        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&unidad=${encodeURIComponent(state.history.unidad)}&page=${requestedPage}&page_size=25`;
         let res;
         try { res = await apiV2Fetch(`/historial/?${query}`); }
         catch (error) {
@@ -2128,12 +2178,14 @@
         state.history.page = requestedPage + (state.history.hasNext ? 1 : 0);
         state.historyLoading = false;
         const branchOptions = state.sucursales.map(s => `<option value="${s.id}" ${String(s.id) === String(state.history.sucursal) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("");
+        const unitOptions = state.unidades.map(unit => `<option value="${unit.id}" ${String(unit.id) === String(state.history.unidad) ? "selected" : ""}>${esc(unit.codigo)} · ${esc(unit.descripcion || "Sin descripción")}</option>`).join("");
         return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
           <div class="history-filters" aria-label="Filtros de historial">
             <label>Periodo<select onchange="setHistoryFilter('periodo',this.value)">${[["30d","30 días"],["semana","Semana"],["mes","Mes"],["90d","90 días"],["todo","Todo"]].map(([v,l])=>`<option value="${v}" ${state.history.periodo===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Estado<select onchange="setHistoryFilter('estado',this.value)">${[["todo","Todos"],["abierto","Abierto"],["en_proceso","En proceso"],["cerrado","Cerrado"],["cancelado","Cancelado"]].map(([v,l])=>`<option value="${v}" ${state.history.estado===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Sucursal<select onchange="setHistoryFilter('sucursal',this.value)"><option value="">Todas</option>${branchOptions}</select></label>
+            <label class="history-unit-filter">Unidad<select onchange="setHistoryFilter('unidad',this.value)"><option value="">Todas las unidades</option>${unitOptions}</select></label>
           </div>${state.history.results.map(historyCard).join("") || `<div class="empty">No hay movimientos con estos filtros.</div>`}
           ${state.history.hasNext ? `<button class="secondary-btn" onclick="loadMoreHistory(this)" ${state.historyLoading ? "disabled" : ""}>${state.historyLoading ? "Cargando…" : "Cargar más"}</button>` : ""}`));
       }
@@ -2278,7 +2330,13 @@
       function closeImageViewer(restoreFocus = true){ const viewer=document.getElementById("image-viewer"); const url=viewer?.dataset.objectUrl; viewer?.remove(); if(url){URL.revokeObjectURL(url);state.evidenceObjectUrls.delete(url);} if(restoreFocus) state.viewerReturnFocus?.focus?.(); }
       document.addEventListener("click", event => {
         const detailButton = event.target.closest("[data-maintenance-uid]");
-        if (detailButton) openItemDetail(detailButton.dataset.maintenanceUid, detailButton);
+        if (detailButton) {
+          const uid = detailButton.dataset.maintenanceUid;
+          if (state.pantalla === "pendientes" && state.bandeja.some((item) => item.uid === uid)) {
+            return abrirBandejaItemPorUid(uid);
+          }
+          openItemDetail(uid, detailButton);
+        }
       });
       document.addEventListener("keydown", event => {
         const viewer = document.getElementById("image-viewer");
@@ -2295,7 +2353,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-api-v2-url-v2", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-cierre-costo-v3", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

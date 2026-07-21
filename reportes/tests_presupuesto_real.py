@@ -1,6 +1,6 @@
 """Pruebas de consolidación del real en el presupuesto maestro."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
 
@@ -2721,7 +2721,8 @@ class CombustibleYMantEquipoTests(TestCase):
         for activo, costo in ((horno, "1800"), (vitrina, "999")):
             OrdenMantenimiento.objects.create(
                 activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
-                descripcion="test", costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+                fecha_cierre=date(2026, 7, 10), descripcion="test",
+                costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
             )
         ReglaFuenteRubro.objects.create(
             rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
@@ -2736,6 +2737,34 @@ class CombustibleYMantEquipoTests(TestCase):
 
 class MantEquipoPorSucursalTests(TestCase):
     """La regla por_sucursal hereda la sucursal del rubro."""
+
+    def test_seed_habilita_mantenimiento_concluido_desde_junio_2026(self):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        produccion = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        gastos_venta = AreaPresupuesto.objects.create(nombre="Gastos de venta", codigo="gastos-venta")
+        sucursal = Sucursal.objects.create(nombre="Sucursal Seed ME", codigo="ME-SEED")
+        rubro_produccion = RubroPresupuesto.objects.create(
+            area=produccion,
+            concepto="Mantenimiento equipo/maquinaria",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        rubro_sucursal = RubroPresupuesto.objects.create(
+            area=gastos_venta,
+            concepto="Mantenimiento equipo/maquinaria",
+            sucursal=sucursal,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        for rubro in (rubro_produccion, rubro_sucursal):
+            regla = ReglaFuenteRubro.objects.get(
+                rubro=rubro,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+            )
+            self.assertEqual(regla.filtros["desde"], "2026-06")
 
     def test_cada_sucursal_toma_sus_ordenes(self):
         from activos.models import Activo, OrdenMantenimiento
@@ -2761,13 +2790,73 @@ class MantEquipoPorSucursalTests(TestCase):
         for activo, costo in ((a1, "900"), (a2, "400")):
             OrdenMantenimiento.objects.create(
                 activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
-                descripcion="t", costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+                fecha_cierre=date(2026, 7, 10), descripcion="t",
+                costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
             )
         PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
         for codigo, esperado in (("ME-MTZ", "900.00"), ("ME-LEY", "400.00")):
             linea = LineaPresupuestoMensual.objects.get(pk=lineas[codigo].pk)
             self.assertEqual(linea.monto_real, Decimal(esperado))
             self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
+
+    def test_indice_usa_solo_trabajos_cerrados_en_mes_y_costo_final_historico(self):
+        from django.contrib.auth import get_user_model
+
+        from activos.models import Activo, OrdenMantenimiento
+        from fallas.models import CategoriaFalla, ReporteFalla
+
+        sucursal = Sucursal.objects.create(nombre="Sucursal ME Hist", codigo="ME-HIST")
+        activo = Activo.objects.create(
+            nombre="Refrigerador histórico", ubicacion="PISO VENTA", sucursal=sucursal,
+        )
+        categoria = CategoriaFalla.objects.create(nombre="Refrigeración histórica")
+        usuario = get_user_model().objects.create_user("mantenimiento-historico")
+
+        estimada = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio cerrado estimado", descripcion="Histórico",
+            estatus=ReporteFalla.ESTATUS_CERRADO, costo_estimado=Decimal("300.00"),
+            reportado_por=usuario,
+        )
+        real = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio cerrado real", descripcion="Histórico",
+            estatus=ReporteFalla.ESTATUS_RESUELTO, costo_estimado=Decimal("500.00"),
+            costo_real=Decimal("450.00"), reportado_por=usuario,
+        )
+        abierta = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio todavía abierto", descripcion="No contabilizar",
+            estatus=ReporteFalla.ESTATUS_PROCESO, costo_estimado=Decimal("999.00"),
+            reportado_por=usuario,
+        )
+        ReporteFalla.objects.filter(pk=estimada.pk).update(
+            fecha_cierre=timezone.make_aware(datetime(2026, 7, 7, 12, 0)),
+        )
+        ReporteFalla.objects.filter(pk=real.pk).update(
+            fecha_resolucion=timezone.make_aware(datetime(2026, 7, 8, 12, 0)),
+        )
+        ReporteFalla.objects.filter(pk=abierta.pk).update(
+            fecha_reporte=timezone.make_aware(datetime(2026, 7, 9, 12, 0)),
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA",
+            estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre=date(2026, 7, 10),
+            descripcion="Orden cerrada", costo_repuestos=Decimal("200.00"),
+            costo_mano_obra=0, costo_otros=0,
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA",
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            descripcion="Orden abierta", costo_repuestos=Decimal("777.00"),
+            costo_mano_obra=0, costo_otros=0,
+        )
+
+        rows = PresupuestoRealConsolidacionService._build_mant_equipo_index(date(2026, 7, 1))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["activo_ref__sucursal__codigo"], sucursal.codigo)
+        self.assertEqual(rows[0]["monto"], Decimal("950.00"))
 
 
 class ComplementosClasificadosTests(TestCase):

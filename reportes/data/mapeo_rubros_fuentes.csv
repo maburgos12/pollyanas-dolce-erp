@@ -110,8 +110,8 @@ logistica,Peugeot Manager,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-PM1""}
 logistica,Fiat Ducato,MANTENIMIENTO_UNIDAD,,"{""unidad_codigo"": ""GS-DC1""}",Flotilla: reportes de unidad con costo de servicio,1
 logistica,Diesel,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-DC1"", ""GS-PM1"", ""GS-P1""], ""desde"": ""2026-06""}",Bitácora de cargas: Ducato y Manager (diésel); antes de jul rige el Excel,1
 logistica,Gasolina,COMBUSTIBLE_UNIDAD,,"{""unidades"": [""GS-CH1""], ""desde"": ""2026-06""}",Bitácora de cargas: Cheyenne y Partner (gasolina); antes de jul rige el Excel,1
-produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones_produccion"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de activos en producción/CEDIS/hornos,1
-gastos-venta,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""por_sucursal"": true, ""desde"": ""2026-07""}",Órdenes de mantenimiento de los activos de cada sucursal,1
+produccion,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""ubicaciones_produccion"": true, ""desde"": ""2026-06""}",Trabajos concluidos de órdenes y reportes de falla en producción/CEDIS/hornos; costo real o importe histórico de cierre,1
+gastos-venta,Mantenimiento equipo/maquinaria,MANTENIMIENTO_EQUIPO,,"{""por_sucursal"": true, ""desde"": ""2026-06""}",Trabajos concluidos de órdenes y reportes de falla por sucursal; costo real o importe histórico de cierre,1
 resultados,Venta complementos,VENTA_POS,,"{""clasificacion_catalogo"": [""REVENTA"", ""SERVICIO_ACCESORIO"", ""TOPPING""], ""campo_monto"": ""total_venta""}",P&L: complementos = productos clasificados en el catálogo curado,1
 resultados,Costos complementos,COSTO_REVENTA,,"{""desde"": ""2026-04""}",P&L: unidades x costo reventa desde abril (el Excel solo capturó ene-mar),1
 gastos-venta,Servicios públicos,GASTO_OPERATIVO,SERVICIOS,,Bolsa histórica de servicios por sucursal (capturas sin desglosar),1

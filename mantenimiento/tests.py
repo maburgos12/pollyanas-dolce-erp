@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 import re
 from unittest.mock import patch
@@ -81,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-api-v2-url-v2", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-cierre-costo-v3", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -230,7 +231,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(app, 'const API_V2 = `${API}/v2`;')
         self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
-        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1')
+        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1')
         self.assertContains(app, "detailCache: new Map()")
         self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0}")
         self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
@@ -248,6 +249,24 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "historyLoading: false")
         self.assertContains(app, "const requestedPage = state.history.page")
         self.assertContains(app, "if (state.historyLoading) return")
+
+    def test_pwa_history_can_filter_by_unit_and_show_authorized_costs(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(
+            app,
+            'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1',
+        )
+        self.assertContains(app, "async function ensureUnidades()")
+        self.assertContains(app, "await Promise.all([ensureSucursales(), ensureUnidades()])")
+        self.assertContains(app, 'unidad=${encodeURIComponent(state.history.unidad)}')
+        self.assertContains(app, "setHistoryFilter('unidad',this.value)")
+        self.assertContains(app, "Todas las unidades")
+        self.assertContains(app, "formatCurrency(item.costo)")
+        self.assertContains(app, ".history-unit-filter{grid-column:1/-1}")
+        self.assertContains(app, '<label class="history-unit-filter">Unidad')
 
     def test_pwa_does_not_duplicate_api_prefix_for_v2_requests(self):
         self.client.force_login(self.mantenimiento)
@@ -711,6 +730,56 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_PROCESO)
         self.assertEqual(str(self.falla.costo_estimado), "1250.50")
         self.assertEqual(ReporteFalla.objects.count(), report_count)
+
+    def test_future_close_with_estimate_requires_explicit_final_amount_confirmation(self):
+        self.falla.costo_estimado = Decimal("1250.50")
+        self.falla.save(update_fields=["costo_estimado"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {"estatus": ReporteFalla.ESTATUS_RESUELTO, "comentario": "Trabajo terminado."},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Confirma el importe final", response.json()["error"])
+        self.falla.refresh_from_db()
+        self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_ABIERTO)
+        self.assertIsNone(self.falla.costo_real)
+
+    def test_future_close_can_confirm_estimate_as_final_without_recapturing_it(self):
+        self.falla.costo_estimado = Decimal("1250.50")
+        self.falla.save(update_fields=["costo_estimado"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {
+                "estatus": ReporteFalla.ESTATUS_RESUELTO,
+                "confirmar_costo_estimado": "true",
+                "comentario": "Trabajo terminado por el importe cotizado.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.falla.refresh_from_db()
+        self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_RESUELTO)
+        self.assertEqual(self.falla.costo_real, Decimal("1250.50"))
+
+    def test_pwa_future_close_sends_confirmation_or_explicit_real_cost(self):
+        self.client.force_login(self.user)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn('id="falla-costo-real"', source)
+        self.assertIn("¿El importe final fue el mismo", source)
+        self.assertIn("confirmar_costo_estimado", source)
+        self.assertIn("costo_real: costoReal || null", source)
+        self.assertIn('apiFetch(`/bandeja/falla/${id}/actualizar/`, {\n          method: "POST"', source)
+        self.assertIn('apiFetch(`/bandeja/unidad/${id}/actualizar/`, {\n          method: "POST"', source)
+        self.assertIn('value="${esc(String(item.costo_real || item.costo_estimado || ""))}"', source)
+        self.assertIn('if (state.pantalla === "pendientes" && state.bandeja.some((item) => item.uid === uid))', source)
+        self.assertIn("return abrirBandejaItemPorUid(uid);", source)
 
     def test_followup_uploads_public_evidence_for_falla_timeline(self):
         self.client.force_login(self.user)

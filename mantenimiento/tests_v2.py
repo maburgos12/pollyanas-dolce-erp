@@ -703,6 +703,7 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
         falla = ReporteFalla.objects.create(
             sucursal=self.branch, categoria=self.category, titulo="Falla", descripcion="x",
             reportado_por=self.actor, foto_evidencia="fallas/evidencias/history.jpg",
+            costo_estimado="90.00", costo_real="100.00",
         )
         order = OrdenMantenimiento.objects.create(
             activo_ref=self.asset, origen=OrdenMantenimiento.ORIGEN_EMERGENCIA,
@@ -738,6 +739,7 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
                           (f"servicio_unidad:{service.pk}", "servicio_unidad_factura")):
             self.assertIn(f"/evidencias/{kind}/", rows[uid]["factura"]["url"])
         self.assertEqual(rows[f"orden:{order.pk}"]["costo"], "120.00")
+        self.assertEqual(rows[f"falla:{falla.pk}"]["costo"], "100.00")
 
         direct_repair = ReparacionUnidad.objects.create(
             unidad=self.unit, fecha_ingreso=timezone.localdate(), descripcion_falla="Directa",
