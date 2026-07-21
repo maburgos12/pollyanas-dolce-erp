@@ -1522,13 +1522,113 @@ class CalendarioTests(TestCase):
         propia.refresh_from_db()
         self.assertFalse(propia.activo)
 
-    def test_calendario_no_expone_boton_eliminar_actividad(self):
+    def test_asignado_no_puede_editar_completar_ni_eliminar_evento_del_creador(self):
+        asignada = ActividadCalendario.objects.create(
+            usuario=self.user_b,
+            invitado_user=self.user_b,
+            creado_por=self.user_a,
+            titulo="Asignada por otra persona",
+            fecha=self.hoy,
+        )
+        self.client.force_login(self.user_b)
+
+        editar = self.client.post(
+            f"/seguimiento/calendario/actividades/{asignada.pk}/",
+            {"titulo": "Intento", "fecha": self.hoy.isoformat()},
+        )
+        completar = self.client.post(f"/seguimiento/calendario/actividades/{asignada.pk}/completar/")
+        eliminar = self.client.post(f"/seguimiento/calendario/actividades/{asignada.pk}/eliminar/")
+
+        self.assertEqual(editar.status_code, 404)
+        self.assertEqual(completar.status_code, 404)
+        self.assertEqual(eliminar.status_code, 404)
+
+    def test_evento_asignado_solo_es_editable_para_su_creador(self):
+        asignada = ActividadCalendario.objects.create(
+            usuario=self.user_b,
+            invitado_user=self.user_b,
+            creado_por=self.user_a,
+            titulo="Asignada por otra persona",
+            fecha=self.hoy,
+        )
+
+        evento_asignado = self._eventos(self.user_b).json()["eventos"][0]
+        evento_creador = self._eventos(self.user_a).json()["eventos"][0]
+
+        self.assertFalse(evento_asignado["editable"])
+        self.assertTrue(evento_creador["editable"])
+
+    def test_calendario_usa_numero_de_repeticiones_y_expone_eliminar_actividad(self):
         self.client.force_login(self.user_a)
 
         response = self.client.get("/seguimiento/calendario/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Eliminar")
+        self.assertContains(response, "Número de repeticiones")
+        self.assertContains(response, "Incluye la primera fecha")
+        self.assertContains(response, "Eliminar actividad")
+
+    def test_recurrencia_diaria_omite_domingos(self):
+        from .views import _fechas_recurrentes
+
+        sabado = datetime(2026, 7, 18).date()
+
+        fechas = _fechas_recurrentes(sabado, "DIARIA", 4)
+
+        self.assertEqual(
+            fechas,
+            [
+                datetime(2026, 7, 18).date(),
+                datetime(2026, 7, 20).date(),
+                datetime(2026, 7, 21).date(),
+                datetime(2026, 7, 22).date(),
+            ],
+        )
+
+    def test_recurrencia_mensual_mueve_domingo_al_lunes(self):
+        from .views import _fechas_recurrentes
+
+        fechas = _fechas_recurrentes(datetime(2026, 7, 16).date(), "MENSUAL", 3)
+
+        self.assertEqual(
+            fechas,
+            [
+                datetime(2026, 7, 16).date(),
+                datetime(2026, 8, 17).date(),
+                datetime(2026, 9, 16).date(),
+            ],
+        )
+
+    def test_no_permite_iniciar_una_recurrencia_en_domingo(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Actividad dominical recurrente",
+                "fecha": "2026-07-19",
+                "periodicidad": "SEMANAL",
+                "repeticiones": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("domingo", response.json()["error"].lower())
+
+    def test_permite_actividad_unica_en_domingo(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Excepción dominical",
+                "fecha": "2026-07-19",
+                "periodicidad": "NINGUNA",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ActividadCalendario.objects.filter(titulo="Excepción dominical").exists())
 
     def test_crud_crear_editar_completar_valida_campos(self):
         self.client.force_login(self.user_a)
@@ -1585,6 +1685,9 @@ class CalendarioTests(TestCase):
         self.assertEqual(ActividadCalendario.objects.filter(tipo=ActividadCalendario.TIPO_REUNION).count(), 3)
         self.assertTrue(Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").exists())
         self.assertTrue(Notificacion.objects.filter(usuario=self.dg, titulo__startswith="Reunión:").exists())
+        notificacion = Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").latest("id")
+        self.assertIn("repeticiones", notificacion.mensaje.lower())
+        self.assertNotIn("ocurrencias", notificacion.mensaje.lower())
         send_mail_mock.assert_called()
         whatsapp_mock.assert_called_once()
 
@@ -1597,6 +1700,23 @@ class CalendarioTests(TestCase):
         self.assertEqual(evento_invitado["invitado"], "Usuario B")
         self.assertTrue(evento_invitado["direccion_general"])
         self.assertEqual(evento_creador["source_label"], "Reunión DG")
+
+    def test_validacion_de_repeticiones_usa_lenguaje_comun(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Demasiadas repeticiones",
+                "fecha": "2026-07-20",
+                "periodicidad": "DIARIA",
+                "repeticiones": "27",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repeticiones", response.json()["error"].lower())
+        self.assertNotIn("ocurrencias", response.json()["error"].lower())
 
     def test_validaciones_endpoint_eventos(self):
         self.client.force_login(self.user_a)

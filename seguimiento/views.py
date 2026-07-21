@@ -1539,7 +1539,9 @@ def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
     responsable = _nombre_usuario_legible(actividad.usuario)
     invitado = _nombre_usuario_legible(actividad.invitado_user)
     creador = _nombre_usuario_legible(actividad.creado_por)
-    editable = actividad.usuario_id == request_user.id or actividad.creado_por_id == request_user.id
+    editable = actividad.creado_por_id == request_user.id or (
+        actividad.creado_por_id is None and actividad.usuario_id == request_user.id
+    )
     return {
         "id": f"act-{actividad.pk}",
         "fuente": "actividad",
@@ -1666,13 +1668,21 @@ def _fechas_recurrentes(fecha, periodicidad: str, repeticiones: int):
     if periodicidad == "NINGUNA":
         return [fecha]
     fechas = []
-    for index in range(repeticiones):
-        if periodicidad == "DIARIA":
-            fechas.append(fecha + timedelta(days=index))
-        elif periodicidad == "SEMANAL":
-            fechas.append(fecha + timedelta(days=index * 7))
-        elif periodicidad == "MENSUAL":
-            fechas.append(_sumar_meses(fecha, index))
+    if periodicidad == "DIARIA":
+        fecha_actual = fecha
+        while len(fechas) < repeticiones:
+            if fecha_actual.weekday() != 6:
+                fechas.append(fecha_actual)
+            fecha_actual += timedelta(days=1)
+    else:
+        for index in range(repeticiones):
+            if periodicidad == "SEMANAL":
+                fechas.append(fecha + timedelta(days=index * 7))
+            elif periodicidad == "MENSUAL":
+                fecha_mensual = _sumar_meses(fecha, index)
+                if fecha_mensual.weekday() == 6:
+                    fecha_mensual += timedelta(days=1)
+                fechas.append(fecha_mensual)
     return fechas or [fecha]
 
 
@@ -1687,7 +1697,7 @@ def _periodicidad_post(request):
     except ValueError:
         return None, None, "El número de repeticiones no es válido."
     if repeticiones < 2 or repeticiones > 26:
-        return None, None, "La recurrencia debe estar entre 2 y 26 ocurrencias."
+        return None, None, "El número de repeticiones debe estar entre 2 y 26."
     return periodicidad, repeticiones, None
 
 
@@ -1734,7 +1744,7 @@ def _datos_actividad_post(request):
 
 def _actividad_editable_qs(user):
     return ActividadCalendario.objects.filter(
-        Q(usuario=user) | Q(creado_por=user) | Q(creado_por__isnull=True, usuario=user),
+        Q(creado_por=user) | Q(creado_por__isnull=True, usuario=user),
         activo=True,
     ).distinct()
 
@@ -1760,7 +1770,7 @@ def _notificar_reunion_calendario(actividad: ActividadCalendario, *, actor, tota
         return 0
     fecha = actividad.fecha.strftime("%d/%m/%Y")
     hora = actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else "sin hora definida"
-    extra = f"\nSe crearon {total_ocurrencias} ocurrencias." if total_ocurrencias > 1 else ""
+    extra = f"\nSe crearon {total_ocurrencias} repeticiones." if total_ocurrencias > 1 else ""
     mensaje = f"{actor.get_full_name() or actor.username} creó una reunión para {fecha} a las {hora}.{extra}"
     creadas = crear_notificaciones(
         destinatarios,
@@ -1881,7 +1891,13 @@ def actividad_crear(request):
     periodicidad, repeticiones, error = _periodicidad_post(request)
     if error:
         return JsonResponse({"error": error}, status=400)
-    fechas = _fechas_recurrentes(datos.pop("fecha"), periodicidad, repeticiones)
+    fecha_inicial = datos.pop("fecha")
+    if periodicidad != "NINGUNA" and fecha_inicial.weekday() == 6:
+        return JsonResponse(
+            {"error": "Las actividades en domingo deben registrarse con la opción ‘No se repite’."},
+            status=400,
+        )
+    fechas = _fechas_recurrentes(fecha_inicial, periodicidad, repeticiones)
     usuario = datos.get("invitado_user") or request.user
     actividades = [
         ActividadCalendario.objects.create(usuario=usuario, creado_por=request.user, fecha=fecha, **datos)
@@ -1954,4 +1970,9 @@ def actividad_eliminar(request, pk):
         actividad.pk,
         {"fecha": actividad.fecha.isoformat()},
     )
-    return JsonResponse({"ok": True})
+    return JsonResponse(
+        {
+            "ok": True,
+            "toast": {"type": "success", "message": "Actividad eliminada del calendario."},
+        }
+    )
