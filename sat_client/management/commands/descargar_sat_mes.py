@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -17,9 +17,11 @@ def _rango_mes(mes: str) -> tuple[date, date]:
     except (ValueError, TypeError) as exc:
         raise CommandError(f"Mes invalido '{mes}': usar formato YYYY-MM") from exc
     fin = date(anio, numero, calendar.monthrange(anio, numero)[1])
-    hoy = date.today()
-    if fin >= hoy:
-        fin = hoy  # el SAT no entrega el dia en curso completo
+    ayer = date.today() - timedelta(days=1)
+    if fin > ayer:
+        # No cubrir el dia en curso: quedaria marcado como resuelto y la
+        # descarga nocturna lo saltaria aunque lleguen CFDIs mas tarde.
+        fin = ayer
     if inicio > fin:
         raise CommandError(f"El mes {mes} aun no tiene dias completos que descargar")
     return inicio, fin
