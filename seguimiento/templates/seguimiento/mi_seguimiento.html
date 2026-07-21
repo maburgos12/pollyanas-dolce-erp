@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-mi-seguimiento.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-mi-seguimiento.css?v=20260721-action-inbox-v1">
 {% endblock %}
 
 {% block content %}
@@ -23,83 +23,24 @@
     {% endif %}
   </nav>
 
-  <section class="bi-hero">
-    <div class="bi-hero-main">
-      <div class="bi-kicker">Mi Trabajo</div>
-      <h1 class="bi-hero-title seguimiento-hero-title">{% if active_tipo %}{{ sections.0.title }}{% else %}Resumen general{% endif %}</h1>
-      <p class="bi-copy seguimiento-copy">{% if active_tipo %}Vista detallada de {{ sections.0.title|lower }} asignados a tu usuario.{% else %}Dashboard personal para minutas, proyectos y compromisos asignados.{% endif %}</p>
-      <div class="bi-hero-highlights">
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Trabajos acumulados</div>
-          <div class="bi-hero-highlight-value">{{ metrics.total|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">{{ metrics.abiertos|intcomma }} abiertos · {{ metrics.completados|intcomma }} completados</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Atención inmediata</div>
-          <div class="bi-hero-highlight-value {% if metrics.vencidos %}is-danger{% elif metrics.por_vencer_24h %}is-warning{% else %}is-success{% endif %}">{{ metrics.vencidos|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">{{ metrics.por_vencer_24h|intcomma }} por vencer en 24h</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Cumplidos a tiempo</div>
-          <div class="bi-hero-highlight-value {% if metrics.cumplidos_a_tiempo %}is-success{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Cierres aprobados sin rebasar fecha límite</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Más tiempo solicitado</div>
-          <div class="bi-hero-highlight-value {% if metrics.prorrogas_pendientes %}is-warning{% else %}is-success{% endif %}">{{ metrics.prorrogas_pendientes|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Solicitudes pendientes de revisión</div>
-        </article>
-      </div>
-    </div>
-    <div class="bi-hero-side">
-      <div class="bi-hero-status-grid">
-        <article class="bi-status-card">
-          <span class="bi-status-label">Usuario</span>
-          <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>
-        </article>
-        <article class="bi-status-card">
-          <span class="bi-status-label">Área</span>
-          <strong>{% if empleado %}{{ empleado.area|default:"ERP" }}{% else %}ERP{% endif %}</strong>
-        </article>
-        <article class="bi-status-card">
-          <span class="bi-status-label">Puesto</span>
-          <strong>{% if empleado %}{{ empleado.puesto|default:"Sin puesto" }}{% else %}Usuario ERP{% endif %}</strong>
-        </article>
-        <article class="bi-status-card">
-          <span class="bi-status-label">Sucursal</span>
-          <strong>{% if empleado %}{{ empleado.sucursal|default:"ERP" }}{% else %}ERP{% endif %}</strong>
-        </article>
-      </div>
-      <div class="bi-summary-band">
-        <div class="bi-summary-chip"><span>Fuente</span><strong>Agente DG y ERP</strong></div>
-        <div class="bi-summary-chip"><span>Revisión</span><strong>{{ metrics.en_revision|intcomma }}</strong></div>
-        <div class="bi-summary-chip"><span>Vencidos</span><strong>{{ metrics.vencidos|intcomma }}</strong></div>
-      </div>
+  <section class="seg-work-head" aria-labelledby="seg-work-title">
+    <div>
+      <div class="bi-kicker">Mi trabajo</div>
+      <h1 id="seg-work-title">{% if active_tipo %}Lo que debes atender{% else %}Mi trabajo activo{% endif %}</h1>
+      <p>{% if active_tipo %}{{ sections.0.title }} asignadas a tu usuario · ordenadas por prioridad{% else %}Acuerdos activos asignados a tu usuario{% endif %}</p>
     </div>
   </section>
 
-  <section class="bi-kpi-grid seguimiento-kpi-grid" aria-label="Resumen">
-    <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{{ metrics.total|intcomma }}</div>
-      <div class="bi-kpi-label">Trabajos acumulados</div>
-    </article>
-    <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if metrics.abiertos %}warning{% else %}success{% endif %}">{{ metrics.abiertos|intcomma }}</div>
-      <div class="bi-kpi-label">Abiertos</div>
-    </article>
-    <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if metrics.por_vencer_24h %}warning{% else %}success{% endif %}">{{ metrics.por_vencer_24h|intcomma }}</div>
-      <div class="bi-kpi-label">Por vencer (24h)</div>
-    </article>
-    <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if metrics.vencidos %}danger{% else %}success{% endif %}">{{ metrics.vencidos|intcomma }}</div>
-      <div class="bi-kpi-label">Vencidos</div>
-    </article>
-    <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if metrics.cumplidos_a_tiempo %}success{% else %}warning{% endif %}">{{ metrics.cumplidos_a_tiempo|intcomma }}</div>
-      <div class="bi-kpi-label">Cumplidos a tiempo</div>
-    </article>
-  </section>
+  <nav class="seg-work-buckets" aria-label="Estado del trabajo">
+    <button type="button" class="seg-work-bucket is-active" data-work-bucket="attention" aria-pressed="true"><span>Por atender</span><span class="seg-work-count" data-work-count="attention">0</span></button>
+    <button type="button" class="seg-work-bucket" data-work-bucket="ready" aria-pressed="false"><span>Para cerrar</span><span class="seg-work-count" data-work-count="ready">0</span></button>
+    <button type="button" class="seg-work-bucket" data-work-bucket="review" aria-pressed="false"><span>En revisión</span><span class="seg-work-count" data-work-count="review">0</span></button>
+    <button type="button" class="seg-work-bucket" data-work-bucket="history" aria-pressed="false"><span>Historial</span><span class="seg-work-count" data-work-count="history">0</span></button>
+  </nav>
+
+  <div class="seg-work-priority" data-priority-callout hidden>
+    <div><strong>Empieza por este acuerdo</strong><span data-priority-copy></span></div><span aria-hidden="true">→</span>
+  </div>
 
   <!-- Pasos de proyectos que esperan la aprobación de este usuario -->
   {% if mis_aprobaciones %}
@@ -149,138 +90,74 @@
 
   <div class="seguimiento-board {% if modo_detalle %}is-detail{% endif %}">
     {% for section in sections %}
-    <section class="bi-panel seguimiento-column {{ section.tone }}">
-      <div class="bi-panel-head">
-        <div>
-          <div class="bi-kicker">{{ section.title }}</div>
-          <h2 class="bi-panel-title">{{ section.subtitle }}</h2>
-        </div>
-        <div class="seguimiento-count">{{ section.total|intcomma }}</div>
-      </div>
-
-      <div class="bi-metric-strip seguimiento-section-metrics">
-        <div class="bi-metric">
-          <div class="bi-metric-label">Abiertos</div>
-          <div class="bi-metric-value {% if section.abiertos %}warning{% else %}success{% endif %}">{{ section.abiertos|intcomma }}</div>
-        </div>
-        <div class="bi-metric">
-          <div class="bi-metric-label">Vencidos</div>
-          <div class="bi-metric-value {% if section.vencidos %}danger{% else %}success{% endif %}">{{ section.vencidos|intcomma }}</div>
-        </div>
-        <div class="bi-metric">
-          <div class="bi-metric-label">Checks</div>
-          <div class="bi-metric-value">{{ section.progreso_pct }}%</div>
-        </div>
-      </div>
-
-      <div class="bi-list bi-list-dense seguimiento-list">
+    <section class="seguimiento-column {{ section.tone }}">
+      <div class="seguimiento-list">
         {% for item in section.items %}
-        <article class="seguimiento-item {% if item.esta_vencido %}is-overdue{% endif %} {% if item.respuesta_dg_nueva %}has-dg-response{% endif %}">
-          <div>
-            <div class="seguimiento-item-head">
-              <h3 class="seguimiento-item-title"><a href="{% url 'seguimiento:detalle' item.pk %}" class="pd-u-34fe2e3239">{{ item.titulo }}</a></h3>
-              <span class="bi-pill {% if item.prioridad_tone == 'danger' %}danger{% elif item.prioridad_tone == 'warn' %}warning{% endif %}">{{ item.get_tipo_display }}</span>
-            </div>
-            {% if item.descripcion %}<p class="seguimiento-item-copy">{{ item.descripcion|truncatechars:190 }}</p>{% endif %}
-            {% if item.entregable_esperado %}<p class="seguimiento-item-copy seguimiento-deliverable">Entregable: {{ item.entregable_esperado|truncatechars:160 }}</p>{% endif %}
-          </div>
+        <article class="seguimiento-item seg-work-card {% if item.esta_vencido %}is-overdue{% endif %} {% if item.respuesta_dg_nueva %}has-dg-response{% endif %}"
+                 data-follow-up-id="{{ item.pk }}"
+                 data-is-closed="{{ item.esta_cerrado|yesno:'true,false' }}"
+                 data-status="{{ item.estatus }}"
+                 data-overdue="{{ item.esta_vencido|yesno:'true,false' }}"
+                 data-due="{% if item.fecha_limite %}{{ item.fecha_limite|date:'c' }}{% endif %}"
+                 data-checklist-total="{{ item.checklist_total }}"
+                 data-checklist-done="{{ item.checklist_done }}"
+                 data-new-dg-response="{{ item.respuesta_dg_nueva|yesno:'true,false' }}">
+          <button class="seg-work-card-toggle" type="button" aria-expanded="false" aria-controls="seg-work-detail-{{ item.pk }}">
+            <span>
+              <span class="seg-work-deadline">{{ item.prioridad_label }}{% if item.fecha_limite %} · {{ item.fecha_limite|date:"d/m/Y H:i" }}{% endif %}</span>
+              <strong>{{ item.titulo }}</strong>
+              <small>{% if item.responsable_user_id != request.user.id %}Compartido · {% endif %}{% if item.checklist_total %}{{ item.checklist_done }} de {{ item.checklist_total }} puntos completados{% else %}Sin checklist · abre para actualizar{% endif %}</small>
+            </span>
+            <span class="seg-work-chevron" aria-hidden="true">⌄</span>
+          </button>
 
-          <div class="bi-summary-band">
-            <span class="bi-summary-chip"><span>Estatus</span><strong>{{ item.get_estatus_display }}</strong></span>
-            <span class="bi-summary-chip"><span>Prioridad</span><strong>{{ item.prioridad_label }}</strong></span>
-            {% if item.es_compartido %}<span class="bi-summary-chip"><span>Participación</span><strong>Compartido</strong></span>{% endif %}
-            {% if item.area %}<span class="bi-summary-chip"><span>Área</span><strong>{{ item.area }}</strong></span>{% endif %}
-          </div>
+          <div class="seg-work-card-detail" id="seg-work-detail-{{ item.pk }}" hidden>
+            {% if item.descripcion %}<p class="seguimiento-item-copy">{{ item.descripcion }}</p>{% endif %}
+            {% if item.entregable_esperado %}<p class="seguimiento-item-copy seguimiento-deliverable">Entregable: {{ item.entregable_esperado }}</p>{% endif %}
 
-          <div class="seguimiento-meta-grid">
-            <div class="bi-metric">
-              <div class="bi-metric-label">Fecha</div>
-              <div class="bi-metric-value">{% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y H:i" }}{% else %}Sin fecha{% endif %}</div>
+            <div class="bi-progress-track" aria-label="Avance de checklist">
+              <span class="bi-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-width="{{ item.progreso_pct }}%"></span>
             </div>
-            <div class="bi-metric">
-              <div class="bi-metric-label">Actividad</div>
-              <div class="bi-metric-value">{{ item.ultima_actividad|date:"d/m/Y H:i" }}</div>
+            <div class="seg-work-points-head"><span>Puntos del acuerdo</span><span>{{ item.checklist_done }} de {{ item.checklist_total }}</span></div>
+            <div class="seguimiento-checks">
+              {% for check in item.checklist.all %}
+              {% if item.esta_cerrado %}
+              <span class="seguimiento-action-button {% if check.completado %}is-done{% endif %}">{% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}</span>
+              {% elif check.origen_step_id %}
+              <a class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" href="{% url 'seguimiento:detalle' item.pk %}">{% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}</a>
+              {% else %}
+              <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">{% csrf_token %}<button class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" type="submit">{% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}</button></form>
+              {% endif %}
+              {% empty %}<span class="bi-subtle">Este acuerdo no tiene puntos de checklist.</span>{% endfor %}
             </div>
-            <div class="bi-metric">
-              <div class="bi-metric-label">Origen</div>
-              <div class="bi-metric-value">{{ item.origen_display }}</div>
-            </div>
-            <div class="bi-metric">
-              <div class="bi-metric-label">Registro</div>
-              <div class="bi-metric-value">Feedback {{ item.comentarios.count }} · Evidencias {{ item.evidencias.count }} · Prórrogas {{ item.prorrogas.count }}</div>
-            </div>
-          </div>
 
-          {% if item.prorroga_pendiente %}
-          <div class="bi-note pending">
-            <strong>Más tiempo solicitado:</strong> {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} · {{ item.prorroga_pendiente.motivo|truncatechars:120 }}
-          </div>
-          {% endif %}
+            {% if item.ultimo_comentario_dg %}
+            <div class="seg-dg-respuesta {% if item.respuesta_dg_nueva %}is-nueva{% endif %}"><div class="seg-dg-respuesta-head"><span>DG · Director General</span><span class="seg-dg-fecha">{{ item.ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>{% if item.respuesta_dg_nueva %}<span class="badge bg-warning">Nuevo</span>{% endif %}</div><p class="seg-dg-texto">{{ item.ultimo_comentario_dg.comentario }}</p></div>
+            {% endif %}
 
-          <div class="bi-progress-track" aria-label="Avance de checklist">
-            <span class="bi-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif item.progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-width="{{ item.progreso_pct }}%"></span>
+            {% if item.esta_cerrado %}
+            <div class="seg-work-waiting"><strong>Acuerdo finalizado</strong><span>Se conserva aquí para consulta; ya no requiere acciones.</span></div>
+            {% elif item.estatus == estatus_en_revision %}
+            <div class="seg-work-waiting"><strong>Esperando aprobación</strong><span>Ya enviaste este acuerdo a revisión.</span></div>
+            {% else %}
+            <form class="seguimiento-action-form seg-work-primary-form" method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data">
+              {% csrf_token %}<input type="file" name="archivo" accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf" required><textarea name="comentario" placeholder="Comentario de evidencia"></textarea><button class="seguimiento-action-button is-primary" type="submit">Continuar y adjuntar evidencia</button>
+            </form>
+            <details class="seg-work-more-actions"><summary>Más acciones</summary><div class="seg-work-more-panel">
+              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}">{% csrf_token %}<textarea name="comentario" placeholder="Retroalimentación, avance o resultado" required></textarea><button class="seguimiento-action-button" type="submit">Enviar avance</button></form>
+              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}">{% csrf_token %}<input type="date" name="fecha_solicitada" required><textarea name="motivo" placeholder="Motivo de la solicitud" required></textarea><button class="seguimiento-action-button" type="submit">Necesito más tiempo</button></form>
+            </div></details>
+            {% endif %}
           </div>
-          <div class="bi-subtle">{{ item.checklist_done }}/{{ item.checklist_total }} checks · {{ item.progreso_pct }}%</div>
-
-          {% if item.ultimo_comentario_dg %}
-          <div class="seg-dg-respuesta {% if item.respuesta_dg_nueva %}is-nueva{% endif %}">
-            <div class="seg-dg-respuesta-head">
-              <span>DG</span>
-              <span>Director General</span>
-              <span class="seg-dg-fecha">· {{ item.ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
-              {% if item.respuesta_dg_nueva %}<span class="badge bg-warning pd-u-b0774758a6">Nuevo</span>{% endif %}
-            </div>
-            <p class="seg-dg-texto">{{ item.ultimo_comentario_dg.comentario|truncatechars:260 }}</p>
-          </div>
-          {% endif %}
-
-          <details{% if item.checklist_total and not item.esta_cerrado %} open{% endif %}>
-            <summary class="seguimiento-action-summary">Actualizar seguimiento</summary>
-            <div class="seguimiento-action-panel">
-              <div class="seguimiento-checks">
-                {% for check in item.checklist.all %}
-                {% if check.origen_step_id %}
-                <a class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" href="{% url 'seguimiento:detalle' item.pk %}">
-                  {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
-                </a>
-                {% else %}
-                <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
-                  {% csrf_token %}
-                  <button class="seguimiento-action-button {% if check.completado %}is-done{% endif %}" type="submit">
-                    {% if check.completado %}Listo{% else %}Pendiente{% endif %}: {{ check.titulo }}
-                  </button>
-                </form>
-                {% endif %}
-                {% empty %}
-                <span class="bi-summary-chip"><span>Checklist</span><strong>Sin checklist</strong></span>
-                {% endfor %}
-              </div>
-              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}">
-                {% csrf_token %}
-                <textarea name="comentario" placeholder="Retroalimentación, avance o resultado" required></textarea>
-                <button class="seguimiento-action-button is-primary" type="submit">Enviar retroalimentación</button>
-              </form>
-              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data">
-                {% csrf_token %}
-                <input type="file" name="archivo" accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf" required>
-                <button class="seguimiento-action-button is-primary" type="submit">Subir evidencia</button>
-                <textarea name="comentario" placeholder="Comentario de evidencia"></textarea>
-              </form>
-              <form class="seguimiento-action-form" method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}">
-                {% csrf_token %}
-                <input type="date" name="fecha_solicitada" required>
-                <button class="seguimiento-action-button is-primary" type="submit">Solicitar más tiempo</button>
-                <textarea name="motivo" placeholder="Motivo de la solicitud" required></textarea>
-              </form>
-            </div>
-          </details>
         </article>
-        {% empty %}
-        <div class="seguimiento-empty">Sin registros asignados en esta sección.</div>
-        {% endfor %}
+        {% empty %}<div class="seguimiento-empty">No tienes acuerdos de este tipo.</div>{% endfor %}
       </div>
     </section>
     {% endfor %}
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/seguimiento_mi_trabajo.js' %}?v=20260721-action-inbox-v1" defer></script>
 {% endblock %}

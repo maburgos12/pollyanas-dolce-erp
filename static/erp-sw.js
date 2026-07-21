@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v19-mantenimiento-pruebas";
+const CACHE_NAME = "pollyanas-erp-shell-v20-seguimiento-action-inbox";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

@@ -144,7 +144,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260711-action-context-v14')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260721-seguimiento-action-inbox-v20')", html)
 
     def test_login_template_also_exposes_pwa_install_metadata(self):
         login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
@@ -154,7 +154,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="theme-color"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260711-action-context-v14')", html)
+        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20260721-seguimiento-action-inbox-v20')", html)
 
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
@@ -164,13 +164,13 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v14-action-context"', sw)
+        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v20-seguimiento-action-inbox"', sw)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
         response = self.client.get("/erp-sw.js")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"pollyanas-erp-shell-v14-action-context", b"".join(response.streaming_content))
+        self.assertIn(b"pollyanas-erp-shell-v20-seguimiento-action-inbox", b"".join(response.streaming_content))
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()

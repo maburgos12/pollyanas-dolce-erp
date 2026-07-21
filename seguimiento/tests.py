@@ -4,13 +4,16 @@ import json
 import os
 from datetime import datetime, time, timedelta
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
 
@@ -77,21 +80,23 @@ class SeguimientoColaboradorTests(TestCase):
     def test_empleado_se_resuelve_por_email_real(self):
         self.assertEqual(empleado_de_usuario(self.user), self.empleado)
 
-    def test_portal_muestra_trabajo_en_dashboard_por_tipo(self):
+    def test_portal_muestra_bandeja_operativa_por_tipo(self):
         response = self.client.get("/seguimiento/")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn("Resumen general", content)
-        self.assertIn("Trabajos acumulados", content)
-        self.assertIn("Por vencer (24h)", content)
+        self.assertIn("Mi trabajo activo", content)
+        self.assertIn("Por atender", content)
+        self.assertIn("Para cerrar", content)
+        self.assertIn("En revisión", content)
+        self.assertIn("Historial", content)
         self.assertIn("Compromisos", content)
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
         self.assertIn('data-dashboard-url="/seguimiento/"', content)
         self.assertIn("Validar inventarios en cuartos fríos", content)
         self.assertIn("Retroalimentación", content)
-        self.assertIn("Solicitar más tiempo", content)
+        self.assertIn("Necesito más tiempo", content)
         self.assertNotIn("Alcance", content)
         self.assertNotIn("Control visible y auditable", content)
         self.assertNotIn("Visible:", content)
@@ -107,7 +112,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
-    def test_minuta_con_checks_muestra_panel_abierto_para_colaborador(self):
+    def test_minuta_con_checks_muestra_acordeon_operativo_para_colaborador(self):
         item = SeguimientoItem.objects.create(
             tipo=SeguimientoItem.TIPO_MINUTA,
             titulo="Minuta con checks visibles",
@@ -125,7 +130,9 @@ class SeguimientoColaboradorTests(TestCase):
         content = response.content.decode()
 
         self.assertContains(response, "Minuta con checks visibles")
-        self.assertIn("<details open>", content)
+        self.assertIn(f'data-follow-up-id="{item.pk}"', content)
+        self.assertIn(f'aria-controls="seg-work-detail-{item.pk}"', content)
+        self.assertIn('class="seg-work-card-toggle"', content)
         self.assertIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
 
     def test_paso_agente_dg_no_acepta_toggle_local(self):
@@ -553,6 +560,64 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(urls["Minutas"], "/seguimiento/panel/?tab=MINUTA")
         self.assertEqual(urls["Proyectos"], "/seguimiento/panel/?tab=PROYECTO")
         self.assertEqual(urls["Compromisos"], "/seguimiento/panel/?tab=COMPROMISO")
+
+    def test_mi_trabajo_renderiza_bandeja_operativa_y_segmentos(self):
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Lo que debes atender")
+        self.assertContains(response, 'data-work-bucket="attention"')
+        self.assertContains(response, 'data-work-bucket="ready"')
+        self.assertContains(response, 'data-work-bucket="review"')
+        self.assertContains(response, 'data-work-bucket="history"')
+        self.assertContains(response, 'src="/static/js/seguimiento_mi_trabajo.js?')
+
+    def test_mi_trabajo_conserva_acciones_existentes_en_tarjeta(self):
+        item = SeguimientoItem.objects.create(
+            titulo="Actualizar proveedores",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=self.user,
+        )
+        check = SeguimientoChecklistItem.objects.create(seguimiento=item, titulo="Adjuntar listado")
+
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, check.pk]))
+        self.assertContains(response, reverse("seguimiento:registrar_feedback", args=[item.pk]))
+        self.assertContains(response, reverse("seguimiento:subir_evidencia", args=[item.pk]))
+        self.assertContains(response, reverse("seguimiento:solicitar_prorroga", args=[item.pk]))
+        self.assertContains(response, f'data-follow-up-id="{item.pk}"')
+
+    def test_mi_trabajo_expone_estado_sin_cambiar_asignacion(self):
+        outsider = get_user_model().objects.create_user(username="empleada.otra", password="test12345")
+        visible = SeguimientoItem.objects.create(
+            titulo="Acuerdo propio visible",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+            responsable_user=self.user,
+        )
+        SeguimientoItem.objects.create(
+            titulo="Acuerdo ajeno oculto",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=outsider,
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertContains(response, visible.titulo)
+        self.assertContains(response, 'data-is-closed="true"')
+        self.assertNotContains(response, "Acuerdo ajeno oculto")
+
+    def test_script_mi_trabajo_define_segmentos_y_acordeon_unico(self):
+        script = (Path(settings.BASE_DIR) / "static" / "js" / "seguimiento_mi_trabajo.js").read_text()
+        self.assertIn('return "history"', script)
+        self.assertIn('return "review"', script)
+        self.assertIn('return "ready"', script)
+        self.assertIn('return "attention"', script)
+        self.assertIn("if (candidate !== card) closeCard(candidate)", script)
+        self.assertIn('selectBucket("attention")', script)
 
     def test_colaborador_staff_aprueba_paso_designado_desde_mi_trabajo(self):
         ventas, _ = Group.objects.get_or_create(name="VENTAS")
