@@ -1365,6 +1365,11 @@ class TipoServicioUnidad(models.Model):
         return self.nombre
 
 
+class ServicioRealizadoUnidadQuerySet(models.QuerySet):
+    def vigentes(self):
+        return self.filter(anulado_en__isnull=True)
+
+
 class ServicioRealizadoUnidad(models.Model):
     unidad = models.ForeignKey(Unidad, on_delete=models.PROTECT, related_name="servicios")
     tipo_servicio = models.ForeignKey(TipoServicioUnidad, on_delete=models.PROTECT)
@@ -1378,6 +1383,24 @@ class ServicioRealizadoUnidad(models.Model):
     fecha_registro = models.DateTimeField(auto_now_add=True)
     proxima_fecha = models.DateField(null=True, blank=True)
     proximos_km = models.PositiveIntegerField(null=True, blank=True)
+    anulado_en = models.DateTimeField(null=True, blank=True)
+    anulado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="servicios_unidad_anulados",
+    )
+    motivo_anulacion = models.TextField(blank=True)
+    duplicado_de = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="duplicados_anulados",
+    )
+
+    objects = ServicioRealizadoUnidadQuerySet.as_manager()
 
     class Meta:
         ordering = ["-fecha_servicio"]

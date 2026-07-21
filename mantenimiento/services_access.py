@@ -86,7 +86,7 @@ def authorized_repairs(user):
 
 
 def authorized_unit_services(user):
-    return _authorized_queryset(user, ServicioRealizadoUnidad.objects.all(), "unidad__sucursal_id")
+    return _authorized_queryset(user, ServicioRealizadoUnidad.objects.vigentes(), "unidad__sucursal_id")
 
 
 def can_view_costs(user):

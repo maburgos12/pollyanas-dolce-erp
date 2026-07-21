@@ -3152,7 +3152,7 @@ def dashboard_ejecutivo(request):
         "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
         "unidades_activas": Unidad.objects.filter(activa=True).count(),
         "documentos_por_vencer": DocumentoUnidad.objects.filter(vigente=True, fecha_vencimiento__lte=limite_30).count(),
-        "servicios_proximos": ServicioRealizadoUnidad.objects.filter(proxima_fecha__lte=limite_30).count(),
+        "servicios_proximos": ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__lte=limite_30).count(),
         "gasto_mes": ReparacionUnidad.objects.filter(
             fecha_ingreso__month=today.month,
             fecha_ingreso__year=today.year,
@@ -3242,11 +3242,11 @@ def flota_resumen(request):
             .order_by("-fecha_vencimiento")
             .first()
         )
-        ultimo_servicio = ServicioRealizadoUnidad.objects.select_related("tipo_servicio").filter(unidad=unidad).order_by(
+        ultimo_servicio = ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio").filter(unidad=unidad).order_by(
             "-fecha_servicio"
         ).first()
         proximo_servicio = _decorate_servicio(
-            ServicioRealizadoUnidad.objects.select_related("tipo_servicio")
+            ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio")
             .filter(unidad=unidad, proxima_fecha__isnull=False)
             .order_by("proxima_fecha")
             .first()
@@ -3318,7 +3318,7 @@ def unidad_detalle(request, pk):
         "tipos_servicio": TipoServicioUnidad.objects.filter(activo=True).order_by("nombre"),
         "servicios": [
             _decorate_servicio(servicio)
-            for servicio in ServicioRealizadoUnidad.objects.select_related("tipo_servicio", "registrado_por")
+            for servicio in ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio", "registrado_por")
             .filter(unidad=unidad)
             .order_by("-fecha_servicio")
         ],
