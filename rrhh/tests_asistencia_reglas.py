@@ -572,3 +572,129 @@ class ConexionVacacionesAsistenciaTests(TestCase):
         falta.refresh_from_db()
         self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
         self.assertIsNone(falta.solicitud_vacaciones)
+
+
+class BarridoDiarioAsistenciaTests(TestCase):
+    """La task diaria evalúa también a quien no checó (sustituye al polling ISAPI)."""
+
+    FECHA_FIJA = date(2026, 6, 3)  # miércoles; el día evaluado es martes 2
+
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Barrido",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2025, 1, 1),
+        )
+
+    def _correr_task(self):
+        from unittest.mock import patch
+
+        from rrhh import tasks
+
+        with patch.object(tasks.timezone, "localdate", return_value=self.FECHA_FIJA):
+            return tasks.evaluar_asistencia_diaria()
+
+    def test_genera_falta_para_empleado_sin_checada(self):
+        resultado = self._correr_task()
+
+        self.assertTrue(resultado["ok"])
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 2),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+
+    def test_no_marca_falta_si_hay_vacaciones_reservadas(self):
+        SolicitudVacaciones.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 5),
+            dias_laborables=Decimal("5"),
+            motivo="Vacaciones en trámite",
+            estado=SolicitudVacaciones.ESTADO_SOLICITADA,
+        )
+
+        self._correr_task()
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 2),
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+
+
+class AuditoriaVacacionesDiariaTests(TestCase):
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            nombre="Empleada Auditoria",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2020, 1, 10),
+        )
+        self.periodo = PeriodoVacacional.objects.create(
+            empleado=self.empleado,
+            aniversario=date(2026, 1, 10),
+            fecha_limite=date(2026, 7, 10),
+            antiguedad_anios=6,
+            dias_generados=Decimal("5.00"),
+        )
+
+    def _solicitud(self, inicio, fin, estado, dias="5.00"):
+        return SolicitudVacaciones.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=inicio,
+            fecha_fin=fin,
+            dias_laborables=Decimal(dias),
+            motivo="test",
+            estado=estado,
+        )
+
+    def test_sin_anomalias_no_envia_correo(self):
+        from django.core import mail
+
+        from rrhh.tasks import auditar_vacaciones_diaria
+
+        resultado = auditar_vacaciones_diaria()
+
+        self.assertEqual(resultado["hallazgos"], 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_detecta_cruce_de_periodo_en_reserva_pendiente(self):
+        from django.core import mail
+
+        from rrhh.tasks import auditar_vacaciones_diaria
+
+        # vacación de 2025 reservando de la bolsa 2026 (patrón Carmina)
+        solicitud = self._solicitud(
+            date(2025, 9, 1), date(2025, 9, 5), SolicitudVacaciones.ESTADO_SOLICITADA
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud,
+            periodo=self.periodo,
+            dias=Decimal("5.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_RESERVADA,
+        )
+
+        resultado = auditar_vacaciones_diaria()
+
+        self.assertEqual(resultado["hallazgos"], 1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Cruce de periodo", mail.outbox[0].body)
+
+    def test_detecta_bolsa_sobregirada(self):
+        from rrhh.tasks import _hallazgos_auditoria_vacaciones
+
+        solicitud = self._solicitud(
+            date(2026, 2, 2), date(2026, 2, 7), SolicitudVacaciones.ESTADO_APROBADA, dias="6.00"
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud,
+            periodo=self.periodo,
+            dias=Decimal("6.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        )
+
+        hallazgos = _hallazgos_auditoria_vacaciones()
+
+        self.assertTrue(any("sobregirada" in h for h in hallazgos))
