@@ -13,6 +13,7 @@ from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.dateparse import parse_date, parse_time
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -334,6 +335,12 @@ def _validar_archivo_evidencia(archivo) -> str | None:
 
 @login_required
 def mi_seguimiento(request, tipo: str | None = None):
+    if can_review_seguimiento_global(request.user):
+        panel_url = reverse("seguimiento:panel_dg")
+        if tipo:
+            panel_url = f"{panel_url}?tab={tipo}"
+        return redirect(panel_url)
+
     now = timezone.now()
     empleado = empleado_de_usuario(request.user)
     items = list(_items_del_usuario(request.user))
