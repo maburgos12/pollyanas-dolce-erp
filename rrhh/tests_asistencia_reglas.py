@@ -698,3 +698,58 @@ class AuditoriaVacacionesDiariaTests(TestCase):
         hallazgos = _hallazgos_auditoria_vacaciones()
 
         self.assertTrue(any("sobregirada" in h for h in hallazgos))
+
+
+class ExencionChecadorTests(TestCase):
+    """Empleados exentos (remoto / oficina sin checador) no generan falta automática."""
+
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Remoto",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2025, 1, 1),
+            exento_checador=True,
+            exento_checador_motivo="Trabajo remoto",
+        )
+
+    def test_exento_sin_checada_no_genera_falta(self):
+        fecha = date(2026, 6, 1)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(
+            IncidenciaAsistencia.objects.filter(
+                empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA
+            ).exists()
+        )
+
+    def test_exento_resuelve_falta_previa_al_reevaluar(self):
+        fecha = date(2026, 6, 1)
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+        )
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+        self.assertGreaterEqual(resultado.resueltos, 1)
+
+    def test_no_exento_sigue_generando_falta(self):
+        self.empleado.exento_checador = False
+        self.empleado.save(update_fields=["exento_checador"])
+        fecha = date(2026, 6, 1)
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        falta = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA
+        )
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
