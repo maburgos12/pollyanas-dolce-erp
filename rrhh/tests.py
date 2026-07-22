@@ -2089,6 +2089,15 @@ class RRHHViewsTests(TestCase):
         self.assertContains(resp, f'<select id="edit_sucursal_{empleado.id}" class="input-field" name="sucursal_id">', html=False)
         self.assertContains(resp, f'<option value="{sucursal.id}" selected>{sucursal.nombre}</option>', html=False)
 
+    def test_empleados_campos_de_usuario_se_pueden_revelar_desde_el_checkbox(self):
+        resp = self.client.get(reverse("rrhh:empleados"), secure=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'class="rrhh-field" data-new-user-field hidden', count=2)
+        self.assertNotContains(resp, 'class="rrhh-field pd-u-c8be1ccba6" data-new-user-field')
+        self.assertContains(resp, "field.hidden = !show;")
+        self.assertContains(resp, "input.required = show;")
+
     def test_empleados_crea_y_edita_codigo_operativo(self):
         resp = self.client.post(
             reverse("rrhh:empleados"),
@@ -2306,6 +2315,27 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(str(repartidor.licencia_expedicion), "2026-01-01")
         self.assertEqual(str(repartidor.licencia_expiracion), "2028-01-01")
         self.assertIn("licencia", repartidor.archivo_licencia.name)
+
+    def test_empleados_revierte_alta_si_faltan_credenciales_de_usuario(self):
+        sucursal = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+
+        resp = self.client.post(
+            reverse("rrhh:empleados"),
+            {
+                "action": "create",
+                "nombre": "REPARTIDOR SIN CREDENCIALES",
+                "area": "REPARTIDORES",
+                "crear_usuario_erp": "on",
+                "sucursal_app_id": str(sucursal.id),
+                "salario_diario": "300.00",
+            },
+            follow=True,
+            secure=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Captura el usuario para el acceso ERP/app.")
+        self.assertFalse(Empleado.objects.filter(nombre="REPARTIDOR SIN CREDENCIALES").exists())
 
     def test_empleados_autoriza_conductor_occasional_sin_grupo_repartidor(self):
         from api.logistica_views import _can_operate_pwa
