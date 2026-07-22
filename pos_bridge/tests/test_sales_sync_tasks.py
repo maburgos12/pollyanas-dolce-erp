@@ -72,7 +72,9 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
 
     @override_settings(POINT_SALES_SYNC_SOURCE_MODE="OFFICIAL", POINT_SALES_SYNC_CREDITO_SCOPES=["null"])
     def test_run_daily_sales_sync_passes_window_and_mode_to_history_task(self):
-        fake_job = object()
+        # Desde 79a13d38 la task consulta sync_job.status tras el sync; el stub
+        # necesita status (FAILED evita los pasos post-sync que tocan DB).
+        fake_job = SimpleNamespace(id=1, status=PointSyncJob.STATUS_FAILED)
         with patch("pos_bridge.tasks.run_daily_sales_sync.run_sales_history_sync", return_value=fake_job) as task_mock:
             result = run_daily_sales_sync(
                 lookback_days=3,
