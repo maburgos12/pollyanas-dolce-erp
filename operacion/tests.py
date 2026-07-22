@@ -70,7 +70,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260721-fecha-mobile-v4")
+        self.assertContains(response, "20260722-supervision-mermas-v3")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -89,7 +89,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
-        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260721-fecha-mobile-v4"')
+        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260722-supervision-mermas-v3"')
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
 
@@ -130,7 +130,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v15-fecha-mobile", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v18-supervision-mermas", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -148,7 +148,7 @@ class OperacionAppTests(TestCase):
         bitacoras = self.client.get("/app/bitacoras/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Registrar merma")
+        self.assertContains(response, "Merma de producto")
         self.assertContains(response, "/mermas/app/?modo=captura")
         self.assertNotContains(response, "Bitácoras")
         self.assertNotContains(response, "/app/bitacoras/")
@@ -213,9 +213,9 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Registrar merma")
+        self.assertContains(response, "Merma de producto")
         self.assertContains(response, "Reportar falla")
-        self.assertContains(response, 'href="/fallas/app/"')
+        self.assertContains(response, 'href="/app/sucursal/?tab=fallas"')
         self.assertNotContains(response, 'href="/fallas/reportar/"')
         self.assertContains(response, "Colosio")
         self.assertNotContains(response, "Flota")
@@ -418,7 +418,7 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Registrar merma")
+        self.assertContains(response, "Merma de producto")
         self.assertContains(response, "Recibir merma")
         self.assertContains(response, "Reportar falla")
         self.assertContains(response, "Auditorías")
@@ -426,6 +426,20 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "Flota")
         self.assertContains(response, "Rutas")
         self.assertNotContains(response, "Logística móvil")
+
+    def test_superuser_sin_sucursal_ve_supervision_de_mermas(self):
+        user = self.user_model.objects.create_superuser(
+            username="direccion.sin.sucursal",
+            email="direccion@example.com",
+            password="test12345",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Supervisión de mermas de insumos")
+        self.assertContains(response, '/app/sucursal/?tab=mermas')
 
     def test_repartidor_direct_urls_are_limited_to_app_and_logistica_pwa(self):
         group = Group.objects.create(name=ROLE_REPARTIDOR)

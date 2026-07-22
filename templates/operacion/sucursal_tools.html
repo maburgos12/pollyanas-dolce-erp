@@ -15,7 +15,7 @@
       <a class="back-link" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">←</a>
       <div>
         <p>App Operativa</p>
-        <h1>{{ sucursal.nombre }}</h1>
+        <h1>{% if sucursal %}{{ sucursal.nombre }}{% else %}Supervisión de mermas de insumos{% endif %}</h1>
       </div>
       <span class="session-state">Sesión activa</span>
     </header>
@@ -70,6 +70,7 @@
     </section>
 
     <section class="tool-panel" data-tab-panel="mermas" {% if not solo_aprobacion and tab_activa != 'mermas' %}hidden{% endif %}>
+      {% if solo_aprobacion and not sucursal %}<div class="panel-heading"><h2>Supervisión de mermas de insumos</h2><p>No hay solicitudes pendientes ni casos sin responsable por atender.</p></div>{% endif %}
       {% if not solo_aprobacion %}
       <div class="panel-heading">
         <h2>Registrar merma de insumo</h2>

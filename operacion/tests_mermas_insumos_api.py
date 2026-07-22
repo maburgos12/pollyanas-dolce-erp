@@ -277,6 +277,16 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertContains(response, "Sin responsable asignado")
         self.assertContains(response, "Fresa fresca")
 
+    def test_direccion_sin_sucursal_y_sin_pendientes_abre_bandeja_vacia(self):
+        admin = User.objects.create_superuser(username="direccion.vacia", password="x")
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("operacion:sucursal_tools") + "?tab=mermas")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Supervisión de mermas de insumos")
+        self.assertNotContains(response, "Enviar a mi jefe")
+
     def test_aprobacion_html_regresa_a_merma_con_fragmento(self):
         self.client.post(
             reverse("operacion:mermas_insumos_crear_api"),

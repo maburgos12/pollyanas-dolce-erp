@@ -138,12 +138,13 @@ def app_home(request):
 @login_required
 def sucursal_tools(request):
     sucursal = _sucursal_operativa_usuario(request.user)
+    es_direccion = is_admin_or_dg(request.user)
     pendientes = MermaInsumo.objects.filter(
         jefe_inmediato=request.user, estatus=MermaInsumo.ESTATUS_ENVIADA
     ).select_related("sucursal", "reportado_por")
     solo_aprobacion = False
     sin_responsable = MermaInsumo.objects.none()
-    if is_admin_or_dg(request.user):
+    if es_direccion:
         sin_responsable = MermaInsumo.objects.filter(
             estatus=MermaInsumo.ESTATUS_SIN_RESPONSABLE
         ).select_related("sucursal", "reportado_por")
@@ -153,14 +154,16 @@ def sucursal_tools(request):
     if not sucursal and pendientes.exists():
         sucursal = pendientes.first().sucursal
         solo_aprobacion = True
-    if not sucursal:
+    if not sucursal and es_direccion:
+        solo_aprobacion = True
+    if not sucursal and not es_direccion:
         raise PermissionDenied("Tu sesión no tiene una sucursal operativa asignada.")
     return render(
         request,
         "operacion/sucursal_tools.html",
         {
             "sucursal": sucursal,
-            "tab_activa": request.GET.get("tab") or "fallas",
+            "tab_activa": request.GET.get("tab") or ("mermas" if solo_aprobacion else "fallas"),
             "activos": Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id"),
             "categorias_equipo": CategoriaFalla.objects.filter(
                 activo=True, tipo=CategoriaFalla.TIPO_EQUIPO
@@ -174,7 +177,7 @@ def sucursal_tools(request):
             "mermas_sin_responsable": sin_responsable,
             "jefes_candidatos": Empleado.objects.filter(
                 activo=True, usuario_erp__is_active=True
-            ).select_related("usuario_erp", "sucursal_ref").order_by("nombre") if is_admin_or_dg(request.user) else [],
+            ).select_related("usuario_erp", "sucursal_ref").order_by("nombre") if es_direccion else [],
             "draft_fallas": request.session.pop("operacion_draft_fallas", {}),
             "draft_mermas": request.session.pop("operacion_draft_mermas", {}),
             "mis_mermas": MermaInsumo.objects.filter(reportado_por=request.user).order_by("-creado_en")[:8],
