@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v21-seguimiento-dg-compact";
+const CACHE_NAME = "pollyanas-erp-shell-v22-rrhh-alta-usuario";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
