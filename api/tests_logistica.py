@@ -1,13 +1,16 @@
+from datetime import datetime
+
 from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess
-from logistica.models import LavadoUnidad, Repartidor, ReporteUnidad, Unidad
+from logistica.models import BitacoraSalidaLlegada, LavadoUnidad, Repartidor, ReporteUnidad, Unidad
 from rrhh.models import Empleado
 
 
@@ -140,6 +143,31 @@ class LogisticaReportesApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_alerta_combustible_ignora_turnos_anteriores_a_su_entrada_en_vigor(self):
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            km_salida=47093,
+            nivel_gas_salida="1/2",
+            foto_tablero_salida="bitacora/salida-historica.gif",
+            hora_llegada=timezone.make_aware(datetime(2026, 5, 11, 9, 18)),
+            km_llegada=47201,
+            nivel_gas_llegada="3/4",
+            foto_tablero_llegada="bitacora/llegada-historica.gif",
+            cerrada=True,
+        )
+        BitacoraSalidaLlegada.objects.filter(pk=bitacora.pk).update(
+            hora_salida=timezone.make_aware(datetime(2026, 5, 10, 8, 47)),
+            hora_llegada=timezone.make_aware(datetime(2026, 5, 11, 9, 18)),
+        )
+        self._auth(self._jwt_for("repartidor.api"))
+
+        response = self.client.get(reverse("api_logistica_combustible_alerta"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["pendiente"])
+        self.assertEqual(response.data["pendientes"], [])
 
     def test_compras_logistica_puede_actualizar_reporte(self):
         reporte = ReporteUnidad.objects.create(

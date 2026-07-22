@@ -4954,7 +4954,7 @@
                       ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                     </div>
                     <p class="gps-registered">📍 Ubicación registrada</p>
-                    <button class="primary-btn" type="button" onclick="guardarSalida()" ${ubicacionLista && draft.km_salida && draft.nivel_gas_salida && draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>
+                    <button class="primary-btn" type="button" onclick="guardarSalida()">Iniciar turno</button>
                   </div>
                 ` : ""}
               `}
@@ -5438,7 +5438,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v79-entrega-administrativa", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v80-combustible-km-turno", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
