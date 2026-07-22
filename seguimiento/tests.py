@@ -351,6 +351,33 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
 
+    def test_detalle_dg_prioriza_responsable_resumen_y_proceso_compacto(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.detalle", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="seg-agreement-hero"')
+        self.assertContains(response, "Responsable")
+        self.assertContains(response, "Carolina Cayetano")
+        self.assertContains(response, 'class="seg-agreement-summary"')
+        self.assertContains(response, "Puntos por completar")
+        self.assertContains(response, "Conversación y cierre")
+        self.assertContains(response, "Detalles técnicos")
+        self.assertNotContains(response, 'class="bi-metric-strip seg-metric-strip"')
+
+    def test_detalle_colaborador_comparte_ficha_compacta_sin_perder_acciones(self):
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="seg-agreement-hero"')
+        self.assertContains(response, "Puntos por completar")
+        self.assertContains(response, "Marcar hecho")
+        self.assertContains(response, "Detalles técnicos")
+
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.writeback", password="test12345")
