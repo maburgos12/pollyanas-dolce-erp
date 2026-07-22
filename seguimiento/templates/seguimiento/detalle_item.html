@@ -7,130 +7,61 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260722-detail-compact-v2">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell seg-detalle-shell">
 
   <div class="seg-back-row">
-    <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">← Mi trabajo</a>
+    <a href="{% if es_vista_dg %}{% url 'seguimiento:panel_dg' %}{% else %}{% url 'seguimiento:mi_seguimiento' %}{% endif %}" class="seg-back-link">← {% if es_vista_dg %}Panel de acuerdos{% else %}Mi trabajo{% endif %}</a>
   </div>
 
-  <div class="seg-detalle-header">
-    <div>
-      <div class="bi-kicker">{{ item.get_tipo_display }}</div>
-      <h1 class="seg-detalle-title">{{ item.titulo }}</h1>
+  <article class="seg-agreement-hero">
+    <div class="seg-detalle-header">
+      <div class="seg-title-block">
+        <div class="bi-kicker">{{ item.get_tipo_display }}</div>
+        <h1 class="seg-detalle-title">{{ item.titulo }}</h1>
+      </div>
+      <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
     </div>
-    <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
-  </div>
 
-  <!-- Metadata -->
-  <div class="bi-panel seg-panel-gap">
-    <div class="bi-metric-strip seg-metric-strip">
-      <div class="bi-metric">
-        <div class="bi-metric-label">Fecha límite</div>
-        <div class="bi-metric-value {% if item.esta_vencido %}danger{% endif %}">
-          {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y H:i" }}{% else %}Sin fecha{% endif %}
+    <div class="seg-owner-row">
+      <span class="seg-owner-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7 8a7 7 0 0 0-14 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
+      <span class="seg-owner-copy"><small>Responsable</small><strong>{% if item.responsable_empleado %}{{ item.responsable_empleado.nombre }}{% elif item.responsable_user %}{{ item.responsable_user.get_full_name|default:item.responsable_user.username }}{% else %}Sin responsable asignado{% endif %}</strong></span>
+    </div>
+
+    <div class="seg-agreement-summary">
+      <div class="seg-summary-cell">
+        <span>Vence</span>
+        <strong class="{% if item.esta_vencido %}danger{% endif %}">{% if item.fecha_limite %}{{ item.fecha_limite|date:"d M · H:i" }}{% else %}Sin fecha{% endif %}</strong>
+      </div>
+      <div class="seg-summary-cell">
+        <span>Avance</span>
+        <strong>{{ checklist_done }} de {{ checklist_total }} · {{ progreso_pct }}%</strong>
+        <div class="bi-progress-track seg-progress-track" aria-label="Avance: {{ progreso_pct }}%">
+          <span class="seg-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-css-var="--seg-pct" data-pd-width="{{ progreso_pct }}%"></span>
         </div>
       </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Área</div>
-        <div class="bi-metric-value">{{ item.area|default:"—" }}</div>
-      </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Origen</div>
-        <div class="bi-metric-value">{{ item.origen|default:"ERP" }}</div>
-      </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Estado app</div>
-        <div class="bi-metric-value">{{ item.estado_app_label }}</div>
-      </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Estado ERP</div>
-        <div class="bi-metric-value">{{ item.get_estatus_display }}</div>
-      </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Última sync</div>
-        <div class="bi-metric-value">{% if item.source_synced_at %}{{ item.source_synced_at|slice:":16" }}{% else %}—{% endif %}</div>
-      </div>
-      <div class="bi-metric">
-        <div class="bi-metric-label">Checks</div>
-        <div class="bi-metric-value">{{ checklist_done }}/{{ checklist_total }} · {{ progreso_pct }}%</div>
-      </div>
     </div>
 
-    {% if item.descripcion %}
-    <p class="seg-description">{{ item.descripcion }}</p>
-    {% endif %}
-    {% if item.entregable_esperado %}
-    <p class="seg-entregable">
-      Entregable esperado: {{ item.entregable_esperado }}
-    </p>
-    {% endif %}
-
-    {% if checklist_total %}
-    <div class="bi-progress-track seg-progress-track" aria-label="Avance">
-      <span class="seg-progress-fill pd-js-width {% if item.esta_vencido %}is-danger{% elif progreso_pct >= 100 %}is-success{% else %}is-plum{% endif %}" data-pd-css-var="--seg-pct" data-pd-width="{{ progreso_pct }}%"></span>
+    {% if item.descripcion or item.entregable_esperado %}
+    <div class="seg-agreement-copy">
+      {% if item.descripcion %}<p class="seg-description">{{ item.descripcion }}</p>{% endif %}
+      {% if item.entregable_esperado %}<p class="seg-entregable"><span>Entregable esperado</span>{{ item.entregable_esperado }}</p>{% endif %}
     </div>
     {% endif %}
-  </div>
-
-  <!-- Conversación y cierre -->
-  <div class="bi-panel seg-panel-gap seg-status-panel{% if item.esta_cerrado %} is-closed{% elif ultimo_comentario_dg %} is-review{% endif %}">
-    <p class="seg-section-title">Conversación y cierre</p>
-    <div class="seg-conversation-card {% if item.esta_cerrado %}is-closed{% endif %}">
-      <div class="seg-conversation-head">
-        <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
-        <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
-      </div>
-      {% if item.aprobado_at and item.esta_cerrado %}
-      <p class="seg-timeline-meta seg-meta-flat">
-        Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.
-      </p>
-      {% elif item.tiene_desfase_agente_dg %}
-      <p class="seg-timeline-meta seg-meta-warning">
-        Aprobación local anterior pendiente de sincronizar con app.pollyanasdolce.com.
-      </p>
-      {% elif item.es_historico_agente_dg %}
-      <p class="seg-timeline-meta seg-meta-success">
-        Registro histórico importado desde app.pollyanasdolce.com; no cuenta como pendiente ni vencido.
-      </p>
-      {% endif %}
-      {% if ultimo_comentario_dg %}
-      <div class="seg-dg-note">
-        <strong>{{ ultimo_comentario_dg.usuario.get_full_name|default:ultimo_comentario_dg.usuario.username }}</strong>
-        <span class="muted seg-dg-meta"> · {{ ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
-        <p class="seg-note-copy">{{ ultimo_comentario_dg.comentario }}</p>
-      </div>
-      {% elif comentarios %}
-      <p class="muted seg-muted-copy">Hay actividad registrada abajo en el historial.</p>
-      {% else %}
-      <p class="muted seg-muted-copy">Sin conversación registrada todavía.</p>
-      {% endif %}
-      {% if comentarios_dg|length > 1 %}
-      <details>
-        <summary class="seg-summary-link">Ver retroalimentaciones anteriores de DG</summary>
-        <div class="seg-note-stack">
-          {% for com in comentarios_dg %}
-          {% if com.pk != ultimo_comentario_dg.pk %}
-          <div class="seg-dg-note">
-            <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
-            <span class="muted seg-dg-meta"> · {{ com.created_at|date:"d/m/Y H:i" }}</span>
-            <p class="seg-note-copy">{{ com.comentario }}</p>
-          </div>
-          {% endif %}
-          {% endfor %}
-        </div>
-      </details>
-      {% endif %}
-    </div>
-  </div>
+  </article>
 
   <!-- Proceso / Checklist -->
   {% if checks %}
-  <div class="bi-panel seg-panel-gap">
-    <p class="seg-section-title">Proceso{% if es_vista_dg %} · solo lectura{% endif %}</p>
+  <section class="bi-panel seg-panel-gap seg-process-panel">
+    <div class="seg-section-heading">
+      <p class="seg-section-title">Puntos por completar</p>
+      <span>{{ checklist_done }}/{{ checklist_total }}</span>
+    </div>
     <p class="muted seg-check-help">
       {% if es_vista_dg %}Avance del colaborador. Toca un paso para ver su detalle. El responsable marca cada paso en orden.
       {% else %}Toca un paso para ver su detalle. Marca los pasos en orden: solo el siguiente está disponible.{% endif %}
@@ -234,8 +165,76 @@
       </details>
       {% endfor %}
     </div>
-  </div>
+  </section>
   {% endif %}
+
+  <!-- Conversación y cierre -->
+  <details class="seg-collapsible seg-panel-gap" {% if item.esta_cerrado or ultimo_comentario_dg %}open{% endif %}>
+    <summary>
+      <span class="seg-collapse-icon" aria-hidden="true">💬</span>
+      <span><strong>Conversación y cierre</strong><small>{% if ultimo_comentario_dg %}Última respuesta de DG disponible{% elif comentarios %}Hay actividad registrada{% else %}Sin mensajes todavía{% endif %}</small></span>
+      <span class="seg-collapse-chevron" aria-hidden="true">⌄</span>
+    </summary>
+    <div class="seg-collapse-body seg-status-panel{% if item.esta_cerrado %} is-closed{% elif ultimo_comentario_dg %} is-review{% endif %}">
+      <div class="seg-conversation-card {% if item.esta_cerrado %}is-closed{% endif %}">
+        <div class="seg-conversation-head">
+          <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
+          <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+        </div>
+        {% if item.aprobado_at and item.esta_cerrado %}
+        <p class="seg-timeline-meta seg-meta-flat">Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.</p>
+        {% elif item.tiene_desfase_agente_dg %}
+        <p class="seg-timeline-meta seg-meta-warning">Aprobación local anterior pendiente de sincronizar con app.pollyanasdolce.com.</p>
+        {% elif item.es_historico_agente_dg %}
+        <p class="seg-timeline-meta seg-meta-success">Registro histórico importado desde app.pollyanasdolce.com; no cuenta como pendiente ni vencido.</p>
+        {% endif %}
+        {% if ultimo_comentario_dg %}
+        <div class="seg-dg-note">
+          <strong>{{ ultimo_comentario_dg.usuario.get_full_name|default:ultimo_comentario_dg.usuario.username }}</strong>
+          <span class="muted seg-dg-meta"> · {{ ultimo_comentario_dg.created_at|date:"d/m/Y H:i" }}</span>
+          <p class="seg-note-copy">{{ ultimo_comentario_dg.comentario }}</p>
+        </div>
+        {% elif comentarios %}
+        <p class="muted seg-muted-copy">Hay actividad registrada abajo en el historial.</p>
+        {% else %}
+        <p class="muted seg-muted-copy">Sin conversación registrada todavía.</p>
+        {% endif %}
+        {% if comentarios_dg|length > 1 %}
+        <details>
+          <summary class="seg-summary-link">Ver retroalimentaciones anteriores de DG</summary>
+          <div class="seg-note-stack">
+            {% for com in comentarios_dg %}
+            {% if com.pk != ultimo_comentario_dg.pk %}
+            <div class="seg-dg-note">
+              <strong>{{ com.usuario.get_full_name|default:com.usuario.username }}</strong>
+              <span class="muted seg-dg-meta"> · {{ com.created_at|date:"d/m/Y H:i" }}</span>
+              <p class="seg-note-copy">{{ com.comentario }}</p>
+            </div>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
+    </div>
+  </details>
+
+  <details class="seg-collapsible seg-panel-gap">
+    <summary>
+      <span class="seg-collapse-icon is-technical" aria-hidden="true">⚙</span>
+      <span><strong>Detalles técnicos</strong><small>{{ item.estado_app_label }} · {{ item.get_estatus_display }}{% if item.source_synced_at %} · Sincronizado{% endif %}</small></span>
+      <span class="seg-collapse-chevron" aria-hidden="true">⌄</span>
+    </summary>
+    <div class="seg-collapse-body">
+      <dl class="seg-technical-grid">
+        <div><dt>Área</dt><dd>{{ item.area|default:"—" }}</dd></div>
+        <div><dt>Origen</dt><dd>{{ item.origen|default:"ERP" }}</dd></div>
+        <div><dt>Estado app</dt><dd>{{ item.estado_app_label }}</dd></div>
+        <div><dt>Estado ERP</dt><dd>{{ item.get_estatus_display }}</dd></div>
+        <div class="seg-tech-wide"><dt>Última sincronización</dt><dd>{% if item.source_synced_at %}{{ item.source_synced_at|slice:":16" }}{% else %}Sin registro{% endif %}</dd></div>
+      </dl>
+    </div>
+  </details>
 
   <!-- Prórroga pendiente -->
   {% if prorroga_pendiente %}
