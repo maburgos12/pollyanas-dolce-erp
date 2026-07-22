@@ -190,13 +190,24 @@ def build_operacion_context(user) -> dict:
             tiles.append(
                 OperacionTile(
                     key="mermas_captura",
-                    title="Registrar merma",
-                    detail="Captura de sucursal con productos, ticket y evidencia.",
+                    title="Merma de producto",
+                    detail="Producto terminado enviado físicamente a CEDIS.",
                     href="/mermas/app/?modo=captura",
                     icon="merma",
                     area="Sucursal",
                 )
             )
+            if getattr(profile, "sucursal_id", None):
+                tiles.append(
+                    OperacionTile(
+                        key="mermas_insumos",
+                        title="Merma de insumo",
+                        detail="Insumos recibidos en la sucursal; requiere revisión del jefe.",
+                        href="/app/sucursal/?tab=mermas",
+                        icon="merma",
+                        area="Sucursal",
+                    )
+                )
         if _can_receive_mermas(user):
             tiles.append(
                 OperacionTile(
@@ -213,8 +224,8 @@ def build_operacion_context(user) -> dict:
                 OperacionTile(
                     key="fallas_reportar",
                     title="Reportar falla",
-                    detail="Foto, sucursal, activo y prioridad del reporte.",
-                    href="/fallas/app/",
+                    detail="Equipo registrado o instalaciones; llega directo a Mantenimiento.",
+                    href="/app/sucursal/?tab=fallas",
                     icon="falla",
                     area="Sucursal",
                 )

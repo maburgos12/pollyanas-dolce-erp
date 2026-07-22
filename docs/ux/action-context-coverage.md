@@ -17,6 +17,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Compras | Solicitudes, órdenes y demás acciones de recepciones | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Inventario / Ajustes | Aprobar y aplicar ajuste pendiente | Sí, toast y redirect seguro | Sí, `#ajuste-<id>` | `InventarioAjustesApprovalTests` + `ERPActionContractTests` | Parcial: solo aprobación/aplicación |
 | Inventario, recetas, bonos, mantenimiento y activos | Demás guardados y cambios de estado | No inventariado por pantalla | No | No | Pendiente etapa 3 |
+| App Operativa / Sucursal | Reportar falla, registrar merma, aprobar, aclarar y rechazar | Sí, bloquea el botón y muestra toast | Fallback HTML completo pendiente | `operacion.tests_fallas_api` + `operacion.tests_mermas_insumos_api` | Parcial: flujo async cubierto; navegador pendiente |
 | Resto del ERP | Acciones mutantes restantes | No inventariado por pantalla | No | No | Pendiente etapa 4 |
 
 No se declarará cobertura total hasta que cada pantalla candidata tenga una fila con evidencia de implementación o una excepción justificada.
