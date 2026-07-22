@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -90,6 +91,24 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertEqual(merma.estatus, MermaInsumo.ESTATUS_ENVIADA)
         self.assertEqual(merma.jefe_inmediato, self.jefe_user)
         self.assertEqual(merma.unidad_point, "KG")
+
+    @patch("operacion.views._cargar_insumos_sucursal", return_value=([], True))
+    def test_timeout_catalogo_muestra_fallback_y_no_escribe(self, _mock_cargar):
+        pagina = self.client.get(reverse("operacion:sucursal_tools"), {"tab": "mermas"})
+        self.assertEqual(pagina.status_code, 200)
+        self.assertContains(pagina, "No pudimos cargar las existencias de Point")
+        self.assertNotContains(pagina, 'id="merma-form"')
+
+        catalogo = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"))
+        self.assertEqual(catalogo.status_code, 503)
+
+        crear = self.client.post(
+            reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload()),
+            content_type="application/json",
+        )
+        self.assertEqual(crear.status_code, 503)
+        self.assertEqual(MermaInsumo.objects.count(), 0)
 
     def test_envio_notifica_por_correo_al_jefe_sin_afectar_transaccion(self):
         with self.captureOnCommitCallbacks(execute=True):
