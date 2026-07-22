@@ -232,8 +232,8 @@
           <strong>${{ periodo_resumen.resumen_ejecutivo.sat_ventas|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Cargos banco</span>
-          <strong>${{ periodo_resumen.resumen_ejecutivo.banco_cargos|floatformat:2|intcomma }}</strong>
+          <span>Pagos con factura esperada</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.banco_cargos_proveedores|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
           <span>Gastos SAT recibidos</span>
@@ -246,7 +246,7 @@
           <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_abonos_ventas|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Diferencia cargos vs gastos</span>
+          <span>Diferencia pagos c/factura vs gastos SAT</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_cargos_proveedores|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
