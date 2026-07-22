@@ -323,7 +323,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks", "syncfy_client.tasks")
+CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
     "logistica-alertar-documentos-por-vencer": {
         "task": "logistica.tasks.alertar_documentos_por_vencer",
@@ -374,11 +374,6 @@ CELERY_BEAT_SCHEDULE = {
     "sat: descarga cfdi nocturna": {
         "task": "sat_client.ejecutar_descarga_sat_nocturna",
         "schedule": crontab(hour=1, minute=0),
-        "options": {"timezone": TIME_ZONE},
-    },
-    "syncfy: sincronizacion bancaria nocturna": {
-        "task": "syncfy_client.sincronizar_movimientos_bancarios",
-        "schedule": crontab(hour=2, minute=0),
         "options": {"timezone": TIME_ZONE},
     },
     # --- Cierre nocturno de producción ---
@@ -545,17 +540,6 @@ SAT_DESCARGA_URL = os.getenv(
     "SAT_DESCARGA_URL",
     "https://cfdidescargamasiva.clouda.sat.gob.mx/DescargaMasivaService.svc",
 )
-
-# Syncfy - agregador bancario.
-SYNCFY_API_KEY = os.getenv("SYNCFY_API_KEY", "")
-SYNCFY_ID_USER = os.getenv("SYNCFY_ID_USER", "")
-SYNCFY_BASE_URL = os.getenv("SYNCFY_BASE_URL", "https://opendata-api.syncfy.com/v1")
-SYNCFY_DIAS_ATRAS = env_int("SYNCFY_DIAS_ATRAS", 7)
-SYNCFY_ENABLED = env_bool("SYNCFY_ENABLED", default=False)
-SYNCFY_TIMEOUT_SECONDS = env_int("SYNCFY_TIMEOUT_SECONDS", 60)
-SYNCFY_POLL_INTERVAL_SECONDS = env_int("SYNCFY_POLL_INTERVAL_SECONDS", 30)
-SYNCFY_POLL_MAX_ATTEMPTS = env_int("SYNCFY_POLL_MAX_ATTEMPTS", 20)
-SYNCFY_ALERT_EMAILS = env_list("SYNCFY_ALERT_EMAILS", "maburgos12@pollyanasdolce.com")
 
 # Umbrales de rentabilidad para el agente IA
 RENT_MARGEN_BRUTO_MIN = 55.0

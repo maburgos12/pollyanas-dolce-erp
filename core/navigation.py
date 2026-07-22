@@ -221,7 +221,6 @@ NAV_GROUPS = [
             ("sistema", "orquestacion", "Orquestación", "/orquestacion/", ["/orquestacion/"]),
             ("sistema", "ia", "IA privada", "/ia-privada/", ["/ia-privada/"]),
             ("sistema", "integraciones", "Integraciones", "/integraciones/", ["/integraciones/"]),
-            ("sistema", "syncfy", "Bancos Syncfy", "/syncfy/bancos/", ["/syncfy/bancos/"]),
             (
                 "sistema",
                 "horarios_especiales",
