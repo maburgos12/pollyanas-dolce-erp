@@ -142,6 +142,28 @@ PANEL_BUCKETS = {
     "historico": "Histórico finalizado",
 }
 
+PANEL_ESTADOS = {
+    "vencidos": "Vencidos",
+    "activos": "Activos",
+    "revision": "Por aprobar",
+    "prorrogas": "Prórrogas",
+    "completados": "Completados",
+}
+
+
+def _item_en_estado_panel(item: SeguimientoItem, estado: str) -> bool:
+    if estado == "vencidos":
+        return item.es_vencido_visual
+    if estado == "activos":
+        return not item.esta_cerrado
+    if estado == "revision":
+        return item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+    if estado == "prorrogas":
+        return bool(item.prorroga_pendiente)
+    if estado == "completados":
+        return item.estatus == SeguimientoItem.ESTATUS_COMPLETADO
+    return False
+
 
 def _source_status(item: SeguimientoItem) -> str:
     return str((item.metadata or {}).get("source_status") or "").strip().upper()
@@ -972,9 +994,9 @@ def panel_dg(request):
     filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
     filtro_colaborador = (request.GET.get("colaborador") or "").strip()
     filtro_vencidos = request.GET.get("vencidos") == "1"
-    active_bucket = (request.GET.get("bucket") or "activos").strip().lower()
+    active_bucket = (request.GET.get("bucket") or "").strip().lower()
     if active_bucket not in PANEL_BUCKETS:
-        active_bucket = "activos"
+        active_bucket = ""
 
     qs = (
         SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
@@ -1024,7 +1046,35 @@ def panel_dg(request):
         {"key": bucket, "label": label, "count": bucket_counts[bucket]}
         for bucket, label in PANEL_BUCKETS.items()
     ]
-    items = [i for i in items_base if i.visual_bucket == active_bucket]
+    items_scope = [i for i in items_base if i.visual_bucket == active_bucket] if active_bucket else list(items_base)
+
+    active_estado = (request.GET.get("estado") or "").strip().lower()
+    if active_estado not in PANEL_ESTADOS:
+        active_estado = {
+            "activos": "activos",
+            "historico": "completados",
+            "revision": "revision",
+            "desfases": "activos",
+        }.get(active_bucket, "vencidos")
+
+    dashboard_counts = {
+        estado: sum(1 for item in items_scope if _item_en_estado_panel(item, estado))
+        for estado in PANEL_ESTADOS
+    }
+    state_nav = []
+    for estado, label in PANEL_ESTADOS.items():
+        params = request.GET.copy()
+        params.pop("bucket", None)
+        params.pop("vencidos", None)
+        params["estado"] = estado
+        state_nav.append({
+            "key": estado,
+            "label": label,
+            "count": dashboard_counts[estado],
+            "url": f"?{params.urlencode()}",
+        })
+
+    items = [i for i in items_scope if _item_en_estado_panel(i, active_estado)]
 
     active_tab = (request.GET.get("tab") or "").strip().upper()
     items_for_type_counts = list(items)
@@ -1050,11 +1100,13 @@ def panel_dg(request):
     )
 
     from collections import defaultdict
-    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
+    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "iniciales": "", "count": 0, "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
     for item in items:
         key = item.responsable_nombre
         por_colaborador[key]["nombre"] = key
+        por_colaborador[key]["iniciales"] = "".join(part[0] for part in key.split()[:2]).upper() or "—"
         por_colaborador[key]["items"].append(item)
+        por_colaborador[key]["count"] += 1
         if not item.esta_cerrado:
             por_colaborador[key]["abiertos"] += 1
         if item.es_vencido_visual:
@@ -1066,7 +1118,7 @@ def panel_dg(request):
 
     colaboradores_resumen = sorted(
         por_colaborador.values(),
-        key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
+        key=lambda c: (-c["count"], c["nombre"].casefold()),
     )
 
     # Sección "Requiere tu acción": en revisión + prórrogas pendientes (sin importar filtros).
@@ -1092,6 +1144,12 @@ def panel_dg(request):
 
     return render(request, "seguimiento/panel_dg.html", {
         "items": items,
+        "items_estado": items,
+        "colaboradores_estado": colaboradores_resumen,
+        "active_estado": active_estado,
+        "active_estado_label": PANEL_ESTADOS[active_estado],
+        "state_nav": state_nav,
+        "dashboard_counts": dashboard_counts,
         "pendientes_accion": pendientes_accion,
         "pendientes_accion_total": len(pendientes_accion),
         "colaboradores_resumen": colaboradores_resumen,
