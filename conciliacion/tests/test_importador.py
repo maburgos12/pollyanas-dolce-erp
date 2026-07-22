@@ -49,7 +49,7 @@ class ImportadorBancarioTests(TestCase):
         self.assertEqual(efectivo.codigo, "EFECTIVO_SUCURSAL_DIA")
         self.assertFalse(efectivo.permite_match_directo)
         self.assertIn("CFDI de ingreso emitido por sucursal", efectivo.sat)
-        self.assertIn("factura de ingreso contra deposito bancario", efectivo.metodo)
+        self.assertIn("factura de ingreso contra depósito bancario", efectivo.metodo)
         self.assertEqual(transferencia.codigo, "TRANSFERENCIA_CLIENTE")
         self.assertTrue(transferencia.permite_match_directo)
         self.assertEqual(tarjeta_credito.codigo, "TARJETA_TPV_NETO")
