@@ -23,7 +23,7 @@
   tabs.forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tabTarget)));
 
   const objectiveInputs = [...document.querySelectorAll('input[name="tipo_objetivo"]')];
-  function syncFailureTarget() {
+  function syncFailureTarget(clearCategory = false) {
     const equipment = document.querySelector('input[name="tipo_objetivo"]:checked')?.value === "EQUIPO";
     document.querySelector("[data-equipment-fields]").hidden = !equipment;
     document.querySelector("[data-installation-fields]").hidden = equipment;
@@ -31,10 +31,10 @@
     document.querySelector("[data-installation-options]").disabled = equipment;
     document.querySelector("#activo_id").required = equipment;
     document.querySelector("#area_instalacion").required = !equipment;
-    document.querySelector("#categoria_falla").value = "";
+    if (clearCategory) document.querySelector("#categoria_falla").value = "";
   }
-  objectiveInputs.forEach((input) => input.addEventListener("change", syncFailureTarget));
-  if (objectiveInputs.length) syncFailureTarget();
+  objectiveInputs.forEach((input) => input.addEventListener("change", () => syncFailureTarget(true)));
+  if (objectiveInputs.length) syncFailureTarget(false);
 
   const supply = document.querySelector("#codigo_point");
   function syncSupply() {

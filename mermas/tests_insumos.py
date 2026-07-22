@@ -219,6 +219,76 @@ class EnviarMermaInsumoTests(TestCase):
 
         self.assertEqual(self.MermaInsumoEvento.objects.filter(merma=merma).count(), 0)
 
+    def test_direccion_reasigna_sin_responsable_y_deja_evento(self):
+        admin = User.objects.create_superuser(username="direccion", password="x")
+        _, jefe = self.crear_identidad_valida()
+        merma = self.nueva_merma(estatus=self.MermaInsumo.ESTATUS_SIN_RESPONSABLE)
+        from mermas.services_insumos import reasignar_merma_sin_responsable
+
+        reasignada = reasignar_merma_sin_responsable(
+            merma_id=merma.id, actor=admin, jefe_empleado=jefe, motivo="Corrección de organigrama"
+        )
+
+        self.assertEqual(reasignada.estatus, self.MermaInsumo.ESTATUS_ENVIADA)
+        self.assertEqual(reasignada.jefe_inmediato, self.usuario_jefe)
+        evento = self.MermaInsumoEvento.objects.get(merma=merma)
+        self.assertEqual(evento.actor, admin)
+        self.assertEqual(evento.metadata["jefe_empleado_id"], jefe.id)
+
+    def test_reasignacion_nunca_permite_autoaprobacion(self):
+        admin = User.objects.create_superuser(username="direccion.segura", password="x")
+        reportante, _ = self.crear_identidad_valida()
+        merma = self.nueva_merma(
+            estatus=self.MermaInsumo.ESTATUS_SIN_RESPONSABLE, reportante_empleado=reportante,
+            jefe_inmediato=None,
+        )
+        from mermas.services_insumos import reasignar_merma_sin_responsable
+
+        with self.assertRaisesMessage(ValidationError, "misma persona"):
+            reasignar_merma_sin_responsable(
+                merma_id=merma.id, actor=admin, jefe_empleado=reportante, motivo="Inválido"
+            )
+
+    def test_reportante_corrige_aclaracion_y_reenvia_al_mismo_jefe(self):
+        reportante, jefe = self.crear_identidad_valida()
+        merma = self.nueva_merma(
+            estatus=self.MermaInsumo.ESTATUS_EN_ACLARACION,
+            reportante_empleado=reportante,
+            jefe_empleado=jefe,
+            jefe_inmediato=self.usuario_jefe,
+        )
+        from mermas.services_insumos import reenviar_merma_aclarada
+
+        reenviada = reenviar_merma_aclarada(
+            merma_id=merma.id, usuario=self.usuario, cantidad=Decimal("2.500"),
+            comentario="Cantidad pesada nuevamente", motivo="Corrección solicitada",
+        )
+
+        self.assertEqual(reenviada.estatus, self.MermaInsumo.ESTATUS_ENVIADA)
+        self.assertEqual(reenviada.cantidad_reportada, Decimal("2.500"))
+        evento = self.MermaInsumoEvento.objects.get(merma=merma)
+        self.assertEqual(evento.metadata["cantidad_anterior"], "3.000")
+        self.assertEqual(evento.metadata["cantidad_nueva"], "2.500")
+
+    def test_aclaracion_con_jefe_inactivo_pasa_a_sin_responsable_auditado(self):
+        reportante, jefe = self.crear_identidad_valida()
+        merma = self.nueva_merma(
+            estatus=self.MermaInsumo.ESTATUS_EN_ACLARACION,
+            reportante_empleado=reportante, jefe_empleado=jefe, jefe_inmediato=self.usuario_jefe,
+        )
+        self.usuario_jefe.is_active = False
+        self.usuario_jefe.save(update_fields=["is_active"])
+        from mermas.services_insumos import reenviar_merma_aclarada
+
+        reenviada = reenviar_merma_aclarada(
+            merma_id=merma.id, usuario=self.usuario, cantidad=Decimal("2.500"),
+            comentario="Cantidad corregida", motivo="Atiendo aclaración",
+        )
+
+        self.assertEqual(reenviada.estatus, self.MermaInsumo.ESTATUS_SIN_RESPONSABLE)
+        self.assertIsNone(reenviada.jefe_inmediato_id)
+        self.assertTrue(reenviada.eventos.filter(estado_nuevo=self.MermaInsumo.ESTATUS_SIN_RESPONSABLE).exists())
+
 
 class InsumosElegiblesPointTests(TestCase):
     def setUp(self):

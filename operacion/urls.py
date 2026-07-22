@@ -22,6 +22,16 @@ urlpatterns = [
         views.mermas_insumos_decidir_api,
         name="mermas_insumos_decidir_api",
     ),
+    path(
+        "api/mermas-insumos/<int:merma_id>/reenviar/",
+        views.mermas_insumos_reenviar_api,
+        name="mermas_insumos_reenviar_api",
+    ),
+    path(
+        "api/mermas-insumos/<int:merma_id>/reasignar/",
+        views.mermas_insumos_reasignar_api,
+        name="mermas_insumos_reasignar_api",
+    ),
     path("bitacoras/", views.bitacoras_home, name="bitacoras_home"),
     path("bitacoras/<str:tipo>/", views.bitacora_captura, name="bitacora_captura"),
 ]

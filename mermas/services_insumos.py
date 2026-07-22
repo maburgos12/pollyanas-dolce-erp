@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from core.access import is_admin_or_dg
 from mermas.models import MermaInsumo, MermaInsumoEvento, OrdenAjustePoint
 from pos_bridge.models import PointInventorySnapshot, PointTransferLine
 from rrhh.services_identidad import empleado_vinculado_usuario
@@ -161,6 +162,93 @@ def decidir_merma_insumo(*, merma_id, jefe, accion, motivo):
     merma.save(update_fields=["estatus", "actualizado_en"])
     MermaInsumoEvento.objects.create(
         merma=merma, estado_anterior=anterior, estado_nuevo=merma.estatus, actor=jefe, motivo=motivo
+    )
+    return merma
+
+
+@transaction.atomic
+def reasignar_merma_sin_responsable(*, merma_id, actor, jefe_empleado, motivo):
+    if not is_admin_or_dg(actor):
+        raise ValidationError("Solo Administración o Dirección puede reasignar esta solicitud.")
+    motivo = (motivo or "").strip()
+    if not motivo:
+        raise ValidationError("Es obligatorio indicar el motivo de la reasignación.")
+    merma = MermaInsumo.objects.select_for_update().get(pk=merma_id)
+    if merma.estatus != MermaInsumo.ESTATUS_SIN_RESPONSABLE:
+        raise ValidationError("Solo puede reasignarse una merma sin responsable.")
+    usuario_jefe = getattr(jefe_empleado, "usuario_erp", None)
+    if not jefe_empleado.activo or not usuario_jefe or not usuario_jefe.is_active:
+        raise ValidationError("El responsable debe ser un empleado activo con usuario ERP activo.")
+    if usuario_jefe.id == merma.reportado_por_id or jefe_empleado.id == merma.reportante_empleado_id:
+        raise ValidationError("El responsable no puede ser la misma persona que reportó la merma.")
+    anterior = merma.estatus
+    merma.jefe_empleado = jefe_empleado
+    merma.jefe_inmediato = usuario_jefe
+    merma.estatus = MermaInsumo.ESTATUS_ENVIADA
+    merma.save(update_fields=["jefe_empleado", "jefe_inmediato", "estatus", "actualizado_en"])
+    MermaInsumoEvento.objects.create(
+        merma=merma, estado_anterior=anterior, estado_nuevo=merma.estatus,
+        actor=actor, motivo=motivo,
+        metadata={"jefe_empleado_id": jefe_empleado.id, "jefe_usuario_id": usuario_jefe.id},
+    )
+    return merma
+
+
+@transaction.atomic
+def reenviar_merma_aclarada(*, merma_id, usuario, cantidad, comentario, motivo):
+    merma = MermaInsumo.objects.select_for_update().get(pk=merma_id)
+    if merma.reportado_por_id != getattr(usuario, "id", None):
+        raise ValidationError("Solo la persona reportante puede corregir esta merma.")
+    if merma.estatus != MermaInsumo.ESTATUS_EN_ACLARACION:
+        raise ValidationError("La merma no está pendiente de aclaración.")
+    cantidad = Decimal(str(cantidad))
+    if not cantidad.is_finite() or cantidad <= 0:
+        raise ValidationError("Captura una cantidad positiva válida.")
+    comentario = (comentario or "").strip()
+    motivo = (motivo or "").strip()
+    if not comentario or not motivo:
+        raise ValidationError("El comentario corregido y el motivo de reenvío son obligatorios.")
+    jefe = merma.jefe_empleado
+    usuario_jefe = getattr(jefe, "usuario_erp", None) if jefe else None
+    if not jefe or not jefe.activo or not usuario_jefe or not usuario_jefe.is_active:
+        cantidad_anterior = merma.cantidad_reportada
+        anterior = merma.estatus
+        merma.cantidad_reportada = cantidad
+        merma.cantidad_aprobada = None
+        merma.comentario = comentario
+        merma.jefe_empleado = None
+        merma.jefe_inmediato = None
+        merma.estatus = MermaInsumo.ESTATUS_SIN_RESPONSABLE
+        merma.full_clean()
+        merma.save(update_fields=[
+            "cantidad_reportada", "cantidad_aprobada", "comentario", "jefe_empleado",
+            "jefe_inmediato", "estatus", "actualizado_en",
+        ])
+        MermaInsumoEvento.objects.create(
+            merma=merma, estado_anterior=anterior, estado_nuevo=merma.estatus, actor=usuario,
+            motivo="El responsable anterior dejó de estar activo; requiere reasignación.",
+            metadata={
+                "cantidad_anterior": f"{cantidad_anterior:.3f}", "cantidad_nueva": f"{cantidad:.3f}",
+                "motivo_aclaracion": motivo,
+            },
+        )
+        return merma
+    cantidad_anterior = merma.cantidad_reportada
+    anterior = merma.estatus
+    merma.cantidad_reportada = cantidad
+    merma.cantidad_aprobada = None
+    merma.comentario = comentario
+    merma.estatus = MermaInsumo.ESTATUS_ENVIADA
+    merma.full_clean()
+    merma.save(update_fields=["cantidad_reportada", "cantidad_aprobada", "comentario", "estatus", "actualizado_en"])
+    MermaInsumoEvento.objects.create(
+        merma=merma, estado_anterior=anterior, estado_nuevo=merma.estatus,
+        actor=usuario, motivo=motivo,
+        metadata={
+            "cantidad_anterior": f"{cantidad_anterior:.3f}",
+            "cantidad_nueva": f"{cantidad:.3f}",
+            "requiere_nueva_aprobacion": True,
+        },
     )
     return merma
 

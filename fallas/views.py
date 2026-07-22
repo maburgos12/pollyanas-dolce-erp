@@ -422,10 +422,15 @@ def pwa_reporte(request):
         elif not sucursales.filter(pk=sucursal_id).exists():
             messages.error(request, "No tienes permiso para reportar fallas en esa sucursal.")
         else:
+            activo_id = request.POST.get("activo_relacionado") or None
             reporte = ReporteFalla.objects.create(
                 sucursal_id=sucursal_id,
                 categoria_id=categoria_id,
-                activo_relacionado_id=request.POST.get("activo_relacionado") or None,
+                activo_relacionado_id=activo_id,
+                tipo_objetivo=(
+                    ReporteFalla.OBJETIVO_EQUIPO if activo_id else ReporteFalla.OBJETIVO_INSTALACION
+                ),
+                area_instalacion="" if activo_id else ((request.POST.get("area_instalacion") or "Sucursal").strip()),
                 area=request.POST.get("area") or ReporteFalla.AREA_GENERAL,
                 titulo=titulo,
                 descripcion=descripcion,
