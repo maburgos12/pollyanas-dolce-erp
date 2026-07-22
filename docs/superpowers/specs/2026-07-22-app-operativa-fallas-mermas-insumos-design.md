@@ -1,7 +1,7 @@
 # App Operativa: fallas y mermas de insumos
 
-Fecha: 2026-07-22  
-Estado: diseño aprobado por Mauricio  
+Fecha: 2026-07-22
+Estado: diseño aprobado por Mauricio
 Alcance: especificación funcional y técnica; no autoriza todavía cambios de código, datos ni producción.
 
 ## 1. Objetivo
@@ -322,4 +322,3 @@ Cada etapa exige PR revisado, despliegue mediante `scripts/deploy_web_safe.sh` y
 - El ERP conserva cantidades reportada y aprobada, todas las decisiones y la evidencia de Point.
 - Los errores técnicos se reintentan con seguridad y los resultados ambiguos nunca se presentan como éxito.
 - El flujo actual de merma de producto terminado y el seguimiento actual de Mantenimiento continúan funcionando.
-
