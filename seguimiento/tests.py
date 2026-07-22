@@ -401,6 +401,69 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertContains(response, "Desfase app")
         self.assertNotContains(response, ">10%</span>")
 
+    def test_panel_dg_renderiza_resumen_compacto_y_estados_ejecutivos(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.resumen", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/panel/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="panel-dg-mini-dashboard"')
+        self.assertContains(response, "Nuevo acuerdo")
+        self.assertContains(response, 'data-panel-state="vencidos"')
+        self.assertContains(response, 'data-panel-state="activos"')
+        self.assertContains(response, 'data-panel-state="revision"')
+        self.assertContains(response, 'data-panel-state="prorrogas"')
+        self.assertContains(response, 'data-panel-state="completados"')
+        self.assertContains(response, 'ti-progress-check')
+        self.assertContains(response, 'ti-user-check')
+        self.assertContains(response, 'ti-calendar-time')
+        self.assertContains(response, 'ti-circle-check')
+        self.assertNotContains(response, 'class="bi-hero-status-grid"')
+
+    def test_panel_dg_filtra_cada_estado_y_lo_desglosa_por_persona(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.personas", password="test12345")
+        dg_user.groups.add(dg_group)
+        otra = Empleado.objects.create(
+            nombre="María González",
+            email="maria.gonzalez@pollyanasdolce.com",
+            area="VENTAS",
+            puesto="Gerente",
+            sucursal="CENTRO",
+        )
+        vencido_otra = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Acuerdo vencido de María",
+            responsable_empleado=otra,
+            area="VENTAS",
+            fecha_limite=timezone.now() - timedelta(days=2),
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+        )
+        activo_otra = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Acuerdo activo de María",
+            responsable_empleado=otra,
+            area="VENTAS",
+            fecha_limite=timezone.now() + timedelta(days=2),
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+        )
+        self.client.force_login(dg_user)
+
+        vencidos = self.client.get("/seguimiento/panel/?estado=vencidos")
+        activos = self.client.get("/seguimiento/panel/?estado=activos")
+
+        self.assertEqual([item.pk for item in vencidos.context["items_estado"]], [vencido_otra.pk])
+        self.assertEqual(vencidos.context["colaboradores_estado"][0]["nombre"], "María González")
+        self.assertEqual(vencidos.context["colaboradores_estado"][0]["count"], 1)
+        self.assertContains(vencidos, "Abrir lista")
+        self.assertContains(vencidos, "Acuerdo vencido de María")
+        self.assertNotContains(vencidos, "Acuerdo activo de María")
+        self.assertIn(vencido_otra.pk, [item.pk for item in activos.context["items_estado"]])
+        self.assertIn(activo_otra.pk, [item.pk for item in activos.context["items_estado"]])
+
     def test_detalle_no_muestra_cerrado_si_fuente_sigue_abierta(self):
         self.item.tipo = SeguimientoItem.TIPO_MINUTA
         self.item.estatus = SeguimientoItem.ESTATUS_PENDIENTE

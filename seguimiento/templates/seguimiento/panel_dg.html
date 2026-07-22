@@ -7,334 +7,144 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260529-panel-dg-v2">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-panel-dg.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="{% static 'css/template_modules/seguimiento-templates-seguimiento-panel-dg.css' %}?v=20260722-dg-compact-v1">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell panel-dg-shell">
-
-  <!-- Hero -->
-  <section class="bi-hero panel-dg-hero">
-    <div class="bi-hero-main">
+  <header class="panel-dg-heading">
+    <div>
       <div class="bi-kicker">Dirección General</div>
-      <h1 class="bi-hero-title panel-dg-hero-title">Panel de acuerdos</h1>
-      <p class="bi-copy">Minutas, proyectos y compromisos de tu equipo.</p>
-      <div class="bi-hero-highlights">
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Total</div>
-          <div class="bi-hero-highlight-value">{{ total|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">{{ abiertos }} abiertos · {{ completados }} completados</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Vencidos</div>
-          <div class="bi-hero-highlight-value {% if vencidos %}is-danger{% else %}is-success{% endif %}">{{ vencidos }}</div>
-          <div class="bi-hero-highlight-meta">{{ por_vencer_24h }} vencen en 24h</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">En revisión</div>
-          <div class="bi-hero-highlight-value {% if en_revision %}is-warning{% else %}is-success{% endif %}">{{ en_revision }}</div>
-          <div class="bi-hero-highlight-meta">Esperan tu aprobación</div>
-        </article>
-        <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Prórrogas</div>
-          <div class="bi-hero-highlight-value {% if prorrogas_pendientes %}is-warning{% else %}is-success{% endif %}">{{ prorrogas_pendientes }}</div>
-          <div class="bi-hero-highlight-meta">Pendientes</div>
-        </article>
-      </div>
+      <h1>Panel de acuerdos</h1>
+      <p>Minutas, proyectos y compromisos de tu equipo.</p>
     </div>
-    <div class="bi-hero-side">
-      <div class="bi-hero-status-grid">
-        <article class="bi-status-card"><span class="bi-status-label">Abiertos</span><strong>{{ abiertos }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Completados</span><strong class="is-success">{{ completados }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">Vencidos</span><strong class="{% if vencidos %}is-danger{% else %}is-success{% endif %}">{{ vencidos }}</strong></article>
-        <article class="bi-status-card"><span class="bi-status-label">En revisión</span><strong class="{% if en_revision %}is-warning{% endif %}">{{ en_revision }}</strong></article>
-      </div>
-      <div class="panel-dg-side-actions">
-        <a href="{% url 'seguimiento:mi_seguimiento' %}" class="btn btn-secondary btn-sm">Mi trabajo</a>
-      </div>
-    </div>
+    <button class="btn btn-secondary panel-dg-new-button" type="button" data-panel-dialog-open {% if not writeback_activo %}disabled{% endif %}>
+      <i class="ti ti-plus" aria-hidden="true"></i><span>Nuevo acuerdo</span>
+    </button>
+  </header>
+
+  <section class="panel-dg-mini-dashboard" aria-label="Resumen ejecutivo">
+    <a href="{% for state in state_nav %}{% if state.key == 'activos' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
+      <i class="ti ti-progress-check panel-dg-mini-icon" aria-hidden="true"></i>
+      <span>Activos</span><strong>{{ dashboard_counts.activos }}</strong><small>Abiertos</small>
+    </a>
+    <a href="{% for state in state_nav %}{% if state.key == 'revision' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
+      <i class="ti ti-user-check panel-dg-mini-icon is-warning" aria-hidden="true"></i>
+      <span>Por aprobar</span><strong class="is-warning">{{ dashboard_counts.revision }}</strong><small>En revisión</small>
+    </a>
+    <a href="{% for state in state_nav %}{% if state.key == 'prorrogas' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
+      <i class="ti ti-calendar-time panel-dg-mini-icon is-warning" aria-hidden="true"></i>
+      <span>Prórrogas</span><strong class="is-warning">{{ dashboard_counts.prorrogas }}</strong><small>Pendientes</small>
+    </a>
+    <a href="{% for state in state_nav %}{% if state.key == 'completados' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
+      <i class="ti ti-circle-check panel-dg-mini-icon is-success" aria-hidden="true"></i>
+      <span>Completados</span><strong class="is-success">{{ dashboard_counts.completados }}</strong><small>Cerrados</small>
+    </a>
   </section>
 
-  <!-- Crear acuerdo integrado ERP → app -->
-  <section class="bi-panel panel-dg-panel-gap">
-    <div class="panel-dg-create-head">
+  <nav class="panel-dg-state-nav" aria-label="Filtrar acuerdos por estado">
+    {% for state in state_nav %}
+    <a href="{{ state.url }}" class="panel-dg-state-link {% if active_estado == state.key %}is-active{% endif %}" data-panel-state="{{ state.key }}" {% if active_estado == state.key %}aria-current="page"{% endif %}>
+      <span>{{ state.label }}</span><strong>{{ state.count }}</strong>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <section class="panel-dg-people" aria-labelledby="panel-dg-people-title">
+    <div class="panel-dg-list-heading">
       <div>
-        <p class="seg-section-title panel-dg-create-title">Nuevo acuerdo integrado</p>
-        <p class="muted panel-dg-create-copy">
-          Se crea primero en app.pollyanasdolce.com y después se refleja en este panel.
-        </p>
+        <div class="bi-kicker">{{ active_estado_label }}</div>
+        <h2 id="panel-dg-people-title">Por persona</h2>
       </div>
-      {% if not writeback_activo %}
-      <span class="bi-pill pill-bloqueado">API desactivada</span>
-      {% endif %}
+      <span>{{ items_estado|length }} acuerdo{{ items_estado|length|pluralize:"s" }}</span>
     </div>
-    <form method="post" action="{% url 'seguimiento:crear_acuerdo_agente_dg' %}" class="panel-dg-create-form">
-      {% csrf_token %}
-      <div class="bi-control">
-        <label for="nuevo-responsable">Colaborador</label>
-        <select id="nuevo-responsable" name="responsable_user_id" required {% if not writeback_activo %}disabled{% endif %}>
-          <option value="">Seleccionar</option>
-          {% for user in usuarios_crear_acuerdo %}
-          <option value="{{ user.pk }}">{{ user.get_full_name|default:user.username }} · {{ user.email|default:user.username }}</option>
+
+    {% if items_estado %}
+    <div class="panel-dg-people-list">
+      <details class="panel-dg-all-agreements">
+        <summary>
+          <span class="panel-dg-alert-icon" aria-hidden="true"><i class="ti ti-alert-triangle"></i></span>
+          <span class="panel-dg-row-copy">
+            <strong>{{ items_estado|length }} acuerdo{{ items_estado|length|pluralize:"s" }} {{ active_estado_label|lower }}</strong>
+            <small>Abre la lista completa o selecciona una persona.</small>
+          </span>
+          <span class="btn btn-secondary btn-sm panel-dg-open-label">Abrir lista</span>
+          <i class="ti ti-chevron-down panel-dg-chevron" aria-hidden="true"></i>
+        </summary>
+        <div class="panel-dg-agreement-list">
+          {% for item in items_estado %}
+          <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="panel-dg-agreement-row">
+            <span><strong>{{ item.titulo }}</strong><small>{{ item.responsable_nombre }} · {{ item.get_tipo_display }} · {{ item.avance_label }}{% if item.visual_bucket == "desfases" %} · Desfase app{% endif %}{% if item.fecha_limite %} · {{ item.fecha_limite|date:"d/m/Y" }}{% endif %}</small></span>
+            <span class="bi-pill pill-{{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+          </a>
           {% endfor %}
-        </select>
-      </div>
-      <div class="bi-control">
-        <label for="nuevo-titulo">Acuerdo</label>
-        <input id="nuevo-titulo" name="titulo" type="text" maxlength="220" required placeholder="Título del acuerdo" {% if not writeback_activo %}disabled{% endif %}>
-      </div>
-      <div class="bi-control">
-        <label for="nuevo-fecha">Fecha límite</label>
-        <input id="nuevo-fecha" name="fecha_limite" type="date" required {% if not writeback_activo %}disabled{% endif %}>
-      </div>
-      <div class="bi-control">
-        <label for="nuevo-hora">Hora</label>
-        <input id="nuevo-hora" name="hora_limite" type="time" value="18:00" required {% if not writeback_activo %}disabled{% endif %}>
-      </div>
-      <div class="bi-control panel-dg-control-span-2">
-        <label for="nuevo-descripcion">Detalle</label>
-        <textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo %}disabled{% endif %}></textarea>
-      </div>
-      <div class="bi-control panel-dg-control-span-2">
-        <label for="nuevo-checklist">Checklist opcional</label>
-        <textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo %}disabled{% endif %}></textarea>
-      </div>
-      <div class="panel-dg-form-actions">
-        <button class="btn btn-primary btn-sm" type="submit" {% if not writeback_activo %}disabled{% endif %}>Crear en app y ERP</button>
-      </div>
-    </form>
-  </section>
-
-  <!-- ── Requiere tu acción ── -->
-  {% if pendientes_accion %}
-  <section class="panel-dg-accion panel-dg-action-section">
-    <div class="home-exec-section-head panel-dg-section-head">
-      <div>
-        <div class="home-exec-kicker panel-dg-section-kicker">Requiere tu acción</div>
-        <h2 class="home-exec-title panel-dg-section-title">Pendientes de tu revisión ({{ pendientes_accion_total }})</h2>
-      </div>
-    </div>
-    <div class="panel-dg-review-list">
-      {% for item in pendientes_accion %}
-      <div class="bi-panel panel-dg-review-card {% if item.prorroga_pendiente %}is-prorroga{% endif %}">
-        <div class="panel-dg-review-head">
-          <div class="panel-dg-review-main">
-            <span class="bi-pill panel-dg-pill-sm">{{ item.get_tipo_display }}</span>
-            {% if item.es_en_revision %}<span class="bi-pill pill-en_revision panel-dg-pill-sm">En revisión</span>{% endif %}
-            {% if item.prorroga_pendiente %}<span class="badge bg-warning panel-dg-prorroga-badge">Prórroga</span>{% endif %}
-            <h3 class="panel-dg-review-title">{{ item.titulo }}</h3>
-            <p class="muted panel-dg-review-meta">
-              {{ item.responsable_nombre }} · {{ item.area|default:"—" }} ·
-              Límite: {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}sin fecha{% endif %} ·
-              Checks {{ item.checklist_done }}/{{ item.checklist_total }}
-            </p>
-          </div>
-          <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm panel-dg-detail-link">Ver detalle</a>
         </div>
+      </details>
 
-        {% if item.ultima_evidencia %}
-        <div class="panel-dg-evidence-row">
-          <a href="{{ item.ultima_evidencia.archivo.url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">{{ item.ultima_evidencia.nombre_original|truncatechars:40 }}</a>
-          {% if item.ultimo_comentario %}<span class="muted panel-dg-comment">"{{ item.ultimo_comentario.comentario|truncatechars:120 }}"</span>{% endif %}
+      {% for colab in colaboradores_estado %}
+      <details class="panel-dg-person-row">
+        <summary>
+          <span class="panel-dg-avatar" aria-hidden="true">{{ colab.iniciales }}</span>
+          <span class="panel-dg-row-copy">
+            <strong>{{ colab.nombre }} · <em>{{ colab.count }} {{ active_estado_label|lower }}</em></strong>
+            <small>{% with first=colab.items.0 %}{% if first.fecha_limite %}Fecha más próxima: {{ first.fecha_limite|date:"d/m/Y" }}{% else %}Sin fecha límite registrada{% endif %}{% endwith %}</small>
+          </span>
+          <i class="ti ti-chevron-down panel-dg-chevron" aria-hidden="true"></i>
+        </summary>
+        <div class="panel-dg-agreement-list">
+          {% for item in colab.items %}
+          <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="panel-dg-agreement-row">
+            <span><strong>{{ item.titulo }}</strong><small>{{ item.get_tipo_display }} · {{ item.area|default:"Sin área" }} · {{ item.avance_label }}{% if item.visual_bucket == "desfases" %} · Desfase app{% endif %}{% if item.fecha_limite %} · {{ item.fecha_limite|date:"d/m/Y" }}{% endif %}</small></span>
+            <span class="bi-pill pill-{{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+          </a>
+          {% endfor %}
         </div>
-        {% elif item.ultimo_comentario %}
-        <p class="muted panel-dg-standalone-comment">"{{ item.ultimo_comentario.comentario|truncatechars:160 }}"</p>
-        {% endif %}
-
-        {% if item.prorroga_pendiente %}
-        <div class="panel-dg-prorroga-box">
-          <p class="panel-dg-prorroga-copy">
-            <strong>Pide más tiempo</strong> hasta {{ item.prorroga_pendiente.fecha_solicitada|date:"d/m/Y" }} —
-            {{ item.prorroga_pendiente.motivo|truncatechars:140 }}
-          </p>
-          <div class="panel-dg-row-actions">
-            <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
-              {% csrf_token %}<input type="hidden" name="next" value="panel"><input type="hidden" name="accion" value="aprobar">
-              <button class="btn btn-primary btn-sm" type="submit">Aprobar prórroga</button>
-            </form>
-            <form method="post" action="{% url 'seguimiento:resolver_prorroga' item.pk item.prorroga_pendiente.pk %}">
-              {% csrf_token %}<input type="hidden" name="next" value="panel"><input type="hidden" name="accion" value="rechazar">
-              <button class="btn btn-secondary btn-sm" type="submit">Rechazar</button>
-            </form>
-          </div>
-        </div>
-        {% endif %}
-
-        {% if item.es_en_revision %}
-        <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" class="panel-dg-review-form">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="panel">
-          <textarea name="comentario" class="panel-dg-review-textarea" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)"></textarea>
-          <div class="panel-dg-row-actions">
-            <button class="btn btn-primary btn-sm" type="submit" name="accion" value="aprobar">Aprobar como completado</button>
-            <button class="btn btn-secondary btn-sm" type="submit" name="accion" value="devolver">Devolver para corrección</button>
-          </div>
-        </form>
-        {% endif %}
-      </div>
+      </details>
       {% endfor %}
     </div>
+    {% else %}
+    <div class="panel-dg-empty">
+      <i class="ti ti-circle-check" aria-hidden="true"></i>
+      <strong>Sin acuerdos {{ active_estado_label|lower }}</strong>
+      <span>No hay personas que mostrar en este estado.</span>
+    </div>
+    {% endif %}
   </section>
-  {% endif %}
 
-  <!-- Filtros con bi-filterbar + bi-control -->
-  <form class="bi-filterbar panel-dg-filterbar" method="get" id="filtros-form">
-    <div class="bi-control">
-      <label for="f-tipo">Tipo</label>
-      <select id="f-tipo" name="tipo" onchange="this.form.submit()">
-        <option value="">Todos los tipos</option>
-        {% for val, label in tipo_choices %}
-        <option value="{{ val }}" {% if filtro_tipo == val %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
+  <details class="panel-dg-tools">
+    <summary><span><i class="ti ti-adjustments" aria-hidden="true"></i> Filtros y auditoría</span><i class="ti ti-chevron-down" aria-hidden="true"></i></summary>
+    <div class="panel-dg-tools-body">
+      <form class="bi-filterbar panel-dg-filterbar" method="get" id="filtros-form">
+        <div class="bi-control"><label for="f-tipo">Tipo</label><select id="f-tipo" name="tipo"><option value="">Todos</option>{% for val, label in tipo_choices %}<option value="{{ val }}" {% if filtro_tipo == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="bi-control"><label for="f-estatus">Estatus técnico</label><select id="f-estatus" name="estatus"><option value="">Todos</option>{% for val, label in estatus_choices %}<option value="{{ val }}" {% if filtro_estatus == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="bi-control"><label for="f-colab">Colaborador</label><input id="f-colab" type="text" name="colaborador" value="{{ filtro_colaborador }}" placeholder="Nombre o usuario"></div>
+        <div class="panel-dg-filter-actions"><button class="btn btn-primary btn-sm" type="submit">Aplicar</button><a href="{% url 'seguimiento:panel_dg' %}?estado={{ active_estado }}" class="btn btn-secondary btn-sm">Limpiar</a></div>
+        <input type="hidden" name="estado" value="{{ active_estado }}">
+      </form>
+      <nav class="panel-dg-audit-links" aria-label="Estados de auditoría de la app">
+        <a href="?bucket=desfases&estado=activos">Desfases app ({{ bucket_counts.desfases }})</a>
+        <a href="?bucket=historico&estado=completados">Histórico finalizado ({{ bucket_counts.historico }})</a>
+      </nav>
     </div>
-    <div class="bi-control">
-      <label for="f-estatus">Estatus</label>
-      <select id="f-estatus" name="estatus" onchange="this.form.submit()">
-        <option value="">Todos los estatus</option>
-        {% for val, label in estatus_choices %}
-        <option value="{{ val }}" {% if filtro_estatus == val %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="bi-control">
-      <label for="f-colab">Colaborador</label>
-      <input id="f-colab" type="text" name="colaborador" value="{{ filtro_colaborador }}" placeholder="Nombre o usuario">
-    </div>
-    <div class="bi-control panel-dg-check-control">
-      <input type="checkbox" id="f-vencidos" name="vencidos" value="1" {% if filtro_vencidos %}checked{% endif %} onchange="this.form.submit()">
-      <label for="f-vencidos" class="panel-dg-check-label">Solo vencidos</label>
-    </div>
-    <div class="bi-control panel-dg-check-control">
-      <button class="btn btn-primary btn-sm" type="submit">Filtrar</button>
-      {% if filtro_tipo or filtro_estatus or filtro_colaborador or filtro_vencidos %}
-      <a href="{% url 'seguimiento:panel_dg' %}?vista={{ vista }}" class="btn btn-secondary btn-sm">Limpiar</a>
-      {% endif %}
-    </div>
-    <input type="hidden" name="vista" value="{{ vista }}">
-    <input type="hidden" name="tab" value="{{ active_tab }}">
-    <input type="hidden" name="bucket" value="{{ active_bucket }}">
-  </form>
+  </details>
 
-  <!-- Tabs por estado operativo -->
-  <nav class="module-tabs rrhh-tabs panel-dg-tabs" aria-label="Tipo de acuerdo">
-    {% for bucket in bucket_nav %}
-    <a href="?bucket={{ bucket.key }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab={{ active_tab }}"
-       class="module-tab {% if active_bucket == bucket.key %}active{% endif %}">{{ bucket.label }} ({{ bucket.count }})</a>
-    {% endfor %}
-  </nav>
-
-  <!-- Tabs por tipo -->
-  <nav class="module-tabs rrhh-tabs panel-dg-tabs" aria-label="Tipo de acuerdo">
-    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab="
-       class="module-tab {% if not active_tab %}active{% endif %}">Todos ({{ count_todos_tipo }})</a>
-    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=COMPROMISO"
-       class="module-tab {% if active_tab == 'COMPROMISO' %}active{% endif %}">Compromisos ({{ count_compromisos }})</a>
-    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=MINUTA"
-       class="module-tab {% if active_tab == 'MINUTA' %}active{% endif %}">Minutas ({{ count_minutas }})</a>
-    <a href="?bucket={{ active_bucket }}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&vista={{ vista }}&tab=PROYECTO"
-       class="module-tab {% if active_tab == 'PROYECTO' %}active{% endif %}">Proyectos ({{ count_proyectos }})</a>
-  </nav>
-
-  <!-- Vista tabs (tabla / colaborador) -->
-  <div class="panel-dg-view-tabs">
-    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&tab={{ active_tab }}&vista=tabla"
-       class="btn {% if vista == 'tabla' %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">Tabla</a>
-    <a href="?bucket={{ active_bucket }}{% if filtro_tipo %}&tipo={{ filtro_tipo }}{% endif %}{% if filtro_estatus %}&estatus={{ filtro_estatus }}{% endif %}{% if filtro_colaborador %}&colaborador={{ filtro_colaborador }}{% endif %}{% if filtro_vencidos %}&vencidos=1{% endif %}&tab={{ active_tab }}&vista=colaborador"
-       class="btn {% if vista == 'colaborador' %}btn-primary{% else %}btn-secondary{% endif %} btn-sm">Por colaborador</a>
-  </div>
-
-  {% if not items %}
-  <div class="bi-panel panel-dg-empty">
-    <p class="panel-dg-empty-mark">0</p>
-    <p class="panel-dg-empty-copy">Sin acuerdos con los filtros actuales.</p>
-  </div>
-
-  {% elif vista == 'colaborador' %}
-  <div class="panel-dg-colab-grid">
-    {% for colab in colaboradores_resumen %}
-    <div class="panel-dg-colab-card {% if colab.vencidos %}tiene-vencidos{% elif colab.en_revision %}tiene-revision{% endif %}">
-      <div>
-        <p class="panel-dg-colab-title">{{ colab.nombre }}</p>
-        <div class="bi-summary-band panel-dg-summary-band">
-          <span class="bi-summary-chip"><span>Abiertos</span><strong>{{ colab.abiertos }}</strong></span>
-          {% if colab.vencidos %}<span class="bi-summary-chip panel-dg-chip-danger"><span>Vencidos</span><strong>{{ colab.vencidos }}</strong></span>{% endif %}
-          {% if colab.en_revision %}<span class="bi-summary-chip panel-dg-chip-warning"><span>Revisión</span><strong>{{ colab.en_revision }}</strong></span>{% endif %}
-          <span class="bi-summary-chip"><span>OK</span><strong>{{ colab.completados }}</strong></span>
-        </div>
-      </div>
-      <div class="panel-dg-colab-items">
-        {% for item in colab.items %}
-        <a href="{% url 'seguimiento:detalle_dg' item.pk %}"
-           class="panel-dg-colab-item {% if item.es_vencido_visual %}is-vencido{% elif item.estatus == ESTATUS_EN_REVISION %}is-revision{% elif item.esta_cerrado %}is-done{% endif %}">
-          <span class="panel-dg-colab-item-label">{{ item.titulo }}</span>
-          {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase panel-dg-pill-xs">Desfase app</span>{% endif %}
-          {% if item.es_historico_agente_dg %}<span class="bi-pill pill-historico panel-dg-pill-xs">Histórico</span>{% endif %}
-          <span class="bi-pill pill-{{ item.estatus|lower }} panel-dg-pill-status">{{ item.get_estatus_display }}</span>
-        </a>
-        {% endfor %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
-  {% else %}
-  <!-- Vista tabla -->
-  <div class="table-responsive">
-    <table class="panel-dg-table">
-      <colgroup>
-        <col class="col-acuerdo">
-        <col class="col-colab">
-        <col class="col-area">
-        <col class="col-estatus">
-        <col class="col-fecha">
-        <col class="col-avance">
-        <col class="col-act">
-        <col class="col-ver">
-      </colgroup>
-      <thead>
-        <tr>
-          <th>Acuerdo</th>
-          <th>Colaborador</th>
-          <th>Área</th>
-          <th>Estatus</th>
-          <th>Fecha límite</th>
-          <th>Avance</th>
-          <th>Actualizado</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
-        <tr class="{% if item.es_vencido_visual %}is-vencido{% endif %}">
-          <td>
-            <span class="panel-dg-cell-trunc panel-dg-cell-title" title="{{ item.titulo }}">{{ item.titulo }}</span>
-            <span class="bi-pill panel-dg-pill-sm">{{ item.get_tipo_display }}</span>
-            {% if item.tiene_desfase_agente_dg %}<span class="bi-pill pill-desfase panel-dg-pill-xs">Desfase app</span>{% endif %}
-            {% if item.es_historico_agente_dg %}<span class="bi-pill pill-historico panel-dg-pill-xs">Histórico</span>{% endif %}
-            {% if item.source_status %}<span class="bi-pill pill-app panel-dg-pill-xs" title="Estado app">{{ item.source_status }}</span>{% endif %}
-            {% if item.prorroga_pendiente %}<span class="badge bg-warning panel-dg-prorroga-badge">Prórroga</span>{% endif %}
-          </td>
-          <td><span class="panel-dg-cell-trunc">{{ item.responsable_nombre }}</span></td>
-          <td><span class="panel-dg-cell-trunc muted">{{ item.area|default:"—" }}</span></td>
-          <td><span class="bi-pill pill-{{ item.estatus|lower }} panel-dg-pill-table">{{ item.get_estatus_display }}</span></td>
-          <td class="{% if item.urgencia == 'danger' %}fecha-danger{% elif item.urgencia == 'warn' %}fecha-warn{% else %}muted{% endif %}">
-            {% if item.fecha_limite %}{{ item.fecha_limite|date:"d/m/Y" }}{% else %}—{% endif %}
-          </td>
-          <td>
-            <div class="panel-dg-progress {% if not item.checklist_total %}is-muted{% endif %}">
-              <div class="panel-dg-progress-fill pd-js-width {% if item.es_vencido_visual %}is-danger{% elif item.progreso_pct >= 100 %}is-done{% endif %}" data-pd-css-var="--w" data-pd-width="{{ item.progreso_pct }}%"></div>
-            </div>
-            <span class="muted panel-dg-progress-meta" title="{{ item.avance_detalle }}">{{ item.avance_label }}</span>
-          </td>
-          <td class="muted panel-dg-updated" title="{{ item.ultima_actualizacion|date:'d/m/Y H:i' }}">{{ item.ultima_actualizacion|timesince }}</td>
-          <td><a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm">Ver</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
+  <dialog class="panel-dg-dialog" data-panel-dialog aria-labelledby="panel-dg-dialog-title">
+    <form method="dialog" class="panel-dg-dialog-close-form"><button type="submit" class="icon-btn" aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button></form>
+    <div class="panel-dg-create-head"><div><div class="bi-kicker">Dirección General</div><h2 id="panel-dg-dialog-title">Nuevo acuerdo</h2><p>Se crea en app.pollyanasdolce.com y se refleja en el ERP.</p></div>{% if not writeback_activo %}<span class="bi-pill pill-bloqueado">API desactivada</span>{% endif %}</div>
+    <form method="post" action="{% url 'seguimiento:crear_acuerdo_agente_dg' %}" class="panel-dg-create-form">
+      {% csrf_token %}
+      <div class="bi-control"><label for="nuevo-responsable">Colaborador</label><select id="nuevo-responsable" name="responsable_user_id" required {% if not writeback_activo %}disabled{% endif %}><option value="">Seleccionar</option>{% for user in usuarios_crear_acuerdo %}<option value="{{ user.pk }}">{{ user.get_full_name|default:user.username }} · {{ user.email|default:user.username }}</option>{% endfor %}</select></div>
+      <div class="bi-control"><label for="nuevo-titulo">Acuerdo</label><input id="nuevo-titulo" name="titulo" type="text" maxlength="220" required placeholder="Título del acuerdo" {% if not writeback_activo %}disabled{% endif %}></div>
+      <div class="bi-control"><label for="nuevo-fecha">Fecha límite</label><input id="nuevo-fecha" name="fecha_limite" type="date" required {% if not writeback_activo %}disabled{% endif %}></div>
+      <div class="bi-control"><label for="nuevo-hora">Hora</label><input id="nuevo-hora" name="hora_limite" type="time" value="18:00" required {% if not writeback_activo %}disabled{% endif %}></div>
+      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-descripcion">Detalle</label><textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
+      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-checklist">Checklist opcional</label><textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
+      <div class="panel-dg-form-actions"><button class="btn btn-primary" type="submit" {% if not writeback_activo %}disabled{% endif %}>Crear en app y ERP</button></div>
+    </form>
+  </dialog>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/seguimiento_panel_dg.js' %}?v=20260722-dg-compact-v1" defer></script>
 {% endblock %}
