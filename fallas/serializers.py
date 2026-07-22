@@ -155,6 +155,12 @@ class ReporteFallaCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data["reportado_por"] = self.context["request"].user
+        if validated_data.get("activo_relacionado"):
+            validated_data["tipo_objetivo"] = ReporteFalla.OBJETIVO_EQUIPO
+            validated_data["area_instalacion"] = ""
+        else:
+            validated_data["tipo_objetivo"] = ReporteFalla.OBJETIVO_INSTALACION
+            validated_data["area_instalacion"] = "Sucursal"
         with transaction.atomic():
             reporte = super().create(validated_data)
             BitacoraFalla.objects.create(

@@ -1,0 +1,122 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#8b2252">
+  <title>Captura de sucursal · Pollyana's Dolce</title>
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260722-insumos-v1">
+  <link rel="stylesheet" href="{% static 'operacion/sucursal_tools.css' %}?v=20260722-insumos-v1">
+</head>
+<body class="branch-tools">
+  <main class="tools-shell">
+    <header class="tools-header">
+      <a class="back-link" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">←</a>
+      <div>
+        <p>App Operativa</p>
+        <h1>{{ sucursal.nombre }}</h1>
+      </div>
+      <span class="session-state">Sesión activa</span>
+    </header>
+
+    {% if not solo_aprobacion %}<nav class="tool-tabs" aria-label="Tipo de captura">
+      <button type="button" data-tab-target="fallas" aria-selected="{% if tab_activa != 'mermas' %}true{% else %}false{% endif %}">Reportar falla</button>
+      <button type="button" data-tab-target="mermas" aria-selected="{% if tab_activa == 'mermas' %}true{% else %}false{% endif %}">Merma de insumo</button>
+    </nav>{% endif %}
+
+    <section class="tool-panel" data-tab-panel="fallas" {% if solo_aprobacion or tab_activa == 'mermas' %}hidden{% endif %}>
+      <div class="panel-heading">
+        <h2>¿Qué falló?</h2>
+        <p>El reporte llegará directamente al equipo de Mantenimiento.</p>
+      </div>
+      <form id="falla-form" data-async-action action="{% url 'operacion:fallas_crear_api' %}" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <fieldset class="choice-row">
+          <legend>Tipo de reporte</legend>
+          <label><input type="radio" name="tipo_objetivo" value="EQUIPO" {% if draft_fallas.tipo_objetivo != 'INSTALACION' %}checked{% endif %}> Equipo registrado</label>
+          <label><input type="radio" name="tipo_objetivo" value="INSTALACION" {% if draft_fallas.tipo_objetivo == 'INSTALACION' %}checked{% endif %}> Instalación</label>
+        </fieldset>
+        <div data-equipment-fields>
+          <label for="activo_id">Equipo de {{ sucursal.nombre }}</label>
+          <select id="activo_id" name="activo_id">
+            <option value="">Selecciona un equipo</option>
+            {% for activo in activos %}<option value="{{ activo.id }}" {% if draft_fallas.activo_id == activo.id|stringformat:'s' %}selected{% endif %}>{{ activo.nombre }}{% if activo.codigo %} · {{ activo.codigo }}{% endif %}</option>{% endfor %}
+          </select>
+        </div>
+        <div data-installation-fields hidden>
+          <label for="area_instalacion">Área de la sucursal</label>
+          <input id="area_instalacion" name="area_instalacion" maxlength="120" value="{{ draft_fallas.area_instalacion|default:'' }}" placeholder="Ej. baño, cocina, exterior">
+        </div>
+        <label for="categoria_falla">Categoría</label>
+        <select id="categoria_falla" name="categoria_id" required>
+          <option value="">Selecciona una categoría</option>
+          <optgroup label="Equipos" data-equipment-options>{% for categoria in categorias_equipo %}<option value="{{ categoria.id }}" {% if draft_fallas.categoria_id == categoria.id|stringformat:'s' %}selected{% endif %}>{{ categoria.nombre }}</option>{% endfor %}</optgroup>
+          <optgroup label="Instalaciones" data-installation-options disabled>{% for categoria in categorias_instalacion %}<option value="{{ categoria.id }}" {% if draft_fallas.categoria_id == categoria.id|stringformat:'s' %}selected{% endif %}>{{ categoria.nombre }}</option>{% endfor %}</optgroup>
+        </select>
+        <label for="titulo_falla">Título</label>
+        <input id="titulo_falla" name="titulo" maxlength="200" value="{{ draft_fallas.titulo|default:'' }}" required placeholder="Resume el problema">
+        <label for="descripcion_falla">Descripción</label>
+        <textarea id="descripcion_falla" name="descripcion" rows="4" required placeholder="Qué ocurre, desde cuándo y cómo afecta la operación">{{ draft_fallas.descripcion|default:'' }}</textarea>
+        <label for="prioridad_falla">Prioridad</label>
+        <select id="prioridad_falla" name="prioridad"><option value="baja" {% if draft_fallas.prioridad == 'baja' %}selected{% endif %}>Baja</option><option value="media" {% if not draft_fallas.prioridad or draft_fallas.prioridad == 'media' %}selected{% endif %}>Media</option><option value="alta" {% if draft_fallas.prioridad == 'alta' %}selected{% endif %}>Alta</option><option value="critica" {% if draft_fallas.prioridad == 'critica' %}selected{% endif %}>Crítica · operación detenida</option></select>
+        <label for="foto_falla">Foto <span>opcional</span></label>
+        <input id="foto_falla" name="foto_evidencia" type="file" accept="image/*" capture="environment">
+        <label for="justificacion_falla">Si no adjuntas foto, explica por qué</label>
+        <textarea id="justificacion_falla" name="justificacion_sin_foto" rows="2">{{ draft_fallas.justificacion_sin_foto|default:'' }}</textarea>
+        <button class="primary-action" type="submit">Enviar a Mantenimiento</button>
+      </form>
+      {% if mis_fallas %}<div class="approval-list"><div class="panel-heading"><h2>Mis fallas recientes</h2></div>{% for falla in mis_fallas %}<article class="approval-card"><h3>#{{ falla.id }} · {{ falla.titulo }}</h3><p>{{ falla.get_estatus_display }} · {{ falla.categoria.nombre }}</p></article>{% endfor %}</div>{% endif %}
+    </section>
+
+    <section class="tool-panel" data-tab-panel="mermas" {% if not solo_aprobacion and tab_activa != 'mermas' %}hidden{% endif %}>
+      {% if not solo_aprobacion %}
+      <div class="panel-heading">
+        <h2>Registrar merma de insumo</h2>
+        <p>Solo aparecen insumos recibidos por {{ sucursal.nombre }}. La unidad corresponde a Point.</p>
+      </div>
+      <form id="merma-form" data-async-action action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="codigo_point">Insumo recibido</label>
+        <select id="codigo_point" name="codigo_point" required>
+          <option value="">Selecciona un insumo</option>
+          {% for insumo in insumos %}<option value="{{ insumo.codigo_point }}" data-unit="{{ insumo.unidad_point }}" data-stock="{{ insumo.existencia }}" {% if draft_mermas.codigo_point == insumo.codigo_point %}selected{% endif %}>{{ insumo.nombre_point }}</option>{% endfor %}
+        </select>
+        {% if not insumos %}<p class="empty-state">Point no reporta insumos elegibles para esta sucursal. No se mostrará el catálogo general.</p>{% endif %}
+        <div class="stock-note" data-stock-note hidden></div>
+        <label for="cantidad_merma">Cantidad <span data-unit-label></span></label>
+        <input id="cantidad_merma" name="cantidad" type="number" inputmode="decimal" min="0.001" step="0.001" value="{{ draft_mermas.cantidad|default:'' }}" required>
+        <label for="motivo_merma">Motivo</label>
+        <select id="motivo_merma" name="motivo" required><option value="">Selecciona un motivo</option><option value="DESCOMPOSICION" {% if draft_mermas.motivo == 'DESCOMPOSICION' %}selected{% endif %}>Descomposición</option><option value="CADUCIDAD" {% if draft_mermas.motivo == 'CADUCIDAD' %}selected{% endif %}>Caducidad</option><option value="DERRAME" {% if draft_mermas.motivo == 'DERRAME' %}selected{% endif %}>Derrame</option><option value="CALIDAD" {% if draft_mermas.motivo == 'CALIDAD' %}selected{% endif %}>Problema de calidad</option><option value="OTRO" {% if draft_mermas.motivo == 'OTRO' %}selected{% endif %}>Otro</option></select>
+        <label for="comentario_merma">Comentario</label>
+        <textarea id="comentario_merma" name="comentario" rows="3" required placeholder="Describe qué ocurrió">{{ draft_mermas.comentario|default:'' }}</textarea>
+        <label for="foto_merma">Foto <span>opcional</span></label>
+        <input id="foto_merma" name="foto_evidencia" type="file" accept="image/*" capture="environment">
+        <label for="justificacion_merma">Si no adjuntas foto, explica por qué</label>
+        <textarea id="justificacion_merma" name="justificacion_sin_foto" rows="2">{{ draft_mermas.justificacion_sin_foto|default:'' }}</textarea>
+        <button class="primary-action" type="submit" {% if not insumos %}disabled{% endif %}>Enviar a mi jefe</button>
+      </form>
+      {% endif %}
+      {% if mermas_pendientes %}
+      <div class="approval-list">
+        <div class="panel-heading"><h2>Pendientes por aprobar</h2><p>Solo se permite conservar o reducir la cantidad reportada.</p></div>
+        {% for pendiente in mermas_pendientes %}
+        <article class="approval-card">
+          <h3>{{ pendiente.nombre_point }}</h3><p>{{ pendiente.sucursal.nombre }} · {{ pendiente.reportado_por.username }}</p><p>Reportado: {{ pendiente.cantidad_reportada }} {{ pendiente.unidad_point }}</p>
+          <form data-async-action data-reset-on-success="false" action="{% url 'operacion:mermas_insumos_aprobar_api' pendiente.id %}" method="post">{% csrf_token %}<label>Cantidad aprobada</label><input name="cantidad" type="number" min="0.001" max="{{ pendiente.cantidad_reportada }}" step="0.001" value="{{ pendiente.cantidad_reportada }}" required><label>Motivo si reduces</label><textarea name="motivo" rows="2"></textarea><button class="primary-action" type="submit">Aprobar y generar orden</button></form>
+          <form data-async-action data-reset-on-success="false" action="{% url 'operacion:mermas_insumos_decidir_api' pendiente.id %}" method="post">{% csrf_token %}<label>Motivo de la decisión</label><textarea name="motivo" rows="2" required></textarea><div class="choice-row"><button class="secondary-action" name="accion" value="ACLARAR" type="submit">Pedir aclaración</button><button class="danger-action" name="accion" value="RECHAZAR" type="submit">Rechazar</button></div></form>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if mermas_sin_responsable %}
+      <div class="approval-list"><div class="panel-heading"><h2>Sin responsable asignado</h2><p>Dirección puede asignar un responsable validado de RRHH. La acción queda auditada.</p></div>
+        {% for pendiente in mermas_sin_responsable %}<article class="approval-card" id="merma-{{ pendiente.id }}"><h3>#{{ pendiente.id }} · {{ pendiente.nombre_point }}</h3><p>{{ pendiente.sucursal.nombre }} · {{ pendiente.cantidad_reportada }} {{ pendiente.unidad_point }}</p><form data-async-action data-reset-on-success="false" action="{% url 'operacion:mermas_insumos_reasignar_api' pendiente.id %}" method="post">{% csrf_token %}<label>Responsable</label><select name="jefe_empleado_id" required><option value="">Selecciona</option>{% for jefe in jefes_candidatos %}<option value="{{ jefe.id }}">{{ jefe.nombre }}{% if jefe.sucursal_ref %} · {{ jefe.sucursal_ref.nombre }}{% endif %}</option>{% endfor %}</select><label>Motivo de reasignación</label><textarea name="motivo" required></textarea><button class="primary-action" type="submit">Asignar y enviar</button></form></article>{% endfor %}
+      </div>{% endif %}
+      {% if mis_mermas %}<div class="approval-list"><div class="panel-heading"><h2>Mis mermas recientes</h2></div>{% for merma in mis_mermas %}<article class="approval-card" id="merma-{{ merma.id }}"><h3>#{{ merma.id }} · {{ merma.nombre_point }}</h3><p>{{ merma.get_estatus_display }} · {{ merma.cantidad_reportada }} {{ merma.unidad_point }}</p>{% if merma.estatus == 'EN_ACLARACION' %}<form data-async-action data-reset-on-success="false" action="{% url 'operacion:mermas_insumos_reenviar_api' merma.id %}" method="post">{% csrf_token %}<label>Cantidad corregida</label><input name="cantidad" type="number" min="0.001" step="0.001" value="{{ merma.cantidad_reportada }}" required><label>Comentario corregido</label><textarea name="comentario" required>{{ merma.comentario }}</textarea><label>Qué se corrigió</label><textarea name="motivo" required></textarea><button class="primary-action" type="submit">Reenviar a mi jefe</button></form>{% endif %}</article>{% endfor %}</div>{% endif %}
+    </section>
+  </main>
+  <div class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260722-insumos-v1" defer></script>
+</body>
+</html>

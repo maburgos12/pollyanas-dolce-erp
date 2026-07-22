@@ -151,6 +151,12 @@ def _guardar_evidencias_falla(bitacora, archivos, user):
 
 
 def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
+    if reporte_kwargs.get("activo_relacionado"):
+        reporte_kwargs.setdefault("tipo_objetivo", ReporteFalla.OBJETIVO_EQUIPO)
+        reporte_kwargs.setdefault("area_instalacion", "")
+    else:
+        reporte_kwargs.setdefault("tipo_objetivo", ReporteFalla.OBJETIVO_INSTALACION)
+        reporte_kwargs.setdefault("area_instalacion", "Sucursal")
     reporte = ReporteFalla(**reporte_kwargs)
     try:
         with transaction.atomic():
