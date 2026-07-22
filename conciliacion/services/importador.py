@@ -72,8 +72,12 @@ PDF_MONTH_ABBR = {
     "NOV": 11,
     "DEC": 12,
 }
-BBVA_ABONO_CODES = {"T20", "W02", "Y45"}
-BBVA_CARGO_CODES = {"P14", "R01", "R15", "S39", "S40", "T17"}
+# BS3 = disposicion de plan de pagos fijos (credito depositado en cuenta);
+# N06 = pago recibido de cuenta de tercero. Ambos confirmados como abono contra
+# los totales de control de estados de cuenta reales (feb/jun 2026).
+BBVA_ABONO_CODES = {"T20", "W02", "Y45", "BS3", "N06"}
+# P12 = pago de tarjeta de credito hecho desde la cuenta (retiro; abr 2026).
+BBVA_CARGO_CODES = {"P12", "P14", "R01", "R15", "S39", "S40", "T17"}
 
 
 class ImportacionBancariaError(ValueError):
@@ -1156,8 +1160,8 @@ def _pdf_rows_from_bbva_maestra(pages_text: list[str]) -> list[dict[str, Any]]:
         r"(?P<code>[A-Z0-9]{3})\s+"
         r"(?P<description>.+?)\s+"
         r"(?P<amount>\d{1,3}(?:,\d{3})*\.\d{2})"
-        r"(?:\s+(?P<saldo_operacion>\d{1,3}(?:,\d{3})*\.\d{2})\s+"
-        r"(?P<saldo_liquidacion>\d{1,3}(?:,\d{3})*\.\d{2}))?$"
+        r"(?:\s+(?P<saldo_operacion>-?\d{1,3}(?:,\d{3})*\.\d{2})\s+"
+        r"(?P<saldo_liquidacion>-?\d{1,3}(?:,\d{3})*\.\d{2}))?$"
     )
 
     for page_number, text in enumerate(pages_text, start=1):
