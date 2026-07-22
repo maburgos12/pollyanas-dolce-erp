@@ -94,3 +94,39 @@ class SeedYClasificacionTests(TestCase):
         self.assertEqual(m_sin_regla.tipo_conciliacion, "")
         self.assertEqual(m_dep.extra_raw["clasificacion_auto"]["concepto"], "VENTA_TARJETA_DEBITO")
         self.assertIn("SIN REGLA", out.getvalue())
+
+
+class DesgloseCargosResumenTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.cuenta = CuentaBancaria.objects.create(
+            id_site_syncfy="", nombre_display="BanBajio Test", banco="banbajio",
+        )
+
+    def test_resumen_separa_cargos_por_clasificacion(self):
+        from conciliacion.services.importador import resumen_periodo_conciliacion
+
+        _mov(self.cuenta, "ENVIO SPEI:FACTURA 123", "cargo", "1000.00", dia=5,
+             tipo_conciliacion=MovimientoBancario.CONCILIACION_CFDI)
+        _mov(self.cuenta, "TRASPASO DE RECURSOS A LA CUENTA CONECTA", "cargo", "5000.00", dia=6,
+             tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO)
+        _mov(self.cuenta, "PAGO DE NOMINA", "cargo", "3000.00", dia=7,
+             tipo_conciliacion=MovimientoBancario.CONCILIACION_NOMINA)
+        _mov(self.cuenta, "RARO SIN REGLA", "cargo", "111.00", dia=8)
+
+        r = resumen_periodo_conciliacion(year=2026, month=1)
+
+        self.assertEqual(r["resumen_ejecutivo"]["banco_cargos_proveedores"], Decimal("1000.00"))
+        conceptos = {row["concepto"]: row for row in r["trabajo_conciliacion"]}
+        self.assertEqual(
+            conceptos["Pagos a proveedores y gastos (esperan CFDI)"]["banco_total"], Decimal("1000.00")
+        )
+        self.assertEqual(
+            conceptos["Traspasos entre cuentas propias"]["banco_total"], Decimal("5000.00")
+        )
+        self.assertEqual(conceptos["Traspasos entre cuentas propias"]["estado"], "ok")
+        self.assertEqual(
+            conceptos["Nomina pagada por banco vs timbrada"]["banco_total"], Decimal("3000.00")
+        )
+        self.assertEqual(conceptos["Cargos sin clasificar"]["banco_total"], Decimal("111.00"))
+        self.assertEqual(conceptos["Cargos sin clasificar"]["estado"], "pendiente")
