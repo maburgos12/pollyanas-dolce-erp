@@ -95,7 +95,6 @@ urlpatterns = [
     path("seguimiento/", include(("seguimiento.urls", "seguimiento"), namespace="seguimiento")),
     path("conciliacion/", include(("conciliacion.urls", "conciliacion"), namespace="conciliacion")),
     path("sat/", include(("sat_client.urls", "sat_client"), namespace="sat_client")),
-    path("syncfy/", include(("syncfy_client.urls", "syncfy_client"), namespace="syncfy_client")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
