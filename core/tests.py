@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,6 +31,7 @@ from core.access import (
     primary_role,
 )
 from core.branch_catalog import eligible_operational_branch_qs
+from core.cache_versions import bump_cache_scopes
 from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddleware
 from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
@@ -645,12 +646,23 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.user = get_user_model().objects.create_user(username="johana.lopez", password="test12345")
         self.client.force_login(self.user)
 
-    def test_authenticated_user_gets_redirected_from_login_to_dashboard(self):
+    def test_authenticated_user_without_dashboard_access_goes_to_seguimiento(self):
+        # Desde 4b10af7c el dashboard requiere revisar seguimiento global
+        # (superuser/DG/ADMIN); el resto aterriza en Mi Seguimiento.
+        response = self.client.get("/login/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/seguimiento/")
+        self.assertIn("no-cache", response["Cache-Control"])
+
+    def test_authenticated_dashboard_reviewer_gets_redirected_to_dashboard(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+
         response = self.client.get("/login/")
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/dashboard/")
-        self.assertIn("no-cache", response["Cache-Control"])
 
     def test_authenticated_user_gets_redirected_from_login_to_safe_next(self):
         response = self.client.get("/login/?next=/bonos-ventas/app/%3Fcaptura%3D1")
@@ -662,7 +674,7 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         response = self.client.get("/login/?next=/mermas/app/")
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/dashboard/")
+        self.assertEqual(response["Location"], "/seguimiento/")
 
     def test_authenticated_mermas_capture_user_keeps_mermas_app_next(self):
         UserModuleAccess.objects.create(user=self.user, module="mermas.captura", access=UserModuleAccess.ACCESS_MANAGE)
@@ -732,6 +744,9 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
 
 class DashboardHomologacionContextTests(TestCase):
     def setUp(self):
+        # El catálogo canónico y los datasets de ventas se cachean con versión por
+        # scope; el cache locmem sobrevive entre tests aunque la DB haga rollback.
+        bump_cache_scopes("insumos", "inventario", "dashboard", "ventas")
         user_model = get_user_model()
         self.user = user_model.objects.create_superuser(
             username="admin_dashboard",
@@ -739,6 +754,45 @@ class DashboardHomologacionContextTests(TestCase):
             password="test12345",
         )
         self.client.force_login(self.user)
+
+    def _get_dashboard_operativo(self):
+        # Las secciones diarias leen mv_dashboard_daily_ops (fila singleton que la
+        # migración materializó vacía); hay que refrescarla tras sembrar el stage.
+        from reportes.analytics_service import refresh_dashboard_daily_ops_materialized_view
+
+        refresh_dashboard_daily_ops_materialized_view(concurrently=False)
+        # Los usuarios con acceso a reportes reciben dashboard_executive.html;
+        # estos tests cubren el dashboard clásico que aún ven los demás perfiles.
+        with patch("core.views._can_view_dashboard_executive_panels", return_value=False):
+            return self.client.get(reverse("dashboard"))
+
+    def _crear_venta_stage(self, *, branch, product, fecha, cantidad, monto, receta=None, tickets=0):
+        # Desde el rediseño del dataset diario (mv_dashboard_daily_ops) las
+        # secciones operativas del dashboard leen SOLO el stage Point
+        # (pos_bridge_daily_sales), ya no VentaHistorica.
+        return PointDailySale.objects.create(
+            branch=branch,
+            product=product,
+            receta=receta,
+            sale_date=fecha,
+            quantity=cantidad,
+            tickets=tickets,
+            total_amount=monto,
+            source_endpoint="/Report/VentasCategorias",
+        )
+
+    def _visible_cutoff_dos_dias_atras(self):
+        # Ancla el corte visible a hoy-2 para que el fallback canónico dispare
+        # sin depender de la hora local (corte real: 03:35 America/Mazatlan).
+        return patch(
+            "reportes.dashboard_sales_dataset._expected_operational_visible_cutoff",
+            return_value=timezone.localdate() - timedelta(days=2),
+        )
+
+    def test_dashboard_executive_template_for_reportes_users(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/dashboard_executive.html")
 
     def test_dashboard_context_includes_homologacion_counts(self):
         PointPendingMatch.objects.create(
@@ -1025,7 +1079,7 @@ class DashboardHomologacionContextTests(TestCase):
             fuente="POINT_PRIORITY_TEST",
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Bloqueos del maestro con impacto comercial")
         self.assertContains(response, "Bloqueos que frenan la operación")
@@ -1136,35 +1190,27 @@ class DashboardHomologacionContextTests(TestCase):
     def test_dashboard_shows_sales_history_summary(self):
         sucursal_a = Sucursal.objects.create(codigo="SUC-A-DASH", nombre="Sucursal A")
         sucursal_b = Sucursal.objects.create(codigo="SUC-B-DASH", nombre="Sucursal B")
+        branch_a = PointBranch.objects.create(external_id="DASH-A", name=sucursal_a.nombre, erp_branch=sucursal_a)
+        branch_b = PointBranch.objects.create(external_id="DASH-B", name=sucursal_b.nombre, erp_branch=sucursal_b)
         receta_a = Receta.objects.create(nombre="Pastel Chocolate Dashboard", hash_contenido="hash-venta-dashboard-a")
         receta_b = Receta.objects.create(nombre="Pay Queso Dashboard", hash_contenido="hash-venta-dashboard-b")
+        producto_a = PointProduct.objects.create(external_id="DASH-P-A", sku="DASHPA", name=receta_a.nombre, active=True)
+        producto_b = PointProduct.objects.create(external_id="DASH-P-B", sku="DASHPB", name=receta_b.nombre, active=True)
 
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal_a,
-            fecha="2026-01-01",
-            cantidad=Decimal("12"),
-            monto_total=Decimal("1200"),
-            fuente="POINT_HIST_2026_Q1",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto_a, receta=receta_a,
+            fecha=date(2026, 1, 1), cantidad=Decimal("12"), monto=Decimal("1200"),
         )
-        VentaHistorica.objects.create(
-            receta=receta_b,
-            sucursal=sucursal_b,
-            fecha="2026-01-02",
-            cantidad=Decimal("8"),
-            monto_total=Decimal("800"),
-            fuente="POINT_HIST_2026_Q1",
+        self._crear_venta_stage(
+            branch=branch_b, product=producto_b, receta=receta_b,
+            fecha=date(2026, 1, 2), cantidad=Decimal("8"), monto=Decimal("800"),
         )
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal_a,
-            fecha="2026-01-03",
-            cantidad=Decimal("10"),
-            monto_total=Decimal("1000"),
-            fuente="POINT_HIST_2026_Q1",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto_a, receta=receta_a,
+            fecha=date(2026, 1, 3), cantidad=Decimal("10"), monto=Decimal("1000"),
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Base histórica de ventas")
         self.assertContains(response, "Cobertura cerrada")
@@ -1178,8 +1224,8 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertEqual(summary["active_days"], 3)
         self.assertEqual(summary["expected_days"], 3)
         self.assertEqual(summary["missing_days"], 0)
-        self.assertEqual(summary["latest_source"], "POINT_HIST_2026_Q1")
-        self.assertEqual(summary["top_branches"][0]["sucursal__codigo"], "SUC-A-DASH")
+        self.assertEqual(summary["latest_source"], "POINT_STAGE")
+        self.assertEqual(summary["top_branches"][0]["branch_code"], "DASH-A")
         critical_path = response.context["erp_critical_path_rows"]
         self.assertGreaterEqual(len(critical_path), 1)
         self.assertIn("rank", critical_path[0])
@@ -1245,7 +1291,9 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertEqual(summary["total_units"], Decimal("10"))
         self.assertEqual(summary["total_amount"], Decimal("1000"))
         self.assertEqual(summary["branch_count"], 1)
-        self.assertEqual(summary["recipe_count"], 1)
+        # Desde 5560164a los conteos de recetas salen de PointDailySale (stage);
+        # sin stage cargado el resumen canónico reporta 0 recetas por diseño.
+        self.assertEqual(summary["recipe_count"], 0)
         self.assertEqual(summary["latest_source"], "CANONICAL_V2_FACT")
 
     def test_dashboard_sales_history_summary_mentions_canonical_date_when_stage_lags(self):
@@ -1301,13 +1349,13 @@ class DashboardHomologacionContextTests(TestCase):
             fecha_requerida=timezone.localdate() - timedelta(days=1),
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Pulso operativo del día")
-        self.assertContains(response, "Resumen operativo")
+        self.assertContains(response, "Resumen ejecutivo del corte")
         self.assertContains(response, "Ticket promedio")
-        self.assertContains(response, "Venta acumulada del mes")
+        self.assertContains(response, "Venta último corte")
         self.assertContains(response, "Ventas recientes")
         self.assertContains(response, "Ranking comercial del corte")
         self.assertContains(response, "Producción CEDIS y cobertura")
@@ -1364,7 +1412,8 @@ class DashboardHomologacionContextTests(TestCase):
             total_tickets=3,
         )
 
-        snapshot = _build_dashboard_daily_sales_snapshot()
+        with self._visible_cutoff_dos_dias_atras():
+            snapshot = _build_dashboard_daily_sales_snapshot()
 
         self.assertEqual(snapshot["source_label"], "Point directo")
         self.assertEqual(snapshot["date_label"], latest_day.isoformat())
@@ -1405,7 +1454,8 @@ class DashboardHomologacionContextTests(TestCase):
             total_venta_neta=Decimal("800"),
         )
 
-        snapshot = _build_dashboard_daily_sales_snapshot()
+        with self._visible_cutoff_dos_dias_atras():
+            snapshot = _build_dashboard_daily_sales_snapshot()
 
         self.assertEqual(snapshot["comparison_label"], "Arriba")
         self.assertEqual(snapshot["comparison_tone"], "success")
@@ -1423,7 +1473,7 @@ class DashboardHomologacionContextTests(TestCase):
             fuente="MERMA_TEST",
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Merma sucursal y CEDIS")
@@ -1434,46 +1484,29 @@ class DashboardHomologacionContextTests(TestCase):
     def test_dashboard_shows_branch_daily_exceptions(self):
         sucursal_a = Sucursal.objects.create(codigo="SUC-EXC-A", nombre="Sucursal Excepcion A")
         sucursal_b = Sucursal.objects.create(codigo="SUC-EXC-B", nombre="Sucursal Excepcion B")
+        branch_a = PointBranch.objects.create(external_id="EXC-A", name=sucursal_a.nombre, erp_branch=sucursal_a)
+        branch_b = PointBranch.objects.create(external_id="EXC-B", name=sucursal_b.nombre, erp_branch=sucursal_b)
         receta = Receta.objects.create(nombre="Pastel Excepcion Dashboard", hash_contenido="hash-dashboard-exc")
+        producto = PointProduct.objects.create(external_id="EXC-P", sku="EXCP", name=receta.nombre, active=True)
         base_date = timezone.localdate() - timedelta(days=2)
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_a,
-            fecha=base_date,
-            cantidad=Decimal("40"),
-            tickets=10,
-            monto_total=Decimal("1000"),
-            fuente="EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto, receta=receta,
+            fecha=base_date, cantidad=Decimal("40"), monto=Decimal("1000"), tickets=10,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_b,
-            fecha=base_date,
-            cantidad=Decimal("20"),
-            tickets=5,
-            monto_total=Decimal("500"),
-            fuente="EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch_b, product=producto, receta=receta,
+            fecha=base_date, cantidad=Decimal("20"), monto=Decimal("500"), tickets=5,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_a,
-            fecha=base_date + timedelta(days=1),
-            cantidad=Decimal("20"),
-            tickets=6,
-            monto_total=Decimal("450"),
-            fuente="EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto, receta=receta,
+            fecha=base_date + timedelta(days=1), cantidad=Decimal("20"), monto=Decimal("450"), tickets=6,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_b,
-            fecha=base_date + timedelta(days=1),
-            cantidad=Decimal("35"),
-            tickets=8,
-            monto_total=Decimal("900"),
-            fuente="EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch_b, product=producto, receta=receta,
+            fecha=base_date + timedelta(days=1), cantidad=Decimal("35"), monto=Decimal("900"), tickets=8,
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Excepciones por sucursal")
@@ -1490,47 +1523,30 @@ class DashboardHomologacionContextTests(TestCase):
 
     def test_dashboard_shows_product_daily_exceptions(self):
         sucursal = Sucursal.objects.create(codigo="SUC-PROD-EXC", nombre="Sucursal Producto Excepcion")
+        branch = PointBranch.objects.create(external_id="PEXC", name=sucursal.nombre, erp_branch=sucursal)
         receta_a = Receta.objects.create(nombre="Pastel Producto A", hash_contenido="hash-dashboard-prod-a")
         receta_b = Receta.objects.create(nombre="Pastel Producto B", hash_contenido="hash-dashboard-prod-b")
+        producto_a = PointProduct.objects.create(external_id="PEXC-A", sku="PEXCA", name=receta_a.nombre, active=True)
+        producto_b = PointProduct.objects.create(external_id="PEXC-B", sku="PEXCB", name=receta_b.nombre, active=True)
         base_date = timezone.localdate() - timedelta(days=2)
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal,
-            fecha=base_date,
-            cantidad=Decimal("50"),
-            tickets=11,
-            monto_total=Decimal("1200"),
-            fuente="PROD_EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_a, receta=receta_a,
+            fecha=base_date, cantidad=Decimal("50"), monto=Decimal("1200"), tickets=11,
         )
-        VentaHistorica.objects.create(
-            receta=receta_b,
-            sucursal=sucursal,
-            fecha=base_date,
-            cantidad=Decimal("15"),
-            tickets=4,
-            monto_total=Decimal("300"),
-            fuente="PROD_EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_b, receta=receta_b,
+            fecha=base_date, cantidad=Decimal("15"), monto=Decimal("300"), tickets=4,
         )
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal,
-            fecha=base_date + timedelta(days=1),
-            cantidad=Decimal("18"),
-            tickets=5,
-            monto_total=Decimal("400"),
-            fuente="PROD_EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_a, receta=receta_a,
+            fecha=base_date + timedelta(days=1), cantidad=Decimal("18"), monto=Decimal("400"), tickets=5,
         )
-        VentaHistorica.objects.create(
-            receta=receta_b,
-            sucursal=sucursal,
-            fecha=base_date + timedelta(days=1),
-            cantidad=Decimal("35"),
-            tickets=9,
-            monto_total=Decimal("840"),
-            fuente="PROD_EXC_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_b, receta=receta_b,
+            fecha=base_date + timedelta(days=1), cantidad=Decimal("35"), monto=Decimal("840"), tickets=9,
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Productos con variación fuerte")
@@ -1542,50 +1558,33 @@ class DashboardHomologacionContextTests(TestCase):
     def test_dashboard_shows_branch_weekday_comparison(self):
         sucursal_a = Sucursal.objects.create(codigo="SUC-WEEK-A", nombre="Sucursal Comparable A")
         sucursal_b = Sucursal.objects.create(codigo="SUC-WEEK-B", nombre="Sucursal Comparable B")
+        branch_a = PointBranch.objects.create(external_id="WEEK-A", name=sucursal_a.nombre, erp_branch=sucursal_a)
+        branch_b = PointBranch.objects.create(external_id="WEEK-B", name=sucursal_b.nombre, erp_branch=sucursal_b)
         receta = Receta.objects.create(nombre="Pastel Comparable Semana", hash_contenido="hash-dashboard-weekday")
+        producto = PointProduct.objects.create(external_id="WEEK-P", sku="WEEKP", name=receta.nombre, active=True)
         latest_date = timezone.localdate() - timedelta(days=1)
         while latest_date.weekday() != 2:
             latest_date -= timedelta(days=1)
         comparable_date = latest_date - timedelta(days=7)
 
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_a,
-            fecha=comparable_date,
-            cantidad=Decimal("40"),
-            tickets=10,
-            monto_total=Decimal("1000"),
-            fuente="WEEKDAY_TEST",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto, receta=receta,
+            fecha=comparable_date, cantidad=Decimal("40"), monto=Decimal("1000"), tickets=10,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_b,
-            fecha=comparable_date,
-            cantidad=Decimal("30"),
-            tickets=8,
-            monto_total=Decimal("750"),
-            fuente="WEEKDAY_TEST",
+        self._crear_venta_stage(
+            branch=branch_b, product=producto, receta=receta,
+            fecha=comparable_date, cantidad=Decimal("30"), monto=Decimal("750"), tickets=8,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_a,
-            fecha=latest_date,
-            cantidad=Decimal("22"),
-            tickets=6,
-            monto_total=Decimal("520"),
-            fuente="WEEKDAY_TEST",
+        self._crear_venta_stage(
+            branch=branch_a, product=producto, receta=receta,
+            fecha=latest_date, cantidad=Decimal("22"), monto=Decimal("520"), tickets=6,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal_b,
-            fecha=latest_date,
-            cantidad=Decimal("44"),
-            tickets=11,
-            monto_total=Decimal("1120"),
-            fuente="WEEKDAY_TEST",
+        self._crear_venta_stage(
+            branch=branch_b, product=producto, receta=receta,
+            fecha=latest_date, cantidad=Decimal("44"), monto=Decimal("1120"), tickets=11,
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sucursales vs mismo día de semana")
@@ -1596,51 +1595,34 @@ class DashboardHomologacionContextTests(TestCase):
 
     def test_dashboard_shows_product_weekday_comparison(self):
         sucursal = Sucursal.objects.create(codigo="SUC-WEEK-PROD", nombre="Sucursal Comparable Producto")
+        branch = PointBranch.objects.create(external_id="WKP", name=sucursal.nombre, erp_branch=sucursal)
         receta_a = Receta.objects.create(nombre="Pastel Comparable A", hash_contenido="hash-dashboard-weekly-prod-a")
         receta_b = Receta.objects.create(nombre="Pastel Comparable B", hash_contenido="hash-dashboard-weekly-prod-b")
+        producto_a = PointProduct.objects.create(external_id="WKP-A", sku="WKPA", name=receta_a.nombre, active=True)
+        producto_b = PointProduct.objects.create(external_id="WKP-B", sku="WKPB", name=receta_b.nombre, active=True)
         latest_date = timezone.localdate() - timedelta(days=1)
         while latest_date.weekday() != 3:
             latest_date -= timedelta(days=1)
         comparable_date = latest_date - timedelta(days=7)
 
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal,
-            fecha=comparable_date,
-            cantidad=Decimal("50"),
-            tickets=11,
-            monto_total=Decimal("1250"),
-            fuente="WEEKLY_PROD_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_a, receta=receta_a,
+            fecha=comparable_date, cantidad=Decimal("50"), monto=Decimal("1250"), tickets=11,
         )
-        VentaHistorica.objects.create(
-            receta=receta_b,
-            sucursal=sucursal,
-            fecha=comparable_date,
-            cantidad=Decimal("18"),
-            tickets=5,
-            monto_total=Decimal("420"),
-            fuente="WEEKLY_PROD_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_b, receta=receta_b,
+            fecha=comparable_date, cantidad=Decimal("18"), monto=Decimal("420"), tickets=5,
         )
-        VentaHistorica.objects.create(
-            receta=receta_a,
-            sucursal=sucursal,
-            fecha=latest_date,
-            cantidad=Decimal("24"),
-            tickets=6,
-            monto_total=Decimal("560"),
-            fuente="WEEKLY_PROD_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_a, receta=receta_a,
+            fecha=latest_date, cantidad=Decimal("24"), monto=Decimal("560"), tickets=6,
         )
-        VentaHistorica.objects.create(
-            receta=receta_b,
-            sucursal=sucursal,
-            fecha=latest_date,
-            cantidad=Decimal("34"),
-            tickets=9,
-            monto_total=Decimal("900"),
-            fuente="WEEKLY_PROD_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto_b, receta=receta_b,
+            fecha=latest_date, cantidad=Decimal("34"), monto=Decimal("900"), tickets=9,
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Productos vs mismo día de semana")
@@ -1651,25 +1633,17 @@ class DashboardHomologacionContextTests(TestCase):
 
     def test_dashboard_shows_top_daily_decisions(self):
         sucursal = Sucursal.objects.create(codigo="SUC-DECISION", nombre="Sucursal Decision")
+        branch = PointBranch.objects.create(external_id="DEC", name=sucursal.nombre, erp_branch=sucursal)
         receta = Receta.objects.create(nombre="Pastel Decision Diario", hash_contenido="hash-dashboard-decision")
+        producto = PointProduct.objects.create(external_id="DEC-P", sku="DECP", name=receta.nombre, active=True)
         base_date = timezone.localdate() - timedelta(days=2)
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal,
-            fecha=base_date,
-            cantidad=Decimal("60"),
-            tickets=12,
-            monto_total=Decimal("1500"),
-            fuente="DECISION_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto, receta=receta,
+            fecha=base_date, cantidad=Decimal("60"), monto=Decimal("1500"), tickets=12,
         )
-        VentaHistorica.objects.create(
-            receta=receta,
-            sucursal=sucursal,
-            fecha=base_date + timedelta(days=1),
-            cantidad=Decimal("20"),
-            tickets=5,
-            monto_total=Decimal("400"),
-            fuente="DECISION_TEST",
+        self._crear_venta_stage(
+            branch=branch, product=producto, receta=receta,
+            fecha=base_date + timedelta(days=1), cantidad=Decimal("20"), monto=Decimal("400"), tickets=5,
         )
         insumo = Insumo.objects.create(nombre="Insumo Decision Diario", activo=True)
         SolicitudCompra.objects.create(
@@ -1680,7 +1654,7 @@ class DashboardHomologacionContextTests(TestCase):
             fecha_requerida=timezone.localdate() - timedelta(days=1),
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Top decisiones del día")
@@ -1735,7 +1709,7 @@ class DashboardHomologacionContextTests(TestCase):
             fuente="DASH_SUPPLY_TEST",
         )
 
-        response = self.client.get(reverse("dashboard"))
+        response = self._get_dashboard_operativo()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Insumos críticos del plan")
@@ -1807,32 +1781,14 @@ class UsersAccessTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("users_access"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Crear Usuario")
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Cockpit de habilitación ERP")
-        self.assertContains(response, "Cadena de habilitación ERP")
-        self.assertContains(response, "Cadena troncal de habilitación")
-        self.assertContains(response, "Cierre troncal ERP consolidado")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Depende de")
-        self.assertContains(response, "Cierre")
-        self.assertContains(response, "Dependencia")
-        self.assertContains(response, "Madurez de accesos ERP")
-        self.assertContains(response, "Criterios de cierre ERP")
-        self.assertContains(response, "Cierre global")
-        self.assertContains(response, "Cadena de control RBAC")
-        self.assertContains(response, "Entrega de accesos a downstream")
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertContains(response, "Salud operativa ERP")
-        self.assertContains(response, "Control RBAC")
-        self.assertContains(response, "Matriz de Roles")
-        self.assertContains(response, "Operativo")
-        self.assertContains(response, "Gobierno de accesos")
-        self.assertContains(response, "Cobertura Operativa")
+        # El template se rediseñó en producción (sync 2e2cf70f); las secciones
+        # actuales son la mesa de trabajo compacta y el panel colapsable.
+        self.assertContains(response, "Crear usuario")
+        self.assertContains(response, "Mesa de trabajo de usuarios")
+        self.assertContains(response, "Gaps de cobertura")
+        self.assertContains(response, "Gobierno, cobertura y matrices avanzadas")
+        self.assertContains(response, "Cobertura operativa")
         self.assertContains(response, "Sucursales con gap")
-        self.assertContains(response, "Listos ERP")
-        self.assertContains(response, "Requisitos operativos por rol")
         self.assertIn("users_operational_health_cards", response.context)
         self.assertIn("users_focus_cards", response.context)
         self.assertIn("users_stage_rows", response.context)
@@ -1931,14 +1887,14 @@ class UsersAccessTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("users_access"), {"coverage": "sucursal", "scope_id": sucursal.id})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cobertura Operativa")
-        self.assertContains(response, "Gap operativo")
+        self.assertContains(response, "Cobertura operativa")
+        self.assertContains(response, "Sucursales con gap")
 
     def test_users_access_edit_view_shows_profile_diagnosis(self):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("users_access"), {"edit": self.compras.id})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Editar Usuario")
+        self.assertContains(response, "Editar usuario")
         self.assertContains(response, "Sin departamento")
         self.assertNotContains(response, "Sin bloqueos críticos")
 
