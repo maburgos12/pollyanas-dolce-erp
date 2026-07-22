@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -442,7 +442,11 @@ class LogisticaCombustibleAlertaView(_LogisticaBaseView):
         bitacoras = (
             BitacoraSalidaLlegada.objects.select_related("unidad")
             .prefetch_related("cargas_combustible")
-            .filter(repartidor=repartidor, cerrada=True)
+            .filter(
+                repartidor=repartidor,
+                cerrada=True,
+                hora_llegada__gte=timezone.make_aware(datetime(2026, 5, 12)),
+            )
             .exclude(nivel_gas_llegada="")
             .order_by("-hora_llegada", "-id")
         )
