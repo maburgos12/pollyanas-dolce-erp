@@ -304,6 +304,41 @@ class ImportadorBancarioTests(TestCase):
         self.assertIn("0145607982", preview.movimientos[2].referencia)
         self.assertEqual(preview.errores, [])
 
+    def test_generar_preview_bbva_codigos_credito_y_saldo_negativo(self):
+        archivo = SimpleUploadedFile(
+            "00741744000120753084CH.pdf",
+            _minimal_text_pdf(
+                [
+                    "Estado de Cuenta",
+                    "MAESTRA PYME BBVA",
+                    "Periodo DEL 01/06/2026 AL 30/06/2026",
+                    "Detalle de Movimientos Realizados",
+                    "FECHA SALDO",
+                    "OPER LIQ COD. DESCRIPCIÓN REFERENCIA CARGOS ABONOS OPERACIÓN LIQUIDACIÓN",
+                    "08/JUN 08/JUN BS3 PLAN PAGOS FIJOS 12 MESES 150,000.00",
+                    "Ref. DISPOSICION",
+                    "23/JUN 24/JUN N06 PAGO CUENTA DE TERCERO 335.00 6,407.34 6,072.34",
+                    "Ref. TERCERO",
+                    "14/JUN 13/JUN P12 PAGO TARJETA DE CREDITO 2,320.00 1,725.62 1,725.62",
+                    "Ref. TDC",
+                    "14/JUN 16/JUN T17 SPEI ENVIADO BANCOPPEL 6,457.85 3,030.91 -287,559.68",
+                    "Ref. NOMINA",
+                ]
+            ),
+            content_type="application/pdf",
+        )
+
+        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
+
+        self.assertEqual(len(preview.movimientos), 4)
+        tipos = {(m.descripcion.split()[0], m.tipo) for m in preview.movimientos}
+        self.assertIn(("BS3", MovimientoBancario.TIPO_ABONO), tipos)
+        self.assertIn(("N06", MovimientoBancario.TIPO_ABONO), tipos)
+        self.assertIn(("P12", MovimientoBancario.TIPO_CARGO), tipos)
+        negativo = [m for m in preview.movimientos if m.monto == Decimal("6457.85")]
+        self.assertEqual(len(negativo), 1)
+        self.assertEqual(negativo[0].tipo, MovimientoBancario.TIPO_CARGO)
+
     def test_generar_preview_reads_american_express_pdf_statement(self):
         amex, _ = CuentaBancaria.objects.update_or_create(
             banco=CuentaBancaria.BANCO_AMEX,
