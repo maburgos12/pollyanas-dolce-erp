@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.staticfiles import finders
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -74,6 +74,18 @@ BITACORA_CONFIG = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def _cargar_insumos_sucursal(sucursal):
+    """Evita que una réplica Point lenta consuma un worker web completo."""
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = %s", [5000])
+            return insumos_elegibles_para_sucursal(sucursal), False
+    except OperationalError:
+        logger.exception("Timeout al cargar el catálogo local de insumos Point para sucursal=%s", sucursal.pk)
+        return [], True
 
 
 def _on_commit_seguro(callback):
@@ -158,6 +170,9 @@ def sucursal_tools(request):
         solo_aprobacion = True
     if not sucursal and not es_direccion:
         raise PermissionDenied("Tu sesión no tiene una sucursal operativa asignada.")
+    insumos, catalogo_insumos_no_disponible = (
+        ([], False) if solo_aprobacion else _cargar_insumos_sucursal(sucursal)
+    )
     return render(
         request,
         "operacion/sucursal_tools.html",
@@ -171,7 +186,8 @@ def sucursal_tools(request):
             "categorias_instalacion": CategoriaFalla.objects.filter(
                 activo=True, tipo=CategoriaFalla.TIPO_INSTALACION
             ).order_by("orden", "nombre"),
-            "insumos": [] if solo_aprobacion else insumos_elegibles_para_sucursal(sucursal),
+            "insumos": insumos,
+            "catalogo_insumos_no_disponible": catalogo_insumos_no_disponible,
             "mermas_pendientes": pendientes,
             "solo_aprobacion": solo_aprobacion,
             "mermas_sin_responsable": sin_responsable,
@@ -315,7 +331,12 @@ def mermas_insumos_catalogo_api(request):
     sucursal = _sucursal_operativa_usuario(request.user)
     if not sucursal:
         return JsonResponse({"error": "Tu sesión no tiene una sucursal operativa asignada."}, status=403)
-    rows = insumos_elegibles_para_sucursal(sucursal)
+    rows, no_disponible = _cargar_insumos_sucursal(sucursal)
+    if no_disponible:
+        return JsonResponse(
+            {"error": "No pudimos cargar las existencias de Point. Reintenta en unos momentos."},
+            status=503,
+        )
     return JsonResponse(
         {
             "sucursal": {"id": sucursal.id, "nombre": sucursal.nombre},
@@ -344,7 +365,16 @@ def mermas_insumos_crear_api(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "La solicitud no contiene JSON válido."}, status=400)
 
-    eligible = {row.codigo_point: row for row in insumos_elegibles_para_sucursal(sucursal)}
+    rows, no_disponible = _cargar_insumos_sucursal(sucursal)
+    if no_disponible:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.content_type == "application/json":
+            return JsonResponse(
+                {"error": "No pudimos validar las existencias de Point. No se registró ninguna merma."},
+                status=503,
+            )
+        messages.error(request, "No pudimos validar las existencias de Point. No se registró ninguna merma.")
+        return redirect(f"{reverse('operacion:sucursal_tools')}?tab=mermas#merma-form")
+    eligible = {row.codigo_point: row for row in rows}
     row = eligible.get((data.get("codigo_point") or "").strip())
     if not row:
         return _respuesta_error(

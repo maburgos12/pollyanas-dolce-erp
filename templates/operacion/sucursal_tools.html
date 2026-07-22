@@ -76,6 +76,11 @@
         <h2>Registrar merma de insumo</h2>
         <p>Solo aparecen insumos recibidos por {{ sucursal.nombre }}. La unidad corresponde a Point.</p>
       </div>
+      {% if catalogo_insumos_no_disponible %}
+      <div class="empty-state" role="alert">
+        No pudimos cargar las existencias de Point. Reintenta en unos momentos; no se registró ninguna merma.
+      </div>
+      {% else %}
       <form id="merma-form" data-async-action action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <label for="codigo_point">Insumo recibido</label>
@@ -97,6 +102,7 @@
         <textarea id="justificacion_merma" name="justificacion_sin_foto" rows="2">{{ draft_mermas.justificacion_sin_foto|default:'' }}</textarea>
         <button class="primary-action" type="submit" {% if not insumos %}disabled{% endif %}>Enviar a mi jefe</button>
       </form>
+      {% endif %}
       {% endif %}
       {% if mermas_pendientes %}
       <div class="approval-list">

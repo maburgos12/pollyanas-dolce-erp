@@ -5,6 +5,7 @@ from hashlib import sha256
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Subquery
 from django.utils import timezone
 
 from core.access import is_admin_or_dg
@@ -87,40 +88,65 @@ def insumos_elegibles_para_sucursal(sucursal):
         is_cancelled=False,
         is_insumo=True,
         received_quantity__gt=0,
-    ).exclude(item_code="")
+    ).exclude(item_code="").values(
+        "item_code",
+        "item_name",
+        "unit",
+        "destination_branch_id",
+        "received_at",
+        "registered_at",
+    )
 
     by_code = {}
     for line in transfers.order_by("item_code", "-received_at", "-registered_at", "-id"):
-        code = (line.item_code or "").strip()
-        unit = (line.unit or "").strip().upper()
+        code = (line["item_code"] or "").strip()
+        unit = (line["unit"] or "").strip().upper()
         if not code or not unit:
             continue
-        received_at = line.received_at or line.registered_at
+        received_at = line["received_at"] or line["registered_at"]
         row = by_code.setdefault(
             code,
-            {"name": line.item_name, "units": set(), "branches": set(), "last_movement": received_at},
+            {"name": line["item_name"], "units": set(), "branches": set(), "last_movement": received_at},
         )
         row["units"].add(unit)
-        row["branches"].add(line.destination_branch_id)
+        row["branches"].add(line["destination_branch_id"])
         if received_at and (not row["last_movement"] or received_at > row["last_movement"]):
             row["last_movement"] = received_at
 
     if not by_code:
         return []
 
+    snapshot_keys = {
+        (next(iter(data["branches"])), code)
+        for code, data in by_code.items()
+        if len(data["units"]) == 1 and len(data["branches"]) == 1
+    }
+    branch_ids = {branch_id for branch_id, _code in snapshot_keys}
+    product_codes = {code for _branch_id, code in snapshot_keys}
+    latest_snapshot_ids = (
+        PointInventorySnapshot.objects.filter(
+            branch_id__in=branch_ids,
+            product__sku__in=product_codes,
+        )
+        .order_by("branch_id", "product_id", "-captured_at", "-id")
+        .distinct("branch_id", "product_id")
+        .values("id")
+    )
+    latest_snapshots = {}
+    for snapshot in PointInventorySnapshot.objects.filter(
+        id__in=Subquery(latest_snapshot_ids)
+    ).select_related("product"):
+        key = (snapshot.branch_id, snapshot.product.sku)
+        previous = latest_snapshots.get(key)
+        if previous is None or (snapshot.captured_at, snapshot.id) > (previous.captured_at, previous.id):
+            latest_snapshots[key] = snapshot
+
     tolerance_date = timezone.localdate() - timedelta(days=7)
     result = []
     for code, data in by_code.items():
         if len(data["units"]) != 1 or len(data["branches"]) != 1:
             continue
-        snapshot = (
-            PointInventorySnapshot.objects.filter(
-                branch_id=next(iter(data["branches"])), product__sku=code
-            )
-            .select_related("product")
-            .order_by("-captured_at", "-id")
-            .first()
-        )
+        snapshot = latest_snapshots.get((next(iter(data["branches"])), code))
         if snapshot is None:
             continue
         last_movement = data["last_movement"]

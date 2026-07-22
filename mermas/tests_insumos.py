@@ -359,6 +359,46 @@ class InsumosElegiblesPointTests(TestCase):
 
         self.assertEqual(insumos_elegibles_para_sucursal(self.sucursal), [])
 
+    def test_catalogo_resuelve_snapshots_en_consulta_acotada(self):
+        self.recepcion(days_ago=0)
+        self.snapshot("5")
+        for index in range(2, 22):
+            product = PointProduct.objects.create(
+                external_id=f"ext-{index}", sku=f"INS-{index:03d}", name=f"Insumo {index}"
+            )
+            PointTransferLine.objects.create(
+                origin_branch=self.cedis,
+                destination_branch=self.branch,
+                erp_destination_branch=self.sucursal,
+                sync_job=self.job,
+                transfer_external_id=f"T-{index}",
+                detail_external_id=f"D-{index}",
+                source_hash=f"hash-{index}",
+                registered_at=timezone.now(),
+                received_at=timezone.now(),
+                item_name=f"Insumo {index}",
+                item_code=product.sku,
+                unit="KG",
+                received_quantity=Decimal("1"),
+                is_insumo=True,
+                is_received=True,
+                is_cancelled=False,
+                is_current_snapshot=True,
+            )
+            PointInventorySnapshot.objects.create(
+                branch=self.branch,
+                product=product,
+                stock=Decimal("1"),
+                captured_at=timezone.now(),
+                sync_job=self.job,
+            )
+        from mermas.services_insumos import insumos_elegibles_para_sucursal
+
+        with self.assertNumQueries(2):
+            rows = insumos_elegibles_para_sucursal(self.sucursal)
+
+        self.assertEqual(len(rows), 21)
+
 
 class SimulacionOrdenPointTests(TestCase):
     def setUp(self):
