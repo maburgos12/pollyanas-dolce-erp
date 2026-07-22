@@ -9,6 +9,7 @@ from core.access import (
     can_view_module,
     can_manage_submodule,
     can_view_submodule,
+    is_admin_or_dg,
     is_branch_capture_only,
     is_mermas_only,
     is_repartidor_only,
@@ -206,6 +207,17 @@ def build_operacion_context(user) -> dict:
                         href="/app/sucursal/?tab=mermas",
                         icon="merma",
                         area="Sucursal",
+                    )
+                )
+            elif is_admin_or_dg(user):
+                tiles.append(
+                    OperacionTile(
+                        key="mermas_insumos_supervision",
+                        title="Supervisión de mermas de insumos",
+                        detail="Aprobaciones, casos sin responsable y órdenes de ajuste Point.",
+                        href="/app/sucursal/?tab=mermas",
+                        icon="merma",
+                        area="Dirección",
                     )
                 )
         if _can_receive_mermas(user):
