@@ -86,17 +86,15 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("Mi trabajo activo", content)
-        self.assertIn("Por atender", content)
-        self.assertIn("Para cerrar", content)
+        self.assertIn("Vencidos", content)
+        self.assertIn("Activos", content)
         self.assertIn("En revisión", content)
-        self.assertIn("Historial", content)
+        self.assertIn("Finalizados", content)
         self.assertIn("Compromisos", content)
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
         self.assertIn('data-dashboard-url="/seguimiento/"', content)
         self.assertIn("Validar inventarios en cuartos fríos", content)
-        self.assertIn("Retroalimentación", content)
-        self.assertIn("Necesito más tiempo", content)
         self.assertNotIn("Alcance", content)
         self.assertNotIn("Control visible y auditable", content)
         self.assertNotIn("Visible:", content)
@@ -131,9 +129,8 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertContains(response, "Minuta con checks visibles")
         self.assertIn(f'data-follow-up-id="{item.pk}"', content)
-        self.assertIn(f'aria-controls="seg-work-detail-{item.pk}"', content)
-        self.assertIn('class="seg-work-card-toggle"', content)
-        self.assertIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
+        self.assertIn(f'href="/seguimiento/{item.pk}/"', content)
+        self.assertNotIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
 
     def test_paso_agente_dg_no_acepta_toggle_local(self):
         self.item.tipo = SeguimientoItem.TIPO_PROYECTO
@@ -375,7 +372,9 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'class="seg-agreement-hero"')
         self.assertContains(response, "Puntos por completar")
-        self.assertContains(response, "Marcar hecho")
+        self.assertContains(response, "Marcar punto terminado")
+        self.assertEqual(response.content.decode().count("Marcar punto terminado"), 1)
+        self.assertNotContains(response, "Marcar hecho")
         self.assertContains(response, "Detalles técnicos")
 
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
@@ -655,14 +654,14 @@ class SeguimientoColaboradorTests(TestCase):
         response = self.client.get("/seguimiento/minutas/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Lo que debes atender")
-        self.assertContains(response, 'data-work-bucket="attention"')
-        self.assertContains(response, 'data-work-bucket="ready"')
-        self.assertContains(response, 'data-work-bucket="review"')
-        self.assertContains(response, 'data-work-bucket="history"')
-        self.assertContains(response, 'src="/static/js/seguimiento_mi_trabajo.js?')
+        self.assertContains(response, "Minutas asignadas")
+        self.assertContains(response, 'data-work-bucket="vencidos"')
+        self.assertContains(response, 'data-work-bucket="activos"')
+        self.assertContains(response, 'data-work-bucket="en_revision"')
+        self.assertContains(response, 'data-work-bucket="finalizados"')
+        self.assertContains(response, 'data-active-work-bucket="activos"')
 
-    def test_mi_trabajo_conserva_acciones_existentes_en_tarjeta(self):
+    def test_mi_trabajo_deja_acciones_dentro_del_detalle(self):
         item = SeguimientoItem.objects.create(
             titulo="Actualizar proveedores",
             tipo=SeguimientoItem.TIPO_MINUTA,
@@ -673,13 +672,14 @@ class SeguimientoColaboradorTests(TestCase):
 
         response = self.client.get("/seguimiento/minutas/")
 
-        self.assertContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, check.pk]))
-        self.assertContains(response, reverse("seguimiento:registrar_feedback", args=[item.pk]))
-        self.assertContains(response, reverse("seguimiento:subir_evidencia", args=[item.pk]))
-        self.assertContains(response, reverse("seguimiento:solicitar_prorroga", args=[item.pk]))
+        self.assertContains(response, reverse("seguimiento:detalle", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, check.pk]))
+        self.assertNotContains(response, reverse("seguimiento:registrar_feedback", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:subir_evidencia", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:solicitar_prorroga", args=[item.pk]))
         self.assertContains(response, f'data-follow-up-id="{item.pk}"')
 
-    def test_mi_trabajo_expone_estado_sin_cambiar_asignacion(self):
+    def test_mi_trabajo_separa_finalizados_sin_cambiar_asignacion(self):
         outsider = get_user_model().objects.create_user(username="empleada.otra", password="test12345")
         visible = SeguimientoItem.objects.create(
             titulo="Acuerdo propio visible",
@@ -694,20 +694,113 @@ class SeguimientoColaboradorTests(TestCase):
             responsable_user=outsider,
         )
 
-        response = self.client.get("/seguimiento/minutas/")
+        response = self.client.get("/seguimiento/minutas/?estado=finalizados")
 
         self.assertContains(response, visible.titulo)
-        self.assertContains(response, 'data-is-closed="true"')
+        self.assertContains(response, "Finalizado ")
+        self.assertContains(response, 'data-active-work-bucket="finalizados"')
         self.assertNotContains(response, "Acuerdo ajeno oculto")
 
-    def test_script_mi_trabajo_define_segmentos_y_acordeon_unico(self):
-        script = (Path(settings.BASE_DIR) / "static" / "js" / "seguimiento_mi_trabajo.js").read_text()
-        self.assertIn('return "history"', script)
-        self.assertIn('return "review"', script)
-        self.assertIn('return "ready"', script)
-        self.assertIn('return "attention"', script)
-        self.assertIn("if (candidate !== card) closeCard(candidate)", script)
-        self.assertIn('selectBucket("attention")', script)
+    def test_mi_trabajo_no_mezcla_estados_en_la_lista_visible(self):
+        vencido = SeguimientoItem.objects.create(
+            titulo="Acuerdo vencido visible",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=1),
+        )
+        activo = SeguimientoItem.objects.create(
+            titulo="Acuerdo activo separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() + timedelta(days=4),
+        )
+        revision = SeguimientoItem.objects.create(
+            titulo="Acuerdo en revisión separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_REVISION,
+            responsable_user=self.user,
+        )
+        finalizado = SeguimientoItem.objects.create(
+            titulo="Acuerdo finalizado separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+            responsable_user=self.user,
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        self.assertContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, revision.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=activos")
+        self.assertContains(response, activo.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, revision.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=en_revision")
+        self.assertContains(response, revision.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=finalizados")
+        self.assertContains(response, finalizado.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, revision.titulo)
+
+    def test_mi_trabajo_ordena_vencidos_del_mas_atrasado_al_mas_reciente(self):
+        reciente = SeguimientoItem.objects.create(
+            titulo="Venció ayer",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=1),
+        )
+        antiguo = SeguimientoItem.objects.create(
+            titulo="Venció hace una semana",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=7),
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        content = response.content.decode()
+
+        self.assertLess(content.index(antiguo.titulo), content.index(reciente.titulo))
+
+    def test_detalle_destaca_el_siguiente_punto_y_deja_evidencia_como_opcional(self):
+        item = SeguimientoItem.objects.create(
+            titulo="Actualizar precios de temporada",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+        )
+        SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Validar costos actuales",
+            completado=True,
+            orden=1,
+        )
+        siguiente = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Confirmar precios con Dirección",
+            orden=2,
+        )
+
+        response = self.client.get(reverse("seguimiento:detalle", args=[item.pk]))
+
+        self.assertContains(response, "Próxima acción")
+        self.assertContains(response, siguiente.titulo)
+        self.assertContains(response, "Marcar punto terminado")
+        self.assertContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, siguiente.pk]))
+        self.assertContains(response, "Acciones opcionales")
+        self.assertContains(response, "Agregar evidencia")
 
     def test_colaborador_staff_aprueba_paso_designado_desde_mi_trabajo(self):
         ventas, _ = Group.objects.get_or_create(name="VENTAS")

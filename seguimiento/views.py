@@ -459,6 +459,50 @@ def mi_seguimiento(request, tipo: str | None = None):
             and (not item.fecha_limite or (item.aprobado_at or item.ultima_actividad) <= item.fecha_limite)
         ),
     }
+
+    # La bandeja personal separa estados en el servidor. De esta forma el trabajo
+    # terminado no se mezcla ni se descarga como parte de la lista activa.
+    items_del_tipo = [item for item in items if not tipo or item.tipo == tipo]
+    items_por_estado = {
+        "vencidos": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus != SeguimientoItem.ESTATUS_EN_REVISION
+            and item.esta_vencido
+        ],
+        "activos": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus != SeguimientoItem.ESTATUS_EN_REVISION
+            and not item.esta_vencido
+        ],
+        "en_revision": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+        ],
+        "finalizados": [item for item in items_del_tipo if item.esta_cerrado],
+    }
+    items_por_estado["vencidos"].sort(
+        key=lambda item: (item.fecha_limite is None, item.fecha_limite or now)
+    )
+    items_por_estado["activos"].sort(
+        key=lambda item: (item.fecha_limite is None, item.fecha_limite or now)
+    )
+    items_por_estado["en_revision"].sort(key=lambda item: item.updated_at, reverse=True)
+    items_por_estado["finalizados"].sort(
+        key=lambda item: item.aprobado_at or item.updated_at,
+        reverse=True,
+    )
+    bucket_counts = {estado: len(bucket_items) for estado, bucket_items in items_por_estado.items()}
+    active_bucket = (request.GET.get("estado") or "").strip().lower()
+    if active_bucket not in items_por_estado:
+        active_bucket = "vencidos" if bucket_counts["vencidos"] else "activos"
+    visible_items = items_por_estado[active_bucket]
+
     section_config = [
         {
             "tipo": SeguimientoItem.TIPO_COMPROMISO,
@@ -483,7 +527,7 @@ def mi_seguimiento(request, tipo: str | None = None):
         section_config = [config for config in section_config if config["tipo"] == tipo]
     sections = []
     for config in section_config:
-        section_items = [item for item in items if item.tipo == config["tipo"]]
+        section_items = [item for item in visible_items if item.tipo == config["tipo"]]
         total_checks = sum(item.checklist_total for item in section_items)
         done_checks = sum(item.checklist_done for item in section_items)
         sections.append(
@@ -526,6 +570,9 @@ def mi_seguimiento(request, tipo: str | None = None):
             "mis_aprobaciones": mis_aprobaciones,
             "writeback_activo": _writeback_activo(),
             "puede_revisar_seguimiento_global": can_review_seguimiento_global(request.user),
+            "active_bucket": active_bucket,
+            "bucket_counts": bucket_counts,
+            "visible_total": len(visible_items),
         },
     )
 
@@ -1305,6 +1352,7 @@ def detalle_item(request, pk):
     # Orden secuencial: solo el primer paso incompleto se puede marcar y solo el último
     # completado se puede deshacer. El resto queda bloqueado en la interfaz.
     siguiente_check_id = next((c.id for c in checks if not c.completado), None)
+    siguiente_check = next((c for c in checks if c.id == siguiente_check_id), None)
     ultimo_completado_id = next((c.id for c in reversed(checks) if c.completado), None)
 
     # Pasos de ESTE ítem donde el usuario logeado es aprobador y están en espera
@@ -1337,6 +1385,7 @@ def detalle_item(request, pk):
             "puede_retractar": puede_retractar,
             "current_user": request.user,
             "siguiente_check_id": siguiente_check_id,
+            "siguiente_check": siguiente_check,
             "ultimo_completado_id": ultimo_completado_id,
             "writeback_activo": _writeback_activo(),
             "pasos_a_aprobar": pasos_a_aprobar,
