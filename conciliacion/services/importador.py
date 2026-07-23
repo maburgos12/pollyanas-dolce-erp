@@ -807,7 +807,21 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
         "transferencia": {"conteo": 0, "total": Decimal("0.00")},
         "otros_abonos": {"conteo": 0, "total": Decimal("0.00")},
     }
-    for descripcion, monto in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list("descripcion", "monto"):
+    PROPIOS = {
+        MovimientoBancario.CONCILIACION_TRASPASO,
+        MovimientoBancario.CONCILIACION_LINEA_CREDITO,
+        MovimientoBancario.CONCILIACION_TARJETA_CREDITO,
+    }
+    propios = {"conteo": 0, "total": Decimal("0.00")}
+    for descripcion, monto, tipo_conciliacion in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list(
+        "descripcion", "monto", "tipo_conciliacion"
+    ):
+        # abonos clasificados como dinero propio (traspasos, disposiciones de credito,
+        # pagos recibidos en tarjeta propia) no son ingresos de clientes
+        if tipo_conciliacion in PROPIOS:
+            propios["conteo"] += 1
+            propios["total"] += monto or Decimal("0.00")
+            continue
         canal = _clasificar_canal_banco(descripcion)
         banco[canal]["conteo"] += 1
         banco[canal]["total"] += monto or Decimal("0.00")
@@ -853,6 +867,22 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
                 "metodo": regla.metodo,
                 "accion": regla.siguiente_revision,
                 "permite_match_directo": regla.permite_match_directo,
+            }
+        )
+    if propios["conteo"]:
+        rows.append(
+            {
+                "canal": "propios",
+                "nombre": "Traspasos y credito recibidos (dinero propio)",
+                "banco_conteo": propios["conteo"],
+                "banco_total": propios["total"],
+                "sat_conteo": 0,
+                "sat_total": Decimal("0.00"),
+                "diferencia": Decimal("0.00"),
+                "estado": "ok",
+                "metodo": "Abonos clasificados como traspaso entre cuentas propias o disposicion de credito: no son ventas.",
+                "accion": "Sin efecto fiscal",
+                "permite_match_directo": False,
             }
         )
     return rows

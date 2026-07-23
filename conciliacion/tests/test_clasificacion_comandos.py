@@ -130,3 +130,25 @@ class DesgloseCargosResumenTests(TestCase):
         )
         self.assertEqual(conceptos["Cargos sin clasificar"]["banco_total"], Decimal("111.00"))
         self.assertEqual(conceptos["Cargos sin clasificar"]["estado"], "pendiente")
+
+
+class CanalesAbonosPropiosTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.cuenta = CuentaBancaria.objects.create(
+            id_site_syncfy="", nombre_display="BBVA Test", banco="bbva",
+        )
+
+    def test_abonos_traspaso_no_cuentan_como_transferencia_de_cliente(self):
+        from conciliacion.services.importador import resumen_periodo_conciliacion
+
+        _mov(self.cuenta, "T20 SPEI RECIBIDOBAJIO", "abono", "100000.00", dia=5,
+             tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO)
+        _mov(self.cuenta, "T20 SPEI RECIBIDOCITI MEXICO", "abono", "464.84", dia=6,
+             tipo_conciliacion=MovimientoBancario.CONCILIACION_CFDI)
+
+        r = resumen_periodo_conciliacion(year=2026, month=1)
+        canales = {row["canal"]: row for row in r["canales_comparativo"]}
+        self.assertEqual(canales["transferencia"]["banco_total"], Decimal("464.84"))
+        self.assertEqual(canales["propios"]["banco_total"], Decimal("100000.00"))
+        self.assertEqual(canales["propios"]["estado"], "ok")
