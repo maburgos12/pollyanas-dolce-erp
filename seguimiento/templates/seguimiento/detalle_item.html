@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260722-detail-compact-v2">
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260723-next-action-v3">
 {% endblock %}
 
 {% block content %}
@@ -17,6 +17,8 @@
     <a href="{% if es_vista_dg %}{% url 'seguimiento:panel_dg' %}{% else %}{% url 'seguimiento:mi_seguimiento' %}{% endif %}" class="seg-back-link">← {% if es_vista_dg %}Panel de acuerdos{% else %}Mi trabajo{% endif %}</a>
   </div>
 
+  <div class="seg-detail-workspace">
+  <div class="seg-detail-main">
   <article class="seg-agreement-hero">
     <div class="seg-detalle-header">
       <div class="seg-title-block">
@@ -128,31 +130,19 @@
 
           {% if not es_vista_dg and not item.esta_cerrado %}
             {% if writeback_activo and check.origen_step_id %}
-            {# Write-back: transiciones de estatus sincronizadas con el Agente DG #}
-            <div class="seg-action-row">
               {% if check.completado or check.estatus_origen == 'COMPLETED' %}
                 <span class="muted seg-complete-meta">Paso completado</span>
               {% elif check.estatus_origen == 'SUBMITTED' %}
                 <span class="muted seg-complete-meta">En revisión del aprobador{% if check.aprobador_nombre %} ({{ check.aprobador_nombre }}){% endif %}</span>
-              {% elif check.estatus_origen == 'IN_PROGRESS' %}
-                {% if check.requiere_aprobacion %}
-                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="enviar"><button class="btn btn-primary btn-sm" type="submit">Enviar a revisión</button></form>
-                {% else %}
-                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="completar"><button class="btn btn-primary btn-sm" type="submit">Marcar terminado</button></form>
-                {% endif %}
-              {% else %}
-                <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk check.pk %}">{% csrf_token %}<input type="hidden" name="accion" value="iniciar"><button class="btn btn-primary btn-sm" type="submit">Iniciar</button></form>
+              {% elif check.pk == siguiente_check_id %}
+                <span class="muted seg-complete-meta">Usa la acción principal de esta pantalla.</span>
               {% endif %}
-            </div>
             {% elif check.origen_step_id %}
             <span class="muted" style="font-size:.8rem;">Paso sincronizado con app.pollyanasdolce.com; no acepta cambios locales.</span>
             {% else %}
             {# Comportamiento local (sin write-back) #}
             {% if check.pk == siguiente_check_id %}
-            <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
-              {% csrf_token %}
-              <button class="btn btn-primary btn-sm" type="submit">Marcar hecho</button>
-            </form>
+            <span class="muted seg-complete-meta">Usa la acción principal de esta pantalla.</span>
             {% elif check.completado and check.pk == ultimo_completado_id %}
             <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
               {% csrf_token %}
@@ -167,6 +157,106 @@
     </div>
   </section>
   {% endif %}
+  </div>
+
+  <aside class="seg-next-panel" aria-labelledby="seg-next-title">
+    {% if item.esta_cerrado %}
+      <span class="seg-next-label">Acuerdo finalizado</span>
+      <h2 id="seg-next-title">Sin acciones pendientes</h2>
+      <p>Este acuerdo permanece disponible únicamente para consulta.</p>
+    {% elif item.estatus == estatus_en_revision %}
+      <span class="seg-next-label">Estado actual</span>
+      <h2 id="seg-next-title">Esperando revisión</h2>
+      <p>Ya enviaste este acuerdo. No necesitas adjuntar más información salvo que te la soliciten.</p>
+    {% elif siguiente_check and not es_vista_dg %}
+      <span class="seg-next-label">Próxima acción</span>
+      <h2 id="seg-next-title">{{ siguiente_check.titulo }}</h2>
+      {% if siguiente_check.descripcion %}
+      <p>{{ siguiente_check.descripcion }}</p>
+      {% else %}
+      <p>Completa este punto para avanzar al siguiente paso del acuerdo.</p>
+      {% endif %}
+
+      <div class="seg-next-primary">
+        {% if siguiente_check.origen_step_id and writeback_activo %}
+          {% if siguiente_check.estatus_origen == "SUBMITTED" %}
+          <span class="seg-next-waiting">Este punto está esperando aprobación.</span>
+          {% elif siguiente_check.estatus_origen == "IN_PROGRESS" %}
+          <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk siguiente_check.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="{% if siguiente_check.requiere_aprobacion %}enviar{% else %}completar{% endif %}">
+            <button class="btn btn-primary" type="submit">
+              {% if siguiente_check.requiere_aprobacion %}Enviar punto a revisión{% else %}Marcar punto terminado{% endif %}
+            </button>
+          </form>
+          {% else %}
+          <form method="post" action="{% url 'seguimiento:marcar_paso' item.pk siguiente_check.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="iniciar">
+            <button class="btn btn-primary" type="submit">Iniciar punto</button>
+          </form>
+          {% endif %}
+        {% elif siguiente_check.origen_step_id %}
+          <span class="seg-next-waiting">La sincronización con app.pollyanasdolce.com no está disponible en este momento.</span>
+        {% else %}
+          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk siguiente_check.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-primary" type="submit">Marcar punto terminado</button>
+          </form>
+        {% endif %}
+      </div>
+    {% elif checklist_completo and not es_vista_dg %}
+      <span class="seg-next-label">Próxima acción</span>
+      <h2 id="seg-next-title">Cerrar el acuerdo</h2>
+      <p>Todos los puntos están completos. Solo falta confirmar el cierre.</p>
+      <a class="btn btn-primary" href="#seg-cierre-acuerdo">Ir al cierre</a>
+    {% else %}
+      <span class="seg-next-label">Seguimiento</span>
+      <h2 id="seg-next-title">Consulta del acuerdo</h2>
+      <p>Revisa los puntos, la conversación y el historial registrado.</p>
+    {% endif %}
+
+    {% if not item.esta_cerrado and not es_vista_dg %}
+    <div class="seg-next-optional">
+      <strong>Acciones opcionales</strong>
+      <p>Úsalas únicamente cuando realmente sean necesarias.</p>
+
+      <details>
+        <summary>Agregar evidencia</summary>
+        <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" class="seg-next-form">
+          {% csrf_token %}
+          <input type="file" name="archivo"
+            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
+            required>
+          <textarea name="comentario" placeholder="Nota sobre el archivo (opcional)"></textarea>
+          <button class="btn btn-secondary btn-sm" type="submit">Subir evidencia</button>
+        </form>
+      </details>
+
+      <details>
+        <summary>Registrar avance</summary>
+        <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" class="seg-next-form">
+          {% csrf_token %}
+          <textarea name="comentario" placeholder="Avance, bloqueo u observación" required></textarea>
+          <button class="btn btn-secondary btn-sm" type="submit">Guardar avance</button>
+        </form>
+      </details>
+
+      {% if puede_entregar %}
+      <details>
+        <summary>Solicitar más tiempo</summary>
+        <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" class="seg-next-form">
+          {% csrf_token %}
+          <input type="date" name="fecha_solicitada" required>
+          <textarea name="motivo" placeholder="¿Por qué necesitas más tiempo?" required></textarea>
+          <button class="btn btn-secondary btn-sm" type="submit">Solicitar prórroga</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+    {% endif %}
+  </aside>
+  </div>
 
   <!-- Conversación y cierre -->
   <details class="seg-collapsible seg-panel-gap" {% if item.esta_cerrado or ultimo_comentario_dg %}open{% endif %}>
@@ -303,7 +393,7 @@
 
   <!-- Cierre directo (sin aprobación requerida o checklist 100%) -->
   {% if puede_cerrar_directo %}
-  <div class="bi-panel seg-panel-gap">
+  <div class="bi-panel seg-panel-gap" id="seg-cierre-acuerdo">
     <p class="seg-section-title">
       {% if checklist_completo %}Checklist completo — cerrar acuerdo{% else %}Marcar como completado{% endif %}
     </p>
@@ -372,23 +462,6 @@
         </div>
       </form>
     </div>
-  </div>
-  {% endif %}
-
-  <!-- Subir archivo (colaborador, cuando no está cerrado) -->
-  {% if not item.esta_cerrado and not es_vista_dg %}
-  <div class="bi-panel seg-panel-gap">
-    <p class="seg-section-title">Agregar archivo de evidencia</p>
-    <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" class="seg-form-grid">
-      {% csrf_token %}
-      <input type="file" name="archivo"
-        accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
-        class="pd-file-input">
-      <textarea name="comentario" class="seg-form-textarea pd-textarea-compact" placeholder="Nota sobre el archivo (opcional)"></textarea>
-      <div>
-        <button class="btn btn-primary btn-sm" type="submit">Subir archivo</button>
-      </div>
-    </form>
   </div>
   {% endif %}
 
@@ -501,35 +574,6 @@
     </div>
     {% endif %}
   </div>
-
-  <!-- Acciones secundarias (feedback / prórroga) -->
-  {% if puede_entregar %}
-  <div class="bi-panel">
-    <p class="seg-section-title">Otras acciones</p>
-    <div class="seg-secondary-stack">
-
-      <details>
-        <summary class="btn btn-secondary btn-sm seg-summary-link">Enviar retroalimentación / avance parcial</summary>
-        <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" class="seg-edit-form">
-          {% csrf_token %}
-          <textarea name="comentario" class="seg-form-textarea" placeholder="Avance, bloqueo u observación" required></textarea>
-          <button class="btn btn-secondary btn-sm" type="submit">Enviar retroalimentación</button>
-        </form>
-      </details>
-
-      <details>
-        <summary class="btn btn-secondary btn-sm seg-summary-link">Solicitar más tiempo</summary>
-        <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" class="seg-edit-form">
-          {% csrf_token %}
-          <input type="date" name="fecha_solicitada" required class="seg-date-input">
-          <textarea name="motivo" class="seg-form-textarea" placeholder="¿Por qué necesitas más tiempo?" required></textarea>
-          <button class="btn btn-secondary btn-sm" type="submit">Solicitar prórroga</button>
-        </form>
-      </details>
-
-    </div>
-  </div>
-  {% endif %}
 
 </div>
 {% endblock %}

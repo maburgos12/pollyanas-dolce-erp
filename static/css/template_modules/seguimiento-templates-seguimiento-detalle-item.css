@@ -1,5 +1,131 @@
 /* Extracted from seguimiento/templates/seguimiento/detalle_item.html */
-.seg-detalle-shell { width: min(100%, 900px); }
+.seg-detalle-shell { width: min(100%, 1180px); }
+
+  .seg-detail-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(290px, .8fr);
+    gap: 20px;
+    align-items: start;
+    margin-bottom: 16px;
+  }
+
+  .seg-detail-main {
+    min-width: 0;
+  }
+
+  .seg-next-panel {
+    position: sticky;
+    top: 18px;
+    display: grid;
+    gap: 12px;
+    padding: 20px;
+    border-top: 3px solid var(--vino);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .94);
+    box-shadow: 0 6px 8px rgba(74, 37, 50, .08);
+  }
+
+  .seg-next-label {
+    color: var(--texto-light);
+    font-size: .7rem;
+    font-weight: 900;
+    letter-spacing: .075em;
+    text-transform: uppercase;
+  }
+
+  .seg-next-panel h2 {
+    margin: -4px 0 0;
+    color: var(--texto);
+    font-family: "Playfair Display", serif;
+    font-size: 1.5rem;
+    line-height: 1.12;
+    letter-spacing: -.02em;
+    text-wrap: balance;
+  }
+
+  .seg-next-panel > p,
+  .seg-next-optional > p {
+    margin: 0;
+    color: var(--texto-light);
+    font-size: .86rem;
+    line-height: 1.48;
+    text-wrap: pretty;
+  }
+
+  .seg-next-primary form,
+  .seg-next-primary .btn,
+  .seg-next-panel > .btn {
+    width: 100%;
+  }
+
+  .seg-next-waiting {
+    display: block;
+    padding: 11px 12px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--dorado) 12%, white);
+    color: #795f1c;
+    font-size: .84rem;
+    font-weight: 700;
+  }
+
+  .seg-next-optional {
+    display: grid;
+    gap: 9px;
+    margin-top: 6px;
+    padding-top: 16px;
+    border-top: 1px solid color-mix(in srgb, var(--vino) 11%, transparent);
+  }
+
+  .seg-next-optional > strong {
+    color: var(--texto);
+    font-size: .86rem;
+  }
+
+  .seg-next-optional details {
+    border: 1px solid color-mix(in srgb, var(--vino) 13%, transparent);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .76);
+  }
+
+  .seg-next-optional summary {
+    padding: 10px 12px;
+    color: var(--vino);
+    cursor: pointer;
+    font-size: .82rem;
+    font-weight: 800;
+    list-style-position: inside;
+  }
+
+  .seg-next-optional summary:focus-visible {
+    border-radius: 9px;
+    outline: 3px solid color-mix(in srgb, var(--vino) 30%, transparent);
+    outline-offset: 2px;
+  }
+
+  .seg-next-form {
+    display: grid;
+    gap: 8px;
+    padding: 0 10px 10px;
+  }
+
+  .seg-next-form input,
+  .seg-next-form textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--vino) 16%, transparent);
+    border-radius: 9px;
+    padding: 9px 10px;
+    background: white;
+    color: var(--texto);
+    font: inherit;
+    font-size: .82rem;
+  }
+
+  .seg-next-form textarea {
+    min-height: 70px;
+    resize: vertical;
+  }
 
   .seg-agreement-hero {
     display: grid;
@@ -402,6 +528,17 @@
   .seg-secondary-stack { display:grid; gap:12px; }
   .seg-date-input { border:1px solid color-mix(in srgb, var(--pd-wine) 14%, transparent); border-radius:12px; padding:10px; font:inherit; }
   .seg-inline-badge { margin-left: 8px; }
+
+  @media (max-width: 900px) {
+    .seg-detail-workspace {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .seg-next-panel {
+      position: static;
+      grid-row: 1;
+    }
+  }
 
   @media (max-width: 640px) {
     .seg-agreement-hero { gap: 13px; padding: 16px; }
