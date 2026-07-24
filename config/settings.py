@@ -88,7 +88,7 @@ LOGISTICA_FALLBACK_SPEED_KMH = env_int("LOGISTICA_FALLBACK_SPEED_KMH", 35)
 # Ventana absoluta y corta para vaciar colas offline creadas por la PWA v59.
 # Definirla vacia deshabilita la compatibilidad inmediatamente.
 LOGISTICA_PWA_V59_COMPAT_UNTIL = os.getenv(
-    "LOGISTICA_PWA_V59_COMPAT_UNTIL", "2026-07-17T23:59:59-07:00"
+    "LOGISTICA_PWA_V59_COMPAT_UNTIL", ""
 ).strip()
 ECOMMERCE_API_BASE_URL = os.getenv("ECOMMERCE_API_BASE_URL", "").strip()
 ECOMMERCE_SERVICE_EMAIL = os.getenv("ECOMMERCE_SERVICE_EMAIL", "").strip()

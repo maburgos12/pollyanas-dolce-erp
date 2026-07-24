@@ -1202,6 +1202,9 @@ class LogisticaEntregaApiStabilizationTests(TestCase):
 
         self.assertEqual(logistica_v59_compat_window(None), [])
 
+    def test_ventana_v59_esta_deshabilitada_por_defecto(self):
+        self.assertEqual(settings.LOGISTICA_PWA_V59_COMPAT_UNTIL, "")
+
     @override_settings(LOGISTICA_PWA_V59_COMPAT_UNTIL="fecha-invalida")
     def test_configuracion_v59_malformada_falla_cerrado_en_api(self):
         queue_id = "legacy-config-invalida"
