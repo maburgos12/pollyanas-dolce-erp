@@ -30,7 +30,7 @@
     </div>
     {% endif %}
 
-    <form method="post" enctype="multipart/form-data">
+    <form id="merma-capture-form" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <section class="form-block">
             <h2>Salida de sucursal</h2>
@@ -102,9 +102,24 @@
 
 <script>
 (() => {
+    const form = document.getElementById("merma-capture-form");
     const wrapper = document.getElementById("productos-wrapper");
     const add = document.getElementById("add-product");
     const options = Array.from(document.querySelectorAll("#productos-list option"));
+
+    form.addEventListener("formdata", (event) => {
+        const cookieToken = document.cookie
+            .split("; ")
+            .find((row) => row.startsWith("csrftoken="))
+            ?.split("=")
+            .slice(1)
+            .join("=");
+        const fieldToken = form.querySelector('[name="csrfmiddlewaretoken"]')?.value;
+        const token = cookieToken ? decodeURIComponent(cookieToken) : fieldToken;
+        if (token) {
+            event.formData.set("csrfmiddlewaretoken", token);
+        }
+    });
     const syncProductId = (row) => {
         const textInput = row.querySelector('input[name="producto_texto[]"]');
         const idInput = row.querySelector('input[name="receta_id[]"]');
