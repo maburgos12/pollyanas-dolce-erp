@@ -6,7 +6,9 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import connections
+from django.http import HttpResponseForbidden, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.utils.deprecation import MiddlewareMixin
@@ -17,10 +19,76 @@ from core.access import (
     is_mermas_only,
     is_repartidor_only,
 )
+from core.superuser_preview import MANAGEMENT_PREFIX, SESSION_KEY
 
 
 ERP_BUILD_TAG = "2026.03.13-enterprise-01"
 performance_logger = logging.getLogger("erp.performance")
+
+
+class SuperuserPreviewMiddleware:
+    """
+    Ejecuta lecturas como el empleado elegido sin cambiar la sesión autenticada.
+
+    La identidad real queda en ``request.preview_actor`` y cualquier método que
+    pueda modificar estado se bloquea antes de alcanzar vistas, APIs o callbacks.
+    """
+
+    SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        request.preview_active = False
+        request.preview_actor = None
+        request.preview_target = None
+
+        actor = getattr(request, "user", None)
+        if not actor or not actor.is_authenticated:
+            return self.get_response(request)
+
+        target_id = request.session.get(SESSION_KEY)
+        if not target_id:
+            return self.get_response(request)
+
+        if not actor.is_active or not actor.is_superuser:
+            request.session.pop(SESSION_KEY, None)
+            return self.get_response(request)
+
+        target = (
+            get_user_model()
+            .objects.filter(
+                pk=target_id,
+                is_active=True,
+                is_superuser=False,
+                empleado_rrhh__activo=True,
+            )
+            .first()
+        )
+        if target is None:
+            request.session.pop(SESSION_KEY, None)
+            return self.get_response(request)
+
+        request.preview_active = True
+        request.preview_actor = actor
+        request.preview_target = target
+
+        if (request.path or "").startswith(MANAGEMENT_PREFIX):
+            return self.get_response(request)
+
+        if request.method not in self.SAFE_METHODS:
+            message = (
+                "La vista «Ver como» es de solo lectura. "
+                "Vuelve a tu usuario para realizar cambios."
+            )
+            accept = (request.headers.get("Accept") or "").lower()
+            if "application/json" in accept:
+                return JsonResponse({"detail": message, "preview_read_only": True}, status=403)
+            return HttpResponseForbidden(message)
+
+        request.user = target
+        return self.get_response(request)
 
 
 @dataclass
