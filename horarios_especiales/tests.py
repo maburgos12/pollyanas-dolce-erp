@@ -4,6 +4,7 @@ from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
+from django.core.management import call_command
 from django.test import TestCase
 
 from core.models import Sucursal
@@ -92,3 +93,28 @@ class SpecialHoursWorkflowTests(TestCase):
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(request_obj.status, SolicitudHorarioEspecial.STATUS_EJECUTADO)
         self.assertEqual(detail.execution_status, HorarioEspecialDetalle.EXEC_STATUS_SUCCESS)
+
+
+class SpecialHoursBootstrapCommandTests(TestCase):
+    def setUp(self):
+        self.matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        self.payan = Sucursal.objects.create(codigo="PAYAN", nombre="Payan", activa=True)
+
+    def test_bootstrap_catalog_creates_aliases_and_platform_config(self):
+        call_command("bootstrap_special_hours_catalog", "--apply")
+
+        self.assertTrue(SucursalAlias.objects.filter(sucursal=self.matriz, alias="matriz", is_active=True).exists())
+        self.assertTrue(SucursalAlias.objects.filter(sucursal=self.payan, alias="paya", is_active=True).exists())
+
+        matriz_config = SucursalPlataformaExterna.objects.get(
+            sucursal=self.matriz,
+            platform=SucursalPlataformaExterna.PLATFORM_GOOGLE,
+        )
+        self.assertTrue(matriz_config.is_active)
+        self.assertEqual(
+            matriz_config.settings_json["google_business_profile"]["expected_store_name"],
+            "Pollyana's Dolce",
+        )
+        self.assertEqual(matriz_config.external_account_id, "113534506057208552108")
+        self.assertEqual(matriz_config.external_location_id, "17542525418474435119")
+        self.assertEqual(matriz_config.external_location_name, "locations/17542525418474435119")
