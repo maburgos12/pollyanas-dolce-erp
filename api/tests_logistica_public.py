@@ -1,13 +1,30 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.db import close_old_connections
+from django.test import TransactionTestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import AuditLog, Notificacion, Sucursal
-from crm.models import Cliente, PedidoCliente
+from crm.models import Cliente, DireccionCliente, PedidoCliente
 from integraciones.models import PublicApiAccessLog, PublicApiClient
-from logistica.models import EntregaEcommerce, Repartidor, SolicitudDomicilio
+from logistica.models import (
+    EntregaEcommerce,
+    Repartidor,
+    SolicitudDomicilio,
+    SolicitudDomicilioStatusOperation,
+)
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+)
+from logistica.services_domicilio_status import (
+    DomicilioStatusError,
+    update_domicilio_status,
+)
 
 
 class PublicLogisticaAssignmentApiTests(APITestCase):
@@ -378,4 +395,249 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
                 status_code=status.HTTP_400_BAD_REQUEST,
             ).count(),
             2,
+        )
+
+
+class PublicLogisticaDriverExecutionApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.api_client, key = PublicApiClient.create_with_generated_key(
+            nombre="Maya ejecución",
+        )
+        self.api_client.capabilities = [
+            PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
+        ]
+        self.api_client.save(update_fields=["capabilities"])
+        self.auth = {"HTTP_X_API_KEY": key}
+        sucursal = Sucursal.objects.create(codigo="M2M-EXEC", nombre="M2M Exec")
+        user = User.objects.create_user(username="driver_exec", password="x")
+        self.driver = Repartidor.objects.create(user=user, sucursal=sucursal)
+        self.api_client.repartidores_logistica_autorizados.add(self.driver)
+        cliente = Cliente.objects.create(
+            nombre="Cliente visible",
+            telefono="6671230000",
+            email="oculto@example.com",
+            notas="nota interna secreta",
+        )
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Av. Visible 123",
+            referencias="Portón azul",
+            latitud="24.809100",
+            longitud="-107.394000",
+            place_id="place-public",
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            descripcion="Pastel de entrega",
+            canal=PedidoCliente.CANAL_WHATSAPP,
+            public_api_client=self.api_client,
+            payload_snapshot={"token": "no-exponer"},
+        )
+        self.solicitud = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente=cliente,
+            direccion_cliente=direccion,
+            cliente_nombre=cliente.nombre,
+            cliente_telefono=cliente.telefono,
+            direccion=direccion.direccion,
+            notas="otra nota interna",
+            repartidor=self.driver,
+            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+        )
+        self.list_url = reverse(
+            "api_public_logistica_repartidor_domicilios",
+            args=[self.driver.id],
+        )
+        self.status_url = reverse(
+            "api_public_logistica_domicilio_estatus",
+            args=[self.solicitud.id],
+        )
+
+    def payload(self, operation_id="48bf68a2-8642-4fd8-bc25-eaa23a0e5a84"):
+        return {
+            "repartidor_id": self.driver.id,
+            "estatus": "EN_RUTA",
+            "operation_id": operation_id,
+            "actor": {"id": "app-driver", "nombre": "App repartidor"},
+        }
+
+    def test_lista_minima_incluye_gps_y_excluye_pii_notas_y_terminales(self):
+        response = self.client.get(self.list_url, **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = response.data["results"][0]
+        self.assertEqual(
+            set(item),
+            {
+                "id", "estatus", "revision", "cliente_nombre",
+                "cliente_telefono", "direccion", "referencias", "latitud",
+                "longitud", "place_id", "descripcion", "canal",
+                "fecha_compromiso",
+            },
+        )
+        rendered = str(response.data)
+        self.assertNotIn("oculto@example.com", rendered)
+        self.assertNotIn("secreta", rendered)
+        self.assertNotIn("no-exponer", rendered)
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
+        self.solicitud.save(update_fields=["estatus"])
+        terminal = self.client.get(self.list_url, **self.auth)
+        self.assertEqual(terminal.data, {"results": []})
+
+    def test_operacion_durable_replay_exacto_y_mismatch(self):
+        first = self.client.post(
+            self.status_url, self.payload(), format="json", **self.auth
+        )
+        replay = self.client.post(
+            self.status_url, self.payload(), format="json", **self.auth
+        )
+        mismatch_payload = self.payload()
+        mismatch_payload["actor"]["nombre"] = "Otro actor"
+        mismatch = self.client.post(
+            self.status_url, mismatch_payload, format="json", **self.auth
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertFalse(first.data["idempotent"])
+        self.assertEqual(replay.status_code, status.HTTP_200_OK)
+        self.assertTrue(replay.data["idempotent"])
+        self.assertEqual(mismatch.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
+        )
+        self.assertNotIn("latitud", str(AuditLog.objects.get().payload))
+
+    def test_reasignada_transicion_invalida_y_foreign_fallan_cerrado(self):
+        other_user = User.objects.create_user(username="other_driver", password="x")
+        other = Repartidor.objects.create(
+            user=other_user,
+            sucursal=self.driver.sucursal,
+        )
+        self.solicitud.repartidor = other
+        self.solicitud.save(update_fields=["repartidor"])
+        reassigned = self.client.post(
+            self.status_url, self.payload(), format="json", **self.auth
+        )
+        self.assertEqual(reassigned.status_code, status.HTTP_409_CONFLICT)
+
+        foreign_client, foreign_key = PublicApiClient.create_with_generated_key(
+            nombre="Foreign",
+        )
+        foreign_client.capabilities = [
+            PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
+        ]
+        foreign_client.save(update_fields=["capabilities"])
+        foreign = self.client.post(
+            self.status_url,
+            self.payload(),
+            format="json",
+            HTTP_X_API_KEY=foreign_key,
+        )
+        self.assertEqual(foreign.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.solicitud.repartidor = self.driver
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PENDIENTE
+        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        invalid = self.client.post(
+            self.status_url,
+            self.payload("f3a1d1ef-8996-4670-8fe2-094e4a6a1d56"),
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(invalid.status_code, status.HTTP_409_CONFLICT)
+
+
+class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.api_client, _ = PublicApiClient.create_with_generated_key(
+            nombre="Maya concurrencia",
+        )
+        self.api_client.capabilities = [
+            PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
+        ]
+        self.api_client.save(update_fields=["capabilities"])
+        sucursal = Sucursal.objects.create(codigo="M2M-RACE", nombre="Race")
+        self.drivers = []
+        for index in range(2):
+            user = User.objects.create_user(username=f"race_{index}", password="x")
+            self.drivers.append(Repartidor.objects.create(user=user, sucursal=sucursal))
+        self.api_client.repartidores_logistica_autorizados.add(*self.drivers)
+        cliente = Cliente.objects.create(nombre="Race")
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            descripcion="Race",
+            public_api_client=self.api_client,
+        )
+        self.solicitud = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente_nombre="Race",
+            direccion="Race",
+            repartidor=self.drivers[0],
+            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+        )
+
+    def _status(self, operation_id):
+        close_old_connections()
+        try:
+            return update_domicilio_status(
+                solicitud_id=self.solicitud.id,
+                api_client=self.api_client,
+                repartidor_id=self.drivers[0].id,
+                requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+                operation_id=operation_id,
+                actor={"id": "race", "nombre": "Race"},
+            )
+        finally:
+            close_old_connections()
+
+    def test_mismo_operation_id_concurrente_muta_y_audita_una_vez(self):
+        operation_id = "8841e703-fadd-4a76-86bb-06388a6f61af"
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(self._status, [operation_id, operation_id]))
+
+        self.assertEqual(sorted(item["idempotent"] for item in results), [False, True])
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
+        )
+
+    def test_reasignacion_y_estatus_comparten_lock_y_no_se_cruzan(self):
+        def reassign():
+            close_old_connections()
+            try:
+                return assign_domicilio(
+                    solicitud_id=self.solicitud.id,
+                    repartidor_id=self.drivers[1].id,
+                    owner_api_client=self.api_client,
+                )
+            except DomicilioAssignmentError:
+                return "conflict"
+            finally:
+                close_old_connections()
+
+        def status_change():
+            try:
+                return self._status("f90c4eb5-e018-4280-ae7a-f4a30b39ea46")
+            except DomicilioStatusError:
+                return "conflict"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = [
+                executor.submit(reassign),
+                executor.submit(status_change),
+            ]
+            results = [future.result() for future in outcomes]
+
+        self.solicitud.refresh_from_db()
+        successful = [item for item in results if item != "conflict"]
+        self.assertEqual(len(successful), 1)
+        self.assertIn(
+            (self.solicitud.repartidor_id, self.solicitud.estatus),
+            {
+                (self.drivers[1].id, SolicitudDomicilio.ESTATUS_ASIGNADO),
+                (self.drivers[0].id, SolicitudDomicilio.ESTATUS_EN_RUTA),
+            },
         )

@@ -132,7 +132,10 @@ def assign_domicilio(
         solicitud.repartidor = repartidor
         solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
         solicitud.asignado_en = timezone.now()
-        solicitud.save(update_fields=["repartidor", "estatus", "asignado_en"])
+        solicitud.revision += 1
+        solicitud.save(
+            update_fields=["repartidor", "estatus", "asignado_en", "revision"]
+        )
         payload = {
             "repartidor_anterior_id": anterior_id,
             "repartidor_nuevo_id": repartidor.id,
@@ -149,5 +152,6 @@ def assign_domicilio(
             "id": solicitud.id,
             "repartidor_id": repartidor.id,
             "estatus": solicitud.estatus,
+            "revision": solicitud.revision,
             "idempotent": False,
         }

@@ -13,6 +13,12 @@ from logistica.services_domicilio_assignment import (
     assign_domicilio,
     get_owned_domicilio_or_404,
     list_repartidores_disponibles_minimal,
+    repartidores_disponibles_queryset,
+)
+from logistica.models import SolicitudDomicilio
+from logistica.services_domicilio_status import (
+    DomicilioStatusError,
+    update_domicilio_status,
 )
 
 
@@ -29,6 +35,16 @@ class PublicDomicilioAssignmentSerializer(serializers.Serializer):
         if isinstance(self.initial_data.get("repartidor_id"), bool):
             raise serializers.ValidationError("Debe ser un entero positivo.")
         return value
+
+
+class PublicDomicilioStatusSerializer(PublicDomicilioAssignmentSerializer):
+    estatus = serializers.ChoiceField(
+        choices=[
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+        ]
+    )
+    operation_id = serializers.UUIDField()
 
 
 class PublicLogisticaCatalogQuerySerializer(serializers.Serializer):
@@ -140,3 +156,95 @@ class PublicLogisticaDomicilioAsignarView(APIView):
 
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload, status=status.HTTP_200_OK)
+
+
+def _serialize_domicilio(solicitud):
+    direccion = solicitud.direccion_cliente
+    pedido = solicitud.pedido_cliente
+    return {
+        "id": solicitud.id,
+        "estatus": solicitud.estatus,
+        "revision": solicitud.revision,
+        "cliente_nombre": solicitud.cliente_nombre,
+        "cliente_telefono": solicitud.cliente_telefono,
+        "direccion": direccion.direccion if direccion else solicitud.direccion,
+        "referencias": direccion.referencias if direccion else "",
+        "latitud": direccion.latitud if direccion else None,
+        "longitud": direccion.longitud if direccion else None,
+        "place_id": direccion.place_id if direccion else "",
+        "descripcion": pedido.descripcion,
+        "canal": pedido.canal,
+        "fecha_compromiso": pedido.fecha_compromiso,
+    }
+
+
+class PublicLogisticaRepartidorDomiciliosView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, repartidor_id: int):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_logistica_assignment(api_client, request)
+        if capability_error:
+            return capability_error
+        repartidor_visible = (
+            repartidores_disponibles_queryset()
+            .filter(
+                pk=repartidor_id,
+                api_clients_logistica_autorizados=api_client,
+            )
+            .exists()
+        )
+        if not repartidor_visible:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise Http404
+        solicitudes = (
+            SolicitudDomicilio.objects.filter(
+                pedido_cliente__public_api_client=api_client,
+                repartidor_id=repartidor_id,
+                estatus__in=[
+                    SolicitudDomicilio.ESTATUS_ASIGNADO,
+                    SolicitudDomicilio.ESTATUS_EN_RUTA,
+                ],
+            )
+            .select_related("pedido_cliente", "direccion_cliente")
+            .order_by("id")
+        )
+        payload = {"results": [_serialize_domicilio(item) for item in solicitudes]}
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload)
+
+
+class PublicLogisticaDomicilioStatusView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, solicitud_id: int):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_logistica_assignment(api_client, request)
+        if capability_error:
+            return capability_error
+        serializer = PublicDomicilioStatusSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        values = serializer.validated_data
+        try:
+            payload = update_domicilio_status(
+                solicitud_id=solicitud_id,
+                api_client=api_client,
+                repartidor_id=values["repartidor_id"],
+                requested_status=values["estatus"],
+                operation_id=values["operation_id"],
+                actor=values["actor"],
+            )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+        except DomicilioStatusError as exc:
+            _log_access(api_client, request, exc.status_code)
+            return Response({"detail": exc.detail}, status=exc.status_code)
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload)
