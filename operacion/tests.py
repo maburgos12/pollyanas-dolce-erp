@@ -1,15 +1,17 @@
 from pathlib import Path
+from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROLE_REPARTIDOR
-from core.models import Sucursal, UserModuleAccess, UserProfile
+from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from logistica.models import Repartidor, Unidad
 from mermas.models import PersonalEnviosSucursal
-from recetas.models import Receta
+from recetas.models import Receta, RecetaCodigoPointAlias
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from operacion.services import build_operacion_context
 
@@ -126,7 +128,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v12-pull-refresh", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v20-bitacoras-mapa-local", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -181,6 +183,243 @@ class OperacionAppTests(TestCase):
         self.assertEqual(linea.receta, receta)
         self.assertEqual(linea.datos["cedis"], "4")
         self.assertEqual(linea.datos["devolucion"], "1")
+
+    def test_bitacoras_home_groups_real_capture_formats(self):
+        user = self._user("produccion.formatos")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Producción diaria")
+        self.assertContains(response, "Mapa operativo local")
+        self.assertContains(response, "Se concilia contra el cierre anterior")
+        self.assertContains(response, "Inventario CFP 1.1")
+        self.assertContains(response, "Control producción - Hornos")
+        self.assertContains(response, "Bitácora de temperatura")
+        self.assertContains(response, "Checklist inocuidad producción")
+
+    def test_cfp11_inventory_capture_saves_salida_for_armado(self):
+        user = self._user("produccion.cfp11")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(
+            nombre="Pan de Vainilla Dawn Chico",
+            codigo_point="DAWN-CH",
+            pasa_modulo_produccion=True,
+            hash_contenido="bitacora-cfp11-dawn-ch",
+        )
+        previa = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha="2026-07-06",
+            creado_por=user,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=previa,
+            receta=receta,
+            datos={"item": receta.nombre, "tamano": "CH", "existencia_final": "8"},
+        )
+        self.client.force_login(user)
+
+        capture = self.client.get(f"/app/bitacoras/{BitacoraOperativa.TIPO_CFP11}/")
+        self.assertContains(capture, "Inventario CFP 1.1")
+        self.assertContains(capture, "Inicial esperado")
+        self.assertContains(capture, "8")
+        self.assertContains(capture, "Salida")
+        self.assertContains(capture, "Entrada")
+        self.assertContains(capture, "Existencia final")
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_CFP11}/",
+            {
+                "fecha": "2026-07-07",
+                "receta_0": str(receta.id),
+                "existencia_final_0": "10",
+                "salida_0": "3",
+                "entrada_0": "2",
+                "cerrar": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"/app/bitacoras/{BitacoraOperativa.TIPO_CFP11}/?revision=", response["Location"])
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_CFP11, fecha="2026-07-07")
+        linea = bitacora.lineas.get()
+        self.assertEqual(linea.receta, receta)
+        self.assertEqual(linea.datos["existencia_final"], "10")
+        self.assertEqual(linea.datos["salida"], "3")
+        self.assertEqual(linea.datos["entrada"], "2")
+
+        review = self.client.get(response["Location"])
+        self.assertContains(review, "Conciliación guardada")
+        self.assertContains(review, "Esperado final")
+        self.assertContains(review, "Diferencia")
+        self.assertContains(review, "Sobra")
+
+    def test_temperature_bitacora_capture_saves_range_values(self):
+        user = self._user("produccion.temperatura")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_TEMPERATURA}/",
+            {
+                "fecha": "2026-07-02",
+                "responsable_general": "Carolina",
+                "apertura_0": "-12",
+                "cierre_0": "-10",
+                "observaciones_0": "Equipo estable",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_TEMPERATURA)
+        linea = bitacora.lineas.get()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        self.assertIn("Responsable: Carolina", bitacora.notas)
+        self.assertEqual(linea.datos["item"], "FP 1")
+        self.assertEqual(linea.datos["apertura"], "-12")
+        self.assertEqual(linea.datos["rango_min"], "-18")
+
+    def test_weekly_matrix_capture_saves_day_and_product(self):
+        user = self._user("produccion.hornos")
+        self._grant(user, "produccion")
+        jefe = self._user("produccion.jefe")
+        self._grant(jefe, "produccion", ACCESS_MANAGE)
+        receta = Receta.objects.create(
+            nombre="Pan de Vainilla Dawn Grande",
+            codigo_point="DAWN-G",
+            pasa_modulo_produccion=True,
+            hash_contenido="bitacora-hornos-dawn-g",
+        )
+        self.client.force_login(user)
+
+        capture = self.client.get(f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/")
+        self.assertContains(capture, "Pan de Vainilla Dawn Grande")
+        self.assertContains(capture, "Producto ERP")
+        self.assertContains(capture, "Guardar existencia")
+        self.assertContains(capture, "Stock fijo")
+        self.assertContains(capture, "Proyección")
+        self.assertNotContains(capture, "Proyección jefatura")
+        self.assertNotContains(capture, "Pedido")
+        self.assertNotContains(capture, "Día de captura")
+        self.assertNotContains(capture, "Corte a ciegas al iniciar turno")
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": "2026-07-03",
+                "receta_0": str(receta.id),
+                "accion": "existencia",
+                "existencia_0": "2",
+                "preparacion_0": "3",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_HORNOS)
+        linea = bitacora.lineas.get()
+        self.assertEqual(linea.receta, receta)
+        self.assertEqual(linea.datos["item"], "Pan de Vainilla Dawn Grande")
+        self.assertEqual(linea.datos["tamano"], "G")
+        self.assertEqual(linea.datos["codigo_point"], "DAWN-G")
+        self.assertEqual(linea.datos["existencia"], "2")
+        self.assertEqual(linea.datos["preparacion"], "3")
+        self.assertNotIn("pedido", linea.datos)
+        self.assertIn("Modo: corte de existencia a ciegas", bitacora.notas)
+        self.assertIn("Existencia guardada:", bitacora.notas)
+        notificacion = Notificacion.objects.get(usuario=jefe)
+        self.assertEqual(notificacion.prioridad, Notificacion.PRIORIDAD_ALTA)
+        self.assertIn("Existencia guardada", notificacion.titulo)
+
+    def test_pending_product_alias_can_be_linked_to_recipe(self):
+        user = self._user("produccion.pendientes")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(
+            nombre="Pan de Vainilla Dawn Mediano",
+            codigo_point="DAWN-M",
+            pasa_modulo_produccion=True,
+            hash_contenido="bitacora-hornos-dawn-m",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": "2026-07-05",
+                "dia_captura": "Domingo",
+                "stock_1": "7",
+                "cerrar": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        linea = BitacoraOperativaLinea.objects.get()
+        self.assertIsNone(linea.receta)
+        self.assertEqual(linea.datos["alias_captura"], "DAWN Mediano")
+
+        pendientes = self.client.get("/app/bitacoras/pendientes/")
+        self.assertContains(pendientes, "DAWN Mediano")
+        self.assertContains(pendientes, "Pan de Vainilla Dawn Mediano")
+
+        link = self.client.post("/app/bitacoras/pendientes/", {"alias": "DAWN Mediano", "receta": str(receta.id)})
+
+        self.assertEqual(link.status_code, 302)
+        linea.refresh_from_db()
+        self.assertEqual(linea.receta, receta)
+        alias = RecetaCodigoPointAlias.objects.get(nombre_point="DAWN Mediano")
+        self.assertEqual(alias.receta, receta)
+        self.assertEqual(alias.codigo_point, "BITACORA-dawnmediano")
+
+    def test_bulk_alias_command_applies_high_confidence_matches(self):
+        user = self._user("produccion.bulk")
+        receta = Receta.objects.create(
+            nombre="Pan de Vainilla Dawn Mediano",
+            codigo_point="DAWN-M",
+            pasa_modulo_produccion=True,
+            hash_contenido="bitacora-bulk-dawn-m",
+        )
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha="2026-07-06",
+            creado_por=user,
+        )
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            datos={"item": "DAWN Mediano", "alias_captura": "DAWN Mediano", "tamano": "M", "stock": "4"},
+        )
+        out = StringIO()
+
+        call_command("sugerir_aliases_bitacoras", "--apply-high-confidence", stdout=out)
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.receta, receta)
+        alias = RecetaCodigoPointAlias.objects.get(nombre_point="DAWN Mediano")
+        self.assertEqual(alias.receta, receta)
+        self.assertIn("DAWN Mediano|alta|Pan de Vainilla Dawn Mediano", out.getvalue())
+
+    def test_checklist_capture_saves_status(self):
+        user = self._user("produccion.inocuidad")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_INOCUIDAD}/",
+            {
+                "fecha": "2026-07-04",
+                "dia_captura": "Sábado",
+                "cumple_0": "si",
+                "cumple_1": "no",
+                "observaciones_1": "Reforzar lavado",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_INOCUIDAD)
+        self.assertEqual(bitacora.lineas.count(), 2)
+        self.assertEqual(bitacora.lineas.order_by("id")[1].datos["cumple"], "no")
 
     def test_merma_recepcion_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")

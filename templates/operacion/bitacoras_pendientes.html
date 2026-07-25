@@ -1,0 +1,94 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Productos pendientes · App Operativa</title>
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-bitacoras-reales-v1">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f9f5f8; color: #1c1520; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { min-height: 100vh; padding: 16px; }
+    .shell { max-width: 1040px; margin: 0 auto; display: grid; gap: 14px; }
+    .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h1, h2, p { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.32rem; color: #8b2252; }
+    h2 { font-size: 1rem; color: #2b1722; }
+    p, small { color: #6b5f70; }
+    .links { display: flex; gap: 8px; align-items: center; }
+    .link { min-height: 42px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #ede6f0; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
+    .card { display: grid; gap: 12px; padding: 14px; border: 1px solid #ede6f0; border-radius: 10px; background: #fff; }
+    .head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .alias { color: #2b1722; font-weight: 900; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .chip { width: max-content; max-width: 100%; border-radius: 999px; padding: 4px 8px; background: #f1e7ec; color: #66163a; font-size: .74rem; font-weight: 850; }
+    .chip.warn { background: #fff8df; color: #8a6512; }
+    form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    select, button { min-height: 44px; border-radius: 8px; font: inherit; }
+    select { width: 100%; border: 1px solid #d9c6d0; background: #fff; color: #1c1520; padding: 9px 10px; }
+    select:focus, button:focus-visible, .link:focus-visible { outline: 3px solid rgba(201, 168, 76, .28); outline-offset: 2px; }
+    button { border: 1px solid #8b2252; background: #8b2252; color: #fff; padding: 0 14px; font-weight: 850; }
+    .message { padding: 10px 12px; border-radius: 8px; background: #effaf3; color: #21633b; font-weight: 750; }
+    .empty { padding: 18px; border: 1px solid #ede6f0; border-radius: 10px; background: #fff; }
+    @media (max-width: 680px) {
+      .page { padding: 12px; }
+      .top, .head { display: grid; }
+      .links, form { grid-template-columns: 1fr; }
+      form { display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="shell">
+      <header class="top">
+        <div>
+          <h1>Productos pendientes</h1>
+          <p>Nombres capturados en bitácora que aún no están unidos a una receta ERP.</p>
+        </div>
+        <div class="links">
+          <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+          </a>
+          <a class="link" href="{% url 'operacion:bitacoras_home' %}">Volver</a>
+        </div>
+      </header>
+
+      {% if messages %}
+        {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+      {% endif %}
+
+      {% for item in pendientes %}
+        <section class="card">
+          <div class="head">
+            <div>
+              <div class="alias">{{ item.alias }}</div>
+              <div class="chips">
+                {% if item.tamano %}<span class="chip">{{ item.tamano }}</span>{% endif %}
+                <span class="chip warn">{{ item.lineas }} línea{{ item.lineas|pluralize }}</span>
+              </div>
+            </div>
+          </div>
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="alias" value="{{ item.alias }}">
+            <select name="receta" required>
+              <option value="">Seleccionar receta ERP</option>
+              {% for receta in item.sugerencias %}
+                <option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Vincular</button>
+          </form>
+        </section>
+      {% empty %}
+        <div class="empty">
+          <h2>Sin pendientes</h2>
+          <p>Los productos capturados hasta ahora ya están vinculados o no hay capturas nuevas.</p>
+        </div>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>

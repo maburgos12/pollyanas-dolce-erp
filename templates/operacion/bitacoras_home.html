@@ -5,29 +5,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Bitácoras · App Operativa</title>
-  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-bitacoras-reales-v1">
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f6f1f4; color: #2b1722; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f9f5f8; color: #1c1520; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .page { min-height: 100vh; padding: 16px; }
-    .shell { max-width: 860px; margin: 0 auto; display: grid; gap: 14px; }
+    .shell { max-width: 1040px; margin: 0 auto; display: grid; gap: 16px; }
     .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    h1 { margin: 0; font-size: 1.35rem; letter-spacing: 0; }
-    p { margin: 4px 0 0; color: #705d68; }
-    a { color: inherit; }
-    .link { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-    .tile { min-height: 104px; padding: 14px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; text-decoration: none; display: grid; align-content: start; gap: 7px; }
-    .tile b { font-size: 1rem; }
-    .tile span { color: #705d68; font-size: .88rem; }
-    .panel { border: 1px solid #eadde4; border-radius: 8px; background: #fff; overflow: hidden; }
-    .panel h2 { margin: 0; padding: 13px 14px; font-size: 1rem; background: #fbf7f9; border-bottom: 1px solid #eadde4; }
+    h1, h2, p { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.35rem; color: #8b2252; }
+    h2 { font-size: 1rem; color: #2b1722; }
+    p, small { color: #6b5f70; }
+    .link { min-height: 42px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #ede6f0; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
+    .section { display: grid; gap: 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+    .tile { min-height: 118px; padding: 14px; border: 1px solid #ede6f0; border-radius: 10px; background: #fff; color: inherit; text-decoration: none; display: grid; align-content: start; gap: 8px; }
+    .tile:focus-visible, .link:focus-visible { outline: 3px solid rgba(201, 168, 76, .38); outline-offset: 2px; }
+    .tile strong { color: #2b1722; font-size: 1rem; }
+    .tile span { color: #6b5f70; font-size: .88rem; line-height: 1.35; }
+    .tag { width: max-content; max-width: 100%; border-radius: 999px; padding: 4px 8px; background: #f1e7ec; color: #66163a; font-size: .74rem; font-weight: 850; }
+    .panel { border: 1px solid #ede6f0; border-radius: 10px; background: #fff; overflow: hidden; }
+    .panel h2 { padding: 13px 14px; background: #fbf7f9; border-bottom: 1px solid #ede6f0; }
     .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #f0e7ec; }
     .row:last-child { border-bottom: 0; }
-    .row small { color: #705d68; }
+    .flow { display: grid; gap: 0; }
+    .flow-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-bottom: 1px solid #f0e7ec; }
+    .flow-row:last-child { border-bottom: 0; }
+    .flow-row strong { color: #2b1722; }
+    .flow-row span { color: #6b5f70; line-height: 1.35; }
     .badge { align-self: start; border-radius: 999px; padding: 5px 9px; background: #f1e7ec; color: #66163a; font-size: .76rem; font-weight: 850; }
     .messages { display: grid; gap: 8px; }
-    .message { padding: 10px 12px; border-radius: 8px; background: #e8f5ee; color: #19724a; font-weight: 750; }
+    .message { padding: 10px 12px; border-radius: 8px; background: #effaf3; color: #21633b; font-weight: 750; }
+    @media (max-width: 640px) {
+      .page { padding: 12px; }
+      .top { align-items: flex-start; }
+      .grid { grid-template-columns: 1fr; }
+      .flow-row { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -36,7 +50,7 @@
       <header class="top">
         <div>
           <h1>Bitácoras</h1>
-          <p>Capturas diarias de producción y logística.</p>
+          <p>Capturas reales de producción, calidad e inocuidad.</p>
         </div>
         <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
@@ -49,25 +63,71 @@
         </div>
       {% endif %}
 
-      <div class="grid">
-        {% for value,label in tipos %}
-          <a class="tile" href="{% url 'operacion:bitacora_captura' value %}">
-            <b>{{ label }}</b>
-            <span>Capturar registro del día</span>
+      <section class="panel">
+        <h2>Mapa operativo local</h2>
+        <div class="flow">
+          <div class="flow-row">
+            <strong>CFP 1.1</strong>
+            <span>Entrada, salida hacia armado y existencia final. Se concilia contra el cierre anterior.</span>
+          </div>
+          <div class="flow-row">
+            <strong>Hornos</strong>
+            <span>Existencia inicial a ciegas y preparación producida. Stock fijo y proyección son referencia, no inventario real.</span>
+          </div>
+          <div class="flow-row">
+            <strong>Armado</strong>
+            <span>Existencia inicial a ciegas y preparación armada. Debe consumir salidas registradas desde CFP 1.1.</span>
+          </div>
+          <div class="flow-row">
+            <strong>Control</strong>
+            <span>Temperatura, inocuidad, limpieza, merma, rechazos, rotación y rebanado documentan condiciones y diferencias.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Vínculos de productos</h2>
+        <div class="grid">
+          <a class="tile" href="{% url 'operacion:bitacoras_pendientes' %}">
+            <span class="tag">{{ pendientes_count }} pendientes</span>
+            <strong>Productos pendientes de vínculo</strong>
+            <span>Une nombres capturados en tablet con recetas reales del ERP.</span>
           </a>
-        {% endfor %}
-        <a class="tile" href="/mermas/app/?modo=recepcion">
-          <b>Bitácora de Recepción de Merma</b>
-          <span>Se captura en la app de mermas existente.</span>
-        </a>
-      </div>
+        </div>
+      </section>
+
+      {% for grupo in grupos %}
+        <section class="section">
+          <h2>{{ grupo.title }}</h2>
+          <div class="grid">
+            {% for item in grupo.items %}
+              <a class="tile" href="{% url 'operacion:bitacora_captura' item.tipo %}">
+                <span class="tag">{{ item.familia_label }}</span>
+                <strong>{{ item.config.titulo }}</strong>
+                <span>{{ item.config.ayuda }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+
+      <section class="section">
+        <h2>Flujos existentes</h2>
+        <div class="grid">
+          <a class="tile" href="/mermas/app/?modo=recepcion">
+            <span class="tag">mermas</span>
+            <strong>Bitácora de recepción de merma</strong>
+            <span>Se mantiene en la app de mermas existente.</span>
+          </a>
+        </div>
+      </section>
 
       <section class="panel">
         <h2>Últimas capturas</h2>
         {% for item in recientes %}
           <div class="row">
             <div>
-              <b>{{ item.get_tipo_display }}</b><br>
+              <strong>{{ item.get_tipo_display }}</strong><br>
               <small>{{ item.fecha|date:"d/m/Y" }} · {{ item.lineas.count }} líneas</small>
             </div>
             <span class="badge">{{ item.get_estatus_display }}</span>

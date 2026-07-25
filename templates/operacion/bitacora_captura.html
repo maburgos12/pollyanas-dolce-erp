@@ -5,32 +5,63 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{ config.titulo }} · App Operativa</title>
-  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260708-bitacoras-reales-v1">
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f6f1f4; color: #2b1722; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    .page { min-height: 100vh; padding: 16px 16px 88px; }
-    .shell { max-width: 900px; margin: 0 auto; display: grid; gap: 12px; }
+    body { margin: 0; background: #f9f5f8; color: #1c1520; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { min-height: 100vh; padding: 16px 16px 92px; }
+    .shell { max-width: 1120px; margin: 0 auto; display: grid; gap: 12px; }
     .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-    h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0; }
-    p { margin: 4px 0 0; color: #705d68; }
-    .link { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
-    .panel, .line { border: 1px solid #eadde4; border-radius: 8px; background: #fff; }
+    h1, h2, h3, p { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 1.28rem; color: #8b2252; }
+    h2 { font-size: 1rem; color: #2b1722; }
+    h3 { font-size: .96rem; color: #2b1722; }
+    p, small { color: #6b5f70; }
+    .links { display: flex; gap: 8px; align-items: center; }
+    .link { min-height: 42px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #ede6f0; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
+    .panel, .line { border: 1px solid #ede6f0; border-radius: 10px; background: #fff; }
     .panel { padding: 14px; display: grid; gap: 10px; }
     .line { padding: 12px; display: grid; gap: 10px; }
     .lines { display: grid; gap: 10px; }
-    label { display: grid; gap: 5px; color: #705d68; font-size: .82rem; font-weight: 800; }
-    input, select, textarea { width: 100%; min-height: 42px; border: 1px solid #d9c6d0; border-radius: 8px; background: #fff; color: #2b1722; font: inherit; padding: 9px 10px; }
-    textarea { min-height: 76px; resize: vertical; }
-    .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; }
-    .sucursales { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; padding: 10px; border-radius: 8px; background: #fbf7f9; }
-    .actions { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px env(safe-area-inset-bottom); background: linear-gradient(180deg, rgba(246,241,244,0), #f6f1f4 35%); }
-    .actions-inner { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    label { display: grid; gap: 5px; color: #6b5f70; font-size: .82rem; font-weight: 800; }
+    input, select, textarea { width: 100%; min-height: 42px; border: 1px solid #d9c6d0; border-radius: 8px; background: #fff; color: #1c1520; font: inherit; padding: 9px 10px; }
+    input:focus, select:focus, textarea:focus { border-color: #c9a84c; outline: none; box-shadow: 0 0 0 3px rgba(201, 168, 76, .22); }
+    textarea { min-height: 70px; resize: vertical; }
+    .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px; }
+    .row-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .item-title { color: #2b1722; font-weight: 850; }
+    .item-sub { color: #6b5f70; font-size: .82rem; }
+    .item-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+    .chip { width: max-content; max-width: 100%; border-radius: 999px; padding: 4px 8px; background: #f1e7ec; color: #66163a; font-size: .74rem; font-weight: 850; }
+    .chip.pending { background: #fff8df; color: #8a6512; }
+    .chip.ok { background: #effaf3; color: #21633b; }
+    .range { border-radius: 999px; padding: 4px 8px; background: #fff8df; color: #8a6512; font-size: .76rem; font-weight: 850; }
+    .refs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ref-chip { border-radius: 8px; border: 1px solid #ede6f0; padding: 7px 9px; color: #2b1722; background: #fbf7f9; font-size: .76rem; font-weight: 850; }
+    .ref-chip span { color: #6b5f70; font-weight: 750; }
+    .recon { overflow-x: auto; }
+    .recon table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    .recon th, .recon td { padding: 9px 8px; border-bottom: 1px solid #ede6f0; text-align: left; font-size: .82rem; }
+    .recon th { color: #6b5f70; }
+    .recon td { color: #2b1722; font-weight: 750; }
+    .status { border-radius: 999px; padding: 4px 8px; background: #f1e7ec; color: #66163a; font-size: .74rem; font-weight: 850; }
+    .status.ok { background: #effaf3; color: #21633b; }
+    .readonly-date { min-height: 42px; display: flex; align-items: center; border: 1px solid #d9c6d0; border-radius: 8px; background: #fbf7f9; color: #1c1520; padding: 9px 10px; font-weight: 850; }
+    .check-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .check-options label { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #ede6f0; border-radius: 8px; color: #2b1722; background: #fbf7f9; }
+    .check-options input { width: auto; min-height: auto; }
+    .actions { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px env(safe-area-inset-bottom); background: linear-gradient(180deg, rgba(249,245,248,0), #f9f5f8 35%); }
+    .actions-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     button { min-height: 48px; border-radius: 8px; border: 1px solid #8b2252; background: #8b2252; color: #fff; font: inherit; font-weight: 850; }
     button.secondary { background: #fff; color: #66163a; }
-    @media (max-width: 640px) {
-      .page { padding: 12px 12px 88px; }
+    @media (hover: hover) and (pointer: fine) {
+      .link:hover, button:hover { filter: brightness(.98); }
+    }
+    @media (max-width: 760px) {
+      .page { padding: 12px 12px 92px; }
+      .top { gap: 10px; }
+      .links { flex-direction: column; align-items: stretch; }
       .meta, .actions-inner { grid-template-columns: 1fr; }
     }
   </style>
@@ -44,7 +75,7 @@
           <h1>{{ config.titulo }}</h1>
           <p>{{ config.ayuda }}</p>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div class="links">
           <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
           </a>
@@ -52,17 +83,73 @@
         </div>
       </header>
 
+      {% if revision %}
+        <section class="panel">
+          <h2>Conciliación guardada</h2>
+          <p>{{ revision.bitacora.fecha|date:"d/m/Y" }}</p>
+          <div class="recon">
+            <table>
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Inicial</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th>Esperado final</th>
+                  <th>Existencia final</th>
+                  <th>Diferencia</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in revision.rows %}
+                  <tr>
+                    <td>{{ row.producto }}</td>
+                    <td>{{ row.inicial }}</td>
+                    <td>{{ row.entrada }}</td>
+                    <td>{{ row.salida }}</td>
+                    <td>{{ row.esperado|default_if_none:"--" }}</td>
+                    <td>{{ row.final }}</td>
+                    <td>{{ row.diferencia|default_if_none:"--" }}</td>
+                    <td><span class="status {% if row.estado == 'OK' %}ok{% endif %}">{{ row.estado }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+
       <section class="panel">
         <div class="meta">
-          <label>Fecha
-            <input type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
-          </label>
+          {% if family == "weekly_matrix" %}
+            <label>Fecha
+              <div class="readonly-date">{{ today|date:"d/m/Y" }}</div>
+              <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
+            </label>
+          {% else %}
+            <label>Fecha
+              <input type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
+            </label>
+          {% endif %}
           <label>Área / sucursal
             <select name="sucursal">
               <option value="">CEDIS / Producción</option>
               {% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}
             </select>
           </label>
+          {% if family == "checklist" %}
+            <label>Día de captura
+              <select name="dia_captura">
+                <option value="">Seleccionar día</option>
+                <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option><option>Sábado</option><option>Domingo</option>
+              </select>
+            </label>
+          {% else %}
+            <label>Responsable
+              <input type="text" name="responsable_general" autocomplete="name">
+            </label>
+          {% endif %}
         </div>
         <label>Notas generales
           <textarea name="notas" placeholder="Observaciones generales de la bitácora"></textarea>
@@ -70,44 +157,66 @@
       </section>
 
       <div class="lines">
-        {% for index in row_range %}
+        {% for row in rows %}
           <section class="line">
-            {% if not config.sin_producto %}
-              <label>Producto
-                <select name="receta_{{ index }}">
-                  <option value="">Seleccionar producto</option>
-                  {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}</option>{% endfor %}
-                </select>
-              </label>
+            <div class="row-head">
+              <div>
+                {% if row.receta_id %}<input type="hidden" name="receta_{{ row.index }}" value="{{ row.receta_id }}">{% endif %}
+                {% if family == "free_rows" %}
+                  <h3>Registro {{ row.index|add:1 }}</h3>
+                {% else %}
+                  <h3 class="item-title">{{ row.item }}</h3>
+                  <div class="item-meta">
+                {% if row.tamano_label %}<span class="chip">{{ row.tamano_label }}</span>{% endif %}
+                {% if row.codigo_point %}<span class="chip ok">Point {{ row.codigo_point }}</span>{% endif %}
+                {% if row.vinculado %}
+                  <span class="chip ok">Producto ERP</span>
+                {% elif family == "daily_product" or family == "weekly_matrix" %}
+                      <span class="chip pending">Pendiente de vínculo ERP/Point</span>
+                    {% endif %}
+                  </div>
+                  {% if row.section %}<span class="item-sub">{{ row.section }}</span>{% endif %}
+                {% endif %}
+              </div>
+              {% if family == "temperature" %}<span class="range">{{ row.min }}°C a {{ row.max }}°C</span>{% endif %}
+            </div>
+
+            {% if row.referencias %}
+              <div class="refs">
+                {% for ref in row.referencias %}
+                  <span class="ref-chip">{{ ref.label }}: <span>{{ ref.value }}</span></span>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if family == "checklist" %}
+              <div class="check-options">
+                <label><input type="radio" name="cumple_{{ row.index }}" value="si"> Sí</label>
+                <label><input type="radio" name="cumple_{{ row.index }}" value="no"> No</label>
+                <label><input type="radio" name="cumple_{{ row.index }}" value="na"> N/A</label>
+              </div>
             {% endif %}
 
             <div class="fields">
-              {% for campo in config.campos %}
-                <label>
-                  {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% else %}{{ campo|capfirst }}{% endif %}
-                  {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
-                    <input type="date" name="{{ campo }}_{{ index }}">
-                  {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}
-                    <input type="text" name="{{ campo }}_{{ index }}">
+              {% for field in fields %}
+                <label>{{ field.label }}
+                  {% if field.name == "fecha_producto" %}
+                    <input type="date" name="{{ field.name }}_{{ row.index }}">
+                  {% elif field.name == "hora" %}
+                    <input type="time" name="{{ field.name }}_{{ row.index }}">
+                  {% elif field.name == "motivo" or field.name == "motivo_merma" %}
+                    <input type="text" name="{{ field.name }}_{{ row.index }}">
+                  {% elif field.name == "item" or field.name == "unidad" or field.name == "responsable" or field.name == "sucursal_texto" or field.name == "dia" %}
+                    <input type="text" name="{{ field.name }}_{{ row.index }}">
                   {% else %}
-                    <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ index }}">
+                    <input type="number" step="0.001" inputmode="decimal" name="{{ field.name }}_{{ row.index }}">
                   {% endif %}
                 </label>
               {% endfor %}
             </div>
 
-            {% if config.usa_sucursales %}
-              <div class="sucursales">
-                {% for sucursal in sucursales %}
-                  <label>{{ sucursal.codigo }}
-                    <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ index }}_{{ sucursal.id }}">
-                  </label>
-                {% endfor %}
-              </div>
-            {% endif %}
-
             <label>Observaciones
-              <textarea name="observaciones_{{ index }}" placeholder="Comentario de esta línea"></textarea>
+              <textarea name="observaciones_{{ row.index }}" placeholder="Comentario de esta línea"></textarea>
             </label>
           </section>
         {% endfor %}
@@ -116,8 +225,13 @@
 
     <div class="actions">
       <div class="actions-inner">
-        <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
-        <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>
+        {% if family == "weekly_matrix" %}
+          <button class="secondary" type="submit" name="accion" value="existencia">Guardar existencia</button>
+          <button type="submit" name="accion" value="preparacion">Guardar preparación</button>
+        {% else %}
+          <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
+          <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>
+        {% endif %}
       </div>
     </div>
   </form>
