@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from uuid import uuid4
 
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q
@@ -140,6 +141,54 @@ def _snapshot_matches(order: PedidoCliente, data: dict) -> bool:
     return order.payload_snapshot == _canonical_payload(data)
 
 
+def _conflict_response(api_client, request, *, detail: str, code: str):
+    _log_access(api_client, request, status.HTTP_409_CONFLICT)
+    return Response(
+        {"detail": detail, "code": code},
+        status=status.HTTP_409_CONFLICT,
+    )
+
+
+def _resolve_existing_order(api_client, request, order: PedidoCliente, data: dict):
+    if not order.payload_snapshot:
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="La clave externa pertenece a un pedido anterior sin snapshot verificable.",
+            code="LEGACY_EXTERNAL_ORDER_CONFLICT",
+        )
+    if not _snapshot_matches(order, data):
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="La clave externa ya existe con contenido distinto.",
+            code=IDEMPOTENCY_CONFLICT_CODE,
+        )
+    if order.public_api_client_id != api_client.id:
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="La clave externa pertenece a otro cliente API.",
+            code="OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT",
+        )
+    if not order.tracking_token:
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="El pedido omnicanal existe pero no tiene seguimiento seguro.",
+            code="OMNICHANNEL_ORDER_INCOMPLETE",
+        )
+    delivery = SolicitudDomicilio.objects.filter(pedido_cliente=order).first()
+    if not delivery:
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="El pedido omnicanal existe pero su solicitud de domicilio está incompleta.",
+            code="OMNICHANNEL_ORDER_INCOMPLETE",
+        )
+    return delivery, None
+
+
 def _response_payload(request, order: PedidoCliente, delivery: SolicitudDomicilio, *, created: bool):
     return {
         "cliente_id": order.cliente_id,
@@ -151,7 +200,7 @@ def _response_payload(request, order: PedidoCliente, delivery: SolicitudDomicili
             "pedido_seguimiento": request.build_absolute_uri(
                 reverse(
                     "api_public_omnichannel_order_status",
-                    kwargs={"pedido_id": order.id},
+                    kwargs={"tracking_token": order.tracking_token},
                 ),
             ),
         },
@@ -183,16 +232,14 @@ class PublicOmnichannelOrdersView(APIView):
                 .first()
             )
             if order:
-                delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
-                if not _snapshot_matches(order, data):
-                    _log_access(api_client, request, status.HTTP_409_CONFLICT)
-                    return Response(
-                        {
-                            "detail": "La clave externa ya existe con contenido distinto.",
-                            "code": IDEMPOTENCY_CONFLICT_CODE,
-                        },
-                        status=status.HTTP_409_CONFLICT,
-                    )
+                delivery, conflict = _resolve_existing_order(
+                    api_client,
+                    request,
+                    order,
+                    data,
+                )
+                if conflict:
+                    return conflict
                 payload = _response_payload(request, order, delivery, created=False)
                 response_status = status.HTTP_200_OK
             else:
@@ -207,6 +254,8 @@ class PublicOmnichannelOrdersView(APIView):
                             external_source=data["external_source"],
                             external_id=data["external_id"],
                             payload_snapshot=_canonical_payload(data),
+                            tracking_token=uuid4(),
+                            public_api_client=api_client,
                             canal=data["canal"],
                             descripcion=_normalize_text(detail["descripcion"]),
                             fecha_compromiso=detail.get("fecha_compromiso"),
@@ -220,16 +269,14 @@ class PublicOmnichannelOrdersView(APIView):
                         external_source=data["external_source"],
                         external_id=data["external_id"],
                     )
-                    delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
-                    if not _snapshot_matches(order, data):
-                        _log_access(api_client, request, status.HTTP_409_CONFLICT)
-                        return Response(
-                            {
-                                "detail": "La clave externa ya existe con contenido distinto.",
-                                "code": IDEMPOTENCY_CONFLICT_CODE,
-                            },
-                            status=status.HTTP_409_CONFLICT,
-                        )
+                    delivery, conflict = _resolve_existing_order(
+                        api_client,
+                        request,
+                        order,
+                        data,
+                    )
+                    if conflict:
+                        return conflict
                     payload = _response_payload(request, order, delivery, created=False)
                     response_status = status.HTTP_200_OK
                 else:
@@ -299,12 +346,17 @@ class PublicOmnichannelCustomersView(APIView):
 class PublicOmnichannelOrderStatusView(APIView):
     permission_classes = [AllowAny]
 
-    def get(self, request, pedido_id: int):
+    def get(self, request, tracking_token):
         api_client, error = _auth_public_client(request)
         if error:
             return error
 
-        order = PedidoCliente.objects.filter(id=pedido_id).first()
+        order = PedidoCliente.objects.filter(
+            tracking_token=tracking_token,
+            public_api_client=api_client,
+        ).exclude(
+            payload_snapshot={},
+        ).first()
         if not order:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
             return Response(
@@ -322,10 +374,10 @@ class PublicOmnichannelOrderStatusView(APIView):
         payload = {
             "pedido_id": order.id,
             "solicitud_domicilio_id": delivery.id,
-            "external_source": order.external_source,
-            "external_id": order.external_id,
+            "canal": order.canal,
             "estatus": order.estatus,
             "estatus_domicilio": delivery.estatus,
+            "created_at": order.created_at.isoformat(),
             "updated_at": order.updated_at.isoformat(),
         }
         _log_access(api_client, request, status.HTTP_200_OK)

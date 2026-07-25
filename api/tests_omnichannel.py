@@ -1,6 +1,7 @@
 from copy import deepcopy
 from threading import Barrier, Thread
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.core.cache import cache
 from django.db import close_old_connections
@@ -128,6 +129,39 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.data["code"], "OMNICHANNEL_IDEMPOTENCY_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
 
+    def test_pedido_legacy_sin_snapshot_ni_domicilio_retorna_409_estable(self):
+        customer = Cliente.objects.create(nombre="Cliente legacy")
+        PedidoCliente.objects.create(
+            cliente=customer,
+            external_source=self.payload["external_source"],
+            external_id=self.payload["external_id"],
+            payload_snapshot={},
+            canal=self.payload["canal"],
+            descripcion=self.payload["pedido"]["descripcion"],
+        )
+
+        response = self.client.post(self.url, self.payload, format="json", **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["code"], "LEGACY_EXTERNAL_ORDER_CONFLICT")
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 0)
+
+    def test_pedido_con_snapshot_coincidente_sin_domicilio_retorna_409_estable(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        SolicitudDomicilio.objects.all().delete()
+
+        response = self.client.post(self.url, self.payload, format="json", **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["code"], "OMNICHANNEL_ORDER_INCOMPLETE")
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(DireccionCliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 0)
+
     def test_retry_identico_reutilizando_cliente_con_datos_previos_retorna_200(self):
         existing = Cliente.objects.create(
             nombre="Ana Registro Anterior",
@@ -175,16 +209,63 @@ class OmnichannelPublicApiTests(APITestCase):
     def test_link_seguimiento_es_publico_y_consumible_con_api_key(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         tracking_url = created.data["links"]["pedido_seguimiento"]
+        order = PedidoCliente.objects.get(id=created.data["pedido_id"])
 
         unauthorized = self.client.get(tracking_url)
         authorized = self.client.get(tracking_url, **self.auth)
 
         self.assertEqual(unauthorized.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(authorized.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(order.tracking_token)
+        self.assertIn(str(order.tracking_token), tracking_url)
+        self.assertNotEqual(tracking_url.rstrip("/").split("/")[-1], str(order.id))
         self.assertEqual(authorized.data["pedido_id"], created.data["pedido_id"])
         self.assertEqual(authorized.data["estatus"], PedidoCliente.ESTATUS_NUEVO)
         self.assertNotIn("cliente", authorized.data)
         self.assertNotIn("direccion", authorized.data)
+        self.assertNotIn("external_source", authorized.data)
+        self.assertNotIn("external_id", authorized.data)
+
+    def test_seguimiento_deniega_otra_api_key_sin_filtrar_existencia(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        other_client, other_key = PublicApiClient.create_with_generated_key(
+            nombre="Integrador ajeno",
+        )
+
+        response = self.client.get(
+            created.data["links"]["pedido_seguimiento"],
+            HTTP_X_API_KEY=other_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertNotEqual(other_client.id, self.public_client.id)
+
+    def test_seguimiento_token_invalido_retorna_404(self):
+        response = self.client.get(
+            reverse(
+                "api_public_omnichannel_order_status",
+                kwargs={"tracking_token": uuid4()},
+            ),
+            **self.auth,
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_pedido_interno_no_es_accesible_por_seguimiento_publico(self):
+        customer = Cliente.objects.create(nombre="Pedido interno")
+        order = PedidoCliente.objects.create(
+            cliente=customer,
+            descripcion="Pedido interno",
+            tracking_token=uuid4(),
+            public_api_client=self.public_client,
+        )
+        response = self.client.get(
+            reverse(
+                "api_public_omnichannel_order_status",
+                kwargs={"tracking_token": order.tracking_token},
+            ),
+            **self.auth,
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_rollback_atomico_si_falla_despues_de_crear_cliente(self):
         with patch(

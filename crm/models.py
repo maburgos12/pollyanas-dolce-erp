@@ -137,6 +137,20 @@ class PedidoCliente(models.Model):
     external_source = models.CharField(max_length=40, blank=True, default="", db_index=True)
     external_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
     payload_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    tracking_token = models.UUIDField(
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+    )
+    public_api_client = models.ForeignKey(
+        "integraciones.PublicApiClient",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="pedidos_omnichannel",
+    )
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
     sucursal = models.CharField(max_length=120, blank=True, default="")

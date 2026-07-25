@@ -471,7 +471,7 @@ urlpatterns = [
         name="api_public_omnichannel_customers",
     ),
     path(
-        "public/v1/omnichannel-orders/<int:pedido_id>/",
+        "public/v1/omnichannel-orders/<uuid:tracking_token>/",
         PublicOmnichannelOrderStatusView.as_view(),
         name="api_public_omnichannel_order_status",
     ),
