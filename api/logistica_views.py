@@ -84,6 +84,11 @@ from logistica.services_entregas import (
     obtener_respuesta_idempotente,
     tiene_llegada_geocerca_confiable,
 )
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+    list_repartidores_disponibles,
+)
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -1746,47 +1751,12 @@ class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
         )
 
 
-def _repartidores_disponibles_queryset():
-    """Perfiles logísticos canónicos habilitados para recibir domicilios.
-
-    El perfil Repartidor es obligatorio. RRHH restringe cuando existe el vínculo,
-    pero se conserva el fallback histórico de perfiles anteriores a esa relación.
-    """
-    return (
-        Repartidor.objects.select_related(
-            "user",
-            "user__empleado_rrhh",
-            "sucursal",
-            "unidad_asignada",
-        )
-        .filter(user__is_active=True)
-        .filter(Q(user__empleado_rrhh__isnull=True) | Q(user__empleado_rrhh__activo=True))
-        .exclude(tipo_identidad=Repartidor.TIPO_CUENTA_TECNICA)
-        .order_by("user__first_name", "user__last_name", "user__username", "id")
-    )
-
-
 class LogisticaRepartidoresDisponiblesView(_LogisticaBaseView):
     def get(self, request):
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise DRFPermissionDenied("No tienes permisos para gestionar Logística.")
         return Response(
-            [
-                {
-                    "id": repartidor.id,
-                    "nombre": nombre_operativo_usuario(repartidor.user),
-                    "telefono": repartidor.telefono,
-                    "sucursal_id": repartidor.sucursal_id,
-                    "sucursal": repartidor.sucursal.nombre,
-                    "unidad_id": repartidor.unidad_asignada_id,
-                    "unidad": (
-                        repartidor.unidad_asignada.codigo
-                        if repartidor.unidad_asignada_id
-                        else None
-                    ),
-                }
-                for repartidor in _repartidores_disponibles_queryset()
-            ],
+            list_repartidores_disponibles(),
             status=status.HTTP_200_OK,
         )
 
@@ -1801,65 +1771,15 @@ class LogisticaDomicilioAsignarView(_LogisticaBaseView):
                 {"detail": "repartidor_id es obligatorio."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        with transaction.atomic():
-            solicitud = get_object_or_404(
-                SolicitudDomicilio.objects.select_for_update(),
-                pk=solicitud_id,
+        try:
+            payload = assign_domicilio(
+                solicitud_id=solicitud_id,
+                repartidor_id=int(repartidor_id),
+                audit_user=request.user,
             )
-            repartidor_id = int(repartidor_id)
-            if solicitud.repartidor_id == repartidor_id:
-                return Response(
-                    {
-                        "id": solicitud.id,
-                        "repartidor_id": repartidor_id,
-                        "estatus": solicitud.estatus,
-                        "idempotent": True,
-                    },
-                    status=status.HTTP_200_OK,
-                )
-            if solicitud.estatus in {
-                SolicitudDomicilio.ESTATUS_EN_RUTA,
-                SolicitudDomicilio.ESTATUS_ENTREGADO,
-                SolicitudDomicilio.ESTATUS_CANCELADO,
-            }:
-                return Response(
-                    {"detail": "El domicilio ya no admite asignación."},
-                    status=status.HTTP_409_CONFLICT,
-                )
-            repartidor = _repartidores_disponibles_queryset().filter(
-                pk=repartidor_id
-            ).first()
-            if repartidor is None:
-                return Response(
-                    {"detail": "Repartidor no disponible."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            anterior_id = solicitud.repartidor_id
-            solicitud.repartidor = repartidor
-            solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
-            solicitud.asignado_en = timezone.now()
-            solicitud.save(
-                update_fields=["repartidor", "estatus", "asignado_en"]
-            )
-            log_event(
-                request.user,
-                "ASSIGN",
-                "logistica.SolicitudDomicilio",
-                solicitud.id,
-                {
-                    "repartidor_anterior_id": anterior_id,
-                    "repartidor_nuevo_id": repartidor.id,
-                },
-            )
-        return Response(
-            {
-                "id": solicitud.id,
-                "repartidor_id": repartidor.id,
-                "estatus": solicitud.estatus,
-                "idempotent": False,
-            },
-            status=status.HTTP_200_OK,
-        )
+        except DomicilioAssignmentError as exc:
+            return Response({"detail": exc.detail}, status=exc.status_code)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaCargaChecklistView(_LogisticaBaseView):

@@ -98,6 +98,10 @@ from .omnichannel_views import (
     PublicOmnichannelOrderStatusView,
     PublicOmnichannelOrdersView,
 )
+from .logistica_public_views import (
+    PublicLogisticaDomicilioAsignarView,
+    PublicLogisticaRepartidoresDisponiblesView,
+)
 from .rrhh_views import (
     RRHHEmpleadoAsignarSucursalView,
     RRHHDashboardView,
@@ -451,6 +455,16 @@ urlpatterns = [
     path("public/v1/recetas/", PublicRecetasView.as_view(), name="api_public_recetas"),
     path("public/v1/resumen/", PublicResumenView.as_view(), name="api_public_resumen"),
     path("public/v1/domicilios-generales/resumen/", PublicDomiciliosGeneralesResumenView.as_view(), name="api_public_domicilios_generales_resumen"),
+    path(
+        "public/v1/logistica/repartidores-disponibles/",
+        PublicLogisticaRepartidoresDisponiblesView.as_view(),
+        name="api_public_logistica_repartidores_disponibles",
+    ),
+    path(
+        "public/v1/logistica/domicilios/<int:solicitud_id>/asignar/",
+        PublicLogisticaDomicilioAsignarView.as_view(),
+        name="api_public_logistica_domicilio_asignar",
+    ),
     path("public/v1/pickup-availability/", PublicPickupAvailabilityView.as_view(), name="api_public_pickup_availability"),
     path("public/v1/pickup-reservations/", PublicPickupReservationsView.as_view(), name="api_public_pickup_reservations"),
     path(

@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from django.http import Http404
+from rest_framework import serializers, status
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from api.public_views import _auth_public_client, _log_access
+from integraciones.models import PublicApiClient
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+    list_repartidores_disponibles,
+)
+
+
+class ExternalActorSerializer(serializers.Serializer):
+    id = serializers.CharField(max_length=64, trim_whitespace=True)
+    nombre = serializers.CharField(max_length=120, trim_whitespace=True)
+
+
+class PublicDomicilioAssignmentSerializer(serializers.Serializer):
+    repartidor_id = serializers.IntegerField(min_value=1)
+    actor = ExternalActorSerializer()
+
+    def validate_repartidor_id(self, value):
+        if isinstance(self.initial_data.get("repartidor_id"), bool):
+            raise serializers.ValidationError("Debe ser un entero positivo.")
+        return value
+
+
+def _authorize_logistica_assignment(api_client, request):
+    capability = PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
+    if api_client.has_capability(capability):
+        return None
+    _log_access(api_client, request, status.HTTP_403_FORBIDDEN)
+    return Response(
+        {
+            "detail": "La API key no tiene autorización para asignación logística.",
+            "code": "LOGISTICA_ASSIGNMENT_CAPABILITY_REQUIRED",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+class PublicLogisticaRepartidoresDisponiblesView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_logistica_assignment(api_client, request)
+        if capability_error:
+            return capability_error
+
+        payload = {"results": list_repartidores_disponibles()}
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class PublicLogisticaDomicilioAsignarView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, solicitud_id: int):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_logistica_assignment(api_client, request)
+        if capability_error:
+            return capability_error
+
+        serializer = PublicDomicilioAssignmentSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        actor = serializer.validated_data["actor"]
+        try:
+            payload = assign_domicilio(
+                solicitud_id=solicitud_id,
+                repartidor_id=serializer.validated_data["repartidor_id"],
+                audit_metadata={
+                    "api_client": {
+                        "id": api_client.id,
+                        "nombre": api_client.nombre,
+                    },
+                    "actor_externo": {
+                        "id": actor["id"],
+                        "nombre": actor["nombre"],
+                    },
+                },
+            )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+        except DomicilioAssignmentError as exc:
+            _log_access(api_client, request, exc.status_code)
+            return Response(
+                {"detail": exc.detail},
+                status=exc.status_code,
+            )
+
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)

@@ -21,6 +21,7 @@ class GeneratedApiKey:
 
 class PublicApiClient(models.Model):
     CAPABILITY_OMNICHANNEL = "OMNICHANNEL"
+    CAPABILITY_LOGISTICA_ASSIGNMENT = "LOGISTICA_ASSIGNMENT"
 
     nombre = models.CharField(max_length=120)
     clave_prefijo = models.CharField(max_length=12, unique=True, db_index=True)
