@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.utils import timezone
 
 from sat_client.models import CfdiDescargado, LogDescargaSat, SolicitudDescarga
 from sat_client.services.autenticacion import obtener_token
@@ -82,6 +83,21 @@ def _alertar_error(mensaje: str) -> None:
     )
 
 
+def _alerta_repetida_reciente(mensaje: str, *, horas: int = 24) -> bool:
+    limite = timezone.now() - timedelta(hours=horas)
+    return LogDescargaSat.objects.filter(
+        nivel=LogDescargaSat.NIVEL_ERROR,
+        mensaje=mensaje,
+        creado_en__gte=limite,
+    ).exists()
+
+
+def _es_error_sat_permanente(exc: SatServiceError) -> bool:
+    texto = str(exc).strip().lower()
+    # ponytail: stop retrying a known hard-stop from SAT; revisit only if SAT exposes a stable code for it.
+    return "agotado" in texto and "por vida" in texto
+
+
 def _procesar_periodo_direccion(fecha_inicial: date, fecha_final: date, direccion: str) -> dict[str, int | str]:
     token = obtener_token()
     solicitud = solicitar_descarga_periodo(
@@ -156,21 +172,27 @@ def ejecutar_descarga_sat_nocturna(self):
                 resultados.extend(_procesar_con_split(fecha_inicial, fecha_final, direccion))
     except SatConfigurationError as exc:
         mensaje = f"Descarga SAT no configurada: {exc}"
+        alerta_repetida = _alerta_repetida_reciente(mensaje)
         LogDescargaSat.objects.create(
             nivel=LogDescargaSat.NIVEL_ERROR,
             mensaje=mensaje,
             duracion_segundos=int(time.monotonic() - inicio),
         )
-        _alertar_error(mensaje)
+        if not alerta_repetida:
+            _alertar_error(mensaje)
         return {"status": "configuracion_incompleta", "error": str(exc)}
     except SatServiceError as exc:
         mensaje = f"Error SAT: {exc}"
+        alerta_repetida = _alerta_repetida_reciente(mensaje)
         LogDescargaSat.objects.create(
             nivel=LogDescargaSat.NIVEL_ERROR,
             mensaje=mensaje,
             duracion_segundos=int(time.monotonic() - inicio),
         )
-        _alertar_error(mensaje)
+        if not alerta_repetida:
+            _alertar_error(mensaje)
+        if _es_error_sat_permanente(exc):
+            return {"status": "error_permanente", "error": str(exc), "retry": False}
         raise self.retry(exc=exc)
 
     descargados = sum(int(item["descargados"]) for item in resultados)

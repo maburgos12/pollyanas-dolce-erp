@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from sat_client.models import LogDescargaSat, SolicitudDescarga
+from sat_client.services.base import SatServiceError
 from sat_client.tasks import _solicitud_periodo_registrada, periodos_diarios_a_descargar
 from sat_client.tasks import ejecutar_descarga_sat_nocturna
 
@@ -86,3 +87,32 @@ class SatTaskEnabledFlagTests(TestCase):
             date(2026, 6, 7),
             SolicitudDescarga.DIRECCION_RECIBIDOS,
         )
+
+    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1)
+    @patch("sat_client.tasks.periodos_diarios_a_descargar", return_value=[(date(2026, 6, 7), date(2026, 6, 7))])
+    @patch("sat_client.tasks._procesar_con_split", side_effect=SatServiceError("Se han agotado las solicitudes de por vida."))
+    @patch("sat_client.tasks.send_mail", return_value=1)
+    def test_task_does_not_retry_known_permanent_sat_error(self, send_mail_mock, _procesar, _periodos):
+        task = ejecutar_descarga_sat_nocturna
+        with patch.object(task, "retry", side_effect=AssertionError("retry no debe ejecutarse")):
+            result = task.run()
+
+        self.assertEqual(result["status"], "error_permanente")
+        self.assertFalse(result["retry"])
+        self.assertEqual(LogDescargaSat.objects.filter(nivel=LogDescargaSat.NIVEL_ERROR).count(), 1)
+        send_mail_mock.assert_called_once()
+
+    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1)
+    @patch("sat_client.tasks.periodos_diarios_a_descargar", return_value=[(date(2026, 6, 7), date(2026, 6, 7))])
+    @patch("sat_client.tasks._procesar_con_split", side_effect=SatServiceError("Se han agotado las solicitudes de por vida."))
+    @patch("sat_client.tasks.send_mail", return_value=1)
+    def test_task_skips_duplicate_alert_email_for_recent_same_error(self, send_mail_mock, _procesar, _periodos):
+        LogDescargaSat.objects.create(
+            nivel=LogDescargaSat.NIVEL_ERROR,
+            mensaje="Error SAT: Se han agotado las solicitudes de por vida.",
+        )
+        result = ejecutar_descarga_sat_nocturna.run()
+
+        self.assertEqual(result["status"], "error_permanente")
+        self.assertEqual(LogDescargaSat.objects.filter(nivel=LogDescargaSat.NIVEL_ERROR).count(), 2)
+        send_mail_mock.assert_not_called()
