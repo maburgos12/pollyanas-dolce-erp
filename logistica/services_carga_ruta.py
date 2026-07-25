@@ -26,7 +26,14 @@ from pos_bridge.services.open_transfer_sync_service import (
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import SolicitudReabastoCedis, SolicitudReabastoCedisLinea
 
+from .carga_operativa import (
+    archivar_linea_checklist,
+    archivar_solicitudes_point,
+    linea_point_es_operativa,
+    resolver_duplicados_activos_point,
+)
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
+from .services_discrepancias import registrar_discrepancias_point
 from .models import (
     EventoRuta,
     ParadaEntregaEvidencia,
@@ -36,6 +43,7 @@ from .models import (
     RutaCargaChecklistLinea,
     RutaEntrega,
 )
+from .services_rutas_control import repartidor_participa_en_ruta
 
 POINT_PENDIENTE_ENVIO_NOTA = (
     "La carga aún no aparece enviada en Point. "
@@ -367,51 +375,12 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             "point_transfer_line__destination_branch",
         )
     )
-    lineas_superadas = 0
-    activas_por_point_id: dict[int, list[RutaCargaChecklistLinea]] = {}
-    for linea in checklist_lines:
-        if (
-            linea.point_transfer_line_id is not None
-            and linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
-        ):
-            activas_por_point_id.setdefault(linea.point_transfer_line_id, []).append(linea)
-    for duplicadas in activas_por_point_id.values():
-        if len(duplicadas) <= 1:
-            continue
-        point_line = duplicadas[0].point_transfer_line
-        propietaria = max(
-            duplicadas,
-            key=lambda linea: (
-                linea.source_hash == point_line.source_hash,
-                linea.detail_external_id == point_line.detail_external_id,
-                linea.transfer_external_id == point_line.transfer_external_id,
-                -linea.id,
-            ),
-        )
-        for linea in duplicadas:
-            if linea.id == propietaria.id:
-                continue
-            linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
-            linea.superada_por = propietaria
-            linea.notas = " ".join(
-                value
-                for value in [
-                    linea.notas.strip(),
-                    "Fila duplicada de la misma línea Point; se conserva solo para auditoría.",
-                ]
-                if value
-            )
-            linea.save(
-                update_fields=[
-                    "estatus",
-                    "superada_por",
-                    "notas",
-                    "actualizado_en",
-                ]
-            )
-            lineas_superadas += 1
+    lineas_superadas = resolver_duplicados_activos_point(checklist_lines)
+    lineas_superadas += archivar_solicitudes_point(checklist_lines)
     for linea in checklist_lines:
         point_line = linea.point_transfer_line
+        if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
+            continue
         retorno_a_cedis = bool(
             point_line
             and point_line.erp_origin_branch_id in branch_ids
@@ -424,24 +393,14 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             and linea.estatus != RutaCargaChecklistLinea.ESTATUS_SUPERADA
         )
         if retorno_a_cedis or reservada_por_otra_ruta:
-            if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
-                continue
-            linea.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
             nota_auditoria = (
                 "Transferencia de regreso a CEDIS; se conserva solo para auditoría."
                 if retorno_a_cedis
                 else "Línea Point ya asignada a otra ruta; se conserva solo para auditoría."
             )
-            linea.notas = " ".join(
-                value
-                for value in [
-                    linea.notas.strip(),
-                    nota_auditoria,
-                ]
-                if value
+            lineas_superadas += int(
+                archivar_linea_checklist(linea, nota=nota_auditoria)
             )
-            linea.save(update_fields=["estatus", "notas", "actualizado_en"])
-            lineas_superadas += 1
     lineas_por_source = {
         linea.source_hash: linea
         for linea in checklist_lines
@@ -464,6 +423,9 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     actualizadas = lineas_superadas
     omitidas = 0
     for line in candidates:
+        if not linea_point_es_operativa(line):
+            omitidas += 1
+            continue
         branch = resolve_requesting_erp_branch(line)
         if branch is None or branch.id not in paradas_by_branch:
             omitidas += 1
@@ -472,7 +434,7 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
             omitidas += 1
             continue
         cantidad_esperada = _cantidad_esperada(line)
-        enviada = point_transfer_enviada(line)
+        enviada = linea_point_es_operativa(line)
         parada = paradas_by_branch[branch.id]
         producto_key = _point_producto_key(line)
         cedis_line = None
@@ -955,14 +917,27 @@ def _actualizar_checklist_carga_desde_point(
     checklist.save(update_fields=sync_fields)
     omitidas = checklist.lineas.filter(parada__punto__tipo=PuntoLogistico.TIPO_CEDIS, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()[0]
 
-    creadas, actualizadas, omitidas_consolidado = _sincronizar_lineas_consolidado_para_ruta(ruta=ruta, checklist=checklist)
-    omitidas += omitidas_consolidado
-    if creadas or actualizadas:
-        checklist.lineas.filter(point_transfer_line__isnull=False, estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exclude(
-            source_hash__startswith="cedis-reabasto-"
-        ).delete()
-        checklist.notas = "Carga esperada generada desde consolidado CEDIS."
-        checklist.save(update_fields=["notas", "actualizado_en"])
+    creadas = 0
+    actualizadas = 0
+    solicitudes_consolidadas = list(
+        checklist.lineas.filter(
+            point_transfer_line__isnull=True,
+            source_hash__startswith="cedis-reabasto-",
+        ).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+    )
+    for solicitud in solicitudes_consolidadas:
+        solicitud.estatus = RutaCargaChecklistLinea.ESTATUS_SUPERADA
+        solicitud.superada_por = None
+        nota = "Solicitud CEDIS sin Enviado Point; se conserva solo para auditoría."
+        if nota not in solicitud.notas:
+            solicitud.notas = " ".join(
+                value for value in [solicitud.notas.strip(), nota] if value
+            )
+        solicitud.save(
+            update_fields=["estatus", "superada_por", "notas", "actualizado_en"]
+        )
+        actualizadas += 1
+    omitidas += len(solicitudes_consolidadas)
     creadas_point, actualizadas_point, omitidas_point = _sincronizar_lineas_point_para_ruta(
         ruta=ruta,
         checklist=checklist,
@@ -1021,7 +996,7 @@ def validar_usuario_puede_operar_checklist(*, user, ruta: RutaEntrega, repartido
         raise ValidationError("La ruta no permite confirmar carga en este estatus.")
     if can_manage_submodule(user, "logistica", "rutas"):
         return
-    if not repartidor or ruta.repartidor_id != repartidor.id:
+    if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
         raise PermissionDenied("No tienes permiso para confirmar carga de esta ruta.")
 
 
@@ -1036,13 +1011,36 @@ def validar_linea_carga(
     motivo_diferencia: str = "",
     notas: str = "",
     client_event_id: str = "",
+    source_hash: str = "",
+    transfer_external_id: str = "",
+    detail_external_id: str = "",
+    parada_id: int | None = None,
 ) -> RutaCargaChecklistLinea:
     validar_usuario_puede_operar_checklist(user=user, ruta=ruta, repartidor=repartidor)
     checklist = obtener_checklist_carga(ruta)
-    linea = RutaCargaChecklistLinea.objects.select_for_update().select_related("checklist", "parada").get(
-        pk=linea_id,
+    lineas_actuales = RutaCargaChecklistLinea.objects.select_for_update().select_related("checklist", "parada").filter(
         checklist=checklist,
     )
+    linea = lineas_actuales.filter(pk=linea_id).first()
+    if not linea:
+        candidatos = lineas_actuales.exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        source_hash = (source_hash or "").strip()
+        transfer_external_id = (transfer_external_id or "").strip()
+        detail_external_id = (detail_external_id or "").strip()
+        if source_hash:
+            candidatos = candidatos.filter(source_hash=source_hash)
+        elif transfer_external_id and detail_external_id:
+            candidatos = candidatos.filter(
+                transfer_external_id=transfer_external_id,
+                detail_external_id=detail_external_id,
+            )
+        else:
+            raise ValidationError("La carga se actualizó desde Point. Actualiza la pantalla y vuelve a confirmar este producto.")
+        if parada_id:
+            candidatos = candidatos.filter(parada_id=parada_id)
+        linea = candidatos.first()
+        if not linea:
+            raise ValidationError("La carga se actualizó desde Point y este producto ya no pertenece al tramo actual.")
     if linea.estatus == RutaCargaChecklistLinea.ESTATUS_SUPERADA:
         raise ValidationError("Esta línea fue superada por una transferencia de Point más reciente y ya no admite captura.")
 
@@ -1196,7 +1194,16 @@ def validar_producto_tramo_carga(
 
 def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
     checklist = getattr(ruta, "checklist_carga", None)
-    if not checklist or not checklist.lineas.exists():
+    if not checklist:
+        return None
+    if (
+        checklist.sincronizado_en
+        or checklist.estatus == RutaCargaChecklist.ESTATUS_BLOQUEADA
+    ) and not checklist.lineas.exclude(
+        estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
+    ).exists():
+        return "sincroniza la carga enviada desde Point antes de liberar la ruta"
+    if not checklist.lineas.exists():
         return None
     if ruta.paradas.filter(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
         lineas_salida = lineas_tramo_operativo_actual(
@@ -2023,6 +2030,7 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
     paradas_actualizadas = 0
     lineas_recibidas = 0
     lineas_pendientes_point = 0
+    evidencias_point = []
 
     for linea in checklist.lineas.exclude(
         estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
@@ -2085,6 +2093,8 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
             evidencia.capturado_en = received_at
             evidencia.metadata = metadata
             evidencia.save(update_fields=["cantidad_entregada", "capturado_por", "capturado_en", "metadata"])
+        evidencias_point.append(evidencia)
+    registrar_discrepancias_point(evidencias=evidencias_point, ruta=ruta, actor=user)
     return RecepcionPointResumen(
         ruta=ruta,
         evidencias_creadas=evidencias_creadas,

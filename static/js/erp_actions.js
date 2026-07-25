@@ -149,10 +149,22 @@
         navigating = true;
         var redirectToast = normalizedToast(payload.toast, "success");
         if (storePendingToast(redirectToast)) {
-          window.location.assign(redirectUrl.href);
+          if (payload.reload) {
+            window.location.hash = redirectUrl.hash;
+            window.location.reload();
+          } else {
+            window.location.assign(redirectUrl.href);
+          }
         } else {
           showToast(redirectToast);
-          window.setTimeout(function () { window.location.assign(redirectUrl.href); }, 900);
+          window.setTimeout(function () {
+            if (payload.reload) {
+              window.location.hash = redirectUrl.hash;
+              window.location.reload();
+            } else {
+              window.location.assign(redirectUrl.href);
+            }
+          }, 900);
         }
         return;
       }

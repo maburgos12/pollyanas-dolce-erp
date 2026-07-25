@@ -185,6 +185,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
         default=F("fecha_reporte"),
     )).order_by("-effective_event", "-id").values(
         "id", "titulo", "descripcion", "estatus", "fecha_reporte", "fecha_resolucion", "fecha_cierre",
+        "costo_estimado", "costo_real",
         "sucursal_id", "sucursal__nombre", "activo_relacionado_id", "activo_relacionado__nombre",
         "reportado_por_id", "reportado_por__first_name", "reportado_por__last_name", "reportado_por__username",
     )[:candidate_limit]
@@ -205,6 +206,8 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
                 actor=_history_actor(item["reportado_por_id"], " ".join(filter(None, [item["reportado_por__first_name"], item["reportado_por__last_name"]])), item["reportado_por__username"]),
                 origin="falla", title=item["titulo"], description=item["descripcion"],
                 asset_id=item["activo_relacionado_id"],
+                cost=((item["costo_real"] if item["costo_real"] is not None else item["costo_estimado"])
+                      if include_costs else None),
             ))
 
     from activos.models import SolicitudFalla

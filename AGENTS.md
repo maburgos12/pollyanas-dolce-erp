@@ -13,9 +13,26 @@ Sistema de uso interno para el equipo operativo.
 - Rama principal: main · Repo: github.com/maburgos12/pollyanas-dolce-erp (privado)
 
 ## Stack
-- Backend: Django 5.0.1 + DRF 3.14 · DB: PostgreSQL 16 (prod) / SQLite (dev)
+- Backend: Django 5.0.1 + DRF 3.14 · DB: PostgreSQL 16 (producción, desarrollo y pruebas)
 - Deploy: Docker + VPS propio (NO Railway)
 - Servidor: Gunicorn + WhiteNoise · Zona horaria: America/Mazatlan · Moneda: MXN
+
+### Base de datos local obligatoria
+
+- PostgreSQL 16 es la única base operativa soportada para ejecutar Django,
+  migraciones, checks y pruebas.
+- SQLite nunca debe utilizarse como fallback. Los archivos o scripts SQLite
+  existentes son únicamente herramientas históricas de recuperación o análisis;
+  no representan la base de desarrollo del ERP.
+- Antes de ejecutar cualquier comando `manage.py`, verificar una configuración
+  PostgreSQL válida mediante `DATABASE_URL` o `DB_HOST` junto con las variables
+  `DB_*`, y confirmar conectividad con la base.
+- En worktrees paralelos, levantar PostgreSQL/Docker de forma aislada con un
+  `COMPOSE_PROJECT_NAME` único, un `DB_HOST_PORT` propio y volúmenes separados.
+- Si PostgreSQL no está disponible, preparar primero el entorno local aislado.
+  Solo reportar un bloqueo cuando exista una causa concreta que no pueda
+  resolverse localmente, indicando el comando fallido y la variable o servicio
+  faltante; no intentar SQLite.
 
 ## Otros sistemas en el mismo servidor
 | Sistema | Directorio | Puerto | Dominio |
@@ -137,6 +154,59 @@ Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
 configuración, UI, permisos, navegación, reportes, jobs, integraciones,
 prototipos o producción.
 
+### 0. Interpretar profesionalmente las solicitudes de Mauricio
+
+Mauricio puede describir necesidades, errores o mejoras usando lenguaje informal,
+operativo o no técnico. No exigirle que redacte como programador. El agente es
+responsable de traducir cada solicitud a un requerimiento técnico de nivel senior,
+aplicando el criterio del especialista correspondiente: arquitectura, lógica de
+negocio, backend, frontend, UX, seguridad, datos, integraciones o DevOps.
+
+Antes de actuar:
+
+1. Identificar el problema real, el resultado esperado, el módulo afectado y los
+   criterios observables de aceptación.
+2. Inspeccionar la implementación, arquitectura y patrones existentes antes de
+   asumir cómo está construido el sistema.
+3. Reformular la solicitud como un requerimiento técnico claro, sin inventar
+   tecnologías, archivos, componentes, endpoints ni reglas de negocio.
+4. Delimitar el alcance, consumidores afectados, riesgos y posibles regresiones.
+5. Si Mauricio solicita diagnóstico, revisión, alternativas o propuestas, mantener
+   el trabajo en modo de solo lectura hasta que autorice una implementación.
+6. Si existe una solución claramente superior, explicarla y recomendarla antes de
+   introducir una alternativa frágil o deuda técnica.
+
+#### Ejecución automática
+
+Si la intención es clara, el alcance está bien definido y el cambio es de riesgo
+bajo o medio, no pedir confirmación innecesaria. Inspeccionar primero el código,
+determinar la mejor solución compatible con la arquitectura existente y proceder
+respetando las validaciones y reglas de seguridad del proyecto.
+
+Expresiones como “procede”, “impleméntalo”, “corrígelo”, “hazlo” o equivalentes
+autorizan la ejecución dentro del alcance solicitado, pero no omiten la inspección,
+aislamiento, pruebas, revisión ni validación obligatoria.
+
+#### Aprobación previa obligatoria
+
+Presentar primero interpretación, diagnóstico, solución recomendada, alcance,
+archivos o contratos probablemente afectados, riesgos y posibles regresiones.
+Esperar aprobación antes de modificar cuando ocurra cualquiera de estos casos:
+
+- Existan varias soluciones de arquitectura con implicaciones materiales distintas.
+- El cambio afecte lógica de negocio delicada, datos operativos, seguridad,
+  permisos, autenticación o producción.
+- Se modifiquen contratos compartidos o públicos, como API, modelos, esquemas,
+  migraciones, integraciones, eventos, caché o service workers.
+- Exista riesgo relevante de pérdida de datos, indisponibilidad o regresión.
+- El alcance sea ambiguo y las interpretaciones posibles produzcan resultados
+  materialmente diferentes.
+- La ejecución requiera ampliar el alcance o la autorización original.
+
+Cuando sea necesario preguntar, formular una sola pregunta concreta que desbloquee
+la decisión. No detener el trabajo por detalles menores que puedan resolverse con
+la arquitectura, convenciones y contexto existentes.
+
 ### 1. Clasificar el tipo de trabajo antes de tocar archivos
 - **Consulta o diagnóstico:** solo leer, inspeccionar y reportar. No modificar nada
   salvo que Mauricio lo pida explícitamente.
@@ -155,11 +225,30 @@ primero, aparecen migraciones "pendientes" de otras apps que no son de la tarea 
 
 ```bash
 git fetch origin main
-git checkout -b codex/<modulo>-<descripcion> origin/main   # rama limpia desde main actualizado
-python manage.py migrate                                    # aplicar TODO lo que main ya tiene
+git worktree add /Users/mauricioburgos/Downloads/codex_worktrees/<tarea> \
+  -b codex/<modulo>-<descripcion> origin/main
+cd /Users/mauricioburgos/Downloads/codex_worktrees/<tarea>
+bash scripts/git_workspace_preflight.sh --write
+# Sustituir ambos valores por un nombre y un puerto libre exclusivos del worktree.
+export COMPOSE_PROJECT_NAME=erp_modulo_descripcion
+export DB_HOST_PORT=puerto_libre_asignado
+docker compose up -d db
+export APP_ENV=development
+export ALLOW_INSECURE_LOCAL_SECRET_KEY=1                 # solo desarrollo local temporal
+export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${DB_HOST_PORT}/pastelerias_erp"
+docker compose exec -T db pg_isready -U postgres
+python manage.py migrate                                  # aplicar TODO lo que main ya tiene
 python manage.py migrate --check                           # debe quedar en 0 pendientes
 python manage.py check                                     # debe quedar en 0 errores
 ```
+
+El checkout raíz `/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1` es
+una base de solo lectura. Nunca crear ramas, ejecutar agentes con escritura ni
+implementar tareas dentro de esa carpeta. El preflight es obligatorio antes de
+modificar archivos y debe detener el trabajo ante `detached HEAD`, checkout raíz,
+rama `main`, cambios previos, archivos sin seguimiento o atraso frente a
+`origin/main`. No reparar esas condiciones dentro del mismo árbol: crear o
+recuperar un worktree limpio.
 
 **Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
 y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
@@ -274,6 +363,25 @@ accidental es crítico.
   JOIN bonos_produccion_configbonoperiodo cp ON bp.periodo_id=cp.id
   WHERE cp.mes=X AND cp.anio=Y AND (bono_extra>0 OR ajuste_positivo>0);
   ```
+
+### Presupuesto vs real — trampas de doble conteo (confirmadas en prod)
+Antes de conectar cualquier rubro nuevo a una fuente en
+`reportes/data/mapeo_rubros_fuentes.csv`, verificar estas dos trampas:
+- **Filas AGREGADO del Excel de admón:** la hoja de administración del Excel trae
+  conceptos que son la SUMA de las hojas por sucursal (casos confirmados: "Luz 65%",
+  "Adquisición de equipo/maquinaria" $278k, servicios #1054, "Etiquetas, bolsas,
+  cajas y empaques" rubro 794). Señal típica: su ppto mensual = suma de los rubros
+  por sucursal (a veces menos una constante = la sucursal que la hoja vieja no
+  incluía) y/o su real legado = suma exacta de capturas por centro. Esos rubros se
+  DESACTIVAN (con motivo en metadata), no se conectan — sumarlos duplica contra los
+  renglones por sucursal.
+- **CONSUMO_MP fuera de producción duplica:** los insumos tipo EMPAQUE (y cualquier
+  otro con movimientos) generan filas en `ConsumoInsumoMensual`, y el renglón Costos
+  del P&L (`CONSUMO_MP total_empresa`) ya las suma. La exclusión anti-doble-conteo
+  de `estado_resultados` (`_es_materia_prima` + rubros con regla CONSUMO_MP) SOLO
+  aplica al área `produccion` — conectar rubros de admón o gastos-venta a CONSUMO_MP
+  duplica a nivel empresa. Para esos rubros usar GASTO_OPERATIVO por categoría/centro
+  (patrón servicios/empaques, PRs #1050-#1054 y #1075).
 
 ### Service Worker — caché PWA
 Cualquier módulo con `sw.js` (hoy: `bonos_ventas`, `bonos_produccion`, `logistica`,
@@ -410,6 +518,10 @@ python manage.py runserver                                    # Servidor local
 Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni producción.
 
 - Usar `1 hilo = 1 branch = 1 worktree limpio`.
+- El checkout raíz es base de solo lectura y debe permanecer limpio; no usarlo como worktree de tarea.
+- Ningún worktree de tarea puede apropiarse de `main`; usar siempre `codex/<modulo>-<cambio>`.
+- Si `git branch --show-current` no devuelve una rama, detenerse: `detached HEAD` nunca es válido para trabajar.
+- Ejecutar `bash scripts/git_workspace_preflight.sh --write` antes de la primera modificación.
 - Antes de empezar, revisar `git status --short --branch` y `git worktree list`.
 - No trabajar sobre `main` ni sobre un checkout con cambios no relacionados.
 - Si el árbol actual está mezclado, abrir un worktree limpio desde `origin/main`.
@@ -420,7 +532,7 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 - Preview local, staging y producción son evidencias distintas. No presentar validación local como prueba de producción.
 - No desplegar desde una rama con cambios mezclados o no revisados.
 - Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `CLAUDE.md` en el mismo cambio para mantenerlas alineadas (deben quedar con el mismo contenido).
-- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado y limpiar ramas atoradas que puedan obstruir otros hilos.
+- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado, ejecutar `git worktree prune --dry-run` y limpiar ramas/worktrees atorados que puedan obstruir otros hilos.
 
 ## Acciones que cambian estado — contrato obligatorio
 

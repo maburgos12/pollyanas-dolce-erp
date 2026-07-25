@@ -4,13 +4,16 @@ import json
 import os
 from datetime import datetime, time, timedelta
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from django_celery_beat.models import PeriodicTask
 
@@ -77,21 +80,21 @@ class SeguimientoColaboradorTests(TestCase):
     def test_empleado_se_resuelve_por_email_real(self):
         self.assertEqual(empleado_de_usuario(self.user), self.empleado)
 
-    def test_portal_muestra_trabajo_en_dashboard_por_tipo(self):
+    def test_portal_muestra_bandeja_operativa_por_tipo(self):
         response = self.client.get("/seguimiento/")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn("Resumen general", content)
-        self.assertIn("Trabajos acumulados", content)
-        self.assertIn("Por vencer (24h)", content)
+        self.assertIn("Mi trabajo activo", content)
+        self.assertIn("Vencidos", content)
+        self.assertIn("Activos", content)
+        self.assertIn("En revisión", content)
+        self.assertIn("Finalizados", content)
         self.assertIn("Compromisos", content)
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
         self.assertIn('data-dashboard-url="/seguimiento/"', content)
         self.assertIn("Validar inventarios en cuartos fríos", content)
-        self.assertIn("Retroalimentación", content)
-        self.assertIn("Solicitar más tiempo", content)
         self.assertNotIn("Alcance", content)
         self.assertNotIn("Control visible y auditable", content)
         self.assertNotIn("Visible:", content)
@@ -107,7 +110,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertTrue(self.check.completado)
         self.assertEqual(self.check.completado_por, self.user)
 
-    def test_minuta_con_checks_muestra_panel_abierto_para_colaborador(self):
+    def test_minuta_con_checks_muestra_acordeon_operativo_para_colaborador(self):
         item = SeguimientoItem.objects.create(
             tipo=SeguimientoItem.TIPO_MINUTA,
             titulo="Minuta con checks visibles",
@@ -125,8 +128,9 @@ class SeguimientoColaboradorTests(TestCase):
         content = response.content.decode()
 
         self.assertContains(response, "Minuta con checks visibles")
-        self.assertIn("<details open>", content)
-        self.assertIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
+        self.assertIn(f'data-follow-up-id="{item.pk}"', content)
+        self.assertIn(f'href="/seguimiento/{item.pk}/"', content)
+        self.assertNotIn(f'action="/seguimiento/{item.pk}/checklist/{check.pk}/"', content)
 
     def test_paso_agente_dg_no_acepta_toggle_local(self):
         self.item.tipo = SeguimientoItem.TIPO_PROYECTO
@@ -344,6 +348,35 @@ class SeguimientoColaboradorTests(TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_COMPLETADO)
 
+    def test_detalle_dg_prioriza_responsable_resumen_y_proceso_compacto(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.detalle", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="seg-agreement-hero"')
+        self.assertContains(response, "Responsable")
+        self.assertContains(response, "Carolina Cayetano")
+        self.assertContains(response, 'class="seg-agreement-summary"')
+        self.assertContains(response, "Puntos por completar")
+        self.assertContains(response, "Conversación y cierre")
+        self.assertContains(response, "Detalles técnicos")
+        self.assertNotContains(response, 'class="bi-metric-strip seg-metric-strip"')
+
+    def test_detalle_colaborador_comparte_ficha_compacta_sin_perder_acciones(self):
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="seg-agreement-hero"')
+        self.assertContains(response, "Puntos por completar")
+        self.assertContains(response, "Marcar punto terminado")
+        self.assertEqual(response.content.decode().count("Marcar punto terminado"), 1)
+        self.assertNotContains(response, "Marcar hecho")
+        self.assertContains(response, "Detalles técnicos")
+
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.writeback", password="test12345")
@@ -393,6 +426,69 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertContains(response, "Sin checklist")
         self.assertContains(response, "Desfase app")
         self.assertNotContains(response, ">10%</span>")
+
+    def test_panel_dg_renderiza_resumen_compacto_y_estados_ejecutivos(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.resumen", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/panel/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="panel-dg-mini-dashboard"')
+        self.assertContains(response, "Nuevo acuerdo")
+        self.assertContains(response, 'data-panel-state="vencidos"')
+        self.assertContains(response, 'data-panel-state="activos"')
+        self.assertContains(response, 'data-panel-state="revision"')
+        self.assertContains(response, 'data-panel-state="prorrogas"')
+        self.assertContains(response, 'data-panel-state="completados"')
+        self.assertContains(response, 'ti-progress-check')
+        self.assertContains(response, 'ti-user-check')
+        self.assertContains(response, 'ti-calendar-time')
+        self.assertContains(response, 'ti-circle-check')
+        self.assertNotContains(response, 'class="bi-hero-status-grid"')
+
+    def test_panel_dg_filtra_cada_estado_y_lo_desglosa_por_persona(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.personas", password="test12345")
+        dg_user.groups.add(dg_group)
+        otra = Empleado.objects.create(
+            nombre="María González",
+            email="maria.gonzalez@pollyanasdolce.com",
+            area="VENTAS",
+            puesto="Gerente",
+            sucursal="CENTRO",
+        )
+        vencido_otra = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Acuerdo vencido de María",
+            responsable_empleado=otra,
+            area="VENTAS",
+            fecha_limite=timezone.now() - timedelta(days=2),
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+        )
+        activo_otra = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Acuerdo activo de María",
+            responsable_empleado=otra,
+            area="VENTAS",
+            fecha_limite=timezone.now() + timedelta(days=2),
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+        )
+        self.client.force_login(dg_user)
+
+        vencidos = self.client.get("/seguimiento/panel/?estado=vencidos")
+        activos = self.client.get("/seguimiento/panel/?estado=activos")
+
+        self.assertEqual([item.pk for item in vencidos.context["items_estado"]], [vencido_otra.pk])
+        self.assertEqual(vencidos.context["colaboradores_estado"][0]["nombre"], "María González")
+        self.assertEqual(vencidos.context["colaboradores_estado"][0]["count"], 1)
+        self.assertContains(vencidos, "Abrir lista")
+        self.assertContains(vencidos, "Acuerdo vencido de María")
+        self.assertNotContains(vencidos, "Acuerdo activo de María")
+        self.assertIn(vencido_otra.pk, [item.pk for item in activos.context["items_estado"]])
+        self.assertIn(activo_otra.pk, [item.pk for item in activos.context["items_estado"]])
 
     def test_detalle_no_muestra_cerrado_si_fuente_sigue_abierta(self):
         self.item.tipo = SeguimientoItem.TIPO_MINUTA
@@ -519,6 +615,192 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/dashboard/")
+
+    def test_dg_que_abre_mi_trabajo_es_enviado_al_panel_del_equipo(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.panel", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/")
+
+        self.assertRedirects(response, "/seguimiento/panel/", fetch_redirect_response=False)
+
+    def test_dg_que_abre_minutas_personales_es_enviado_al_panel_filtrado(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.minutas", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertRedirects(response, "/seguimiento/panel/?tab=MINUTA", fetch_redirect_response=False)
+
+    def test_navegacion_dg_apunta_al_panel_y_conserva_filtro_por_tipo(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.nav", password="test12345")
+        dg_user.groups.add(dg_group)
+
+        groups = build_nav_groups(dg_user, "/seguimiento/panel/")
+        mi_trabajo = next(group for group in groups if group["key"] == "mi_trabajo")
+        urls = {item["label"]: item["url"] for item in mi_trabajo["items"]}
+
+        self.assertEqual(mi_trabajo["url"], "/seguimiento/panel/")
+        self.assertEqual(urls["Minutas"], "/seguimiento/panel/?tab=MINUTA")
+        self.assertEqual(urls["Proyectos"], "/seguimiento/panel/?tab=PROYECTO")
+        self.assertEqual(urls["Compromisos"], "/seguimiento/panel/?tab=COMPROMISO")
+
+    def test_mi_trabajo_renderiza_bandeja_operativa_y_segmentos(self):
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Minutas asignadas")
+        self.assertContains(response, 'data-work-bucket="vencidos"')
+        self.assertContains(response, 'data-work-bucket="activos"')
+        self.assertContains(response, 'data-work-bucket="en_revision"')
+        self.assertContains(response, 'data-work-bucket="finalizados"')
+        self.assertContains(response, 'data-active-work-bucket="activos"')
+
+    def test_mi_trabajo_deja_acciones_dentro_del_detalle(self):
+        item = SeguimientoItem.objects.create(
+            titulo="Actualizar proveedores",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=self.user,
+        )
+        check = SeguimientoChecklistItem.objects.create(seguimiento=item, titulo="Adjuntar listado")
+
+        response = self.client.get("/seguimiento/minutas/")
+
+        self.assertContains(response, reverse("seguimiento:detalle", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, check.pk]))
+        self.assertNotContains(response, reverse("seguimiento:registrar_feedback", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:subir_evidencia", args=[item.pk]))
+        self.assertNotContains(response, reverse("seguimiento:solicitar_prorroga", args=[item.pk]))
+        self.assertContains(response, f'data-follow-up-id="{item.pk}"')
+
+    def test_mi_trabajo_separa_finalizados_sin_cambiar_asignacion(self):
+        outsider = get_user_model().objects.create_user(username="empleada.otra", password="test12345")
+        visible = SeguimientoItem.objects.create(
+            titulo="Acuerdo propio visible",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+            responsable_user=self.user,
+        )
+        SeguimientoItem.objects.create(
+            titulo="Acuerdo ajeno oculto",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=outsider,
+        )
+
+        response = self.client.get("/seguimiento/minutas/?estado=finalizados")
+
+        self.assertContains(response, visible.titulo)
+        self.assertContains(response, "Finalizado ")
+        self.assertContains(response, 'data-active-work-bucket="finalizados"')
+        self.assertNotContains(response, "Acuerdo ajeno oculto")
+
+    def test_mi_trabajo_no_mezcla_estados_en_la_lista_visible(self):
+        vencido = SeguimientoItem.objects.create(
+            titulo="Acuerdo vencido visible",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=1),
+        )
+        activo = SeguimientoItem.objects.create(
+            titulo="Acuerdo activo separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() + timedelta(days=4),
+        )
+        revision = SeguimientoItem.objects.create(
+            titulo="Acuerdo en revisión separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_REVISION,
+            responsable_user=self.user,
+        )
+        finalizado = SeguimientoItem.objects.create(
+            titulo="Acuerdo finalizado separado",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_COMPLETADO,
+            responsable_user=self.user,
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        self.assertContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, revision.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=activos")
+        self.assertContains(response, activo.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, revision.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=en_revision")
+        self.assertContains(response, revision.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, finalizado.titulo)
+
+        response = self.client.get("/seguimiento/minutas/?estado=finalizados")
+        self.assertContains(response, finalizado.titulo)
+        self.assertNotContains(response, vencido.titulo)
+        self.assertNotContains(response, activo.titulo)
+        self.assertNotContains(response, revision.titulo)
+
+    def test_mi_trabajo_ordena_vencidos_del_mas_atrasado_al_mas_reciente(self):
+        reciente = SeguimientoItem.objects.create(
+            titulo="Venció ayer",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=1),
+        )
+        antiguo = SeguimientoItem.objects.create(
+            titulo="Venció hace una semana",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+            responsable_user=self.user,
+            fecha_limite=timezone.now() - timedelta(days=7),
+        )
+
+        response = self.client.get("/seguimiento/minutas/")
+        content = response.content.decode()
+
+        self.assertLess(content.index(antiguo.titulo), content.index(reciente.titulo))
+
+    def test_detalle_destaca_el_siguiente_punto_y_deja_evidencia_como_opcional(self):
+        item = SeguimientoItem.objects.create(
+            titulo="Actualizar precios de temporada",
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+            responsable_user=self.user,
+        )
+        SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Validar costos actuales",
+            completado=True,
+            orden=1,
+        )
+        siguiente = SeguimientoChecklistItem.objects.create(
+            seguimiento=item,
+            titulo="Confirmar precios con Dirección",
+            orden=2,
+        )
+
+        response = self.client.get(reverse("seguimiento:detalle", args=[item.pk]))
+
+        self.assertContains(response, "Próxima acción")
+        self.assertContains(response, siguiente.titulo)
+        self.assertContains(response, "Marcar punto terminado")
+        self.assertContains(response, reverse("seguimiento:toggle_checklist", args=[item.pk, siguiente.pk]))
+        self.assertContains(response, "Acciones opcionales")
+        self.assertContains(response, "Agregar evidencia")
 
     def test_colaborador_staff_aprueba_paso_designado_desde_mi_trabajo(self):
         ventas, _ = Group.objects.get_or_create(name="VENTAS")
@@ -1488,13 +1770,113 @@ class CalendarioTests(TestCase):
         propia.refresh_from_db()
         self.assertFalse(propia.activo)
 
-    def test_calendario_no_expone_boton_eliminar_actividad(self):
+    def test_asignado_no_puede_editar_completar_ni_eliminar_evento_del_creador(self):
+        asignada = ActividadCalendario.objects.create(
+            usuario=self.user_b,
+            invitado_user=self.user_b,
+            creado_por=self.user_a,
+            titulo="Asignada por otra persona",
+            fecha=self.hoy,
+        )
+        self.client.force_login(self.user_b)
+
+        editar = self.client.post(
+            f"/seguimiento/calendario/actividades/{asignada.pk}/",
+            {"titulo": "Intento", "fecha": self.hoy.isoformat()},
+        )
+        completar = self.client.post(f"/seguimiento/calendario/actividades/{asignada.pk}/completar/")
+        eliminar = self.client.post(f"/seguimiento/calendario/actividades/{asignada.pk}/eliminar/")
+
+        self.assertEqual(editar.status_code, 404)
+        self.assertEqual(completar.status_code, 404)
+        self.assertEqual(eliminar.status_code, 404)
+
+    def test_evento_asignado_solo_es_editable_para_su_creador(self):
+        asignada = ActividadCalendario.objects.create(
+            usuario=self.user_b,
+            invitado_user=self.user_b,
+            creado_por=self.user_a,
+            titulo="Asignada por otra persona",
+            fecha=self.hoy,
+        )
+
+        evento_asignado = self._eventos(self.user_b).json()["eventos"][0]
+        evento_creador = self._eventos(self.user_a).json()["eventos"][0]
+
+        self.assertFalse(evento_asignado["editable"])
+        self.assertTrue(evento_creador["editable"])
+
+    def test_calendario_usa_numero_de_repeticiones_y_expone_eliminar_actividad(self):
         self.client.force_login(self.user_a)
 
         response = self.client.get("/seguimiento/calendario/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Eliminar")
+        self.assertContains(response, "Número de repeticiones")
+        self.assertContains(response, "Incluye la primera fecha")
+        self.assertContains(response, "Eliminar actividad")
+
+    def test_recurrencia_diaria_omite_domingos(self):
+        from .views import _fechas_recurrentes
+
+        sabado = datetime(2026, 7, 18).date()
+
+        fechas = _fechas_recurrentes(sabado, "DIARIA", 4)
+
+        self.assertEqual(
+            fechas,
+            [
+                datetime(2026, 7, 18).date(),
+                datetime(2026, 7, 20).date(),
+                datetime(2026, 7, 21).date(),
+                datetime(2026, 7, 22).date(),
+            ],
+        )
+
+    def test_recurrencia_mensual_mueve_domingo_al_lunes(self):
+        from .views import _fechas_recurrentes
+
+        fechas = _fechas_recurrentes(datetime(2026, 7, 16).date(), "MENSUAL", 3)
+
+        self.assertEqual(
+            fechas,
+            [
+                datetime(2026, 7, 16).date(),
+                datetime(2026, 8, 17).date(),
+                datetime(2026, 9, 16).date(),
+            ],
+        )
+
+    def test_no_permite_iniciar_una_recurrencia_en_domingo(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Actividad dominical recurrente",
+                "fecha": "2026-07-19",
+                "periodicidad": "SEMANAL",
+                "repeticiones": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("domingo", response.json()["error"].lower())
+
+    def test_permite_actividad_unica_en_domingo(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Excepción dominical",
+                "fecha": "2026-07-19",
+                "periodicidad": "NINGUNA",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ActividadCalendario.objects.filter(titulo="Excepción dominical").exists())
 
     def test_crud_crear_editar_completar_valida_campos(self):
         self.client.force_login(self.user_a)
@@ -1551,6 +1933,9 @@ class CalendarioTests(TestCase):
         self.assertEqual(ActividadCalendario.objects.filter(tipo=ActividadCalendario.TIPO_REUNION).count(), 3)
         self.assertTrue(Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").exists())
         self.assertTrue(Notificacion.objects.filter(usuario=self.dg, titulo__startswith="Reunión:").exists())
+        notificacion = Notificacion.objects.filter(usuario=self.user_b, titulo__startswith="Reunión:").latest("id")
+        self.assertIn("repeticiones", notificacion.mensaje.lower())
+        self.assertNotIn("ocurrencias", notificacion.mensaje.lower())
         send_mail_mock.assert_called()
         whatsapp_mock.assert_called_once()
 
@@ -1563,6 +1948,23 @@ class CalendarioTests(TestCase):
         self.assertEqual(evento_invitado["invitado"], "Usuario B")
         self.assertTrue(evento_invitado["direccion_general"])
         self.assertEqual(evento_creador["source_label"], "Reunión DG")
+
+    def test_validacion_de_repeticiones_usa_lenguaje_comun(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.post(
+            "/seguimiento/calendario/actividades/",
+            {
+                "titulo": "Demasiadas repeticiones",
+                "fecha": "2026-07-20",
+                "periodicidad": "DIARIA",
+                "repeticiones": "27",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repeticiones", response.json()["error"].lower())
+        self.assertNotIn("ocurrencias", response.json()["error"].lower())
 
     def test_validaciones_endpoint_eventos(self):
         self.client.force_login(self.user_a)

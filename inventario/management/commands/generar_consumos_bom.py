@@ -53,6 +53,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(f"Producciones procesadas: {summary.producciones_procesadas}")
         self.stdout.write(f"Líneas de producción procesadas: {summary.lineas_produccion_procesadas}")
+        self.stdout.write(f"Recetas de venta-servicio procesadas: {summary.recetas_venta_servicio_procesadas}")
         self.stdout.write(f"Movimientos CONSUMO generados: {summary.movimientos_generados}")
         if not summary.dry_run:
             self.stdout.write(

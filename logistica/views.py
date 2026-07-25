@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, OperationalError, transaction
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -28,6 +28,7 @@ from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
     DocumentoUnidad,
+    DiscrepanciaLogistica,
     EntregaEcommerce,
     EntregaRuta,
     EventoRuta,
@@ -72,6 +73,7 @@ from .services_rutas_control import (
     resumen_control_rutas,
 )
 from .services_entregas import confirmar_entrega_parada, resolver_alerta_historica, revisar_entrega_excepcional
+from .services_discrepancias import pendientes_vencidos_para_planeacion, resolver_discrepancia
 from .services_tiempos_ruta import resumen_tiempos_ruta
 
 
@@ -759,21 +761,26 @@ def _logistica_release_gate_rows(
     ]
 
 
-def _point_sin_enviado_q() -> Q:
-    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
-    prefix = "checklist_carga__lineas__point_transfer_line__"
+def _point_linea_sin_enviado_q(*, linea_prefix: str = "", ruta_prefix: str = "") -> Q:
+    """Predicado canónico para una línea cuyo folio vigente no está enviado."""
+    point_prefix = f"{linea_prefix}point_transfer_line__"
     return (
-        Q(estatus__in=[RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA])
-        & Q(checklist_carga__lineas__estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE)
-        & Q(**{f"{prefix}is_current_snapshot": True})
-        & Q(**{f"{prefix}is_cancelled": False})
-        & Q(**{f"{prefix}is_received": False})
-        & Q(**{f"{prefix}sent_at__isnull": True})
+        Q(**{f"{ruta_prefix}estatus__in": [RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA]})
+        & Q(**{f"{linea_prefix}estatus": RutaCargaChecklistLinea.ESTATUS_PENDIENTE})
+        & Q(**{f"{point_prefix}is_current_snapshot": True})
+        & Q(**{f"{point_prefix}is_cancelled": False})
+        & Q(**{f"{point_prefix}is_received": False})
+        & Q(**{f"{point_prefix}sent_at__isnull": True})
         & (
-            Q(**{f"{prefix}raw_payload__transfer__isEnviado": False})
-            | Q(**{f"{prefix}raw_payload__transfer__isEnviado__isnull": True})
+            Q(**{f"{point_prefix}raw_payload__transfer__isEnviado": False})
+            | Q(**{f"{point_prefix}raw_payload__transfer__isEnviado__isnull": True})
         )
     )
+
+
+def _point_sin_enviado_q() -> Q:
+    """Líneas operativas cuyo folio vigente todavía no está enviado en Point."""
+    return _point_linea_sin_enviado_q(linea_prefix="checklist_carga__lineas__")
 
 
 def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
@@ -815,9 +822,9 @@ def _logistica_focus_cards(*, selected_focus: str) -> list[dict[str, object]]:
         },
         {
             "key": "POINT_BLOQUEO",
-            "label": "Point sin enviado",
+            "label": "Solicitado sin enviar en Point",
             "count": point_blocked_routes,
-            "detail": "Rutas con carga solicitada en Point que aún no aparece como enviada.",
+            "detail": "Considera toda la ruta, antes y después de CEDIS.",
             "url": reverse("logistica:rutas") + "?enterprise_focus=POINT_BLOQUEO",
         },
     ]
@@ -1339,9 +1346,31 @@ def control_rutas(request):
 
 @login_required
 def revisiones_entrega(request):
-    if not can_manage_submodule(request.user, "logistica", "rutas"):
+    gestiona_rutas = can_manage_submodule(request.user, "logistica", "rutas")
+    tiene_asignadas = DiscrepanciaLogistica.objects.filter(asignado_a=request.user).exists()
+    if not gestiona_rutas and not tiene_asignadas:
         raise PermissionDenied("No tienes permisos para revisar entregas de Logística")
     if request.method == "POST":
+        discrepancia_id = (request.POST.get("discrepancia_id") or "").strip()
+        if discrepancia_id:
+            caso = get_object_or_404(DiscrepanciaLogistica, pk=int(discrepancia_id) if discrepancia_id.isdigit() else 0)
+            try:
+                resolver_discrepancia(
+                    caso=caso,
+                    actor=request.user,
+                    accion=request.POST.get("accion"),
+                    comentario=request.POST.get("resolucion"),
+                )
+            except (ValidationError, PermissionDenied) as exc:
+                mensaje = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    return JsonResponse({"ok": False, "toast": {"type": "error", "message": mensaje}}, status=422)
+                messages.error(request, mensaje)
+            else:
+                if "application/json" in (request.headers.get("Accept") or "").lower():
+                    return JsonResponse({"ok": True, "remove": f"#discrepancia-{caso.id}", "toast": {"type": "success", "message": "Discrepancia atendida con trazabilidad."}})
+                messages.success(request, "Discrepancia atendida con trazabilidad.")
+            return redirect("logistica:revisiones_entrega")
         evento_id = (request.POST.get("evento_id") or "").strip()
         evento = get_object_or_404(
             EventoRuta,
@@ -1374,6 +1403,19 @@ def revisiones_entrega(request):
         .select_related("ruta", "ruta__repartidor__user", "parada", "parada__punto")
         .order_by("-creado_en", "-id")
     )
+    discrepancias_qs = DiscrepanciaLogistica.objects.filter(
+            estado__in=[
+                DiscrepanciaLogistica.ESTADO_PENDIENTE_JEFE,
+                DiscrepanciaLogistica.ESTADO_ACLARACION_SOLICITADA,
+            ]
+        )
+    if not gestiona_rutas:
+        discrepancias_qs = discrepancias_qs.filter(asignado_a=request.user)
+    discrepancias = list(
+        discrepancias_qs
+        .select_related("ruta", "parada", "linea_carga", "asignado_a")
+        .order_by("creado_en", "id")
+    )
     return render(
         request,
         "logistica/revisiones_entrega.html",
@@ -1381,7 +1423,8 @@ def revisiones_entrega(request):
             "module_tabs": _module_tabs("revisiones_entrega", request.user),
             "paradas_revision": paradas,
             "alertas_historicas": alertas,
-            "revisiones_count": len(paradas) + len(alertas),
+            "discrepancias_logistica": discrepancias,
+            "revisiones_count": len(paradas) + len(alertas) + len(discrepancias),
         },
     )
 
@@ -1832,6 +1875,13 @@ def rutas(request):
     if not can_view_submodule(request.user, "logistica", "rutas"):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
+    discrepancias_vencidas = pendientes_vencidos_para_planeacion(request.user, timezone.localdate())
+    if request.method == "POST" and discrepancias_vencidas:
+        return JsonResponse(
+            {"detail": "Aclara las diferencias pendientes antes de planear una ruta nueva."},
+            status=403,
+        )
+
     if request.method == "POST":
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
@@ -1951,7 +2001,13 @@ def rutas(request):
     if date_from and date_to and date_from > date_to:
         date_from, date_to = date_to, date_from
 
-    rutas_qs = RutaEntrega.objects.all()
+    rutas_qs = RutaEntrega.objects.select_related(
+        "repartidor__user__empleado_rrhh",
+        "repartidor__unidad_asignada",
+        "acompanante__user__empleado_rrhh",
+        "acompanante__unidad_asignada",
+        "unidad_operativa",
+    )
     if date_from:
         rutas_qs = rutas_qs.filter(fecha_ruta__gte=date_from)
     if date_to:
@@ -2050,11 +2106,19 @@ def rutas(request):
         )
         .values("total")[:1]
     )
+    point_bloqueo_subquery = (
+        RutaCargaChecklistLinea.objects.filter(checklist__ruta=OuterRef("pk"))
+        .filter(_point_linea_sin_enviado_q(ruta_prefix="checklist__ruta__"))
+        .values("checklist__ruta")
+        .annotate(total=Count("id", distinct=True))
+        .values("total")[:1]
+    )
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
         "revisiones_globales_count": _revisiones_globales_count(),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
+        "discrepancias_vencidas": discrepancias_vencidas,
         "rutas": rutas_qs.annotate(
             paradas_entrega_total=Count("paradas", filter=~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS), distinct=True),
             paradas_entregadas=Count(
@@ -2068,10 +2132,9 @@ def rutas(request):
                 & ~Q(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS),
                 distinct=True,
             ),
-            point_bloqueo_lineas=Count(
-                "checklist_carga__lineas",
-                filter=_point_sin_enviado_q(),
-                distinct=True,
+            point_bloqueo_lineas=Coalesce(
+                Subquery(point_bloqueo_subquery, output_field=IntegerField()),
+                0,
             ),
             monto_transferido_point=Coalesce(
                 Subquery(monto_transferido_subquery, output_field=DecimalField(max_digits=18, decimal_places=2)),
@@ -2712,9 +2775,6 @@ def ruta_detail(request, pk: int):
                     if ruta_tiene_entregas_pendientes(ruta):
                         messages.error(request, "No se puede completar la ruta: hay paradas sin entrega confirmada.")
                         return redirect("logistica:ruta_detail", pk=ruta.id)
-                    if ruta_tiene_diferencias_entrega(ruta):
-                        messages.error(request, "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver.")
-                        return redirect("logistica:ruta_detail", pk=ruta.id)
                 from_status = ruta.estatus
                 if from_status != estatus_nuevo:
                     ruta.estatus = estatus_nuevo
@@ -3092,7 +3152,7 @@ def dashboard_ejecutivo(request):
         "turnos_abiertos": BitacoraSalidaLlegada.objects.filter(cerrada=False).count(),
         "unidades_activas": Unidad.objects.filter(activa=True).count(),
         "documentos_por_vencer": DocumentoUnidad.objects.filter(vigente=True, fecha_vencimiento__lte=limite_30).count(),
-        "servicios_proximos": ServicioRealizadoUnidad.objects.filter(proxima_fecha__lte=limite_30).count(),
+        "servicios_proximos": ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__lte=limite_30).count(),
         "gasto_mes": ReparacionUnidad.objects.filter(
             fecha_ingreso__month=today.month,
             fecha_ingreso__year=today.year,
@@ -3182,11 +3242,11 @@ def flota_resumen(request):
             .order_by("-fecha_vencimiento")
             .first()
         )
-        ultimo_servicio = ServicioRealizadoUnidad.objects.select_related("tipo_servicio").filter(unidad=unidad).order_by(
+        ultimo_servicio = ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio").filter(unidad=unidad).order_by(
             "-fecha_servicio"
         ).first()
         proximo_servicio = _decorate_servicio(
-            ServicioRealizadoUnidad.objects.select_related("tipo_servicio")
+            ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio")
             .filter(unidad=unidad, proxima_fecha__isnull=False)
             .order_by("proxima_fecha")
             .first()
@@ -3258,7 +3318,7 @@ def unidad_detalle(request, pk):
         "tipos_servicio": TipoServicioUnidad.objects.filter(activo=True).order_by("nombre"),
         "servicios": [
             _decorate_servicio(servicio)
-            for servicio in ServicioRealizadoUnidad.objects.select_related("tipo_servicio", "registrado_por")
+            for servicio in ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio", "registrado_por")
             .filter(unidad=unidad)
             .order_by("-fecha_servicio")
         ],

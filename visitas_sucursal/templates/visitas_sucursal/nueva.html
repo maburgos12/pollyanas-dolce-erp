@@ -21,7 +21,7 @@
         <select name="sucursal" required>
           <option value="">Selecciona</option>
           {% for sucursal in sucursales %}
-          <option value="{{ sucursal.id }}">{{ sucursal|branch_label }}</option>
+          <option value="{{ sucursal.id }}" {% if preset_sucursal == sucursal.id|stringformat:"s" %}selected{% endif %}>{{ sucursal|branch_label }}</option>
           {% endfor %}
         </select>
       </label>

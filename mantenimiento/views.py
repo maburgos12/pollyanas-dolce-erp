@@ -151,6 +151,12 @@ def _guardar_evidencias_falla(bitacora, archivos, user):
 
 
 def _crear_reporte_falla_atomico(*, reporte_kwargs, usuario, comentario):
+    if reporte_kwargs.get("activo_relacionado"):
+        reporte_kwargs.setdefault("tipo_objetivo", ReporteFalla.OBJETIVO_EQUIPO)
+        reporte_kwargs.setdefault("area_instalacion", "")
+    else:
+        reporte_kwargs.setdefault("tipo_objetivo", ReporteFalla.OBJETIVO_INSTALACION)
+        reporte_kwargs.setdefault("area_instalacion", "Sucursal")
     reporte = ReporteFalla(**reporte_kwargs)
     try:
         with transaction.atomic():
@@ -632,7 +638,7 @@ class ServicioListCreateView(generics.ListCreateAPIView):
         return ServicioListSerializer
 
     def get_queryset(self):
-        qs = ServicioRealizadoUnidad.objects.select_related("unidad", "tipo_servicio").order_by("-fecha_servicio", "-id")
+        qs = ServicioRealizadoUnidad.objects.vigentes().select_related("unidad", "tipo_servicio").order_by("-fecha_servicio", "-id")
         unidad = self.request.query_params.get("unidad")
         if unidad:
             qs = qs.filter(unidad_id=unidad)
@@ -1013,7 +1019,7 @@ def resumen_movil(request):
     servicios = []
     vistos = set()
     servicios_qs = (
-        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
+        ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__isnull=False)
         .select_related("unidad", "unidad__sucursal", "tipo_servicio")
         .order_by("proxima_fecha", "id")
     )
@@ -1176,10 +1182,6 @@ def crear_servicio_movil(request):
         return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
 
     branch_ids = authorized_branch_ids(request.user)
-    sucursales = Sucursal.objects.filter(activa=True)
-    if branch_ids is not None:
-        sucursales = sucursales.filter(pk__in=branch_ids)
-    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
     if not fecha_objetivo:
         fecha_objetivo = timezone.localdate()
@@ -1189,7 +1191,10 @@ def crear_servicio_movil(request):
     costo_total = _parse_decimal(request.data.get("costo_total")) or Decimal("0")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=_safe_int(request.data.get("unidad_id")), activa=True, sucursal=sucursal)
+        unidades = Unidad.objects.filter(activa=True)
+        if branch_ids is not None:
+            unidades = unidades.filter(sucursal_id__in=branch_ids)
+        unidad = get_object_or_404(unidades, pk=_safe_int(request.data.get("unidad_id")))
         tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
             nombre=descripcion[:100],
             defaults={"tipo_intervalo": TipoServicioUnidad.INTERVALO_TIEMPO, "activo": True},
@@ -1206,6 +1211,10 @@ def crear_servicio_movil(request):
         )
         return Response(ServicioListSerializer(servicio).data, status=201)
 
+    sucursales = Sucursal.objects.filter(activa=True)
+    if branch_ids is not None:
+        sucursales = sucursales.filter(pk__in=branch_ids)
+    sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
     proveedor_obj = _ensure_provider(proveedor_nombre)
     if alcance == "instalacion":
         activo_obj = _get_installation_asset(
@@ -1298,6 +1307,22 @@ def actualizar_item(request, tipo, pk):
         estatus = (request.data.get("estatus") or reporte.estatus).strip()
         if estatus not in {value for value, _label in ReporteFalla.ESTATUS}:
             return Response({"error": "Estatus no válido."}, status=400)
+        estatus_finales = {ReporteFalla.ESTATUS_RESUELTO, ReporteFalla.ESTATUS_CERRADO}
+        finalizando = estatus_anterior not in estatus_finales and estatus in estatus_finales
+        estimado_final = costo_estimado if costo_estimado is not None else reporte.costo_estimado
+        confirmar_estimado = str(request.data.get("confirmar_costo_estimado") or "").strip().lower() in {
+            "1",
+            "true",
+            "si",
+            "sí",
+            "yes",
+            "on",
+        }
+        if finalizando and estimado_final is not None and costo_real is None and not confirmar_estimado:
+            return Response(
+                {"error": "Confirma el importe final o captura uno distinto antes de finalizar."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         now = timezone.now()
         reporte.estatus = estatus
         reporte.asignado_a = request.user
@@ -1324,6 +1349,8 @@ def actualizar_item(request, tipo, pk):
             reporte.costo_estimado = costo_estimado
         if costo_real is not None:
             reporte.costo_real = costo_real
+        elif finalizando and confirmar_estimado:
+            reporte.costo_real = estimado_final
         reporte.save()
         # Si la falla se cierra, restaurar el activo vinculado a OPERATIVO
         if estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO):
@@ -1526,7 +1553,11 @@ def crear_servicio_mantenimiento(request):
         return redirect("mantenimiento:dashboard")
 
     if alcance == "unidad":
-        unidad = get_object_or_404(Unidad, pk=unidad_id, activa=True)
+        unidades = Unidad.objects.filter(activa=True)
+        branch_ids = authorized_branch_ids(request.user)
+        if branch_ids is not None:
+            unidades = unidades.filter(sucursal_id__in=branch_ids)
+        unidad = get_object_or_404(unidades, pk=unidad_id)
         tipo_servicio, _created = TipoServicioUnidad.objects.get_or_create(
             nombre=descripcion[:100],
             defaults={
@@ -1783,13 +1814,13 @@ def dashboard(request):
     # Servicios de flota — todos con proxima_fecha pendiente, más reciente por unidad+tipo
     from django.db.models import Max
     ultimos_ids = (
-        ServicioRealizadoUnidad.objects.filter(proxima_fecha__isnull=False)
+        ServicioRealizadoUnidad.objects.vigentes().filter(proxima_fecha__isnull=False)
         .values("unidad_id", "tipo_servicio_id")
         .annotate(ultimo_id=Max("id"))
         .values_list("ultimo_id", flat=True)
     )
     servicios_flota = list(
-        ServicioRealizadoUnidad.objects.filter(id__in=ultimos_ids)
+        ServicioRealizadoUnidad.objects.vigentes().filter(id__in=ultimos_ids)
         .select_related("unidad", "unidad__sucursal", "tipo_servicio")
         .order_by("proxima_fecha")[:60]
     )

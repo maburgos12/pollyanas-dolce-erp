@@ -28,7 +28,6 @@ class SetupCelerySchedulesCommandTests(TestCase):
             {
                 "pos_bridge: ventas cerradas diario",
                 "sat: descarga cfdi nocturna",
-                "syncfy: sincronizacion bancaria nocturna",
                 "pos_bridge: ventas intradia actual",
                 "pos_bridge: asistencias Point intradia",
                 "rentabilidad: recalculo intradia periodo actual",
@@ -65,9 +64,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "orquestacion: cadena plan demanda-produccion-compras",
                 "orquestacion: excepciones compra DG",
                 "orquestacion: guardia ajustes inventario",
+                "bonos: reconciliar asistencia periodo actual",
+                "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 39)
+        self.assertEqual(PeriodicTask.objects.count(), 40)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -77,11 +78,9 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(sat_download.crontab.hour, "1")
         self.assertEqual(sat_download.crontab.minute, "0")
         self.assertFalse(sat_download.enabled)
-        syncfy = PeriodicTask.objects.get(name="syncfy: sincronizacion bancaria nocturna")
-        self.assertEqual(syncfy.task, "syncfy_client.sincronizar_movimientos_bancarios")
-        self.assertEqual(syncfy.crontab.hour, "2")
-        self.assertEqual(syncfy.crontab.minute, "0")
-        self.assertFalse(syncfy.enabled)
+        self.assertFalse(
+            PeriodicTask.objects.filter(name="syncfy: sincronizacion bancaria nocturna").exists()
+        )
         intraday_sales = PeriodicTask.objects.get(name="pos_bridge: ventas intradia actual")
         self.assertEqual(intraday_sales.task, "pos_bridge.daily_sales_sync")
         self.assertEqual(intraday_sales.crontab.hour, "8-22")

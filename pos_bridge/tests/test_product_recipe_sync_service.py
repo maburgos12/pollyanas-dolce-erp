@@ -27,8 +27,12 @@ class FakePointHttpClient:
         del branch_hint
         return {"branch_name": "Matriz", "branch_id": 1, "account_id": "acc"}
 
-    def get_products(self):
+    def get_products(self, **kwargs):
         return list(self.payload["products"])
+
+    def get_all_products(self, **kwargs):
+        # Los catálogos de prueba son chicos: equivale al listado plano.
+        return self.get_products()
 
     def get_product_detail(self, product_id):
         return dict(self.payload["details"][product_id])
@@ -930,8 +934,8 @@ class PointProductRecipeSyncServiceTests(TestCase):
 
 
 class FakeRecipeSyncService:
-    def sync(self, *, branch_hint=None, product_codes=None, limit=None, include_without_recipe=False, sync_job=None):
-        del branch_hint, product_codes, limit, include_without_recipe, sync_job
+    def sync(self, *, branch_hint=None, product_codes=None, articulo_codes=None, limit=None, include_without_recipe=False, sync_job=None):
+        del branch_hint, product_codes, articulo_codes, limit, include_without_recipe, sync_job
         return PointRecipeSyncResult(
             summary={
                 "workspace": "Matriz",
@@ -1035,3 +1039,54 @@ class PointSyncServiceRecipeJobTests(TestCase):
         self.assertEqual(sync_job.status, PointSyncJob.STATUS_SUCCESS)
         self.assertEqual(sync_job.result_summary["point_retry_events"], 2)
         self.assertEqual(sync_job.result_summary["point_relogin_events"], 1)
+
+
+class ArticuloRootExtractionTests(TestCase):
+    """El extractor puede entrar por ARTÍCULO (insumos con receta propia)."""
+
+    def test_extrae_articulo_como_raiz(self):
+        payload = {
+            "products": [],
+            "details": {},
+            "boms": {},
+            "articulos": [
+                {
+                    "PK_Articulo": 900,
+                    "Codigo_Articulo": "01PLOTUSR",
+                    "Nombre_Articulo": "Pan Lotus Rosca",
+                    "Categoria": "PAN",
+                    "HasReceta": True,
+                }
+            ],
+            "articulo_details": {
+                900: {
+                    "Nombre_Articulo": "Pan Lotus Rosca",
+                    "Codigo_Articulo": "01PLOTUSR",
+                    "Categoria": "PAN",
+                    "UnidadVenta": "pza",
+                    "BOM": [
+                        {
+                            "PK_Articulo": 901,
+                            "Codigo_Articulo": "HAR001",
+                            "Articulo": "Harina Lotus Test",
+                            "Cantidad": 500,
+                            "Unidad_corto": "G",
+                        }
+                    ],
+                },
+                901: {
+                    "Nombre_Articulo": "Harina Lotus Test",
+                    "Codigo_Articulo": "HAR001",
+                    "Categoria": "Harinas",
+                    "UnidadVenta": "g",
+                    "BOM": [],
+                },
+            },
+        }
+        service = PointProductRecipeSyncService(http_client_factory=lambda: FakePointHttpClient(payload))
+        result = service.sync(articulo_codes=["01PLOTUSR"])
+        receta = Receta.objects.filter(codigo_point="01PLOTUSR").first()
+        self.assertIsNotNone(receta)
+        self.assertEqual(receta.tipo, Receta.TIPO_PREPARACION)
+        self.assertGreaterEqual(LineaReceta.objects.filter(receta=receta).count(), 1)
+        self.assertEqual(result.summary["products_selected"], 1)

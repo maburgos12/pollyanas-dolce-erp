@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from maestros.models import CostoInsumo, Insumo
 from pos_bridge.models import PointProductionLine
-from recetas.models import LineaReceta, Receta
+from recetas.models import LineaReceta, Receta, VentaHistorica
 
 from .models import ConsumoInsumoMensual, ExistenciaInsumo, MovimientoInventario
 
@@ -126,6 +126,8 @@ class ConsumoInsumoAuditService:
         start_dt = timezone.make_aware(datetime.combine(period_start, time.min))
         end_dt = timezone.make_aware(datetime.combine(period_end, time.max))
         produccion_por_receta = self._produccion_por_receta(period_start, period_end)
+        for receta_id, vendido in self._ventas_servicio_por_receta(period_start, period_end).items():
+            produccion_por_receta[receta_id] = produccion_por_receta.get(receta_id, DECIMAL_ZERO) + vendido
         teorico_por_insumo = self._consumo_teorico_por_insumo(produccion_por_receta)
 
         movimiento_insumo_ids = set(
@@ -240,6 +242,33 @@ class ConsumoInsumoAuditService:
             .annotate(total=Sum("produced_quantity"))
         )
         return {int(row["receta_id"]): Decimal(str(row["total"] or 0)) for row in rows}
+
+    def _ventas_servicio_por_receta(self, period_start: date, period_end: date) -> dict[int, Decimal]:
+        """Recetas FABRICADO que se venden sin pasar por producción Point (rebanadas,
+        sabores, vasos): su BOM (plato, cuchara, etiqueta, toppings) se consume al
+        momento de la venta, así que la venta cuenta como "producción" para el teórico."""
+        rows = (
+            VentaHistorica.objects.filter(
+                fecha__range=(period_start, period_end),
+                receta__modo_costeo=Receta.MODO_COSTEO_FABRICADO,
+                cantidad__gt=0,
+            )
+            .values("receta_id")
+            .annotate(total=Sum("cantidad"))
+        )
+        receta_ids = {int(row["receta_id"]) for row in rows}
+        if not receta_ids:
+            return {}
+        producidas = set(
+            PointProductionLine.objects.filter(
+                receta_id__in=receta_ids, production_date__lte=period_end
+            ).values_list("receta_id", flat=True)
+        )
+        return {
+            int(row["receta_id"]): Decimal(str(row["total"] or 0))
+            for row in rows
+            if int(row["receta_id"]) not in producidas
+        }
 
     def _consumo_teorico_por_insumo(self, produccion_por_receta: dict[int, Decimal]) -> dict[int, dict[str, object]]:
         if not produccion_por_receta:

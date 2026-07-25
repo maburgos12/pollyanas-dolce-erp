@@ -13,6 +13,7 @@ from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
 from inventario.models import ALMACEN_CHOICES, MovimientoInventario, UBICACION_CFP_1_1
 from inventario.services_existencias import aplicar_delta
+from pos_bridge.services.unidades import cantidad_en_unidad_erp
 from maestros.models import Insumo, PointPendingMatch
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import (
@@ -240,12 +241,15 @@ class PointMovementSyncService:
     def _upsert_inventory_movement(self, *, line: PointProductionLine) -> bool:
         almacen = "CUARTO_FRIO"
         fecha = datetime.combine(line.production_date, datetime.min.time(), tzinfo=timezone.get_current_timezone())
+        cantidad_erp, _nota = cantidad_en_unidad_erp(
+            Decimal(str(line.produced_quantity or 0)), line.unit, line.insumo
+        )
         defaults = {
             "fecha": fecha,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
             "almacen": almacen,
-            "cantidad": line.produced_quantity,
+            "cantidad": cantidad_erp,
             "referencia": f"POINT-PROD:{line.production_external_id}",
         }
         existing = MovimientoInventario.objects.select_for_update().filter(source_hash=line.source_hash).first()
@@ -291,11 +295,11 @@ class PointMovementSyncService:
             MovimientoInventario.objects.create(source_hash=line.source_hash, **defaults)
             self._apply_inventory_delta(
                 insumo=line.insumo,
-                delta=Decimal(str(line.produced_quantity or 0)),
+                delta=cantidad_erp,
                 almacen=almacen,
             )
             return True
-        new_qty = Decimal(str(line.produced_quantity or 0))
+        new_qty = cantidad_erp
         old_qty = Decimal(str(existing.cantidad or 0))
         old_almacen = existing.almacen or almacen
         if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:
@@ -361,12 +365,17 @@ class PointMovementSyncService:
         almacen = derived_almacen or existing_almacen
         if not almacen:
             raise ValueError("La transferencia Point no tiene una ubicación de inventario derivable.")
+        # Point reporta en SU unidad (kg/litro); el ERP guarda en la unidad
+        # base del insumo (g/ml) — sin convertir, la entrada queda 1000× corta.
+        cantidad_erp, _nota = cantidad_en_unidad_erp(
+            Decimal(str(line.received_quantity or 0)), line.unit, line.insumo
+        )
         defaults = {
             "fecha": movement_at,
             "tipo": MovimientoInventario.TIPO_ENTRADA,
             "insumo": line.insumo,
             "almacen": almacen,
-            "cantidad": line.received_quantity,
+            "cantidad": cantidad_erp,
             "referencia": f"POINT-TRANSFER:{line.transfer_external_id}",
         }
         if existing is None:
@@ -374,10 +383,10 @@ class PointMovementSyncService:
             self._apply_inventory_delta(
                 insumo=line.insumo,
                 almacen=almacen,
-                delta=Decimal(str(line.received_quantity or 0)),
+                delta=cantidad_erp,
             )
             return True
-        new_qty = Decimal(str(line.received_quantity or 0))
+        new_qty = cantidad_erp
         old_qty = Decimal(str(existing.cantidad or 0))
         old_almacen = existing_almacen or almacen
         if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == almacen:

@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from .models import MermaEvidencia, MermaProducto, MermaRegistro, PersonalEnviosSucursal
+from .models import (
+    MermaEvidencia, MermaInsumo, MermaInsumoEvento, MermaProducto, MermaRegistro,
+    OrdenAjustePoint, PersonalEnviosSucursal,
+)
 
 
 class MermaProductoInline(admin.TabularInline):
@@ -44,3 +47,39 @@ class PersonalEnviosSucursalAdmin(admin.ModelAdmin):
     @admin.display(description="Nombre")
     def nombre(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+
+@admin.register(MermaInsumo)
+class MermaInsumoAdmin(admin.ModelAdmin):
+    list_display = ("id", "sucursal", "nombre_point", "cantidad_reportada", "unidad_point", "estatus", "jefe_inmediato", "creado_en")
+    list_filter = ("estatus", "sucursal", "unidad_point")
+    search_fields = ("codigo_point", "nombre_point", "reportado_por__username", "jefe_inmediato__username")
+    readonly_fields = tuple(field.name for field in MermaInsumo._meta.fields)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MermaInsumoEvento)
+class MermaInsumoEventoAdmin(admin.ModelAdmin):
+    list_display = ("merma", "estado_anterior", "estado_nuevo", "actor", "creado_en")
+    readonly_fields = ("merma", "estado_anterior", "estado_nuevo", "actor", "motivo", "metadata", "creado_en")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OrdenAjustePoint)
+class OrdenAjustePointAdmin(admin.ModelAdmin):
+    list_display = ("id", "merma", "sucursal", "codigo_point", "cantidad", "estatus", "intentos", "actualizado_en")
+    list_filter = ("estatus", "sucursal")
+    readonly_fields = ("merma", "sucursal", "codigo_point", "unidad_point", "cantidad", "idempotency_key", "payload_hash", "existencia_antes", "existencia_despues", "referencia_point", "evidencia_tecnica", "creado_en", "aplicado_en", "actualizado_en")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

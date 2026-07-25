@@ -147,6 +147,11 @@ class Empleado(models.Model):
     banco = models.CharField(max_length=80, blank=True, default="")
     cuenta_clabe = models.CharField(max_length=18, blank=True, default="")
     numero_cuenta = models.CharField(max_length=20, blank=True, default="")
+    exento_checador = models.BooleanField(
+        default=False,
+        help_text="No genera falta automática cuando no hay checada (remoto, oficina sin checador).",
+    )
+    exento_checador_motivo = models.CharField(max_length=120, blank=True, default="")
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -508,6 +513,7 @@ class EmpleadoBaja(models.Model):
         return self.antiguedad_meses <= Decimal("3")
 
     def save(self, *args, **kwargs):
+        creating = self._state.adding
         if self.empleado_id:
             self.nombre = self.nombre or self.empleado.nombre
             self.area = self.area or self.empleado.area
@@ -515,6 +521,12 @@ class EmpleadoBaja(models.Model):
             self.tipo_contrato = self.tipo_contrato or self.empleado.tipo_contrato
             self.fecha_ingreso = self.fecha_ingreso or self.empleado.fecha_ingreso
         super().save(*args, **kwargs)
+        # Invariante: registrar una baja desactiva al empleado en todo el ERP,
+        # sin importar la ruta de captura (vistas, admin, shell, imports).
+        if creating and self.empleado_id:
+            from rrhh.services_identidad import desactivar_identidad_operativa_empleado
+
+            desactivar_identidad_operativa_empleado(self.empleado)
 
     def __str__(self) -> str:
         return f"{self.nombre} · {self.fecha_baja}"
@@ -1593,6 +1605,82 @@ class MovimientoVacaciones(models.Model):
 
     def __str__(self) -> str:
         return f"{self.empleado} · {self.tipo} · {self.dias}"
+
+
+class PeriodoVacacional(models.Model):
+    """Bolsa de días de goce generada en cada aniversario del empleado."""
+
+    empleado = models.ForeignKey(Empleado, on_delete=models.CASCADE, related_name="periodos_vacacionales")
+    aniversario = models.DateField()
+    fecha_limite = models.DateField()
+    antiguedad_anios = models.PositiveSmallIntegerField()
+    dias_generados = models.DecimalField(max_digits=6, decimal_places=2)
+    origen = models.CharField(max_length=20, default="calculado")
+    notas = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["aniversario", "id"]
+        verbose_name = "Periodo vacacional"
+        verbose_name_plural = "Periodos vacacionales"
+        constraints = [
+            models.UniqueConstraint(fields=["empleado", "aniversario"], name="uq_periodo_vac_aniversario"),
+            models.CheckConstraint(check=models.Q(dias_generados__gte=0), name="ck_periodo_vac_dias_no_neg"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.aniversario} · {self.dias_generados}"
+
+
+class AplicacionGoceVacaciones(models.Model):
+    """Desglose de días de una solicitud aplicados a un periodo vacacional."""
+
+    ESTADO_RESERVADA = "reservada"
+    ESTADO_CONSUMIDA = "consumida"
+    ESTADO_LIBERADA = "liberada"
+    ESTADO_REVERTIDA = "revertida"
+    ESTADO_CHOICES = [
+        (ESTADO_RESERVADA, "Reservada"),
+        (ESTADO_CONSUMIDA, "Consumida"),
+        (ESTADO_LIBERADA, "Liberada"),
+        (ESTADO_REVERTIDA, "Revertida"),
+    ]
+
+    solicitud = models.ForeignKey(
+        SolicitudVacaciones, on_delete=models.PROTECT, related_name="aplicaciones_goce"
+    )
+    periodo = models.ForeignKey(
+        PeriodoVacacional, on_delete=models.PROTECT, related_name="aplicaciones_goce"
+    )
+    dias = models.DecimalField(max_digits=6, decimal_places=2)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, db_index=True)
+    excepcion_fifo = models.BooleanField(default=False)
+    motivo_excepcion = models.CharField(max_length=220, blank=True, default="")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["periodo__aniversario", "id"]
+        verbose_name = "Aplicación de goce vacacional"
+        verbose_name_plural = "Aplicaciones de goce vacacional"
+        constraints = [
+            models.UniqueConstraint(fields=["solicitud", "periodo"], name="uq_aplicacion_goce_periodo"),
+            models.CheckConstraint(check=models.Q(dias__gt=0), name="ck_aplicacion_goce_dias_pos"),
+        ]
+
+    def clean(self):
+        if self.solicitud_id and self.periodo_id:
+            if self.solicitud.empleado_id != self.periodo.empleado_id:
+                raise ValidationError(
+                    "La solicitud y el periodo vacacional deben pertenecer al mismo empleado."
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.solicitud_id} · {self.periodo_id} · {self.dias} ({self.estado})"
 
 
 class IncidenciaAsistencia(models.Model):

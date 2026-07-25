@@ -309,3 +309,150 @@ class VisitasSucursalTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sucursal Payán")
+
+    def test_detalle_reprogramar_visita(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "reprogramar", "nueva_fecha": "2026-06-26"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        visita.refresh_from_db()
+        self.assertEqual(str(visita.fecha_programada), "2026-06-26")
+        self.assertEqual(visita.estatus, VisitaSucursal.ESTATUS_PROGRAMADA)
+
+    def test_detalle_reprogramar_rechaza_dia_ocupado(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+        VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-26", creado_por=self.user
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "reprogramar", "nueva_fecha": "2026-06-26"},
+        )
+
+        visita.refresh_from_db()
+        self.assertEqual(str(visita.fecha_programada), "2026-06-24")
+
+    def test_detalle_cancelar_visita(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "cancelar"},
+        )
+
+        visita.refresh_from_db()
+        self.assertEqual(visita.estatus, VisitaSucursal.ESTATUS_CANCELADA)
+
+    def test_detalle_eliminar_visita_programada(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "eliminar"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("anio=2026", response.url)
+        self.assertFalse(VisitaSucursal.objects.filter(pk=visita.pk).exists())
+
+    def test_detalle_no_elimina_visita_realizada(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal,
+            fecha_programada="2026-06-24",
+            estatus=VisitaSucursal.ESTATUS_REALIZADA,
+            creado_por=self.user,
+        )
+
+        self.client.post(
+            reverse("visitas_sucursal:detalle", args=[visita.id]),
+            {"action": "eliminar"},
+        )
+
+        self.assertTrue(VisitaSucursal.objects.filter(pk=visita.pk).exists())
+
+    def test_app_auditor_filtra_por_sucursal(self):
+        otra = Sucursal.objects.create(codigo="OTR", nombre="Otra", activa=True)
+        VisitaSucursal.objects.create(sucursal=self.sucursal, creado_por=self.user)
+        visita_otra = VisitaSucursal.objects.create(sucursal=otra, creado_por=self.user)
+
+        response = self.client.get(
+            reverse("visitas_sucursal:app"),
+            {"modo": "auditor", "sucursal": otra.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["visita"].id, visita_otra.id)
+        self.assertEqual(
+            [item.sucursal_id for item in response.context["visitas"]],
+            [otra.id],
+        )
+
+    def test_lista_agenda_por_dia_es_default(self):
+        VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.get(reverse("visitas_sucursal:lista"), {"anio": 2026, "mes": 6})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["vista_movil"], "dia")
+        agenda = response.context["agenda_dias"]
+        self.assertEqual(len(agenda), 1)
+        self.assertEqual(str(agenda[0]["fecha"]), "2026-06-24")
+        self.assertEqual(len(agenda[0]["visitas"]), 1)
+        self.assertContains(response, "Por sucursal")
+
+    def test_lista_vista_sucursal_por_parametro(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "sucursal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["vista_movil"], "sucursal")
+
+    def test_lista_vista_invalida_regresa_a_dia(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "xxx"},
+        )
+
+        self.assertEqual(response.context["vista_movil"], "dia")
+
+    def test_nueva_precarga_sucursal_y_fecha_desde_get(self):
+        response = self.client.get(
+            reverse("visitas_sucursal:nueva"),
+            {"sucursal": self.sucursal.id, "fecha": "2026-06-28"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'value="{self.sucursal.id}" selected')
+        self.assertContains(response, 'value="2026-06-28"')
+
+    def test_lista_vista_sucursal_muestra_mini_calendario(self):
+        visita = VisitaSucursal.objects.create(
+            sucursal=self.sucursal, fecha_programada="2026-06-24", creado_por=self.user
+        )
+
+        response = self.client.get(
+            reverse("visitas_sucursal:lista"),
+            {"anio": 2026, "mes": 6, "vista": "sucursal"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "visit-mini-cal")
+        self.assertContains(response, reverse("visitas_sucursal:detalle", args=[visita.id]))
+        self.assertContains(response, f"?sucursal={self.sucursal.id}&fecha=2026-06-01")

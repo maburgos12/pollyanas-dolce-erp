@@ -8,6 +8,7 @@ from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
 from core import shortcut_views
 from core import views as core_views
+from core import superuser_preview
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
 
@@ -36,6 +37,21 @@ urlpatterns = [
     path("notificaciones/<int:pk>/leer/", core_views.notificacion_leer_view, name="notificacion_leer"),
     path("notificaciones/marcar-todas/", core_views.notificaciones_marcar_todas_view, name="notificaciones_marcar_todas"),
     path("auditoria/", core_views.audit_log_view, name="audit_log"),
+    path(
+        "superusuario/ver-como/opciones/",
+        superuser_preview.preview_options,
+        name="superuser_preview_options",
+    ),
+    path(
+        "superusuario/ver-como/iniciar/",
+        superuser_preview.preview_start,
+        name="superuser_preview_start",
+    ),
+    path(
+        "superusuario/ver-como/salir/",
+        superuser_preview.preview_stop,
+        name="superuser_preview_stop",
+    ),
     path("ia-privada/", ai_chat_views.chat_home, name="ai_private_hub"),
     path("ia-privada/api/conversations/", ai_chat_views.conversations_api, name="ai_private_conversations_api"),
     path("ia-privada/api/conversations/new/", ai_chat_views.create_conversation_api, name="ai_private_conversation_create_api"),
@@ -95,7 +111,6 @@ urlpatterns = [
     path("seguimiento/", include(("seguimiento.urls", "seguimiento"), namespace="seguimiento")),
     path("conciliacion/", include(("conciliacion.urls", "conciliacion"), namespace="conciliacion")),
     path("sat/", include(("sat_client.urls", "sat_client"), namespace="sat_client")),
-    path("syncfy/", include(("syncfy_client.urls", "syncfy_client"), namespace="syncfy_client")),
     path("reportes/", include(("reportes.urls", "reportes"), namespace="reportes")),
     path("inversiones/", include(("reportes.urls_inversiones", "inversiones"), namespace="inversiones")),
     path("integraciones/", include(("integraciones.urls", "integraciones"), namespace="integraciones")),
@@ -105,6 +120,11 @@ urlpatterns = [
     ),
     path("orquestacion/", include(("orquestacion.urls", "orquestacion"), namespace="orquestacion")),
     path("rentabilidad/", views_rentabilidad.dashboard_rentabilidad, name="rentabilidad_dashboard"),
+    path(
+        "rentabilidad/reporte-mensual/",
+        views_rentabilidad.reporte_mensual,
+        name="rentabilidad_reporte_mensual",
+    ),
     path("rentabilidad/<int:pk>/", views_rentabilidad.detalle_sucursal, name="rentabilidad_detalle"),
     path(
         "rentabilidad/<int:pk>/analizar/",

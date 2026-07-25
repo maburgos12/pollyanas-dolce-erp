@@ -192,6 +192,7 @@ class LogisticaEntregaCreateSerializer(serializers.Serializer):
     estatus = serializers.ChoiceField(choices=EntregaRuta.ESTATUS_CHOICES, required=False, default=EntregaRuta.ESTATUS_PENDIENTE)
     monto_estimado = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
     comentario = serializers.CharField(required=False, allow_blank=True, default="")
+    motivo_diferencia = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
 
 
 class PuntoLogisticoSerializer(serializers.ModelSerializer):
@@ -485,7 +486,10 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
 
     def get_point_enviada(self, obj):
         point_line = self._point_line(obj)
-        return bool(point_line and point_transfer_enviada(point_line))
+        if point_line is None:
+            # Carga manual capturada en el ERP: no depende del Enviado de Point.
+            return True
+        return point_transfer_enviada(point_line)
 
     def get_cantidad_cargada(self, obj):
         return self.get_cantidad_cargada_pwa(obj)
@@ -599,6 +603,10 @@ class RutaCargaLineaValidarSerializer(serializers.Serializer):
     )
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+    source_hash = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
+    transfer_external_id = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
+    detail_external_id = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
+    parada_id = serializers.IntegerField(required=False, min_value=1)
 
 
 class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
@@ -607,6 +615,26 @@ class RutaCargaProductoTramoValidarSerializer(serializers.Serializer):
     unit = serializers.CharField(required=False, allow_blank=True, max_length=50, default="")
     cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
+
+
+class RutaCargaSucursalLineaSerializer(serializers.Serializer):
+    linea_id = serializers.IntegerField(min_value=1)
+    source_hash = serializers.CharField(max_length=64)
+    cantidad_cargada = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0"))
+    motivo_diferencia = serializers.ChoiceField(
+        choices=RutaCargaChecklistLinea.MOTIVO_CHOICES,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RutaCargaSucursalGuardarSerializer(serializers.Serializer):
+    contexto_token = serializers.CharField()
+    version_checklist = serializers.CharField(max_length=64)
+    client_event_id = serializers.CharField(max_length=80)
+    lineas = RutaCargaSucursalLineaSerializer(many=True, allow_empty=False)
 
 
 class ParadaEntregaEvidenciaCreateSerializer(serializers.Serializer):
@@ -650,6 +678,8 @@ class ParadaEntregaConfirmarSerializer(serializers.Serializer):
     notas = serializers.CharField(required=False, allow_blank=True, default="")
     client_event_id = serializers.CharField(required=False, allow_blank=True, max_length=80, default="")
     client_context = serializers.DictField(required=False, default=dict)
+    contexto_token = serializers.CharField(required=False, allow_blank=True, default="")
+    version_checklist = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
     evidencias = ParadaEntregaEvidenciaCreateSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
@@ -1294,6 +1324,7 @@ class LogisticaLavadoUnidadCreateSerializer(serializers.ModelSerializer):
 
 
 class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
+    unidad = serializers.PrimaryKeyRelatedField(queryset=Unidad.objects.filter(activa=True), required=False)
     nivel_gas_salida = serializers.CharField()
     MAX_KM_SALTO_SALIDA = 1000
 
@@ -1323,6 +1354,13 @@ class LogisticaBitacoraSalidaCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         unidad = attrs.get("unidad")
+        if not unidad:
+            ruta = self.context.get("ruta")
+            unidad = getattr(ruta, "unidad_operativa", None)
+            if unidad and unidad.activa:
+                attrs["unidad"] = unidad
+            else:
+                raise serializers.ValidationError({"unidad": "Selecciona una unidad activa para iniciar bitácora."})
         km_salida = attrs.get("km_salida")
         if unidad and km_salida is not None:
             ultimo_turno = (

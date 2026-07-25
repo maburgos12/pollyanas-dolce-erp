@@ -1,11 +1,12 @@
 """Pruebas de consolidación del real en el presupuesto maestro."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch
@@ -555,11 +556,32 @@ class PresupuestoRealFixesReviewTests(TestCase):
         self.client.force_login(self.superuser)
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
         kpis = response.context["kpis"]
-        self.assertEqual(kpis["presupuesto"], Decimal("50.00"))
-        self.assertEqual(kpis["real"], Decimal("40.00"))
+        self.assertEqual(kpis["ppto_egresos"], Decimal("50.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("40.00"))
         # Con el área nómina seleccionada sí se muestra su propio total.
         response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=nomina")
-        self.assertEqual(response.context["kpis"]["presupuesto"], Decimal("100.00"))
+        self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("100.00"))
+
+    def test_kpi_capex_va_aparte_de_egresos(self):
+        """CAPEX es inversión, no gasto: su KPI va aparte y no suma a egresos."""
+        area_capex = AreaPresupuesto.objects.create(nombre="Inversión", codigo="capex")
+        rubro_capex = RubroPresupuesto.objects.create(
+            area=area_capex, concepto="CAPEX Horno nuevo", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro_capex, periodo=self.periodo,
+            monto_presupuesto=Decimal("500.00"), monto_real=Decimal("300.00"),
+            fuente_real="MANUAL:dg",
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["ppto_capex"], Decimal("500.00"))
+        self.assertEqual(kpis["real_capex"], Decimal("300.00"))
+        # Egresos operativos no cambian, y la diferencia operativa tampoco.
+        self.assertEqual(kpis["ppto_egresos"], Decimal("50.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("40.00"))
+        self.assertEqual(kpis["dif_real"], Decimal("0.00") - Decimal("40.00"))
 
     def test_export_neutraliza_formulas(self):
         """Un concepto que empieza con '=' se exporta neutralizado."""
@@ -1206,12 +1228,14 @@ class MatchingRefinadoTests(TestCase):
         self.assertEqual(filtros_vaso.get("productos_pos"), ["Vaso Fresas con Crema Grande"])
 
     def test_override_de_csv_manda_sobre_la_autoasignacion(self):
-        """El rubro con override en el CSV recibe UNA regla, la del CSV."""
-        rubro = self._rubro("BEBIDAS/OTROS · REFRESCO")
+        """El rubro con override en el CSV recibe SOLO las reglas del CSV."""
+        rubro = self._rubro("Bebidas")
         call_command("seed_reglas_fuente_rubro", stdout=StringIO())
         reglas = list(ReglaFuenteRubro.objects.filter(rubro=rubro))
-        self.assertEqual(len(reglas), 1)
-        self.assertEqual(reglas[0].filtros.get("categoria_pos"), "Coca-cola")
+        self.assertEqual(len(reglas), 3)
+        self.assertEqual(
+            {r.filtros.get("categoria_pos") for r in reglas}, {"Coca-cola", "TE", "Café"}
+        )
 
 
 class FueraProyeccionTests(TestCase):
@@ -1672,3 +1696,1652 @@ class ImportRealGastosExcelTests(TestCase):
         )
         linea.refresh_from_db()
         self.assertEqual(linea.monto_real, Decimal("999"))
+
+
+class CedulaImssTests(TestCase):
+    """Import de cédulas SIPARE: parseo por etiquetas, cruce NSS y reparto."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.sucursal = Sucursal.objects.create(codigo="CED01", nombre="Centro cédula")
+        cls.gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        cls.adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.nom = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area, sucursal in [(cls.gv, cls.sucursal), (cls.adm, None), (cls.nom, None)]:
+            for concepto in ["IMSS", "Infonavit"]:
+                RubroPresupuesto.objects.create(
+                    area=area, concepto=concepto, sucursal=sucursal,
+                    tipo=RubroPresupuesto.TIPO_EGRESO,
+                )
+        Empleado.objects.create(
+            codigo="CED-1", nombre="Vendedora uno", nss="23-91-73-3507-9",
+            departamento=Empleado.DEP_VENTAS, sucursal_ref=cls.sucursal,
+        )
+        Empleado.objects.create(
+            codigo="CED-2", nombre="Admin uno", nss="23988051852",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def _filas_mensual(self):
+        return [
+            [""] * 22,
+            ["SISTEMA ÚNICO DE AUTODETERMINACIÓN"] + [""] * 21,
+            [""] * 22,
+            [""] * 22,
+            [""] * 22,
+            [""] * 22,
+            ["Fecha de Proceso", "2026-05-15"] + [""] * 20,
+            ["Período de Proceso: Abril-2026"] + [""] * 21,
+            [""] * 22,
+            ["Registro Patronal: ", "E52-40157-10-0"] + [""] * 20,
+            *[[""] * 22 for _ in range(11)],
+            ["Clave", "", "Fecha", "Días", "SDI", "Lic.", "Inc.", "Aus.", "C.F.", "Exc.Pat.",
+             "Exc. Obr.", "P.D. Pat.", "P.D. Obr.", "G.M.P. Pat.", "G.M.P. Obr.", "R.T.",
+             "I.V. Pat.", "I.V. Obr", "G.P.S.", "Patronal", "Obrera", "SubTotal"],
+            ["23-91-73-3507-9", "", "", "", "", "ACOSTA FLORES MARIA"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 331.44, 0, 3, 0, 646.14, 0, 0, 62.64, 22.37, 93.96, 33.56,
+             44.74, 156.61, 55.93, 89.49, 1093.58, 111.86, 1205.44],
+            ["23-98-80-5185-2", "", "", "", "", "PEREZ ADMIN JUAN"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 331.01, 0, 0, 0, 717.94, 0, 0, 69.51, 24.83, 104.27, 37.24,
+             49.65, 173.78, 62.06, 99.3, 1214.45, 124.13, 1338.58],
+            ["99-99-99-9999-9", "", "", "", "", "SIN CRUCE FULANO"] + [""] * 16,
+            [""] * 22,
+            ["", "", "", 30, 300, 0, 0, 0, 500, 0, 0, 50, 20, 80, 30, 40, 150, 50, 80, 930, 100, 1030],
+        ]
+
+    def test_mensual_cruza_reparte_y_reporta_sin_nss(self):
+        from reportes.services_cedula_imss import aplicar_cedula, parsear_cedula
+
+        parseada = parsear_cedula(self._filas_mensual())
+        self.assertEqual(parseada.tipo, "MENSUAL")
+        self.assertEqual(parseada.periodo, date(2026, 4, 1))
+        self.assertEqual(len(parseada.trabajadores), 3)
+
+        resumen = aplicar_cedula(parseada)
+        self.assertEqual(resumen.empleados_cruzados, 2)
+        self.assertEqual(len(resumen.nss_sin_cruce), 1)
+
+        imss_suc = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="IMSS", rubro__sucursal=self.sucursal,
+            periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(imss_suc.monto_real, Decimal("1093.58"))  # patronal vendedora
+        self.assertEqual(imss_suc.fuente_real, "AUTO:SIPARE")
+        imss_adm = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="IMSS", periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(imss_adm.monto_real, Decimal("1214.45"))
+        imss_nom = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.nom, rubro__concepto="IMSS", periodo=date(2026, 4, 1),
+        )
+        # El control (Nómina) lleva el total ÍNTEGRO de la cédula, incluido
+        # el NSS sin cruce ($930) — el dinero nunca se esconde.
+        self.assertEqual(imss_nom.monto_real, Decimal("3238.03"))
+
+    def test_bimestral_parte_mitad_y_mitad_y_respeta_manual(self):
+        from reportes.services_cedula_imss import aplicar_cedula, parsear_cedula
+
+        filas = self._filas_mensual()
+        filas[7] = ["Bimestre de Proceso: Abril-2026"] + [""] * 21
+        filas[21] = ["Clave", "Fecha", "Días", "SDI", "Lic.", "Inc.", "Aus.", "Retiro",
+                     "Patronal", "Obrera", "Suma", "Aportación Pa", "% o $ o FD", "*",
+                     "Suma", "Créd. Vivienda", "Tipo"] + [""] * 5
+        filas[24] = ["", "", 61, 331.44, 0, 3, 0, 404.36, 1158.41, 216.26, 1779.03,
+                     1010.89, "", 1404.24, "", 2823.48, ""] + [""] * 5
+        filas[27] = ["", "", 61, 331.01, 0, 0, 0, 403.83, 1216.75, 227.16, 1847.74,
+                     1009.58, "", "", "", 0, ""] + [""] * 5
+        filas[30] = ["", "", 61, 300, 0, 0, 0, 400, 1100, 200, 1700, 1000, "", "", "", 0, ""] + [""] * 5
+
+        # Captura manual previa en marzo (mes 1 del bimestre): NO debe pisarse.
+        infonavit_adm = RubroPresupuesto.objects.get(area=self.adm, concepto="Infonavit")
+        LineaPresupuestoMensual.objects.create(
+            rubro=infonavit_adm, periodo=date(2026, 3, 1), monto_presupuesto=Decimal("0"),
+            monto_real=Decimal("777"), fuente_real="MANUAL:paula.lugo",
+        )
+
+        parseada = parsear_cedula(filas)
+        self.assertEqual(parseada.tipo, "BIMESTRAL")
+        self.assertEqual([m.isoformat() for m in parseada.meses], ["2026-03-01", "2026-04-01"])
+
+        resumen = aplicar_cedula(parseada)
+        # Vendedora: (404.36 + 1158.41 + 1010.89) = 2573.66 → 1286.83 por mes.
+        marzo = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="Infonavit", periodo=date(2026, 3, 1),
+        )
+        abril = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.gv, rubro__concepto="Infonavit", periodo=date(2026, 4, 1),
+        )
+        self.assertEqual(marzo.monto_real, Decimal("1286.83"))
+        self.assertEqual(abril.monto_real, Decimal("1286.83"))
+        # La captura manual de marzo en administración quedó intacta.
+        linea_manual = LineaPresupuestoMensual.objects.get(
+            rubro=infonavit_adm, periodo=date(2026, 3, 1),
+        )
+        self.assertEqual(linea_manual.monto_real, Decimal("777"))
+        self.assertEqual(resumen.protegidas_manual, 1)
+
+
+class CedulaImssEndurecidaTests(TestCase):
+    """Fixes de la revisión adversarial del import de cédulas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.nom = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in [cls.adm, cls.nom]:
+            for concepto in ["IMSS", "Infonavit"]:
+                RubroPresupuesto.objects.create(
+                    area=area, concepto=concepto, tipo=RubroPresupuesto.TIPO_EGRESO
+                )
+
+    def _parseada(self, tipo="MENSUAL", periodo=None, trabajadores=None):
+        from reportes.services_cedula_imss import CedulaParseada, TrabajadorCedula
+
+        return CedulaParseada(
+            tipo=tipo, periodo=periodo or date(2026, 4, 1), registro_patronal="E52",
+            trabajadores=[TrabajadorCedula(*t) for t in (trabajadores or [])],
+        )
+
+    def test_area_con_mezcla_de_sucursales_no_truena(self):
+        """Ventas con sucursal + sin sucursal en la misma corrida (bug de prod)."""
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        sucursal = Sucursal.objects.create(codigo="MIX01", nombre="Mixta")
+        RubroPresupuesto.objects.create(area=gv, concepto="IMSS", tipo=RubroPresupuesto.TIPO_EGRESO)
+        RubroPresupuesto.objects.create(
+            area=gv, concepto="IMSS", sucursal=sucursal, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        Empleado.objects.create(
+            codigo="MIX-1", nombre="Con sucursal", nss="77777777777",
+            departamento=Empleado.DEP_VENTAS, sucursal_ref=sucursal,
+        )
+        Empleado.objects.create(
+            codigo="MIX-2", nombre="Sin sucursal", nss="88888888888",
+            departamento=Empleado.DEP_VENTAS,
+        )
+        resumen = aplicar_cedula(self._parseada(trabajadores=[
+            ("77777777777", "A", Decimal("10")), ("88888888888", "B", Decimal("20")),
+        ]))
+        self.assertEqual(resumen.empleados_cruzados, 2)
+
+    def test_nss_duplicado_en_rrhh_aborta(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        for codigo in ["DUP-1", "DUP-2"]:
+            Empleado.objects.create(
+                codigo=codigo, nombre=f"Empleado {codigo}", nss="11-11-11-1111-1",
+                departamento=Empleado.DEP_ADMINISTRACION,
+            )
+        parseada = self._parseada(trabajadores=[("11111111111", "X", Decimal("100"))])
+        with self.assertRaises(ValueError):
+            aplicar_cedula(parseada)
+
+    def test_total_control_incluye_sin_cruce_y_avisa(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        Empleado.objects.create(
+            codigo="OK-1", nombre="Con cruce", nss="22222222222",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        parseada = self._parseada(trabajadores=[
+            ("22222222222", "Con cruce", Decimal("100.00")),
+            ("33333333333", "Sin cruce", Decimal("50.00")),
+        ])
+        resumen = aplicar_cedula(parseada)
+        self.assertEqual(resumen.total_patronal, Decimal("150.00"))
+        control = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.nom, rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(control.monto_real, Decimal("150.00"))  # íntegro
+        adm = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(adm.monto_real, Decimal("100.00"))  # solo asignado
+        self.assertTrue(any("SIN asignar" in a for a in resumen.avisos))
+
+    def test_no_pisa_otra_fuente_auto_pero_si_legado(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        Empleado.objects.create(
+            codigo="OK-2", nombre="Admin", nss="44444444444",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        rubro_adm = RubroPresupuesto.objects.get(area=self.adm, concepto="IMSS")
+        otra_fuente = LineaPresupuestoMensual.objects.create(
+            rubro=rubro_adm, periodo=date(2026, 4, 1), monto_presupuesto=Decimal("0"),
+            monto_real=Decimal("999"), fuente_real="AUTO:GASTO_OPERATIVO",
+        )
+        resumen = aplicar_cedula(self._parseada(trabajadores=[("44444444444", "A", Decimal("80"))]))
+        otra_fuente.refresh_from_db()
+        self.assertEqual(otra_fuente.monto_real, Decimal("999"))  # conflicto, no pisado
+        self.assertTrue(any("conflicto de fuentes" in a for a in resumen.avisos))
+
+        # AUTO:LEGADO (Excel tecleado) SÍ cede ante la cédula oficial.
+        otra_fuente.fuente_real = "AUTO:LEGADO"
+        otra_fuente.save()
+        aplicar_cedula(self._parseada(trabajadores=[("44444444444", "A", Decimal("80"))]))
+        otra_fuente.refresh_from_db()
+        self.assertEqual(otra_fuente.monto_real, Decimal("80.00"))
+        self.assertEqual(otra_fuente.fuente_real, "AUTO:SIPARE")
+
+    def test_bimestre_impar_rechazado_y_centavo_conservado(self):
+        from reportes.services_cedula_imss import aplicar_cedula
+
+        with self.assertRaises(ValueError):
+            aplicar_cedula(self._parseada(
+                tipo="BIMESTRAL", periodo=date(2026, 3, 1),
+                trabajadores=[("55555555555", "X", Decimal("100"))],
+            ))
+
+        Empleado.objects.create(
+            codigo="OK-3", nombre="Admin b", nss="66666666666",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        # Total con centavo impar: 100.01 → 50.01 + 50.00 (suma exacta).
+        aplicar_cedula(self._parseada(
+            tipo="BIMESTRAL", periodo=date(2026, 4, 1),
+            trabajadores=[("66666666666", "B", Decimal("100.01"))],
+        ))
+        marzo = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="Infonavit", periodo=date(2026, 3, 1)
+        )
+        abril = LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, rubro__concepto="Infonavit", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(marzo.monto_real + abril.monto_real, Decimal("100.01"))
+
+
+class PantallaCedulaImssTests(TestCase):
+    """Pantalla de subida de cédulas: RBAC, preview y aplicación."""
+
+    URL = "/reportes/presupuesto-real/cedula-imss/"
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        cls.dg = User.objects.create_superuser("dg_ced", "dgc@test.mx", "x")
+        cls.paula = User.objects.create_user("paula_ced", "p@test.mx", "x")
+        cls.ajeno = User.objects.create_user("ajeno_ced", "a@test.mx", "x")
+
+        from reportes.models import AreaPresupuestoResponsable
+
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        adm = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        for area in [nomina, adm]:
+            RubroPresupuesto.objects.create(area=area, concepto="IMSS", tipo=RubroPresupuesto.TIPO_EGRESO)
+        AreaPresupuestoResponsable.objects.create(area=nomina, usuario=cls.paula)
+        Empleado.objects.create(
+            codigo="PC-1", nombre="Admin cédula", nss="12121212121",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def _subir(self, usuario, previsualizar=True):
+        from unittest.mock import patch
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        filas = [
+            ["Período de Proceso: Abril-2026"],
+            ["Clave", "", "", "Patronal", "Obrera"],
+            ["12-12-12-1212-1", "TRABAJADORA UNO"],
+            ["", "", "", 500.0, 100.0],
+        ]
+        self.client.force_login(usuario)
+        datos = {"cedula": SimpleUploadedFile("cedula.xls", b"fake")}
+        if previsualizar:
+            datos["previsualizar"] = "1"
+        with patch("reportes.services_cedula_imss.cargar_filas_xls", return_value=filas):
+            return self.client.post(self.URL, datos)
+
+    def test_rbac(self):
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+        self.client.force_login(self.paula)
+        self.assertEqual(self.client.get(self.URL).status_code, 200)  # responsable de nómina
+
+    def test_preview_no_escribe_y_aplicar_si(self):
+        r = self._subir(self.paula, previsualizar=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["resumen"].lineas_actualizadas, 2)
+        self.assertFalse(
+            LineaPresupuestoMensual.objects.filter(fuente_real="AUTO:SIPARE").exists()
+        )
+
+        r = self._subir(self.paula, previsualizar=False)
+        self.assertEqual(r.status_code, 200)
+        linea = LineaPresupuestoMensual.objects.get(
+            rubro__area__codigo="administracion", rubro__concepto="IMSS", periodo=date(2026, 4, 1)
+        )
+        self.assertEqual(linea.monto_real, Decimal("500.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:SIPARE")
+
+    def test_extension_invalida_rechazada(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_login(self.dg)
+        r = self.client.post(self.URL, {"cedula": SimpleUploadedFile("cedula.pdf", b"x")})
+        self.assertIn(".xls", r.context["error"])
+
+
+class AccesoAnonimoTests(TestCase):
+    """Usuarios no autenticados van al login, nunca a un error 500."""
+
+    def test_pantallas_redirigen_a_login(self):
+        for url in [
+            "/reportes/presupuesto-vs-real/",
+            "/reportes/presupuesto-real/captura/",
+            "/reportes/presupuesto-real/cedula-imss/",
+        ]:
+            respuesta = self.client.get(url)
+            self.assertEqual(respuesta.status_code, 302, url)
+            self.assertIn("login", respuesta["Location"], url)
+
+
+class OverrideDirigidoTests(TestCase):
+    """Dirección sobrescribe automáticos con motivo y puede liberar capturas."""
+
+    URL_GUARDAR = "/reportes/presupuesto-real/captura/guardar/"
+    URL_LIBERAR = "/reportes/presupuesto-real/liberar/"
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        from reportes.models import AreaPresupuestoResponsable
+
+        User = get_user_model()
+        cls.dg = User.objects.create_superuser("dg_ovr", "d@test.mx", "x")
+        cls.jefa = User.objects.create_user("jefa_ovr", "j@test.mx", "x")
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        AreaPresupuestoResponsable.objects.create(area=area, usuario=cls.jefa)
+        rubro_auto = RubroPresupuesto.objects.create(
+            area=area, concepto="Sueldo logística", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro_auto,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA,
+            filtros={"campo_monto": "salario_base", "departamento": "LOGISTICA"},
+        )
+        cls.linea_auto = LineaPresupuestoMensual.objects.create(
+            rubro=rubro_auto, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("100"),
+            monto_real=Decimal("80"), fuente_real="AUTO:NOMINA",
+        )
+
+    def test_jefa_no_sobrescribe_automatico(self):
+        self.client.force_login(self.jefa)
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "50", "motivo": "intento"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 409)
+
+    def test_direccion_sobrescribe_con_motivo_y_libera(self):
+        self.client.force_login(self.dg)
+        # Sin motivo → rechazado.
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "77"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 400)
+        # Con motivo → queda MANUAL:dg con el motivo en el historial.
+        r = self.client.post(
+            self.URL_GUARDAR,
+            {"linea_id": self.linea_auto.id, "monto": "77", "motivo": "Ajuste por finiquito"},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.monto_real, Decimal("77.00"))
+        self.assertEqual(self.linea_auto.fuente_real, "MANUAL:dg_ovr")
+        self.assertEqual(self.linea_auto.metadata["capturas"][-1]["motivo"], "Ajuste por finiquito")
+        # Y el motor la respeta.
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.monto_real, Decimal("77.00"))
+
+        # Liberar: vuelve a pendiente y el motor la rellena de nuevo.
+        r = self.client.post(
+            self.URL_LIBERAR,
+            {"linea_id": self.linea_auto.id},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.linea_auto.refresh_from_db()
+        self.assertEqual(self.linea_auto.fuente_real, "")
+        self.assertEqual(self.linea_auto.metadata["capturas"][-1]["accion"], "liberado_a_automatico")
+
+    def test_jefa_no_puede_liberar(self):
+        # Deja una captura manual primero (de la propia dirección).
+        LineaPresupuestoMensual.objects.filter(pk=self.linea_auto.pk).update(
+            fuente_real="MANUAL:dg_ovr"
+        )
+        self.client.force_login(self.jefa)
+        r = self.client.post(
+            self.URL_LIBERAR,
+            {"linea_id": self.linea_auto.id},
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(r.status_code, 403)
+
+
+class AreaResultadosTests(TestCase):
+    """El bloque P&L de empresa sale de administración a un área de control."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        cls.superuser = get_user_model().objects.create_superuser(
+            "dg_resultados", "dgr@test.mx", "clave-test"
+        )
+        cls.periodo = date(2026, 3, 1)
+        cls.admin_area = AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        # El import del Excel tipó las ventas como EGRESO; el comando lo corrige.
+        cls.rubro_pnl = RubroPresupuesto.objects.create(
+            area=cls.admin_area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        cls.rubro_gasto = RubroPresupuesto.objects.create(
+            area=cls.admin_area, concepto="Sueldo", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+    def test_comando_mueve_solo_rubros_pnl(self):
+        salida = StringIO()
+        call_command("mover_rubros_resultados", stdout=salida)
+        self.rubro_pnl.refresh_from_db()
+        self.rubro_gasto.refresh_from_db()
+        area = AreaPresupuesto.objects.get(codigo="resultados")
+        self.assertEqual(self.rubro_pnl.area, area)
+        self.assertEqual(self.rubro_pnl.tipo, RubroPresupuesto.TIPO_INGRESO)
+        self.assertEqual(self.rubro_gasto.area, self.admin_area)
+        # Idempotente: segunda corrida no truena ni duplica el área.
+        call_command("mover_rubros_resultados", stdout=salida)
+        self.assertEqual(AreaPresupuesto.objects.filter(codigo="resultados").count(), 1)
+
+    def test_dry_run_no_mueve(self):
+        salida = StringIO()
+        call_command("mover_rubros_resultados", "--dry-run", stdout=salida)
+        self.rubro_pnl.refresh_from_db()
+        self.assertEqual(self.rubro_pnl.area, self.admin_area)
+        self.assertFalse(AreaPresupuesto.objects.filter(codigo="resultados").exists())
+
+    def test_kpi_global_excluye_area_resultados(self):
+        call_command("mover_rubros_resultados", stdout=StringIO())
+        LineaPresupuestoMensual.objects.create(
+            rubro=self.rubro_pnl, periodo=self.periodo,
+            monto_presupuesto=Decimal("4000000.00"), monto_real=Decimal("3500000.00"),
+            fuente_real="AUTO:LEGADO",
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=self.rubro_gasto, periodo=self.periodo,
+            monto_presupuesto=Decimal("100.00"), monto_real=Decimal("80.00"),
+            fuente_real="AUTO:NOMINA",
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["ppto_egresos"], Decimal("100.00"))
+        self.assertEqual(kpis["real_egresos"], Decimal("80.00"))
+        # Seleccionando el área de control sí se ve su propio total (el rubro
+        # del P&L quedó re-tipado a INGRESO, así que cae en el KPI de ingresos).
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3&area=resultados")
+        self.assertEqual(response.context["kpis"]["ppto_ingresos"], Decimal("4000000.00"))
+
+
+class EstadoResultadosTests(TestCase):
+    """P&L empresa completa: utilidades calculadas y MP sin doble conteo."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        from maestros.models import Insumo
+
+        cls.superuser = get_user_model().objects.create_superuser(
+            "dg_pnl", "dgp@test.mx", "clave-test"
+        )
+        cls.periodo = date(2026, 2, 1)
+
+        def rubro(area, concepto, tipo=RubroPresupuesto.TIPO_EGRESO):
+            return RubroPresupuesto.objects.create(area=area, concepto=concepto, tipo=tipo)
+
+        def linea(rubro_obj, ppto, real=None, periodo=None):
+            return LineaPresupuestoMensual.objects.create(
+                rubro=rubro_obj, periodo=periodo or cls.periodo,
+                monto_presupuesto=Decimal(ppto),
+                monto_real=Decimal(real) if real is not None else None,
+                fuente_real="AUTO:LEGADO" if real is not None else "",
+            )
+
+        resultados = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        gastos = AreaPresupuesto.objects.create(nombre="Gastos de venta", codigo="gastos-venta")
+        produccion = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        capex = AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+
+        linea(rubro(resultados, "Venta postres", RubroPresupuesto.TIPO_INGRESO), "1000", "900")
+        linea(rubro(resultados, "Costos insumos"), "400", "350")
+        linea(rubro(gastos, "Renta"), "100", "90")
+        rubro_mo = rubro(produccion, "Mano de obra")
+        linea(rubro_mo, "50", "40")
+        # Materia prima en producción: tiene regla CONSUMO_MP → NO debe sumar
+        rubro_mp = rubro(produccion, "Queso crema")
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro_mp, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={},
+        )
+        linea(rubro_mp, "400", "350")
+        # Roll-up del Excel e insumo suelto sin regla: tampoco deben sumar
+        linea(rubro(produccion, "Costo de producción"), "800", "700")
+        Insumo.objects.create(nombre="Chocolate Blanco Turín")
+        linea(rubro(produccion, "Chocolate blanco turin"), "60", "55")
+        # Herramienta con nombre en catálogo: SÍ suma (no es materia prima)
+        Insumo.objects.create(nombre="Mesa de trabajo", tipo_item=Insumo.TIPO_HERRAMIENTA)
+        linea(rubro(produccion, "Mesa de trabajo"), "30", "20")
+        linea(rubro(capex, "Horno nuevo"), "200", "100")
+        linea(rubro(nomina, "Sueldos control"), "9999", "9999")
+        # Marzo: solo presupuesto, sin real → columnas reales en blanco
+        linea(rubro(gastos, "Renta marzo"), "100", periodo=date(2026, 3, 1))
+
+    def _get(self):
+        self.client.force_login(self.superuser)
+        return self.client.get("/reportes/estado-resultados/?year=2026")
+
+    def test_utilidades_y_exclusiones(self):
+        filas = {f["label"]: f for f in self._get().context["filas"]}
+        feb = 1  # índice del mes 2
+        # Utilidad bruta = 1000-400 ppto, 900-350 real
+        self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["ppto"], Decimal("600"))
+        self.assertEqual(filas["Utilidad bruta"]["meses"][feb]["real"], Decimal("550"))
+        # Producción excluye MP con regla, roll-up e insumo suelto;
+        # queda mano de obra (50/40) + herramienta (30/20)
+        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["ppto"], Decimal("80"))
+        self.assertEqual(filas["Producción (sin materia prima)"]["meses"][feb]["real"], Decimal("60"))
+        # Operativa = 600-180 ppto, 550-150 real
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["ppto"], Decimal("420"))
+        self.assertEqual(filas["Utilidad operativa"]["meses"][feb]["real"], Decimal("400"))
+        # Resultado final = operativa - capex
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["ppto"], Decimal("220"))
+        self.assertEqual(filas["Resultado final"]["meses"][feb]["real"], Decimal("300"))
+        # Inversiones separadas: "Horno nuevo" no empieza con CAPEX → equipo
+        self.assertEqual(filas["Compras de equipo"]["meses"][feb]["ppto"], Decimal("200"))
+        self.assertEqual(filas["Inversión en proyectos (aperturas)"]["meses"][feb]["ppto"], Decimal("0"))
+
+    def test_mes_sin_real_queda_en_blanco_y_nomina_fuera(self):
+        filas = {f["label"]: f for f in self._get().context["filas"]}
+        mar = 2
+        self.assertIsNone(filas["Gastos de venta"]["meses"][mar]["real"])
+        self.assertEqual(filas["Gastos de venta"]["meses"][mar]["ppto"], Decimal("100"))
+        # Nómina (control) no aparece en ninguna fila
+        anual_egresos = sum(f["anual_ppto"] for f in filas.values() if f["kind"] == "linea")
+        self.assertLess(anual_egresos, Decimal("9999"))
+        # Anual real de utilidad solo suma meses con ingresos reales
+        self.assertEqual(filas["Resultado final"]["anual_real"], Decimal("300"))
+
+    def test_requiere_login(self):
+        response = self.client.get("/reportes/estado-resultados/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response["Location"])
+
+
+class HojaGeneralNoImportaTests(TestCase):
+    """La hoja GENERAL (consolidado) no debe importarse como sucursal fantasma."""
+
+    def _xlsx_con_general(self):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        hoja = wb.active
+        hoja.title = "MATRIZ"
+        hoja.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        hoja.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        hoja.append(["", "Renta", 1000, 900, ""])
+        general = wb.create_sheet("GENERAL")
+        general.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        general.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        general.append(["", "Renta", 1000, 900, ""])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+        return tmp.name
+
+    def test_hoja_general_se_ignora(self):
+        from core.models import Sucursal
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        Sucursal.objects.create(nombre="Matriz", codigo="MATRIZ")
+        service = PresupuestoMaestroImportService()
+        service.import_file(
+            archivo=self._xlsx_con_general(), area_code="gastos-venta",
+            version="ORIGINAL", year=2026,
+        )
+        rubros = RubroPresupuesto.objects.filter(area__codigo="gastos-venta", concepto="Renta")
+        self.assertEqual(rubros.count(), 1)
+        self.assertIsNotNone(rubros.first().sucursal_id)
+
+    def test_comando_desactiva_rubros_fantasma(self):
+        area = AreaPresupuesto.objects.create(nombre="Gastos", codigo="gastos-venta")
+        fantasma = RubroPresupuesto.objects.create(
+            area=area, concepto="Renta", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "PAQUETE_2026_REAL"},
+        )
+        otro_origen = RubroPresupuesto.objects.create(
+            area=area, concepto="Rubro legítimo", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "OTRO"},
+        )
+        salida = StringIO()
+        call_command("desactivar_rubros_hoja_general", stdout=salida)
+        fantasma.refresh_from_db()
+        otro_origen.refresh_from_db()
+        self.assertFalse(fantasma.activo)
+        self.assertIn("desactivado_motivo", fantasma.metadata)
+        self.assertTrue(otro_origen.activo)
+
+    def test_dry_run_no_desactiva(self):
+        area = AreaPresupuesto.objects.create(nombre="Gastos", codigo="gastos-venta")
+        fantasma = RubroPresupuesto.objects.create(
+            area=area, concepto="Renta", tipo=RubroPresupuesto.TIPO_EGRESO,
+            metadata={"source": "PAQUETE_2026_REAL"},
+        )
+        call_command("desactivar_rubros_hoja_general", "--dry-run", stdout=StringIO())
+        fantasma.refresh_from_db()
+        self.assertTrue(fantasma.activo)
+
+
+class TotalEmpresaReglasTests(TestCase):
+    """Reglas total_empresa: los renglones del P&L leen fuentes vivas."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.periodo = date(2026, 6, 1)
+        cls.area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        cls.rubro_ventas = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        cls.rubro_costos = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Costos insumos/productos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=cls.rubro_ventas, periodo=cls.periodo,
+            monto_presupuesto=Decimal("100"), monto_real=Decimal("55"),
+            fuente_real="AUTO:LEGADO",  # el Excel parcial que debe pisarse
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=cls.rubro_costos, periodo=cls.periodo, monto_presupuesto=Decimal("50"),
+        )
+
+    def test_venta_total_empresa_pisa_legado(self):
+        sucursal = Sucursal.objects.create(nombre="Matriz", codigo="MATRIZ")
+        branch = PointBranch.objects.create(external_id="b1", name="Matriz", erp_branch=sucursal)
+        for categoria, producto, monto in (("PASTELES", "Pastel X", "30"), ("BOLLOS", "Bollo Y", "12")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=self.periodo, sucursal_nombre=branch.name,
+                categoria=categoria, producto_nombre_historico=producto,
+                total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_ventas, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True, "campo_monto": "total_venta"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_ventas, periodo=self.periodo)
+        self.assertEqual(linea.monto_real, Decimal("42"))
+        self.assertEqual(linea.fuente_real, "AUTO:VENTA_POS")
+
+    def test_consumo_total_empresa(self):
+        from inventario.models import ConsumoInsumoMensual
+        from maestros.models import Insumo
+
+        a = Insumo.objects.create(nombre="Harina P&L")
+        b = Insumo.objects.create(nombre="Azúcar P&L")
+        ConsumoInsumoMensual.objects.create(insumo=a, periodo=self.periodo, costo_real=Decimal("20"))
+        ConsumoInsumoMensual.objects.create(insumo=b, periodo=self.periodo, costo_real=Decimal("15"))
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_costos, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"total_empresa": True},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_costos, periodo=self.periodo)
+        self.assertEqual(linea.monto_real, Decimal("35"))
+        self.assertEqual(linea.fuente_real, "AUTO:CONSUMO_MP")
+
+    def test_limpiar_sin_asignacion_respeta_total_empresa(self):
+        from reportes.services_presupuesto_real import limpiar_reales_sin_asignacion
+
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_ventas, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True},
+        )
+        limpiadas = limpiar_reales_sin_asignacion()
+        self.assertEqual(limpiadas, 0)
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro_ventas, periodo=self.periodo)
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+
+
+class ConsumoDesdeFiltroTests(TestCase):
+    """El filtro 'desde' de CONSUMO_MP protege los meses legados del Excel."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventario.models import ConsumoInsumoMensual
+        from maestros.models import Insumo
+
+        cls.area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        cls.rubro = RubroPresupuesto.objects.create(
+            area=cls.area, concepto="Costos insumos/productos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        insumo = Insumo.objects.create(nombre="Harina desde-test")
+        for mes, costo in ((3, "999"), (6, "500")):
+            LineaPresupuestoMensual.objects.create(
+                rubro=cls.rubro, periodo=date(2026, mes, 1),
+                monto_presupuesto=Decimal("1000"),
+                monto_real=Decimal("777"), fuente_real="AUTO:LEGADO",
+            )
+            ConsumoInsumoMensual.objects.create(
+                insumo=insumo, periodo=date(2026, mes, 1), costo_real=Decimal(costo)
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=cls.rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"total_empresa": True, "desde": "2026-06"},
+        )
+
+    def test_antes_de_desde_conserva_legado_y_despues_consolida(self):
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 3, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        marzo = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 3, 1))
+        junio = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 6, 1))
+        self.assertEqual(marzo.monto_real, Decimal("777"))
+        self.assertEqual(marzo.fuente_real, "AUTO:LEGADO")
+        self.assertEqual(junio.monto_real, Decimal("500"))
+        self.assertEqual(junio.fuente_real, "AUTO:CONSUMO_MP")
+
+    def test_restaurar_costos_legado(self):
+        linea = LineaPresupuestoMensual.objects.get(rubro=self.rubro, periodo=date(2026, 3, 1))
+        linea.monto_real = Decimal("363918")
+        linea.fuente_real = "AUTO:CONSUMO_MP"
+        linea.save()
+        salida = StringIO()
+        call_command("restaurar_costos_pnl_legado", stdout=salida)
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("1247660.66"))
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+        # Idempotente
+        call_command("restaurar_costos_pnl_legado", stdout=salida)
+        self.assertIn("ya restaurado", salida.getvalue())
+
+
+class CorregirPronosticoNombresPointTests(TestCase):
+    """Reasignación de pronósticos a recetas Point vigentes (regla de dirección)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from recetas.models import PronosticoVenta, Receta
+
+        cls.sv = Receta.objects.create(nombre="3 Pecados Mini SV", hash_contenido="t-sv")
+        cls.vigente = Receta.objects.create(nombre="Pastel 3 Pecados Mini", hash_contenido="t-mini")
+        cls.sv_chico = Receta.objects.create(
+            nombre="Pastel Fresas con Crema San Valentín Chico", hash_contenido="t-svc"
+        )
+        cls.chico = Receta.objects.create(
+            nombre="Pastel de Fresas Con Crema Chico", hash_contenido="t-chico"
+        )
+        cls.flan = Receta.objects.create(nombre="Flan 3 Pecados Chico", hash_contenido="t-flan")
+        PronosticoVenta.objects.create(receta=cls.sv, periodo="2026-05", cantidad=Decimal("194"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.sv_chico, periodo="2026-05", cantidad=Decimal("485"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.chico, periodo="2026-05", cantidad=Decimal("100"), fuente="PRESUPUESTO_2026")
+        PronosticoVenta.objects.create(receta=cls.flan, periodo="2026-05", cantidad=Decimal("555"), fuente="PRESUPUESTO_2026")
+
+    def test_reasigna_suma_y_elimina_internos(self):
+        from recetas.models import PronosticoVenta
+
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        # SV sin destino previo: se movió la fila entera
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv).count(), 0)
+        movido = PronosticoVenta.objects.get(receta=self.vigente, periodo="2026-05")
+        self.assertEqual(movido.cantidad, Decimal("194"))
+        # SV con destino previo: se sumaron cantidades
+        sumado = PronosticoVenta.objects.get(receta=self.chico, periodo="2026-05")
+        self.assertEqual(sumado.cantidad, Decimal("585"))
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv_chico).count(), 0)
+        # Insumo interno: eliminado del comparativo de ventas
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.flan).count(), 0)
+        # Idempotente
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.get(receta=self.vigente, periodo="2026-05").cantidad, Decimal("194"))
+
+    def test_dry_run_no_toca(self):
+        from recetas.models import PronosticoVenta
+
+        call_command("corregir_pronostico_nombres_point", "--dry-run", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.sv).count(), 1)
+        self.assertEqual(PronosticoVenta.objects.filter(receta=self.flan).count(), 1)
+
+
+class ProductosDescontinuadosTests(TestCase):
+    """Los productos descontinuados salen del pronóstico (dirección 2026-07-16)."""
+
+    def test_elimina_descontinuados(self):
+        from recetas.models import PronosticoVenta, Receta
+
+        receta = Receta.objects.create(nombre="Brownie Rebanada", hash_contenido="t-br")
+        PronosticoVenta.objects.create(receta=receta, periodo="2026-05", cantidad=Decimal("8"), fuente="PRESUPUESTO_2026")
+        call_command("corregir_pronostico_nombres_point", stdout=StringIO())
+        self.assertEqual(PronosticoVenta.objects.filter(receta=receta).count(), 0)
+
+
+class ReclasificarInversionTests(TestCase):
+    """Rubros de inversión se mueven a CAPEX; las refacciones se quedan."""
+
+    def test_mueve_inversion_y_respeta_refacciones(self):
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        inversion = RubroPresupuesto.objects.create(
+            area=gv, concepto="Apertura sucursal", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        refaccion = RubroPresupuesto.objects.create(
+            area=gv, concepto="Refrigerador 1", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        call_command("reclasificar_inversion_capex", stdout=StringIO())
+        inversion.refresh_from_db()
+        refaccion.refresh_from_db()
+        self.assertEqual(inversion.area.codigo, "capex")
+        self.assertEqual(inversion.metadata.get("area_anterior"), "gastos-venta")
+        self.assertEqual(refaccion.area.codigo, "gastos-venta")
+
+    def test_dry_run_no_mueve(self):
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        AreaPresupuesto.objects.create(nombre="CAPEX", codigo="capex")
+        r = RubroPresupuesto.objects.create(
+            area=gv, concepto="Apertura sucursal", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        call_command("reclasificar_inversion_capex", "--dry-run", stdout=StringIO())
+        r.refresh_from_db()
+        self.assertEqual(r.area.codigo, "gastos-venta")
+
+
+class ConsolidacionNocturnaVentanaTests(TestCase):
+    """La nocturna barre el mes corriente + 2 anteriores (fuentes tardías)."""
+
+    def test_sin_argumento_cubre_tres_meses(self):
+        from unittest.mock import patch
+
+        from reportes.tasks import task_consolidar_presupuesto_real
+
+        consolidados = []
+
+        class FakeService:
+            def consolidar(self, periodo):
+                consolidados.append(periodo)
+
+                class R:
+                    def as_dict(self):
+                        return {"periodo": str(periodo)}
+
+                return R()
+
+        with patch(
+            "reportes.services_presupuesto_real.PresupuestoRealConsolidacionService",
+            FakeService,
+        ):
+            task_consolidar_presupuesto_real.run()
+        self.assertEqual(len(consolidados), 3)
+        self.assertEqual(len({p for p in consolidados}), 3)
+        self.assertTrue(all(p.day == 1 for p in consolidados))
+
+
+class DesgloseConceptosTests(TestCase):
+    """El desglose por concepto suma sucursales y agrupa por bloque del P&L."""
+
+    def test_concepto_suma_sucursales(self):
+        from django.contrib.auth import get_user_model
+
+        gv = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        s1 = Sucursal.objects.create(nombre="Uno", codigo="DES-S1")
+        s2 = Sucursal.objects.create(nombre="Dos", codigo="DES-S2")
+        for suc, real in ((s1, "100"), (s2, "150")):
+            rubro = RubroPresupuesto.objects.create(
+                area=gv, concepto="Renta", sucursal=suc, tipo=RubroPresupuesto.TIPO_EGRESO
+            )
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 2, 1),
+                monto_presupuesto=Decimal("120"), monto_real=Decimal(real),
+                fuente_real="AUTO:GASTO_OPERATIVO",
+            )
+        user = get_user_model().objects.create_superuser("dg_desglose", "dgd@test.mx", "clave")
+        self.client.force_login(user)
+        response = self.client.get("/reportes/estado-resultados/?year=2026")
+        desglose = response.context["desglose"]
+        bloque_gv = next(b for b in desglose if b["grupo"] == "Gastos de venta")
+        renta = next(f for f in bloque_gv["conceptos"] if f["label"] == "Renta")
+        self.assertEqual(renta["meses"][1]["real"], Decimal("250"))
+        self.assertEqual(renta["meses"][1]["ppto"], Decimal("240"))
+
+
+class MantenimientoUnidadTests(TestCase):
+    """La fuente MANTENIMIENTO_UNIDAD liga rubros de flotilla con ReporteUnidad."""
+
+    def test_costo_servicio_fluye_al_rubro(self):
+        from logistica.models import Repartidor, ReporteUnidad, Unidad
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Peugeot Partner", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        linea = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("5000"),
+        )
+        suc = Sucursal.objects.create(nombre="Matriz MU", codigo="MU-MTZ")
+        unidad = Unidad.objects.create(codigo="GS-P1", descripcion="Peugeot Partner", sucursal=suc)
+        ReporteUnidad.objects.create(
+            unidad=unidad, tipo="FALLA", severidad="MEDIA", descripcion="Servicio frenos",
+            costo_servicio=Decimal("12287"), fecha_reporte=timezone.now().replace(year=2026, month=7, day=10),
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD,
+            filtros={"unidad_codigo": "GS-P1"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("12287.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_UNIDAD")
+
+
+class CombustibleYMantEquipoTests(TestCase):
+    """Combustible por unidad y mantenimiento de equipos fluyen desde julio."""
+
+    def test_combustible_suma_unidades_y_respeta_desde(self):
+        from logistica.models import CargaCombustibleUnidad, Repartidor, Unidad
+
+        area = AreaPresupuesto.objects.create(nombre="Logística", codigo="logistica")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Diesel", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        for mes, real_previo in ((6, "18000"), (7, None)):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, mes, 1), monto_presupuesto=Decimal("22000"),
+                monto_real=Decimal(real_previo) if real_previo else None,
+                fuente_real="AUTO:LEGADO" if real_previo else "",
+            )
+        suc = Sucursal.objects.create(nombre="Matriz CB", codigo="CB-MTZ")
+        u1 = Unidad.objects.create(codigo="GS-DC1", descripcion="Fiat Ducato", sucursal=suc)
+        u2 = Unidad.objects.create(codigo="GS-PM1", descripcion="Peugeot Manager", sucursal=suc)
+        from django.contrib.auth import get_user_model
+
+        from logistica.models import BitacoraSalidaLlegada
+        user_rep = get_user_model().objects.create_user("rep_cb", "rep@test.mx", "clave")
+        rep = Repartidor.objects.create(user=user_rep, sucursal=suc)
+        bit = BitacoraSalidaLlegada.objects.create(
+            repartidor=rep, unidad=u1, km_salida=1, nivel_gas_salida="1/2",
+        )
+        for u, monto, mes in ((u1, "6600", 7), (u2, "7600", 7), (u1, "12800", 6)):
+            carga = CargaCombustibleUnidad.objects.create(
+                bitacora=bit, unidad=u, repartidor=rep, litros=Decimal("40"),
+                importe_total=Decimal(monto),
+            )
+            # fecha_registro es auto_now_add: fijar el mes vía update
+            CargaCombustibleUnidad.objects.filter(pk=carga.pk).update(
+                fecha_registro=timezone.now().replace(year=2026, month=mes, day=5)
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_COMBUSTIBLE_UNIDAD,
+            filtros={"unidades": ["GS-DC1", "GS-PM1"], "desde": "2026-07"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        jul = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 7, 1))
+        jun = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 6, 1))
+        self.assertEqual(jul.monto_real, Decimal("14200.00"))
+        self.assertEqual(jul.fuente_real, "AUTO:COMBUSTIBLE_UNIDAD")
+        # junio: antes del 'desde' → conserva el legado del Excel
+        self.assertEqual(jun.monto_real, Decimal("18000"))
+        self.assertEqual(jun.fuente_real, "AUTO:LEGADO")
+
+    def test_mantenimiento_equipo_produccion(self):
+        from activos.models import Activo, OrdenMantenimiento
+
+        area = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Mantenimiento equipo/maquinaria", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("7000"),
+        )
+        horno = Activo.objects.create(nombre="Horno Test", ubicacion="HORNOS")
+        vitrina = Activo.objects.create(nombre="Vitrina Test", ubicacion="LEYVA")
+        for activo, costo in ((horno, "1800"), (vitrina, "999")):
+            OrdenMantenimiento.objects.create(
+                activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
+                fecha_cierre=date(2026, 7, 10), descripcion="test",
+                costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+            filtros={"ubicaciones_produccion": True, "desde": "2026-07"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        linea = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 7, 1))
+        # solo el horno (HORNOS es producción); la vitrina de LEYVA no
+        self.assertEqual(linea.monto_real, Decimal("1800.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
+
+
+class MantEquipoPorSucursalTests(TestCase):
+    """La regla por_sucursal hereda la sucursal del rubro."""
+
+    def test_seed_habilita_mantenimiento_concluido_desde_junio_2026(self):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        produccion = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        gastos_venta = AreaPresupuesto.objects.create(nombre="Gastos de venta", codigo="gastos-venta")
+        sucursal = Sucursal.objects.create(nombre="Sucursal Seed ME", codigo="ME-SEED")
+        rubro_produccion = RubroPresupuesto.objects.create(
+            area=produccion,
+            concepto="Mantenimiento equipo/maquinaria",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        rubro_sucursal = RubroPresupuesto.objects.create(
+            area=gastos_venta,
+            concepto="Mantenimiento equipo/maquinaria",
+            sucursal=sucursal,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        for rubro in (rubro_produccion, rubro_sucursal):
+            regla = ReglaFuenteRubro.objects.get(
+                rubro=rubro,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+            )
+            self.assertEqual(regla.filtros["desde"], "2026-06")
+
+    def test_cada_sucursal_toma_sus_ordenes(self):
+        from activos.models import Activo, OrdenMantenimiento
+
+        area = AreaPresupuesto.objects.create(nombre="Gastos venta", codigo="gastos-venta")
+        s1 = Sucursal.objects.create(nombre="Matriz ME", codigo="ME-MTZ")
+        s2 = Sucursal.objects.create(nombre="Leyva ME", codigo="ME-LEY")
+        lineas = {}
+        for suc in (s1, s2):
+            rubro = RubroPresupuesto.objects.create(
+                area=area, concepto="Mantenimiento equipo/maquinaria",
+                sucursal=suc, tipo=RubroPresupuesto.TIPO_EGRESO,
+            )
+            lineas[suc.codigo] = LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("1000"),
+            )
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO,
+                filtros={"por_sucursal": True, "desde": "2026-07"},
+            )
+        a1 = Activo.objects.create(nombre="Refri ME1", ubicacion="MATRIZ", sucursal=s1)
+        a2 = Activo.objects.create(nombre="Vitrina ME2", ubicacion="LEYVA", sucursal=s2)
+        for activo, costo in ((a1, "900"), (a2, "400")):
+            OrdenMantenimiento.objects.create(
+                activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA", estatus="CERRADA",
+                fecha_cierre=date(2026, 7, 10), descripcion="t",
+                costo_repuestos=Decimal(costo), costo_mano_obra=0, costo_otros=0,
+            )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        for codigo, esperado in (("ME-MTZ", "900.00"), ("ME-LEY", "400.00")):
+            linea = LineaPresupuestoMensual.objects.get(pk=lineas[codigo].pk)
+            self.assertEqual(linea.monto_real, Decimal(esperado))
+            self.assertEqual(linea.fuente_real, "AUTO:MANTENIMIENTO_EQUIPO")
+
+    def test_indice_usa_solo_trabajos_cerrados_en_mes_y_costo_final_historico(self):
+        from django.contrib.auth import get_user_model
+
+        from activos.models import Activo, OrdenMantenimiento
+        from fallas.models import CategoriaFalla, ReporteFalla
+
+        sucursal = Sucursal.objects.create(nombre="Sucursal ME Hist", codigo="ME-HIST")
+        activo = Activo.objects.create(
+            nombre="Refrigerador histórico", ubicacion="PISO VENTA", sucursal=sucursal,
+        )
+        categoria = CategoriaFalla.objects.create(nombre="Refrigeración histórica")
+        usuario = get_user_model().objects.create_user("mantenimiento-historico")
+
+        estimada = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio cerrado estimado", descripcion="Histórico",
+            estatus=ReporteFalla.ESTATUS_CERRADO, costo_estimado=Decimal("300.00"),
+            reportado_por=usuario,
+        )
+        real = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio cerrado real", descripcion="Histórico",
+            estatus=ReporteFalla.ESTATUS_RESUELTO, costo_estimado=Decimal("500.00"),
+            costo_real=Decimal("450.00"), reportado_por=usuario,
+        )
+        abierta = ReporteFalla.objects.create(
+            sucursal=sucursal, categoria=categoria, activo_relacionado=activo,
+            titulo="Servicio todavía abierto", descripcion="No contabilizar",
+            estatus=ReporteFalla.ESTATUS_PROCESO, costo_estimado=Decimal("999.00"),
+            reportado_por=usuario,
+        )
+        ReporteFalla.objects.filter(pk=estimada.pk).update(
+            fecha_cierre=timezone.make_aware(datetime(2026, 7, 7, 12, 0)),
+        )
+        ReporteFalla.objects.filter(pk=real.pk).update(
+            fecha_resolucion=timezone.make_aware(datetime(2026, 7, 8, 12, 0)),
+        )
+        ReporteFalla.objects.filter(pk=abierta.pk).update(
+            fecha_reporte=timezone.make_aware(datetime(2026, 7, 9, 12, 0)),
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA",
+            estatus=OrdenMantenimiento.ESTATUS_CERRADA, fecha_cierre=date(2026, 7, 10),
+            descripcion="Orden cerrada", costo_repuestos=Decimal("200.00"),
+            costo_mano_obra=0, costo_otros=0,
+        )
+        OrdenMantenimiento.objects.create(
+            activo_ref=activo, tipo="CORRECTIVO", prioridad="MEDIA",
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
+            descripcion="Orden abierta", costo_repuestos=Decimal("777.00"),
+            costo_mano_obra=0, costo_otros=0,
+        )
+
+        rows = PresupuestoRealConsolidacionService._build_mant_equipo_index(date(2026, 7, 1))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["activo_ref__sucursal__codigo"], sucursal.codigo)
+        self.assertEqual(rows[0]["monto"], Decimal("950.00"))
+
+
+class ComplementosClasificadosTests(TestCase):
+    """Complementos = productos del catálogo curado; postres los excluye."""
+
+    def test_separacion_sin_doble_conteo(self):
+        from pos_bridge.models import PointBranch, PointProductCategory
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        postres = RubroPresupuesto.objects.create(
+            area=area, concepto="Venta postres", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        compl = RubroPresupuesto.objects.create(
+            area=area, concepto="Venta complementos", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        for rubro in (postres, compl):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("100"),
+            )
+        PointProductCategory.objects.create(codigo_point="V1", nombre="Vela Granmark", category="SERVICIO_ACCESORIO")
+        branch = PointBranch.objects.create(external_id="cc-br", name="Matriz CC")
+        for producto, monto in (("Pastel X", "1000"), ("Vela Granmark", "50")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 6, 5), sucursal_nombre="Matriz CC",
+                categoria="Cat", producto_nombre_historico=producto,
+                total_venta=Decimal(monto), total_venta_neta=Decimal(monto),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=postres, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"total_empresa": True, "excluir_clasificados": True},
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=compl, tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"clasificacion_catalogo": ["REVENTA", "SERVICIO_ACCESORIO", "TOPPING"]},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        lp = LineaPresupuestoMensual.objects.get(rubro=postres)
+        lc = LineaPresupuestoMensual.objects.get(rubro=compl)
+        self.assertEqual(lp.monto_real, Decimal("1000.00"))
+        self.assertEqual(lc.monto_real, Decimal("50.00"))
+        # suma = total Point; nada doble, nada perdido
+        self.assertEqual(lp.monto_real + lc.monto_real, Decimal("1050.00"))
+
+
+class CostoReventaComplementosTests(TestCase):
+    """Costos complementos = unidades vendidas × costo de reventa, desde junio."""
+
+    def test_unidades_por_costo_con_desde(self):
+        from pos_bridge.models import PointBranch, PointProduct, PointProductCategory
+        from reportes.models import ProductoReventaCosto
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados", codigo="resultados")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Costos complementos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        for mes, legado in ((5, "9000"), (6, None)):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro, periodo=date(2026, mes, 1), monto_presupuesto=Decimal("10000"),
+                monto_real=Decimal(legado) if legado else None,
+                fuente_real="AUTO:LEGADO" if legado else "",
+            )
+        PointProductCategory.objects.create(codigo_point="CR1", nombre="Vela Magica", category="SERVICIO_ACCESORIO")
+        producto = PointProduct.objects.create(external_id="cr-1", sku="CR1", name="Vela Magica")
+        ProductoReventaCosto.objects.create(
+            producto_point=producto, costo_unitario=Decimal("4.50"),
+            fecha_vigencia=date(2026, 1, 10), fuente="TEST", source_hash="cr-hash-1",
+        )
+        branch = PointBranch.objects.create(external_id="cr-br", name="Matriz CR")
+        for mes, unidades in ((5, "100"), (6, "200")):
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, mes, 10), sucursal_nombre="Matriz CR",
+                categoria="Accesorios", producto_nombre_historico="Vela Magica",
+                point_product=producto, total_cantidad=Decimal(unidades),
+                total_venta=Decimal("1"), total_venta_neta=Decimal("1"),
+            )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_COSTO_REVENTA,
+            filtros={"desde": "2026-06"},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 5, 1))
+        jun = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 6, 1))
+        may = LineaPresupuestoMensual.objects.get(rubro=rubro, periodo=date(2026, 5, 1))
+        self.assertEqual(jun.monto_real, Decimal("900.00"))  # 200 × 4.50
+        self.assertEqual(jun.fuente_real, "AUTO:COSTO_REVENTA")
+        self.assertEqual(may.monto_real, Decimal("9000"))  # legado intacto
+        self.assertEqual(may.fuente_real, "AUTO:LEGADO")
+
+
+class MermaProductoTests(TestCase):
+    """La fuente MERMA_PRODUCTO valúa la merma Point (MermaPOS) a costo de receta."""
+
+    def test_merma_point_valuada_respeta_desde(self):
+        from control.models import MermaPOS
+        from recetas.models import LineaReceta, Receta
+
+        area = AreaPresupuesto.objects.create(nombre="Resultados (P&L)", codigo="resultados")
+        rubro = RubroPresupuesto.objects.create(
+            area=area, concepto="Merma", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        jul = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("2000"),
+        )
+        may = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 5, 1), monto_presupuesto=Decimal("2000"),
+            monto_real=Decimal("1495.59"), fuente_real="AUTO:LEGADO",
+        )
+        # Receta con costo total 100 y rendimiento 10 → costo unitario 10.
+        receta = Receta.objects.create(
+            nombre="Pastel Merma Test", hash_contenido="t-merma", rendimiento_cantidad=10
+        )
+        LineaReceta.objects.create(
+            receta=receta, insumo_texto="base", costo_linea_excel=Decimal("100"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        suc = Sucursal.objects.create(nombre="Matriz Merma", codigo="MM-MTZ")
+        # Sucursal y CEDIS suman igual: 3 × 10 + 2 × 10.
+        MermaPOS.objects.create(receta=receta, sucursal=suc, fecha=date(2026, 7, 5), cantidad=Decimal("3"))
+        MermaPOS.objects.create(receta=receta, fecha=date(2026, 7, 6), cantidad=Decimal("2"))
+        # Sin receta ligada: no se puede valuar, no debe tronar.
+        MermaPOS.objects.create(producto_texto="gelatina suelta", fecha=date(2026, 7, 6), cantidad=Decimal("1"))
+        # Producto terminado sin rendimiento: el costo total es por pieza.
+        producto = Receta.objects.create(nombre="Piñatero Merma Test", hash_contenido="t-merma-p")
+        LineaReceta.objects.create(
+            receta=producto, insumo_texto="base", costo_linea_excel=Decimal("40"),
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        MermaPOS.objects.create(receta=producto, fecha=date(2026, 7, 8), cantidad=Decimal("1"))
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO,
+            filtros={"desde": "2026-06"},
+        )
+        service = PresupuestoRealConsolidacionService()
+        service.consolidar(periodo=date(2026, 7, 1))
+        service.consolidar(periodo=date(2026, 5, 1))
+        jul.refresh_from_db()
+        may.refresh_from_db()
+        self.assertEqual(jul.monto_real, Decimal("90.00"))  # (3 + 2) × 10 + 1 × 40
+        self.assertEqual(jul.fuente_real, "AUTO:MERMA_PRODUCTO")
+        self.assertEqual(may.monto_real, Decimal("1495.59"))  # legado intacto
+        self.assertEqual(may.fuente_real, "AUTO:LEGADO")
+
+
+class ImportNominaHojaGeneralTests(TestCase):
+    """El archivo de nómina alimenta el área de control SOLO con la hoja GENERAL."""
+
+    def test_nomina_toma_general_e_ignora_departamentos(self):
+        import tempfile
+
+        from openpyxl import Workbook
+
+        from reportes.services_presupuesto_maestro import PresupuestoMaestroImportService
+
+        wb = Workbook()
+        general = wb.active
+        general.title = "GENERAL"
+        general.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        general.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        general.append(["", "SUELDO", 632149, "", ""])
+        admin = wb.create_sheet("ADMINISTRACION")
+        admin.append(["CUENTA", "DESCRIPCION", "ENERO", "", ""])
+        admin.append(["", "", "PRESUPUESTADO", "REAL", "VARIACION"])
+        admin.append(["", "SUELDO", 134197, "", ""])
+        admin.append(["", "PLAYERA", 300, "", ""])
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        wb.save(tmp.name)
+
+        PresupuestoMaestroImportService().import_file(
+            archivo=tmp.name, area_code="nomina", version="ORIGINAL", year=2026
+        )
+        linea = LineaPresupuestoMensual.objects.get(
+            periodo=date(2026, 1, 1), rubro__concepto__iexact="sueldo",
+            rubro__area__codigo="nomina",
+        )
+        # Gana la hoja GENERAL, no la última hoja de departamento.
+        self.assertEqual(linea.monto_presupuesto, Decimal("632149"))
+        # Los conceptos exclusivos de hojas de departamento no entran al control.
+        self.assertFalse(
+            RubroPresupuesto.objects.filter(
+                area__codigo="nomina", concepto__iexact="playera"
+            ).exists()
+        )
+
+
+class RecihoCompartidoPorcentajeTests(TestCase):
+    """El recibo compartido Matriz+CEDIS se reparte por porcentaje de la regla."""
+
+    def test_porcentaje_sobre_centro_compartido(self):
+        from reportes.models import CentroCosto
+
+        prod = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        matriz = Sucursal.objects.create(nombre="Sucursal Matriz", codigo="RC-MTZ")
+        r_prod = RubroPresupuesto.objects.create(
+            area=prod, concepto="Energía eléctrica", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        r_mtz = RubroPresupuesto.objects.create(
+            area=gv, concepto="Energía eléctrica", sucursal=matriz,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        l_prod = LineaPresupuestoMensual.objects.create(
+            rubro=r_prod, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("30000"),
+        )
+        l_mtz = LineaPresupuestoMensual.objects.create(
+            rubro=r_mtz, periodo=date(2026, 7, 1), monto_presupuesto=Decimal("15000"),
+        )
+        cat = CategoriaGasto.objects.create(
+            codigo="LUZ_SUC", nombre="Luz y energía eléctrica",
+            capa_objetivo=CategoriaGasto.CAPA_SUCURSAL,
+        )
+        centro = CentroCosto.objects.create(
+            codigo="COMPARTIDO_MC", nombre="Compartido Matriz-CEDIS", tipo="COMPARTIDO"
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=date(2026, 7, 1), categoria_gasto=cat, centro_costo=centro,
+            monto=Decimal("40000"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=r_prod, tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=cat, filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 65},
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=r_mtz, tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=cat, filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 35},
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 7, 1))
+        l_prod.refresh_from_db()
+        l_mtz.refresh_from_db()
+        self.assertEqual(l_prod.monto_real, Decimal("26000.00"))  # 65%
+        self.assertEqual(l_mtz.monto_real, Decimal("14000.00"))  # 35%
+
+
+class EmpaquesGastoOperativoTests(TestCase):
+    """Los rubros "Etiquetas, bolsas, cajas y empaques" se llenan de
+    GASTO_OPERATIVO/EMPAQUE: por sucursal con herencia del rubro y el de
+    administración solo con centros CORPORATIVO. NUNCA de CONSUMO_MP: los
+    insumos EMPAQUE ya generan filas en ConsumoInsumoMensual y el renglón
+    Costos del P&L (total_empresa) las suma — duplicaría a nivel empresa."""
+
+    CONCEPTO = "Etiquetas, bolsas, cajas y empaques"
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.gv = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        cls.admin = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
+        cls.sucursal = Sucursal.objects.create(codigo="EMP01", nombre="Sucursal Centro")
+        cls.r_suc = RubroPresupuesto.objects.create(
+            area=cls.gv, concepto=cls.CONCEPTO, sucursal=cls.sucursal,
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        cls.r_admin = RubroPresupuesto.objects.create(
+            area=cls.admin, concepto=cls.CONCEPTO, tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        cls.periodo = date(2026, 6, 1)
+        cls.l_suc = LineaPresupuestoMensual.objects.create(
+            rubro=cls.r_suc, periodo=cls.periodo, monto_presupuesto=Decimal("2000"),
+        )
+        cls.l_admin = LineaPresupuestoMensual.objects.create(
+            rubro=cls.r_admin, periodo=cls.periodo, monto_presupuesto=Decimal("20000"),
+            monto_real=Decimal("19000"), fuente_real="AUTO:LEGADO",
+        )
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+    def test_seed_crea_reglas_y_autoprovisiona_categoria_empaque(self):
+        cat = CategoriaGasto.objects.get(codigo="EMPAQUE")
+        regla_suc = ReglaFuenteRubro.objects.get(rubro=self.r_suc)
+        self.assertEqual(regla_suc.tipo_fuente, ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO)
+        self.assertEqual(regla_suc.categoria_gasto, cat)
+        self.assertNotIn("centro_tipo", regla_suc.filtros or {})
+        regla_admin = ReglaFuenteRubro.objects.get(rubro=self.r_admin)
+        self.assertEqual(regla_admin.categoria_gasto, cat)
+        self.assertEqual((regla_admin.filtros or {}).get("centro_tipo"), "CORPORATIVO")
+
+    def test_sucursal_hereda_y_admin_solo_toma_corporativo(self):
+        cat = CategoriaGasto.objects.get(codigo="EMPAQUE")
+        centro_suc = CentroCosto.objects.create(
+            codigo="EMP_SUC", nombre="Centro", tipo="SUCURSAL_VENTA", sucursal=self.sucursal
+        )
+        centro_corp = CentroCosto.objects.create(
+            codigo="EMP_CORP", nombre="Oficinas", tipo="CORPORATIVO"
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=self.periodo, categoria_gasto=cat, centro_costo=centro_suc,
+            monto=Decimal("1800"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        GastoOperativoMensual.objects.create(
+            periodo=self.periodo, categoria_gasto=cat, centro_costo=centro_corp,
+            monto=Decimal("500"), tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        )
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        self.l_suc.refresh_from_db()
+        self.l_admin.refresh_from_db()
+        self.assertEqual(self.l_suc.monto_real, Decimal("1800.00"))
+        self.assertEqual(self.l_suc.fuente_real, "AUTO:GASTO_OPERATIVO")
+        self.assertEqual(self.l_admin.monto_real, Decimal("500.00"))
+
+    def test_admin_sin_captura_corporativa_conserva_legado(self):
+        PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo)
+        self.l_admin.refresh_from_db()
+        self.assertEqual(self.l_admin.monto_real, Decimal("19000.00"))
+        self.assertEqual(self.l_admin.fuente_real, "AUTO:LEGADO")
+        self.assertTrue((self.l_admin.metadata or {}).get("sin_datos_fuente"))
+
+
+class ReestructuraBebidasOtrosTemporadaTests(TestCase):
+    """Separación del renglón BEBIDAS/OTROS · ESPECIAL/TEMPORADA (2026-07-18)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+
+        def rubro(concepto, lineas):
+            r = RubroPresupuesto.objects.create(
+                area=cls.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+            )
+            for periodo, ppto, real, fuente in lineas:
+                LineaPresupuestoMensual.objects.create(
+                    rubro=r,
+                    periodo=periodo,
+                    monto_presupuesto=Decimal(ppto),
+                    monto_real=Decimal(real) if real is not None else None,
+                    fuente_real=fuente,
+                )
+            return r
+
+        jun, jul = date(2026, 6, 1), date(2026, 7, 1)
+        cls.mixto = rubro(
+            "BEBIDAS/OTROS · ESPECIAL/TEMPORADA",
+            [(jun, "152475", "448", "AUTO:LEGADO"), (jul, "424400", None, "")],
+        )
+        cls.galleta = rubro(
+            "GALLETA · ESPECIAL/TEMPORADA",
+            [(jun, "1015", "2030", "AUTO:LEGADO"), (jul, "100", "50", "MANUAL:paula")],
+        )
+        cls.coca = rubro("Coca-cola", [(jun, "3200", "1300", "AUTO:VENTA_POS")])
+        cls.te = rubro("TE", [(jun, "2800", "950", "AUTO:VENTA_POS")])
+        ReglaFuenteRubro.objects.create(
+            rubro=cls.coca,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_VENTA_POS,
+            filtros={"categoria_pos": "Coca-cola"},
+        )
+
+    def test_reestructura_fusiona_renombra_y_crea_otros(self):
+        salida = StringIO()
+        call_command("reestructurar_bebidas_otros_temporada", stdout=salida)
+
+        temporada = RubroPresupuesto.objects.get(pk=self.mixto.pk)
+        self.assertEqual(temporada.concepto, "Especiales/Temporada")
+        self.assertEqual(
+            temporada.metadata["nombre_excel"], "BEBIDAS/OTROS · ESPECIAL/TEMPORADA"
+        )
+        jun = temporada.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        # Presupuestos sumados y reales AUTO/legado sumados.
+        self.assertEqual(jun.monto_presupuesto, Decimal("153490"))
+        self.assertEqual(jun.monto_real, Decimal("2478"))
+        # El real MANUAL del origen NO se fusiona (nunca se pisa ni se mueve).
+        jul = temporada.lineas_mensuales.get(periodo=date(2026, 7, 1))
+        self.assertEqual(jul.monto_presupuesto, Decimal("424500"))
+        self.assertIsNone(jul.monto_real)
+        self.assertIn("MANUAL", salida.getvalue())
+
+        bebidas = RubroPresupuesto.objects.get(pk=self.coca.pk)
+        self.assertEqual(bebidas.concepto, "Bebidas")
+        jun_beb = bebidas.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        self.assertEqual(jun_beb.monto_presupuesto, Decimal("6000"))
+        self.assertEqual(jun_beb.monto_real, Decimal("2250"))
+
+        for origen in (self.galleta, self.te):
+            origen.refresh_from_db()
+            self.assertFalse(origen.activo)
+            self.assertIn("fusionado", origen.metadata["motivo_desactivacion"])
+
+        otros = RubroPresupuesto.objects.get(area=self.area, concepto="Otros")
+        self.assertEqual(otros.lineas_mensuales.count(), 2)
+        for linea in otros.lineas_mensuales.all():
+            self.assertEqual(linea.monto_presupuesto, Decimal("0"))
+
+    def test_es_idempotente(self):
+        call_command("reestructurar_bebidas_otros_temporada", stdout=StringIO())
+        call_command("reestructurar_bebidas_otros_temporada", stdout=StringIO())
+        temporada = RubroPresupuesto.objects.get(pk=self.mixto.pk)
+        jun = temporada.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        self.assertEqual(jun.monto_presupuesto, Decimal("153490"))
+        self.assertEqual(
+            RubroPresupuesto.objects.filter(area=self.area, concepto="Otros").count(), 1
+        )
+
+
+class ExclusividadOverridesSeedTests(TestCase):
+    """Los productos/categorías reclamados por overrides del CSV no pueden
+    ganarse por matching difuso (ningún producto Point en dos reglas)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        CategoriaGasto.objects.create(
+            codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
+        )
+        cls.area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        branch = PointBranch.objects.create(external_id="EXC-BR", name="Centro")
+        for cat, prod in [
+            ("Pastel Mediano", "Pastel Lotus Mediano"),
+            ("Café", "Capuchino"),
+            ("Coca-cola", "COCA-COLA 450 ML"),
+            ("TE", "TE DEL JARDIN"),
+            ("Otros postres", "Cubeta de Crema Para Fresas"),
+        ]:
+            PointSalesDailyProductFact.objects.create(
+                branch=branch, sale_date=date(2026, 6, 3), sucursal_nombre="Centro",
+                categoria=cat, producto_nombre_historico=prod,
+                total_venta=Decimal("10"), total_venta_neta=Decimal("9"),
+            )
+
+        def rubro(concepto):
+            r = RubroPresupuesto.objects.create(
+                area=cls.area, concepto=concepto, tipo=RubroPresupuesto.TIPO_INGRESO
+            )
+            LineaPresupuestoMensual.objects.create(
+                rubro=r, periodo=date(2026, 6, 1), monto_presupuesto=Decimal("1")
+            )
+            return r
+
+        cls.temporada = rubro("Especiales/Temporada")
+        cls.bebidas = rubro("Bebidas")
+        cls.otros = rubro("Otros")
+        cls.competidor = rubro("PASTEL MEDIANO · LOTUS")
+
+    def test_override_saca_sus_productos_y_categorias_del_pool_difuso(self):
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+
+        temporada = ReglaFuenteRubro.objects.get(rubro=self.temporada)
+        self.assertIn("Pastel Lotus Mediano", temporada.filtros["productos_pos"])
+
+        # El rubro que el matching difuso habría cruzado con "Pastel Lotus
+        # Mediano" (score 100) queda SIN asignación: el override manda.
+        competidor = ReglaFuenteRubro.objects.get(rubro=self.competidor)
+        self.assertNotIn("productos_pos", competidor.filtros)
+        self.assertNotIn("categoria_pos", competidor.filtros)
+
+        otros = ReglaFuenteRubro.objects.get(rubro=self.otros)
+        self.assertEqual(otros.filtros.get("categoria_pos"), "Otros postres")
+        self.assertEqual(ReglaFuenteRubro.objects.filter(rubro=self.bebidas).count(), 3)
+
+    def test_consolidacion_suma_las_tres_categorias_de_bebidas(self):
+        call_command("seed_reglas_fuente_rubro", stdout=StringIO())
+        PresupuestoRealConsolidacionService().consolidar(periodo=date(2026, 6, 1))
+        linea = self.bebidas.lineas_mensuales.get(periodo=date(2026, 6, 1))
+        # Coca-cola (10) + TE (10) + Café (10); el resto no le pertenece.
+        self.assertEqual(linea.monto_real, Decimal("30.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:VENTA_POS")
+
+
+class CrearRenglonesFamiliasVentasTests(TestCase):
+    """Renglones ppto-0 para familias vivas nunca presupuestadas (2026-07-19)."""
+
+    def test_crea_renglones_idempotente(self):
+        area = AreaPresupuesto.objects.create(nombre="Ventas", codigo="ventas")
+        molde = RubroPresupuesto.objects.create(
+            area=area, concepto="Especiales/Temporada", tipo=RubroPresupuesto.TIPO_INGRESO
+        )
+        for mes in (6, 7):
+            LineaPresupuestoMensual.objects.create(rubro=molde, periodo=date(2026, mes, 1))
+        call_command("crear_renglones_familias_ventas", stdout=StringIO())
+        call_command("crear_renglones_familias_ventas", stdout=StringIO())
+
+        granmark = RubroPresupuesto.objects.get(area=area, concepto="Granmark", activo=True)
+        self.assertEqual(granmark.lineas_mensuales.count(), 2)
+        for linea in granmark.lineas_mensuales.all():
+            self.assertEqual(linea.monto_presupuesto, Decimal("0"))
+        self.assertEqual(
+            RubroPresupuesto.objects.filter(area=area, concepto="Piñatero Mini").count(), 1
+        )
+
+
+class ConciliacionCombustibleTests(TestCase):
+    """El render de conciliación marca montos no redondos sin clasificar."""
+
+    def test_monto_no_redondo_se_marca_revisar(self):
+        from decimal import Decimal as D
+
+        from reportes.services_conciliacion_combustible import _es_monto_redondo
+
+        self.assertTrue(_es_monto_redondo(D("3000")))
+        self.assertTrue(_es_monto_redondo(D("17600.00")))
+        self.assertFalse(_es_monto_redondo(D("1691.02")))
+        self.assertFalse(_es_monto_redondo(D("1250")))  # no múltiplo de 100

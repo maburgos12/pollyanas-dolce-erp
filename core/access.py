@@ -205,7 +205,6 @@ ACCESS_SUBMODULES = {
         ("orquestacion", "Orquestación"),
         ("ia", "IA privada"),
         ("integraciones", "Integraciones"),
-        ("syncfy", "Bancos Syncfy"),
         ("horarios_especiales", "Horarios Especiales"),
     ],
 }

@@ -35,6 +35,7 @@ logs/bloque1_dato_maestro_*/
 .playwright-cli/
 .playwright-mcp/
 .claude/
+.superpowers/
 outputs/
 output/
 storage/pos_bridge/logs/*

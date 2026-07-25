@@ -11,6 +11,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -215,6 +216,7 @@ def lista_visitas(request):
         {"day": day, "date": date(first_day.year, first_day.month, day), "is_sunday": date(first_day.year, first_day.month, day).weekday() == 6}
         for day in range(1, last_day.day + 1)
     ]
+    month_weeks = calendar.Calendar().monthdatescalendar(first_day.year, first_day.month)
     rows = []
     for sucursal in sucursales:
         row_visits = 0
@@ -224,14 +226,44 @@ def lista_visitas(request):
             visita = visitas[0] if visitas else None
             row_visits += len(visitas)
             cells.append({"day": day, "visita": visita, "count": len(visitas)})
+        weeks = [
+            [
+                {
+                    "pad": cell_date.month != first_day.month,
+                    "date": cell_date,
+                    "visita": (visitas_by_cell.get((sucursal.id, cell_date.day), [None])[0]
+                               if cell_date.month == first_day.month else None),
+                    "es_hoy": cell_date == hoy,
+                }
+                for cell_date in week
+            ]
+            for week in month_weeks
+        ]
         rows.append(
             {
                 "sucursal": sucursal,
                 "cells": cells,
+                "weeks": weeks,
                 "avance": round((row_visits / total_programadas) * 100) if total_programadas else 0,
                 "visitas_count": row_visits,
             }
         )
+
+    vista_movil = request.GET.get("vista") or "dia"
+    if vista_movil not in ("dia", "sucursal"):
+        vista_movil = "dia"
+    visitas_por_dia = {}
+    for visita in visitas_mes:
+        visitas_por_dia.setdefault(visita.fecha_programada, []).append(visita)
+    agenda_dias = [
+        {
+            "fecha": fecha,
+            "visitas": items,
+            "es_hoy": fecha == hoy,
+            "vencida": fecha < hoy and any(v.estatus == VisitaSucursal.ESTATUS_PROGRAMADA for v in items),
+        }
+        for fecha, items in sorted(visitas_por_dia.items())
+    ]
 
     daily_estimated = []
     daily_real = []
@@ -268,6 +300,9 @@ def lista_visitas(request):
             visita__sucursal__in=_sucursales_visitables(),
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
         ).count(),
+        "vista_movil": vista_movil,
+        "agenda_dias": agenda_dias,
+        "hoy": hoy,
         "avance_estimado": 100 if total_programadas else 0,
         "avance_real": round((total_realizadas / total_programadas) * 100) if total_programadas else 0,
         "daily_estimated": daily_estimated,
@@ -302,6 +337,8 @@ def nueva_visita(request):
                 _crear_checklist_base(visita)
             messages.success(request, "Visita creada con checklist base.")
             return redirect("visitas_sucursal:detalle", pk=visita.pk)
+    preset_sucursal = request.GET.get("sucursal") or ""
+    preset_fecha = _parse_date(request.GET.get("fecha")) or timezone.localdate()
     return render(
         request,
         "visitas_sucursal/nueva.html",
@@ -309,7 +346,8 @@ def nueva_visita(request):
             "sucursales": sucursales,
             "users": users,
             "tipo_choices": VisitaSucursal.TIPO_CHOICES,
-            "today": timezone.localdate(),
+            "today": preset_fecha,
+            "preset_sucursal": preset_sucursal,
         },
     )
 
@@ -340,6 +378,13 @@ def app_visitas_sucursal(request):
         preview_read_only = True
 
     visitas = _visitas_app(request.user, sucursal, can_manage)
+    filtro_sucursal = None
+    if can_manage:
+        suc_param = request.GET.get("sucursal") or ""
+        if suc_param.isdigit():
+            filtro_sucursal = _sucursales_visitables().filter(pk=suc_param).first()
+        if filtro_sucursal:
+            visitas = visitas.filter(sucursal=filtro_sucursal)
     visita_id = request.GET.get("visita")
     visita = visitas.filter(pk=visita_id).first() if visita_id else None
     if not visita:
@@ -423,6 +468,7 @@ def app_visitas_sucursal(request):
             "app_mode": app_mode,
             "preview_read_only": preview_read_only,
             "preview_sucursal": preview_sucursal,
+            "filtro_sucursal": filtro_sucursal,
             "sucursales_preview": _sucursales_visitables().order_by("nombre") if is_superuser else [],
             "is_superuser": is_superuser,
         },
@@ -438,6 +484,40 @@ def detalle_visita(request, pk):
     )
     if request.method == "POST":
         _require_visitas(request.user, manage=True)
+        action = request.POST.get("action") or ""
+        if action == "reprogramar":
+            nueva_fecha = _parse_date(request.POST.get("nueva_fecha"))
+            if visita.estatus != VisitaSucursal.ESTATUS_PROGRAMADA:
+                messages.error(request, "Solo se pueden reprogramar visitas en estatus Programada.")
+            elif not nueva_fecha:
+                messages.error(request, "Selecciona una fecha válida para reprogramar.")
+            elif (
+                VisitaSucursal.objects.filter(sucursal=visita.sucursal, fecha_programada=nueva_fecha)
+                .exclude(pk=visita.pk)
+                .exists()
+            ):
+                messages.error(request, "La sucursal ya tiene visita programada ese día.")
+            else:
+                visita.fecha_programada = nueva_fecha
+                visita.save(update_fields=["fecha_programada", "actualizado_en"])
+                messages.success(request, f"Visita reprogramada al {nueva_fecha:%d/%m/%Y}.")
+            return redirect("visitas_sucursal:detalle", pk=visita.pk)
+        if action == "cancelar":
+            if visita.estatus != VisitaSucursal.ESTATUS_PROGRAMADA:
+                messages.error(request, "Solo se pueden cancelar visitas en estatus Programada.")
+            else:
+                visita.estatus = VisitaSucursal.ESTATUS_CANCELADA
+                visita.save(update_fields=["estatus", "actualizado_en"])
+                messages.success(request, "Visita cancelada. Sigue visible en el cronograma como C.")
+            return redirect("visitas_sucursal:detalle", pk=visita.pk)
+        if action == "eliminar":
+            if visita.estatus == VisitaSucursal.ESTATUS_REALIZADA:
+                messages.error(request, "No se puede eliminar una visita ya realizada.")
+                return redirect("visitas_sucursal:detalle", pk=visita.pk)
+            fecha = visita.fecha_programada
+            visita.delete()
+            messages.success(request, "Visita eliminada del cronograma.")
+            return redirect(f"{reverse('visitas_sucursal:lista')}?anio={fecha.year}&mes={fecha.month}")
         visita.observaciones = (request.POST.get("observaciones") or "").strip()
         visita.save(update_fields=["observaciones", "actualizado_en"])
 

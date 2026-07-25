@@ -250,8 +250,12 @@ def task_monitoreo_variacion_costos_reventa(self):
 def task_consolidar_presupuesto_real(self, periodo: str | None = None):
     """Consolida el monto real del presupuesto maestro para el mes indicado.
 
-    Sin argumento consolida el mes en curso y, los primeros 5 días del mes,
-    también el mes anterior (cierre).
+    Sin argumento consolida el mes en curso y los DOS meses anteriores:
+    las fuentes cierran tarde (la nómina de junio se marcó PAGADA hasta
+    mediados de julio y sus sueldos quedaron invisibles en el tablero
+    porque solo se refrescaba el mes corriente). Re-consolidar meses
+    pasados es seguro: nunca pisa capturas MANUAL y el namespace AUTO
+    solo se re-escribe con datos de su misma fuente.
     """
     from reportes.services_presupuesto_real import PresupuestoRealConsolidacionService
 
@@ -261,12 +265,44 @@ def task_consolidar_presupuesto_real(self, periodo: str | None = None):
         year, month = periodo.split("-")
         periodos = [date(int(year), int(month), 1)]
     else:
-        periodos = [hoy.replace(day=1)]
-        if hoy.day <= 5:
-            previo = hoy.replace(day=1) - timedelta(days=1)
-            periodos.append(previo.replace(day=1))
+        mes = hoy.replace(day=1)
+        periodos = [mes]
+        for _ in range(2):
+            mes = (mes - timedelta(days=1)).replace(day=1)
+            periodos.append(mes)
 
     try:
         return [service.consolidar(periodo=p).as_dict() for p in periodos]
     except Exception as exc:
         raise self.retry(exc=exc)
+
+
+@shared_task(name="reportes.conciliar_combustible_mensual", bind=True, max_retries=1, default_retry_delay=600)
+def task_conciliar_combustible_mensual(self):
+    """Día 3 de cada mes: concilia el combustible del mes anterior
+    (facturas SAT vs bitácora) y envía el reporte por correo al DG."""
+    from django.conf import settings
+    from django.core.mail import send_mail
+
+    from reportes.services_conciliacion_combustible import (
+        conciliar_combustible,
+        render_conciliacion_texto,
+    )
+
+    hoy = date.today()
+    periodo = (hoy.replace(day=1) - timedelta(days=1)).replace(day=1)
+    datos = conciliar_combustible(periodo)
+    texto = render_conciliacion_texto(datos)
+    destinatarios = [
+        e.strip()
+        for e in getattr(settings, "SAT_ALERT_EMAILS", ["maburgos12@pollyanasdolce.com"])
+        if e and e.strip()
+    ]
+    send_mail(
+        subject=f"Conciliación combustible {datos['periodo']} — facturas vs bitácora",
+        message=texto,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
+        recipient_list=destinatarios,
+        fail_silently=False,
+    )
+    return {"periodo": datos["periodo"], "facturas": len(datos["facturas"]), "diferencia": str(datos["diferencia"])}

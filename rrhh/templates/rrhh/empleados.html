@@ -368,11 +368,11 @@
             <div class="rrhh-flow-note">
               <strong>Regla:</strong> si la persona usará una app, el usuario se crea aquí y queda ligado a este empleado. No se captura otra persona en Logística, Bonos, Mermas o Fallas.
             </div>
-            <div class="rrhh-field pd-u-c8be1ccba6" data-new-user-field>
+            <div class="rrhh-field" data-new-user-field hidden>
               <label for="nuevo_usuario_username">Usuario nuevo</label>
               <input id="nuevo_usuario_username" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
             </div>
-            <div class="rrhh-field pd-u-c8be1ccba6" data-new-user-field>
+            <div class="rrhh-field" data-new-user-field hidden>
               <label for="nuevo_usuario_password">Contraseña temporal</label>
               <input id="nuevo_usuario_password" class="input-field" type="password" name="nuevo_usuario_password" minlength="8" autocomplete="new-password">
             </div>
@@ -916,11 +916,11 @@
                         <strong>Regla:</strong> el usuario y los accesos se administran desde esta ficha del empleado. Las apps consumen esta relación; no crean otra persona.
                       </div>
                       {% if not e.usuario_erp_id %}
-                      <div class="rrhh-field pd-u-c8be1ccba6" data-new-user-field>
+                      <div class="rrhh-field" data-new-user-field hidden>
                         <label for="edit_nuevo_usuario_username_{{ e.id }}">Usuario nuevo</label>
                         <input id="edit_nuevo_usuario_username_{{ e.id }}" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
                       </div>
-                      <div class="rrhh-field pd-u-c8be1ccba6" data-new-user-field>
+                      <div class="rrhh-field" data-new-user-field hidden>
                         <label for="edit_nuevo_usuario_password_{{ e.id }}">Contraseña temporal</label>
                         <input id="edit_nuevo_usuario_password_{{ e.id }}" class="input-field" type="password" name="nuevo_usuario_password" minlength="8" autocomplete="new-password">
                       </div>
@@ -1205,7 +1205,10 @@
     const createToggle = form.querySelector('[data-create-user-toggle]');
     const show = Boolean(createToggle && createToggle.checked);
     form.querySelectorAll('[data-new-user-field]').forEach((field) => {
-      field.style.display = show ? '' : 'none';
+      field.hidden = !show;
+      field.querySelectorAll('input').forEach((input) => {
+        input.required = show;
+      });
     });
     const existingUserSelect = form.querySelector('select[name="usuario_erp"]');
     if (existingUserSelect) {

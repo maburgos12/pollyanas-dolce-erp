@@ -12,6 +12,7 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
+from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -41,7 +42,7 @@ ZERO = Decimal("0")
 # El área "Nómina" replica los sueldos que ya viven dentro de cada área
 # (Gastos de Venta, Administración, Logística, Producción). Se muestra como
 # vista de control pero NO se suma a los KPI globales para no duplicar dinero.
-AREAS_NO_SUMABLES = {"nomina"}
+AREAS_NO_SUMABLES = {"nomina", "resultados"}
 
 
 def _parse_int(value, default: int) -> int:
@@ -102,6 +103,11 @@ def _cobertura_por_area() -> list[dict[str, object]]:
     filas = sorted(acumulado.values(), key=lambda item: item["orden"])
     for fila in filas:
         fila["pct_auto"] = int(round(fila["auto"] * 100 / fila["total"])) if fila["total"] else 0
+        # Con fuente = automatizado + manual declarado (un rubro MANUAL está
+        # resuelto por diseño, no pendiente — ej. CAPEX se captura a mano).
+        fila["pct_con_fuente"] = (
+            int(round((fila["auto"] + fila["manual"]) * 100 / fila["total"])) if fila["total"] else 0
+        )
     return filas
 
 
@@ -187,13 +193,31 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     # ---- KPIs del mes ------------------------------------------------------
     # Sin área seleccionada, las áreas de control (Nómina) no se suman: sus
     # sueldos ya están dentro de las demás áreas y duplicarían el total.
-    kpis = {"presupuesto": ZERO, "real": ZERO, "capturado": 0, "pendiente": 0, "retenidos": 0}
+    # Ingresos y egresos NUNCA se suman juntos: un "total general" que los
+    # mezcla cuadra al peso pero no significa nada para el negocio (hallazgo
+    # de dirección: mayo mostraba $8.9M "presupuestados" = venta + gasto).
+    kpis = {
+        "ppto_ingresos": ZERO, "real_ingresos": ZERO,
+        "ppto_egresos": ZERO, "real_egresos": ZERO,
+        "ppto_capex": ZERO, "real_capex": ZERO,
+        "capturado": 0, "pendiente": 0, "retenidos": 0,
+    }
     for row in detalle:
         if not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
             continue
-        kpis["presupuesto"] += row["presupuesto"]
+        if row["area_codigo"] == "capex":
+            # CAPEX es inversión (se capitaliza y entra al resultado vía
+            # depreciación), no gasto del periodo: se muestra aparte y no
+            # entra a los egresos ni a la diferencia operativa. Mismo criterio
+            # que estado_resultados (CAPEX después de la utilidad operativa).
+            ppto_key, real_key = "ppto_capex", "real_capex"
+        elif row["tipo"] == RubroPresupuesto.TIPO_INGRESO:
+            ppto_key, real_key = "ppto_ingresos", "real_ingresos"
+        else:
+            ppto_key, real_key = "ppto_egresos", "real_egresos"
+        kpis[ppto_key] += row["presupuesto"]
         if row["real"] is not None:
-            kpis["real"] += row["real"]
+            kpis[real_key] += row["real"]
             kpis["capturado"] += 1
             if row["sin_datos_fuente"]:
                 # Valor retenido de una consolidación previa (fuente sin datos
@@ -201,8 +225,8 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
                 kpis["retenidos"] += 1
         else:
             kpis["pendiente"] += 1
-    kpis["varianza"] = kpis["real"] - kpis["presupuesto"]
-    kpis["varianza_pct"] = variance_pct(kpis["varianza"], kpis["presupuesto"])
+    kpis["dif_real"] = kpis["real_ingresos"] - kpis["real_egresos"]
+    kpis["dif_ppto"] = kpis["ppto_ingresos"] - kpis["ppto_egresos"]
 
     # ---- ventas por unidades (regla de dirección: unidades × precio actual) --
     ventas_unidades = None
@@ -291,6 +315,7 @@ def _export_xlsx(context: dict[str, object]) -> HttpResponse:
     return response
 
 
+@login_required
 def presupuesto_vs_real(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
@@ -343,10 +368,18 @@ def _wants_json(request: HttpRequest) -> bool:
     )
 
 
+def _es_admin_presupuesto(user) -> bool:
+    from core.access import can_manage_module
+
+    return bool(user and user.is_authenticated and (user.is_superuser or can_manage_module(user, "reportes")))
+
+
+@login_required
 def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
 
     areas_permitidas = _areas_capturables(request.user)
+    es_admin = _es_admin_presupuesto(request.user)
 
     hoy = timezone.localdate()
     selected_year = max(2020, min(_parse_int(request.GET.get("year"), hoy.year), 2035))
@@ -384,6 +417,10 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             {
                 "linea": linea,
                 "capturable": capturable,
+                # Dirección puede sobrescribir un automático (motivo obligatorio)
+                # y liberar una captura manual para que vuelva al automático.
+                "puede_sobrescribir": es_admin and not capturable,
+                "puede_liberar": es_admin and str(linea.fuente_real or "").startswith("MANUAL:"),
                 "con_real": con_real,
                 "fuente": _fuente_display(linea.fuente_real),
             }
@@ -403,10 +440,12 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             "filas": filas,
             "completos": completos,
             "total_filas": len(filas),
+            "es_admin": es_admin,
         },
     )
 
 
+@login_required
 @require_POST
 def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
     areas_permitidas = _areas_capturables(request.user)
@@ -451,13 +490,24 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
 
         if areas_permitidas is not None and linea.rubro.area.codigo not in areas_permitidas:
             return responder(False, "No eres responsable de esta área.", tipo="error", status=403)
+        motivo = (request.POST.get("motivo") or "").strip()
         if not _linea_es_capturable(linea):
-            return responder(
-                False,
-                "Este concepto se llena automáticamente desde el sistema; no se captura a mano.",
-                tipo="error",
-                status=409,
-            )
+            # Sobrescribir un automático: solo dirección y con motivo (queda
+            # como MANUAL:<usuario>, que el motor respeta — auditoría).
+            if not _es_admin_presupuesto(request.user):
+                return responder(
+                    False,
+                    "Este concepto se llena automáticamente desde el sistema; no se captura a mano.",
+                    tipo="error",
+                    status=409,
+                )
+            if not motivo:
+                return responder(
+                    False,
+                    "Para sobrescribir un dato automático escribe el motivo (obligatorio).",
+                    tipo="error",
+                    status=400,
+                )
 
         metadata = dict(linea.metadata or {})
         historial = list(metadata.get("capturas") or [])
@@ -467,6 +517,7 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
                 "monto": str(monto),
                 "anterior": str(linea.monto_real) if linea.monto_real is not None else None,
                 "fecha": timezone.now().isoformat(),
+                **({"motivo": motivo[:200]} if motivo else {}),
             }
         )
         metadata["capturas"] = historial[-20:]  # historial acotado, nunca se borra lo capturado
@@ -482,3 +533,339 @@ def presupuesto_real_captura_guardar(request: HttpRequest) -> HttpResponse:
         True,
         f"Capturado {linea.rubro.concepto}: ${monto:,.2f}.",
     )
+
+
+# ---------------------------------------------------------------------- #
+# Cédulas IMSS / SIPARE                                                   #
+# ---------------------------------------------------------------------- #
+
+
+def _puede_subir_cedulas(user) -> bool:
+    """Administración de reportes, o responsable del área Nómina."""
+    from core.access import can_manage_module
+
+    if can_manage_module(user, "reportes"):
+        return True
+    return AreaPresupuestoResponsable.objects.filter(
+        usuario=user, puede_capturar=True, area__codigo="nomina", area__activa=True
+    ).exists()
+
+
+@login_required
+def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
+    from .views import _reportes_module_tabs
+
+    if not _puede_subir_cedulas(request.user):
+        raise PermissionDenied("No tienes permisos para subir cédulas del IMSS.")
+
+    resumen = None
+    error = None
+    fue_dry_run = False
+    if request.method == "POST":
+        from .services_cedula_imss import procesar_cedula_subida
+
+        archivo = request.FILES.get("cedula")
+        fue_dry_run = bool(request.POST.get("previsualizar"))
+        if archivo is None:
+            error = "Selecciona el archivo .xls de la cédula (SUA/SIPARE)."
+        elif not archivo.name.lower().endswith(".xls"):
+            error = "El archivo debe ser el .xls que genera el SUA/SIPARE."
+        else:
+            try:
+                resumen = procesar_cedula_subida(archivo, dry_run=fue_dry_run)
+            except ValueError as exc:
+                error = str(exc)
+
+    return render(
+        request,
+        "reportes/cedula_imss_importar.html",
+        {
+            "module_tabs": _reportes_module_tabs("presupuesto_vs_real")
+            if can_view_reportes(request.user)
+            else [],
+            "resumen": resumen,
+            "error": error,
+            "fue_dry_run": fue_dry_run,
+        },
+    )
+
+
+@login_required
+@require_POST
+def presupuesto_real_liberar(request: HttpRequest) -> HttpResponse:
+    """Devuelve una captura manual al flujo automático (solo dirección).
+
+    Limpia fuente_real: la consolidación nocturna (o la siguiente corrida)
+    vuelve a llenar el dato desde su fuente. El historial se conserva.
+    """
+    from django.contrib import messages
+    from django.db import transaction
+
+    if not _es_admin_presupuesto(request.user):
+        raise PermissionDenied("Solo dirección puede liberar capturas.")
+
+    wants_json = _wants_json(request)
+
+    def responder(ok: bool, mensaje: str, *, status: int = 200):
+        if wants_json:
+            return JsonResponse(
+                {"ok": ok, "toast": {"type": "success" if ok else "error", "message": mensaje, "persistent": not ok}},
+                status=status,
+            )
+        (messages.success if ok else messages.error)(request, mensaje)
+        destino = request.POST.get("return_to") or reverse("reportes:presupuesto_real_captura")
+        if not destino.startswith("/") or destino.startswith("//"):
+            destino = reverse("reportes:presupuesto_real_captura")
+        return redirect(destino + f"#linea-{request.POST.get('linea_id', '')}")
+
+    with transaction.atomic():
+        try:
+            linea = LineaPresupuestoMensual.objects.select_for_update().select_related("rubro").get(
+                pk=_parse_int(request.POST.get("linea_id"), 0)
+            )
+        except LineaPresupuestoMensual.DoesNotExist:
+            return responder(False, "La línea no existe.", status=404)
+        if not str(linea.fuente_real or "").startswith("MANUAL:"):
+            return responder(False, "Esta línea no tiene captura manual que liberar.", status=409)
+
+        metadata = dict(linea.metadata or {})
+        historial = list(metadata.get("capturas") or [])
+        historial.append(
+            {
+                "usuario": request.user.get_username(),
+                "accion": "liberado_a_automatico",
+                "anterior": str(linea.monto_real) if linea.monto_real is not None else None,
+                "fecha": timezone.now().isoformat(),
+            }
+        )
+        metadata["capturas"] = historial[-20:]
+        linea.fuente_real = ""
+        linea.metadata = metadata
+        linea.save(update_fields=["fuente_real", "metadata", "actualizado_en"])
+
+    return responder(True, f"{linea.rubro.concepto}: liberado — el automático lo rellenará en la próxima consolidación.")
+
+
+# ---------------------------------------------------------------------------
+# Estado de resultados (P&L empresa completa)
+# ---------------------------------------------------------------------------
+# Réplica honesta de la pestaña "GENERAL" del Excel de administración:
+# Ingresos − Costos = Utilidad bruta − Egresos por área = Utilidad operativa
+# − Inversiones (CAPEX) = Resultado final. A diferencia del Excel, los
+# egresos incluyen TODAS las áreas de gasto (no solo administración), y a
+# producción se le excluye la materia prima porque ya está en "Costos".
+
+_ER_AREAS_EGRESO = [
+    ("gastos-venta", "Gastos de venta"),
+    ("administracion", "Administración"),
+    ("produccion", "Producción (sin materia prima)"),
+    ("logistica", "Logística"),
+]
+
+
+def _er_bucket() -> dict[int, dict[str, object]]:
+    return {m: {"ppto": ZERO, "real": ZERO, "con_real": False} for m in range(1, 13)}
+
+
+def _er_fila(label: str, bucket, kind: str = "linea", area: str = "") -> dict[str, object]:
+    meses = []
+    anual_ppto = ZERO
+    anual_real = ZERO
+    hay_real = False
+    for m in range(1, 13):
+        celda = bucket[m]
+        ppto = celda["ppto"]
+        real = celda["real"] if celda["con_real"] else None
+        anual_ppto += ppto
+        if real is not None:
+            anual_real += real
+            hay_real = True
+        meses.append({
+            "ppto": ppto,
+            "real": real,
+            "var": (real - ppto) if real is not None else None,
+        })
+    return {
+        "label": label,
+        "kind": kind,
+        "area": area,
+        "meses": meses,
+        "anual_ppto": anual_ppto,
+        "anual_real": anual_real if hay_real else None,
+        "anual_var": (anual_real - anual_ppto) if hay_real else None,
+    }
+
+
+def _er_resta(bucket_a, bucket_b) -> dict[int, dict[str, object]]:
+    """a − b por mes; el real solo existe donde a lo tiene (gate: ingresos)."""
+    out = _er_bucket()
+    for m in range(1, 13):
+        out[m]["ppto"] = bucket_a[m]["ppto"] - bucket_b[m]["ppto"]
+        if bucket_a[m]["con_real"]:
+            real_b = bucket_b[m]["real"] if bucket_b[m]["con_real"] else ZERO
+            out[m]["real"] = bucket_a[m]["real"] - real_b
+            out[m]["con_real"] = True
+    return out
+
+
+def _er_suma(*buckets) -> dict[int, dict[str, object]]:
+    out = _er_bucket()
+    for m in range(1, 13):
+        for b in buckets:
+            out[m]["ppto"] += b[m]["ppto"]
+            if b[m]["con_real"]:
+                out[m]["real"] += b[m]["real"]
+                out[m]["con_real"] = True
+    return out
+
+
+@login_required
+def estado_resultados(request: HttpRequest) -> HttpResponse:
+    if not can_view_reportes(request.user):
+        raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+    from .views import _reportes_module_tabs  # import tardío: views.py es pesado
+
+    hoy = timezone.localdate()
+    selected_year = max(2020, min(_parse_int(request.GET.get("year"), hoy.year), 2035))
+    selected_version = normalize_version(request.GET.get("version"))
+
+    rubros_mp = set(
+        ReglaFuenteRubro.objects.filter(
+            tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP, activa=True
+        ).values_list("rubro_id", flat=True)
+    )
+    # La hoja de producción del Excel traía su roll-up "Costo de producción"
+    # (idéntico al renglón Costos del P&L) MÁS el detalle por insumo; ambos
+    # duplicarían "Costos", así que también se excluyen los rubros cuyo nombre
+    # es un insumo de materia prima del catálogo.
+    from unidecode import unidecode
+
+    from maestros.models import Insumo
+
+    def _norm(texto: str) -> str:
+        return " ".join(unidecode(texto or "").lower().strip().split())
+
+    nombres_mp = set(
+        Insumo.objects.filter(
+            activo=True, tipo_item=Insumo.TIPO_MATERIA_PRIMA
+        ).values_list("nombre_normalizado", flat=True)
+    )
+    nombres_mp.add("costo de produccion")
+
+    def _es_materia_prima(linea) -> bool:
+        return (
+            linea.rubro_id in rubros_mp
+            or _norm(linea.rubro.concepto) in nombres_mp
+        )
+
+    buckets = {clave: _er_bucket() for clave, _ in _ER_AREAS_EGRESO}
+    # Las inversiones NO se revuelven (regla de dirección): los proyectos de
+    # apertura (rubros "CAPEX <proyecto> ...") se muestran aparte del equipo
+    # ordinario (adquisiciones/mesas/hornos de producción).
+    buckets.update(
+        ingresos=_er_bucket(), costos=_er_bucket(),
+        capex_proyectos=_er_bucket(), capex_equipo=_er_bucket(),
+    )
+    egreso_keys = {clave for clave, _ in _ER_AREAS_EGRESO}
+    # Desglose por concepto (pestaña GENERAL del Excel): cada concepto sumado
+    # entre sucursales, agrupado por bloque del P&L, para auditar renglón a
+    # renglón de dónde sale cada total.
+    detalle: dict[tuple[str, str], dict] = {}
+
+    lineas = LineaPresupuestoMensual.objects.filter(
+        periodo__year=selected_year, version=selected_version, rubro__activo=True
+    ).select_related("rubro", "rubro__area")
+    for linea in lineas:
+        area = linea.rubro.area.codigo
+        if area == "resultados":
+            clave = "ingresos" if linea.rubro.tipo == RubroPresupuesto.TIPO_INGRESO else "costos"
+        elif area == "produccion" and _es_materia_prima(linea):
+            continue  # la materia prima ya está en "Costos" del P&L
+        elif area == "capex":
+            clave = (
+                "capex_proyectos"
+                if linea.rubro.concepto.upper().startswith("CAPEX")
+                else "capex_equipo"
+            )
+        elif area in egreso_keys:
+            clave = area
+        else:
+            continue  # ventas por producto ya vive en Ingresos; nómina es control
+        celda = buckets[clave][linea.periodo.month]
+        celda["ppto"] += linea.monto_presupuesto or ZERO
+        if str(linea.fuente_real or "").strip():
+            celda["real"] += linea.monto_real or ZERO
+            celda["con_real"] = True
+        celda_det = detalle.setdefault((clave, linea.rubro.concepto), _er_bucket())[linea.periodo.month]
+        celda_det["ppto"] += linea.monto_presupuesto or ZERO
+        if str(linea.fuente_real or "").strip():
+            celda_det["real"] += linea.monto_real or ZERO
+            celda_det["con_real"] = True
+
+    utilidad_bruta = _er_resta(buckets["ingresos"], buckets["costos"])
+    egresos_total = _er_suma(*(buckets[clave] for clave in egreso_keys))
+    utilidad_operativa = _er_resta(utilidad_bruta, egresos_total)
+    inversion_total = _er_suma(buckets["capex_proyectos"], buckets["capex_equipo"])
+    resultado_final = _er_resta(utilidad_operativa, inversion_total)
+
+    filas = [
+        _er_fila("Ingresos", buckets["ingresos"], area="resultados"),
+        _er_fila("Costos", buckets["costos"], area="resultados"),
+        _er_fila("Utilidad bruta", utilidad_bruta, kind="total"),
+    ]
+    filas.extend(
+        _er_fila(nombre, buckets[clave], area=clave) for clave, nombre in _ER_AREAS_EGRESO
+    )
+    filas.append(_er_fila("Utilidad operativa", utilidad_operativa, kind="total"))
+    filas.append(_er_fila("Inversión en proyectos (aperturas)", buckets["capex_proyectos"], area="capex"))
+    filas.append(_er_fila("Compras de equipo", buckets["capex_equipo"], area="capex"))
+    filas.append(_er_fila("Resultado final", resultado_final, kind="total"))
+
+    # ---- desglose por concepto (orden y nombres de los bloques del P&L) ----
+    NOMBRES_GRUPO = {
+        "ingresos": "Ingresos",
+        "costos": "Costos",
+        **dict(_ER_AREAS_EGRESO),
+        "capex_proyectos": "Inversión en proyectos (aperturas)",
+        "capex_equipo": "Compras de equipo",
+    }
+    orden_grupos = ["ingresos", "costos"] + [c for c, _ in _ER_AREAS_EGRESO] + [
+        "capex_proyectos", "capex_equipo",
+    ]
+    desglose = []
+    for grupo in orden_grupos:
+        conceptos = [
+            _er_fila(concepto, bucket)
+            for (g, concepto), bucket in detalle.items()
+            if g == grupo
+        ]
+        if not conceptos:
+            continue
+        conceptos.sort(key=lambda f: -(f["anual_real"] if f["anual_real"] is not None else ZERO))
+        desglose.append({"grupo": NOMBRES_GRUPO[grupo], "conceptos": conceptos})
+
+    por_label = {fila["label"]: fila for fila in filas}
+    kpis = {
+        "ingresos_real": por_label["Ingresos"]["anual_real"],
+        "utilidad_bruta_real": por_label["Utilidad bruta"]["anual_real"],
+        "utilidad_operativa_real": por_label["Utilidad operativa"]["anual_real"],
+        "resultado_final_real": por_label["Resultado final"]["anual_real"],
+    }
+    if kpis["ingresos_real"]:
+        kpis["margen_operativo_pct"] = (
+            (kpis["utilidad_operativa_real"] or ZERO) / kpis["ingresos_real"] * 100
+        )
+    else:
+        kpis["margen_operativo_pct"] = None
+
+    return render(request, "reportes/estado_resultados.html", {
+        "module_tabs": _reportes_module_tabs("estado_resultados"),
+        "filas": filas,
+        "desglose": desglose,
+        "kpis": kpis,
+        "month_options": MONTH_COLUMNS,
+        "selected_year": selected_year,
+        "selected_version": selected_version,
+        "versions": [v for v, _ in LineaPresupuestoMensual.VERSION_CHOICES],
+    })

@@ -13,6 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -100,11 +101,13 @@ from .services_vacaciones import (
     can_gestionar_vacaciones_jefe,
     can_resolver_vacaciones_jefe,
     crear_solicitud_vacaciones,
+    goce_vacacional_fifo_activo,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
     vacaciones_jefe_q,
 )
+from .services_vacaciones_saldos import desglose_periodos_vacacionales
 from .services_vacantes import (
     can_autorizar_vacante,
     can_solicitar_vacantes,
@@ -130,6 +133,23 @@ def _parse_date(raw: str | None):
         return dt_date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _wants_progressive_response(request) -> bool:
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def _action_redirect_url(request, *, fragment: str = "") -> str:
+    url = reverse("rrhh:rrhh_vacaciones_list")
+    query = request.GET.urlencode()
+    if query:
+        url = f"{url}?{query}"
+    if fragment:
+        url = f"{url}#{fragment}"
+    return url
 
 
 def _misma_fecha_en_anio(fecha: dt_date, anio: int) -> dt_date:
@@ -2791,6 +2811,9 @@ def vacaciones_list(request):
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
+        progressive = _wants_progressive_response(request)
+        success_message = ""
+        fragment = ""
         try:
             if action == "crear":
                 empleado = get_object_or_404(empleados_qs, pk=request.POST.get("empleado_id"))
@@ -2811,7 +2834,8 @@ def vacaciones_list(request):
                     motivo=(request.POST.get("motivo") or "").strip(),
                     actor=request.user,
                 )
-                messages.success(request, f"Solicitud {solicitud.folio} registrada y saldo reservado.")
+                success_message = f"Solicitud {solicitud.folio} registrada y saldo reservado."
+                fragment = f"vac-solicitud-{solicitud.id}"
             elif action == "ajustar_saldo":
                 if not can_manage_rrhh(request.user):
                     raise PermissionDenied("Solo Capital Humano puede conciliar saldos de vacaciones.")
@@ -2836,7 +2860,8 @@ def vacaciones_list(request):
                     descripcion=f"[conciliacion-manual] {descripcion}"[:220],
                     actor=request.user,
                 )
-                messages.success(request, f"Saldo de {empleado.nombre} conciliado.")
+                success_message = f"Saldo de {empleado.nombre} conciliado."
+                fragment = f"saldo-empleado-{empleado.id}"
             elif action in {"preautorizar_jefe", "rechazar_jefe"}:
                 solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
                 preautorizar_solicitud_vacaciones_jefe(
@@ -2845,22 +2870,48 @@ def vacaciones_list(request):
                     aprobar=action == "preautorizar_jefe",
                 )
                 estado = "preautorizada" if action == "preautorizar_jefe" else "rechazada"
-                messages.success(request, f"Vacaciones {solicitud.folio} {estado} por jefe directo.")
+                success_message = f"Vacaciones {solicitud.folio} {estado} por jefe directo."
+                fragment = f"vac-solicitud-{solicitud.id}"
             elif action in {"aprobar_rrhh", "rechazar_rrhh"}:
                 solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
                 if action == "aprobar_rrhh":
                     aprobar_solicitud_vacaciones_rrhh(solicitud, request.user)
-                    messages.success(request, f"Vacaciones {solicitud.folio} aprobadas por Capital Humano.")
+                    success_message = f"Vacaciones {solicitud.folio} aprobadas por Capital Humano."
                 else:
                     rechazar_solicitud_vacaciones(solicitud, request.user)
-                    messages.success(request, f"Vacaciones {solicitud.folio} rechazadas y reserva liberada.")
+                    success_message = f"Vacaciones {solicitud.folio} rechazadas y reserva liberada."
+                fragment = f"vac-solicitud-{solicitud.id}"
             else:
                 raise PermissionDenied("Acción de vacaciones no válida.")
         except ValidationError as exc:
-            messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
-        url = reverse("rrhh:rrhh_vacaciones_list")
-        query = request.GET.urlencode()
-        return redirect(f"{url}?{query}" if query else url)
+            error_message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            if progressive:
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "toast": {
+                            "type": "error",
+                            "message": error_message,
+                            "persistent": True,
+                        },
+                    },
+                    status=400,
+                )
+            messages.error(request, error_message)
+            return redirect(_action_redirect_url(request, fragment=fragment))
+
+        redirect_url = _action_redirect_url(request, fragment=fragment)
+        if progressive:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "toast": {"type": "success", "message": success_message},
+                    "redirect": redirect_url,
+                    "reload": True,
+                }
+            )
+        messages.success(request, success_message)
+        return redirect(redirect_url)
 
     solicitudes_qs = (
         SolicitudVacaciones.objects.select_related(
@@ -2870,6 +2921,7 @@ def vacaciones_list(request):
             "aprobado_rrhh_por",
             "creado_por",
         )
+        .prefetch_related("aplicaciones_goce__periodo")
         .order_by("-creado_en")
     )
     if not can_view_submodule(request.user, "rrhh", "vacaciones"):
@@ -2892,7 +2944,11 @@ def vacaciones_list(request):
         )
     if filtro_sucursal:
         revision_qs = revision_qs.filter(sucursal=filtro_sucursal)
-    empleados_revision = list(revision_qs[:120])
+    empleados_revision = list(
+        revision_qs.prefetch_related(
+            "periodos_vacacionales__aplicaciones_goce"
+        )[:120]
+    )
     sucursales_historial = list(
         empleados_qs.exclude(sucursal="")
         .values_list("sucursal", flat=True)
@@ -2921,13 +2977,41 @@ def vacaciones_list(request):
         .values("empleado_id")
         .annotate(total=Sum("dias"))
     }
+    fifo_activo = goce_vacacional_fifo_activo()
     empleados_historial = []
     for empleado in empleados_revision:
-        saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)
-        aniversario = _ultimo_aniversario(empleado.fecha_ingreso, hoy)
-        fecha_limite = _sumar_meses(aniversario, 6) if aniversario else None
-        pendiente_anterior = pendientes_anteriores.get(empleado.id, Decimal("0"))
-        disponible = saldo["disponible"] + pendiente_anterior
+        periodos = desglose_periodos_vacacionales(empleado) if fifo_activo else []
+        if periodos:
+            saldo = {
+                "periodo_anio": periodos[-1]["anio"],
+                "generado": sum((periodo["generado"] for periodo in periodos), Decimal("0")),
+                "consumido": sum((periodo["gozado"] for periodo in periodos), Decimal("0")),
+                "reservado": sum((periodo["reservado"] for periodo in periodos), Decimal("0")),
+                "disponible": sum(
+                    (periodo["disponible_goce"] for periodo in periodos), Decimal("0")
+                ),
+            }
+            pendiente_anterior = sum(
+                (
+                    periodo["disponible_goce"]
+                    for periodo in periodos
+                    if periodo["anio"] < hoy.year
+                ),
+                Decimal("0"),
+            )
+            periodo_referencia = next(
+                (periodo for periodo in periodos if periodo["disponible_goce"] > 0),
+                periodos[-1],
+            )
+            aniversario = periodo_referencia["aniversario"]
+            fecha_limite = periodo_referencia["fecha_limite"]
+            disponible = saldo["disponible"]
+        else:
+            saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)
+            aniversario = _ultimo_aniversario(empleado.fecha_ingreso, hoy)
+            fecha_limite = _sumar_meses(aniversario, 6) if aniversario else None
+            pendiente_anterior = pendientes_anteriores.get(empleado.id, Decimal("0"))
+            disponible = saldo["disponible"] + pendiente_anterior
         if disponible <= 0:
             estado_legal = "Sin saldo pendiente"
         elif fecha_limite and fecha_limite < hoy:
@@ -2948,6 +3032,7 @@ def vacaciones_list(request):
             {
                 "empleado": empleado,
                 "saldo": saldo,
+                "periodos": periodos,
                 "ultimo_aniversario": aniversario,
                 "fecha_limite": fecha_limite,
                 "pendiente_anterior": pendiente_anterior,
@@ -2960,6 +3045,9 @@ def vacaciones_list(request):
         rows = list(qs[:120])
         for solicitud in rows:
             solicitud.puede_preautorizar_jefe = can_resolver_vacaciones_jefe(request.user, solicitud)
+            solicitud.distribucion_goce = (
+                list(solicitud.aplicaciones_goce.all()) if fifo_activo else []
+            )
         return rows
 
     columnas = [
@@ -2998,6 +3086,7 @@ def vacaciones_list(request):
             "hay_solicitudes": stats["total"] > 0,
             "columnas": columnas,
             "stats": stats,
+            "vacaciones_goce_fifo_activo": fifo_activo,
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "user_id": request.user.id,
             "tiene_equipo_vacaciones": tiene_equipo,

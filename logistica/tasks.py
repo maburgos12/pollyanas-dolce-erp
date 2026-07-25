@@ -439,7 +439,7 @@ def alertar_servicios_proximos():
     enviadas = 0
     for dias in _dias_configurados(config):
         fecha_objetivo = hoy + timedelta(days=dias)
-        servicios = ServicioRealizadoUnidad.objects.select_related("unidad", "tipo_servicio").filter(
+        servicios = ServicioRealizadoUnidad.objects.vigentes().select_related("unidad", "tipo_servicio").filter(
             proxima_fecha=fecha_objetivo
         )
         for servicio in servicios:
@@ -468,7 +468,7 @@ def alertar_servicios_proximos():
             )
             enviadas += 1
 
-    servicios_por_km = ServicioRealizadoUnidad.objects.select_related("unidad", "tipo_servicio").filter(
+    servicios_por_km = ServicioRealizadoUnidad.objects.vigentes().select_related("unidad", "tipo_servicio").filter(
         proximos_km__isnull=False
     )
     for servicio in servicios_por_km:

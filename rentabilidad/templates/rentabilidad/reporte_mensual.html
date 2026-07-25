@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Reporte mensual consolidado - Pollyana's Dolce{% endblock %}
+{% block page_title %}Reporte mensual consolidado{% endblock %}
+
+{% block extra_css %}
+<style>
+  .rm-shell { display: flex; flex-direction: column; gap: 20px; }
+  .rm-hero {
+    background: linear-gradient(135deg, var(--vino, #8B2252), #6B1740);
+    color: #FFFAF5; border-radius: 14px; padding: 22px 26px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+  }
+  .rm-hero h1 { font-family: "Playfair Display", serif; font-size: 1.5rem; margin: 0 0 6px; color: #FFFAF5; }
+  .rm-hero p { margin: 0; font-size: .9rem; opacity: .85; max-width: 640px; }
+  .rm-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .rm-controls label { font-size: .8rem; opacity: .9; }
+  .rm-controls select, .rm-controls input {
+    border: none; border-radius: 8px; padding: 7px 10px; font-family: inherit; font-size: .85rem;
+  }
+  .rm-controls .rm-btn {
+    background: var(--dorado, #C9A84C); color: #3D2B2B; border: none; border-radius: 8px;
+    padding: 8px 14px; font-weight: 700; cursor: pointer; text-decoration: none; font-size: .85rem;
+  }
+  .rm-card { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(61,43,43,.06); overflow-x: auto; }
+  table.rm-tabla { width: 100%; border-collapse: collapse; font-size: .87rem; min-width: 900px; }
+  .rm-tabla th {
+    text-align: right; padding: 10px 12px; color: var(--texto-light, #7A6565);
+    border-bottom: 2px solid var(--rosa, #F8E8EE); font-weight: 700;
+  }
+  .rm-tabla th:first-child, .rm-tabla td:first-child { text-align: left; }
+  .rm-tabla td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--gris-suave, #F5F0EB); }
+  .rm-tabla tbody tr:hover { background: var(--blanco, #FFFAF5); }
+  .rm-tabla tfoot td { font-weight: 800; border-top: 2px solid var(--vino, #8B2252); }
+  .rm-pos { color: var(--verde, #4CAF50); font-weight: 700; }
+  .rm-neg { color: var(--rojo, #E53935); font-weight: 700; }
+  .rm-na { color: var(--texto-light, #7A6565); }
+  .rm-mes { font-weight: 700; color: var(--vino, #8B2252); }
+  .rm-note { font-size: .78rem; color: var(--texto-light, #7A6565); margin-top: 10px; }
+  details.rm-detalle { margin-top: 4px; }
+  details.rm-detalle summary { cursor: pointer; color: var(--vino, #8B2252); font-size: .8rem; }
+  .rm-sub { font-size: .8rem; color: var(--texto-light, #7A6565); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rm-shell">
+  <section class="rm-hero">
+    <div>
+      <h1>Reporte mensual consolidado · últimos 12 meses</h1>
+      <p>
+        Ingresos del P&amp;L canónico, nómina con horas extra como línea aparte,
+        nómina como % de ventas, utilidad neta (P&amp;L de 6 líneas de gasto) y
+        variación contra el mismo mes del año anterior.
+      </p>
+    </div>
+    <form method="get" class="rm-controls">
+      <label for="rm-sucursal">Sucursal</label>
+      <select id="rm-sucursal" name="sucursal">
+        <option value="">Todas (consolidado)</option>
+        {% for s in sucursales %}
+        <option value="{{ s.id }}" {% if s.id == sucursal_id %}selected{% endif %}>{{ s.nombre }}</option>
+        {% endfor %}
+      </select>
+      <label for="rm-hasta">Hasta</label>
+      <input id="rm-hasta" type="month" name="hasta" value="{{ hasta_str }}">
+      <button type="submit" class="rm-btn">Aplicar</button>
+      <a class="rm-btn" href="?formato=csv&hasta={{ hasta_str }}{% if sucursal_id %}&sucursal={{ sucursal_id }}{% endif %}">Exportar CSV</a>
+    </form>
+  </section>
+
+  <section class="rm-card">
+    <div class="table-responsive">
+    <table class="rm-tabla">
+      <thead>
+        <tr>
+          <th>Mes</th>
+          <th>Ingresos</th>
+          <th>Nómina (P&amp;L)</th>
+          <th>Horas extra</th>
+          <th>Nómina total</th>
+          <th>Nómina % ventas</th>
+          <th>Utilidad neta</th>
+          <th>YoY ingresos</th>
+          <th>YoY nómina</th>
+          <th>YoY utilidad</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fila in filas %}
+        <tr>
+          <td class="rm-mes">{{ fila.periodo|date:"M Y" }}</td>
+          <td>${{ fila.ingresos|floatformat:2|intcomma }}</td>
+          <td>${{ fila.nomina|floatformat:2|intcomma }}</td>
+          <td>${{ fila.horas_extra|floatformat:2|intcomma }}</td>
+          <td>${{ fila.nomina_total|floatformat:2|intcomma }}</td>
+          <td>{% if fila.nomina_pct_ventas is not None %}{{ fila.nomina_pct_ventas|floatformat:2 }}%{% else %}<span class="rm-na">—</span>{% endif %}</td>
+          <td class="{% if fila.utilidad_neta < 0 %}rm-neg{% endif %}">${{ fila.utilidad_neta|floatformat:2|intcomma }}</td>
+          <td>
+            {% if fila.yoy.ingresos is not None %}
+              <span class="{% if fila.yoy.ingresos >= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.ingresos|floatformat:1 }}%</span>
+            {% else %}<span class="rm-na">—</span>{% endif %}
+          </td>
+          <td>
+            {% if fila.yoy.nomina_total is not None %}
+              <span class="{% if fila.yoy.nomina_total <= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.nomina_total|floatformat:1 }}%</span>
+            {% else %}<span class="rm-na">—</span>{% endif %}
+          </td>
+          <td>
+            {% if fila.yoy.utilidad_neta is not None %}
+              <span class="{% if fila.yoy.utilidad_neta >= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.utilidad_neta|floatformat:1 }}%</span>
+            {% else %}<span class="rm-na">—</span>{% endif %}
+          </td>
+        </tr>
+        {% if not sucursal_id and fila.sucursales %}
+        <tr>
+          <td colspan="10" style="padding-top:0;">
+            <details class="rm-detalle">
+              <summary>Desglose por sucursal · {{ fila.periodo|date:"M Y" }}</summary>
+              <div class="rm-sub">
+                {% for s in fila.sucursales %}
+                <div>
+                  {{ s.sucursal }} — ingresos ${{ s.ingresos|floatformat:2|intcomma }} ·
+                  nómina ${{ s.nomina|floatformat:2|intcomma }} + HE ${{ s.horas_extra|floatformat:2|intcomma }}
+                  {% if s.nomina_pct_ventas is not None %}({{ s.nomina_pct_ventas|floatformat:2 }}% de ventas){% endif %} ·
+                  utilidad ${{ s.utilidad_neta|floatformat:2|intcomma }}
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>TOTAL 12M</td>
+          <td>${{ reporte.totales.ingresos|floatformat:2|intcomma }}</td>
+          <td>${{ reporte.totales.nomina|floatformat:2|intcomma }}</td>
+          <td>${{ reporte.totales.horas_extra|floatformat:2|intcomma }}</td>
+          <td>${{ reporte.totales.nomina_total|floatformat:2|intcomma }}</td>
+          <td></td>
+          <td class="{% if reporte.totales.utilidad_neta < 0 %}rm-neg{% endif %}">${{ reporte.totales.utilidad_neta|floatformat:2|intcomma }}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+    <p class="rm-note">
+      Fuentes: rentabilidad histórica (P&amp;L canónico por sucursal-mes) y horas extra
+      de RRHH en estado autorizado o pagado. La utilidad neta corresponde a la utilidad
+      operativa del P&amp;L de 6 líneas de gasto (renta, nómina, servicios, mantenimiento,
+      gastos administrativos prorrateados y otros gastos fijos).
+    </p>
+  </section>
+</div>
+{% endblock %}

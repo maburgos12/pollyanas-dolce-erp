@@ -245,6 +245,7 @@ class PointMovementSyncServiceTests(TestCase):
             insumo=insumo,
             insumo_id=insumo.id,
             received_quantity=Decimal("5"),
+            unit=None,
             transfer_external_id="TR-ARMADO-001",
             destination_branch=SimpleNamespace(name="ARMADO", metadata={}),
         )
@@ -291,6 +292,7 @@ class PointMovementSyncServiceTests(TestCase):
             insumo=insumo,
             insumo_id=insumo.id,
             received_quantity=Decimal("6"),
+            unit=None,
             transfer_external_id="TR-VACIO-001",
             destination_branch=SimpleNamespace(
                 name="CEDIS",
@@ -337,6 +339,7 @@ class PointMovementSyncServiceTests(TestCase):
             insumo=insumo,
             insumo_id=insumo.id,
             received_quantity=Decimal("4"),
+            unit=None,
             transfer_external_id="TR-NOOP-001",
             destination_branch=SimpleNamespace(
                 name="CEDIS",

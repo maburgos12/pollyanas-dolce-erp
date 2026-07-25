@@ -102,6 +102,7 @@ class PointProductRecipeSyncService:
         *,
         branch_hint: str | None = None,
         product_codes: list[str] | None = None,
+        articulo_codes: list[str] | None = None,
         limit: int | None = None,
         include_without_recipe: bool = False,
         sync_job=None,
@@ -109,6 +110,7 @@ class PointProductRecipeSyncService:
     ) -> PointRecipeSyncResult:
         seed_unidades_basicas()
         selected_codes = {self._norm_code(code) for code in (product_codes or []) if (code or "").strip()}
+        selected_articulos = [c.strip() for c in (articulo_codes or []) if (c or "").strip()]
         summary = {
             "workspace": "",
             "products_seen": 0,
@@ -149,8 +151,14 @@ class PointProductRecipeSyncService:
                 root_codes=sorted(selected_codes),
                 max_depth=max(1, int(max_depth or 3)),
             )
-            products = client.get_products()
-            products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
+            if selected_codes:
+                # Extracción dirigida: 1 búsqueda por código. Pagar la
+                # enumeración completa (~1,500 consultas) por un lote de 15
+                # productos causaba lotes de 3 horas.
+                products = self._fetch_products_by_codes(client=client, selected_codes=selected_codes)
+            else:
+                products = client.get_all_products()
+                products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
             summary["products_seen"] = len(products)
             visited: dict[str, PointRecipeNode] = {}
 
@@ -207,6 +215,36 @@ class PointProductRecipeSyncService:
             )
             run.summary = summary
             run.save(update_fields=["summary", "updated_at"])
+            for codigo_articulo in selected_articulos:
+                # Raíz por ARTÍCULO (sí-o-sí de dirección 2026-07-17): insumos con
+                # receta propia que ningún producto referencia (panes/variantes).
+                try:
+                    rows_art = client.get_articulos(search=codigo_articulo)
+                except Exception:
+                    rows_art = []
+                fila_art = next(
+                    (
+                        r
+                        for r in rows_art
+                        if self._norm_code(str(r.get("Codigo_Articulo") or "")) == self._norm_code(codigo_articulo)
+                    ),
+                    None,
+                )
+                if fila_art is None:
+                    summary.setdefault("articulos_no_encontrados", []).append(codigo_articulo)
+                    continue
+                summary["products_selected"] += 1
+                self._extract_insumo_node(
+                    client=client,
+                    run=run,
+                    articulo_row=fila_art,
+                    depth=0,
+                    max_depth=max_depth,
+                    visited=visited,
+                    summary=summary,
+                    node_outcomes=node_outcomes,
+                )
+
 
         raw_export_path = self._write_raw_export(run=run, payload=self._serialize_run(run))
         summary["run_id"] = run.id
@@ -220,7 +258,7 @@ class PointProductRecipeSyncService:
     ) -> dict[str, object]:
         with self._build_http_client() as client:
             workspace = client.login(branch_hint=branch_hint)
-            products = client.get_products()
+            products = client.get_all_products()
             discovery_baseline_at = self._discovery_baseline_at()
             products = self._hydrate_recent_discovery_products(
                 client=client,
@@ -412,6 +450,26 @@ class PointProductRecipeSyncService:
                 seen_codes.add(sku_norm)
             seen_external_ids.add(external_id)
         return hydrated
+
+    def _fetch_products_by_codes(self, *, client, selected_codes: set[str]) -> list[dict]:
+        """Trae SOLO los productos pedidos: una consulta dirigida por código,
+        con hidratación desde PointProduct para los que la búsqueda no regrese.
+        """
+        found: list[dict] = []
+        seen: set[str] = set()
+        for code in sorted(selected_codes):
+            if not code:
+                continue
+            try:
+                rows = client.get_products(text_art=code)
+            except Exception:
+                rows = []
+            for row in rows:
+                norm = self._norm_code(row.get("Codigo") or "")
+                if norm == code and norm not in seen:
+                    seen.add(norm)
+                    found.append(row)
+        return self._hydrate_selected_products(client=client, products=found, selected_codes=selected_codes)
 
     def _hydrate_selected_products(self, *, client, products: list[dict], selected_codes: set[str]) -> list[dict]:
         if not selected_codes:
@@ -1127,6 +1185,24 @@ class PointProductRecipeSyncService:
 
         unit = self.identity_service.resolve_unit(unit_raw)
         tipo_item = self._infer_direct_input_type(category=category)
+        # El código puede pertenecer ya a un insumo activo (la resolución por
+        # nombre pudo caer en otro, o el detalle de Point actualizó el código):
+        # crear duplicaría y el constraint único tumbaba el lote entero.
+        codigo_limpio = (point_code or "").strip().upper()[:80]
+        if codigo_limpio:
+            existente = (
+                Insumo.objects.filter(activo=True, codigo_point__iexact=codigo_limpio)
+                .order_by("id")
+                .first()
+            )
+            if existente is not None:
+                self.identity_service.sync_insumo_point_identity(
+                    insumo=existente,
+                    point_code=point_code,
+                    point_name=point_name,
+                    category=category,
+                )
+                return ResolvedInsumo(insumo=existente, score=100.0, method="POINT_CODE"), False
         insumo = Insumo.objects.create(
             codigo_point=point_code[:80],
             nombre_point=point_name[:250],
@@ -1196,6 +1272,19 @@ class PointProductRecipeSyncService:
                     if named_internal is not None and named_internal.id != internal.id:
                         stale_internal = internal
                         internal = named_internal
+                # El insumo viejo suelta el código PRIMERO: guardarlo al
+                # nuevo con el viejo aún activo viola el constraint único
+                # (crash real: lote de panes con 01VARCMINI).
+                if stale_internal is not None:
+                    stale_updates: list[str] = []
+                    if stale_internal.codigo_point:
+                        stale_internal.codigo_point = ""
+                        stale_updates.append("codigo_point")
+                    if stale_internal.nombre_point:
+                        stale_internal.nombre_point = ""
+                        stale_updates.append("nombre_point")
+                    if stale_updates:
+                        stale_internal.save(update_fields=stale_updates)
                 updates: list[str] = []
                 if point_code and internal.codigo_point != point_code:
                     internal.codigo_point = point_code[:80]
@@ -1211,16 +1300,6 @@ class PointProductRecipeSyncService:
                     updates.append("unidad_base")
                 if updates:
                     internal.save(update_fields=updates)
-                if stale_internal is not None:
-                    stale_updates: list[str] = []
-                    if stale_internal.codigo_point:
-                        stale_internal.codigo_point = ""
-                        stale_updates.append("codigo_point")
-                    if stale_internal.nombre_point:
-                        stale_internal.nombre_point = ""
-                        stale_updates.append("nombre_point")
-                    if stale_updates:
-                        stale_internal.save(update_fields=stale_updates)
                 return internal, False
 
         if normalized_name:

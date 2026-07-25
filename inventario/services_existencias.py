@@ -42,7 +42,7 @@ def establecer_stock(insumo: Insumo, almacen: str, cantidad) -> ExistenciaInsumo
 
 
 @transaction.atomic
-def aplicar_delta(insumo: Insumo, almacen: str, delta) -> ExistenciaInsumo:
+def aplicar_delta(insumo: Insumo, almacen: str, delta, *, permitir_negativo: bool = False) -> ExistenciaInsumo:
     try:
         delta_decimal = Decimal(str(delta))
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -60,7 +60,9 @@ def aplicar_delta(insumo: Insumo, almacen: str, delta) -> ExistenciaInsumo:
         almacen=almacen,
     )
     nuevo_saldo = Decimal(str(existencia.stock_actual or 0)) + delta_decimal
-    if nuevo_saldo < 0:
+    # permitir_negativo: el consumo automático por venta Point puede correr antes
+    # de la apertura de stock del insumo; los flujos manuales siguen estrictos.
+    if nuevo_saldo < 0 and not permitir_negativo:
         raise ValidationError(
             f"Stock insuficiente en {almacen}: saldo resultante {nuevo_saldo}.",
             code="stock_negativo",

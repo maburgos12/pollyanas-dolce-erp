@@ -221,7 +221,6 @@ NAV_GROUPS = [
             ("sistema", "orquestacion", "Orquestación", "/orquestacion/", ["/orquestacion/"]),
             ("sistema", "ia", "IA privada", "/ia-privada/", ["/ia-privada/"]),
             ("sistema", "integraciones", "Integraciones", "/integraciones/", ["/integraciones/"]),
-            ("sistema", "syncfy", "Bancos Syncfy", "/syncfy/bancos/", ["/syncfy/bancos/"]),
             (
                 "sistema",
                 "horarios_especiales",
@@ -239,11 +238,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     current_path = current_path or ""
     visible_groups = []
     best_match_len = 0
+    es_revisor_seguimiento = can_review_seguimiento_global(user)
+    rutas_panel_dg = {
+        "minutas": "/seguimiento/panel/?tab=MINUTA",
+        "proyectos": "/seguimiento/panel/?tab=PROYECTO",
+        "compromisos": "/seguimiento/panel/?tab=COMPROMISO",
+    }
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
             if not can_view_submodule(user, module, submodule):
                 continue
+            if es_revisor_seguimiento and module == "seguimiento" and submodule in rutas_panel_dg:
+                url = rutas_panel_dg[submodule]
+                prefixes = [url]
             match_len = max((len(prefix) for prefix in prefixes if current_path.startswith(prefix)), default=0)
             best_match_len = max(best_match_len, match_len)
             items.append(
@@ -260,6 +268,24 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         # Entradas con permiso propio (no dependen del acceso por módulo):
         # la captura de presupuesto la usan responsables de área que pueden
         # no tener el módulo de reportes; el tablero es de dirección.
+        if group["key"] == "mi_trabajo" and user and user.is_authenticated:
+            from reportes.views_presupuesto_real import _puede_subir_cedulas
+
+            if _puede_subir_cedulas(user):
+                url_cedula = "/reportes/presupuesto-real/cedula-imss/"
+                match_len = len(url_cedula) if current_path.startswith(url_cedula) else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Cédulas IMSS",
+                        "url": url_cedula,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "reportes",
+                        "submodule": "cedula_imss",
+                        "initial": "I",
+                    }
+                )
         if group["key"] == "mi_trabajo" and _puede_capturar_presupuesto(user):
             url_captura = "/reportes/presupuesto-real/captura/"
             match_len = len(url_captura) if current_path.startswith(url_captura) else 0
@@ -290,8 +316,24 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "initial": "P",
                 }
             )
+            url_estado = "/reportes/estado-resultados/"
+            match_len = len(url_estado) if current_path.startswith(url_estado) else 0
+            best_match_len = max(best_match_len, match_len)
+            items.append(
+                {
+                    "label": "Estado de resultados",
+                    "url": url_estado,
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "reportes",
+                    "submodule": "estado_resultados",
+                    "initial": "E",
+                }
+            )
         if items:
             group_url = group.get("url")
+            if es_revisor_seguimiento and group["key"] == "mi_trabajo":
+                group_url = "/seguimiento/panel/"
             group_active = bool(
                 group_url
                 and current_path.rstrip("/") == group_url.rstrip("/")

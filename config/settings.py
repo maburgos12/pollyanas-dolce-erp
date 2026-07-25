@@ -57,6 +57,7 @@ APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
 IS_DEVELOPMENT_ENV = APP_ENV in {"development", "dev", "local", "test"}
 RUNNING_TESTS = "test" in sys.argv or bool(os.getenv("PYTEST_CURRENT_TEST"))
 DEBUG = env_bool("DEBUG", default=IS_DEVELOPMENT_ENV)
+VACACIONES_GOCE_FIFO_ACTIVO = env_bool("VACACIONES_GOCE_FIFO_ACTIVO", default=False)
 
 if APP_ENV in {"production", "staging"} and DEBUG:
     raise ValueError("DEBUG must remain disabled when APP_ENV is production or staging.")
@@ -87,7 +88,7 @@ LOGISTICA_FALLBACK_SPEED_KMH = env_int("LOGISTICA_FALLBACK_SPEED_KMH", 35)
 # Ventana absoluta y corta para vaciar colas offline creadas por la PWA v59.
 # Definirla vacia deshabilita la compatibilidad inmediatamente.
 LOGISTICA_PWA_V59_COMPAT_UNTIL = os.getenv(
-    "LOGISTICA_PWA_V59_COMPAT_UNTIL", "2026-07-17T23:59:59-07:00"
+    "LOGISTICA_PWA_V59_COMPAT_UNTIL", ""
 ).strip()
 ECOMMERCE_API_BASE_URL = os.getenv("ECOMMERCE_API_BASE_URL", "").strip()
 ECOMMERCE_SERVICE_EMAIL = os.getenv("ECOMMERCE_SERVICE_EMAIL", "").strip()
@@ -155,6 +156,7 @@ MIDDLEWARE = [
     "core.middleware.EnsureCSRFCookieOnHtmlMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "core.middleware.SuperuserPreviewMiddleware",
     "core.middleware.BonosProduccionCaptureOnlyMiddleware",
     "core.middleware.BranchCaptureOnlyMiddleware",
     "core.middleware.RepartidorOnlyMiddleware",
@@ -322,7 +324,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks", "syncfy_client.tasks")
+CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
     "logistica-alertar-documentos-por-vencer": {
         "task": "logistica.tasks.alertar_documentos_por_vencer",
@@ -339,6 +341,21 @@ CELERY_BEAT_SCHEDULE = {
     "rrhh-alertar-cuotas-quincena": {
         "task": "rrhh.tasks.alertar_cuotas_quincena",
         "schedule": crontab(day_of_month="14,29", hour=8, minute=0),
+    },
+    "rrhh-consumir-goce-vacaciones-completado": {
+        "task": "rrhh.tasks.consumir_goce_vacaciones_completado",
+        "schedule": crontab(hour=0, minute=10),
+        "options": {"timezone": TIME_ZONE},
+    },
+    "rrhh-evaluar-asistencia-diaria": {
+        "task": "rrhh.tasks.evaluar_asistencia_diaria",
+        "schedule": crontab(hour=7, minute=0),
+        "options": {"timezone": TIME_ZONE},
+    },
+    "rrhh-auditar-vacaciones-diaria": {
+        "task": "rrhh.tasks.auditar_vacaciones_diaria",
+        "schedule": crontab(hour=7, minute=30),
+        "options": {"timezone": TIME_ZONE},
     },
     "logistica-escalar-tickets-sin-respuesta-cada-60-min": {
         "task": "logistica.tasks.escalar_tickets_sin_respuesta",
@@ -358,11 +375,6 @@ CELERY_BEAT_SCHEDULE = {
     "sat: descarga cfdi nocturna": {
         "task": "sat_client.ejecutar_descarga_sat_nocturna",
         "schedule": crontab(hour=1, minute=0),
-        "options": {"timezone": TIME_ZONE},
-    },
-    "syncfy: sincronizacion bancaria nocturna": {
-        "task": "syncfy_client.sincronizar_movimientos_bancarios",
-        "schedule": crontab(hour=2, minute=0),
         "options": {"timezone": TIME_ZONE},
     },
     # --- Cierre nocturno de producción ---
@@ -529,17 +541,6 @@ SAT_DESCARGA_URL = os.getenv(
     "SAT_DESCARGA_URL",
     "https://cfdidescargamasiva.clouda.sat.gob.mx/DescargaMasivaService.svc",
 )
-
-# Syncfy - agregador bancario.
-SYNCFY_API_KEY = os.getenv("SYNCFY_API_KEY", "")
-SYNCFY_ID_USER = os.getenv("SYNCFY_ID_USER", "")
-SYNCFY_BASE_URL = os.getenv("SYNCFY_BASE_URL", "https://opendata-api.syncfy.com/v1")
-SYNCFY_DIAS_ATRAS = env_int("SYNCFY_DIAS_ATRAS", 7)
-SYNCFY_ENABLED = env_bool("SYNCFY_ENABLED", default=False)
-SYNCFY_TIMEOUT_SECONDS = env_int("SYNCFY_TIMEOUT_SECONDS", 60)
-SYNCFY_POLL_INTERVAL_SECONDS = env_int("SYNCFY_POLL_INTERVAL_SECONDS", 30)
-SYNCFY_POLL_MAX_ATTEMPTS = env_int("SYNCFY_POLL_MAX_ATTEMPTS", 20)
-SYNCFY_ALERT_EMAILS = env_list("SYNCFY_ALERT_EMAILS", "maburgos12@pollyanasdolce.com")
 
 # Umbrales de rentabilidad para el agente IA
 RENT_MARGEN_BRUTO_MIN = 55.0

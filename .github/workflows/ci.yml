@@ -2,8 +2,16 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - ".gitignore"
+      - "scripts/git_workspace_preflight.sh"
 
 jobs:
   test:
@@ -55,6 +63,13 @@ jobs:
             pos_bridge.tests.test_product_month_closure_service \
             pos_bridge.tests.test_movement_sync_service.PointMovementSyncServiceTests \
             pos_bridge.tests.test_sales_sync_tasks.PointSalesSyncTaskRoutingTests.test_run_monthly_product_closure_targets_previous_month_by_default
+
+      - name: Enforce critical page query budgets
+        run: >-
+          python manage.py test
+          logistica.tests.LogisticaViewsTests
+          --tag=performance
+          --verbosity=2
 
       - name: Run legacy full test suite
         continue-on-error: true

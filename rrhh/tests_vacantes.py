@@ -371,7 +371,7 @@ class VacantesSolicitudServiceTests(TestCase):
         self.assertEqual(vacante.autorizado_por, self.jefe_ventas)
         self.assertEqual(VacanteMovimiento.objects.filter(vacante=vacante).count(), 2)
 
-    def test_grupo_area_sin_jefatura_en_organizacion_no_autoriza(self):
+    def test_departamento_sin_jefatura_escala_a_direccion_general(self):
         usuario_compras = User.objects.create_user(username="compras.operador", password="pass123")
         usuario_compras.groups.add(Group.objects.get_or_create(name="COMPRAS")[0])
         self.assertFalse(can_solicitar_vacantes(usuario_compras))
@@ -384,8 +384,60 @@ class VacantesSolicitudServiceTests(TestCase):
             departamento=Empleado.DEP_COMPRAS,
         )
 
-        with self.assertRaisesMessage(ValidationError, "No hay jefe directo asignado"):
-            enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        vacante.refresh_from_db()
+
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_PENDIENTE_DIRECCION)
+        self.assertTrue(vacante.requiere_direccion)
+        self.assertEqual(vacante.tipo_autorizacion, VacanteRRHH.AUTORIZACION_DIRECCION)
+        self.assertIsNone(vacante.autorizador_asignado)
+        self.assertTrue(can_autorizar_vacante(self.dg_user, vacante))
+        self.assertTrue(Notificacion.objects.filter(usuario=self.dg_user, objeto_id=str(vacante.id)).exists())
+
+    def test_departamento_sin_jefatura_autoautoriza_a_jefatura_solicitante(self):
+        # Caso real: jefa de Ventas pide un repartidor y captura el departamento
+        # LOGISTICA, que no tiene empleados en Organización.
+        vacante = crear_solicitud_vacante(
+            area="logistica",
+            puesto="repartidor",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.jefe_ventas,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_LOGISTICA,
+        )
+
+        enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        vacante.refresh_from_db()
+
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_AUTORIZADA)
+        self.assertFalse(vacante.requiere_direccion)
+        self.assertEqual(vacante.autorizador_asignado, self.jefe_ventas)
+        self.assertEqual(vacante.autorizado_por, self.jefe_ventas)
+
+    def test_departamento_sin_jefatura_resuelve_por_jefe_directo_del_solicitante(self):
+        jefa = Empleado.objects.get(usuario_erp=self.jefe_ventas)
+        Empleado.objects.create(
+            nombre="Colaboradora Ventas",
+            departamento=Empleado.DEP_VENTAS,
+            puesto="Vendedora",
+            usuario_erp=self.solicitante,
+            jefe_directo=jefa,
+        )
+        vacante = crear_solicitud_vacante(
+            area="logistica",
+            puesto="repartidor",
+            fecha_solicitada=date(2026, 5, 28),
+            solicitado_por=self.solicitante,
+            creado_por=self.rrhh_user,
+            departamento=Empleado.DEP_LOGISTICA,
+        )
+
+        enviar_vacante_autorizacion(vacante, self.rrhh_user, "Validada por CH")
+        vacante.refresh_from_db()
+
+        self.assertEqual(vacante.estado, VacanteRRHH.ESTADO_PENDIENTE_DIRECCION)
+        self.assertFalse(vacante.requiere_direccion)
+        self.assertEqual(vacante.autorizador_asignado, self.jefe_ventas)
 
     def test_correccion_y_reenvio_regresan_a_revision_sin_borrar_historial(self):
         vacante = crear_solicitud_vacante(

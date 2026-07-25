@@ -267,7 +267,27 @@ class PresupuestoRealConsolidacionService:
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_CONSUMO_MP:
             if "consumo" not in indices:
                 indices["consumo"] = self._build_consumo_index(periodo)
-            return self._monto_consumo_mp(regla, indices["consumo"])
+            return self._monto_consumo_mp(regla, indices["consumo"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD:
+            if "mant_unidad" not in indices:
+                indices["mant_unidad"] = self._build_mant_unidad_index(periodo)
+            return self._monto_mantenimiento_unidad(regla, indices["mant_unidad"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_COMBUSTIBLE_UNIDAD:
+            if "combustible" not in indices:
+                indices["combustible"] = self._build_combustible_index(periodo)
+            return self._monto_combustible_unidad(regla, indices["combustible"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MANTENIMIENTO_EQUIPO:
+            if "mant_equipo" not in indices:
+                indices["mant_equipo"] = self._build_mant_equipo_index(periodo)
+            return self._monto_mantenimiento_equipo(regla, indices["mant_equipo"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_COSTO_REVENTA:
+            if "costo_reventa" not in indices:
+                indices["costo_reventa"] = self._build_costo_reventa_index(periodo)
+            return self._monto_costo_reventa(regla, indices["costo_reventa"], periodo)
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_MERMA_PRODUCTO:
+            if "merma_producto" not in indices:
+                indices["merma_producto"] = self._build_merma_producto_total(periodo)
+            return self._monto_merma_producto(regla, indices["merma_producto"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
 
     @staticmethod
@@ -304,12 +324,20 @@ class PresupuestoRealConsolidacionService:
                 if fila["centro_costo_id"] != regla.centro_costo_id:
                     continue
             else:
-                if sucursal_id is not None and fila["centro_costo__sucursal_id"] != sucursal_id:
-                    continue
-                if centro_tipo and fila["centro_costo__tipo"] != centro_tipo:
+                if centro_tipo:
+                    if fila["centro_costo__tipo"] != centro_tipo:
+                        continue
+                elif sucursal_id is not None and fila["centro_costo__sucursal_id"] != sucursal_id:
                     continue
             total += fila["monto"] or Decimal("0")
             hubo_datos = True
+        # Recibos compartidos entre centros (un medidor Matriz+CEDIS): la
+        # regla toma su % del monto capturado completo en el centro compartido.
+        porcentaje = (regla.filtros or {}).get("porcentaje")
+        if porcentaje is not None:
+            total = (total * Decimal(str(porcentaje)) / Decimal("100")).quantize(
+                Decimal("0.01")
+            )
         return (total, hubo_datos)
 
     @staticmethod
@@ -393,6 +421,31 @@ class PresupuestoRealConsolidacionService:
         campo = filtros.get("campo_monto", "total_venta")
         if campo not in VENTA_POS_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de ventas inválido: {campo}")
+        clasificaciones = filtros.get("clasificacion_catalogo") or []
+        excluir_clasificados = bool(filtros.get("excluir_clasificados"))
+        if clasificaciones or excluir_clasificados:
+            # "Complementos" = productos del catálogo curado (PointProductCategory:
+            # REVENTA / SERVICIO_ACCESORIO / TOPPING). El renglón de postres usa
+            # excluir_clasificados para no contarlos doble.
+            productos_clasificados = self._productos_clasificados(set(clasificaciones) or None)
+        if filtros.get("total_empresa"):
+            # Venta total Point (renglón Ingresos del P&L): todo el índice.
+            total = Decimal("0")
+            hubo_datos = False
+            for (branch_id, cat, prod), montos in (ventas_index or {}).items():
+                if excluir_clasificados and prod in self._productos_clasificados(None):
+                    continue
+                total += montos[campo]
+                hubo_datos = True
+            return (total, hubo_datos)
+        if clasificaciones:
+            total = Decimal("0")
+            hubo_datos = False
+            for (branch_id, cat, prod), montos in (ventas_index or {}).items():
+                if prod in productos_clasificados:
+                    total += montos[campo]
+                    hubo_datos = True
+            return (total, hubo_datos)
         categoria = normalize_header_text(filtros.get("categoria_pos", ""))
         productos_raw = filtros.get("productos_pos")
         if not productos_raw and filtros.get("producto_pos"):
@@ -417,6 +470,21 @@ class PresupuestoRealConsolidacionService:
             hubo_datos = True
         return (total, hubo_datos)
 
+
+    def _productos_clasificados(self, categorias: set[str] | None) -> set[str]:
+        """Nombres (normalizados) de productos del catálogo curado de reventa/
+        accesorios/toppings (pos_bridge.PointProductCategory). Cacheado por
+        instancia; con ``categorias=None`` regresa TODOS los clasificados."""
+        cache = getattr(self, "_clasificados_cache", None)
+        if cache is None:
+            from pos_bridge.models import PointProductCategory
+
+            cache = self._clasificados_cache = {}
+            for fila in PointProductCategory.objects.all().values("nombre", "category"):
+                cache.setdefault(fila["category"], set()).add(normalize_header_text(fila["nombre"]))
+        if categorias is None:
+            return set().union(*cache.values()) if cache else set()
+        return set().union(*(cache.get(c, set()) for c in categorias)) if cache else set()
 
     @staticmethod
     def _build_bono_prod_index(periodo: date) -> list[dict]:
@@ -479,14 +547,308 @@ class PresupuestoRealConsolidacionService:
         }
 
     def _monto_consumo_mp(
-        self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal]
+        self, regla: ReglaFuenteRubro, consumo_index: dict[int, Decimal], periodo: date
     ) -> tuple[Decimal, bool]:
-        insumo_id = (regla.filtros or {}).get("insumo_id")
+        filtros = regla.filtros or {}
+        desde = str(filtros.get("desde") or "")
+        if desde and periodo.strftime("%Y-%m") < desde:
+            # El consumo del ERP no es confiable antes de esta fecha (meses
+            # incompletos y ajustes erróneos): se reporta "sin datos" para que
+            # la línea conserve el valor legado del Excel.
+            return (Decimal("0"), False)
+        if filtros.get("total_empresa"):
+            # Consumo de MP de toda la empresa (renglón Costos del P&L).
+            if not consumo_index:
+                return (Decimal("0"), False)
+            return (sum(consumo_index.values(), Decimal("0")), True)
+        insumo_id = filtros.get("insumo_id")
         if not insumo_id:
             raise ValueError("regla CONSUMO_MP sin insumo_id en filtros")
         if int(insumo_id) not in consumo_index:
             return (Decimal("0"), False)
         return (consumo_index[int(insumo_id)], True)
+
+
+    @staticmethod
+    def _build_merma_producto_total(periodo: date) -> tuple[Decimal, bool]:
+        """Valor de la merma del mes según el registro madre de Point
+        (control.MermaPOS, sync /Mermas/get_mermas): cubre todas las
+        sucursales, CEDIS y almacén. Se valúa a costo vigente de la receta
+        (capa MP del costeo). El módulo PWA de mermas es el rastreo logístico
+        del mismo evento (trae ticket_point) — usarlo aquí duplicaría."""
+        from control.models import MermaPOS
+
+        total = Decimal("0")
+        hubo_datos = False
+        lineas = MermaPOS.objects.filter(
+            fecha__year=periodo.year, fecha__month=periodo.month
+        ).select_related("receta")
+        for linea in lineas:
+            hubo_datos = True
+            if not linea.receta_id:
+                continue
+            # Recetas de lote traen rendimiento (costo/pieza = total/rendimiento);
+            # en recetas de producto terminado el costo total YA es por pieza.
+            costo_unitario = linea.receta.costo_por_unidad_rendimiento
+            if not costo_unitario or costo_unitario <= 0:
+                costo_unitario = linea.receta.costo_total_estimado_decimal
+            if not costo_unitario or costo_unitario <= 0:
+                continue
+            total += Decimal(str(linea.cantidad)) * costo_unitario
+        return (total.quantize(Decimal("0.01")), hubo_datos)
+
+    def _monto_merma_producto(
+        self, regla: ReglaFuenteRubro, merma_total: tuple[Decimal, bool], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        return merma_total
+
+    @staticmethod
+    def _build_mant_unidad_index(periodo: date) -> dict[str, Decimal]:
+        """Costo de servicio del mes por unidad vehicular (logística).
+
+        Fuente: logistica.ReporteUnidad.costo_servicio — la base ligada de la
+        flotilla (unidad + reporte + costo) que pidió dirección conectar.
+        """
+        from logistica.models import ReporteUnidad
+
+        return {
+            fila["unidad__codigo"]: fila["costo"] or Decimal("0")
+            for fila in ReporteUnidad.objects.filter(
+                fecha_reporte__year=periodo.year,
+                fecha_reporte__month=periodo.month,
+                costo_servicio__isnull=False,
+                costo_servicio__gt=0,
+            )
+            .values("unidad__codigo")
+            .annotate(costo=Sum("costo_servicio"))
+            if fila["unidad__codigo"]
+        }
+
+    def _monto_mantenimiento_unidad(
+        self, regla: ReglaFuenteRubro, mant_index: dict[str, Decimal]
+    ) -> tuple[Decimal, bool]:
+        codigo = str((regla.filtros or {}).get("unidad_codigo") or "").strip()
+        if not codigo:
+            raise ValueError("regla MANTENIMIENTO_UNIDAD sin unidad_codigo en filtros")
+        if codigo not in mant_index:
+            return (Decimal("0"), False)
+        return (mant_index[codigo], True)
+
+
+    @staticmethod
+    def _fuera_de_vigencia(regla: ReglaFuenteRubro, periodo: date) -> bool:
+        """Filtro ``desde`` (YYYY-MM): antes de esa fecha la fuente reporta
+        "sin datos" y la línea conserva el legado del Excel."""
+        desde = str((regla.filtros or {}).get("desde") or "")
+        return bool(desde) and periodo.strftime("%Y-%m") < desde
+
+    @staticmethod
+    def _build_combustible_index(periodo: date) -> dict[str, Decimal]:
+        """Cargas de combustible del mes por unidad (bitácora de logística)."""
+        from logistica.models import CargaCombustibleUnidad
+
+        return {
+            fila["unidad__codigo"]: fila["importe"] or Decimal("0")
+            for fila in CargaCombustibleUnidad.objects.filter(
+                fecha_registro__year=periodo.year,
+                fecha_registro__month=periodo.month,
+            )
+            .values("unidad__codigo")
+            .annotate(importe=Sum("importe_total"))
+            if fila["unidad__codigo"]
+        }
+
+    def _monto_combustible_unidad(
+        self, regla: ReglaFuenteRubro, index: dict[str, Decimal], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        unidades = [str(u).strip() for u in (regla.filtros or {}).get("unidades") or [] if str(u).strip()]
+        if not unidades:
+            raise ValueError("regla COMBUSTIBLE_UNIDAD sin lista de unidades en filtros")
+        total = Decimal("0")
+        hubo_datos = False
+        for codigo in unidades:
+            if codigo in index:
+                total += index[codigo]
+                hubo_datos = True
+        return (total, hubo_datos)
+
+    @staticmethod
+    def _build_mant_equipo_index(periodo: date) -> list[dict]:
+        """Trabajos concluidos del mes, agrupados por sucursal y ubicación.
+
+        Las órdenes usan únicamente su fecha de cierre. Los reportes históricos
+        cerrados/resueltos usan costo real y, cuando nunca se capturó, conservan
+        el importe estimado con el que ya fueron concluidos.
+        """
+        from datetime import datetime, time
+
+        from django.db.models import DecimalField, F as _F, Q, Value
+        from django.db.models.functions import Coalesce
+
+        from activos.models import OrdenMantenimiento
+        from fallas.models import ReporteFalla
+
+        inicio = date(periodo.year, periodo.month, 1)
+        siguiente = date(periodo.year + (periodo.month == 12), 1 if periodo.month == 12 else periodo.month + 1, 1)
+        inicio_dt = timezone.make_aware(datetime.combine(inicio, time.min))
+        siguiente_dt = timezone.make_aware(datetime.combine(siguiente, time.min))
+        acumulado: dict[tuple[str, str], Decimal] = {}
+
+        ordenes = (
+            OrdenMantenimiento.objects.filter(
+                estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+                fecha_cierre__gte=inicio,
+                fecha_cierre__lt=siguiente,
+            )
+            .annotate(total=_F("costo_repuestos") + _F("costo_mano_obra") + _F("costo_otros"))
+            .filter(total__gt=0)
+            .values("activo_ref__sucursal__codigo", "activo_ref__ubicacion")
+            .annotate(monto=Sum("total"))
+        )
+        for fila in ordenes:
+            clave = (
+                fila["activo_ref__sucursal__codigo"] or "",
+                fila["activo_ref__ubicacion"] or "",
+            )
+            acumulado[clave] = acumulado.get(clave, Decimal("0")) + (fila["monto"] or Decimal("0"))
+
+        cerrados = [ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_RESUELTO]
+        reportes = (
+            ReporteFalla.objects.filter(estatus__in=cerrados)
+            .filter(
+                Q(fecha_cierre__gte=inicio_dt, fecha_cierre__lt=siguiente_dt)
+                | Q(
+                    fecha_cierre__isnull=True,
+                    fecha_resolucion__gte=inicio_dt,
+                    fecha_resolucion__lt=siguiente_dt,
+                )
+            )
+            .annotate(
+                monto_final=Coalesce(
+                    "costo_real",
+                    "costo_estimado",
+                    Value(Decimal("0")),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+            .filter(monto_final__gt=0)
+            .values("sucursal__codigo", "activo_relacionado__ubicacion")
+            .annotate(monto=Sum("monto_final"))
+        )
+        for fila in reportes:
+            clave = (
+                fila["sucursal__codigo"] or "",
+                fila["activo_relacionado__ubicacion"] or "",
+            )
+            acumulado[clave] = acumulado.get(clave, Decimal("0")) + (fila["monto"] or Decimal("0"))
+
+        return [
+            {
+                "activo_ref__sucursal__codigo": sucursal,
+                "activo_ref__ubicacion": ubicacion,
+                "monto": monto,
+            }
+            for (sucursal, ubicacion), monto in sorted(acumulado.items())
+        ]
+
+    def _monto_mantenimiento_equipo(
+        self, regla: ReglaFuenteRubro, index: list[dict], periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        filtros = regla.filtros or {}
+        sucursal_codigo = str(filtros.get("sucursal_codigo") or "").strip()
+        if not sucursal_codigo and filtros.get("por_sucursal"):
+            # La regla hereda la sucursal de su rubro (una fila del CSV cubre
+            # los 8 rubros por sucursal, cada uno con sus propios activos).
+            sucursal = regla.sucursal_efectiva()
+            sucursal_codigo = sucursal.codigo if sucursal is not None else ""
+            if not sucursal_codigo:
+                return (Decimal("0"), False)
+        solo_produccion = bool(filtros.get("ubicaciones_produccion"))
+        if not sucursal_codigo and not solo_produccion:
+            raise ValueError("regla MANTENIMIENTO_EQUIPO sin sucursal_codigo ni ubicaciones_produccion")
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in index:
+            ubicacion = str(fila.get("activo_ref__ubicacion") or "").upper()
+            es_produccion = "PRODUCCION" in ubicacion or "HORNOS" in ubicacion or fila.get("activo_ref__sucursal__codigo") == "CEDIS"
+            if solo_produccion != es_produccion:
+                continue
+            if sucursal_codigo and fila.get("activo_ref__sucursal__codigo") != sucursal_codigo:
+                continue
+            total += fila["monto"] or Decimal("0")
+            hubo_datos = True
+        return (total, hubo_datos)
+
+
+    def _build_costo_reventa_index(self, periodo: date) -> dict:
+        """Costo de los complementos vendidos en el mes: unidades vendidas de
+        cada producto del catálogo curado × su costo de reventa (histórico
+        mensual si existe; si no, la vigencia más reciente)."""
+        from pos_bridge.models import PointProduct, PointProductCategory
+        from pos_bridge.models.sales_pipeline import PointSalesDailyProductFact
+
+        clasificados = {
+            normalize_header_text(n)
+            for n in PointProductCategory.objects.values_list("nombre", flat=True)
+        }
+        ventas = (
+            PointSalesDailyProductFact.objects.filter(
+                sale_date__year=periodo.year,
+                sale_date__month=periodo.month,
+                point_product__isnull=False,
+            )
+            .values("point_product_id", "point_product__name")
+            .annotate(unidades=Sum("total_cantidad"))
+        )
+        total = Decimal("0")
+        con_datos = False
+        sin_costo = 0
+        ids = [
+            v["point_product_id"]
+            for v in ventas
+            if normalize_header_text(v["point_product__name"]) in clasificados
+        ]
+        productos = {
+            p.id: p
+            for p in PointProduct.objects.filter(id__in=ids).prefetch_related(
+                "costos_reventa", "costos_reventa_historicos_mensuales"
+            )
+        }
+        corte = periodo.replace(day=28)
+        for v in ventas:
+            producto = productos.get(v["point_product_id"])
+            if producto is None:
+                continue
+            historico = next(
+                (h for h in producto.costos_reventa_historicos_mensuales.all() if h.periodo == periodo),
+                None,
+            )
+            if historico is not None and historico.costo_promedio:
+                costo = Decimal(historico.costo_promedio)
+            else:
+                vigencias = [
+                    c for c in producto.costos_reventa.all() if c.fecha_vigencia <= corte
+                ]
+                if not vigencias:
+                    sin_costo += 1
+                    continue
+                costo = Decimal(max(vigencias, key=lambda c: c.fecha_vigencia).costo_unitario)
+            total += (v["unidades"] or Decimal("0")) * costo
+            con_datos = True
+        return {"total": total.quantize(Decimal("0.01")), "con_datos": con_datos, "sin_costo": sin_costo}
+
+    def _monto_costo_reventa(
+        self, regla: ReglaFuenteRubro, index: dict, periodo: date
+    ) -> tuple[Decimal, bool]:
+        if self._fuera_de_vigencia(regla, periodo):
+            return (Decimal("0"), False)
+        return (index["total"], index["con_datos"])
 
 
 def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
@@ -505,7 +867,8 @@ def limpiar_reales_sin_asignacion(*, dry_run: bool = False) -> int:
     rubros_sin_asignacion = [
         regla.rubro_id
         for regla in reglas
-        if not (regla.filtros or {}).get("categoria_pos")
+        if not (regla.filtros or {}).get("total_empresa")
+        and not (regla.filtros or {}).get("categoria_pos")
         and not (regla.filtros or {}).get("productos_pos")
         and not (regla.filtros or {}).get("producto_pos")
     ]

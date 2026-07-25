@@ -114,14 +114,15 @@
           <label for="actividad-periodicidad">Repetir</label>
           <select class="input-field" id="actividad-periodicidad" name="periodicidad">
             <option value="NINGUNA">No se repite</option>
-            <option value="DIARIA">Diario</option>
-            <option value="SEMANAL">Semanal</option>
-            <option value="MENSUAL">Mensual</option>
+            <option value="DIARIA">Cada día (lunes a sábado)</option>
+            <option value="SEMANAL">Cada semana</option>
+            <option value="MENSUAL">Cada mes</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="actividad-repeticiones">Ocurrencias</label>
+          <label for="actividad-repeticiones">Número de repeticiones</label>
           <input class="input-field" type="number" id="actividad-repeticiones" name="repeticiones" min="2" max="26" value="2" disabled>
+          <small class="muted" id="actividad-repeticiones-ayuda">Incluye la primera fecha. Las repeticiones omiten los domingos.</small>
         </div>
       </div>
       <p class="text-danger calendar-hidden" id="calendar-form-error"></p>
@@ -132,6 +133,18 @@
     </form>
   </aside>
 </section>
+
+<div class="erp-confirm" id="calendar-delete-confirm" hidden>
+  <div class="erp-confirm__backdrop" data-calendar-delete-cancel></div>
+  <section class="erp-confirm__panel" role="dialog" aria-modal="true" aria-labelledby="calendar-delete-title" aria-describedby="calendar-delete-message">
+    <h2 id="calendar-delete-title">Eliminar actividad</h2>
+    <p id="calendar-delete-message">Esta actividad dejará de aparecer en tu calendario.</p>
+    <div class="erp-confirm__actions">
+      <button class="btn btn-secondary" type="button" data-calendar-delete-cancel>Cancelar</button>
+      <button class="btn btn-danger" type="button" id="calendar-delete-accept">Eliminar actividad</button>
+    </div>
+  </section>
+</div>
 
 <script>
 (function() {
@@ -163,7 +176,12 @@
     direccionGeneral: byId('actividad-direccion-general'),
     periodicidad: byId('actividad-periodicidad'),
     repeticiones: byId('actividad-repeticiones'),
+    deleteDialog: byId('calendar-delete-confirm'),
+    deleteMessage: byId('calendar-delete-message'),
+    deleteAccept: byId('calendar-delete-accept'),
   };
+  let deleteEventTarget = null;
+  let deleteTrigger = null;
 
   function pad(value) {
     return String(value).padStart(2, '0');
@@ -481,8 +499,14 @@
       complete.className = 'btn btn-secondary';
       complete.textContent = event.estatus === 'COMPLETADA' ? 'Reabrir' : 'Completar';
       complete.addEventListener('click', () => mutate(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/completar/`));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-danger';
+      remove.textContent = 'Eliminar actividad';
+      remove.addEventListener('click', () => openDeleteConfirm(event, remove));
       actions.appendChild(edit);
       actions.appendChild(complete);
+      actions.appendChild(remove);
     } else if (event.url) {
       const link = document.createElement('a');
       link.className = 'btn btn-secondary';
@@ -536,6 +560,59 @@
     els.formPanel.classList.add('calendar-hidden');
   }
 
+  function notify(options) {
+    if (window.ERPActionUI && typeof window.ERPActionUI.showToast === 'function') {
+      window.ERPActionUI.showToast(options);
+    }
+  }
+
+  function openDeleteConfirm(event, trigger) {
+    deleteEventTarget = event;
+    deleteTrigger = trigger;
+    els.deleteMessage.textContent = `“${event.titulo}” dejará de aparecer en tu calendario. Esta acción solo afecta esta fecha.`;
+    els.deleteDialog.hidden = false;
+    els.deleteDialog.querySelector('[data-calendar-delete-cancel]').focus();
+  }
+
+  function closeDeleteConfirm({restoreFocus = true} = {}) {
+    els.deleteDialog.hidden = true;
+    deleteEventTarget = null;
+    if (restoreFocus && deleteTrigger && document.contains(deleteTrigger)) {
+      deleteTrigger.focus();
+    }
+    deleteTrigger = null;
+  }
+
+  async function deleteCalendarEvent() {
+    if (!deleteEventTarget || els.deleteAccept.disabled) {
+      return;
+    }
+    const event = deleteEventTarget;
+    els.deleteAccept.disabled = true;
+    els.deleteAccept.textContent = 'Eliminando…';
+    try {
+      const response = await fetch(`/seguimiento/calendario/actividades/${event.id.replace('act-', '')}/eliminar/`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'X-CSRFToken': csrfToken(), 'Accept': 'application/json'},
+        body: new FormData(),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || 'No se pudo eliminar la actividad.');
+      }
+      closeDeleteConfirm({restoreFocus: false});
+      await loadEvents();
+      els.detail.innerHTML = '<h2>Detalle</h2><p class="muted">Selecciona un evento o un día del calendario.</p>';
+      notify(data.toast || {type: 'success', message: 'Actividad eliminada del calendario.'});
+    } catch (error) {
+      notify({type: 'error', message: error.message || 'No se pudo eliminar la actividad.', persistent: true});
+    } finally {
+      els.deleteAccept.disabled = false;
+      els.deleteAccept.textContent = 'Eliminar actividad';
+    }
+  }
+
   async function mutate(url, formData) {
     const response = await fetch(url, {
       method: 'POST',
@@ -567,6 +644,12 @@
 
   els.form.addEventListener('submit', (event) => {
     event.preventDefault();
+    const selectedDate = byId('actividad-fecha').value;
+    if (els.periodicidad.value !== 'NINGUNA' && selectedDate && parseKey(selectedDate).getDay() === 0) {
+      els.formError.textContent = 'Las actividades en domingo deben registrarse con la opción “No se repite”.';
+      els.formError.classList.remove('calendar-hidden');
+      return;
+    }
     const id = byId('actividad-id').value;
     const url = id ? `/seguimiento/calendario/actividades/${id}/` : '/seguimiento/calendario/actividades/';
     mutate(url, new FormData(els.form));
@@ -611,6 +694,29 @@
   }
 
   els.periodicidad.addEventListener('change', syncRecurrence);
+  document.querySelectorAll('[data-calendar-delete-cancel]').forEach((button) => {
+    button.addEventListener('click', () => closeDeleteConfirm());
+  });
+  els.deleteAccept.addEventListener('click', deleteCalendarEvent);
+  document.addEventListener('keydown', (event) => {
+    if (els.deleteDialog.hidden) {
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeDeleteConfirm();
+      return;
+    }
+    if (event.key === 'Tab') {
+      const focusable = Array.from(els.deleteDialog.querySelectorAll('button:not([disabled])'));
+      const index = focusable.indexOf(document.activeElement);
+      const next = event.shiftKey ? index - 1 : index + 1;
+      if (next < 0 || next >= focusable.length) {
+        event.preventDefault();
+        focusable[event.shiftKey ? focusable.length - 1 : 0].focus();
+      }
+    }
+  });
   syncRecurrence();
   loadEvents();
 })();

@@ -22,13 +22,13 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
     <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260704-badge-centering-v16">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260724-superuser-preview-v1">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
     <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260703-erp-group-tabs-v2">
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}{% if ui_preview.active %} preview-read-only{% endif %}">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
     <div class="layout-wrapper">
         <header class="mobile-app-bar" aria-label="Navegación móvil">
@@ -820,6 +820,15 @@
                     </div>
                 </div>
                 <div class="sidebar-actions">
+                    {% if ui_preview.can_start %}
+                    <button id="preview-picker-open" class="icon-btn preview-picker-trigger" type="button" title="Ver como empleado" aria-label="Ver como empleado">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/>
+                            <circle cx="12" cy="12" r="2.5"/>
+                        </svg>
+                        <span class="sr-only">Ver como empleado</span>
+                    </button>
+                    {% endif %}
                     {% if request.user.is_staff or request.user.is_superuser %}
                     <a href="{% url 'admin:index' %}" class="icon-btn" title="Panel admin" aria-label="Panel admin">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -862,6 +871,26 @@
         </template>
 
         <main class="main-content" id="main-content" data-hallmark-scope="erp">
+            {% if ui_preview.active %}
+            <section class="preview-mode-banner" role="status" aria-label="Vista de empleado activa">
+                <span class="preview-mode-banner__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/>
+                        <circle cx="12" cy="12" r="2.5"/>
+                    </svg>
+                </span>
+                <span class="preview-mode-banner__copy">
+                    <strong>Estás viendo como {{ ui_preview.target.get_full_name|default:ui_preview.target.username }}</strong>
+                    <span>Solo lectura</span>
+                </span>
+                <button id="preview-picker-change" class="preview-mode-banner__change" type="button">Cambiar persona</button>
+                <form method="post" action="{% url 'superuser_preview_stop' %}" data-preview-control>
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'dashboard' %}">
+                    <button class="preview-mode-banner__exit" type="submit">Volver a mi usuario</button>
+                </form>
+            </section>
+            {% endif %}
             <div class="erp-toast-region" id="erp-toast-region" aria-live="polite" aria-atomic="false" aria-label="Notificaciones">
             {% if messages %}
                 {% for message in messages %}
@@ -881,6 +910,36 @@
         </main>
     </div>
 
+    {% if ui_preview.can_start %}
+    <dialog class="preview-picker" id="preview-picker-dialog" aria-labelledby="preview-picker-title">
+        <form method="dialog" class="preview-picker__shell">
+            <header class="preview-picker__header">
+                <div>
+                    <span class="preview-picker__eyebrow">Pruebas de superusuario</span>
+                    <h2 id="preview-picker-title">Ver como empleado</h2>
+                    <p>Revisa exactamente lo que la persona puede consultar. Las acciones quedan bloqueadas.</p>
+                </div>
+                <button class="preview-picker__close" type="submit" value="cancel" aria-label="Cerrar">×</button>
+            </header>
+            <label class="preview-picker__search">
+                <span class="sr-only">Buscar por nombre, área, puesto o sucursal</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"/>
+                    <path d="m20 20-4-4"/>
+                </svg>
+                <input id="preview-picker-search" type="search" autocomplete="off" placeholder="Buscar nombre, área, puesto o sucursal">
+            </label>
+            <div class="preview-picker__status" id="preview-picker-status" aria-live="polite">Escribe para buscar o elige una persona.</div>
+            <div class="preview-picker__results" id="preview-picker-results"></div>
+        </form>
+        <form id="preview-picker-start-form" method="post" action="{% url 'superuser_preview_start' %}" data-preview-control hidden>
+            {% csrf_token %}
+            <input id="preview-picker-user-id" type="hidden" name="user_id">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        </form>
+    </dialog>
+    {% endif %}
+
     <div class="erp-confirm" id="erp-confirm-dialog" hidden>
         <div class="erp-confirm__backdrop" data-confirm-cancel></div>
         <section class="erp-confirm__panel" role="dialog" aria-modal="true" aria-labelledby="erp-confirm-title" aria-describedby="erp-confirm-message">
@@ -893,13 +952,114 @@
         </section>
     </div>
 
-    <script src="{% static 'js/searchable_selects.js' %}?v=20260613-calculo-insumos-a11y-v1" defer></script>
+    <script src="{% static 'js/searchable_selects.js' %}?v=20260715-mantenimiento-guardar-v2" defer></script>
     <script src="{% static 'js/pollyana_ops_ui.js' %}?v=20260614-ui100-v1" defer></script>
-    <script src="{% static 'js/erp_actions.js' %}?v=20260714-stock-actions-v2" defer></script>
+    <script src="{% static 'js/erp_actions.js' %}?v=20260718-vacaciones-actions-v3" defer></script>
 
     {% block extra_js %}{% endblock %}
 
     <script>
+    // ── Vista de empleado para superusuario ───────────────────────
+    (function () {
+        var dialog = document.getElementById('preview-picker-dialog');
+        var openButtons = [
+            document.getElementById('preview-picker-open'),
+            document.getElementById('preview-picker-change')
+        ].filter(Boolean);
+        if (!dialog || !openButtons.length) return;
+
+        var search = document.getElementById('preview-picker-search');
+        var results = document.getElementById('preview-picker-results');
+        var status = document.getElementById('preview-picker-status');
+        var startForm = document.getElementById('preview-picker-start-form');
+        var userId = document.getElementById('preview-picker-user-id');
+        var timer;
+
+        function render(items) {
+            results.replaceChildren();
+            if (!items.length) {
+                status.textContent = 'No encontramos personal activo con acceso al ERP.';
+                return;
+            }
+            status.textContent = items.length + (items.length === 1 ? ' persona disponible' : ' personas disponibles');
+            items.forEach(function (item) {
+                var button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'preview-person';
+                var initials = (item.name || '?').split(/\s+/).slice(0, 2).map(function (part) {
+                    return part.charAt(0);
+                }).join('').toUpperCase();
+                var avatar = document.createElement('span');
+                avatar.className = 'preview-person__avatar';
+                avatar.textContent = initials;
+                var copy = document.createElement('span');
+                copy.className = 'preview-person__copy';
+                var name = document.createElement('strong');
+                name.textContent = item.name;
+                var meta = document.createElement('span');
+                meta.textContent = [item.position, item.area, item.branch].filter(Boolean).join(' · ') || 'Personal activo';
+                copy.append(name, meta);
+                var arrow = document.createElement('span');
+                arrow.className = 'preview-person__arrow';
+                arrow.textContent = '→';
+                button.append(avatar, copy, arrow);
+                button.addEventListener('click', function () {
+                    userId.value = item.user_id;
+                    startForm.submit();
+                });
+                results.append(button);
+            });
+        }
+
+        function loadOptions(query) {
+            status.textContent = 'Buscando personal…';
+            fetch('{% url "superuser_preview_options" %}?q=' + encodeURIComponent(query || ''), {
+                headers: {'Accept': 'application/json'}
+            })
+                .then(function (response) {
+                    if (!response.ok) throw new Error('No fue posible cargar el personal.');
+                    return response.json();
+                })
+                .then(function (payload) { render(payload.results || []); })
+                .catch(function () {
+                    results.replaceChildren();
+                    status.textContent = 'No fue posible cargar el personal. Intenta de nuevo.';
+                });
+        }
+
+        openButtons.forEach(function (button) {
+            button.addEventListener('click', function () {
+                dialog.showModal();
+                loadOptions(search.value);
+                setTimeout(function () { search.focus(); }, 0);
+            });
+        });
+        search.addEventListener('input', function () {
+            clearTimeout(timer);
+            timer = setTimeout(function () { loadOptions(search.value); }, 180);
+        });
+    })();
+
+    {% if ui_preview.active %}
+    // La barrera visual complementa el bloqueo obligatorio del servidor.
+    (function () {
+        document.querySelectorAll('form').forEach(function (form) {
+            if (form.matches('[data-preview-control]')) return;
+            if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
+            form.querySelectorAll('button, input[type="submit"]').forEach(function (control) {
+                control.disabled = true;
+                control.title = 'Solo lectura: vuelve a tu usuario para realizar cambios.';
+            });
+        });
+        document.addEventListener('click', function (event) {
+            var action = event.target.closest('[data-async-action]');
+            if (!action || action.closest('[data-preview-control]')) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, true);
+    })();
+    {% endif %}
+
     // ── Navegación móvil touch ────────────────────────────────────
     (function () {
         var toggle = document.querySelector('.mobile-nav-toggle');
@@ -1077,7 +1237,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20260711-plantilla-point-v15').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20260724-superuser-preview-v23').catch(function () {});
         }
     })();
     </script>

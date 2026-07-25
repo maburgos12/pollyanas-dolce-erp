@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Sucursal
-from pos_bridge.models import PointBranch, PointDailySale, PointProduct, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSyncJob
 from pos_bridge.services.sales_extractor import ExtractedBranchDailySales
 from pos_bridge.services.sync_service import PointSyncService
 from recetas.models import Receta, VentaHistorica
@@ -67,6 +67,22 @@ class FakeSalesExtractor:
         )
 
 
+class FakeSalesIndicatorService:
+    # El servicio real de indicadores abre sesión HTTP contra Point; sin
+    # POINT_BASE_URL lanza ConfigurationError y marca FAILED todo el job.
+    # Simular "sin indicador" ejercita la ruta tolerada (ventas sin tickets).
+    def fetch_branch_day(self, *, branch, indicator_date):
+        raise PointDailyBranchIndicator.DoesNotExist(
+            f"Sin indicador Point en tests para {branch.external_id} {indicator_date.isoformat()}."
+        )
+
+
+def _service_sin_indicadores(extractor):
+    service = PointSyncService(sales_extractor=extractor)
+    service.sales_indicator_service = FakeSalesIndicatorService()
+    return service
+
+
 class PointSalesSyncServiceTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(
@@ -83,7 +99,7 @@ class PointSalesSyncServiceTests(TestCase):
         )
 
     def test_run_sales_sync_persists_staging_and_historical_sales(self):
-        service = PointSyncService(sales_extractor=FakeSalesExtractor())
+        service = _service_sin_indicadores(FakeSalesExtractor())
         sync_job = service.run_sales_sync(
             start_date=date(2025, 12, 31),
             end_date=date(2025, 12, 31),
@@ -122,7 +138,7 @@ class PointSalesSyncServiceTests(TestCase):
         self.assertEqual(branch.erp_branch_id, self.sucursal.id)
 
     def test_run_sales_sync_is_idempotent_for_historical_sales_source(self):
-        service = PointSyncService(sales_extractor=FakeSalesExtractor())
+        service = _service_sin_indicadores(FakeSalesExtractor())
         first_job = service.run_sales_sync(start_date=date(2025, 12, 31), end_date=date(2025, 12, 31), triggered_by=self.user)
         self.assertEqual(first_job.status, PointSyncJob.STATUS_SUCCESS)
 
@@ -176,7 +192,7 @@ class PointSalesSyncServiceTests(TestCase):
                 )
 
         self.receta.codigos_point_aliases.create(codigo_point="0002-A", nombre_point="Pay de Queso Mediano Rebanada")
-        service = PointSyncService(sales_extractor=DuplicateRecipeExtractor())
+        service = _service_sin_indicadores(DuplicateRecipeExtractor())
         sync_job = service.run_sales_sync(start_date=date(2025, 12, 31), end_date=date(2025, 12, 31), triggered_by=self.user)
         self.assertEqual(sync_job.status, PointSyncJob.STATUS_SUCCESS)
         historial = VentaHistorica.objects.get(fuente=PointSyncService.SALES_HISTORY_SOURCE)

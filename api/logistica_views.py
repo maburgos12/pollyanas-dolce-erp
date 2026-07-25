@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -53,7 +53,6 @@ from logistica.services_carga_ruta import (
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
     registrar_evento_checklist_confirmado,
-    ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
     ruta_tiene_paradas_entregables_pendientes,
     sincronizar_checklist_carga_desde_point,
@@ -61,10 +60,19 @@ from logistica.services_carga_ruta import (
     validar_linea_carga,
     validar_producto_tramo_carga,
 )
+from logistica.services_carga_sucursal import CargaSucursalError, ConflictoIdempotencia, guardar_carga_sucursal
+from logistica.services_tutorial_carga import debe_mostrar_tutorial_carga
+from logistica.services_contexto_operativo import (
+    ContextoOperativoObsoleto,
+    construir_contexto_operativo,
+    contexto_operativo_dict,
+    validar_contexto_operativo,
+)
 from logistica.services_rutas_control import (
     LiberacionRutaError,
     liberar_ruta_con_turno,
     registrar_ubicacion_ruta,
+    repartidor_participa_en_ruta,
     resumen_control_rutas,
     ruta_operativa_para_repartidor,
 )
@@ -109,6 +117,7 @@ from .logistica_serializers import (
     RutaCargaChecklistLineaSerializer,
     RutaCargaLineaValidarSerializer,
     RutaCargaProductoTramoValidarSerializer,
+    RutaCargaSucursalGuardarSerializer,
     UbicacionRutaCreateSerializer,
     UbicacionRutaSerializer,
 )
@@ -322,6 +331,9 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             "roles": list(request.user.groups.values_list("name", flat=True)),
             "repartidor": LogisticaRepartidorSerializer(repartidor).data if repartidor else None,
             "ultimos_servicios": [],
+            "mostrar_tutorial_carga_sucursal": bool(
+                repartidor and not preview_activo and debe_mostrar_tutorial_carga(repartidor)
+            ),
             "preview": {
                 "activo": preview_activo,
                 "solo_lectura": preview_activo,
@@ -340,6 +352,27 @@ class LogisticaMiPerfilView(_LogisticaBaseView):
             )[:10]
             data["ultimos_servicios"] = LogisticaReporteSerializer(servicios, many=True).data
         return Response(data, status=status.HTTP_200_OK)
+
+
+class LogisticaTutorialCargaConfirmarView(_LogisticaBaseView):
+    def post(self, request):
+        # La vista superadmin nunca debe consumir la novedad de otro repartidor.
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor:
+            return Response(
+                {"detail": "No tienes perfil de repartidor registrado."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if repartidor.tutorial_carga_sucursal_visto_en is None:
+            repartidor.tutorial_carga_sucursal_visto_en = timezone.now()
+            repartidor.save(update_fields=["tutorial_carga_sucursal_visto_en"])
+        return Response(
+            {
+                "confirmado": True,
+                "visto_en": repartidor.tutorial_carga_sucursal_visto_en,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LogisticaResumenSemanalView(_LogisticaBaseView):
@@ -409,7 +442,11 @@ class LogisticaCombustibleAlertaView(_LogisticaBaseView):
         bitacoras = (
             BitacoraSalidaLlegada.objects.select_related("unidad")
             .prefetch_related("cargas_combustible")
-            .filter(repartidor=repartidor, cerrada=True)
+            .filter(
+                repartidor=repartidor,
+                cerrada=True,
+                hora_llegada__gte=timezone.make_aware(datetime(2026, 5, 12)),
+            )
             .exclude(nivel_gas_llegada="")
             .order_by("-hora_llegada", "-id")
         )
@@ -699,7 +736,10 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = LogisticaBitacoraSalidaCreateSerializer(data=request.data, context={"repartidor": repartidor})
+        serializer = LogisticaBitacoraSalidaCreateSerializer(
+            data=request.data,
+            context={"repartidor": repartidor, "ruta": ruta_activa},
+        )
         if not serializer.is_valid():
             return Response(
                 {
@@ -1229,8 +1269,6 @@ class LogisticaRutaStatusView(_LogisticaBaseView):
                 return Response({"detail": "No se puede completar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede completar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta_tiene_diferencias_entrega(ruta):
-                return Response({"detail": "No se puede completar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
 
         from_status = ruta.estatus
         ruta.estatus = estatus_nuevo
@@ -1268,8 +1306,12 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
             ruta = get_object_or_404(
                 RutaEntrega.objects.select_for_update(),
                 pk=ruta_id,
-                repartidor=repartidor,
             )
+            if not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
+                return Response(
+                    {"detail": "No puedes finalizar una ruta asignada a otro equipo."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             if ruta.estatus == RutaEntrega.ESTATUS_COMPLETADA:
                 return Response(LogisticaRutaSerializer(ruta).data, status=status.HTTP_200_OK)
             if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
@@ -1278,8 +1320,6 @@ class LogisticaRutaFinalizarPwaView(_LogisticaBaseView):
                 return Response({"detail": "No se puede finalizar la ruta: hay paradas pendientes por visitar u omitir."}, status=status.HTTP_400_BAD_REQUEST)
             if ruta_tiene_entregas_pendientes(ruta):
                 return Response({"detail": "No se puede finalizar la ruta: hay paradas sin entrega confirmada."}, status=status.HTTP_400_BAD_REQUEST)
-            if ruta_tiene_diferencias_entrega(ruta):
-                return Response({"detail": "No se puede finalizar la ruta: hay diferencias o entregas no recibidas por resolver."}, status=status.HTTP_400_BAD_REQUEST)
 
             ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
             ruta.hora_cierre_real = ruta.hora_cierre_real or timezone.now()
@@ -1312,13 +1352,25 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
         can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
         repartidor = _get_repartidor_for_user(request.user)
-        if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
+        if not can_manage_rutas and not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
             return Response({"detail": "No puedes confirmar entregas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
         parada = get_object_or_404(ParadaRuta.objects.select_related("punto"), pk=parada_id, ruta=ruta)
         serializer = ParadaEntregaConfirmarSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
         evidencias_payload = payload.get("evidencias") or []
+        if payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA:
+            # "Entregado" en la PWA es un hito administrativo del recorrido.
+            # La recepción por producto pertenece exclusivamente a Point y se
+            # concilia después; ignoramos cantidades de clientes PWA antiguos.
+            evidencias_payload = []
+        if payload.get("contexto_token"):
+            try:
+                contexto = validar_contexto_operativo(token=payload["contexto_token"], ruta=ruta, actor=request.user)
+            except ContextoOperativoObsoleto as exc:
+                return Response({"error": exc.codigo, "mensaje": str(exc)}, status=status.HTTP_409_CONFLICT)
+            if payload.get("version_checklist") != contexto.version_checklist:
+                return Response({"error": "checklist_actualizado", "mensaje": "La recepción ya no coincide con el checklist vigente."}, status=status.HTTP_409_CONFLICT)
         client_context = payload.get("client_context") or {}
         offline_queue_id = (request.headers.get("X-Logistica-Offline-Queue-Id") or "").strip()
         legacy_v59_contract = is_exact_v59_replay_contract(
@@ -1432,12 +1484,6 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
             orden__lt=parada.orden,
         ).exists():
             return Response({"detail": "Primero registra la recarga CEDIS y captura la carga del siguiente tramo."}, status=status.HTTP_400_BAD_REQUEST)
-        if (
-            payload["entrega_estado"] == ParadaRuta.ENTREGA_ENTREGADA
-            and not evidencias_payload
-            and not legacy_v59_replay
-        ):
-            return Response({"detail": "Para confirmar entrega completa registra evidencia de producto recibido."}, status=status.HTTP_400_BAD_REQUEST)
         if not payload.get("client_event_id"):
             return Response({"client_event_id": ["client_event_id es obligatorio."]}, status=status.HTTP_400_BAD_REQUEST)
         linea_ids = {item.get("linea_carga_id") for item in evidencias_payload if item.get("linea_carga_id")}
@@ -1493,7 +1539,6 @@ class LogisticaRutaParadaEntregaView(_LogisticaBaseView):
         ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
         evidencia_ids = resultado.evidencia.metadata.get("evidencia_ids") or [resultado.evidencia.id]
         evidencias = ParadaEntregaEvidencia.objects.filter(id__in=evidencia_ids).select_related("capturado_por", "capturado_por__empleado_rrhh").order_by("id")
-
         log_event(
             request.user,
             "CREATE",
@@ -1523,7 +1568,7 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
         ruta = get_object_or_404(RutaEntrega.objects.select_related("repartidor", "unidad_operativa"), pk=ruta_id)
         can_manage_rutas = can_manage_submodule(request.user, "logistica", "rutas")
         repartidor = _get_repartidor_for_user(request.user)
-        if not can_manage_rutas and (repartidor is None or ruta.repartidor_id != repartidor.id):
+        if not can_manage_rutas and not repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor):
             return Response({"detail": "No puedes registrar recargas de una ruta asignada a otro repartidor."}, status=status.HTTP_403_FORBIDDEN)
         if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
             return Response({"detail": "Solo puedes registrar recarga CEDIS en una ruta en seguimiento."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1574,7 +1619,9 @@ class LogisticaRutaParadaRecargaCedisView(_LogisticaBaseView):
 
 class LogisticaRutaActivaView(_LogisticaBaseView):
     def get(self, request):
-        if not _can_operate_pwa(request.user):
+        if not _can_operate_pwa(request.user) and not (
+            request.user.is_superuser and _is_pwa_preview_request(request)
+        ):
             return Response({"detail": "No tienes permisos para consultar ruta activa."}, status=status.HTTP_403_FORBIDDEN)
 
         repartidor = _get_repartidor_for_request(request)
@@ -1614,9 +1661,18 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
             .values_list("parada_id", flat=True)
         )
 
+        try:
+            contexto_actor = repartidor.user if _is_pwa_preview_request(request) else request.user
+            contexto_operativo = contexto_operativo_dict(construir_contexto_operativo(ruta=ruta, actor=contexto_actor))
+            contexto_advertencia = ""
+        except ValidationError as exc:
+            contexto_operativo = None
+            contexto_advertencia = "; ".join(exc.messages)
         return Response(
             {
                 "ruta": LogisticaRutaSerializer(ruta).data,
+                "contexto_operativo": contexto_operativo,
+                "contexto_operativo_advertencia": contexto_advertencia,
                 "paradas": ParadaRutaSerializer(
                     ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"),
                     many=True,
@@ -1694,14 +1750,24 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
         repartidor = _get_repartidor_for_request(request)
-        can_view = can_view_submodule(request.user, "logistica", "rutas") or (
-            repartidor is not None and ruta.repartidor_id == repartidor.id
+        can_view = can_view_submodule(request.user, "logistica", "rutas") or repartidor_participa_en_ruta(
+            ruta=ruta,
+            repartidor=repartidor,
         )
         if not can_view:
             return Response({"detail": "No tienes permisos para consultar la carga de esta ruta."}, status=status.HTTP_403_FORBIDDEN)
-        solo_tramo_actual = repartidor is not None and ruta.repartidor_id == repartidor.id
+        solo_tramo_actual = repartidor_participa_en_ruta(ruta=ruta, repartidor=repartidor)
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
-        return Response(RutaCargaChecklistSerializer(checklist, context={"request": request}).data, status=status.HTTP_200_OK)
+        data = dict(RutaCargaChecklistSerializer(checklist, context={"request": request}).data)
+        if solo_tramo_actual:
+            try:
+                contexto = construir_contexto_operativo(ruta=ruta, actor=request.user)
+            except ValidationError as exc:
+                data["contexto_operativo"] = None
+                data["contexto_operativo_advertencia"] = "; ".join(exc.messages)
+            else:
+                data["contexto_operativo"] = contexto_operativo_dict(contexto)
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
@@ -1767,6 +1833,10 @@ class LogisticaRutaCargaLineaValidarView(_LogisticaBaseView):
                 motivo_diferencia=payload.get("motivo_diferencia") or "",
                 notas=payload.get("notas") or "",
                 client_event_id=payload.get("client_event_id") or "",
+                source_hash=payload.get("source_hash") or "",
+                transfer_external_id=payload.get("transfer_external_id") or "",
+                detail_external_id=payload.get("detail_external_id") or "",
+                parada_id=payload.get("parada_id"),
             )
         except PermissionDenied as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
@@ -1821,6 +1891,54 @@ class LogisticaRutaCargaProductoTramoValidarView(_LogisticaBaseView):
         )
 
 
+class LogisticaRutaCargaSucursalGuardarView(_LogisticaBaseView):
+    def post(self, request, ruta_id: int, parada_id: int):
+        repartidor = _get_repartidor_for_user(request.user)
+        if not repartidor or not _can_operate_pwa(request.user):
+            return Response(
+                {"error": "usuario_no_autorizado", "mensaje": "Solo el chofer titular puede guardar la carga."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
+        serializer = RutaCargaSucursalGuardarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        try:
+            resultado = guardar_carga_sucursal(
+                actor=request.user,
+                ruta=ruta,
+                contexto_token=payload["contexto_token"],
+                parada_id=parada_id,
+                client_event_id=payload["client_event_id"],
+                lineas=payload["lineas"],
+            )
+        except PermissionDenied as exc:
+            return Response(
+                {"error": "usuario_no_autorizado", "mensaje": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ContextoOperativoObsoleto as exc:
+            return Response(
+                {
+                    "error": exc.codigo,
+                    "mensaje": str(exc),
+                    "productos_afectados": list(exc.productos_afectados),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ConflictoIdempotencia as exc:
+            return Response(
+                {"error": exc.codigo, "mensaje": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except CargaSucursalError as exc:
+            return Response(
+                {"error": exc.codigo, "mensaje": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(resultado, status=status.HTTP_200_OK)
+
+
 class LogisticaRutasControlView(_LogisticaBaseView):
     def get(self, request):
         if not can_view_submodule(request.user, "logistica", "rutas"):
@@ -1864,8 +1982,9 @@ class LogisticaRutaTrackingView(_LogisticaBaseView):
     def get(self, request, ruta_id: int):
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
         repartidor = _get_repartidor_for_request(request)
-        can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or (
-            repartidor is not None and ruta.repartidor_id == repartidor.id
+        can_view_tracking = can_manage_submodule(request.user, "logistica", "rutas") or repartidor_participa_en_ruta(
+            ruta=ruta,
+            repartidor=repartidor,
         )
         if not can_view_tracking:
             return Response({"detail": "No tienes permisos para consultar seguimiento GPS de esta ruta."}, status=status.HTTP_403_FORBIDDEN)

@@ -70,22 +70,29 @@
       <button class="btn btn-primary" type="submit">Actualizar</button>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=xlsx">Exportar Excel</a>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=csv">Exportar CSV</a>
+      <a class="btn btn-secondary" href="{% url 'reportes:estado_resultados' %}?year={{ selected_year }}">Estado de resultados</a>
+      <a class="btn btn-secondary" href="{% url 'reportes:presupuesto_real_captura' %}?year={{ selected_year }}&month={{ selected_month }}">Ir a captura</a>
+      <a class="btn btn-secondary" href="{% url 'reportes:cedula_imss_importar' %}">Cédulas IMSS</a>
     </div>
   </form>
 </section>
 
 <section class="kpi-grid">
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.presupuesto|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Presupuesto · {{ selected_month_name|capfirst }}</div>
+    <div class="kpi-number">${{ kpis.real_ingresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Ingresos reales · {{ selected_month_name|capfirst }} (ppto ${{ kpis.ppto_ingresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Real consolidado</div>
+    <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Egresos operativos reales (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number {% if kpis.varianza < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.varianza|floatformat:0|intcomma }}</div>
-    <div class="kpi-label">Varianza ({{ kpis.varianza_pct|floatformat:2 }}%)</div>
+    <div class="kpi-number {% if kpis.dif_real < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.dif_real|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Diferencia operativa ingresos − egresos (ppto ${{ kpis.dif_ppto|floatformat:0|intcomma }})</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">${{ kpis.real_capex|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Inversión CAPEX (ppto ${{ kpis.ppto_capex|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
     <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
@@ -94,7 +101,7 @@
 </section>
 
 {% if not selected_area %}
-<div class="alert alert-info">El área <strong>Nómina</strong> se muestra como vista de control y no se suma a los KPI: sus sueldos ya están incluidos dentro de cada área.</div>
+<div class="alert alert-info">Las áreas <strong>Nómina</strong> y <strong>Resultados (P&amp;L)</strong> se muestran como vistas de control y no se suman a los KPI: los sueldos ya están dentro de cada área, y la venta y costos totales de la empresa ya viven en Ventas y Producción. El <strong>CAPEX</strong> se muestra aparte porque es inversión, no gasto del periodo — no entra a los egresos ni a la diferencia operativa.</div>
 {% endif %}
 {% if kpis.retenidos %}
 <div class="alert alert-info">{{ kpis.retenidos }} concepto(s) muestran el último valor consolidado porque su fuente no tiene datos este mes (marcados "Fuente sin datos"); pueden estar desactualizados.</div>
@@ -301,8 +308,8 @@
           <td>{{ fila.manual }}</td>
           <td>{% if fila.sin_mapear %}<span class="badge bg-warning">{{ fila.sin_mapear }}</span>{% else %}0{% endif %}</td>
           <td>
-            <div class="pvr-cobertura-bar" role="img" aria-label="{{ fila.pct_auto }}% automatizado"><span style="--pct:{{ fila.pct_auto }}%"></span></div>
-            <span class="muted" style="font-size:0.75rem;">{{ fila.pct_auto }}%</span>
+            <div class="pvr-cobertura-bar" role="img" aria-label="{{ fila.pct_con_fuente }}% con fuente ({{ fila.pct_auto }}% automatizado)"><span style="--pct:{{ fila.pct_con_fuente }}%"></span></div>
+            <span class="muted" style="font-size:0.75rem;" title="{{ fila.pct_auto }}% automatizado">{{ fila.pct_con_fuente }}%</span>
           </td>
         </tr>
         {% empty %}

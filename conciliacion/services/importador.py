@@ -72,8 +72,12 @@ PDF_MONTH_ABBR = {
     "NOV": 11,
     "DEC": 12,
 }
-BBVA_ABONO_CODES = {"T20", "W02", "Y45"}
-BBVA_CARGO_CODES = {"P14", "R01", "R15", "S39", "S40", "T17"}
+# BS3 = disposicion de plan de pagos fijos (credito depositado en cuenta);
+# N06 = pago recibido de cuenta de tercero. Ambos confirmados como abono contra
+# los totales de control de estados de cuenta reales (feb/jun 2026).
+BBVA_ABONO_CODES = {"T20", "W02", "Y45", "BS3", "N06"}
+# P12 = pago de tarjeta de credito hecho desde la cuenta (retiro; abr 2026).
+BBVA_CARGO_CODES = {"P12", "P14", "R01", "R15", "S39", "S40", "T17"}
 
 
 class ImportacionBancariaError(ValueError):
@@ -294,6 +298,8 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
 
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
+    cfdi_nomina = _aggregate_cfdi_nomina(cfdi_qs)
+    cargos_por_tipo = _aggregate_cargos_por_conciliacion(movimientos_qs)
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
     alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
     canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
@@ -301,6 +307,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     resumen_ejecutivo = _resumen_ejecutivo_periodo(
         movimientos_abonos=abonos,
         movimientos_cargos=cargos,
+        cargos_por_tipo=cargos_por_tipo,
         cfdi_emitidos=cfdi_emitidos,
         cfdi_recibidos=cfdi_recibidos,
         alcance_fiscal=alcance_fiscal,
@@ -308,7 +315,9 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     trabajo_conciliacion = _trabajo_conciliacion_periodo(
         canales_comparativo=canales_comparativo,
         movimientos_cargos=cargos,
+        cargos_por_tipo=cargos_por_tipo,
         cfdi_recibidos=cfdi_recibidos,
+        cfdi_nomina=cfdi_nomina,
         alcance_fiscal=alcance_fiscal,
     )
     estado_cierre = _estado_cierre_periodo(
@@ -359,6 +368,7 @@ def _resumen_ejecutivo_periodo(
     *,
     movimientos_abonos: dict[str, Any],
     movimientos_cargos: dict[str, Any],
+    cargos_por_tipo: dict[str, dict[str, Any]],
     cfdi_emitidos: dict[str, Any],
     cfdi_recibidos: dict[str, Any],
     alcance_fiscal: dict[str, Any],
@@ -367,13 +377,19 @@ def _resumen_ejecutivo_periodo(
     banco_cargos = movimientos_cargos["total"]
     sat_ventas = cfdi_emitidos["total"]
     sat_proveedores = cfdi_recibidos["total"]
+    # Solo los cargos que esperan factura son comparables contra CFDI recibidos;
+    # traspasos propios, nomina, tarjeta/credito y fiscal no llevan CFDI recibido.
+    cargos_proveedores = _suma_cargos(
+        cargos_por_tipo, [MovimientoBancario.CONCILIACION_CFDI, MovimientoBancario.CONCILIACION_COMISION]
+    )
     return {
         "banco_abonos": banco_abonos,
         "banco_cargos": banco_cargos,
+        "banco_cargos_proveedores": cargos_proveedores["total"],
         "sat_ventas": sat_ventas,
         "sat_proveedores": sat_proveedores,
         "diferencia_abonos_ventas": banco_abonos - sat_ventas,
-        "diferencia_cargos_proveedores": banco_cargos - sat_proveedores,
+        "diferencia_cargos_proveedores": cargos_proveedores["total"] - sat_proveedores,
         "pagos_cobrados": alcance_fiscal["pagos_emitidos"]["total"],
         "pagos_proveedores": alcance_fiscal["pagos_recibidos"]["total"],
         "credito_clientes_pendiente": alcance_fiscal["ppd_emitidos_abiertos"]["saldo"],
@@ -385,7 +401,9 @@ def _trabajo_conciliacion_periodo(
     *,
     canales_comparativo: list[dict[str, Any]],
     movimientos_cargos: dict[str, Any],
+    cargos_por_tipo: dict[str, dict[str, Any]],
     cfdi_recibidos: dict[str, Any],
+    cfdi_nomina: dict[str, Any],
     alcance_fiscal: dict[str, Any],
 ) -> list[dict[str, Any]]:
     rows = []
@@ -405,21 +423,95 @@ def _trabajo_conciliacion_periodo(
             }
         )
 
-    diferencia_proveedores = movimientos_cargos["total"] - cfdi_recibidos["total"]
+    proveedores = _suma_cargos(
+        cargos_por_tipo, [MovimientoBancario.CONCILIACION_CFDI, MovimientoBancario.CONCILIACION_COMISION]
+    )
+    diferencia_proveedores = proveedores["total"] - cfdi_recibidos["total"]
     estado_proveedores = _estado_diferencia(diferencia_proveedores)
     rows.append(
         {
-            "concepto": "Proveedores, comisiones y gastos",
-            "banco_conteo": movimientos_cargos["conteo"],
-            "banco_total": movimientos_cargos["total"],
+            "concepto": "Pagos a proveedores y gastos (esperan CFDI)",
+            "banco_conteo": proveedores["conteo"],
+            "banco_total": proveedores["total"],
             "sat_conteo": cfdi_recibidos["conteo"],
             "sat_total": cfdi_recibidos["total"],
             "diferencia": diferencia_proveedores,
             "estado": estado_proveedores,
-            "accion": _accion_conciliacion(estado_proveedores, movimientos_cargos["total"], cfdi_recibidos["total"]),
-            "metodo": "Cargos contra CFDI recibidos, comisiones, nomina, fiscal o soporte contable.",
+            "accion": _accion_conciliacion(estado_proveedores, proveedores["total"], cfdi_recibidos["total"]),
+            "metodo": "Solo cargos clasificados como pago con CFDI o comision. Compras a credito se pagan en otro mes: cruzar con complementos REP.",
         }
     )
+
+    nomina = _suma_cargos(cargos_por_tipo, [MovimientoBancario.CONCILIACION_NOMINA])
+    diferencia_nomina = nomina["total"] - cfdi_nomina["total"]
+    estado_nomina = _estado_diferencia(diferencia_nomina)
+    rows.append(
+        {
+            "concepto": "Nomina pagada por banco vs timbrada",
+            "banco_conteo": nomina["conteo"],
+            "banco_total": nomina["total"],
+            "sat_conteo": cfdi_nomina["conteo"],
+            "sat_total": cfdi_nomina["total"],
+            "diferencia": diferencia_nomina,
+            "estado": estado_nomina,
+            "accion": "Cuadrar contra nomina, IMSS, FONACOT y vales" if estado_nomina != "ok" else "Sin diferencia",
+            "metodo": "SPEI de nomina, EDENRED y FONACOT contra CFDI de nomina timbrada del periodo.",
+        }
+    )
+
+    traspasos = _suma_cargos(cargos_por_tipo, [MovimientoBancario.CONCILIACION_TRASPASO])
+    rows.append(
+        {
+            "concepto": "Traspasos entre cuentas propias",
+            "banco_conteo": traspasos["conteo"],
+            "banco_total": traspasos["total"],
+            "sat_conteo": 0,
+            "sat_total": Decimal("0.00"),
+            "diferencia": Decimal("0.00"),
+            "estado": "ok",
+            "accion": "Sin efecto fiscal",
+            "metodo": "Movimientos entre cuentas de la empresa: no generan ni esperan CFDI.",
+        }
+    )
+
+    credito_tarjeta = _suma_cargos(
+        cargos_por_tipo,
+        [
+            MovimientoBancario.CONCILIACION_TARJETA_CREDITO,
+            MovimientoBancario.CONCILIACION_LINEA_CREDITO,
+            MovimientoBancario.CONCILIACION_FISCAL,
+        ],
+    )
+    if credito_tarjeta["conteo"]:
+        rows.append(
+            {
+                "concepto": "Tarjeta, linea de credito y fiscal",
+                "banco_conteo": credito_tarjeta["conteo"],
+                "banco_total": credito_tarjeta["total"],
+                "sat_conteo": 0,
+                "sat_total": Decimal("0.00"),
+                "diferencia": Decimal("0.00"),
+                "estado": "ok",
+                "accion": "Validar contra estado de credito o declaracion",
+                "metodo": "Pagos de tarjeta/linea de credito e impuestos: sin CFDI recibido esperado.",
+            }
+        )
+
+    sin_clasificar = _suma_cargos(cargos_por_tipo, ["", MovimientoBancario.CONCILIACION_REVISION])
+    if sin_clasificar["conteo"]:
+        rows.append(
+            {
+                "concepto": "Cargos sin clasificar",
+                "banco_conteo": sin_clasificar["conteo"],
+                "banco_total": sin_clasificar["total"],
+                "sat_conteo": 0,
+                "sat_total": Decimal("0.00"),
+                "diferencia": sin_clasificar["total"],
+                "estado": "pendiente",
+                "accion": "Clasificar manualmente o agregar regla",
+                "metodo": "Movimientos que ninguna regla reconocio.",
+            }
+        )
 
     credito_total = alcance_fiscal["ppd_emitidos_abiertos"]["saldo"] + alcance_fiscal["ppd_recibidos_abiertos"]["saldo"]
     pagos_total = alcance_fiscal["pagos_emitidos"]["total"] + alcance_fiscal["pagos_recibidos"]["total"]
@@ -544,6 +636,33 @@ def _periodo_bounds(*, year: int, month: int) -> tuple[datetime, datetime]:
 
 def _aggregate_tipo_movimiento(queryset, tipo: str) -> dict[str, Any]:
     data = queryset.filter(tipo=tipo).aggregate(conteo=Count("id"), total=Sum("monto"))
+    return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
+
+
+def _aggregate_cargos_por_conciliacion(movimientos_qs) -> dict[str, dict[str, Any]]:
+    """Cargos del periodo agrupados por tipo_conciliacion (clasificacion automatica)."""
+    data: dict[str, dict[str, Any]] = {}
+    rows = (
+        movimientos_qs.filter(tipo=MovimientoBancario.TIPO_CARGO)
+        .values("tipo_conciliacion")
+        .annotate(conteo=Count("id"), total=Sum("monto"))
+    )
+    for row in rows:
+        clave = row["tipo_conciliacion"] or ""
+        data[clave] = {"conteo": row["conteo"], "total": row["total"] or Decimal("0.00")}
+    return data
+
+
+def _suma_cargos(cargos_por_tipo: dict[str, dict[str, Any]], claves: list[str]) -> dict[str, Any]:
+    conteo = sum(cargos_por_tipo.get(k, {}).get("conteo", 0) for k in claves)
+    total = sum((cargos_por_tipo.get(k, {}).get("total") or Decimal("0.00")) for k in claves)
+    return {"conteo": conteo, "total": total}
+
+
+def _aggregate_cfdi_nomina(queryset) -> dict[str, Any]:
+    data = queryset.filter(tipo_cfdi=CfdiDescargado.TIPO_EMITIDO, tipo_comprobante="N").aggregate(
+        conteo=Count("id"), total=Sum("total")
+    )
     return {"conteo": data["conteo"] or 0, "total": data["total"] or Decimal("0.00")}
 
 
@@ -688,7 +807,21 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
         "transferencia": {"conteo": 0, "total": Decimal("0.00")},
         "otros_abonos": {"conteo": 0, "total": Decimal("0.00")},
     }
-    for descripcion, monto in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list("descripcion", "monto"):
+    PROPIOS = {
+        MovimientoBancario.CONCILIACION_TRASPASO,
+        MovimientoBancario.CONCILIACION_LINEA_CREDITO,
+        MovimientoBancario.CONCILIACION_TARJETA_CREDITO,
+    }
+    propios = {"conteo": 0, "total": Decimal("0.00")}
+    for descripcion, monto, tipo_conciliacion in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list(
+        "descripcion", "monto", "tipo_conciliacion"
+    ):
+        # abonos clasificados como dinero propio (traspasos, disposiciones de credito,
+        # pagos recibidos en tarjeta propia) no son ingresos de clientes
+        if tipo_conciliacion in PROPIOS:
+            propios["conteo"] += 1
+            propios["total"] += monto or Decimal("0.00")
+            continue
         canal = _clasificar_canal_banco(descripcion)
         banco[canal]["conteo"] += 1
         banco[canal]["total"] += monto or Decimal("0.00")
@@ -734,6 +867,22 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
                 "metodo": regla.metodo,
                 "accion": regla.siguiente_revision,
                 "permite_match_directo": regla.permite_match_directo,
+            }
+        )
+    if propios["conteo"]:
+        rows.append(
+            {
+                "canal": "propios",
+                "nombre": "Traspasos y credito recibidos (dinero propio)",
+                "banco_conteo": propios["conteo"],
+                "banco_total": propios["total"],
+                "sat_conteo": 0,
+                "sat_total": Decimal("0.00"),
+                "diferencia": Decimal("0.00"),
+                "estado": "ok",
+                "metodo": "Abonos clasificados como traspaso entre cuentas propias o disposicion de credito: no son ventas.",
+                "accion": "Sin efecto fiscal",
+                "permite_match_directo": False,
             }
         )
     return rows
@@ -1156,8 +1305,8 @@ def _pdf_rows_from_bbva_maestra(pages_text: list[str]) -> list[dict[str, Any]]:
         r"(?P<code>[A-Z0-9]{3})\s+"
         r"(?P<description>.+?)\s+"
         r"(?P<amount>\d{1,3}(?:,\d{3})*\.\d{2})"
-        r"(?:\s+(?P<saldo_operacion>\d{1,3}(?:,\d{3})*\.\d{2})\s+"
-        r"(?P<saldo_liquidacion>\d{1,3}(?:,\d{3})*\.\d{2}))?$"
+        r"(?:\s+(?P<saldo_operacion>-?\d{1,3}(?:,\d{3})*\.\d{2})\s+"
+        r"(?P<saldo_liquidacion>-?\d{1,3}(?:,\d{3})*\.\d{2}))?$"
     )
 
     for page_number, text in enumerate(pages_text, start=1):

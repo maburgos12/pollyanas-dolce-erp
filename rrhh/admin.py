@@ -77,10 +77,12 @@ class EmpleadoAdmin(admin.ModelAdmin):
         "participa_bonos_ventas",
         "participa_bonos_produccion",
         "salario_diario",
+        "exento_checador",
         "activo",
     )
     list_filter = (
         "activo",
+        "exento_checador",
         "tipo_contrato",
         "departamento_origen",
         "departamento",

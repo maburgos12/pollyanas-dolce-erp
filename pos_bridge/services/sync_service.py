@@ -677,6 +677,7 @@ class PointSyncService:
         triggered_by=None,
         branch_hint: str | None = None,
         product_codes: list[str] | None = None,
+        articulo_codes: list[str] | None = None,
         limit: int | None = None,
         include_without_recipe: bool = False,
         attempt_count: int = 1,
@@ -684,6 +685,7 @@ class PointSyncService:
         parameters = {
             "branch_hint": branch_hint or "",
             "product_codes": product_codes or [],
+            "articulo_codes": articulo_codes or [],
             "limit": limit,
             "include_without_recipe": include_without_recipe,
             "settings": self.settings.safe_dict(),
@@ -700,6 +702,7 @@ class PointSyncService:
             result = self.recipe_sync_service.sync(
                 branch_hint=branch_hint,
                 product_codes=product_codes,
+                articulo_codes=articulo_codes,
                 limit=limit,
                 include_without_recipe=include_without_recipe,
                 sync_job=sync_job,

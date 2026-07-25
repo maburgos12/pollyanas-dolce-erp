@@ -52,7 +52,10 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
       };
     },
     window: {
-      location: { href: "https://erp.local/lista/", origin: "https://erp.local", assign: () => events.push("navigate") },
+      location: {
+        href: "https://erp.local/lista/", origin: "https://erp.local", hash: "",
+        assign: () => events.push("navigate"), reload: () => events.push("reload")
+      },
       setTimeout(fn) { fn(); }, sessionStorage, ERPActionUI: null
     },
     console
@@ -72,6 +75,13 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   assert.deepStrictEqual(destination.events, ["toast"]);
   const reload = await scenario(null, null, local.storage);
   assert.deepStrictEqual(reload.events, []);
+
+  const sameDocument = await scenario({
+    ok: true, toast: { message: "actualizado" }, redirect: "/lista/#fila-1", reload: true
+  });
+  await sameDocument.listener(sameDocument.event);
+  assert.deepStrictEqual(sameDocument.events, ["reload"]);
+  assert.strictEqual(sameDocument.storage.size, 1);
 
   const external = await scenario({ ok: true, toast: { message: "ok" }, redirect: "https://evil.example/" });
   await external.listener(external.event);

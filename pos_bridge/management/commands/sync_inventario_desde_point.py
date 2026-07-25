@@ -19,6 +19,12 @@ from inventario.models import MovimientoInventario
 from inventario.services_existencias import establecer_stock, stock_ubicacion
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
+from pos_bridge.services.unidades import cantidad_en_unidad_erp as _cantidad_compartida
+
+
+def _cantidad_en_unidad_erp(cantidad, unidad_point, insumo):
+    """Delegado al helper compartido (pos_bridge.services.unidades)."""
+    return _cantidad_compartida(cantidad, unidad_point, insumo)
 
 
 class Command(BaseCommand):
@@ -80,13 +86,19 @@ class Command(BaseCommand):
 
             insumo = resolved.insumo
             stock_previo = stock_ubicacion(insumo, "ALMACEN_1")
-            stock_point = row.quantity
+            stock_point, nota_conversion = _cantidad_en_unidad_erp(row.quantity, row.unit, insumo)
+            if nota_conversion.startswith("UNIDAD INCOMPATIBLE"):
+                errores.append(f"{insumo.nombre}: {nota_conversion}")
+                continue
 
             if stock_previo == stock_point:
                 sin_cambio += 1
                 continue
 
-            delta_str = f"{stock_previo:.3f} → {stock_point:.3f} {row.unit}"
+            unidad_erp = insumo.unidad_base.codigo if insumo.unidad_base else row.unit
+            delta_str = f"{stock_previo:.3f} → {stock_point:.3f} {unidad_erp}"
+            if nota_conversion:
+                delta_str += f" ({nota_conversion})"
             self.stdout.write(
                 self.style.SUCCESS(f"  {insumo.nombre}: {delta_str}")
             )

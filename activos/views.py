@@ -3168,7 +3168,7 @@ def api_dashboard_ejecutivo(request):
     )
 
     reparaciones_mes_qs = ReparacionUnidad.objects.filter(fecha_ingreso__gte=hace_30.date())
-    servicios_mes_qs = ServicioRealizadoUnidad.objects.filter(fecha_servicio__gte=hace_30.date())
+    servicios_mes_qs = ServicioRealizadoUnidad.objects.vigentes().filter(fecha_servicio__gte=hace_30.date())
     costo_flota_mes = _money(reparaciones_mes_qs.aggregate(total=Sum("costo_total"))["total"]) + _money(
         servicios_mes_qs.aggregate(total=Sum("costo"))["total"]
     )

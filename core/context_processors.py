@@ -38,6 +38,9 @@ def ui_access(request):
     current_path = request.get_full_path() if hasattr(request, "get_full_path") else getattr(request, "path", "")
     can_view_fallas = can_view_module(user, "fallas")
     can_view_mermas = can_view_module(user, "mermas")
+    preview_actor = getattr(request, "preview_actor", None)
+    preview_target = getattr(request, "preview_target", None)
+    real_actor = preview_actor or user
     return {
         "ui_access": {
             "can_view_maestros": can_view_maestros(user),
@@ -73,4 +76,15 @@ def ui_access(request):
             "role_label": _get_role_label(user),
         },
         "ui_nav_groups": build_nav_groups(user, current_path),
+        "ui_preview": {
+            "active": bool(getattr(request, "preview_active", False)),
+            "can_start": bool(
+                real_actor
+                and real_actor.is_authenticated
+                and real_actor.is_active
+                and real_actor.is_superuser
+            ),
+            "actor": real_actor,
+            "target": preview_target,
+        },
     }

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 import re
 from unittest.mock import patch
@@ -81,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260711-api-v2-url-v2", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -211,7 +212,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
         self.assertContains(response, 'reportMaintenanceInitFailure')
         self.assertContains(response, 'class="mant-money-prefix"')
-        self.assertContains(response, 'v=20260707-mant-tabs-row-v10')
+        self.assertContains(response, 'v=20260721-mantenimiento-pruebas-v3')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
 
     def test_pwa_shows_order_traceability_fields(self):
@@ -230,7 +231,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(app, 'const API_V2 = `${API}/v2`;')
         self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
-        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", page: 1')
+        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1')
         self.assertContains(app, "detailCache: new Map()")
         self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0}")
         self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
@@ -248,6 +249,48 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, "historyLoading: false")
         self.assertContains(app, "const requestedPage = state.history.page")
         self.assertContains(app, "if (state.historyLoading) return")
+
+    def test_pwa_history_can_filter_by_unit_and_show_authorized_costs(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(
+            app,
+            'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1',
+        )
+        self.assertContains(app, "async function ensureUnidades()")
+        self.assertContains(app, "await Promise.all([ensureSucursales(), ensureUnidades()])")
+        self.assertContains(app, 'unidad=${encodeURIComponent(state.history.unidad)}')
+        self.assertContains(app, "setHistoryFilter('unidad',this.value)")
+        self.assertContains(app, "Todas las unidades")
+        self.assertContains(app, "formatCurrency(item.costo)")
+        self.assertContains(app, ".history-unit-filter{grid-column:1/-1}")
+        self.assertContains(app, '<label class="history-unit-filter">Unidad')
+
+    def test_pwa_service_scope_hides_and_disables_irrelevant_fields(self):
+        self.client.force_login(self.mantenimiento)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+        mobile_theme = (Path(settings.BASE_DIR) / "static/operacion/app_theme.css").read_text()
+
+        self.assertIn('id="servicio-sucursal-field"', source)
+        self.assertIn(
+            '<div class="field servicio-scope-field" id="servicio-sucursal-field">\n'
+            '              <label for="servicio-sucursal">Sucursal</label>',
+            source,
+        )
+        self.assertIn('id="servicio-activo-field"', source)
+        self.assertIn('id="servicio-unidad-field"', source)
+        self.assertIn('id="servicio-instalacion-field"', source)
+        self.assertIn("setServicioFieldState", source)
+        self.assertIn('const esFlota = alcance === "unidad";', source)
+        self.assertIn("sucursal_id: esFlota ? null", source)
+        self.assertIn("activo_id: alcance === \"activo\"", source)
+        self.assertIn("instalacion_categoria: alcance === \"instalacion\"", source)
+        self.assertIn('input[type="date"]', mobile_theme)
+        self.assertIn("min-inline-size: 0", mobile_theme)
+        self.assertIn("max-inline-size: 100%", mobile_theme)
 
     def test_pwa_does_not_duplicate_api_prefix_for_v2_requests(self):
         self.client.force_login(self.mantenimiento)
@@ -533,6 +576,27 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion="Programar cambio de empaque").exists())
         self.assertTrue(ReporteUnidad.objects.filter(descripcion="Falla reportada desde mantenimiento móvil.").exists())
 
+    def test_mobile_fleet_service_does_not_require_branch(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/servicios-puntuales/",
+            {
+                "modo_servicio": "pendiente",
+                "alcance": "unidad",
+                "unidad_id": self.other_unidad.id,
+                "fecha_objetivo": (timezone.localdate() + timedelta(days=7)).isoformat(),
+                "descripcion": "Revisión móvil sin sucursal artificial.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        servicio = ServicioRealizadoUnidad.objects.get(
+            tipo_servicio__nombre="Revisión móvil sin sucursal artificial."
+        )
+        self.assertEqual(servicio.unidad, self.other_unidad)
+
     def test_quick_asset_keeps_creator_and_exposes_author_name(self):
         self.client.force_login(self.user)
 
@@ -711,6 +775,56 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_PROCESO)
         self.assertEqual(str(self.falla.costo_estimado), "1250.50")
         self.assertEqual(ReporteFalla.objects.count(), report_count)
+
+    def test_future_close_with_estimate_requires_explicit_final_amount_confirmation(self):
+        self.falla.costo_estimado = Decimal("1250.50")
+        self.falla.save(update_fields=["costo_estimado"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {"estatus": ReporteFalla.ESTATUS_RESUELTO, "comentario": "Trabajo terminado."},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Confirma el importe final", response.json()["error"])
+        self.falla.refresh_from_db()
+        self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_ABIERTO)
+        self.assertIsNone(self.falla.costo_real)
+
+    def test_future_close_can_confirm_estimate_as_final_without_recapturing_it(self):
+        self.falla.costo_estimado = Decimal("1250.50")
+        self.falla.save(update_fields=["costo_estimado"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/mantenimiento/bandeja/falla/%s/actualizar/" % self.falla.id,
+            {
+                "estatus": ReporteFalla.ESTATUS_RESUELTO,
+                "confirmar_costo_estimado": "true",
+                "comentario": "Trabajo terminado por el importe cotizado.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.falla.refresh_from_db()
+        self.assertEqual(self.falla.estatus, ReporteFalla.ESTATUS_RESUELTO)
+        self.assertEqual(self.falla.costo_real, Decimal("1250.50"))
+
+    def test_pwa_future_close_sends_confirmation_or_explicit_real_cost(self):
+        self.client.force_login(self.user)
+
+        source = self.client.get(reverse("mantenimiento:app")).content.decode()
+
+        self.assertIn('id="falla-costo-real"', source)
+        self.assertIn("¿El importe final fue el mismo", source)
+        self.assertIn("confirmar_costo_estimado", source)
+        self.assertIn("costo_real: costoReal || null", source)
+        self.assertIn('apiFetch(`/bandeja/falla/${id}/actualizar/`, {\n          method: "POST"', source)
+        self.assertIn('apiFetch(`/bandeja/unidad/${id}/actualizar/`, {\n          method: "POST"', source)
+        self.assertIn('value="${esc(String(item.costo_real || item.costo_estimado || ""))}"', source)
+        self.assertIn('if (state.pantalla === "pendientes" && state.bandeja.some((item) => item.uid === uid))', source)
+        self.assertIn("return abrirBandejaItemPorUid(uid);", source)
 
     def test_followup_uploads_public_evidence_for_falla_timeline(self):
         self.client.force_login(self.user)
@@ -916,7 +1030,7 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertIn("sucursal.disabled = esUnidad;", source)
         self.assertIn('option.textContent = "Seleccionar unidad...";', source)
         self.assertIn("const visible = esUnidad ||", source)
-        self.assertIn("20260714-flota-sin-sucursal-v1", source)
+        self.assertIn("20260715-mantenimiento-guardar-v2", source)
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
         self.assertIn(".mant-field[hidden]{display:none}", css)
 
@@ -1144,3 +1258,29 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertContains(response, "+ Falla / imprevisto")
         self.assertContains(response, "+ Servicio sin orden")
         self.assertContains(response, "+ Programar servicio")
+
+
+class MantenimientoServiceFormMarkupTests(TestCase):
+    databases = []
+
+    def test_direct_service_form_reports_client_validation_and_normalizes_scope(self):
+        source = (Path(settings.BASE_DIR) / "templates/mantenimiento/dashboard.html").read_text()
+
+        self.assertIn('id="ordenServicioForm"', source)
+        self.assertIn('id="ordenServicioError"', source)
+        self.assertIn('class="mant-form-error"', source)
+        self.assertIn("form.addEventListener(\"submit\"", source)
+        self.assertIn("setAlcance(alcance.value);", source)
+        self.assertIn("form.checkValidity()", source)
+        self.assertIn('unidad_id: "Unidad logística"', source)
+        self.assertIn("field.name && !field.disabled", source)
+        self.assertIn("syncSearchableState(sucursal, !esUnidad, !esUnidad);", source)
+        base = (Path(settings.BASE_DIR) / "templates/base.html").read_text()
+        service_worker = (Path(settings.BASE_DIR) / "static/erp-sw.js").read_text()
+        searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
+        css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
+        self.assertIn("20260715-mantenimiento-guardar-v2", base)
+        self.assertIn("20260721-mantenimiento-pruebas-v19", base)
+        self.assertIn("pollyanas-erp-shell-v19-mantenimiento-pruebas", service_worker)
+        self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
+        self.assertIn(".mant-form-error", css)

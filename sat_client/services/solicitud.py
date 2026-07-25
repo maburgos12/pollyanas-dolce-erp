@@ -148,6 +148,20 @@ def solicitar_descarga_periodo(
 
     if code == "5003":
         raise SatRequestLimitExceeded(message or "SAT reporto tope maximo de CFDIs", code=code)
+    if code == "5002":
+        # Cuota "de por vida" agotada para este periodo exacto: registrarlo como
+        # rechazo definitivo para que nunca se vuelva a solicitar (reintentar
+        # solo quema mas cuota y no puede prosperar).
+        return SolicitudDescarga.objects.create(
+            fecha_inicial=fecha_inicial,
+            fecha_final=fecha_final,
+            rfc_solicitante=credentials.rfc,
+            tipo_solicitud=tipo_solicitud,
+            direccion=direccion,
+            codigo_estado=code,
+            estado=SolicitudDescarga.ESTADO_RECHAZADA,
+            error_detalle=message or "Se han agotado las solicitudes de por vida",
+        )
     if code == "5005":
         existente = buscar_solicitud_vigente(
             fecha_inicial=fecha_inicial,

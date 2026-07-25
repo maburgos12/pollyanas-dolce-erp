@@ -13,6 +13,7 @@ from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.dateparse import parse_date, parse_time
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -140,6 +141,28 @@ PANEL_BUCKETS = {
     "desfases": "Desfases",
     "historico": "Histórico finalizado",
 }
+
+PANEL_ESTADOS = {
+    "vencidos": "Vencidos",
+    "activos": "Activos",
+    "revision": "Por aprobar",
+    "prorrogas": "Prórrogas",
+    "completados": "Completados",
+}
+
+
+def _item_en_estado_panel(item: SeguimientoItem, estado: str) -> bool:
+    if estado == "vencidos":
+        return item.es_vencido_visual
+    if estado == "activos":
+        return not item.esta_cerrado
+    if estado == "revision":
+        return item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+    if estado == "prorrogas":
+        return bool(item.prorroga_pendiente)
+    if estado == "completados":
+        return item.estatus == SeguimientoItem.ESTATUS_COMPLETADO
+    return False
 
 
 def _source_status(item: SeguimientoItem) -> str:
@@ -334,6 +357,12 @@ def _validar_archivo_evidencia(archivo) -> str | None:
 
 @login_required
 def mi_seguimiento(request, tipo: str | None = None):
+    if can_review_seguimiento_global(request.user):
+        panel_url = reverse("seguimiento:panel_dg")
+        if tipo:
+            panel_url = f"{panel_url}?tab={tipo}"
+        return redirect(panel_url)
+
     now = timezone.now()
     empleado = empleado_de_usuario(request.user)
     items = list(_items_del_usuario(request.user))
@@ -430,6 +459,50 @@ def mi_seguimiento(request, tipo: str | None = None):
             and (not item.fecha_limite or (item.aprobado_at or item.ultima_actividad) <= item.fecha_limite)
         ),
     }
+
+    # La bandeja personal separa estados en el servidor. De esta forma el trabajo
+    # terminado no se mezcla ni se descarga como parte de la lista activa.
+    items_del_tipo = [item for item in items if not tipo or item.tipo == tipo]
+    items_por_estado = {
+        "vencidos": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus != SeguimientoItem.ESTATUS_EN_REVISION
+            and item.esta_vencido
+        ],
+        "activos": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus != SeguimientoItem.ESTATUS_EN_REVISION
+            and not item.esta_vencido
+        ],
+        "en_revision": [
+            item
+            for item in items_del_tipo
+            if not item.esta_cerrado
+            and item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
+        ],
+        "finalizados": [item for item in items_del_tipo if item.esta_cerrado],
+    }
+    items_por_estado["vencidos"].sort(
+        key=lambda item: (item.fecha_limite is None, item.fecha_limite or now)
+    )
+    items_por_estado["activos"].sort(
+        key=lambda item: (item.fecha_limite is None, item.fecha_limite or now)
+    )
+    items_por_estado["en_revision"].sort(key=lambda item: item.updated_at, reverse=True)
+    items_por_estado["finalizados"].sort(
+        key=lambda item: item.aprobado_at or item.updated_at,
+        reverse=True,
+    )
+    bucket_counts = {estado: len(bucket_items) for estado, bucket_items in items_por_estado.items()}
+    active_bucket = (request.GET.get("estado") or "").strip().lower()
+    if active_bucket not in items_por_estado:
+        active_bucket = "vencidos" if bucket_counts["vencidos"] else "activos"
+    visible_items = items_por_estado[active_bucket]
+
     section_config = [
         {
             "tipo": SeguimientoItem.TIPO_COMPROMISO,
@@ -454,7 +527,7 @@ def mi_seguimiento(request, tipo: str | None = None):
         section_config = [config for config in section_config if config["tipo"] == tipo]
     sections = []
     for config in section_config:
-        section_items = [item for item in items if item.tipo == config["tipo"]]
+        section_items = [item for item in visible_items if item.tipo == config["tipo"]]
         total_checks = sum(item.checklist_total for item in section_items)
         done_checks = sum(item.checklist_done for item in section_items)
         sections.append(
@@ -497,6 +570,9 @@ def mi_seguimiento(request, tipo: str | None = None):
             "mis_aprobaciones": mis_aprobaciones,
             "writeback_activo": _writeback_activo(),
             "puede_revisar_seguimiento_global": can_review_seguimiento_global(request.user),
+            "active_bucket": active_bucket,
+            "bucket_counts": bucket_counts,
+            "visible_total": len(visible_items),
         },
     )
 
@@ -965,9 +1041,9 @@ def panel_dg(request):
     filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
     filtro_colaborador = (request.GET.get("colaborador") or "").strip()
     filtro_vencidos = request.GET.get("vencidos") == "1"
-    active_bucket = (request.GET.get("bucket") or "activos").strip().lower()
+    active_bucket = (request.GET.get("bucket") or "").strip().lower()
     if active_bucket not in PANEL_BUCKETS:
-        active_bucket = "activos"
+        active_bucket = ""
 
     qs = (
         SeguimientoItem.objects.select_related("responsable_user", "responsable_empleado", "aprobado_por")
@@ -1017,7 +1093,35 @@ def panel_dg(request):
         {"key": bucket, "label": label, "count": bucket_counts[bucket]}
         for bucket, label in PANEL_BUCKETS.items()
     ]
-    items = [i for i in items_base if i.visual_bucket == active_bucket]
+    items_scope = [i for i in items_base if i.visual_bucket == active_bucket] if active_bucket else list(items_base)
+
+    active_estado = (request.GET.get("estado") or "").strip().lower()
+    if active_estado not in PANEL_ESTADOS:
+        active_estado = {
+            "activos": "activos",
+            "historico": "completados",
+            "revision": "revision",
+            "desfases": "activos",
+        }.get(active_bucket, "vencidos")
+
+    dashboard_counts = {
+        estado: sum(1 for item in items_scope if _item_en_estado_panel(item, estado))
+        for estado in PANEL_ESTADOS
+    }
+    state_nav = []
+    for estado, label in PANEL_ESTADOS.items():
+        params = request.GET.copy()
+        params.pop("bucket", None)
+        params.pop("vencidos", None)
+        params["estado"] = estado
+        state_nav.append({
+            "key": estado,
+            "label": label,
+            "count": dashboard_counts[estado],
+            "url": f"?{params.urlencode()}",
+        })
+
+    items = [i for i in items_scope if _item_en_estado_panel(i, active_estado)]
 
     active_tab = (request.GET.get("tab") or "").strip().upper()
     items_for_type_counts = list(items)
@@ -1043,11 +1147,13 @@ def panel_dg(request):
     )
 
     from collections import defaultdict
-    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
+    por_colaborador = defaultdict(lambda: {"items": [], "nombre": "", "iniciales": "", "count": 0, "abiertos": 0, "vencidos": 0, "en_revision": 0, "completados": 0})
     for item in items:
         key = item.responsable_nombre
         por_colaborador[key]["nombre"] = key
+        por_colaborador[key]["iniciales"] = "".join(part[0] for part in key.split()[:2]).upper() or "—"
         por_colaborador[key]["items"].append(item)
+        por_colaborador[key]["count"] += 1
         if not item.esta_cerrado:
             por_colaborador[key]["abiertos"] += 1
         if item.es_vencido_visual:
@@ -1059,7 +1165,7 @@ def panel_dg(request):
 
     colaboradores_resumen = sorted(
         por_colaborador.values(),
-        key=lambda c: (-c["vencidos"], -c["en_revision"], -c["abiertos"]),
+        key=lambda c: (-c["count"], c["nombre"].casefold()),
     )
 
     # Sección "Requiere tu acción": en revisión + prórrogas pendientes (sin importar filtros).
@@ -1085,6 +1191,12 @@ def panel_dg(request):
 
     return render(request, "seguimiento/panel_dg.html", {
         "items": items,
+        "items_estado": items,
+        "colaboradores_estado": colaboradores_resumen,
+        "active_estado": active_estado,
+        "active_estado_label": PANEL_ESTADOS[active_estado],
+        "state_nav": state_nav,
+        "dashboard_counts": dashboard_counts,
         "pendientes_accion": pendientes_accion,
         "pendientes_accion_total": len(pendientes_accion),
         "colaboradores_resumen": colaboradores_resumen,
@@ -1240,6 +1352,7 @@ def detalle_item(request, pk):
     # Orden secuencial: solo el primer paso incompleto se puede marcar y solo el último
     # completado se puede deshacer. El resto queda bloqueado en la interfaz.
     siguiente_check_id = next((c.id for c in checks if not c.completado), None)
+    siguiente_check = next((c for c in checks if c.id == siguiente_check_id), None)
     ultimo_completado_id = next((c.id for c in reversed(checks) if c.completado), None)
 
     # Pasos de ESTE ítem donde el usuario logeado es aprobador y están en espera
@@ -1272,6 +1385,7 @@ def detalle_item(request, pk):
             "puede_retractar": puede_retractar,
             "current_user": request.user,
             "siguiente_check_id": siguiente_check_id,
+            "siguiente_check": siguiente_check,
             "ultimo_completado_id": ultimo_completado_id,
             "writeback_activo": _writeback_activo(),
             "pasos_a_aprobar": pasos_a_aprobar,
@@ -1532,7 +1646,9 @@ def _actividad_evento(actividad: ActividadCalendario, request_user) -> dict:
     responsable = _nombre_usuario_legible(actividad.usuario)
     invitado = _nombre_usuario_legible(actividad.invitado_user)
     creador = _nombre_usuario_legible(actividad.creado_por)
-    editable = actividad.usuario_id == request_user.id or actividad.creado_por_id == request_user.id
+    editable = actividad.creado_por_id == request_user.id or (
+        actividad.creado_por_id is None and actividad.usuario_id == request_user.id
+    )
     return {
         "id": f"act-{actividad.pk}",
         "fuente": "actividad",
@@ -1659,13 +1775,21 @@ def _fechas_recurrentes(fecha, periodicidad: str, repeticiones: int):
     if periodicidad == "NINGUNA":
         return [fecha]
     fechas = []
-    for index in range(repeticiones):
-        if periodicidad == "DIARIA":
-            fechas.append(fecha + timedelta(days=index))
-        elif periodicidad == "SEMANAL":
-            fechas.append(fecha + timedelta(days=index * 7))
-        elif periodicidad == "MENSUAL":
-            fechas.append(_sumar_meses(fecha, index))
+    if periodicidad == "DIARIA":
+        fecha_actual = fecha
+        while len(fechas) < repeticiones:
+            if fecha_actual.weekday() != 6:
+                fechas.append(fecha_actual)
+            fecha_actual += timedelta(days=1)
+    else:
+        for index in range(repeticiones):
+            if periodicidad == "SEMANAL":
+                fechas.append(fecha + timedelta(days=index * 7))
+            elif periodicidad == "MENSUAL":
+                fecha_mensual = _sumar_meses(fecha, index)
+                if fecha_mensual.weekday() == 6:
+                    fecha_mensual += timedelta(days=1)
+                fechas.append(fecha_mensual)
     return fechas or [fecha]
 
 
@@ -1680,7 +1804,7 @@ def _periodicidad_post(request):
     except ValueError:
         return None, None, "El número de repeticiones no es válido."
     if repeticiones < 2 or repeticiones > 26:
-        return None, None, "La recurrencia debe estar entre 2 y 26 ocurrencias."
+        return None, None, "El número de repeticiones debe estar entre 2 y 26."
     return periodicidad, repeticiones, None
 
 
@@ -1727,7 +1851,7 @@ def _datos_actividad_post(request):
 
 def _actividad_editable_qs(user):
     return ActividadCalendario.objects.filter(
-        Q(usuario=user) | Q(creado_por=user) | Q(creado_por__isnull=True, usuario=user),
+        Q(creado_por=user) | Q(creado_por__isnull=True, usuario=user),
         activo=True,
     ).distinct()
 
@@ -1753,7 +1877,7 @@ def _notificar_reunion_calendario(actividad: ActividadCalendario, *, actor, tota
         return 0
     fecha = actividad.fecha.strftime("%d/%m/%Y")
     hora = actividad.hora_inicio.strftime("%H:%M") if actividad.hora_inicio else "sin hora definida"
-    extra = f"\nSe crearon {total_ocurrencias} ocurrencias." if total_ocurrencias > 1 else ""
+    extra = f"\nSe crearon {total_ocurrencias} repeticiones." if total_ocurrencias > 1 else ""
     mensaje = f"{actor.get_full_name() or actor.username} creó una reunión para {fecha} a las {hora}.{extra}"
     creadas = crear_notificaciones(
         destinatarios,
@@ -1874,7 +1998,13 @@ def actividad_crear(request):
     periodicidad, repeticiones, error = _periodicidad_post(request)
     if error:
         return JsonResponse({"error": error}, status=400)
-    fechas = _fechas_recurrentes(datos.pop("fecha"), periodicidad, repeticiones)
+    fecha_inicial = datos.pop("fecha")
+    if periodicidad != "NINGUNA" and fecha_inicial.weekday() == 6:
+        return JsonResponse(
+            {"error": "Las actividades en domingo deben registrarse con la opción ‘No se repite’."},
+            status=400,
+        )
+    fechas = _fechas_recurrentes(fecha_inicial, periodicidad, repeticiones)
     usuario = datos.get("invitado_user") or request.user
     actividades = [
         ActividadCalendario.objects.create(usuario=usuario, creado_por=request.user, fecha=fecha, **datos)
@@ -1947,4 +2077,9 @@ def actividad_eliminar(request, pk):
         actividad.pk,
         {"fecha": actividad.fecha.isoformat()},
     )
-    return JsonResponse({"ok": True})
+    return JsonResponse(
+        {
+            "ok": True,
+            "toast": {"type": "success", "message": "Actividad eliminada del calendario."},
+        }
+    )

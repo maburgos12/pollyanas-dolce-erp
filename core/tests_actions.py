@@ -51,6 +51,8 @@ class ERPActionContractTests(SimpleTestCase):
         self.assertIn("url.origin !== window.location.origin", js)
         self.assertIn("url.username || url.password", js)
         self.assertIn("window.location.assign(redirectUrl.href)", js)
+        self.assertIn("if (payload.reload)", js)
+        self.assertIn("window.location.reload()", js)
 
     def test_solo_acciones_de_stock_objetivo_son_async(self):
         recepciones = (ROOT / "compras" / "templates" / "compras" / "recepciones.html").read_text(encoding="utf-8")

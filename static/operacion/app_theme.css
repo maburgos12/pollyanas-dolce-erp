@@ -39,6 +39,17 @@ body,
   color: var(--pd-ink);
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.field,
+.form-block,
+.card,
+.panel {
+  min-width: 0;
+}
+
 .brand-title,
 .mini-brand,
 .screen-title,
@@ -99,6 +110,14 @@ select,
   border-color: var(--pd-line) !important;
   color: var(--pd-ink) !important;
   border-radius: 6px !important;
+  min-width: 0;
+  max-width: 100%;
+}
+
+input[type="date"] {
+  width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 input::placeholder,
