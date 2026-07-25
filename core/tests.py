@@ -37,6 +37,7 @@ from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo
 from core.hallmark_ui_audit import new_issues_against_baseline
 from core.views import _build_dashboard_daily_sales_snapshot, _build_dashboard_sales_history_summary, _compute_budget_semaforo, _compute_plan_forecast_semaforo, _sales_previous_dates, _sales_source_context
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
+from logistica.models import PuntoLogistico, Unidad
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
@@ -568,6 +569,17 @@ class BranchCatalogTests(TestCase):
 
         self.assertEqual([branch.codigo for branch in branches], [matriz.codigo])
 
+    def test_eligible_operational_branch_qs_excludes_technical_demo_branches(self):
+        Sucursal.objects.create(codigo="CODLOG", nombre="Sucursal Codex Logistica", activa=True)
+        Sucursal.objects.create(codigo="DBGX", nombre="Debug X", activa=True)
+        Sucursal.objects.create(codigo="DEMO-CEDIS", nombre="CEDIS Demo", activa=True)
+        Sucursal.objects.create(codigo="DEMO-POINT", nombre="Sucursal Demo Point", activa=True)
+        canonical = Sucursal.objects.create(codigo="COLOSIO", nombre="Sucursal Colosio", activa=True)
+
+        branches = list(eligible_operational_branch_qs())
+
+        self.assertEqual([branch.codigo for branch in branches], [canonical.codigo])
+
 
 class PurgeGhostBranchCommandTests(TestCase):
     def test_purge_ghost_branch_col_migrates_live_dependencies(self):
@@ -598,6 +610,33 @@ class PurgeGhostBranchCommandTests(TestCase):
         self.assertEqual(policy.sucursal, canonical)
         self.assertFalse(Sucursal.objects.filter(codigo="COL").exists())
         self.assertFalse(CentroCosto.objects.filter(pk=center.pk).exists())
+
+    def test_retire_technical_branches_deactivates_operational_records_only(self):
+        branch = Sucursal.objects.create(codigo="CODLOG", nombre="Sucursal Codex Logistica", activa=True)
+        user = get_user_model().objects.create_user(username="tech_branch_user", password="secret")
+        UserProfile.objects.create(user=user, sucursal=branch)
+        PuntoLogistico.objects.create(
+            sucursal=branch,
+            nombre="Sucursal Codex Logistica",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud=Decimal("25.000000"),
+            longitud=Decimal("-108.000000"),
+            radio_geocerca_metros=100,
+            activo=True,
+        )
+        Unidad.objects.create(codigo="CODLOG-UNIT", descripcion="Unidad demo", sucursal=branch, activa=True)
+        PointBranch.objects.create(external_id="CODLOG-POINT", name="Sucursal Codex Logistica", erp_branch=branch)
+
+        call_command("retire_technical_branches", "--execute")
+
+        branch.refresh_from_db()
+        self.assertFalse(branch.activa)
+        self.assertIsNone(UserProfile.objects.get(user=user).sucursal)
+        self.assertFalse(PuntoLogistico.objects.get(sucursal=branch).activo)
+        self.assertFalse(Unidad.objects.get(sucursal=branch).activa)
+        point_branch = PointBranch.objects.get(external_id="CODLOG-POINT")
+        self.assertEqual(point_branch.status, PointBranch.STATUS_INACTIVE)
+        self.assertIsNone(point_branch.erp_branch)
 
 
 class CanonicalLocalHostMiddlewareTests(TestCase):

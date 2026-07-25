@@ -378,3 +378,20 @@ python manage.py showmigrations bonos_produccion bonos_ventas # Estado migracion
 python manage.py test bonos_produccion bonos_ventas rrhh --parallel
 python manage.py runserver                                    # Servidor local
 ```
+
+## Trabajo en paralelo por hilos
+
+Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni produccion.
+
+- Usar `1 hilo = 1 branch = 1 worktree limpio`.
+- Antes de empezar, revisar `git status --short --branch` y `git worktree list`.
+- No trabajar sobre `main` ni sobre un checkout con cambios no relacionados.
+- Si el arbol actual esta mezclado, abrir un worktree limpio desde `origin/main`.
+- Nombrar cada rama con alcance real, por ejemplo: `codex/<modulo>-<cambio>`.
+- Declarar al inicio del hilo: objetivo, alcance, archivos o carpetas permitidos, contratos compartidos afectados y si requiere deploy o solo validacion local.
+- No editar archivos fuera del alcance declarado sin explicarlo primero.
+- Si el cambio toca contratos compartidos como API, modelos, estado global, autenticacion, service worker, cache, variables de entorno, scripts de deploy o procesos compartidos, avisarlo antes de editar y validar consumidores afectados.
+- Preview local, staging y produccion son evidencias distintas. No presentar validacion local como prueba de produccion.
+- No desplegar desde una rama con cambios mezclados o no revisados.
+- Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `claude.md` en el mismo cambio para mantenerlas alineadas.
+- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado y limpiar ramas atoradas que puedan obstruir otros hilos.

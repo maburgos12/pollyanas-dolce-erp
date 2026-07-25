@@ -116,6 +116,10 @@ class RRHHAsignacionSucursalTests(TestCase):
         Sucursal.objects.get_or_create(codigo="GLO", defaults={"nombre": "Las Glorias", "activa": True})
         Sucursal.objects.get_or_create(codigo="COL", defaults={"nombre": "Sucursal Colosio", "activa": True})
         Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "CEDIS", "activa": True})
+        Sucursal.objects.get_or_create(codigo="CODLOG", defaults={"nombre": "Sucursal Codex Logistica", "activa": True})
+        Sucursal.objects.get_or_create(codigo="DBGX", defaults={"nombre": "Debug X", "activa": True})
+        Sucursal.objects.get_or_create(codigo="DEMO-CEDIS", defaults={"nombre": "CEDIS Demo", "activa": True})
+        Sucursal.objects.get_or_create(codigo="DEMO-POINT", defaults={"nombre": "Sucursal Demo Point", "activa": True})
 
         response = self.client.get("/rrhh/api/asignacion-sucursales/")
 
@@ -129,3 +133,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertIn("El Túnel", values)
         self.assertIn("Las Glorias", values)
         self.assertNotIn("CEDIS", names)
+        self.assertNotIn("Sucursal Codex Logistica", names)
+        self.assertNotIn("Debug X", names)
+        self.assertNotIn("CEDIS Demo", names)
+        self.assertNotIn("Sucursal Demo Point", names)

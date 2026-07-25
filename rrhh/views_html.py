@@ -7,7 +7,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from core.branch_catalog import display_branch_name
+from core.branch_catalog import display_branch_name, eligible_operational_branch_qs
 from core.access import can_manage_rrhh
 from core.models import Sucursal, UserProfile
 
@@ -20,8 +20,9 @@ def asignacion_sucursal_view(request):
 @login_required
 def asignacion_sucursales_api(request):
     rows = list(
-        Sucursal.objects.filter(activa=True)
-        .exclude(nombre__in=["Matriz", "CEDIS", "Devoluciones", "Almacén"])
+        eligible_operational_branch_qs()
+        .exclude(codigo__in=["MATRIZ", "CEDIS", "DEVOLUCIONES"])
+        .exclude(nombre__in=["Almacén"])
         .order_by("nombre")
         .values("id", "nombre", "activa")
     )
@@ -42,7 +43,12 @@ def usuarios_sucursal_view(request):
         .select_related("userprofile__sucursal")
         .order_by("first_name", "last_name", "username")
     )
-    sucursales = Sucursal.objects.filter(activa=True).order_by("nombre")
+    sucursales = (
+        eligible_operational_branch_qs()
+        .exclude(codigo__in=["MATRIZ", "CEDIS", "DEVOLUCIONES"])
+        .exclude(nombre__in=["Almacén"])
+        .order_by("nombre")
+    )
     return render(request, "rrhh/usuarios_sucursal.html", {
         "usuarios": usuarios,
         "sucursales": sucursales,

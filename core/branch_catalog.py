@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from core.models import Sucursal, sucursales_operativas_q
 
-EXCLUDED_BRANCH_CODES: tuple[str, ...] = ("TMP1", "MATRIZDBG")
+EXCLUDED_BRANCH_CODES: tuple[str, ...] = (
+    "TMP1",
+    "MATRIZDBG",
+    "CODLOG",
+    "DBGX",
+    "DEMO-CEDIS",
+    "DEMO-POINT",
+)
 
 POINT_NETWORK_BRANCH_CODES = (
     "COLOSIO",
