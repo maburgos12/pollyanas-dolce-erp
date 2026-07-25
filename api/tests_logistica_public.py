@@ -604,6 +604,31 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )
 
+    def test_operation_id_distintos_concurrentes_uno_gana_y_otro_409(self):
+        operation_ids = [
+            "355aa71e-872b-46df-b476-19105fd3a050",
+            "79258634-b608-4b1a-81b1-4d6388a79f0b",
+        ]
+
+        def attempt(operation_id):
+            try:
+                return self._status(operation_id)
+            except DomicilioStatusError as exc:
+                return exc.status_code
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(attempt, operation_ids))
+
+        self.assertEqual(
+            len([item for item in results if isinstance(item, dict)]),
+            1,
+        )
+        self.assertEqual(results.count(status.HTTP_409_CONFLICT), 1)
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
+        )
+
     def test_reasignacion_y_estatus_comparten_lock_y_no_se_cruzan(self):
         def reassign():
             close_old_connections()

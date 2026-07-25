@@ -49,6 +49,10 @@ from .models import (
     Unidad,
 )
 from .services_google_routes import recalcular_ruta_programada
+from .services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+)
 from .services_google_roads import snap_gps_path_to_roads
 from .services_ecommerce import EcommerceClient, EcommerceIntegrationError
 from .services_carga_ruta import (
@@ -3794,19 +3798,18 @@ def domicilios_generales(request):
             elif unidad is None:
                 messages.error(request, "Selecciona una unidad activa.")
             else:
-                solicitud.repartidor = repartidor
-                solicitud.unidad = unidad
-                solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
-                solicitud.asignado_en = timezone.now()
-                solicitud.save(update_fields=["repartidor", "unidad", "estatus", "asignado_en"])
-                log_event(
-                    request.user,
-                    "UPDATE",
-                    "logistica.SolicitudDomicilio",
-                    solicitud.id,
-                    {"repartidor": str(repartidor), "unidad": unidad.codigo},
-                )
-                messages.success(request, f"Domicilio de {solicitud.cliente_nombre} asignado a {repartidor}.")
+                try:
+                    assign_domicilio(
+                        solicitud_id=solicitud.id,
+                        repartidor_id=repartidor.id,
+                        unidad=unidad,
+                        audit_user=request.user,
+                        audit_metadata={"unidad": unidad.codigo},
+                    )
+                except DomicilioAssignmentError as exc:
+                    messages.error(request, exc.detail)
+                else:
+                    messages.success(request, f"Domicilio de {solicitud.cliente_nombre} asignado a {repartidor}.")
 
         return redirect("logistica:domicilios_generales")
 

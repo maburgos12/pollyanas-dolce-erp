@@ -91,6 +91,7 @@ def assign_domicilio(
     audit_user=None,
     audit_metadata: dict[str, Any] | None = None,
     owner_api_client=None,
+    unidad=None,
 ) -> dict[str, Any]:
     with transaction.atomic():
         solicitudes = SolicitudDomicilio.objects.select_for_update()
@@ -106,7 +107,10 @@ def assign_domicilio(
             ).exists()
         ):
             raise DomicilioAssignmentError("Repartidor no disponible.", 400)
-        if solicitud.repartidor_id == repartidor_id:
+        if (
+            solicitud.repartidor_id == repartidor_id
+            and (unidad is None or solicitud.unidad_id == unidad.id)
+        ):
             return {
                 "id": solicitud.id,
                 "repartidor_id": repartidor_id,
@@ -130,12 +134,15 @@ def assign_domicilio(
 
         anterior_id = solicitud.repartidor_id
         solicitud.repartidor = repartidor
+        if unidad is not None:
+            solicitud.unidad = unidad
         solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
         solicitud.asignado_en = timezone.now()
         solicitud.revision += 1
-        solicitud.save(
-            update_fields=["repartidor", "estatus", "asignado_en", "revision"]
-        )
+        update_fields = ["repartidor", "estatus", "asignado_en", "revision"]
+        if unidad is not None:
+            update_fields.append("unidad")
+        solicitud.save(update_fields=update_fields)
         payload = {
             "repartidor_anterior_id": anterior_id,
             "repartidor_nuevo_id": repartidor.id,

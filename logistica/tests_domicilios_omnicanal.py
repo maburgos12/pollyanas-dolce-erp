@@ -6,7 +6,12 @@ from rest_framework.test import APITestCase
 from core.models import Sucursal
 from core.models import AuditLog, Notificacion
 from crm.models import Cliente, DireccionCliente, PedidoCliente
-from logistica.models import EntregaEcommerce, Repartidor, SolicitudDomicilio
+from logistica.models import (
+    EntregaEcommerce,
+    Repartidor,
+    SolicitudDomicilio,
+    Unidad,
+)
 from rrhh.models import Empleado
 
 
@@ -209,3 +214,78 @@ class AsignacionDomicilioApiTests(APITestCase):
 
         self.assertEqual(catalog.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(assign.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_asignacion_html_delega_servicio_revision_unidad_y_auditoria(self):
+        self.client.force_login(self.manager)
+        repartidor = self._repartidor("rep_html")
+        unidad = Unidad.objects.create(
+            codigo="DOM-HTML",
+            descripcion="Unidad HTML",
+            sucursal=self.sucursal,
+        )
+
+        response = self.client.post(
+            reverse("logistica:domicilios_generales"),
+            {
+                "accion": "asignar",
+                "solicitud_id": self.solicitud.id,
+                "repartidor": repartidor.id,
+                "unidad_operativa": unidad.id,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("logistica:domicilios_generales"),
+            fetch_redirect_response=False,
+        )
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
+        self.assertEqual(self.solicitud.unidad_id, unidad.id)
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_ASIGNADO)
+        self.assertEqual(self.solicitud.revision, 1)
+        audit = AuditLog.objects.get(
+            model="logistica.SolicitudDomicilio",
+            object_id=str(self.solicitud.id),
+            action="ASSIGN",
+        )
+        self.assertEqual(audit.user_id, self.manager.id)
+        self.assertEqual(audit.payload["unidad"], unidad.codigo)
+
+    def test_asignacion_html_no_resetea_terminal(self):
+        self.client.force_login(self.manager)
+        actual = self._repartidor("rep_html_terminal")
+        reemplazo = self._repartidor("rep_html_reemplazo")
+        unidad = Unidad.objects.create(
+            codigo="DOM-TERM",
+            descripcion="Unidad terminal",
+            sucursal=self.sucursal,
+        )
+        self.solicitud.repartidor = actual
+        self.solicitud.unidad = unidad
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
+        self.solicitud.revision = 7
+        self.solicitud.save(
+            update_fields=["repartidor", "unidad", "estatus", "revision"]
+        )
+
+        response = self.client.post(
+            reverse("logistica:domicilios_generales"),
+            {
+                "accion": "asignar",
+                "solicitud_id": self.solicitud.id,
+                "repartidor": reemplazo.id,
+                "unidad_operativa": unidad.id,
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("logistica:domicilios_generales"),
+            fetch_redirect_response=False,
+        )
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, actual.id)
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_ENTREGADO)
+        self.assertEqual(self.solicitud.revision, 7)
+        self.assertEqual(AuditLog.objects.count(), 0)
