@@ -1,0 +1,282 @@
+from __future__ import annotations
+
+import hashlib
+import re
+
+from django.db import IntegrityError, connection, transaction
+from django.db.models import Prefetch, Q
+from django.db.models.functions import Lower
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from api.omnichannel_serializers import (
+    OmnichannelCustomerOutputSerializer,
+    OmnichannelOrderInputSerializer,
+)
+from api.public_views import _auth_public_client, _log_access
+from crm.models import Cliente, DireccionCliente, PedidoCliente
+from logistica.models import SolicitudDomicilio
+
+
+IDEMPOTENCY_CONFLICT_CODE = "OMNICHANNEL_IDEMPOTENCY_CONFLICT"
+
+
+def _normalize_phone(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def _normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _normalize_text(value: str) -> str:
+    return (value or "").strip()
+
+
+def _lock_external_key(external_source: str, external_id: str) -> None:
+    if connection.vendor != "postgresql":
+        raise RuntimeError("La API omnicanal requiere PostgreSQL")
+    digest = hashlib.sha256(f"{external_source}\0{external_id}".encode()).digest()
+    lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
+
+
+def _find_customer(data: dict) -> Cliente | None:
+    phone = _normalize_phone(data.get("telefono", ""))
+    if phone:
+        match = (
+            Cliente.objects.extra(
+                where=["regexp_replace(telefono, '[^0-9]', '', 'g') = %s"],
+                params=[phone],
+            )
+            .order_by("id")
+            .first()
+        )
+        if match:
+            return match
+
+    email = _normalize_email(data.get("email", ""))
+    if email:
+        return Cliente.objects.annotate(email_lower=Lower("email")).filter(
+            email_lower=email,
+        ).order_by("id").first()
+    return None
+
+
+def _get_or_create_customer(data: dict) -> Cliente:
+    customer = _find_customer(data)
+    if customer:
+        return customer
+    return Cliente.objects.create(
+        nombre=_normalize_text(data["nombre"]),
+        telefono=_normalize_phone(data.get("telefono", "")),
+        email=_normalize_email(data.get("email", "")),
+    )
+
+
+def _get_or_create_address(customer: Cliente, data: dict) -> DireccionCliente:
+    address_text = _normalize_text(data["direccion"])
+    normalized = DireccionCliente.normalizar_direccion(address_text)
+    address = DireccionCliente.objects.filter(
+        cliente=customer,
+        direccion_normalizada=normalized,
+    ).first()
+    if address:
+        return address
+    try:
+        with transaction.atomic():
+            return DireccionCliente.objects.create(
+                cliente=customer,
+                direccion=address_text,
+                referencias=_normalize_text(data.get("referencias", "")),
+                latitud=data.get("latitud"),
+                longitud=data.get("longitud"),
+                place_id=_normalize_text(data.get("place_id", "")),
+            )
+    except IntegrityError:
+        return DireccionCliente.objects.get(
+            cliente=customer,
+            direccion_normalizada=normalized,
+        )
+
+
+def _customer_matches(customer: Cliente, data: dict) -> bool:
+    return (
+        _normalize_text(customer.nombre) == _normalize_text(data["nombre"])
+        and _normalize_phone(customer.telefono) == _normalize_phone(data.get("telefono", ""))
+        and _normalize_email(customer.email) == _normalize_email(data.get("email", ""))
+    )
+
+
+def _address_matches(address: DireccionCliente, data: dict) -> bool:
+    return (
+        address.direccion_normalizada
+        == DireccionCliente.normalizar_direccion(data["direccion"])
+        and _normalize_text(address.referencias) == _normalize_text(data.get("referencias", ""))
+        and address.latitud == data.get("latitud")
+        and address.longitud == data.get("longitud")
+        and _normalize_text(address.place_id) == _normalize_text(data.get("place_id", ""))
+    )
+
+
+def _order_matches(order: PedidoCliente, data: dict) -> bool:
+    detail = data["pedido"]
+    return (
+        order.external_source == data["external_source"]
+        and order.external_id == data["external_id"]
+        and order.canal == data["canal"]
+        and _normalize_text(order.descripcion) == _normalize_text(detail["descripcion"])
+        and order.fecha_compromiso == detail.get("fecha_compromiso")
+        and order.monto_estimado == detail["monto_estimado"]
+        and order.direccion_entrega_id is not None
+        and _customer_matches(order.cliente, data["cliente"])
+        and _address_matches(order.direccion_entrega, data["direccion"])
+    )
+
+
+def _response_payload(request, order: PedidoCliente, delivery: SolicitudDomicilio, *, created: bool):
+    return {
+        "cliente_id": order.cliente_id,
+        "direccion_id": order.direccion_entrega_id,
+        "pedido_id": order.id,
+        "solicitud_domicilio_id": delivery.id,
+        "created": created,
+        "links": {
+            "pedido_seguimiento": request.build_absolute_uri(
+                reverse("api_crm_pedido_seguimiento", kwargs={"pedido_id": order.id}),
+            ),
+        },
+    }
+
+
+class PublicOmnichannelOrdersView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        serializer = OmnichannelOrderInputSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            _lock_external_key(data["external_source"], data["external_id"])
+            order = (
+                PedidoCliente.objects.select_related("cliente", "direccion_entrega")
+                .filter(
+                    external_source=data["external_source"],
+                    external_id=data["external_id"],
+                )
+                .first()
+            )
+            if order:
+                if not _order_matches(order, data):
+                    _log_access(api_client, request, status.HTTP_409_CONFLICT)
+                    return Response(
+                        {
+                            "detail": "La clave externa ya existe con contenido distinto.",
+                            "code": IDEMPOTENCY_CONFLICT_CODE,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
+                payload = _response_payload(request, order, delivery, created=False)
+                response_status = status.HTTP_200_OK
+            else:
+                customer = _get_or_create_customer(data["cliente"])
+                address = _get_or_create_address(customer, data["direccion"])
+                detail = data["pedido"]
+                try:
+                    with transaction.atomic():
+                        order = PedidoCliente.objects.create(
+                            cliente=customer,
+                            direccion_entrega=address,
+                            external_source=data["external_source"],
+                            external_id=data["external_id"],
+                            canal=data["canal"],
+                            descripcion=_normalize_text(detail["descripcion"]),
+                            fecha_compromiso=detail.get("fecha_compromiso"),
+                            monto_estimado=detail["monto_estimado"],
+                        )
+                except IntegrityError:
+                    order = PedidoCliente.objects.select_related(
+                        "cliente",
+                        "direccion_entrega",
+                    ).get(
+                        external_source=data["external_source"],
+                        external_id=data["external_id"],
+                    )
+                    if not _order_matches(order, data):
+                        _log_access(api_client, request, status.HTTP_409_CONFLICT)
+                        return Response(
+                            {
+                                "detail": "La clave externa ya existe con contenido distinto.",
+                                "code": IDEMPOTENCY_CONFLICT_CODE,
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
+                    payload = _response_payload(request, order, delivery, created=False)
+                    response_status = status.HTTP_200_OK
+                else:
+                    delivery = SolicitudDomicilio.objects.create(
+                        pedido_cliente=order,
+                        cliente=customer,
+                        direccion_cliente=address,
+                        cliente_nombre=customer.nombre,
+                        cliente_telefono=customer.telefono,
+                        direccion=address.direccion,
+                        canal_origen=order.canal,
+                        canal_detalle=data["external_source"],
+                        notas=address.referencias,
+                    )
+                    payload = _response_payload(request, order, delivery, created=True)
+                    response_status = status.HTTP_201_CREATED
+
+        _log_access(api_client, request, response_status)
+        return Response(payload, status=response_status)
+
+
+class PublicOmnichannelCustomersView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        query = _normalize_text(request.query_params.get("q", ""))
+        customers = Cliente.objects.filter(activo=True)
+        if query:
+            phone = _normalize_phone(query)
+            if phone:
+                customers = customers.extra(
+                    where=[
+                        "(nombre ILIKE %s OR email ILIKE %s "
+                        "OR regexp_replace(telefono, '[^0-9]', '', 'g') LIKE %s)"
+                    ],
+                    params=[f"%{query}%", f"%{query}%", f"%{phone}%"],
+                )
+            else:
+                customers = customers.filter(
+                    Q(nombre__icontains=query) | Q(email__icontains=query),
+                )
+        customers = customers.prefetch_related(
+            Prefetch(
+                "direcciones",
+                queryset=DireccionCliente.objects.filter(activa=True),
+                to_attr="direcciones_activas",
+            ),
+        ).order_by("nombre", "id")[:20]
+
+        data = OmnichannelCustomerOutputSerializer(customers, many=True).data
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response({"count": len(data), "results": data})

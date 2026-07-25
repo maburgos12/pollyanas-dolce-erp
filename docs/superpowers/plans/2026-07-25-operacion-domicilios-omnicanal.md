@@ -152,7 +152,7 @@ Resultado de regresión al ejecutar la fase:
 - Test: `api/tests_omnichannel.py`
 - Modify: `integraciones/models.py` only if the existing API client cannot express the required scope.
 
-- [ ] **Step 1: Probar alta única por canal y referencia**
+- [x] **Step 1: Probar alta única por canal y referencia**
 
 ```python
 def test_reintento_no_duplica_cliente_direccion_pedido_o_domicilio(self):
@@ -166,7 +166,7 @@ def test_reintento_no_duplica_cliente_direccion_pedido_o_domicilio(self):
     self.assertEqual(SolicitudDomicilio.objects.count(), 1)
 ```
 
-- [ ] **Step 2: Implementar `POST /api/public/v1/omnichannel-orders/`**
+- [x] **Step 2: Implementar `POST /api/public/v1/omnichannel-orders/`**
 
 Payload obligatorio:
 
@@ -197,15 +197,15 @@ Payload obligatorio:
 
 La respuesta debe incluir `cliente_id`, `direccion_id`, `pedido_id`, `solicitud_domicilio_id`, `created` y los enlaces de seguimiento.
 
-- [ ] **Step 3: Implementar búsqueda rápida**
+- [x] **Step 3: Implementar búsqueda rápida**
 
 Crear `GET /api/public/v1/omnichannel-customers/?q=<telefono|nombre|email>` con máximo 20 resultados y direcciones activas. No devolver notas internas ni datos fuera del alcance operativo.
 
-- [ ] **Step 4: Probar autorización, rate limiting y rollback atómico**
+- [x] **Step 4: Probar autorización, rate limiting y rollback atómico**
 
 Casos obligatorios: API key ausente, API key inválida, payload incompleto, coordenadas inválidas, canal inválido, reintento idéntico y excepción después de crear cliente. En la excepción no debe persistir ninguna fila parcial.
 
-- [ ] **Step 5: Regresión y commit**
+- [x] **Step 5: Regresión y commit**
 
 ```bash
 ./scripts/run_tests_local.sh api.tests_omnichannel api.tests_public_api api.tests_crm

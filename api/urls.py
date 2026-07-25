@@ -93,6 +93,10 @@ from .crm_views import (
     CRMPedidoSeguimientoView,
     CRMPedidosView,
 )
+from .omnichannel_views import (
+    PublicOmnichannelCustomersView,
+    PublicOmnichannelOrdersView,
+)
 from .rrhh_views import (
     RRHHEmpleadoAsignarSucursalView,
     RRHHDashboardView,
@@ -455,6 +459,16 @@ urlpatterns = [
         name="api_public_pickup_reservations_release",
     ),
     path("public/v1/pedidos/", PublicPedidosCreateView.as_view(), name="api_public_pedidos_create"),
+    path(
+        "public/v1/omnichannel-orders/",
+        PublicOmnichannelOrdersView.as_view(),
+        name="api_public_omnichannel_orders",
+    ),
+    path(
+        "public/v1/omnichannel-customers/",
+        PublicOmnichannelCustomersView.as_view(),
+        name="api_public_omnichannel_customers",
+    ),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),
