@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -53,7 +54,12 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
     @override_settings(POINT_SALES_SYNC_SOURCE_MODE="LEGACY")
     def test_run_sales_history_sync_can_use_legacy_source(self):
         fake_job = object()
-        with patch("pos_bridge.tasks.run_sales_history_sync.PointSyncService") as service_cls:
+        # load_point_bridge_settings prioriza la variable de entorno sobre el
+        # setting Django, y settings.py carga .env (POINT_SALES_SYNC_SOURCE_MODE
+        # =OFFICIAL) en os.environ; hay que fijar también el entorno.
+        with patch.dict(os.environ, {"POINT_SALES_SYNC_SOURCE_MODE": "LEGACY"}), patch(
+            "pos_bridge.tasks.run_sales_history_sync.PointSyncService"
+        ) as service_cls:
             service_cls.return_value.run_sales_sync.return_value = fake_job
             result = run_sales_history_sync(
                 start_date=date(2025, 9, 1),

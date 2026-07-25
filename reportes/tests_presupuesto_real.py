@@ -2642,10 +2642,15 @@ class MantenimientoUnidadTests(TestCase):
         )
         suc = Sucursal.objects.create(nombre="Matriz MU", codigo="MU-MTZ")
         unidad = Unidad.objects.create(codigo="GS-P1", descripcion="Peugeot Partner", sucursal=suc)
-        ReporteUnidad.objects.create(
-            unidad=unidad, tipo="FALLA", severidad="MEDIA", descripcion="Servicio frenos",
-            costo_servicio=Decimal("12287"), fecha_reporte=timezone.now().replace(year=2026, month=7, day=10),
-        )
+        from unittest.mock import patch
+
+        # El post_save de ReporteUnidad encola una notificación Celery real
+        # (broker Redis); se mockea igual que en mantenimiento/tests.py.
+        with patch("logistica.signals.notificar_reporte_nuevo.delay"):
+            ReporteUnidad.objects.create(
+                unidad=unidad, tipo="FALLA", severidad="MEDIA", descripcion="Servicio frenos",
+                costo_servicio=Decimal("12287"), fecha_reporte=timezone.now().replace(year=2026, month=7, day=10),
+            )
         ReglaFuenteRubro.objects.create(
             rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD,
             filtros={"unidad_codigo": "GS-P1"},

@@ -1,4 +1,5 @@
 from django.contrib.auth.models import Group, User
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -67,10 +68,28 @@ from reportes.models import (
     ProductoSucursalContribucionMensual,
 )
 from ventas.models import VentaAutoritativaPoint
+from reportes import executive_panels as executive_panels_module
+from ventas.services import sales_truth as sales_truth_module
+
+
+def _clear_reportes_runtime_caches() -> None:
+    """Aísla tests que comparten proceso.
+
+    Los bumps de versión del cache Django corren con transaction.on_commit y
+    nunca se disparan dentro de TestCase, y los cortes de venta usan
+    lru_cache a nivel de módulo (executive_panels, sales_truth); ambos deben
+    limpiarse para que un test no lea datos del test anterior.
+    """
+    cache.clear()
+    for module in (executive_panels_module, sales_truth_module):
+        for attr in vars(module).values():
+            if callable(attr) and hasattr(attr, "cache_clear"):
+                attr.cache_clear()
 
 
 class ReportesBITests(TestCase):
     def setUp(self):
+        _clear_reportes_runtime_caches()
         self.user = User.objects.create_user(username="lectura_reportes", password="pass123")
         group, _ = Group.objects.get_or_create(name="LECTURA")
         self.user.groups.add(group)
@@ -1943,6 +1962,13 @@ class ReportesBIUtilsTests(TestCase):
     def setUp(self):
         from core.models import Sucursal
 
+        _clear_reportes_runtime_caches()
+        # La vista BI exige login + RBAC (can_view_reportes) desde el
+        # endurecimiento de accesos; los exports comparten esa vista.
+        self.user = User.objects.create_user(username="lectura_bi_utils", password="pass123")
+        group, _ = Group.objects.get_or_create(name="LECTURA")
+        self.user.groups.add(group)
+        self.client.login(username="lectura_bi_utils", password="pass123")
         self.sucursal = Sucursal.objects.create(codigo="BIUTILS", nombre="Sucursal BI Utils", activa=True)
         self.point_branch = PointBranch.objects.create(external_id="BIUTILS", name=self.sucursal.nombre, erp_branch=self.sucursal)
         self.point_product = PointProduct.objects.create(
@@ -2436,6 +2462,7 @@ class ReportesBIUtilsTests(TestCase):
 
 class ReportesCanonicosTests(TestCase):
     def setUp(self):
+        _clear_reportes_runtime_caches()
         self.user = User.objects.create_user(username="lectura_reportes_cat", password="pass123")
         group, _ = Group.objects.get_or_create(name="LECTURA")
         self.user.groups.add(group)

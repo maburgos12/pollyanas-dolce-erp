@@ -39,7 +39,7 @@
       {% csrf_token %}
       <select class="input-field" name="insumo_id" required>
         <option value="">Insumo</option>
-        {% for i in insumos %}<option value="{{ i.id }}">{{ i.nombre }}</option>{% endfor %}
+        {% for i in insumos %}<option value="{{ i.id }}">{{ i.display_name }}</option>{% endfor %}
       </select>
       <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual" required>
       <input class="input-field" type="number" step="0.001" name="stock_minimo" placeholder="Stock mínimo" value="0">
@@ -78,7 +78,7 @@
         <tbody>
           {% for e in existencias %}
           <tr>
-            <td>{{ e.insumo.nombre }}</td>
+            <td>{{ e.insumo.display_name }}</td>
             <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
             <td class="text-end">{{ e.stock_actual }}</td>
             <td class="text-end">{{ e.stock_minimo }}</td>

@@ -248,10 +248,14 @@ class OperatingFinanceSnapshotServiceTests(TestCase):
             name="TE DEL JARDIN",
             category="Te",
         )
-        ProductBusinessRule.objects.create(
+        # La migración 0011 ya siembra la regla fija de "TE DEL JARDIN";
+        # usar update_or_create evita el choque con el unique de product_name.
+        ProductBusinessRule.objects.update_or_create(
             product_name="TE DEL JARDIN",
-            classification=ProductBusinessRule.CLASSIFICATION_REVENTA,
-            is_fixed=True,
+            defaults={
+                "classification": ProductBusinessRule.CLASSIFICATION_REVENTA,
+                "is_fixed": True,
+            },
         )
         ProductoReventaCostoHistoricoMensual.objects.create(
             periodo=date(2026, 3, 1),
@@ -3401,7 +3405,7 @@ class BudgetAreaUploadServiceTests(TestCase):
         self.user = User.objects.create_user(username="finanzas", password="pass123")
         self.service = BudgetAreaUploadService()
 
-    def _build_general_upload(self, *, title: str = "PRESUPUESTO GENERAL 2026") -> bytes:
+    def _build_general_upload(self, *, title: str = "PRESUPUESTO GENERAL 2026", include_monthly: bool = True) -> bytes:
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "source.xlsx"
             wb = Workbook()
@@ -3409,15 +3413,17 @@ class BudgetAreaUploadServiceTests(TestCase):
             ws.title = "GENERAL"
             ws["B1"] = title
             ws["C3"] = "TOTAL ANUAL"
-            ws["F3"] = "ENERO"
+            if include_monthly:
+                ws["F3"] = "ENERO"
             ws["A4"] = "CUENTA"
             ws["B4"] = "CONCEPTO"
             ws["C4"] = "PRESUPUESTO"
             ws["D4"] = "RESULTADO"
             ws["E4"] = "VARIACIÓN"
-            ws["F4"] = "PRESUPUESTADO"
-            ws["G4"] = "REAL"
-            ws["H4"] = "VARIACION"
+            if include_monthly:
+                ws["F4"] = "PRESUPUESTADO"
+                ws["G4"] = "REAL"
+                ws["H4"] = "VARIACION"
             ws.append(
                 [
                     "4001",
@@ -3465,9 +3471,12 @@ class BudgetAreaUploadServiceTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(action="BUDGET_UPLOAD_DUPLICATE").exists())
 
     def test_failed_upload_does_not_leave_partial_budget_rows(self):
+        # El servicio renombra la carga al filename canónico del área (que ya
+        # trae el año), así que "SIN ANIO" ya no puede provocar la falla; un
+        # workbook sin bloques mensuales sigue siendo un ValueError legítimo.
         invalid_upload = SimpleUploadedFile(
             "invalido.xlsx",
-            self._build_general_upload(title="SIN ANIO"),
+            self._build_general_upload(title="SIN ANIO", include_monthly=False),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
@@ -3531,6 +3540,10 @@ class BudgetAreaUploadViewTests(TestCase):
         self.assertContains(response, "Nómina por área")
 
     def test_budget_upload_screen_processes_area_file_and_updates_history(self):
+        # Desde el endurecimiento de auditoría (df34d207) el POST de importación
+        # exige nivel de administración del módulo, no solo lectura.
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        self.user.groups.add(admin_group)
         upload = SimpleUploadedFile(
             "presupuesto_admin.xlsx",
             self._build_admin_budget_file(),

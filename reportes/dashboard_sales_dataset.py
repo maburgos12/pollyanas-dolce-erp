@@ -344,13 +344,16 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
     visible_cutoff = _expected_operational_visible_cutoff(today=today)
     raw = _fetch_dashboard_sales_dataset(today=today, months=months, visible_cutoff=visible_cutoff)
     canonical_latest_date = canonical_point_max_date()
+    # Nota: no exigimos raw["latest_date"] != canonical_latest_date. Desde que
+    # `latest` se ancla al corte operativo esperado (visible_cutoff), la fecha
+    # resuelta puede coincidir con la canónica aun sin datos crudos; en ese caso
+    # el fallback canónico sigue siendo la única fuente con información.
     should_use_canonical_daily_fallback = bool(
         canonical_latest_date
         and raw["day_units"] == 0
         and raw["cut_amount"] == 0
         and raw["branch_count"] == 0
         and raw["recipe_count"] == 0
-        and raw["latest_date"] != canonical_latest_date
     )
     if should_use_canonical_daily_fallback:
         prev_candidates = canonical_point_previous_dates(canonical_latest_date)
@@ -529,13 +532,13 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
             "tickets_available": tickets_available,
             "branch_count": raw["branch_count"],
             "recipe_count": raw["recipe_count"],
-            "avg_ticket": (total_amount / Decimal(total_tickets)) if tickets_available else None,
+            "avg_ticket": (total_amount / Decimal(total_tickets)).quantize(Decimal("0.01")) if tickets_available else None,
             "avg_branch_amount": (total_amount / Decimal(raw["branch_count"])) if raw["branch_count"] else Decimal("0"),
             "month_amount": current_month_amount,
             "month_units": raw["month_units"],
             "month_tickets": raw["month_tickets"],
             "month_tickets_available": month_tickets_available,
-            "month_avg_ticket": (current_month_amount / Decimal(raw["month_tickets"])) if month_tickets_available else None,
+            "month_avg_ticket": (current_month_amount / Decimal(raw["month_tickets"])).quantize(Decimal("0.01")) if month_tickets_available else None,
             "comparison_label": comparison_label,
             "comparison_tone": comparison_tone,
             "comparison_detail": comparison_detail,

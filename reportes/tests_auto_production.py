@@ -546,6 +546,17 @@ class ProjectionSupplyContextTests(TestCase):
         self.assertEqual(context["mode"], "PROJECTION_EVENT")
         self.assertFalse(context["uses_stock"])
         self.assertEqual(context["summary"]["projected_products"], 1)
+        # Estas aserciones pertenecen a este test; el commit 83182516 insertó el
+        # test de redondeo de rebanadas en medio del cuerpo y se las llevó.
+        self.assertEqual(context["summary"]["projected_insumos"], 1)
+        product_row = context["products"][0]
+        insumo_row = context["insumos"][0]
+        self.assertEqual(product_row["recipe_name"], "Pastel Proyección")
+        self.assertGreater(product_row["forecast_qty"], ZERO)
+        self.assertEqual(
+            insumo_row["required_gross_qty"],
+            (product_row["forecast_qty"] * Decimal("1.5")).quantize(Decimal("0.001")),
+        )
 
     def test_projection_supply_rounds_derived_slices_up_to_whole_parent(self):
         parent = Receta.objects.create(
@@ -596,16 +607,8 @@ class ProjectionSupplyContextTests(TestCase):
         )
 
         purchase_by_name = {row["insumo_nombre"]: row for row in context["insumos"]}
+        # 9 rebanadas / 8 por padre → 2 enteros; 2 × 2 kg de harina = 4.000 kg.
         self.assertEqual(purchase_by_name[self.insumo.nombre]["required_gross_qty"], Decimal("4.000"))
-        self.assertEqual(context["summary"]["projected_insumos"], 1)
-        product_row = context["products"][0]
-        insumo_row = context["insumos"][0]
-        self.assertEqual(product_row["recipe_name"], "Pastel Proyección")
-        self.assertGreater(product_row["forecast_qty"], ZERO)
-        self.assertEqual(
-            insumo_row["required_gross_qty"],
-            (product_row["forecast_qty"] * Decimal("1.5")).quantize(Decimal("0.001")),
-        )
 
     def test_projection_supply_expands_commercial_addon_to_base_when_base_is_absent(self):
         base_insumo = Insumo.objects.create(
