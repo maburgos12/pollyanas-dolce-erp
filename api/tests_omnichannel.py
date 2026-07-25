@@ -203,6 +203,7 @@ class OmnichannelPublicApiTests(APITestCase):
             external_source=self.payload["external_source"],
             external_id=self.payload["external_id"],
             payload_snapshot={},
+            public_api_client=self.public_client,
             canal=self.payload["canal"],
             descripcion=self.payload["pedido"]["descripcion"],
         )
@@ -214,6 +215,43 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(Cliente.objects.count(), 1)
         self.assertEqual(PedidoCliente.objects.count(), 1)
         self.assertEqual(SolicitudDomicilio.objects.count(), 0)
+
+    def test_pedido_sin_owner_no_permite_inferir_si_snapshot_coincide(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        PedidoCliente.objects.filter(id=created.data["pedido_id"]).update(
+            public_api_client=None,
+        )
+        before_counts = (
+            Cliente.objects.count(),
+            DireccionCliente.objects.count(),
+            PedidoCliente.objects.count(),
+            SolicitudDomicilio.objects.count(),
+        )
+
+        same = self.client.post(self.url, self.payload, format="json", **self.auth)
+        different_payload = deepcopy(self.payload)
+        different_payload["pedido"]["descripcion"] = "Contenido diferente"
+        different = self.client.post(
+            self.url,
+            different_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(same.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(different.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(same.data["code"], "OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT")
+        self.assertEqual(different.data["code"], same.data["code"])
+        self.assertEqual(
+            before_counts,
+            (
+                Cliente.objects.count(),
+                DireccionCliente.objects.count(),
+                PedidoCliente.objects.count(),
+                SolicitudDomicilio.objects.count(),
+            ),
+        )
 
     def test_pedido_con_snapshot_coincidente_sin_domicilio_retorna_409_estable(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)

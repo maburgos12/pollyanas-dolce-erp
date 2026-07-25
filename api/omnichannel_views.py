@@ -171,10 +171,7 @@ def _conflict_response(api_client, request, *, detail: str, code: str):
 
 
 def _resolve_existing_order(api_client, request, order: PedidoCliente, data: dict):
-    if (
-        order.public_api_client_id is not None
-        and order.public_api_client_id != api_client.id
-    ):
+    if order.public_api_client_id != api_client.id:
         return None, _conflict_response(
             api_client,
             request,

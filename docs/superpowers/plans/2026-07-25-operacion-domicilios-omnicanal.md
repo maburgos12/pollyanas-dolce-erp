@@ -201,6 +201,10 @@ Payload obligatorio:
 
 La respuesta debe incluir `cliente_id`, `direccion_id`, `pedido_id`, `solicitud_domicilio_id`, `created` y los enlaces de seguimiento.
 
+Los pedidos externos heredados sin `public_api_client` dueño nunca adquieren
+ownership implícito durante un retry. Su recuperación requiere un backfill
+administrativo explícito y auditado; mientras tanto responden conflicto 409.
+
 - [x] **Step 3: Implementar búsqueda rápida**
 
 Crear `GET /api/public/v1/omnichannel-customers/?q=<telefono|nombre|email>` con máximo 20 resultados y direcciones activas. No devolver notas internas ni datos fuera del alcance operativo.
