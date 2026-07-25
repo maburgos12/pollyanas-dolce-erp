@@ -337,4 +337,3 @@ git status --short --branch
 - [ ] **Step 6: Validar navegador, reporte sombra y producción**
 
 Crear localmente una solicitud 7+3 y revisar UI, consola y Network. Claude revisa diff, abre PR borrador y, tras merge, ejecuta `scripts/deploy_web_safe.sh` sin `git pull` previo. Antes de activar bolsas en producción, aprobar el dry-run y confirmar que Carolina termina con dos días pendientes de 2025.
-

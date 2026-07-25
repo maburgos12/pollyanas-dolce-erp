@@ -1,8 +1,8 @@
 # Vacaciones: pago, goce y aplicación FIFO por periodo
 
-**Fecha:** 2026-07-18  
-**Estado:** Diseño aprobado por Mauricio; pendiente de revisión escrita y plan de implementación  
-**Módulo:** `rrhh`  
+**Fecha:** 2026-07-18
+**Estado:** Diseño aprobado por Mauricio; pendiente de revisión escrita y plan de implementación
+**Módulo:** `rrhh`
 **Tipo de cambio:** Contrato de datos compartido, migraciones nuevas, servicios, nómina, asistencia y UI
 
 ## 1. Problema

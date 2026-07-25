@@ -320,4 +320,3 @@ Validar 403/200, consola, Network, reintento y ausencia de importes para jefatur
 - [ ] **Step 5: Claude revisa, despliega y valida una quincena real**
 
 Tras merge, ejecutar `scripts/deploy_web_safe.sh` sin `git pull` previo. Confirmar idempotencia, permisos y que pagar no cambia el saldo de goce antes de limpiar rama/worktree.
-
