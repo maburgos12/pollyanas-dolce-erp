@@ -111,7 +111,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v6-safe-area-compact", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v7-bitacoras-reales", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260707-workflow-icon-v5", body)
         self.assertIn("env(safe-area-inset-top)", css)
         self.assertIn("calc(10px + env(safe-area-inset-top))", css)
@@ -164,6 +164,104 @@ class OperacionAppTests(TestCase):
         self.assertEqual(linea.receta, receta)
         self.assertEqual(linea.datos["cedis"], "4")
         self.assertEqual(linea.datos["devolucion"], "1")
+
+    def test_bitacoras_home_groups_real_capture_formats(self):
+        user = self._user("produccion.formatos")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Producción diaria")
+        self.assertContains(response, "Control producción - Hornos")
+        self.assertContains(response, "Bitácora de temperatura")
+        self.assertContains(response, "Checklist inocuidad producción")
+
+    def test_temperature_bitacora_capture_saves_range_values(self):
+        user = self._user("produccion.temperatura")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_TEMPERATURA}/",
+            {
+                "fecha": "2026-07-02",
+                "responsable_general": "Carolina",
+                "apertura_0": "-12",
+                "cierre_0": "-10",
+                "observaciones_0": "Equipo estable",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_TEMPERATURA)
+        linea = bitacora.lineas.get()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        self.assertIn("Responsable: Carolina", bitacora.notas)
+        self.assertEqual(linea.datos["item"], "FP 1")
+        self.assertEqual(linea.datos["apertura"], "-12")
+        self.assertEqual(linea.datos["rango_min"], "-18")
+
+    def test_weekly_matrix_capture_saves_day_and_product(self):
+        user = self._user("produccion.hornos")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(
+            nombre="Pan de Vainilla Dawn Grande",
+            codigo_point="DAWN-G",
+            hash_contenido="bitacora-hornos-dawn-g",
+        )
+        self.client.force_login(user)
+
+        capture = self.client.get(f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/")
+        self.assertContains(capture, "Pan de Vainilla Dawn Grande")
+        self.assertContains(capture, "Producto ERP")
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": "2026-07-03",
+                "dia_captura": "Viernes",
+                "receta_0": str(receta.id),
+                "stock_0": "2",
+                "pedido_0": "5",
+                "preparacion_0": "3",
+                "cerrar": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_HORNOS)
+        linea = bitacora.lineas.get()
+        self.assertIn("Día: Viernes", bitacora.notas)
+        self.assertEqual(linea.receta, receta)
+        self.assertEqual(linea.datos["item"], "Pan de Vainilla Dawn Grande")
+        self.assertEqual(linea.datos["tamano"], "G")
+        self.assertEqual(linea.datos["codigo_point"], "DAWN-G")
+        self.assertEqual(linea.datos["pedido"], "5")
+
+    def test_checklist_capture_saves_status(self):
+        user = self._user("produccion.inocuidad")
+        self._grant(user, "produccion")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_INOCUIDAD}/",
+            {
+                "fecha": "2026-07-04",
+                "dia_captura": "Sábado",
+                "cumple_0": "si",
+                "cumple_1": "no",
+                "observaciones_1": "Reforzar lavado",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.get(tipo=BitacoraOperativa.TIPO_INOCUIDAD)
+        self.assertEqual(bitacora.lineas.count(), 2)
+        self.assertEqual(bitacora.lineas.order_by("id")[1].datos["cumple"], "no")
 
     def test_merma_recepcion_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")

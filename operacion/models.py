@@ -12,6 +12,13 @@ class BitacoraOperativa(models.Model):
     TIPO_CFP11 = "CFP11"
     TIPO_ROTACION = "ROTACION"
     TIPO_REBANADO = "REBANADO"
+    TIPO_TEMPERATURA = "TEMPERATURA"
+    TIPO_HORNOS = "HORNOS"
+    TIPO_ARMADO = "ARMADO"
+    TIPO_INOCUIDAD = "INOCUIDAD"
+    TIPO_LIMPIEZA = "LIMPIEZA"
+    TIPO_MERMA = "MERMA"
+    TIPO_RECHAZOS = "RECHAZOS"
     TIPO_CHOICES = [
         (TIPO_SALIDAS_CFP1, "Salidas CFP1 a sucursales"),
         (TIPO_INVENTARIO_CFP1, "Inventario Diario CFP1"),
@@ -19,6 +26,13 @@ class BitacoraOperativa(models.Model):
         (TIPO_CFP11, "Control de Inventario Diario CFP 1.1"),
         (TIPO_ROTACION, "Rotación de producto bitácora"),
         (TIPO_REBANADO, "Producto Rebanado"),
+        (TIPO_TEMPERATURA, "Bitácora de temperatura"),
+        (TIPO_HORNOS, "Control de producción - Hornos"),
+        (TIPO_ARMADO, "Control de producción - Armado"),
+        (TIPO_INOCUIDAD, "Checklist inocuidad producción"),
+        (TIPO_LIMPIEZA, "Checklist limpieza"),
+        (TIPO_MERMA, "Registro de merma"),
+        (TIPO_RECHAZOS, "Registro de rechazos por sucursal"),
     ]
     ESTATUS_BORRADOR = "BORRADOR"
     ESTATUS_CERRADA = "CERRADA"
