@@ -9,14 +9,18 @@ class BitacoraOperativa(models.Model):
     TIPO_SALIDAS_CFP1 = "SALIDAS_CFP1"
     TIPO_INVENTARIO_CFP1 = "INVENTARIO_CFP1"
     TIPO_PLAGAS = "PLAGAS"
+    TIPO_HORNOS = "HORNOS"
     TIPO_CFP11 = "CFP11"
+    TIPO_ARMADO = "ARMADO"
     TIPO_ROTACION = "ROTACION"
     TIPO_REBANADO = "REBANADO"
     TIPO_CHOICES = [
         (TIPO_SALIDAS_CFP1, "Salidas CFP1 a sucursales"),
         (TIPO_INVENTARIO_CFP1, "Inventario Diario CFP1"),
         (TIPO_PLAGAS, "Registro de control de plagas"),
+        (TIPO_HORNOS, "Control producción - Hornos"),
         (TIPO_CFP11, "Control de Inventario Diario CFP 1.1"),
+        (TIPO_ARMADO, "Control producción - Armado"),
         (TIPO_ROTACION, "Rotación de producto bitácora"),
         (TIPO_REBANADO, "Producto Rebanado"),
     ]
@@ -33,6 +37,14 @@ class BitacoraOperativa(models.Model):
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
     cerrado_en = models.DateTimeField(null=True, blank=True)
+    conteo_guardado_en = models.DateTimeField(null=True, blank=True)
+    conteo_guardado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="cortes_ciegos_guardados",
+    )
 
     class Meta:
         ordering = ["-fecha", "-id"]
@@ -48,6 +60,13 @@ class BitacoraOperativa(models.Model):
 class BitacoraOperativaLinea(models.Model):
     bitacora = models.ForeignKey(BitacoraOperativa, on_delete=models.CASCADE, related_name="lineas")
     receta = models.ForeignKey("recetas.Receta", null=True, blank=True, on_delete=models.PROTECT)
+    insumo = models.ForeignKey(
+        "maestros.Insumo",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lineas_bitacora_operativa",
+    )
     sucursal = models.ForeignKey("core.Sucursal", null=True, blank=True, on_delete=models.SET_NULL)
     datos = models.JSONField(default=dict, blank=True)
     observaciones = models.TextField(blank=True, default="")
@@ -57,4 +76,11 @@ class BitacoraOperativaLinea(models.Model):
         ordering = ["id"]
 
     def __str__(self) -> str:
-        return str(self.receta or self.bitacora)
+        return str(self.insumo or self.receta or self.bitacora)
+
+    def save(self, *args, **kwargs):
+        """Bloquear edición de líneas después de que el corte ciego haya sido sellado."""
+        if self.pk and self.bitacora.conteo_guardado_en is not None:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("No se puede editar el corte después de que ha sido sellado.")
+        super().save(*args, **kwargs)

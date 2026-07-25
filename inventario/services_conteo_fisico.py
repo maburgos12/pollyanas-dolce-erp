@@ -19,6 +19,7 @@ from .models import (
     MovimientoInventario,
 )
 from .services_auditoria_insumos import ConsumoInsumoAuditService, parse_period, period_bounds
+from .services_existencias import establecer_stock
 
 
 DECIMAL_ZERO = Decimal("0")
@@ -55,7 +56,11 @@ class ConteoFisicoService:
     ) -> ConteoFisicoInitSummary:
         if ConteoFisicoMensual.objects.filter(periodo=periodo).exists():
             raise ConteoFisicoError(f"Ya existe un conteo físico para {periodo:%Y-%m}.")
-        insumo_rows = list(ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base").order_by("insumo__nombre"))
+        insumo_rows = list(
+            ExistenciaInsumo.objects.filter(almacen="ALMACEN_1")
+            .select_related("insumo", "insumo__unidad_base")
+            .order_by("insumo__nombre")
+        )
         producto_rows = list(
             InventarioCedisProducto.objects.select_related("receta").filter(receta__excluir_cierre=False).order_by("receta__nombre")
         )
@@ -114,10 +119,7 @@ class ConteoFisicoService:
                     if linea.insumo_id:
                         movimiento = self._crear_ajuste_insumo(linea, conteo)
                         linea.movimiento_inventario = movimiento
-                        existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=linea.insumo)
-                        existencia.stock_actual = linea.stock_contado
-                        existencia.actualizado_en = timezone.now()
-                        existencia.save(update_fields=["stock_actual", "actualizado_en"])
+                        establecer_stock(linea.insumo, "ALMACEN_1", linea.stock_contado)
                     elif linea.producto_id:
                         movimiento_producto = self._crear_ajuste_producto(linea, conteo)
                         linea.movimiento_producto_cedis = movimiento_producto
@@ -204,6 +206,7 @@ class ConteoFisicoService:
                 "insumo": linea.insumo,
                 "cantidad": linea.diferencia,
                 "referencia": f"CONTEO-FISICO:{conteo.periodo:%Y-%m}",
+                "almacen": "ALMACEN_1",
             },
         )
         return movement

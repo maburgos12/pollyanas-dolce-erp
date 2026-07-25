@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from django.core.management.base import BaseCommand
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q, Sum
 
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch
@@ -88,7 +88,18 @@ class Command(BaseCommand):
             .values("insumo_id")
             .annotate(total=Count("id"))
         }
-        existencia_map = {e.insumo_id: e for e in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)}
+        existencias_by_insumo: dict[int, list[dict]] = defaultdict(list)
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+            .values("insumo_id", "almacen")
+            .annotate(
+                stock_actual=Sum("stock_actual"),
+                punto_reorden=Max("punto_reorden"),
+                stock_minimo=Max("stock_minimo"),
+                stock_maximo=Max("stock_maximo"),
+            )
+        ):
+            existencias_by_insumo[int(row["insumo_id"])].append(row)
 
         master_rows: list[dict] = []
         inconsistencies: list[dict] = []
@@ -98,31 +109,35 @@ class Command(BaseCommand):
             costo = cost_data.get("costo_unitario")
             fecha_costo = cost_data.get("fecha")
             aliases = alias_map.get(insumo.id, [])
-            existencia = existencia_map.get(insumo.id)
+            existencias = existencias_by_insumo.get(insumo.id) or [None]
 
-            master_rows.append(
-                {
-                    "insumo_id": insumo.id,
-                    "activo": "1" if insumo.activo else "0",
-                    "nombre_oficial": insumo.nombre,
-                    "nombre_normalizado": insumo.nombre_normalizado,
-                    "codigo_interno": insumo.codigo or "",
-                    "codigo_point": insumo.codigo_point or "",
-                    "nombre_point": insumo.nombre_point or "",
-                    "unidad_base": insumo.unidad_base.codigo if insumo.unidad_base else "",
-                    "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal else "",
-                    "aliases_count": len(aliases),
-                    "aliases": " | ".join(aliases),
-                    "costo_unitario_actual": str(costo or ""),
-                    "fecha_costo_actual": str(fecha_costo or ""),
-                    "usos_recetas": receta_use_map.get(insumo.id, 0),
-                    "movimientos_inventario": mov_use_map.get(insumo.id, 0),
-                    "stock_actual": str(existencia.stock_actual) if existencia else "",
-                    "punto_reorden": str(existencia.punto_reorden) if existencia else "",
-                    "stock_minimo": str(existencia.stock_minimo) if existencia else "",
-                    "stock_maximo": str(existencia.stock_maximo) if existencia else "",
-                }
-            )
+            for existencia in existencias:
+                master_rows.append(
+                    {
+                        "insumo_id": insumo.id,
+                        "activo": "1" if insumo.activo else "0",
+                        "nombre_oficial": insumo.nombre,
+                        "nombre_normalizado": insumo.nombre_normalizado,
+                        "codigo_interno": insumo.codigo or "",
+                        "codigo_point": insumo.codigo_point or "",
+                        "nombre_point": insumo.nombre_point or "",
+                        "unidad_base": insumo.unidad_base.codigo if insumo.unidad_base else "",
+                        "proveedor_principal": (
+                            insumo.proveedor_principal.nombre if insumo.proveedor_principal else ""
+                        ),
+                        "aliases_count": len(aliases),
+                        "aliases": " | ".join(aliases),
+                        "costo_unitario_actual": str(costo or ""),
+                        "fecha_costo_actual": str(fecha_costo or ""),
+                        "usos_recetas": receta_use_map.get(insumo.id, 0),
+                        "movimientos_inventario": mov_use_map.get(insumo.id, 0),
+                        "almacen": existencia["almacen"] if existencia else "",
+                        "stock_actual": str(existencia["stock_actual"]) if existencia else "",
+                        "punto_reorden": str(existencia["punto_reorden"]) if existencia else "",
+                        "stock_minimo": str(existencia["stock_minimo"]) if existencia else "",
+                        "stock_maximo": str(existencia["stock_maximo"]) if existencia else "",
+                    }
+                )
 
             if not insumo.unidad_base_id:
                 inconsistencies.append(
@@ -136,7 +151,7 @@ class Command(BaseCommand):
             has_usage = (
                 receta_use_map.get(insumo.id, 0) > 0
                 or mov_use_map.get(insumo.id, 0) > 0
-                or (existencia is not None and (existencia.stock_actual or 0) > 0)
+                or any((existencia["stock_actual"] or 0) > 0 for existencia in existencias if existencia)
             )
 
             if costo is None and has_usage:
@@ -241,6 +256,7 @@ class Command(BaseCommand):
                 "fecha_costo_actual",
                 "usos_recetas",
                 "movimientos_inventario",
+                "almacen",
                 "stock_actual",
                 "punto_reorden",
                 "stock_minimo",

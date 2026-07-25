@@ -1,14 +1,27 @@
+import re
 from decimal import Decimal
+from hashlib import sha256
+from uuid import uuid4
 
 from django.conf import settings
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 from django.utils import timezone
+from unidecode import unidecode
 
 from maestros.models import Insumo
 
 
+UBICACION_CFP_1_1 = "CFP_1_1"
+UBICACION_ARMADO = "ARMADO"
+UBICACION_CFP_1 = "CFP_1"
+
+
 ALMACEN_CHOICES = [
     ("ALMACEN_1", "Almacén 1 (principal)"),
+    (UBICACION_CFP_1_1, "CFP 1.1"),
+    (UBICACION_ARMADO, "Armado"),
+    (UBICACION_CFP_1, "CFP 1"),
     ("ALMACEN_CASA_1", "Almacén Casa 1"),
     ("ALMACEN_CASA_2", "Almacén Casa 2"),
     ("CUARTO_FRIO", "Cuarto Frío"),
@@ -20,7 +33,7 @@ ALMACEN_LABELS = dict(ALMACEN_CHOICES)
 
 
 class ExistenciaInsumo(models.Model):
-    insumo = models.OneToOneField(Insumo, on_delete=models.CASCADE)
+    insumo = models.ForeignKey(Insumo, on_delete=models.CASCADE, related_name="existencias")
     almacen = models.CharField(
         max_length=20, choices=ALMACEN_CHOICES, default="ALMACEN_1",
         verbose_name="Almacén / Ubicación", db_index=True,
@@ -39,9 +52,188 @@ class ExistenciaInsumo(models.Model):
         verbose_name = "Existencia de insumo"
         verbose_name_plural = "Existencias de insumos"
         ordering = ["almacen", "insumo__nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["insumo", "almacen"],
+                name="uniq_existencia_insumo_almacen",
+            ),
+        ]
 
     def __str__(self):
         return self.insumo.nombre
+
+
+def normalizar_codigo_lote(codigo_point):
+    codigo = unidecode(str(codigo_point or "")).upper().strip()
+    return re.sub(r"[^A-Z0-9]+", "-", codigo).strip("-")
+
+
+def construir_codigo_lote(prefijo, identidad, fecha, origen_id):
+    sufijo = f"-{fecha}-{origen_id}"
+    espacio_identidad = 120 - len(prefijo) - len(sufijo) - 1
+    if len(identidad) > espacio_identidad:
+        digest = sha256(identidad.encode("ascii")).hexdigest()[:12].upper()
+        identidad = f"{identidad[:espacio_identidad - 13]}-{digest}"
+    return f"{prefijo}-{identidad}{sufijo}"
+
+
+class LoteProduccion(models.Model):
+    DISPONIBLE = "DISPONIBLE"
+    AGOTADO = "AGOTADO"
+    RETENIDO = "RETENIDO"
+    CANCELADO = "CANCELADO"
+    ESTADO_CHOICES = [
+        (DISPONIBLE, "Disponible"),
+        (AGOTADO, "Agotado"),
+        (RETENIDO, "Retenido"),
+        (CANCELADO, "Cancelado"),
+    ]
+
+    codigo = models.CharField(max_length=120, unique=True, editable=False)
+    insumo = models.ForeignKey(
+        Insumo,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lotes_produccion",
+    )
+    receta = models.ForeignKey(
+        "recetas.Receta",
+        on_delete=models.PROTECT,
+        related_name="lotes_produccion",
+    )
+    cantidad_inicial = models.DecimalField(max_digits=18, decimal_places=3)
+    unidad = models.ForeignKey("maestros.UnidadMedida", on_delete=models.PROTECT)
+    producido_en = models.DateTimeField()
+    linea_origen = models.OneToOneField(
+        "operacion.BitacoraOperativaLinea",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lote_generado",
+    )
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=DISPONIBLE)
+    es_apertura = models.BooleanField(default=False)
+    observaciones = models.CharField(max_length=255, blank=True, default="")
+
+    def clean(self):
+        errors = {}
+        if self.pk:
+            persisted = type(self).objects.filter(pk=self.pk).values(
+                "codigo",
+                "insumo_id",
+                "receta_id",
+                "cantidad_inicial",
+                "unidad_id",
+                "producido_en",
+                "linea_origen_id",
+                "creado_por_id",
+                "es_apertura",
+            ).first()
+            if persisted:
+                immutable_fields = {
+                    "codigo": "codigo",
+                    "insumo": "insumo_id",
+                    "receta": "receta_id",
+                    "cantidad_inicial": "cantidad_inicial",
+                    "unidad": "unidad_id",
+                    "producido_en": "producido_en",
+                    "linea_origen": "linea_origen_id",
+                    "creado_por": "creado_por_id",
+                    "es_apertura": "es_apertura",
+                }
+                for field, attribute in immutable_fields.items():
+                    if getattr(self, attribute) != persisted[attribute]:
+                        errors[field] = "Este dato historico del lote no puede modificarse."
+            if errors:
+                raise ValidationError(errors)
+            return
+
+        try:
+            cantidad = Decimal(str(self.cantidad_inicial))
+        except (ArithmeticError, TypeError, ValueError):
+            cantidad = None
+        if cantidad is None or not cantidad.is_finite() or cantidad <= 0:
+            errors["cantidad_inicial"] = "La cantidad inicial debe ser mayor que cero."
+        if self.producido_en and timezone.is_naive(self.producido_en):
+            errors["producido_en"] = "La fecha de produccion debe incluir zona horaria."
+
+        if self.es_apertura:
+            if self.linea_origen_id:
+                errors["linea_origen"] = "Un lote de apertura no debe inventar una linea historica."
+            if not self.observaciones.strip():
+                errors["observaciones"] = "Un lote de apertura requiere una observacion."
+        elif not self.linea_origen_id:
+            errors["linea_origen"] = "Un lote ordinario requiere una linea de bitacora de origen."
+        elif self.receta_id and self.linea_origen.receta_id != self.receta_id:
+            errors["linea_origen"] = "La linea de origen debe corresponder a la receta del lote."
+
+        if self.receta_id:
+            from recetas.models import Receta
+
+            if self.receta.tipo == Receta.TIPO_PREPARACION and not self.insumo_id:
+                errors["insumo"] = "Una preparacion interna requiere un insumo canonico."
+            if not self.insumo_id and self.receta.tipo != Receta.TIPO_PRODUCTO_FINAL:
+                errors["receta"] = "Un lote sin insumo requiere una receta de producto final."
+            if (
+                self.receta.tipo == Receta.TIPO_PREPARACION
+                and self.insumo_id
+                and self.insumo.unidad_base_id
+                and self.unidad_id != self.insumo.unidad_base_id
+            ):
+                errors["unidad"] = "La unidad debe coincidir con la unidad base del insumo."
+            if (
+                self.receta.tipo == Receta.TIPO_PRODUCTO_FINAL
+                and self.receta.rendimiento_unidad_id
+                and self.unidad_id != self.receta.rendimiento_unidad_id
+            ):
+                errors["unidad"] = "La unidad debe coincidir con la unidad de rendimiento de la receta."
+
+        if self.insumo_id:
+            codigo_point = self.insumo.codigo_point
+        elif self.receta_id:
+            codigo_point = self.receta.codigo_point
+        else:
+            codigo_point = ""
+        if not normalizar_codigo_lote(codigo_point):
+            errors["codigo"] = "El lote requiere una identidad canonica de Point."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        codigo_existente = ""
+        if self.pk:
+            codigo_existente = type(self).objects.filter(pk=self.pk).values_list("codigo", flat=True).first() or ""
+        self.full_clean(exclude=["codigo"] if not self.codigo else None)
+        point_code = self.insumo.codigo_point if self.insumo_id else self.receta.codigo_point
+        identity = normalizar_codigo_lote(point_code)
+        date_code = timezone.localtime(self.producido_en).strftime("%Y%m%d")
+
+        if codigo_existente:
+            super().save(*args, **kwargs)
+            return
+
+        if self.es_apertura and not self.pk:
+            with transaction.atomic():
+                self.codigo = f"INI-PENDIENTE-{uuid4().hex.upper()}"
+                super().save(*args, **kwargs)
+                self.codigo = construir_codigo_lote("INI", identity, date_code, self.pk)
+                type(self).objects.filter(pk=self.pk).update(codigo=self.codigo)
+            return
+
+        source_id = self.pk if self.es_apertura else self.linea_origen_id
+        self.codigo = construir_codigo_lote(
+            "INI" if self.es_apertura else "LOT",
+            identity,
+            date_code,
+            source_id,
+        )
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.codigo
 
 
 class MovimientoInventario(models.Model):
@@ -65,9 +257,52 @@ class MovimientoInventario(models.Model):
     notas = models.CharField(max_length=255, blank=True, default="", verbose_name="Notas / destino")
     registrado_por = models.CharField(max_length=120, blank=True, default="", verbose_name="Registrado por")
     source_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    lote = models.ForeignKey(
+        LoteProduccion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="movimientos",
+    )
+    linea_bitacora = models.ForeignKey(
+        "operacion.BitacoraOperativaLinea",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="movimientos_inventario",
+    )
+    registrado_por_usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    trazabilidad = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-fecha"]
+
+    def clean(self):
+        if not self.lote_id:
+            return
+
+        errors = {}
+        if not self.lote.insumo_id:
+            errors["lote"] = "Un lote de producto final no pertenece al ledger de insumos."
+        elif self.insumo_id != self.lote.insumo_id:
+            errors["insumo"] = "El movimiento debe usar el mismo insumo que el lote."
+
+        if self.linea_bitacora_id != self.lote.linea_origen_id:
+            errors["linea_bitacora"] = "La linea del movimiento debe coincidir con el origen del lote."
+        elif self.linea_bitacora_id and self.linea_bitacora.receta_id != self.lote.receta_id:
+            errors["linea_bitacora"] = "La linea del movimiento debe corresponder a la receta del lote."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.tipo} {self.insumo.nombre} {self.cantidad}"

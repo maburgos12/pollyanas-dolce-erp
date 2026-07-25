@@ -3756,6 +3756,18 @@ def _reabasto_branch_priority_rows(
     return rows[:6]
 
 
+def _stock_total_by_insumo(insumo_ids: set[int]) -> dict[int, Decimal]:
+    # Disponibilidad total para contexto general de receta.
+    return {
+        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
+    }
+
+
 def _reabasto_branch_supply_rows(
     *,
     fecha_operacion: date,
@@ -3792,10 +3804,7 @@ def _reabasto_branch_supply_rows(
         canonical_ids.add(canonical.id)
         lineas_by_recipe[int(linea.receta_id)].append(linea)
 
-    existencia_map = {
-        int(item.insumo_id): item
-        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
-    }
+    stock_total_map = _stock_total_by_insumo(canonical_ids)
 
     rows: list[dict[str, object]] = []
     for branch_row in branch_priority_rows:
@@ -3815,8 +3824,7 @@ def _reabasto_branch_supply_rows(
             if required_qty <= 0:
                 continue
 
-            existencia = existencia_map.get(canonical.id)
-            stock_actual = _to_decimal_safe(getattr(existencia, "stock_actual", 0))
+            stock_actual = _to_decimal_safe(stock_total_map.get(canonical.id, 0))
             shortage = max(required_qty - stock_actual, Decimal("0"))
             readiness = _insumo_erp_readiness(canonical)
             missing = list(readiness.get("missing") or [])
@@ -4514,10 +4522,7 @@ def _plan_branch_supply_rows(
         canonical_ids.add(canonical.id)
         lineas_by_recipe_name[linea.receta.nombre].append(linea)
 
-    existencia_map = {
-        int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
-    }
+    stock_total_map = _stock_total_by_insumo(canonical_ids)
 
     rows: list[dict[str, object]] = []
     for branch_row in branch_priority_rows:
@@ -4535,8 +4540,7 @@ def _plan_branch_supply_rows(
             required_qty = _to_decimal_safe(linea.cantidad) * plan_qty
             if required_qty <= 0:
                 continue
-            existencia = existencia_map.get(canonical.id)
-            stock_actual = _to_decimal_safe(getattr(existencia, "stock_actual", 0))
+            stock_actual = _to_decimal_safe(stock_total_map.get(canonical.id, 0))
             shortage = max(required_qty - stock_actual, Decimal("0"))
             readiness = _insumo_erp_readiness(canonical)
             missing = list(readiness.get("missing") or [])

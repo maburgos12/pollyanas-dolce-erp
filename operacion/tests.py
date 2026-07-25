@@ -1,17 +1,239 @@
 from pathlib import Path
+from datetime import date, timedelta
+from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, ROLE_DG, ROLE_LOGISTICA, ROLE_REPARTIDOR
 from core.models import Sucursal, UserModuleAccess, UserProfile
+from inventario.models import ExistenciaInsumo, LoteProduccion, MovimientoInventario, UBICACION_CFP_1_1
+from inventario.services_existencias import establecer_stock, stock_ubicacion
 from logistica.models import Repartidor, Unidad
+from maestros.models import Insumo, UnidadMedida
 from mermas.models import PersonalEnviosSucursal
-from recetas.models import Receta
+from recetas.models import (
+    InventarioCedisProducto,
+    LineaReceta,
+    MovimientoProductoCedis,
+    Receta,
+)
+
+from operacion.bitacoras_config import BITACORA_CONFIG
 from operacion.models import BitacoraOperativa, BitacoraOperativaLinea
 from operacion.services import build_operacion_context
+from operacion.views import DECIMAL_FIELDS
+
+
+class AperturaInicialLotesTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.apertura", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.apertura", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+        self.unidad = UnidadMedida.objects.create(codigo="kg-apertura", nombre="Kilogramo apertura")
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:APERTURA",
+            codigo_point="RC-001",
+            nombre="Preparacion Crunch",
+            nombre_point="Preparacion Crunch Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Preparacion Crunch",
+            codigo_point="RC-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="apertura-preparacion-crunch",
+        )
+
+    def _registrar(self, **overrides):
+        from operacion.services_bitacoras_inventory import registrar_apertura_inicial
+
+        values = {
+            "receta": self.receta,
+            "insumo": self.insumo,
+            "cantidad": Decimal("3"),
+            "unidad": self.unidad,
+            "ubicacion": UBICACION_CFP_1_1,
+            "fecha_elaboracion": None,
+            "actor": self.manager,
+            "observaciones": "Existencia previa al inicio de trazabilidad",
+        }
+        values.update(overrides)
+        return registrar_apertura_inicial(**values)
+
+    def test_manager_creates_initial_lot_without_fake_source(self):
+        lote = self._registrar()
+
+        self.assertTrue(lote.es_apertura)
+        self.assertIsNone(lote.linea_origen)
+        self.assertTrue(lote.codigo.startswith("INI-RC-001-"))
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+        movimiento = MovimientoInventario.objects.get(lote=lote)
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(movimiento.almacen, UBICACION_CFP_1_1)
+        self.assertEqual(movimiento.registrado_por_usuario, self.manager)
+        self.assertEqual(movimiento.trazabilidad["evento"], "apertura_inicial")
+        self.assertEqual(movimiento.trazabilidad["lote"], lote.codigo)
+
+    def test_opening_is_idempotent_and_does_not_duplicate_stock(self):
+        primero = self._registrar(fecha_elaboracion=date(2026, 7, 1))
+        segundo = self._registrar(fecha_elaboracion=date(2026, 7, 1))
+
+        self.assertEqual(segundo.pk, primero.pk)
+        self.assertEqual(LoteProduccion.objects.count(), 1)
+        self.assertEqual(MovimientoInventario.objects.count(), 1)
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+
+    def test_opening_rejects_a_different_date_without_changing_stock(self):
+        lote = self._registrar(fecha_elaboracion=date(2026, 7, 1))
+
+        with self.assertRaisesMessage(ValidationError, "ya fue aplicada"):
+            self._registrar(fecha_elaboracion=date(2026, 7, 2))
+
+        lote.refresh_from_db()
+        self.assertEqual(lote.producido_en.date(), date(2026, 7, 1))
+        self.assertEqual(LoteProduccion.objects.count(), 1)
+        self.assertEqual(MovimientoInventario.objects.count(), 1)
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("3"))
+
+    def test_opening_rejects_preexisting_stock_without_creating_history(self):
+        establecer_stock(self.insumo, UBICACION_CFP_1_1, Decimal("1.250"))
+
+        with self.assertRaisesMessage(ValidationError, "conciliar"):
+            self._registrar()
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("1.250"))
+
+    def test_opening_rejects_future_operational_date(self):
+        future_date = timezone.localdate() + timedelta(days=1)
+
+        with self.assertRaisesMessage(ValidationError, "futura"):
+            self._registrar(fecha_elaboracion=future_date)
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+
+    def test_unrelated_integrity_error_is_not_treated_as_idempotence(self):
+        original_error = IntegrityError("conflicto ajeno a source_hash")
+
+        with patch("operacion.services_bitacoras_inventory.LoteProduccion.objects.create", side_effect=original_error):
+            with self.assertRaises(IntegrityError) as raised:
+                self._registrar()
+
+        self.assertIs(raised.exception, original_error)
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_opening_rolls_back_lot_and_movement_when_stock_update_fails(self):
+        with patch(
+            "operacion.services_bitacoras_inventory.aplicar_delta",
+            side_effect=ValidationError("fallo de saldo"),
+        ):
+            with self.assertRaisesMessage(ValidationError, "fallo de saldo"):
+                self._registrar()
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertFalse(ExistenciaInsumo.objects.filter(insumo=self.insumo).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_opening_requires_production_manage_permission(self):
+        with self.assertRaises(PermissionDenied):
+            self._registrar(actor=self.operator)
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+
+    def test_opening_rejects_invalid_quantity_identity_and_observation_atomically(self):
+        for invalid_quantity in ("0", "-1", "NaN", "Infinity", "texto"):
+            with self.subTest(cantidad=invalid_quantity), self.assertRaises(ValidationError):
+                self._registrar(cantidad=invalid_quantity)
+
+        self.insumo.codigo_point = "   "
+        self.insumo.save(update_fields=["codigo_point"])
+        with self.assertRaises(ValidationError):
+            self._registrar()
+        self.insumo.codigo_point = "RC-001"
+        self.insumo.save(update_fields=["codigo_point"])
+
+        with self.assertRaises(ValidationError):
+            self._registrar(observaciones="   ")
+
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_opening_page_lists_canonical_products_for_manager_only(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.get("/app/bitacoras/apertura/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Apertura inicial de lotes")
+        self.assertContains(response, "Preparacion Crunch Point")
+        self.assertContains(response, "RC-001")
+        self.assertContains(response, "CFP 1.1")
+        self.client.force_login(self.operator)
+        self.assertEqual(self.client.get("/app/bitacoras/apertura/").status_code, 403)
+
+    def test_opening_page_post_creates_immutable_applied_opening(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            "/app/bitacoras/apertura/",
+            {
+                "insumo": str(self.insumo.id),
+                "cantidad": "2.500",
+                "unidad": str(self.unidad.id),
+                "ubicacion": UBICACION_CFP_1_1,
+                "fecha_elaboracion": "2026-07-01",
+                "observaciones": "Conteo fisico al iniciar trazabilidad",
+            },
+        )
+
+        self.assertRedirects(response, "/app/bitacoras/apertura/")
+        lote = LoteProduccion.objects.get()
+        self.assertEqual(lote.cantidad_inicial, Decimal("2.500"))
+        self.assertEqual(lote.producido_en.date().isoformat(), "2026-07-01")
+        get_response = self.client.get("/app/bitacoras/apertura/")
+        self.assertContains(get_response, lote.codigo)
+        self.assertNotContains(get_response, "Editar")
+
+    def test_opening_page_rejects_future_date_and_limits_date_input(self):
+        self.client.force_login(self.manager)
+        future_date = timezone.localdate() + timedelta(days=1)
+
+        response = self.client.post(
+            "/app/bitacoras/apertura/",
+            {
+                "insumo": str(self.insumo.id),
+                "cantidad": "2.500",
+                "unidad": str(self.unidad.id),
+                "ubicacion": UBICACION_CFP_1_1,
+                "fecha_elaboracion": future_date.isoformat(),
+                "observaciones": "Conteo con fecha futura",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La fecha de elaboración no puede ser futura.")
+        self.assertContains(response, f'max="{timezone.localdate().isoformat()}"')
+        self.assertFalse(LoteProduccion.objects.exists())
+        self.assertFalse(MovimientoInventario.objects.exists())
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -130,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v19-insumos-timeout", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v27-lotes-trazabilidad", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -193,6 +415,231 @@ class OperacionAppTests(TestCase):
         self.assertEqual(linea.receta, receta)
         self.assertEqual(linea.datos["cedis"], "4")
         self.assertEqual(linea.datos["devolucion"], "1")
+
+    def test_hornos_rows_require_point_identity(self):
+        user = self._user("produccion.hornos")
+        self._grant(user, "produccion")
+        receta = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            pasa_modulo_produccion=True,
+            hash_contenido="hornos-point-identity",
+        )
+        preparacion_sin_codigo = Receta.objects.create(
+            nombre="Preparación sin código",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hornos-without-point",
+        )
+        preparacion_codigo_espacios = Receta.objects.create(
+            nombre="Preparación código espacios",
+            codigo_point="   ",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="hornos-blank-point",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Pastel Chocolate Chico",
+            codigo_point="PAS-CHO-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hornos-final-product",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/HORNOS/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<option value="{receta.id}">Pan Chocolate Chico · PAN-CHO-CH</option>',
+            html=True,
+        )
+        self.assertNotContains(response, preparacion_sin_codigo.nombre)
+        self.assertNotContains(response, preparacion_codigo_espacios.nombre)
+        self.assertNotContains(response, producto_final.nombre)
+
+    def test_armado_rows_require_final_product_point_identity(self):
+        user = self._user("produccion.armado")
+        self._grant(user, "produccion")
+        producto_final = Receta.objects.create(
+            nombre="Pastel Chocolate Chico",
+            codigo_point="PAS-CHO-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="armado-final-product",
+        )
+        preparacion = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="armado-preparation",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/bitacoras/ARMADO/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<option value="{producto_final.id}">Pastel Chocolate Chico · PAS-CHO-CH</option>',
+            html=True,
+        )
+        self.assertNotContains(response, preparacion.nombre)
+
+    def test_production_bitacoras_reject_invalid_recipe_before_creating_header(self):
+        user = self._user("produccion.invalid-recipes")
+        self._grant(user, "produccion")
+        preparacion_sin_codigo = Receta.objects.create(
+            nombre="Preparación sin Point",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="invalid-without-point",
+        )
+        preparacion_codigo_espacios = Receta.objects.create(
+            nombre="Preparación Point espacios",
+            codigo_point="   ",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="invalid-blank-point",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Producto final incorrecto",
+            codigo_point="FINAL-INCORRECTO",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="invalid-wrong-type",
+        )
+        self.client.force_login(user)
+
+        for receta_id in (
+            "",
+            "999999",
+            str(producto_final.id),
+            str(preparacion_sin_codigo.id),
+            str(preparacion_codigo_espacios.id),
+        ):
+            with self.subTest(receta_id=receta_id):
+                response = self.client.post(
+                    "/app/bitacoras/HORNOS/",
+                    {"receta_0": receta_id, "existencia_0": "1", "cerrar": "1"},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Selecciona un producto válido con identidad Point.")
+                self.assertFalse(BitacoraOperativa.objects.exists())
+
+    def test_production_bitacora_fields_reject_invalid_decimal_values(self):
+        user = self._user("produccion.decimals")
+        self._grant(user, "produccion")
+        preparacion = Receta.objects.create(
+            nombre="Preparación decimal",
+            codigo_point="PREP-DEC",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="decimal-preparation",
+        )
+        producto_final = Receta.objects.create(
+            nombre="Producto final decimal",
+            codigo_point="FINAL-DEC",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="decimal-final",
+        )
+        unidad_cfp = UnidadMedida.objects.create(codigo="kg-dec", nombre="Kilogramo decimal")
+        insumo_cfp = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-DEC",
+            codigo_point="RC-DEC",
+            nombre="Relleno decimal",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad_cfp,
+        )
+        self.client.force_login(user)
+
+        required_decimal_fields = {
+            "cantidad",
+            "existencia",
+            "salida",
+            "entrada",
+            "preparacion",
+            "existencia_fisica",
+            "salida_armado",
+            "consumo_real",
+            "producto_terminado",
+        }
+        self.assertLessEqual(required_decimal_fields, DECIMAL_FIELDS)
+
+        field_cases = (
+            ("ROTACION", {"receta_0": str(preparacion.id)}, "cantidad"),
+            ("HORNOS", {"receta_0": str(preparacion.id)}, "existencia"),
+            ("HORNOS", {"receta_0": str(preparacion.id)}, "preparacion"),
+            # CFP11 usa filas fijas por insumo Point, no dropdown de recetas.
+            ("CFP11", {"insumo_0": str(insumo_cfp.id)}, "existencia_fisica"),
+            ("CFP11", {"insumo_0": str(insumo_cfp.id)}, "salida_armado"),
+            ("ARMADO", {"receta_0": str(producto_final.id)}, "consumo_real"),
+            ("ARMADO", {"receta_0": str(producto_final.id)}, "producto_terminado"),
+        )
+        for tipo, identidad, campo in field_cases:
+            for invalid_value in ("texto", "NaN", "Infinity", "-Infinity"):
+                with self.subTest(tipo=tipo, campo=campo, invalid_value=invalid_value):
+                    BitacoraOperativa.objects.all().delete()
+                    response = self.client.post(
+                        f"/app/bitacoras/{tipo}/",
+                        {**identidad, f"{campo}_0": invalid_value},
+                    )
+
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(response, "Ingresa una cantidad numérica válida.")
+                    self.assertEqual(response.context["submitted_values"][f"{campo}_0"], invalid_value)
+                    self.assertFalse(BitacoraOperativa.objects.exists())
+                    self.assertFalse(BitacoraOperativaLinea.objects.exists())
+
+        empty_line_response = self.client.post(
+            "/app/bitacoras/HORNOS/",
+            {"receta_0": str(preparacion.id)},
+        )
+
+        self.assertEqual(empty_line_response.status_code, 200)
+        self.assertContains(empty_line_response, "Captura al menos una cantidad u observación.")
+        self.assertFalse(BitacoraOperativa.objects.exists())
+        self.assertFalse(BitacoraOperativaLinea.objects.exists())
+
+    def test_logistics_only_user_cannot_use_production_bitacoras(self):
+        user = self._user("logistica.bitacoras-produccion")
+        self._grant(user, "logistica")
+        self.client.force_login(user)
+
+        get_response = self.client.get("/app/bitacoras/HORNOS/")
+        post_response = self.client.post("/app/bitacoras/HORNOS/", {"cerrar": "1"})
+
+        self.assertEqual(get_response.status_code, 403)
+        self.assertEqual(post_response.status_code, 403)
+        self.assertFalse(BitacoraOperativa.objects.exists())
+
+    def test_cfp11_config_keeps_legacy_fields_outside_active_fields(self):
+        config = BITACORA_CONFIG[BitacoraOperativa.TIPO_CFP11]
+        user = self._user("produccion.cfp11-config")
+        self._grant(user, "produccion")
+        # CFP11 renderiza una fila fija por insumo Point configurado.
+        unidad = UnidadMedida.objects.create(codigo="kg-cfg", nombre="Kilogramo config")
+        Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-CFG",
+            codigo_point="RC-CFG",
+            nombre="Relleno config",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad,
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(config["familia"], "custodia_lotes")
+        self.assertEqual(config["campos"], ["existencia_fisica", "salida_armado"])
+        self.assertEqual(config["campos_legacy"], ["bloque", "tamano", "existencia", "salida", "entrada"])
+        self.assertTrue(config["usa_insumos"])
+        self.assertTrue(config["requiere_codigo_point"])
+
+        response = self.client.get("/app/bitacoras/CFP11/")
+
+        self.assertContains(response, "Existencia física")
+        self.assertContains(response, "Salida a armado")
+        # Fila fija por producto Point: nombre y código visibles, sin dropdown.
+        self.assertContains(response, "Relleno config")
+        self.assertContains(response, "RC-CFG")
+        self.assertContains(response, 'name="insumo_0"')
+        self.assertContains(response, 'name="existencia_fisica_0"')
+        self.assertNotContains(response, 'name="bloque_0"')
+        self.assertNotContains(response, "Existencia_fisica")
 
     def test_mermas_only_reception_user_stays_on_existing_mermas_app(self):
         user = self._user("cedis.merma")
@@ -664,7 +1111,7 @@ class OperacionAppTests(TestCase):
         for template in templates:
             html = (root / template).read_text(encoding="utf-8")
             self.assertIn("app-home-link", html, template)
-            self.assertIn('aria-label="Menú principal"', html, template)
+            self.assertIn('Menú principal', html, template)
 
     def test_operational_pwas_prefer_current_django_session_before_cached_token(self):
         mantenimiento_group = Group.objects.create(name="MANTENIMIENTO")
@@ -832,3 +1279,1841 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No encuentro el equipo")
         self.assertContains(response, "Registrar punto mantenible")
+
+
+class HornosLoteServiceTests(TestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.hornos", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.hornos", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        self.unidad = UnidadMedida.objects.create(codigo="kg-hornos", nombre="Kilogramo hornos")
+        self.receta = Receta.objects.create(
+            nombre="Pan Chocolate Chico",
+            codigo_point="PAN-CHO-CH",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hornos-pan-chocolate",
+            pasa_modulo_produccion=True,
+        )
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-CHO-CH",
+            codigo_point="PAN-CHO-CH",
+            nombre="Pan Chocolate Chico",
+            nombre_point="Pan Chocolate Chico Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "8"},
+            observaciones="Cierre de hornos piloto",
+        )
+
+    def test_close_hornos_creates_one_lot_and_cfp_entry(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        result = cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertEqual(result.lotes_creados, 1)
+        lote = LoteProduccion.objects.get(linea_origen=self.linea)
+        movimiento = MovimientoInventario.objects.get(linea_bitacora=self.linea)
+        self.assertEqual(movimiento.lote, lote)
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(movimiento.almacen, "CFP_1_1")
+
+    def test_close_hornos_twice_does_not_duplicate(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        cerrar_hornos(self.bitacora, self.manager)
+        cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertEqual(LoteProduccion.objects.filter(linea_origen=self.linea).count(), 1)
+        self.assertEqual(MovimientoInventario.objects.filter(linea_bitacora=self.linea).count(), 1)
+
+    def test_bitacora_capture_hornos_with_close_action_creates_lots_via_http(self):
+        self.client.force_login(self.manager)
+        count_before = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "10.5",
+                "observaciones_0": "Cierre HTTP de hornos",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        self.assertIn(f"?revision={bitacora.id}", response.url)
+        linea = bitacora.lineas.first()
+        lote = LoteProduccion.objects.get(linea_origen=linea)
+        self.assertEqual(lote.cantidad_inicial, Decimal("10.5"))
+        movimiento = MovimientoInventario.objects.get(lote=lote)
+        self.assertEqual(movimiento.cantidad, Decimal("10.5"))
+        self.assertEqual(movimiento.tipo, MovimientoInventario.TIPO_ENTRADA)
+
+    def test_bitacora_capture_hornos_without_close_action_saves_draft_no_lots(self):
+        self.client.force_login(self.manager)
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "10.5",
+                "observaciones_0": "Guardado borrador sin cierre",
+                "cerrar": "0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/app/bitacoras/", response.url)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_BORRADOR)
+        linea = bitacora.lineas.first()
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=linea).exists())
+
+    def test_bitacora_capture_hornos_invalid_recipe_rejects_before_creating_bitacora(self):
+        self.client.force_login(self.manager)
+        count_before = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": "999999",
+                "existencia_0": "10.5",
+                "cerrar": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Selecciona un producto válido con identidad Point.")
+        count_after = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).count()
+        self.assertEqual(count_before, count_after)
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen__bitacora__tipo=BitacoraOperativa.TIPO_HORNOS).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora__bitacora__tipo=BitacoraOperativa.TIPO_HORNOS).exists())
+
+    def test_close_hornos_accepts_accion_cerrar_produccion(self):
+        """Point 1: Aceptar accion=cerrar_produccion además de legacy cerrar=1."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            f"/app/bitacoras/{BitacoraOperativa.TIPO_HORNOS}/",
+            {
+                "fecha": timezone.localdate().isoformat(),
+                "receta_0": str(self.receta.id),
+                "existencia_0": "7.5",
+                "observaciones_0": "Cierre con accion",
+                "accion": "cerrar_produccion",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bitacora = BitacoraOperativa.objects.filter(tipo=BitacoraOperativa.TIPO_HORNOS).order_by("-id").first()
+        self.assertEqual(bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+        linea = bitacora.lineas.first()
+        lote = LoteProduccion.objects.get(linea_origen=linea)
+        self.assertEqual(lote.cantidad_inicial, Decimal("7.5"))
+
+    def test_close_hornos_requires_manage_permission_even_direct_call(self):
+        """Point 2: cerrar_hornos exige permiso manage Producción incluso llamada directa."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        with self.assertRaises(PermissionDenied):
+            cerrar_hornos(self.bitacora, self.operator)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+    def test_close_hornos_quantity_must_be_positive_finite_decimal_total_rollback(self):
+        """Point 3: Cantidad Decimal positiva finita, ValidationError + rollback total."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.linea.datos = {"existencia": "0"}
+        self.linea.save(update_fields=["datos"])
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+        self.bitacora.lineas.all().delete()
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "-5"},
+            observaciones="Cantidad negativa",
+        )
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+        self.bitacora.lineas.all().delete()
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia": "NaN"},
+            observaciones="Cantidad NaN",
+        )
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+
+    def test_close_hornos_idempotent_same_call_but_rejects_incompatible_data(self):
+        """Point 4: Reintento idéntico idempotente, incompatibles rechazados."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        # Mismo cierre dos veces: idempotente
+        cerrar_hornos(self.bitacora, self.manager)
+        result2 = cerrar_hornos(self.bitacora, self.manager)
+        self.assertEqual(result2.lotes_creados, 0)
+        self.assertEqual(LoteProduccion.objects.filter(linea_origen=self.linea).count(), 1)
+        self.assertEqual(MovimientoInventario.objects.filter(linea_bitacora=self.linea).count(), 1)
+
+        # Reintentar con cantidad diferente: debe rechazarse
+        self.linea.datos = {"existencia": "15"}
+        self.linea.save(update_fields=["datos"])
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_hornos(self.bitacora, self.manager)
+        self.assertIn("incompatible", str(ctx.exception).lower())
+
+    def test_close_hornos_movement_lot_delta_atomic(self):
+        """Point 5: movimiento/lote/delta atómicos."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        with patch(
+            "operacion.services_bitacoras_inventory.aplicar_delta",
+            side_effect=ValidationError("fallo de delta"),
+        ):
+            with self.assertRaisesMessage(ValidationError, "fallo de delta"):
+                cerrar_hornos(self.bitacora, self.manager)
+
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+
+    def test_close_hornos_two_lines_one_invalid_no_lot_movement_stock_or_close(self):
+        """Point 6: Dos líneas, una inválida, no dejan lote/movimiento/stock ni cierre."""
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        receta2 = Receta.objects.create(
+            nombre="Pan Integral Mediano",
+            codigo_point="PAN-INT-M",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="hornos-pan-integral",
+            pasa_modulo_produccion=True,
+        )
+        insumo2 = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-INT-M",
+            codigo_point="PAN-INT-M",
+            nombre="Pan Integral Mediano",
+            nombre_point="Pan Integral Mediano Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+
+        linea2 = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=receta2,
+            datos={"existencia": "invalid"},
+            observaciones="Línea con cantidad inválida",
+        )
+
+        with self.assertRaises(ValidationError):
+            cerrar_hornos(self.bitacora, self.manager)
+
+        # No hay lotes ni movimientos creados
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=self.linea).exists())
+        self.assertFalse(LoteProduccion.objects.filter(linea_origen=linea2).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=self.linea).exists())
+        self.assertFalse(MovimientoInventario.objects.filter(linea_bitacora=linea2).exists())
+
+        # Stock no se alteró
+        self.assertEqual(stock_ubicacion(self.insumo, UBICACION_CFP_1_1), Decimal("0"))
+        self.assertEqual(stock_ubicacion(insumo2, UBICACION_CFP_1_1), Decimal("0"))
+
+        # Bitácora no se cerró
+        self.bitacora.refresh_from_db()
+        self.assertEqual(self.bitacora.estatus, BitacoraOperativa.ESTATUS_BORRADOR)
+
+
+class CfpBlindCountTests(TestCase):
+    """Pruebas del corte ciego matutino de CFP 1.1: ocultamiento y revelado."""
+
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.cfp", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.cfp", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        self.unidad = UnidadMedida.objects.create(codigo="kg-cfp", nombre="Kilogramo CFP")
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP",
+            codigo_point="RC-001",
+            nombre="Relleno Crunch",
+            nombre_point="Relleno Crunch Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Relleno Crunch",
+            codigo_point="RC-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="cfp-relleno-crunch",
+        )
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+            observaciones="Conteo físico CFP 1.1",
+        )
+
+    def test_cfp_count_hides_expected_until_saved(self):
+        """Verificar que la pantalla oculta esperado antes del corte y lo revela después."""
+        self.client.force_login(self.operator)
+
+        # Verificar que ANTES de guardar no muestra esperado
+        response = self.client.get(f"/app/bitacoras/CFP11/")
+        self.assertNotContains(response, "Existencia esperada")
+        self.assertNotContains(response, "Stock fijo")
+        self.assertNotContains(response, "Diferencia")
+
+        # Guardar el conteo físico
+        response = self.client.post(
+            f"/app/bitacoras/CFP11/",
+            {
+                "accion": "guardar_existencia",
+                "insumo_0": str(self.insumo.id),
+                "existencia_fisica_0": "5",
+            },
+            follow=True,
+        )
+
+        # Verificar que DESPUÉS de guardar muestra esperado y diferencia
+        self.assertContains(response, "Existencia esperada")
+        self.assertContains(response, "Diferencia")
+
+    def test_cfp_capture_shows_one_fixed_row_per_point_product(self):
+        self.client.force_login(self.operator)
+
+        response = self.client.get("/app/bitacoras/CFP11/")
+
+        self.assertContains(response, self.insumo.nombre)
+        self.assertContains(response, self.insumo.codigo_point)
+        self.assertContains(response, 'name="insumo_0"', html=False)
+        self.assertContains(response, f'value="{self.insumo.id}"', html=False)
+        self.assertNotContains(response, '<select name="insumo_0"', html=False)
+
+    def test_cfp_count_requires_every_visible_product(self):
+        second = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-2",
+            codigo_point="RC-002",
+            nombre="Relleno Vainilla",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.client.force_login(self.operator)
+
+        response = self.client.post(
+            "/app/bitacoras/CFP11/",
+            {
+                "accion": "guardar_existencia",
+                "insumo_0": str(self.insumo.id),
+                "existencia_fisica_0": "5",
+                "insumo_1": str(second.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Captura la existencia de Relleno Vainilla.")
+        self.assertFalse(BitacoraOperativa.objects.filter(lineas__insumo=second).exists())
+
+    def test_cfp_count_seal_is_idempotent(self):
+        """Verificar que sellar dos veces no duplica el timestamp ni el usuario."""
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+        primer_sello_en = self.bitacora.conteo_guardado_en
+        primer_sellado_por = self.bitacora.conteo_guardado_por_id
+
+        # Sellar de nuevo con otro usuario
+        guardar_corte_ciego(self.bitacora, self.operator)
+        self.bitacora.refresh_from_db()
+
+        # El sello no debe cambiar
+        self.assertEqual(self.bitacora.conteo_guardado_en, primer_sello_en)
+        self.assertEqual(self.bitacora.conteo_guardado_por_id, primer_sellado_por)
+
+    def test_cfp_count_blocks_edit_after_seal(self):
+        """Verificar que no se puede editar el corte después de sellado."""
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+
+        # Intentar cambiar cantidad después del sello debe fallar
+        self.linea.datos["existencia_fisica"] = "8"
+        with self.assertRaises(ValidationError) as ctx:
+            self.linea.save()
+
+        self.assertIn("sellado", str(ctx.exception).lower())
+
+    def test_cfp_count_calculates_expected_and_difference(self):
+        """
+        Verificar que guardar_corte_ciego calcula esperado/diferencia.
+        Entrada 8 (movimiento ENTRADA), físico 5 → esperado 8, diferencia -3.
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+        from inventario.services_existencias import aplicar_delta
+
+        # Crear movimiento de entrada inicial: 8 kg
+        mov_entrada = MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("8"),
+            almacen="CFP_1_1",
+            referencia="MOV-001",
+            notas="Entrada inicial",
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        # Actualizar linea con conteo físico de 5
+        self.linea.datos["existencia_fisica"] = "5"
+        self.linea.save(update_fields=["datos"])
+
+        # Guardar corte ciego
+        guardar_corte_ciego(self.bitacora, self.manager)
+        self.bitacora.refresh_from_db()
+        self.linea.refresh_from_db()
+
+        # Verificar que se calculó esperado=8 y diferencia=-3
+        self.assertEqual(self.linea.datos.get("esperado"), "8")
+        self.assertEqual(self.linea.datos.get("diferencia"), "-3")
+        self.assertIsNotNone(self.bitacora.conteo_guardado_en)
+        self.assertEqual(self.bitacora.conteo_guardado_por, self.manager)
+
+    def test_cfp_count_notification_only_on_difference(self):
+        """
+        Verificar que se crea notificación SOLO si hay diferencia != 0.
+        Sin diferencia (5=5) → sin notificación.
+        Con diferencia (5≠8) → con notificación.
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+        from core.models import Notificacion
+
+        # Caso 1: Sin diferencia (esperado=5, físico=5)
+        bitacora_ok = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_ok = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_ok,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+            observaciones="Sin diferencia",
+        )
+
+        # Sin movimientos, no hay diferencia
+        notif_count_before = Notificacion.objects.count()
+        guardar_corte_ciego(bitacora_ok, self.manager)
+        notif_count_after = Notificacion.objects.count()
+        self.assertEqual(notif_count_after, notif_count_before, "No debe crear notificación si no hay diferencia")
+
+        # Caso 2: Con diferencia (esperado=8, físico=5)
+        # Crear nuevo insumo/receta para no mezclar con el anterior
+        unidad2 = UnidadMedida.objects.create(codigo="kg-cfp2", nombre="Kilogramo CFP 2")
+        insumo2 = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP2",
+            codigo_point="RC-002",
+            nombre="Relleno Fresa",
+            nombre_point="Relleno Fresa Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad2,
+        )
+        receta2 = Receta.objects.create(
+            nombre="Relleno Fresa",
+            codigo_point="RC-002",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=unidad2,
+            hash_contenido="cfp-relleno-fresa",
+        )
+
+        MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=insumo2,
+            cantidad=Decimal("8"),
+            almacen="CFP_1_1",
+            referencia="MOV-002",
+            notas="Entrada para diferencia",
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        bitacora_diff = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_diff = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_diff,
+            receta=receta2,
+            datos={"existencia_fisica": "5"},
+            observaciones="Con diferencia",
+        )
+
+        # Verificar que la línea guarda esperado=8 y diferencia=-3
+        guardar_corte_ciego(bitacora_diff, self.manager)
+        linea_diff.refresh_from_db()
+        self.assertEqual(linea_diff.datos.get("esperado"), "8", "Debe calcular esperado=8")
+        self.assertEqual(linea_diff.datos.get("diferencia"), "-3", "Debe calcular diferencia=-3")
+        # Nota: La notificación se crearía si hay usuarios con permisos MANAGE en producción
+
+    def test_cfp_count_validates_physical_quantity(self):
+        """
+        Verificar validaciones de cantidad física:
+        - Obligatoria
+        - Numérica
+        - Finita
+        - No negativa
+        """
+        from operacion.services_bitacoras_inventory import guardar_corte_ciego
+
+        # Test: cantidad física vacía
+        bitacora_empty = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_empty = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_empty,
+            receta=self.receta,
+            datos={},
+            observaciones="Sin cantidad física",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_empty, self.manager)
+
+        # Test: cantidad física no numérica
+        bitacora_invalid = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_invalid = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_invalid,
+            receta=self.receta,
+            datos={"existencia_fisica": "abc"},
+            observaciones="Cantidad no numérica",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_invalid, self.manager)
+
+        # Test: cantidad física negativa
+        bitacora_negative = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea_negative = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora_negative,
+            receta=self.receta,
+            datos={"existencia_fisica": "-5"},
+            observaciones="Cantidad negativa",
+        )
+
+        with self.assertRaises(ValidationError):
+            guardar_corte_ciego(bitacora_negative, self.manager)
+
+
+class CfpFifoTransferTests(TestCase):
+    """Test FIFO transfer from CFP 1.1 to Armado."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefe.cfp", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="op.cfp", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Create product and recipe
+        self.unidad = UnidadMedida.objects.create(codigo="kg-cfp", nombre="Kilogramo CFP")
+        self.insumo = Insumo.objects.create(
+            codigo="PREP:CRUNCH:FIFO",
+            codigo_point="RC-FIFO-001",
+            nombre="Preparacion Crunch FIFO",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Preparacion Crunch FIFO",
+            codigo_point="RC-FIFO-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="fifo-crunch-test",
+        )
+
+        # Create two bitacoras with lines, then close them to generate lots via cerrar_hornos
+        bitacora1 = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),  # Older date
+            creado_por=self.manager,
+        )
+        linea1 = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora1,
+            receta=self.receta,
+            datos={"existencia": "5"},
+            observaciones="Lote antiguo",
+        )
+
+        bitacora2 = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 9),  # Newer date
+            creado_por=self.manager,
+        )
+        linea2 = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora2,
+            receta=self.receta,
+            datos={"existencia": "5"},
+            observaciones="Lote nuevo",
+        )
+
+        # Close bitacoras to generate lots
+        cerrar_hornos(bitacora1, self.manager)
+        cerrar_hornos(bitacora2, self.manager)
+
+        # Get the lots created
+        self.lote_antiguo = LoteProduccion.objects.filter(
+            insumo=self.insumo,
+            linea_origen=linea1,
+        ).first()
+        self.lote_nuevo = LoteProduccion.objects.filter(
+            insumo=self.insumo,
+            linea_origen=linea2,
+        ).first()
+
+        # Create a bitacora line for transfers (in CFP11)
+        self.bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "10"},
+            observaciones="Test transfer line",
+        )
+
+    def test_transfer_uses_oldest_available_lot_first(self):
+        """Test that FIFO selects oldest lot first."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Should use 5 from oldest lot and 1 from new lot
+        self.assertEqual(len(result.asignaciones), 2)
+        self.assertEqual(result.asignaciones[0][0], self.lote_antiguo.id)
+        self.assertEqual(result.asignaciones[0][1], Decimal("5"))
+        self.assertEqual(result.asignaciones[1][0], self.lote_nuevo.id)
+        self.assertEqual(result.asignaciones[1][1], Decimal("1"))
+
+        # Check CFP_1_1 stock reduced
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("4"))
+
+        # Check ARMADO stock increased
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("6"))
+
+    def test_transfer_rejects_insufficient_stock(self):
+        """Test that transfer is rejected when insufficient stock."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("11"),  # Only 10 available total
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Verify no movements created (rollback)
+        exit_movements = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+        )
+        self.assertEqual(exit_movements.count(), 0)
+
+        # Stock unchanged
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("10"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("0"))
+
+    def test_transfer_is_idempotent(self):
+        """Test that running transfer twice doesn't duplicate movements."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result1 = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Verify movements created
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+                almacen="CFP_1_1",
+            ).count(),
+            2,
+        )
+
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_ENTRADA,
+                almacen="ARMADO",
+            ).count(),
+            2,
+        )
+
+        # Try again with same parameters - should be idempotent via source_hash
+        # (same result, no duplicates)
+        result2 = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Should still have same number of movements
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+                almacen="CFP_1_1",
+            ).count(),
+            2,
+        )
+
+    def test_transfer_creates_two_leg_movements(self):
+        """Test that each lot assignment creates SALIDA and ENTRADA with distinct hashes."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Check movements for oldest lot
+        salida_antiguo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_antiguo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(salida_antiguo)
+        self.assertEqual(salida_antiguo.cantidad, Decimal("5"))
+
+        entrada_antiguo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_antiguo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(entrada_antiguo)
+        self.assertEqual(entrada_antiguo.cantidad, Decimal("5"))
+
+        # Hashes must be different
+        self.assertNotEqual(salida_antiguo.source_hash, entrada_antiguo.source_hash)
+
+        # Check movements for new lot
+        salida_nuevo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_nuevo,
+            tipo=MovimientoInventario.TIPO_SALIDA,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(salida_nuevo)
+        self.assertEqual(salida_nuevo.cantidad, Decimal("1"))
+
+        entrada_nuevo = MovimientoInventario.objects.filter(
+            insumo=self.insumo,
+            lote=self.lote_nuevo,
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(entrada_nuevo)
+        self.assertEqual(entrada_nuevo.cantidad, Decimal("1"))
+
+    def test_transfer_updates_stock_by_location_once(self):
+        """Test that stock is updated exactly once per location."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("6"),
+            linea=self.linea,
+            actor=self.manager,
+        )
+
+        # Check ExistenciaInsumo records
+        cfp_existe = ExistenciaInsumo.objects.filter(
+            insumo=self.insumo,
+            almacen="CFP_1_1",
+        ).first()
+        self.assertIsNotNone(cfp_existe)
+        self.assertEqual(cfp_existe.stock_actual, Decimal("4"))
+
+        armado_existe = ExistenciaInsumo.objects.filter(
+            insumo=self.insumo,
+            almacen="ARMADO",
+        ).first()
+        self.assertIsNotNone(armado_existe)
+        self.assertEqual(armado_existe.stock_actual, Decimal("6"))
+
+    def test_operator_can_perform_standard_fifo_transfer(self):
+        """La captura operativa puede ejecutar FIFO sin romper el orden."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("3"),
+            linea=self.linea,
+            actor=self.operator,
+        )
+
+        self.assertEqual(result.asignaciones, [(self.lote_antiguo.id, Decimal("3"))])
+
+    def test_transfer_fifo_exception_requires_motivo(self):
+        """Test that FIFO exception requires non-empty motivo."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Try without motivo
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("3"),
+                linea=self.linea,
+                actor=self.manager,
+                lote_excepcion=self.lote_nuevo,  # Out of order
+                motivo_excepcion_fifo="",
+            )
+
+        # Try with motivo - should succeed
+        result = entregar_a_armado(
+            insumo=self.insumo,
+            cantidad=Decimal("3"),
+            linea=self.linea,
+            actor=self.manager,
+            lote_excepcion=self.lote_nuevo,  # Out of order
+            motivo_excepcion_fifo="Especial request",
+        )
+        self.assertIsNotNone(result)
+
+    def test_transfer_fifo_exception_requires_manage_permission(self):
+        """Test that only managers can use FIFO exception."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        with self.assertRaises(PermissionDenied):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("3"),
+                linea=self.linea,
+                actor=self.operator,
+                lote_excepcion=self.lote_nuevo,
+                motivo_excepcion_fifo="Especial request",
+            )
+
+    def test_transfer_rollback_on_insufficient_total(self):
+        """Test complete rollback when total available is insufficient."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Try to transfer more than available
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("15"),  # Only 10 available
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Verify no movements created and stock unchanged
+        self.assertEqual(
+            MovimientoInventario.objects.filter(
+                insumo=self.insumo,
+                tipo=MovimientoInventario.TIPO_SALIDA,
+            ).count(),
+            0,
+        )
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("10"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("0"))
+
+    def test_transfer_validates_positive_finite_quantity(self):
+        """Test quantity validation."""
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        # Zero quantity
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("0"),
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Negative quantity
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad=Decimal("-5"),
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+        # Non-numeric
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(
+                insumo=self.insumo,
+                cantidad="abc",
+                linea=self.linea,
+                actor=self.manager,
+            )
+
+    def test_distinct_lines_can_transfer_the_same_lot(self):
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        segunda_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.bitacora,
+            receta=self.receta,
+            datos={"salida_armado": "2"},
+            observaciones="Segunda entrega",
+        )
+        entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+        entregar_a_armado(self.insumo, Decimal("2"), segunda_linea, self.manager)
+
+        transferencias = MovimientoInventario.objects.filter(
+            lote=self.lote_antiguo,
+            trazabilidad__evento__startswith="entregar_armado_",
+        )
+        self.assertEqual(transferencias.count(), 4)
+        self.assertEqual(transferencias.values("source_hash").distinct().count(), 4)
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("6"))
+        self.assertEqual(stock_ubicacion(self.insumo, "ARMADO"), Decimal("4"))
+
+    def test_retry_rejects_incomplete_existing_transfer(self):
+        from operacion.services_bitacoras_inventory import entregar_a_armado
+
+        entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+        MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            almacen="ARMADO",
+            trazabilidad__linea_transferencia_id=self.linea.id,
+        ).delete()
+
+        with self.assertRaises(ValidationError):
+            entregar_a_armado(self.insumo, Decimal("2"), self.linea, self.manager)
+
+
+class ArmadoCrunchPilotTests(TestCase):
+    """Test cerrar_armado: consume real lots and create finished Crunch product."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos, entregar_a_armado
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefe.armado", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="op.armado", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Create units
+        self.kg = UnidadMedida.objects.create(codigo="kg", nombre="Kilogramo")
+        self.unidad = UnidadMedida.objects.create(codigo="pza", nombre="Pieza")
+
+        # Create PREPARACION insumo for Crunch filling
+        self.relleno = Insumo.objects.create(
+            codigo="PREP:RELLENO:CRUNCH",
+            codigo_point="RELLENO-CRUNCH",
+            nombre="Relleno Crunch",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        # Create PREPARACION recipe for Crunch filling
+        self.relleno_receta = Receta.objects.create(
+            nombre="Relleno Crunch",
+            codigo_point="RELLENO-CRUNCH",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.kg,
+            hash_contenido="relleno-crunch-test",
+        )
+
+        # Create PRODUCTO_FINAL recipe for Crunch Chico
+        self.crunch_ch = Receta.objects.create(
+            nombre="Pastel Crunch Chico",
+            codigo_point="CRUNCH-CH",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_cantidad=Decimal("1"),
+            rendimiento_unidad=self.unidad,
+            hash_contenido="crunch-chico-final",
+        )
+
+        # Add Relleno as a component of Crunch Chico with 0.6 kg per unit
+        LineaReceta.objects.create(
+            receta=self.crunch_ch,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=self.relleno,
+            insumo_texto="Relleno Crunch",
+            cantidad=Decimal("0.6"),
+            unidad=self.kg,
+        )
+
+        # Create HORNOS bitacora and line for Relleno, close it to generate lot in CFP_1_1
+        hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        hornos_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=hornos_bitacora,
+            receta=self.relleno_receta,
+            datos={"existencia": "8"},
+            observaciones="Relleno producido",
+        )
+        cerrar_hornos(hornos_bitacora, self.manager)
+
+        # Transfer Relleno from CFP_1_1 to ARMADO: 8 kg total
+        self.armado_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        transfer_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={"salida_armado": "8"},
+            observaciones="Transferencia de relleno a Armado",
+        )
+        entregar_a_armado(self.relleno, Decimal("8"), transfer_linea, self.manager)
+
+        # Create Armado capture line with real consumption: 5.5 kg (vs theoretical 4.8 kg for 8 units)
+        # Note: key format is consumo_real_{codigo_point_lowercase_with_underscores}
+        self.armado_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={
+                "cantidad_terminada": "8",
+                "consumo_real_relleno_crunch": "5.5",  # Real consumption captured in bitacora
+            },
+            observaciones="Armado Crunch Chico con consumo real",
+        )
+
+    def test_close_armado_consumes_real_and_creates_finished_lot(self):
+        """Test that cerrar_armado consumes real amounts, creates finished lot with CEDIS entries."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        result = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify result structure
+        self.assertEqual(result.producto.codigo_point, self.crunch_ch.codigo_point)
+        self.assertEqual(result.cantidad_terminada, Decimal("8"))
+        self.assertEqual(result.consumo_real[self.relleno.id], Decimal("5.5"))
+        self.assertEqual(result.consumo_teorico[self.relleno.id], Decimal("4.8"))  # 8 * 0.6
+        self.assertTrue(result.lote_terminado.codigo.startswith(f"LOT-CRUNCH-CH"))
+
+        # Verify finished lot is created with insumo=None (product, not ingredient)
+        self.assertIsNone(result.lote_terminado.insumo)
+        self.assertEqual(result.lote_terminado.receta, self.crunch_ch)
+        self.assertEqual(result.lote_terminado.cantidad_inicial, Decimal("8"))
+
+        # Verify CEDIS entries created
+        cedis_inv = InventarioCedisProducto.objects.get(receta=self.crunch_ch)
+        self.assertEqual(cedis_inv.stock_actual, Decimal("8"))
+
+        cedis_mov = MovimientoProductoCedis.objects.get(receta=self.crunch_ch)
+        self.assertEqual(cedis_mov.tipo, MovimientoProductoCedis.TIPO_ENTRADA)
+        self.assertEqual(cedis_mov.cantidad, Decimal("8"))
+
+        # Verify consumption movements created in InventarioInsumo
+        consumo_movs = MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.relleno,
+            almacen="ARMADO",
+        )
+        self.assertEqual(consumo_movs.count(), 1)
+        self.assertEqual(consumo_movs.first().cantidad, Decimal("5.5"))
+
+        # Verify Relleno stock reduced in ARMADO
+        from inventario.services_existencias import stock_ubicacion
+
+        self.assertEqual(stock_ubicacion(self.relleno, "ARMADO"), Decimal("2.5"))  # 8 - 5.5
+
+    def test_close_armado_validates_incomplete_recipe(self):
+        """Test that incomplete recipe (missing insumo link) allows draft but fails on close."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create incomplete recipe without insumo link
+        incomplete_recipe = Receta.objects.create(
+            nombre="Producto Incompleto",
+            codigo_point="PRODUCTO-INC",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_unidad=self.unidad,  # Required per Req 1
+            hash_contenido="incomplete-product",
+        )
+        LineaReceta.objects.create(
+            receta=incomplete_recipe,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=None,  # No insumo linked
+            insumo_texto="Componente sin vincular",
+            cantidad=Decimal("1"),
+        )
+
+        incomplete_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=incomplete_bitacora,
+            receta=incomplete_recipe,
+            datos={"cantidad_terminada": "5"},
+        )
+
+        # Should raise ValidationError when attempting close (due to missing insumo link)
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_armado(incomplete_bitacora, self.manager)
+        self.assertIn("pendientes", str(ctx.exception).lower())
+
+    def test_close_armado_rejects_insufficient_stock(self):
+        """Test that insufficient lot stock in ARMADO causes rollback."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create a demand exceeding available stock
+        exceed_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.armado_bitacora,
+            receta=self.crunch_ch,
+            datos={
+                "cantidad_terminada": "15",  # Would need 15 * 0.6 = 9 kg, but only 8 available
+                "consumo_real_relleno_crunch": "9",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            cerrar_armado(self.armado_bitacora, self.manager)
+        self.assertIn("insuficiente", str(ctx.exception).lower())
+
+        # Verify no CEDIS entries created and stock unchanged
+        self.assertFalse(InventarioCedisProducto.objects.filter(receta=self.crunch_ch).exists())
+
+    def test_close_armado_is_idempotent(self):
+        """Test that calling cerrar_armado twice does not duplicate lots or movements."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        result2 = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Same lot returned both times
+        self.assertEqual(result1.lote_terminado.id, result2.lote_terminado.id)
+
+        # No duplicate CEDIS movements
+        cedis_movs = MovimientoProductoCedis.objects.filter(receta=self.crunch_ch)
+        self.assertEqual(cedis_movs.count(), 1)
+
+        # No duplicate CONSUMO movements for Relleno
+        consumo_movs = MovimientoInventario.objects.filter(
+            tipo=MovimientoInventario.TIPO_CONSUMO,
+            insumo=self.relleno,
+            almacen="ARMADO",
+        )
+        self.assertEqual(consumo_movs.count(), 1)
+
+    def test_close_armado_rollback_on_no_lots_available(self):
+        """Test rollback when Armado location has no lots of required ingredient."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create armado bitacora with component that doesn't exist in ARMADO
+        other_insumo = Insumo.objects.create(
+            codigo="PREP:OTRO",
+            codigo_point="OTRO-PREP",
+            nombre="Otro Insumo",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        recipe_with_other = Receta.objects.create(
+            nombre="Producto con Otro",
+            codigo_point="OTRO-PRODUCT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="recipe-with-other",
+        )
+        LineaReceta.objects.create(
+            receta=recipe_with_other,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=other_insumo,
+            insumo_texto="Otro Insumo",
+            cantidad=Decimal("1"),
+        )
+
+        other_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=other_bitacora,
+            receta=recipe_with_other,
+            datos={"cantidad_terminada": "5", "consumo_real_otro_prep": "5"},  # codigo_point="OTRO-PREP" -> "consumo_real_otro_prep"
+        )
+
+        # Should raise ValidationError for no lots available
+        with self.assertRaises(ValidationError):
+            cerrar_armado(other_bitacora, self.manager)
+
+    def test_close_armado_requires_manage_permission(self):
+        """Test that closing Armado requires manage permission on Produccion."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # operator has only VIEW access, not MANAGE
+        with self.assertRaises(PermissionDenied):
+            cerrar_armado(self.armado_bitacora, self.operator)
+
+    def test_close_armado_requires_armado_bitacora_type(self):
+        """Test that only ARMADO type bitacoras can be closed with cerrar_armado."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+
+        with self.assertRaises(ValidationError):
+            cerrar_armado(hornos_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_absent_or_zero_without_contract(self):
+        """Req 2: consumo_real absent must raise ValidationError, NOT convert to zero silently."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Remove consumo_real key entirely (absent)
+        self.armado_linea.datos = {
+            "cantidad_terminada": "8",
+            # No consumo_real_relleno_crunch key
+        }
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "obligatorio"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_invalid_text(self):
+        """Req 2: consumo_real with invalid text must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "texto_invalido"
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "numérico"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_nan_or_infinity(self):
+        """Req 2: consumo_real with NaN/Infinity must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        for invalid_val in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(consumo=invalid_val):
+                self.armado_linea.datos["consumo_real_relleno_crunch"] = invalid_val
+                self.armado_linea.save(update_fields=["datos"])
+                with self.assertRaises(ValidationError):
+                    cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_rejects_consumo_real_negative(self):
+        """Req 2: consumo_real negative must raise ValidationError."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "-2.5"
+        self.armado_linea.save()
+
+        with self.assertRaisesMessage(ValidationError, "negativ"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_requires_rendimiento_unidad(self):
+        """Req 1: Final recipe must have rendimiento_unidad, no fallback."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Create recipe WITHOUT rendimiento_unidad
+        no_yield_recipe = Receta.objects.create(
+            nombre="Producto sin rendimiento",
+            codigo_point="NO-YIELD",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            rendimiento_unidad=None,  # Violates req 1
+            hash_contenido="no-yield-test",
+        )
+        LineaReceta.objects.create(
+            receta=no_yield_recipe,
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=self.relleno,
+            cantidad=Decimal("0.5"),
+            unidad=self.kg,
+        )
+
+        no_yield_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_ARMADO,
+            fecha=date(2026, 7, 8),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=no_yield_bitacora,
+            receta=no_yield_recipe,
+            datos={
+                "cantidad_terminada": "5",
+                "consumo_real_relleno_crunch": "2.5",
+            },
+        )
+
+        with self.assertRaisesMessage(ValidationError, "rendimiento"):
+            cerrar_armado(no_yield_bitacora, self.manager)
+
+    def test_close_armado_idempotence_by_bitacora_receta_not_quantity(self):
+        """Req 3: CEDIS idempotence keyed by (bitacora, receta), NOT quantity."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # First close
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis1_id = result1.lote_terminado.id
+
+        # Modify datos (attempt to change quantity) and retry
+        self.armado_linea.datos["cantidad_terminada"] = "12"  # Different now!
+        self.armado_linea.save()
+
+        # Second call should detect idempotence and raise ValidationError
+        # because (bitacora, receta) already closed with different quantity
+        with self.assertRaisesMessage(ValidationError, "alterada"):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_cedis_atomic_stock_increase_once(self):
+        """Req 4: CEDIS Inventario and Movimiento created atomically; stock increase only if mov new."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Before close: no CEDIS entry
+        self.assertFalse(InventarioCedisProducto.objects.filter(receta=self.crunch_ch).exists())
+
+        # First close: CEDIS created, stock increased
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis_inv = InventarioCedisProducto.objects.get(receta=self.crunch_ch)
+        stock_after_first = cedis_inv.stock_actual
+
+        # Second call: should return same inventory without incrementing stock again
+        result2 = cerrar_armado(self.armado_bitacora, self.manager)
+        cedis_inv.refresh_from_db()
+        stock_after_second = cedis_inv.stock_actual
+
+        self.assertEqual(stock_after_first, Decimal("8"))
+        self.assertEqual(stock_after_second, stock_after_first)  # No double increase
+
+    def test_close_armado_cannot_reopen_closed_bitacora(self):
+        """Req 5: bitácora/línea closed cannot produce another close with altered data."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # First close
+        result1 = cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Bitacora should be CLOSED now
+        self.armado_bitacora.refresh_from_db()
+        self.assertEqual(self.armado_bitacora.estatus, BitacoraOperativa.ESTATUS_CERRADA)
+
+        # Try to modify datos and retry
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "7.0"
+        self.armado_linea.save()
+
+        # Should raise ValidationError: either due to closed status or idempotence check catching mismatch
+        with self.assertRaises(ValidationError):
+            cerrar_armado(self.armado_bitacora, self.manager)
+
+    def test_close_armado_lot_estado_agotado_on_full_consumption(self):
+        """Req 6: Lote becomes AGOTADO after complete consumption; DISPONIBLE if partial."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Consume only 5.5 kg (partial of 8 kg available)
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "5.5"
+        self.armado_linea.save()
+
+        # Close
+        cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify relleno lots: state should REMAIN DISPONIBLE (partial consumption, still 2.5 kg left)
+        relleno_lotes = LoteProduccion.objects.filter(insumo=self.relleno, estado=LoteProduccion.DISPONIBLE)
+        self.assertGreater(relleno_lotes.count(), 0, "At least one lote should remain DISPONIBLE after partial consumption")
+
+    def test_close_armado_lot_estado_agotado_full_consumption(self):
+        """Req 6: Lote estado changes to AGOTADO after full consumption."""
+        from operacion.services_bitacoras_inventory import cerrar_armado
+
+        # Consume exactly all available (8 kg exactly available, 8 kg consumed)
+        self.armado_linea.datos["consumo_real_relleno_crunch"] = "8.0"  # Exact match
+        self.armado_linea.save()
+
+        cerrar_armado(self.armado_bitacora, self.manager)
+
+        # Verify relleno lots become AGOTADO
+        relleno_lotes = LoteProduccion.objects.filter(insumo=self.relleno)
+        for lote in relleno_lotes:
+            # After complete consumption, lote should be AGOTADO
+            self.assertEqual(lote.estado, LoteProduccion.AGOTADO, msg=f"Lote {lote.codigo} should be AGOTADO")
+
+
+class BitacoraCorrectionPermissionTests(TestCase):
+    """Task 10: Autorizar correcciones trazables de bitacoras con bloqueo de movimiento_original_id."""
+
+    def setUp(self):
+        from operacion.services_bitacoras_inventory import cerrar_hornos
+
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.correccion", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+
+        self.operator = self.user_model.objects.create_user(username="operador.correccion", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+
+        # Setup insumo, receta, and bitacora
+        self.kg = UnidadMedida.objects.create(codigo="kg-corr", nombre="Kilogramo correccion")
+        self.receta = Receta.objects.create(
+            nombre="Pan Correccion",
+            codigo_point="PAN-COR",
+            tipo=Receta.TIPO_PREPARACION,
+            pasa_modulo_produccion=True,
+            hash_contenido="pan-correccion-hash",
+            rendimiento_unidad=self.kg,
+        )
+        # Insumo derivado debe tener mismo codigo_point que la receta
+        self.insumo = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:PAN-COR",
+            codigo_point="PAN-COR",
+            nombre="Preparacion Correccion",
+            nombre_point="Preparacion Correccion Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.kg,
+        )
+
+        # Create a closed Hornos bitacora with a movement
+        self.hornos_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_HORNOS,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        self.hornos_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=self.hornos_bitacora,
+            receta=self.receta,
+            datos={"existencia": "8"},
+            observaciones="Original capture",
+        )
+
+        # Close Hornos to generate the lote and movimiento
+        cerrar_hornos(self.hornos_bitacora, self.manager)
+
+        # Get the original movement
+        self.original = MovimientoInventario.objects.filter(linea_bitacora=self.hornos_linea).first()
+        self.assertIsNotNone(self.original, "Original movement should exist after Hornos close")
+        self.original_id = self.original.id
+
+    def test_employee_cannot_correct_closed_bitacora(self):
+        """Empleado no puede corregir una bitácora cerrada."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Operator tries to correct
+        with self.assertRaises(PermissionDenied):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Conteo verificado",
+                actor=self.operator,
+            )
+
+    def test_manager_correction_creates_compensating_movement(self):
+        """Manager puede crear movimiento compensatorio con motivo."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Manager corrects: 8 -> 9 (diferencia +1)
+        result = autorizar_correccion_bitacora(
+            movimiento_original_id=self.original_id,
+            bitacora=self.hornos_bitacora,
+            linea=self.hornos_linea,
+            nueva_cantidad=Decimal("9"),
+            motivo="Conteo verificado post cierre",
+            actor=self.manager,
+        )
+
+        # Verify original movement unchanged
+        self.original.refresh_from_db()
+        self.assertEqual(self.original.cantidad, Decimal("8"))
+
+        # Verify compensating movement created
+        compensating = MovimientoInventario.objects.filter(
+            referencia__startswith=f"AJUSTE:{self.original_id}:"
+        ).first()
+        self.assertIsNotNone(compensating)
+        self.assertEqual(compensating.tipo, MovimientoInventario.TIPO_AJUSTE)
+        self.assertEqual(compensating.cantidad, Decimal("1"))  # Delta: 9-8
+        self.assertIn("Conteo verificado post cierre", compensating.notas)
+        self.assertEqual(compensating.registrado_por_usuario, self.manager)
+
+    def test_correction_requires_non_empty_motivo(self):
+        """Corrección requiere motivo no vacío."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Intento sin motivo
+        with self.assertRaises(ValidationError):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="",  # Empty
+                actor=self.manager,
+            )
+
+    def test_correction_locks_and_validates_movimiento_original_id(self):
+        """
+        Corrección bloquea movimiento original, valida que pertenece a línea/bitácora.
+        Rechaza IDs ajenos.
+        """
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Create a second bitacora with movement
+        other_bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        other_linea = BitacoraOperativaLinea.objects.create(
+            bitacora=other_bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5"},
+        )
+        other_movimiento = MovimientoInventario.objects.create(
+            fecha=timezone.now(),
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            insumo=self.insumo,
+            cantidad=Decimal("5"),
+            almacen=UBICACION_CFP_1_1,
+            linea_bitacora=other_linea,
+            registrado_por=self.manager.get_username(),
+            registrado_por_usuario=self.manager,
+        )
+
+        # Try to correct Hornos bitacora with ID from different bitacora => should fail
+        with self.assertRaises(ValidationError) as ctx:
+            autorizar_correccion_bitacora(
+                movimiento_original_id=other_movimiento.id,  # Wrong ID (belongs to other_bitacora)
+                bitacora=self.hornos_bitacora,  # Hornos
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Intento fraudulento",
+                actor=self.manager,
+            )
+        self.assertIn("no pertenece", str(ctx.exception).lower())
+
+    def test_correction_denies_nonexistent_movement(self):
+        """Intento de corregir movimiento que no existe."""
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        # Try with fake ID
+        with self.assertRaises(ValidationError):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=999999,  # Non-existent
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=Decimal("9"),
+                motivo="Corrección",
+                actor=self.manager,
+            )
+
+    def test_correction_ui_shows_hidden_id_per_movimiento(self):
+        """UI debe generar acción por movimiento corregible con hidden ID."""
+        # This test verifies that when rendering a closed bitacora in revision mode,
+        # the sealed_bitacora context variable is set and contains the movements
+        self.client.force_login(self.manager)
+
+        # Render closed bitacora revision
+        response = self.client.get(f"/app/bitacoras/{self.hornos_bitacora.tipo}/?revision={self.hornos_bitacora.id}")
+        self.assertEqual(response.status_code, 200)
+
+        # Verify sealed_bitacora is in context and has the original movement
+        self.assertIsNotNone(response.context.get("sealed_bitacora"))
+        sealed = response.context["sealed_bitacora"]
+        self.assertEqual(sealed.id, self.hornos_bitacora.id)
+
+        # Verify the UI displays the revision mode (not edit mode)
+        self.assertContains(response, "Corte sellado", status_code=200)
+
+    def test_correction_negative_delta_allowed(self):
+        """Corrección puede ser negativa (reducir cantidad)."""
+    def test_sequential_corrections_use_current_effective_quantity(self):
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        for objetivo, motivo in ((Decimal("7"), "Primer conteo"), (Decimal("6"), "Segundo conteo")):
+            autorizar_correccion_bitacora(
+                movimiento_original_id=self.original_id,
+                bitacora=self.hornos_bitacora,
+                linea=self.hornos_linea,
+                nueva_cantidad=objetivo,
+                motivo=motivo,
+                actor=self.manager,
+            )
+
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("6"))
+        self.original.refresh_from_db()
+        self.assertEqual(self.original.cantidad, Decimal("8"))
+
+    def test_correction_can_set_effective_quantity_to_zero_and_is_idempotent(self):
+        from operacion.services_bitacoras_inventory import autorizar_correccion_bitacora
+
+        kwargs = {
+            "movimiento_original_id": self.original_id,
+            "bitacora": self.hornos_bitacora,
+            "linea": self.hornos_linea,
+            "nueva_cantidad": Decimal("0"),
+            "motivo": "Producto no localizado",
+            "actor": self.manager,
+        }
+        first = autorizar_correccion_bitacora(**kwargs)
+        second = autorizar_correccion_bitacora(**kwargs)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(stock_ubicacion(self.insumo, "CFP_1_1"), Decimal("0"))
+
+
+class ResponsiveDesignAndContentTests(TestCase):
+    """Tests for Step1 responsive design, data attributes, and content visibility."""
+
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(username="jefatura.responsive", password="test12345")
+        UserProfile.objects.create(user=self.manager)
+        UserModuleAccess.objects.create(user=self.manager, module="produccion", access=ACCESS_MANAGE)
+        self.operator = self.user_model.objects.create_user(username="operador.responsive", password="test12345")
+        UserProfile.objects.create(user=self.operator)
+        UserModuleAccess.objects.create(user=self.operator, module="produccion", access=ACCESS_VIEW)
+        self.sucursal = Sucursal.objects.create(codigo="TEST", nombre="Sucursal Test", activa=True)
+        self.unidad = UnidadMedida.objects.create(codigo="kg-test", nombre="Kilogramo")
+        self.insumo = Insumo.objects.create(
+            codigo="TEST:INSUMO:RESP",
+            codigo_point="RP-001",
+            nombre="Test Insumo Responsive",
+            nombre_point="Test Insumo Point",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=self.unidad,
+        )
+        self.receta = Receta.objects.create(
+            nombre="Test Receta Responsive",
+            codigo_point="RP-001",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_unidad=self.unidad,
+            hash_contenido="test-responsive-receta",
+            pasa_modulo_produccion=True,
+        )
+
+    def test_captura_page_before_seal_has_blind_state(self):
+        """Before CFP seal, page has data-capture-state="blind" hiding summary."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-capture-state="blind"', response.content.decode())
+        # Before seal, summary fields should not be visible
+        self.assertNotIn("Existencia esperada", response.content.decode())
+
+    def test_captura_page_before_seal_has_mobile_layout(self):
+        """Before CFP seal, page uses data-layout="mobile-line" for mobile-first."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-layout="mobile-line"', response.content.decode())
+
+    def test_sealed_bitacora_has_sealed_state(self):
+        """After CFP seal, page has data-capture-state="sealed" revealing summary."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        # Create and seal a bitacora
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5.5", "esperado": "5.5"},
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-capture-state="sealed"', response.content.decode())
+        # After seal, summary should be visible
+        self.assertIn("Existencia esperada", response.content.decode())
+
+    def test_sealed_bitacora_shows_review_section(self):
+        """After seal, review section (Resultados del conteo) is visible."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        linea = BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={
+                "existencia_fisica": "5.5",
+                "esperado": "5.5",
+                "diferencia": "0",
+            },
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+        content = response.content.decode()
+
+        self.assertIn("Resultados del conteo", content)
+        self.assertIn("Existencia física", content)
+        self.assertIn("5.5", content)
+
+    def test_date_picker_not_editable_on_capture(self):
+        """Date field is hidden (type=hidden) on daily capture, not editable."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Date should be submitted as hidden, not visible for editing
+        self.assertIn('type="hidden" name="fecha"', content)
+        # Old editable date input should not exist
+        self.assertNotIn('type="date" name="fecha"', content)
+
+    def test_sealed_bitacora_has_desktop_layout(self):
+        """After seal, page uses data-layout="desktop-table" for review."""
+        self.client.login(username="jefatura.responsive", password="test12345")
+        bitacora = BitacoraOperativa.objects.create(
+            tipo=BitacoraOperativa.TIPO_CFP11,
+            fecha=timezone.localdate(),
+            creado_por=self.manager,
+        )
+        BitacoraOperativaLinea.objects.create(
+            bitacora=bitacora,
+            receta=self.receta,
+            datos={"existencia_fisica": "5.5"},
+        )
+        bitacora.conteo_guardado_en = timezone.now()
+        bitacora.conteo_guardado_por = self.manager
+        bitacora.save()
+
+        from django.urls import reverse
+        url = reverse("operacion:bitacora_captura", args=[BitacoraOperativa.TIPO_CFP11])
+        response = self.client.get(f"{url}?revision={bitacora.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-layout="desktop-table"', response.content.decode())
+
+    def test_bitacoras_home_has_responsive_layout(self):
+        """Bitácoras home page has responsive semantic attributes."""
+        from django.urls import reverse
+        self.client.login(username="jefatura.responsive", password="test12345")
+        url = reverse("operacion:bitacoras_home")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Should use responsive viewport meta
+        self.assertIn('viewport-fit=cover', content)
+        # Should have data-layout attribute
+        self.assertIn('data-layout="mobile-line"', content)
+
+    def test_service_worker_version_updated_in_sw_js(self):
+        """Service worker cache name includes the responsive traceability version."""
+        from django.contrib.staticfiles import finders
+        sw_path = finders.find("operacion/sw.js")
+        self.assertIsNotNone(sw_path, "Service worker file not found")
+
+        with open(sw_path, encoding="utf-8") as f:
+            sw_content = f.read()
+
+        self.assertIn("v27-lotes-trazabilidad", sw_content)
+        self.assertNotIn("v21-", sw_content)

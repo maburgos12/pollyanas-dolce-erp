@@ -10,13 +10,13 @@ Por defecto es dry-run. Usa --apply para guardar cambios.
 from __future__ import annotations
 
 import hashlib
-from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import MovimientoInventario
+from inventario.services_existencias import establecer_stock, stock_ubicacion
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
 from pos_bridge.services.unidades import cantidad_en_unidad_erp as _cantidad_compartida
@@ -85,8 +85,7 @@ class Command(BaseCommand):
                 continue
 
             insumo = resolved.insumo
-            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo)
-            stock_previo = Decimal(str(existencia.stock_actual or 0))
+            stock_previo = stock_ubicacion(insumo, "ALMACEN_1")
             stock_point, nota_conversion = _cantidad_en_unidad_erp(row.quantity, row.unit, insumo)
             if nota_conversion.startswith("UNIDAD INCOMPATIBLE"):
                 errores.append(f"{insumo.nombre}: {nota_conversion}")
@@ -105,9 +104,7 @@ class Command(BaseCommand):
             )
 
             if not dry:
-                existencia.stock_actual = stock_point
-                existencia.actualizado_en = now
-                existencia.save(update_fields=["stock_actual", "actualizado_en"])
+                establecer_stock(insumo, "ALMACEN_1", stock_point)
 
                 source_hash = hashlib.sha256(
                     f"SYNC_POINT|{insumo.id}|{branch_hint}|{stock_point}|{now.isoformat()}".encode()
@@ -119,6 +116,7 @@ class Command(BaseCommand):
                         "tipo": MovimientoInventario.TIPO_AJUSTE,
                         "insumo": insumo,
                         "cantidad": stock_point,
+                        "almacen": "ALMACEN_1",
                         "referencia": sync_ref,
                     },
                 )

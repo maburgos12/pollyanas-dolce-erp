@@ -274,7 +274,7 @@ document.addEventListener('click', e => {
 });
 
 function quickFill(insumoId, nombre, unidad, almacen) {
-  const ins = INSUMOS.find(i => i.id === insumoId);
+  const ins = INSUMOS.find(i => i.id === insumoId && i.almacen === almacen);
   if (ins) selectInsumo(ins);
   window.scrollTo({top: 0, behavior: 'smooth'});
   searchInput && searchInput.focus();

@@ -943,7 +943,18 @@ def _log_budget_alert_once(alert_data: dict, kind: str) -> None:
 def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
     canonical_rows = canonicalized_active_insumos(limit=limit)
     member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
-    existencias_map = {ex.insumo_id: ex for ex in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids)}
+    stock_total_map = {
+        row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=member_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
+    }
+    existencias_map = {
+        ex.insumo_id: ex
+        for ex in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids, almacen="ALMACEN_1")
+    }
 
     inventario_total_count = 0
     stock_min_config_count = 0
@@ -964,19 +975,19 @@ def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
     for row in canonical_rows:
         canonical_id = row["canonical"].id
         member_existencias = [existencias_map[member_id] for member_id in row["member_ids"] if member_id in existencias_map]
-        if not member_existencias:
+        if not any(member_id in stock_total_map for member_id in row["member_ids"]):
             continue
         inventario_total_count += 1
         canonical_existencia = existencias_map.get(canonical_id)
-        base_existencia = canonical_existencia or member_existencias[0]
+        base_existencia = canonical_existencia or (member_existencias[0] if member_existencias else None)
 
-        stock_actual = sum((Decimal(str(item.stock_actual or 0)) for item in member_existencias), Decimal("0"))
-        stock_minimo = Decimal(str(base_existencia.stock_minimo or 0))
-        stock_maximo = Decimal(str(base_existencia.stock_maximo or 0))
-        inventario_promedio = Decimal(str(base_existencia.inventario_promedio or 0))
-        punto_reorden = Decimal(str(base_existencia.punto_reorden or 0))
-        dias_llegada = Decimal(str(base_existencia.dias_llegada_pedido or 0))
-        consumo_diario = Decimal(str(base_existencia.consumo_diario_promedio or 0))
+        stock_actual = sum((stock_total_map.get(member_id, Decimal("0")) for member_id in row["member_ids"]), Decimal("0"))
+        stock_minimo = Decimal(str(getattr(base_existencia, "stock_minimo", 0) or 0))
+        stock_maximo = Decimal(str(getattr(base_existencia, "stock_maximo", 0) or 0))
+        inventario_promedio = Decimal(str(getattr(base_existencia, "inventario_promedio", 0) or 0))
+        punto_reorden = Decimal(str(getattr(base_existencia, "punto_reorden", 0) or 0))
+        dias_llegada = Decimal(str(getattr(base_existencia, "dias_llegada_pedido", 0) or 0))
+        consumo_diario = Decimal(str(getattr(base_existencia, "consumo_diario_promedio", 0) or 0))
 
         if stock_minimo != 0:
             stock_min_config_count += 1
@@ -2451,9 +2462,13 @@ def _build_dashboard_supply_watchlist(limit: int = 6) -> dict[str, object] | Non
             .annotate(total=Sum("cantidad"))
         )
     }
-    existencia_map = {
-        int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+    stock_total_map = {
+        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
 
     aggregated: dict[int, dict[str, object]] = {}
@@ -2490,8 +2505,7 @@ def _build_dashboard_supply_watchlist(limit: int = 6) -> dict[str, object] | Non
         insumo = payload["insumo"]
         required_qty = Decimal(str(payload["required_qty"] or 0))
         historico_units = Decimal(str(payload["historico_units"] or 0))
-        existencia = existencia_map.get(int(insumo.id))
-        stock_actual = Decimal(str(getattr(existencia, "stock_actual", 0) or 0))
+        stock_actual = stock_total_map.get(int(insumo.id), Decimal("0"))
         shortage = max(required_qty - stock_actual, Decimal("0"))
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])

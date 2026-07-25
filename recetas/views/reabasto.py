@@ -35,6 +35,7 @@ from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal, sucursales_operativas
 from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.services_existencias import aplicar_delta
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import (
@@ -3843,7 +3844,7 @@ def _reabasto_branch_supply_rows(
 
     existencia_map = {
         int(item.insumo_id): item
-        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen="ALMACEN_1").select_related("insumo")
     }
 
     rows: list[dict[str, object]] = []
@@ -4565,7 +4566,7 @@ def _plan_branch_supply_rows(
 
     existencia_map = {
         int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen="ALMACEN_1").select_related("insumo")
     }
 
     rows: list[dict[str, object]] = []
@@ -9471,6 +9472,7 @@ def _mark_plan_closed(plan: PlanProduccion, acted_by) -> bool:
     return False
 
 
+@transaction.atomic
 def _apply_plan_consumption(plan: PlanProduccion, acted_by) -> dict[str, int]:
     explosion = _plan_explosion(plan)
     stats = {
@@ -9581,10 +9583,7 @@ def _apply_plan_consumption(plan: PlanProduccion, acted_by) -> dict[str, int]:
                 referencia=referencia,
                 source_hash=source_hash,
             )
-            existencia, _ = ExistenciaInsumo.objects.get_or_create(insumo=insumo_canonical)
-            existencia.stock_actual -= cantidad
-            existencia.actualizado_en = timezone.now()
-            existencia.save(update_fields=["stock_actual", "actualizado_en"])
+            aplicar_delta(insumo_canonical, "ALMACEN_1", -cantidad)
             log_event(
                 acted_by,
                 "CREATE",
@@ -9775,7 +9774,10 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
     )
     existencias_map = {
         e.insumo_id: Decimal(str(e.stock_actual or 0))
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos_map.keys()))
+        for e in ExistenciaInsumo.objects.filter(
+            insumo_id__in=list(insumos_map.keys()),
+            almacen="ALMACEN_1",
+        )
     }
     alertas_capacidad = 0
     for row in insumos:
@@ -10058,7 +10060,10 @@ def _periodo_mrp_resumen(
     insumos = sorted(insumos_map.values(), key=lambda x: x["nombre"].lower())
     existencias_map = {
         e.insumo_id: Decimal(str(e.stock_actual or 0))
-        for e in ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos_map.keys()))
+        for e in ExistenciaInsumo.objects.filter(
+            insumo_id__in=list(insumos_map.keys()),
+            almacen="ALMACEN_1",
+        )
     }
 
     alertas_capacidad = 0

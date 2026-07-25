@@ -1,9 +1,11 @@
 from io import BytesIO
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import transaction
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -12,9 +14,141 @@ from core.models import AuditLog, Sucursal
 from compras.models import SolicitudCompra
 from inventario.models import AjusteInventario, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
-from maestros.utils.canonical_catalog import canonical_member_ids, latest_costo_canonico
+from maestros.utils.canonical_catalog import (
+    canonical_insumo_by_id,
+    canonical_member_ids,
+    canonicalized_active_insumos,
+    clear_canonical_catalog_runtime_caches,
+    latest_costo_canonico,
+)
 from pos_bridge.models import PointProduct
 from recetas.models import LineaReceta, Receta, RecetaCostoVersion, VentaHistorica
+
+
+class CanonicalCatalogCacheTransactionTests(TransactionTestCase):
+    def test_reutiliza_construccion_dentro_del_mismo_atomic(self):
+        from maestros.utils import canonical_catalog
+
+        clear_canonical_catalog_runtime_caches()
+        with patch.object(
+            canonical_catalog,
+            "_build_canonicalized_active_insumos",
+            wraps=canonical_catalog._build_canonicalized_active_insumos,
+        ) as builder:
+            with transaction.atomic():
+                canonicalized_active_insumos(limit=5000)
+                canonicalized_active_insumos(limit=5000)
+
+            self.assertEqual(builder.call_count, 1)
+
+    def test_rollback_no_deja_insumos_fantasma_en_cache(self):
+        clear_canonical_catalog_runtime_caches()
+        insumo_id = None
+
+        try:
+            with transaction.atomic():
+                unidad = UnidadMedida.objects.create(
+                    codigo="kg-cache-rollback",
+                    nombre="Kilogramo cache rollback",
+                    tipo=UnidadMedida.TIPO_MASA,
+                )
+                insumo = Insumo.objects.create(
+                    nombre="Insumo cache rollback",
+                    unidad_base=unidad,
+                    activo=True,
+                )
+                insumo_id = insumo.id
+                cached_ids = {
+                    row["canonical"].id
+                    for row in canonicalized_active_insumos(limit=5000)
+                }
+                self.assertIn(insumo_id, cached_ids)
+                raise RuntimeError("forzar rollback")
+        except RuntimeError:
+            pass
+
+        self.assertFalse(Insumo.objects.filter(pk=insumo_id).exists())
+        current_ids = {
+            row["canonical"].id
+            for row in canonicalized_active_insumos(limit=5000)
+        }
+        self.assertNotIn(insumo_id, current_ids)
+
+    def test_rollback_de_savepoint_no_deja_insumos_fantasma_en_cache_exterior(self):
+        clear_canonical_catalog_runtime_caches()
+        insumo_id = None
+
+        with transaction.atomic():
+            try:
+                with transaction.atomic():
+                    unidad = UnidadMedida.objects.create(
+                        codigo="kg-cache-savepoint",
+                        nombre="Kilogramo cache savepoint",
+                        tipo=UnidadMedida.TIPO_MASA,
+                    )
+                    insumo = Insumo.objects.create(
+                        nombre="Insumo cache savepoint",
+                        unidad_base=unidad,
+                        activo=True,
+                    )
+                    insumo_id = insumo.id
+                    cached_ids = {
+                        row["canonical"].id
+                        for row in canonicalized_active_insumos(limit=5000)
+                    }
+                    self.assertIn(insumo_id, cached_ids)
+                    raise RuntimeError("forzar rollback de savepoint")
+            except RuntimeError:
+                pass
+
+            self.assertFalse(Insumo.objects.filter(pk=insumo_id).exists())
+            current_ids = {
+                row["canonical"].id
+                for row in canonicalized_active_insumos(limit=5000)
+            }
+            self.assertNotIn(insumo_id, current_ids)
+
+    def test_rollback_no_deja_membresia_canonica_obsoleta(self):
+        clear_canonical_catalog_runtime_caches()
+
+        try:
+            with transaction.atomic():
+                unidad_anterior = UnidadMedida.objects.create(
+                    codigo="pz-cache-anterior",
+                    nombre="Pieza cache anterior",
+                    tipo=UnidadMedida.TIPO_PIEZA,
+                )
+                anterior = Insumo.objects.create(
+                    nombre="Insumo cache anterior",
+                    unidad_base=unidad_anterior,
+                    activo=True,
+                )
+                self.assertEqual(canonical_insumo_by_id(anterior.id).id, anterior.id)
+                raise RuntimeError("forzar rollback anterior")
+        except RuntimeError:
+            pass
+
+        with transaction.atomic():
+            unidad = UnidadMedida.objects.create(
+                codigo="pz-cache-nueva",
+                nombre="Pieza cache nueva",
+                tipo=UnidadMedida.TIPO_PIEZA,
+            )
+            canonical = Insumo.objects.create(
+                nombre="Caja cache nueva",
+                unidad_base=unidad,
+                activo=True,
+                codigo_point="CACHE-NUEVA-001",
+            )
+            variant = Insumo.objects.create(
+                nombre="CAJA CACHE NUEVA",
+                unidad_base=unidad,
+                activo=True,
+            )
+
+            resolved = canonical_insumo_by_id(variant.id)
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved.id, canonical.id)
 
 
 class PointPendingReviewTests(TestCase):
