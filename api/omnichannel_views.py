@@ -23,6 +23,7 @@ from logistica.models import SolicitudDomicilio
 
 
 IDEMPOTENCY_CONFLICT_CODE = "OMNICHANNEL_IDEMPOTENCY_CONFLICT"
+OMNICHANNEL_CAPABILITY = "OMNICHANNEL"
 
 
 def _normalize_phone(value: str) -> str:
@@ -44,6 +45,26 @@ def _lock_external_key(external_source: str, external_id: str) -> None:
     lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
+
+
+def _lock_pedido_folio() -> None:
+    digest = hashlib.sha256(b"crm-pedido-folio").digest()
+    lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
+
+
+def _authorize_omnichannel(api_client, request):
+    if api_client.has_capability(OMNICHANNEL_CAPABILITY):
+        return None
+    _log_access(api_client, request, status.HTTP_403_FORBIDDEN)
+    return Response(
+        {
+            "detail": "La API key no tiene autorización omnicanal.",
+            "code": "OMNICHANNEL_CAPABILITY_REQUIRED",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
 
 
 def _find_customer(data: dict) -> Cliente | None:
@@ -150,6 +171,16 @@ def _conflict_response(api_client, request, *, detail: str, code: str):
 
 
 def _resolve_existing_order(api_client, request, order: PedidoCliente, data: dict):
+    if (
+        order.public_api_client_id is not None
+        and order.public_api_client_id != api_client.id
+    ):
+        return None, _conflict_response(
+            api_client,
+            request,
+            detail="La clave externa pertenece a otro cliente API.",
+            code="OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT",
+        )
     if not order.payload_snapshot:
         return None, _conflict_response(
             api_client,
@@ -163,13 +194,6 @@ def _resolve_existing_order(api_client, request, order: PedidoCliente, data: dic
             request,
             detail="La clave externa ya existe con contenido distinto.",
             code=IDEMPOTENCY_CONFLICT_CODE,
-        )
-    if order.public_api_client_id != api_client.id:
-        return None, _conflict_response(
-            api_client,
-            request,
-            detail="La clave externa pertenece a otro cliente API.",
-            code="OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT",
         )
     if not order.tracking_token:
         return None, _conflict_response(
@@ -214,6 +238,9 @@ class PublicOmnichannelOrdersView(APIView):
         api_client, error = _auth_public_client(request)
         if error:
             return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
 
         serializer = OmnichannelOrderInputSerializer(data=request.data)
         if not serializer.is_valid():
@@ -248,6 +275,7 @@ class PublicOmnichannelOrdersView(APIView):
                 detail = data["pedido"]
                 try:
                     with transaction.atomic():
+                        _lock_pedido_folio()
                         order = PedidoCliente.objects.create(
                             cliente=customer,
                             direccion_entrega=address,
@@ -265,10 +293,12 @@ class PublicOmnichannelOrdersView(APIView):
                     order = PedidoCliente.objects.select_related(
                         "cliente",
                         "direccion_entrega",
-                    ).get(
+                    ).filter(
                         external_source=data["external_source"],
                         external_id=data["external_id"],
-                    )
+                    ).first()
+                    if not order:
+                        raise
                     delivery, conflict = _resolve_existing_order(
                         api_client,
                         request,
@@ -305,6 +335,9 @@ class PublicOmnichannelCustomersView(APIView):
         api_client, error = _auth_public_client(request)
         if error:
             return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
 
         query = _normalize_text(request.query_params.get("q", ""))
         if len(query) < 3:
@@ -350,6 +383,9 @@ class PublicOmnichannelOrderStatusView(APIView):
         api_client, error = _auth_public_client(request)
         if error:
             return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
 
         order = PedidoCliente.objects.filter(
             tracking_token=tracking_token,

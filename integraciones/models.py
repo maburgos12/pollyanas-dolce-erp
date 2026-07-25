@@ -20,10 +20,13 @@ class GeneratedApiKey:
 
 
 class PublicApiClient(models.Model):
+    CAPABILITY_OMNICHANNEL = "OMNICHANNEL"
+
     nombre = models.CharField(max_length=120)
     clave_prefijo = models.CharField(max_length=12, unique=True, db_index=True)
     clave_hash = models.CharField(max_length=64)
     descripcion = models.CharField(max_length=255, blank=True, default="")
+    capabilities = models.JSONField(default=list, blank=True)
     activo = models.BooleanField(default=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -74,6 +77,14 @@ class PublicApiClient(models.Model):
 
     def validate(self, raw_key: str) -> bool:
         return self.clave_hash == _hash_key(raw_key)
+
+    def has_capability(self, capability: str) -> bool:
+        requested = (capability or "").strip().upper()
+        return requested in {
+            str(value).strip().upper()
+            for value in (self.capabilities or [])
+            if value
+        }
 
     def mark_used(self):
         self.last_used_at = timezone.now()

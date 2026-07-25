@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -214,6 +215,24 @@ class PedidoCliente(models.Model):
         return f"{prefix}-{seq:04d}"
 
     def save(self, *args, **kwargs):
+        allow_snapshot_backfill = kwargs.pop("_allow_payload_snapshot_backfill", False)
+        if not self._state.adding:
+            persisted_snapshot = (
+                PedidoCliente.objects.filter(pk=self.pk)
+                .values_list("payload_snapshot", flat=True)
+                .first()
+            )
+            snapshot_changed = persisted_snapshot != self.payload_snapshot
+            valid_backfill = (
+                allow_snapshot_backfill
+                and not persisted_snapshot
+                and bool(self.payload_snapshot)
+            )
+            if snapshot_changed and not valid_backfill:
+                raise ValidationError(
+                    {"payload_snapshot": "El snapshot omnicanal es inmutable."},
+                )
+
         if not self.folio:
             self.folio = self._generate_folio()
 

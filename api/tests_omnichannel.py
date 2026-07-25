@@ -4,6 +4,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
@@ -11,7 +12,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
-from integraciones.models import PublicApiClient
+from integraciones.models import PublicApiAccessLog, PublicApiClient
 from logistica.models import SolicitudDomicilio
 
 
@@ -21,6 +22,8 @@ class OmnichannelPublicApiTests(APITestCase):
         self.public_client, self.raw_api_key = PublicApiClient.create_with_generated_key(
             nombre="Maya omnicanal",
         )
+        self.public_client.capabilities = ["OMNICHANNEL"]
+        self.public_client.save(update_fields=["capabilities"])
         self.auth = {"HTTP_X_API_KEY": self.raw_api_key}
         self.url = reverse("api_public_omnichannel_orders")
         self.search_url = reverse("api_public_omnichannel_customers")
@@ -59,6 +62,51 @@ class OmnichannelPublicApiTests(APITestCase):
             HTTP_X_API_KEY="pk_invalid",
         )
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_key_activa_sin_capability_no_puede_usar_vistas_omnichannel(self):
+        unscoped_client, unscoped_key = PublicApiClient.create_with_generated_key(
+            nombre="Integrador sin scope",
+        )
+        unscoped_auth = {"HTTP_X_API_KEY": unscoped_key}
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        before_counts = (
+            Cliente.objects.count(),
+            DireccionCliente.objects.count(),
+            PedidoCliente.objects.count(),
+            SolicitudDomicilio.objects.count(),
+        )
+
+        responses = [
+            self.client.post(self.url, self.payload, format="json", **unscoped_auth),
+            self.client.get(self.search_url, {"q": "ana"}, **unscoped_auth),
+            self.client.get(
+                created.data["links"]["pedido_seguimiento"],
+                **unscoped_auth,
+            ),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+            self.assertEqual(response.data["code"], "OMNICHANNEL_CAPABILITY_REQUIRED")
+            self.assertEqual(set(response.data), {"detail", "code"})
+        self.assertEqual(
+            before_counts,
+            (
+                Cliente.objects.count(),
+                DireccionCliente.objects.count(),
+                PedidoCliente.objects.count(),
+                SolicitudDomicilio.objects.count(),
+            ),
+        )
+        self.assertFalse(unscoped_client.capabilities)
+        self.assertEqual(
+            PublicApiAccessLog.objects.filter(
+                client=unscoped_client,
+                status_code=status.HTTP_403_FORBIDDEN,
+            ).count(),
+            3,
+        )
 
     @override_settings(PUBLIC_API_RATE_LIMIT_PER_MINUTE=1)
     def test_rate_limit_existente_aplica_al_endpoint(self):
@@ -128,6 +176,25 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["code"], "OMNICHANNEL_IDEMPOTENCY_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
+
+    def test_snapshot_no_puede_modificarse_despues_de_crear_pedido(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(id=created.data["pedido_id"])
+        original_snapshot = deepcopy(order.payload_snapshot)
+        order.payload_snapshot = {"alterado": True}
+
+        with self.assertRaises(ValidationError):
+            order.save()
+
+        order.refresh_from_db()
+        self.assertEqual(order.payload_snapshot, original_snapshot)
+
+    def test_payload_no_puede_inyectar_snapshot(self):
+        self.payload["payload_snapshot"] = {"inyectado": "secreto"}
+        response = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(id=response.data["pedido_id"])
+        self.assertNotEqual(order.payload_snapshot, self.payload["payload_snapshot"])
+        self.assertNotIn("inyectado", order.payload_snapshot)
 
     def test_pedido_legacy_sin_snapshot_ni_domicilio_retorna_409_estable(self):
         customer = Cliente.objects.create(nombre="Cliente legacy")
@@ -231,6 +298,8 @@ class OmnichannelPublicApiTests(APITestCase):
         other_client, other_key = PublicApiClient.create_with_generated_key(
             nombre="Integrador ajeno",
         )
+        other_client.capabilities = ["OMNICHANNEL"]
+        other_client.save(update_fields=["capabilities"])
 
         response = self.client.get(
             created.data["links"]["pedido_seguimiento"],
@@ -239,6 +308,31 @@ class OmnichannelPublicApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertNotEqual(other_client.id, self.public_client.id)
+
+    def test_otra_key_no_puede_inferir_si_payload_coincide(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        other_client, other_key = PublicApiClient.create_with_generated_key(
+            nombre="Integrador ajeno con scope",
+        )
+        other_client.capabilities = ["OMNICHANNEL"]
+        other_client.save(update_fields=["capabilities"])
+        other_auth = {"HTTP_X_API_KEY": other_key}
+
+        same = self.client.post(self.url, self.payload, format="json", **other_auth)
+        changed_payload = deepcopy(self.payload)
+        changed_payload["pedido"]["descripcion"] = "Carga diferente"
+        different = self.client.post(
+            self.url,
+            changed_payload,
+            format="json",
+            **other_auth,
+        )
+
+        self.assertEqual(same.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(different.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(same.data["code"], "OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT")
+        self.assertEqual(different.data["code"], same.data["code"])
 
     def test_seguimiento_token_invalido_retorna_404(self):
         response = self.client.get(
@@ -388,6 +482,9 @@ class OmnichannelConcurrencyTests(TransactionTestCase):
         _, self.raw_api_key = PublicApiClient.create_with_generated_key(
             nombre="Maya concurrencia",
         )
+        public_client = PublicApiClient.objects.get(nombre="Maya concurrencia")
+        public_client.capabilities = ["OMNICHANNEL"]
+        public_client.save(update_fields=["capabilities"])
         self.url = reverse("api_public_omnichannel_orders")
         self.payload = {
             "external_source": "WHATSAPP",
@@ -447,3 +544,58 @@ class OmnichannelConcurrencyTests(TransactionTestCase):
         self.assertEqual(DireccionCliente.objects.count(), 1)
         self.assertEqual(PedidoCliente.objects.count(), 1)
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_external_ids_distintos_crean_folios_distintos_sin_colision(self):
+        barrier = Barrier(2)
+        responses = []
+        errors = []
+        for index in (1, 2):
+            customer = Cliente.objects.create(
+                nombre="Cliente Concurrente",
+                telefono=f"66711122{index:02d}",
+                email=f"race{index}@example.com",
+            )
+            DireccionCliente.objects.create(
+                cliente=customer,
+                direccion=f"Calle Carrera {index}",
+                referencias="Casa azul",
+                latitud="24.809064",
+                longitud="-107.394011",
+                place_id="race-place",
+            )
+
+        def submit(index):
+            close_old_connections()
+            client = APIClient()
+            payload = deepcopy(self.payload)
+            payload["external_id"] = f"wa_distinct_{index}"
+            payload["cliente"]["telefono"] = f"66711122{index:02d}"
+            payload["cliente"]["email"] = f"race{index}@example.com"
+            payload["direccion"]["direccion"] = f"Calle Carrera {index}"
+            try:
+                barrier.wait(timeout=10)
+                response = client.post(
+                    self.url,
+                    payload,
+                    format="json",
+                    HTTP_X_API_KEY=self.raw_api_key,
+                )
+                responses.append(response.status_code)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        threads = [Thread(target=submit, args=(index,)) for index in (1, 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertFalse(errors)
+        self.assertEqual(sorted(responses), [201, 201])
+        self.assertEqual(PedidoCliente.objects.count(), 2)
+        self.assertEqual(
+            PedidoCliente.objects.values("folio").distinct().count(),
+            2,
+        )

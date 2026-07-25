@@ -153,7 +153,8 @@ Resultado de regresión al ejecutar la fase:
 - Modify: `crm/models.py` (`payload_snapshot` inmutable, token y dueño API)
 - Create: `crm/migrations/0005_pedidocliente_payload_snapshot.py`
 - Create: `crm/migrations/0006_pedidocliente_tracking_ownership.py`
-- Modify: `integraciones/models.py` only if the existing API client cannot express the required scope.
+- Modify: `integraciones/models.py` (`OMNICHANNEL` capability opt-in).
+- Create: `integraciones/migrations/0002_publicapiclient_capabilities.py`
 
 - [x] **Step 1: Probar alta única por canal y referencia**
 
