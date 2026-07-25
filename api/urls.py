@@ -95,6 +95,7 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicOmnichannelOrderStatusView,
     PublicOmnichannelOrdersView,
 )
 from .rrhh_views import (
@@ -468,6 +469,11 @@ urlpatterns = [
         "public/v1/omnichannel-customers/",
         PublicOmnichannelCustomersView.as_view(),
         name="api_public_omnichannel_customers",
+    ),
+    path(
+        "public/v1/omnichannel-orders/<int:pedido_id>/",
+        PublicOmnichannelOrderStatusView.as_view(),
+        name="api_public_omnichannel_order_status",
     ),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),

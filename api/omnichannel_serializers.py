@@ -86,6 +86,7 @@ class OmnichannelAddressOutputSerializer(serializers.Serializer):
 
 class OmnichannelCustomerOutputSerializer(serializers.Serializer):
     id = serializers.IntegerField()
+    codigo = serializers.CharField()
     nombre = serializers.CharField()
     telefono = serializers.CharField()
     email = serializers.EmailField()

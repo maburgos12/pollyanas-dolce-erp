@@ -1,10 +1,13 @@
+from copy import deepcopy
+from threading import Barrier, Thread
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import override_settings
+from django.db import close_old_connections
+from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from integraciones.models import PublicApiClient
@@ -112,6 +115,7 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(solicitud.cliente_nombre, "Ana Pérez")
         self.assertEqual(solicitud.cliente_telefono, "6671234567")
         self.assertEqual(solicitud.direccion, "Av. Obregón 123")
+        self.assertEqual(solicitud.notas, "Portón blanco")
 
     def test_misma_clave_con_payload_distinto_retorna_409(self):
         first = self.client.post(self.url, self.payload, format="json", **self.auth)
@@ -123,6 +127,64 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["code"], "OMNICHANNEL_IDEMPOTENCY_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
+
+    def test_retry_identico_reutilizando_cliente_con_datos_previos_retorna_200(self):
+        existing = Cliente.objects.create(
+            nombre="Ana Registro Anterior",
+            telefono="(667) 123-4567",
+            email="anterior@example.com",
+        )
+
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["cliente_id"], existing.id)
+        self.assertEqual(first.data["pedido_id"], second.data["pedido_id"])
+        existing.refresh_from_db()
+        self.assertEqual(existing.nombre, "Ana Registro Anterior")
+        self.assertEqual(existing.email, "anterior@example.com")
+
+    def test_retry_identico_reutilizando_direccion_con_metadatos_previos_retorna_200(self):
+        existing_customer = Cliente.objects.create(
+            nombre="Ana Pérez",
+            telefono="6671234567",
+            email="ana@example.com",
+        )
+        existing_address = DireccionCliente.objects.create(
+            cliente=existing_customer,
+            direccion="  AV. OBREGON 123  ",
+            referencias="Referencia histórica",
+            latitud="24.800000",
+            longitud="-107.300000",
+            place_id="place-historico",
+        )
+
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["direccion_id"], existing_address.id)
+        self.assertEqual(first.data["pedido_id"], second.data["pedido_id"])
+        existing_address.refresh_from_db()
+        self.assertEqual(existing_address.referencias, "Referencia histórica")
+        self.assertEqual(existing_address.place_id, "place-historico")
+
+    def test_link_seguimiento_es_publico_y_consumible_con_api_key(self):
+        created = self.client.post(self.url, self.payload, format="json", **self.auth)
+        tracking_url = created.data["links"]["pedido_seguimiento"]
+
+        unauthorized = self.client.get(tracking_url)
+        authorized = self.client.get(tracking_url, **self.auth)
+
+        self.assertEqual(unauthorized.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(authorized.status_code, status.HTTP_200_OK)
+        self.assertEqual(authorized.data["pedido_id"], created.data["pedido_id"])
+        self.assertEqual(authorized.data["estatus"], PedidoCliente.ESTATUS_NUEVO)
+        self.assertNotIn("cliente", authorized.data)
+        self.assertNotIn("direccion", authorized.data)
 
     def test_rollback_atomico_si_falla_despues_de_crear_cliente(self):
         with patch(
@@ -171,13 +233,34 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.data["count"], 1)
         row = response.data["results"][0]
         self.assertEqual(row["id"], active.id)
+        self.assertEqual(row["codigo"], active.codigo)
         self.assertNotIn("notas", row)
         self.assertEqual(len(row["direcciones"]), 1)
+        self.assertEqual(row["direcciones"][0]["referencias"], "Portón blanco")
+        self.assertIn("latitud", row["direcciones"][0])
+        self.assertIn("longitud", row["direcciones"][0])
         self.assertNotIn("Dirección inactiva", str(response.data))
 
     def test_busqueda_requiere_api_key(self):
         response = self.client.get(self.search_url, {"q": "ana"})
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_busqueda_rechaza_q_ausente_o_vacio(self):
+        absent = self.client.get(self.search_url, **self.auth)
+        empty = self.client.get(self.search_url, {"q": "  "}, **self.auth)
+        self.assertEqual(absent.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(empty.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_busqueda_rechaza_termino_demasiado_corto(self):
+        response = self.client.get(self.search_url, {"q": "an"}, **self.auth)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(PUBLIC_API_RATE_LIMIT_PER_MINUTE=1)
+    def test_rate_limit_existente_aplica_a_busqueda(self):
+        first = self.client.get(self.search_url, {"q": "ana"}, **self.auth)
+        second = self.client.get(self.search_url, {"q": "ana"}, **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
     def test_direccion_igual_no_se_cruza_entre_clientes(self):
         first_payload = self.payload
@@ -214,3 +297,72 @@ class OmnichannelPublicApiTests(APITestCase):
         self.client.post(self.url, second_payload, format="json", **self.auth)
 
         self.assertEqual(Cliente.objects.count(), 2)
+
+
+class OmnichannelConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        cache.clear()
+        _, self.raw_api_key = PublicApiClient.create_with_generated_key(
+            nombre="Maya concurrencia",
+        )
+        self.url = reverse("api_public_omnichannel_orders")
+        self.payload = {
+            "external_source": "WHATSAPP",
+            "external_id": "wa_race_123",
+            "canal": "WHATSAPP",
+            "cliente": {
+                "nombre": "Cliente Concurrente",
+                "telefono": "6671112233",
+                "email": "race@example.com",
+            },
+            "direccion": {
+                "direccion": "Calle Carrera 100",
+                "referencias": "Casa azul",
+                "latitud": "24.809064",
+                "longitud": "-107.394011",
+                "place_id": "race-place",
+            },
+            "pedido": {
+                "descripcion": "Pedido concurrente",
+                "fecha_compromiso": "2026-07-26",
+                "monto_estimado": "500.00",
+            },
+        }
+
+    def test_carrera_concurrente_no_duplica_entidades_ni_responde_500(self):
+        barrier = Barrier(2)
+        responses = []
+        errors = []
+
+        def submit():
+            close_old_connections()
+            client = APIClient()
+            try:
+                barrier.wait(timeout=10)
+                response = client.post(
+                    self.url,
+                    deepcopy(self.payload),
+                    format="json",
+                    HTTP_X_API_KEY=self.raw_api_key,
+                )
+                responses.append((response.status_code, response.data))
+            except Exception as exc:  # pragma: no cover - evidencia útil si falla el hilo
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        threads = [Thread(target=submit), Thread(target=submit)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertFalse(errors)
+        self.assertEqual(sorted(code for code, _ in responses), [200, 201])
+        self.assertEqual(len({data["pedido_id"] for _, data in responses}), 1)
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(DireccionCliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)

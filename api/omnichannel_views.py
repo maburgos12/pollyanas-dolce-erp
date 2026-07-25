@@ -104,38 +104,40 @@ def _get_or_create_address(customer: Cliente, data: dict) -> DireccionCliente:
         )
 
 
-def _customer_matches(customer: Cliente, data: dict) -> bool:
-    return (
-        _normalize_text(customer.nombre) == _normalize_text(data["nombre"])
-        and _normalize_phone(customer.telefono) == _normalize_phone(data.get("telefono", ""))
-        and _normalize_email(customer.email) == _normalize_email(data.get("email", ""))
-    )
-
-
-def _address_matches(address: DireccionCliente, data: dict) -> bool:
-    return (
-        address.direccion_normalizada
-        == DireccionCliente.normalizar_direccion(data["direccion"])
-        and _normalize_text(address.referencias) == _normalize_text(data.get("referencias", ""))
-        and address.latitud == data.get("latitud")
-        and address.longitud == data.get("longitud")
-        and _normalize_text(address.place_id) == _normalize_text(data.get("place_id", ""))
-    )
-
-
-def _order_matches(order: PedidoCliente, data: dict) -> bool:
+def _canonical_payload(data: dict) -> dict:
+    customer = data["cliente"]
+    address = data["direccion"]
     detail = data["pedido"]
-    return (
-        order.external_source == data["external_source"]
-        and order.external_id == data["external_id"]
-        and order.canal == data["canal"]
-        and _normalize_text(order.descripcion) == _normalize_text(detail["descripcion"])
-        and order.fecha_compromiso == detail.get("fecha_compromiso")
-        and order.monto_estimado == detail["monto_estimado"]
-        and order.direccion_entrega_id is not None
-        and _customer_matches(order.cliente, data["cliente"])
-        and _address_matches(order.direccion_entrega, data["direccion"])
-    )
+    return {
+        "external_source": data["external_source"],
+        "external_id": data["external_id"],
+        "canal": data["canal"],
+        "cliente": {
+            "nombre": _normalize_text(customer["nombre"]),
+            "telefono": _normalize_phone(customer.get("telefono", "")),
+            "email": _normalize_email(customer.get("email", "")),
+        },
+        "direccion": {
+            "direccion_normalizada": DireccionCliente.normalizar_direccion(address["direccion"]),
+            "referencias": _normalize_text(address.get("referencias", "")),
+            "latitud": str(address["latitud"]) if address.get("latitud") is not None else None,
+            "longitud": str(address["longitud"]) if address.get("longitud") is not None else None,
+            "place_id": _normalize_text(address.get("place_id", "")),
+        },
+        "pedido": {
+            "descripcion": _normalize_text(detail["descripcion"]),
+            "fecha_compromiso": (
+                detail["fecha_compromiso"].isoformat()
+                if detail.get("fecha_compromiso") is not None
+                else None
+            ),
+            "monto_estimado": str(detail["monto_estimado"]),
+        },
+    }
+
+
+def _snapshot_matches(order: PedidoCliente, data: dict) -> bool:
+    return order.payload_snapshot == _canonical_payload(data)
 
 
 def _response_payload(request, order: PedidoCliente, delivery: SolicitudDomicilio, *, created: bool):
@@ -147,7 +149,10 @@ def _response_payload(request, order: PedidoCliente, delivery: SolicitudDomicili
         "created": created,
         "links": {
             "pedido_seguimiento": request.build_absolute_uri(
-                reverse("api_crm_pedido_seguimiento", kwargs={"pedido_id": order.id}),
+                reverse(
+                    "api_public_omnichannel_order_status",
+                    kwargs={"pedido_id": order.id},
+                ),
             ),
         },
     }
@@ -178,7 +183,8 @@ class PublicOmnichannelOrdersView(APIView):
                 .first()
             )
             if order:
-                if not _order_matches(order, data):
+                delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
+                if not _snapshot_matches(order, data):
                     _log_access(api_client, request, status.HTTP_409_CONFLICT)
                     return Response(
                         {
@@ -187,7 +193,6 @@ class PublicOmnichannelOrdersView(APIView):
                         },
                         status=status.HTTP_409_CONFLICT,
                     )
-                delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
                 payload = _response_payload(request, order, delivery, created=False)
                 response_status = status.HTTP_200_OK
             else:
@@ -201,6 +206,7 @@ class PublicOmnichannelOrdersView(APIView):
                             direccion_entrega=address,
                             external_source=data["external_source"],
                             external_id=data["external_id"],
+                            payload_snapshot=_canonical_payload(data),
                             canal=data["canal"],
                             descripcion=_normalize_text(detail["descripcion"]),
                             fecha_compromiso=detail.get("fecha_compromiso"),
@@ -214,7 +220,8 @@ class PublicOmnichannelOrdersView(APIView):
                         external_source=data["external_source"],
                         external_id=data["external_id"],
                     )
-                    if not _order_matches(order, data):
+                    delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
+                    if not _snapshot_matches(order, data):
                         _log_access(api_client, request, status.HTTP_409_CONFLICT)
                         return Response(
                             {
@@ -223,7 +230,6 @@ class PublicOmnichannelOrdersView(APIView):
                             },
                             status=status.HTTP_409_CONFLICT,
                         )
-                    delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
                     payload = _response_payload(request, order, delivery, created=False)
                     response_status = status.HTTP_200_OK
                 else:
@@ -254,21 +260,29 @@ class PublicOmnichannelCustomersView(APIView):
             return error
 
         query = _normalize_text(request.query_params.get("q", ""))
+        if len(query) < 3:
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "detail": "q debe contener al menos 3 caracteres.",
+                    "code": "OMNICHANNEL_SEARCH_TERM_TOO_SHORT",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         customers = Cliente.objects.filter(activo=True)
-        if query:
-            phone = _normalize_phone(query)
-            if phone:
-                customers = customers.extra(
-                    where=[
-                        "(nombre ILIKE %s OR email ILIKE %s "
-                        "OR regexp_replace(telefono, '[^0-9]', '', 'g') LIKE %s)"
-                    ],
-                    params=[f"%{query}%", f"%{query}%", f"%{phone}%"],
-                )
-            else:
-                customers = customers.filter(
-                    Q(nombre__icontains=query) | Q(email__icontains=query),
-                )
+        phone = _normalize_phone(query)
+        if phone:
+            customers = customers.extra(
+                where=[
+                    "(nombre ILIKE %s OR email ILIKE %s "
+                    "OR regexp_replace(telefono, '[^0-9]', '', 'g') LIKE %s)"
+                ],
+                params=[f"%{query}%", f"%{query}%", f"%{phone}%"],
+            )
+        else:
+            customers = customers.filter(
+                Q(nombre__icontains=query) | Q(email__icontains=query),
+            )
         customers = customers.prefetch_related(
             Prefetch(
                 "direcciones",
@@ -280,3 +294,39 @@ class PublicOmnichannelCustomersView(APIView):
         data = OmnichannelCustomerOutputSerializer(customers, many=True).data
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response({"count": len(data), "results": data})
+
+
+class PublicOmnichannelOrderStatusView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, pedido_id: int):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+
+        order = PedidoCliente.objects.filter(id=pedido_id).first()
+        if not order:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Pedido omnicanal no encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        delivery = SolicitudDomicilio.objects.filter(pedido_cliente=order).first()
+        if not delivery:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Pedido omnicanal no encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        payload = {
+            "pedido_id": order.id,
+            "solicitud_domicilio_id": delivery.id,
+            "external_source": order.external_source,
+            "external_id": order.external_id,
+            "estatus": order.estatus,
+            "estatus_domicilio": delivery.estatus,
+            "updated_at": order.updated_at.isoformat(),
+        }
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
