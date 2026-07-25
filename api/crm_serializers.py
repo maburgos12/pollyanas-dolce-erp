@@ -65,6 +65,9 @@ class CRMPedidoSerializer(serializers.ModelSerializer):
             "folio",
             "cliente",
             "cliente_nombre",
+            "direccion_entrega",
+            "external_source",
+            "external_id",
             "descripcion",
             "fecha_compromiso",
             "sucursal",
@@ -77,6 +80,25 @@ class CRMPedidoSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "folio", "created_at", "updated_at", "cliente_nombre"]
+
+    def validate(self, attrs):
+        cliente = attrs.get("cliente")
+        direccion = attrs.get("direccion_entrega")
+        if direccion is not None and cliente is not None and direccion.cliente_id != cliente.id:
+            raise serializers.ValidationError(
+                {"direccion_entrega": "La dirección seleccionada no pertenece al cliente del pedido."}
+            )
+
+        external_source = (attrs.get("external_source") or "").strip()
+        external_id = (attrs.get("external_id") or "").strip()
+        if bool(external_source) != bool(external_id):
+            missing = "external_id" if not external_id else "external_source"
+            raise serializers.ValidationError(
+                {missing: "external_source y external_id deben enviarse juntos."}
+            )
+        attrs["external_source"] = external_source
+        attrs["external_id"] = external_id
+        return attrs
 
     def validate_sucursal(self, value: str) -> str:
         raw_value = (value or "").strip()

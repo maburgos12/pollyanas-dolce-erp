@@ -1628,6 +1628,20 @@ class SolicitudDomicilio(models.Model):
         blank=True,
         related_name="solicitudes_domicilio",
     )
+    cliente = models.ForeignKey(
+        "crm.Cliente",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
+    direccion_cliente = models.ForeignKey(
+        "crm.DireccionCliente",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
     cliente_nombre = models.CharField(max_length=160)
     cliente_telefono = models.CharField(max_length=30, blank=True, default="")
     direccion = models.CharField(max_length=255)

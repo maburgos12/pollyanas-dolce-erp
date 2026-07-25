@@ -127,6 +127,15 @@ class PedidoCliente(models.Model):
 
     folio = models.CharField(max_length=40, unique=True, blank=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="pedidos")
+    direccion_entrega = models.ForeignKey(
+        DireccionCliente,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="pedidos",
+    )
+    external_source = models.CharField(max_length=40, blank=True, default="", db_index=True)
+    external_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
     sucursal = models.CharField(max_length=120, blank=True, default="")
@@ -160,6 +169,13 @@ class PedidoCliente(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["external_source", "external_id"],
+                condition=~models.Q(external_source="") & ~models.Q(external_id=""),
+                name="crm_pedido_origen_externo_unico",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.folio or f"Pedido {self.id}"

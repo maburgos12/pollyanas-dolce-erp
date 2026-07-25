@@ -59,7 +59,7 @@
 - Test: `api/tests_crm.py`
 - Test: `logistica/tests.py`
 
-- [ ] **Step 1: Escribir prueba de contrato de pedido omnicanal**
+- [x] **Step 1: Escribir prueba de contrato de pedido omnicanal**
 
 ```python
 def test_pedido_omnicanal_conserva_direccion_y_origen_externo(self):
@@ -75,7 +75,7 @@ def test_pedido_omnicanal_conserva_direccion_y_origen_externo(self):
     self.assertEqual(pedido.external_source, "CALL_CENTER")
 ```
 
-- [ ] **Step 2: Ejecutar y confirmar fallo por campos inexistentes**
+- [x] **Step 2: Ejecutar y confirmar fallo por campos inexistentes**
 
 Run:
 
@@ -87,7 +87,7 @@ TEST_DB_NAME=test_omnicanal_task2 \
 
 Expected: `TypeError` por `direccion_entrega` o `external_source`.
 
-- [ ] **Step 3: Agregar campos canónicos**
+- [x] **Step 3: Agregar campos canónicos**
 
 ```python
 direccion_entrega = models.ForeignKey(
@@ -103,7 +103,7 @@ external_id = models.CharField(max_length=120, blank=True, default="")
 
 Agregar una restricción única condicional para `(external_source, external_id)` cuando ambos tengan valor. En `SolicitudDomicilio`, agregar relaciones protegidas hacia `Cliente`, `DireccionCliente` y `PedidoCliente` sin retirar los campos de texto históricos.
 
-- [ ] **Step 4: Crear y revisar migraciones**
+- [x] **Step 4: Crear y revisar migraciones**
 
 Run:
 
@@ -114,11 +114,11 @@ Run:
 
 Expected: migraciones `0004` y `0043`; después `No changes detected`.
 
-- [ ] **Step 5: Probar fallback histórico**
+- [x] **Step 5: Probar fallback histórico**
 
 Crear una prueba donde `SolicitudDomicilio` no tenga relaciones nuevas y verificar que su dirección y teléfono históricos sigan serializándose. Esto protege registros existentes.
 
-- [ ] **Step 6: Ejecutar regresión y commit**
+- [x] **Step 6: Ejecutar regresión y commit**
 
 Run:
 
@@ -134,6 +134,14 @@ Commit:
 ```bash
 git commit -m "feat(domicilios): vincular pedidos con clientes y direcciones"
 ```
+
+Resultado de regresión al ejecutar la fase:
+
+- Contrato afectado: 12/12 pruebas en verde.
+- Suite amplia CRM + logística: 382/384.
+- Los dos fallos restantes también fallan aislados y corresponden a contratos
+  previos de entrega/PWA en `logistica/tests.py`; esta fase no modifica esos
+  archivos ni los comportamientos señalados.
 
 ### Task 3: API idempotente para call center y tienda
 
