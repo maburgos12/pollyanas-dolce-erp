@@ -12,9 +12,14 @@ from rest_framework.views import APIView
 
 from core.access import can_manage_crm, can_view_crm
 from core.audit import log_event
-from crm.models import Cliente, PedidoCliente, SeguimientoPedido
+from crm.models import Cliente, DireccionCliente, PedidoCliente, SeguimientoPedido
 
-from .crm_serializers import CRMClienteSerializer, CRMPedidoSerializer, CRMSeguimientoCreateSerializer
+from .crm_serializers import (
+    CRMClienteSerializer,
+    CRMDireccionClienteSerializer,
+    CRMPedidoSerializer,
+    CRMSeguimientoCreateSerializer,
+)
 
 
 class _CRMBaseView(APIView):
@@ -260,10 +265,12 @@ class CRMClienteDetailView(_CRMBaseView):
             .select_related("cliente")
             .order_by("-created_at", "-id")[:50]
         )
+        direcciones = list(cliente.direcciones.filter(activa=True))
         return Response(
             {
                 "cliente": CRMClienteSerializer(cliente).data,
                 "pedidos": CRMPedidoSerializer(pedidos, many=True).data,
+                "direcciones": CRMDireccionClienteSerializer(direcciones, many=True).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -289,3 +296,55 @@ class CRMClienteDetailView(_CRMBaseView):
             },
         )
         return Response(CRMClienteSerializer(cliente).data, status=status.HTTP_200_OK)
+
+
+class CRMClienteDireccionesView(_CRMBaseView):
+    def get(self, request, pk: int):
+        if not can_view_crm(request.user):
+            return Response({"detail": "No tienes permisos para consultar CRM."}, status=status.HTTP_403_FORBIDDEN)
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+        rows = list(cliente.direcciones.filter(activa=True))
+        return Response(CRMDireccionClienteSerializer(rows, many=True).data, status=status.HTTP_200_OK)
+
+    def post(self, request, pk: int):
+        if not can_manage_crm(request.user):
+            return Response(
+                {"detail": "No tienes permisos para registrar direcciones CRM."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        cliente = get_object_or_404(Cliente, pk=pk)
+        serializer = CRMDireccionClienteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        normalized = DireccionCliente.normalizar_direccion(validated["direccion"])
+
+        with transaction.atomic():
+            direccion, created = DireccionCliente.objects.update_or_create(
+                cliente=cliente,
+                direccion_normalizada=normalized,
+                defaults={
+                    **validated,
+                    "activa": True,
+                },
+            )
+
+            if direccion.es_predeterminada:
+                cliente.direcciones.exclude(pk=direccion.pk).update(es_predeterminada=False)
+
+        log_event(
+            request.user,
+            "CREATE" if created else "UPDATE",
+            "crm.DireccionCliente",
+            str(direccion.id),
+            {
+                "cliente_id": cliente.id,
+                "es_predeterminada": direccion.es_predeterminada,
+                "deduplicada": not created,
+            },
+        )
+        return Response(
+            CRMDireccionClienteSerializer(direccion).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

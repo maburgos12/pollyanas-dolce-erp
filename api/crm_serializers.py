@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from crm.models import Cliente, PedidoCliente
+from crm.models import Cliente, DireccionCliente, PedidoCliente
 from crm.services import SucursalResolutionError, resolve_sucursal
 
 
@@ -21,6 +21,37 @@ class CRMClienteSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "codigo", "created_at", "updated_at"]
+
+
+class CRMDireccionClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DireccionCliente
+        fields = [
+            "id",
+            "alias",
+            "direccion",
+            "referencias",
+            "latitud",
+            "longitud",
+            "place_id",
+            "es_predeterminada",
+            "activa",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        latitud = attrs.get("latitud")
+        longitud = attrs.get("longitud")
+        if (latitud is None) != (longitud is None):
+            missing = "longitud" if longitud is None else "latitud"
+            raise serializers.ValidationError({missing: "Latitud y longitud deben enviarse juntas."})
+        if latitud is not None and not (-90 <= latitud <= 90):
+            raise serializers.ValidationError({"latitud": "La latitud debe estar entre -90 y 90."})
+        if longitud is not None and not (-180 <= longitud <= 180):
+            raise serializers.ValidationError({"longitud": "La longitud debe estar entre -180 y 180."})
+        return attrs
 
 
 class CRMPedidoSerializer(serializers.ModelSerializer):

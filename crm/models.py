@@ -40,6 +40,49 @@ class Cliente(models.Model):
         super().save(*args, **kwargs)
 
 
+class DireccionCliente(models.Model):
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name="direcciones")
+    alias = models.CharField(max_length=80, blank=True, default="")
+    direccion = models.CharField(max_length=300)
+    direccion_normalizada = models.CharField(max_length=300, editable=False)
+    referencias = models.CharField(max_length=300, blank=True, default="")
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    place_id = models.CharField(max_length=255, blank=True, default="")
+    es_predeterminada = models.BooleanField(default=False)
+    activa = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-es_predeterminada", "-updated_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cliente", "direccion_normalizada"],
+                name="crm_direccion_cliente_normalizada_unica",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(latitud__isnull=True, longitud__isnull=True)
+                    | models.Q(latitud__isnull=False, longitud__isnull=False)
+                ),
+                name="crm_direccion_gps_par_completo",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.alias or self.direccion
+
+    @staticmethod
+    def normalizar_direccion(value: str) -> str:
+        return normalizar_nombre((value or "").strip())
+
+    def save(self, *args, **kwargs):
+        self.direccion = (self.direccion or "").strip()
+        self.direccion_normalizada = self.normalizar_direccion(self.direccion)
+        super().save(*args, **kwargs)
+
+
 class PedidoCliente(models.Model):
     ESTATUS_NUEVO = "NUEVO"
     ESTATUS_COTIZADO = "COTIZADO"

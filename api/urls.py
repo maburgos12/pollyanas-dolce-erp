@@ -87,6 +87,7 @@ from .views import (
 )
 from .crm_views import (
     CRMClienteDetailView,
+    CRMClienteDireccionesView,
     CRMClientesView,
     CRMDashboardView,
     CRMPedidoSeguimientoView,
@@ -323,6 +324,11 @@ urlpatterns = [
     path("crm/dashboard/", CRMDashboardView.as_view(), name="api_crm_dashboard"),
     path("crm/clientes/", CRMClientesView.as_view(), name="api_crm_clientes"),
     path("crm/clientes/<int:pk>/", CRMClienteDetailView.as_view(), name="api_crm_cliente_detail"),
+    path(
+        "crm/clientes/<int:pk>/direcciones/",
+        CRMClienteDireccionesView.as_view(),
+        name="api_crm_cliente_direcciones",
+    ),
     path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
     path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
     path("rrhh/dashboard/", RRHHDashboardView.as_view(), name="api_rrhh_dashboard"),
