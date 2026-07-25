@@ -169,7 +169,7 @@ class ConversionTransfersTests(SimpleTestCase):
         from pos_bridge.services.movement_sync_service import PointMovementSyncService
 
         insumo = self._insumo_gramos()
-        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv"})
+        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv", "metadata": {"inventario_ubicacion": "ALMACEN_1"}})
         line = PointTransferLine.objects.create(
             transfer_external_id="T-1", source_hash="hash-conv-1", destination_branch=branch, origin_branch=branch,
             insumo=insumo, received_quantity=Decimal("32"), unit="KG",
@@ -192,7 +192,7 @@ class ConversionTransfersTests(SimpleTestCase):
         from pos_bridge.models import PointBranch, PointTransferLine
 
         insumo = self._insumo_gramos()
-        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv"})
+        branch, _ = PointBranch.objects.get_or_create(external_id="conv-br", defaults={"name": "Conv", "metadata": {"inventario_ubicacion": "ALMACEN_1"}})
         PointTransferLine.objects.create(
             transfer_external_id="T-2", source_hash="hash-conv-2", destination_branch=branch, origin_branch=branch,
             insumo=insumo, received_quantity=Decimal("32"), unit="KG",

@@ -1,11 +1,37 @@
 from decimal import Decimal
 from functools import lru_cache
+from weakref import WeakKeyDictionary
 
+from django.db import connection
 from django.db.models import Count, DecimalField, OuterRef, Subquery
 
 from core.cache_versions import bump_cache_scopes, get_cache_scope_version, get_or_set_versioned_cache
 from maestros.models import CostoInsumo, Insumo
 from recetas.utils.normalizacion import normalizar_nombre
+
+
+_atomic_runtime_caches = WeakKeyDictionary()
+
+
+def _current_outer_atomic_block():
+    if not connection.in_atomic_block:
+        return None
+    # Django no expone públicamente la profundidad de atomic; se limita aquí el
+    # acceso para no guardar resultados construidos dentro de savepoints.
+    atomic_blocks = getattr(connection, "atomic_blocks", ())
+    return atomic_blocks[0] if atomic_blocks else None
+
+
+def _atomic_runtime_cache() -> dict | None:
+    outer_atomic = _current_outer_atomic_block()
+    atomic_blocks = getattr(connection, "atomic_blocks", ())
+    if outer_atomic is None or len(atomic_blocks) != 1:
+        return None
+    cache = _atomic_runtime_caches.get(outer_atomic)
+    if cache is None:
+        cache = {}
+        _atomic_runtime_caches[outer_atomic] = cache
+    return cache
 
 
 def enterprise_readiness_profile(insumo: Insumo) -> dict[str, object]:
@@ -165,6 +191,14 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
 
 def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
     limit_safe = max(100, min(int(limit or 1500), 5000))
+    atomic_cache = _atomic_runtime_cache()
+    if connection.in_atomic_block and atomic_cache is None:
+        return _build_canonicalized_active_insumos(limit_safe)
+    if atomic_cache is not None:
+        key = ("canonicalized_active_insumos", limit_safe)
+        if key not in atomic_cache:
+            atomic_cache[key] = _build_canonicalized_active_insumos(limit_safe)
+        return atomic_cache[key]
     return get_or_set_versioned_cache(
         key_parts=("erp", "catalog", "canonicalized-insumos", f"limit{limit_safe}"),
         scopes=("insumos",),
@@ -186,8 +220,7 @@ def canonical_catalog_maps(limit: int = 1500) -> tuple[list[dict], dict[int, dic
     return canonical_rows, member_to_row, canonical_by_member_id, canonical_by_id
 
 
-@lru_cache(maxsize=8)
-def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+def _build_canonical_membership_maps() -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
     member_to_canonical_id: dict[int, int] = {}
     canonical_to_member_ids: dict[int, tuple[int, ...]] = {}
     for row in canonicalized_active_insumos(limit=5000):
@@ -200,7 +233,23 @@ def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, 
 
 
 @lru_cache(maxsize=8192)
-def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+def _cached_canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    return _build_canonical_membership_maps()
+
+
+def _canonical_membership_maps(version: int) -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
+    atomic_cache = _atomic_runtime_cache()
+    if connection.in_atomic_block and atomic_cache is None:
+        return _build_canonical_membership_maps()
+    if atomic_cache is not None:
+        key = ("canonical_membership_maps", version)
+        if key not in atomic_cache:
+            atomic_cache[key] = _build_canonical_membership_maps()
+        return atomic_cache[key]
+    return _cached_canonical_membership_maps(version)
+
+
+def _query_active_canonical_insumo(canonical_id: int) -> Insumo | None:
     return (
         Insumo.objects.filter(pk=canonical_id, activo=True)
         .select_related("unidad_base", "proveedor_principal")
@@ -208,7 +257,27 @@ def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
     )
 
 
+@lru_cache(maxsize=8192)
+def _cached_active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+    return _query_active_canonical_insumo(canonical_id)
+
+
+def _active_canonical_insumo(canonical_id: int, version: int) -> Insumo | None:
+    atomic_cache = _atomic_runtime_cache()
+    if connection.in_atomic_block and atomic_cache is None:
+        return _query_active_canonical_insumo(canonical_id)
+    if atomic_cache is not None:
+        key = ("active_canonical_insumo", canonical_id, version)
+        if key not in atomic_cache:
+            atomic_cache[key] = _query_active_canonical_insumo(canonical_id)
+        return atomic_cache[key]
+    return _cached_active_canonical_insumo(canonical_id, version)
+
+
 def clear_canonical_catalog_runtime_caches() -> None:
+    outer_atomic = _current_outer_atomic_block()
+    if outer_atomic is not None:
+        _atomic_runtime_caches.pop(outer_atomic, None)
     bump_cache_scopes("insumos", "inventario", "dashboard")
 
 

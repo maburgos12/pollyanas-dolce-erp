@@ -358,8 +358,12 @@ def generate_purchase_requests_from_production(
 
     supplier_policies_by_pair, supplier_policies_by_insumo = _load_supplier_policies(sorted(insumo_ids))
     inventory_pool = {
-        int(existencia.insumo_id): _to_decimal(existencia.stock_actual)
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
+        int(row["insumo_id"]): _to_decimal(row["stock_total"])
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
     latest_cost_map = _latest_cost_map(insumo_ids)
     demand_context = _build_insumo_demand_context(

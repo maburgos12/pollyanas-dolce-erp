@@ -408,6 +408,19 @@ class ProductionSupplyContextTests(TestCase):
         self.assertEqual(recipe_items["Huevo Supply"]["status_label"], "Disponible")
         self.assertEqual(recipe_items["Harina Supply"]["status_label"], "Stock parcial")
 
+    def test_supply_context_suma_stock_multiubicacion(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo_harina,
+            almacen="ARMADO",
+            stock_actual=Decimal("3"),
+        )
+
+        context = build_production_supply_context(target_date=self.target_date)
+
+        row = next(item for item in context["rows"] if item["insumo_nombre"] == "Harina Supply")
+        self.assertEqual(row["available_qty"], Decimal("7.000"))
+        self.assertEqual(row["shortage_qty"], Decimal("3.000"))
+
 
 class ProductionSupplyViewTests(TestCase):
     def setUp(self):

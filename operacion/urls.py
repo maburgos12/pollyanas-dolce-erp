@@ -33,5 +33,6 @@ urlpatterns = [
         name="mermas_insumos_reasignar_api",
     ),
     path("bitacoras/", views.bitacoras_home, name="bitacoras_home"),
+    path("bitacoras/apertura/", views.bitacoras_apertura, name="bitacoras_apertura"),
     path("bitacoras/<str:tipo>/", views.bitacora_captura, name="bitacora_captura"),
 ]

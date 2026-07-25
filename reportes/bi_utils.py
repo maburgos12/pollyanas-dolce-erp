@@ -4,7 +4,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Count, F, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
 from compras.models import OrdenCompra
@@ -181,9 +181,23 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
         )
     )
 
-    alertas_stock = ExistenciaInsumo.objects.filter(stock_actual__lt=F("punto_reorden")).count()
-    criticos_stock = ExistenciaInsumo.objects.filter(stock_actual__lte=0).count()
-    bajo_reorden_calc = ExistenciaInsumo.objects.filter(stock_actual__gt=0, stock_actual__lt=F("punto_reorden")).count()
+    inventory_rows = list(
+        ExistenciaInsumo.objects.values("insumo_id").annotate(
+            stock_total=Sum("stock_actual"),
+            punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
+        )
+    )
+    alertas_stock = sum(
+        1
+        for row in inventory_rows
+        if (row["stock_total"] or Decimal("0")) < (row["punto_reorden_almacen_1"] or Decimal("0"))
+    )
+    criticos_stock = sum(1 for row in inventory_rows if (row["stock_total"] or Decimal("0")) <= 0)
+    bajo_reorden_calc = sum(
+        1
+        for row in inventory_rows
+        if Decimal("0") < (row["stock_total"] or Decimal("0")) < (row["punto_reorden_almacen_1"] or Decimal("0"))
+    )
     production_fact_total = (
         FactProduccionDiaria.objects.filter(fecha__gte=date_from, fecha__lte=today).aggregate(total=Sum("producido")).get("total")
         or Decimal("0")

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.db.models import Sum
 from django.utils import timezone
 
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
@@ -167,10 +168,19 @@ def build_production_supply_context(
     existencias = list(
         ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
         .select_related("insumo", "insumo__unidad_base")
-        .order_by("insumo__nombre")
+        .order_by("insumo__nombre", "-actualizado_en", "-id")
     )
-    inventory_by_insumo = {int(existencia.insumo_id): existencia for existencia in existencias}
-    inventory_pool = {insumo_id: _to_decimal(existencia.stock_actual) for insumo_id, existencia in inventory_by_insumo.items()}
+    latest_existence_by_insumo: dict[int, ExistenciaInsumo] = {}
+    for existencia in existencias:
+        latest_existence_by_insumo.setdefault(int(existencia.insumo_id), existencia)
+    inventory_pool = {
+        int(row["insumo_id"]): _to_decimal(row["stock_total"])
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
+    }
     initial_inventory = dict(inventory_pool)
 
     aggregate_rows: dict[int, dict[str, object]] = {}
@@ -260,7 +270,7 @@ def build_production_supply_context(
             )
             purchase_gap_qty = _quantize_units(max(shortage_qty - purchase_generated_qty, ZERO))
 
-            existencia = inventory_by_insumo.get(insumo_id)
+            existencia = latest_existence_by_insumo.get(insumo_id)
             trace = dict(getattr(existencia, "trazabilidad_stock", {}) or {})
             trace_source = trace.get("source") or TRACE_UNTRACED
             trace_label = trace.get("label") or TRACE_LABELS.get(trace_source, trace_source)

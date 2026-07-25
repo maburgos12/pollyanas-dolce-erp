@@ -15,6 +15,7 @@ from recetas.models import LineaReceta, Receta, VentaHistorica
 
 from .models import ExistenciaInsumo, MovimientoInventario
 from .services_auditoria_insumos import DECIMAL_ZERO, ConsumoInsumoAuditService, parse_period, period_bounds
+from .services_existencias import aplicar_delta
 
 
 def _q3(value: Decimal) -> Decimal:
@@ -368,17 +369,15 @@ class ConsumoInsumoAutoService:
         return False, True
 
     def _apply_stock_delta(self, insumo: Insumo, delta: Decimal, *, created_automatically: bool = False) -> None:
-        existencia, created = ExistenciaInsumo.objects.get_or_create(insumo=insumo)
-        existencia.stock_actual = Decimal(str(existencia.stock_actual or 0)) + Decimal(str(delta or 0))
-        existencia.actualizado_en = timezone.now()
+        created = not ExistenciaInsumo.objects.filter(insumo=insumo, almacen="ALMACEN_1").exists()
+        existencia = aplicar_delta(insumo, "ALMACEN_1", delta, permitir_negativo=True)
         if created or created_automatically:
             trace = dict(existencia.trazabilidad_stock or {})
             trace["creado_automaticamente"] = True
             trace["fuente"] = "CONSUMO_BOM"
             existencia.trazabilidad_stock = trace
-            existencia.save(update_fields=["stock_actual", "actualizado_en", "trazabilidad_stock"])
+            existencia.save(update_fields=["trazabilidad_stock"])
             return
-        existencia.save(update_fields=["stock_actual", "actualizado_en"])
 
     def _source_hash(self, *parts: object) -> str:
         raw = "|".join(str(part) for part in parts)

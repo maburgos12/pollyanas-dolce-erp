@@ -17,8 +17,12 @@
     .link { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fff; color: #66163a; font-weight: 800; text-decoration: none; }
     .panel, .line { border: 1px solid #eadde4; border-radius: 8px; background: #fff; }
     .panel { padding: 14px; display: grid; gap: 10px; }
+    .message { padding: 12px 14px; border: 1px solid #c83f5b; border-radius: 8px; background: #fff1f3; color: #7b1730; font-weight: 800; }
     .line { padding: 12px; display: grid; gap: 10px; }
     .lines { display: grid; gap: 10px; }
+    .product-identity { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid #eadde4; }
+    .product-identity strong { color: #2b1722; font-size: .95rem; }
+    .product-identity span { color: #705d68; font-size: .78rem; font-weight: 800; }
     label { display: grid; gap: 5px; color: #705d68; font-size: .82rem; font-weight: 800; }
     input, select, textarea { width: 100%; min-height: 42px; border: 1px solid #d9c6d0; border-radius: 8px; background: #fff; color: #2b1722; font: inherit; padding: 9px 10px; }
     textarea { min-height: 76px; resize: vertical; }
@@ -29,97 +33,271 @@
     .actions-inner { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     button { min-height: 48px; border-radius: 8px; border: 1px solid #8b2252; background: #8b2252; color: #fff; font: inherit; font-weight: 850; }
     button.secondary { background: #fff; color: #66163a; }
+    .revision-mode .actions-inner { grid-template-columns: 1fr; }
+    .revision-mode button { background: #ccc; cursor: not-allowed; }
+    .cfp-sealed-info { display: grid; gap: 10px; }
+    .cfp-sealed-info .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; }
+    .cfp-sealed-info .field-box { padding: 10px; border: 1px solid #eadde4; border-radius: 8px; background: #fbf7f9; }
+    .cfp-sealed-info .field-label { font-size: .75rem; color: #705d68; font-weight: 800; }
+    .cfp-sealed-info .field-value { font-size: 1rem; margin-top: 4px; }
+    /* Responsive data-capture-state blind: hide summary before seal */
+    [data-capture-state="blind"] .cfp-sealed-info { display: none; }
+    /* Responsive layout breakpoints */
+    [data-layout="mobile-line"] .meta { grid-template-columns: 1fr; }
+    [data-layout="tablet-grid"] .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    [data-layout="desktop-table"] .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     @media (max-width: 640px) {
       .page { padding: 12px 12px 88px; }
       .meta, .actions-inner { grid-template-columns: 1fr; }
+      .product-identity { align-items: flex-start; flex-direction: column; gap: 3px; }
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+      .page { padding: 14px; }
+    }
+    @media (min-width: 1025px) {
+      .page { padding: 16px; }
     }
   </style>
 </head>
-<body>
-  <form class="page" method="post">
-    {% csrf_token %}
-    <section class="shell">
-      <header class="top">
-        <div>
-          <h1>{{ config.titulo }}</h1>
-          <p>{{ config.ayuda }}</p>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
-          </a>
-          <a class="link" href="{% url 'operacion:bitacoras_home' %}">Volver</a>
-        </div>
-      </header>
+<body data-capture-state="{% if sealed_bitacora %}sealed{% else %}blind{% endif %}"
+      data-layout="{% if sealed_bitacora %}desktop-table{% else %}mobile-line{% endif %}"
+>
+  {% if sealed_bitacora %}
+    {# Modo revisión sellada #}
+    <div class="page revision-mode">
+      <section class="shell">
+        <header class="top">
+          <div>
+            <h1>{{ config.titulo }}</h1>
+            <p>Corte sellado · {{ sealed_bitacora.conteo_guardado_en|date:"d/m/Y H:i" }}</p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+            </a>
+            <a class="link" href="{% url 'operacion:bitacoras_home' %}">Volver</a>
+          </div>
+        </header>
 
-      <section class="panel">
-        <div class="meta">
-          <label>Fecha
-            <input type="date" name="fecha" value="{{ today|date:'Y-m-d' }}">
-          </label>
-          <label>Área / sucursal
-            <select name="sucursal">
-              <option value="">CEDIS / Producción</option>
-              {% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}
-            </select>
-          </label>
-        </div>
-        <label>Notas generales
-          <textarea name="notas" placeholder="Observaciones generales de la bitácora"></textarea>
-        </label>
+        {% for message in messages %}
+          <div class="message{% if message.tags %} {{ message.tags }}{% endif %}" role="alert">{{ message }}</div>
+        {% endfor %}
+
+        {% if tipo == "CFP11" %}
+          <section class="panel cfp-sealed-info">
+            <h2 style="margin: 0; color: #8b2252; font-size: 1rem;">Resultados del conteo</h2>
+            {% for linea in sealed_bitacora.lineas.all %}
+              <div class="row">
+                <div class="field-box">
+                  <div class="field-label">Producto</div>
+                  <div class="field-value">{% if linea.insumo %}{{ linea.insumo.nombre }}{% else %}{{ linea.receta.nombre }}{% endif %}</div>
+                </div>
+                <div class="field-box">
+                  <div class="field-label">Existencia física</div>
+                  <div class="field-value">{{ linea.datos.existencia_fisica }}</div>
+                </div>
+                <div class="field-box">
+                  <div class="field-label">Existencia esperada</div>
+                  <div class="field-value">{{ linea.datos.esperado|default:"—" }}</div>
+                </div>
+                <div class="field-box">
+                  <div class="field-label">Diferencia</div>
+                  <div class="field-value">{{ linea.datos.diferencia|default:"—" }}</div>
+                </div>
+              </div>
+            {% endfor %}
+          </section>
+
+          {# Sección de correcciones trazables por movimiento (para cualquier tipo cerrado) #}
+          {% if sealed_bitacora %}
+            {% with movimientos=sealed_bitacora.lineas.all|dictsort:"id" %}
+              {% for linea in sealed_bitacora.lineas.all %}
+                {% for mov in linea.movimientos_inventario.all %}
+                  {% if mov.tipo in "ENTRADA,SALIDA" %}
+                    {% if forloop.first %}
+                      <section class="panel">
+                        <h2 style="margin: 0; color: #8b2252; font-size: 1rem;">Autorizar correcciones</h2>
+                    {% endif %}
+                    <form method="post">
+                      {% csrf_token %}
+                      <div style="padding: 12px; border: 1px solid #eadde4; border-radius: 8px; background: #fbf7f9; display: grid; gap: 10px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 9px;">
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Tipo</div>
+                            <div>{{ mov.get_tipo_display }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Insumo</div>
+                            <div>{{ mov.insumo.nombre }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Cantidad original</div>
+                            <div>{{ mov.cantidad }}</div>
+                          </div>
+                          <div>
+                            <div style="font-size: .75rem; color: #705d68; font-weight: 800;">Ubicación</div>
+                            <div>{{ mov.almacen }}</div>
+                          </div>
+                        </div>
+
+                        <input type="hidden" name="movimiento_original_id" value="{{ mov.id }}">
+
+                        <label>Nueva cantidad
+                          <input type="number" step="0.001" inputmode="decimal" name="cantidad_corregida" placeholder="Ingresa la cantidad corregida">
+                        </label>
+
+                        <label>Motivo de la corrección
+                          <textarea name="motivo_correccion" placeholder="Explica por qué se corrige este movimiento" style="min-height: 60px;"></textarea>
+                        </label>
+
+                        <button type="submit" name="accion" value="corregir" style="background: #a0365f;">Registrar corrección</button>
+                      </div>
+                    </form>
+                    {% if forloop.last %}
+                      </section>
+                    {% endif %}
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            {% endwith %}
+          {% endif %}
+
+          <form method="post" class="panel">
+            {% csrf_token %}
+            <h3 style="margin: 0; color: #8b2252; font-size: 0.95rem;">Transferir a Armado</h3>
+            <label>Cantidad
+              <input type="number" step="0.001" inputmode="decimal" name="cantidad_entregar" placeholder="Ej: 5.5">
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <button type="submit" name="accion" value="entregar_armado" style="grid-column: 1 / -1;">Transferir FIFO</button>
+            </div>
+          </form>
+        {% endif %}
       </section>
 
-      <div class="lines">
-        {% for index in row_range %}
-          <section class="line">
-            {% if not config.sin_producto %}
-              <label>Producto
-                <select name="receta_{{ index }}">
-                  <option value="">Seleccionar producto</option>
-                  {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}</option>{% endfor %}
-                </select>
-              </label>
-            {% endif %}
+      <div class="actions">
+        <div class="actions-inner">
+          <button disabled type="button">Corte sellado - No editable</button>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    {# Modo captura normal #}
+    <form class="page" method="post">
+      {% csrf_token %}
+      <section class="shell">
+        <header class="top">
+          <div>
+            <h1>{{ config.titulo }}</h1>
+            <p>{{ config.ayuda }}</p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <a class="link app-home-link" href="/app/" aria-label="Menú principal" title="Menú principal">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+            </a>
+            <a class="link" href="{% url 'operacion:bitacoras_home' %}">Volver</a>
+          </div>
+        </header>
 
-            <div class="fields">
-              {% for campo in config.campos %}
-                <label>
-                  {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% else %}{{ campo|capfirst }}{% endif %}
-                  {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
-                    <input type="date" name="{{ campo }}_{{ index }}">
-                  {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}
-                    <input type="text" name="{{ campo }}_{{ index }}">
-                  {% else %}
-                    <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ index }}">
-                  {% endif %}
+        {% for message in messages %}
+          <div class="message{% if message.tags %} {{ message.tags }}{% endif %}" role="alert">{{ message }}</div>
+        {% endfor %}
+
+        <section class="panel">
+          <div class="meta">
+            <input type="hidden" name="fecha" value="{{ today|date:'Y-m-d' }}">
+            <label>Área / sucursal
+              <select name="sucursal">
+                <option value="">CEDIS / Producción</option>
+                {% for sucursal in sucursales %}<option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>{% endfor %}
+              </select>
+            </label>
+          </div>
+          <label>Notas generales
+            <textarea name="notas" placeholder="Observaciones generales de la bitácora"></textarea>
+          </label>
+        </section>
+
+        <div class="lines">
+          {% for row in capture_rows %}
+            <section class="line">
+              {% if config.usa_insumos %}
+                <div class="product-identity">
+                  <strong>{{ row.insumo.nombre }}</strong>
+                  <span>{{ row.insumo.codigo_point }}</span>
+                </div>
+                <input type="hidden" name="insumo_{{ row.index }}" value="{{ row.insumo.id }}">
+              {% elif not config.sin_producto %}
+                <label>Producto
+                  <select name="receta_{{ row.index }}">
+                    <option value="">Seleccionar producto</option>
+                    {% for receta in recetas %}<option value="{{ receta.id }}">{{ receta.nombre }}{% if receta.codigo_point %} · {{ receta.codigo_point }}{% endif %}</option>{% endfor %}
+                  </select>
                 </label>
-              {% endfor %}
-            </div>
+              {% endif %}
 
-            {% if config.usa_sucursales %}
-              <div class="sucursales">
-                {% for sucursal in sucursales %}
-                  <label>{{ sucursal.codigo }}
-                    <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ index }}_{{ sucursal.id }}">
+              <div class="fields">
+                {% for campo in config.campos %}
+                  <label>
+                    {% if campo == "cedis" %}CEDIS{% elif campo == "devolucion" %}Devolución{% elif campo == "fecha_deteccion" %}Fecha detección{% elif campo == "tamano" %}Tamaño{% elif campo == "pastel_entero" %}Pastel entero{% elif campo == "total_rebanadas" %}Total rebanadas{% elif campo == "merma_rebanadas" %}Merma rebanadas{% elif campo == "fecha_producto" %}Fecha producto{% elif campo == "motivo_merma" %}Motivo merma{% elif campo == "preparacion" %}Preparación{% elif campo == "existencia_fisica" %}Existencia física{% elif campo == "salida_armado" %}Salida a armado{% elif campo == "consumo_real" %}Consumo real{% elif campo == "producto_terminado" %}Producto terminado{% else %}{{ campo|capfirst }}{% endif %}
+                    {% if campo == "fecha_producto" or campo == "fecha_deteccion" %}
+                      <input type="date" name="{{ campo }}_{{ row.index }}">
+                    {% elif campo == "plaga" or campo == "area" or campo == "metodo" or campo == "bloque" or campo == "tamano" or campo == "motivo_merma" %}
+                      <input type="text" name="{{ campo }}_{{ row.index }}">
+                    {% else %}
+                      <input type="number" step="0.001" inputmode="decimal" name="{{ campo }}_{{ row.index }}">
+                    {% endif %}
                   </label>
                 {% endfor %}
               </div>
-            {% endif %}
 
-            <label>Observaciones
-              <textarea name="observaciones_{{ index }}" placeholder="Comentario de esta línea"></textarea>
-            </label>
-          </section>
-        {% endfor %}
-      </div>
-    </section>
+              {% if config.usa_sucursales %}
+                <div class="sucursales">
+                  {% for sucursal in sucursales %}
+                    <label>{{ sucursal.codigo }}
+                      <input type="number" step="0.001" inputmode="decimal" name="sucursal_{{ row.index }}_{{ sucursal.id }}">
+                    </label>
+                  {% endfor %}
+                </div>
+              {% endif %}
 
-    <div class="actions">
-      <div class="actions-inner">
-        <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
-        <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>
+              <label>Observaciones
+                <textarea name="observaciones_{{ row.index }}" placeholder="Comentario de esta línea"></textarea>
+              </label>
+            </section>
+          {% endfor %}
+        </div>
+      </section>
+
+      <div class="actions">
+        <div class="actions-inner">
+          {% if tipo == "CFP11" %}
+            <button class="secondary" type="submit" name="accion" value="">Guardar borrador</button>
+            <button type="submit" name="accion" value="guardar_existencia">Guardar existencia</button>
+          {% elif tipo == "ARMADO" %}
+            <button class="secondary" type="submit" name="accion" value="">Guardar borrador</button>
+            <button type="submit" name="accion" value="cerrar_armado">Cerrar Armado y generar lote</button>
+          {% else %}
+            <button class="secondary" type="submit" name="cerrar" value="0">Guardar borrador</button>
+            <button type="submit" name="cerrar" value="1">Cerrar bitácora</button>
+          {% endif %}
+        </div>
       </div>
-    </div>
-  </form>
+    </form>
+  {% endif %}
+  <script>
+    (() => {
+      const mobile = window.matchMedia("(max-width: 640px)");
+      const tablet = window.matchMedia("(min-width: 641px) and (max-width: 1024px)");
+      const syncLayout = () => {
+        document.body.dataset.layout = mobile.matches
+          ? "mobile-line"
+          : tablet.matches ? "tablet-grid" : "desktop-table";
+      };
+      syncLayout();
+      mobile.addEventListener("change", syncLayout);
+      tablet.addEventListener("change", syncLayout);
+    })();
+  </script>
 </body>
 </html>

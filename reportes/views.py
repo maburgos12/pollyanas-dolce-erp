@@ -1589,14 +1589,20 @@ def _bi_purchase_snapshot() -> dict[str, object]:
 
 
 def _bi_inventory_snapshot() -> dict[str, object]:
-    rows = list(ExistenciaInsumo.objects.select_related("insumo")[:2000])
+    rows = list(
+        ExistenciaInsumo.objects.values("insumo_id").annotate(
+            stock_total=Sum("stock_actual"),
+            punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
+            stock_minimo_almacen_1=Max("stock_minimo", filter=Q(almacen="ALMACEN_1")),
+        )[:2000]
+    )
     total = len(rows)
     criticos = 0
     bajo_reorden = 0
     for row in rows:
-        stock = _to_decimal(getattr(row, "stock_actual", 0))
-        reorden = _to_decimal(getattr(row, "punto_reorden", 0))
-        minimo = _to_decimal(getattr(row, "stock_minimo", 0))
+        stock = _to_decimal(row.get("stock_total"))
+        reorden = _to_decimal(row.get("punto_reorden_almacen_1"))
+        minimo = _to_decimal(row.get("stock_minimo_almacen_1"))
         if stock <= 0:
             criticos += 1
         elif reorden > 0 and stock < reorden:
@@ -1992,9 +1998,13 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
             .annotate(total=Sum("cantidad"))
         )
     }
-    existencia_map = {
-        int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids).select_related("insumo")
+    stock_total_map = {
+        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
+        for row in (
+            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids)
+            .values("insumo_id")
+            .annotate(stock_total=Sum("stock_actual"))
+        )
     }
 
     aggregated: dict[int, dict[str, object]] = {}
@@ -2031,8 +2041,7 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
         insumo = payload["insumo"]
         required_qty = Decimal(str(payload["required_qty"] or 0))
         historico_units = Decimal(str(payload["historico_units"] or 0))
-        existencia = existencia_map.get(int(insumo.id))
-        stock_actual = Decimal(str(getattr(existencia, "stock_actual", 0) or 0))
+        stock_actual = stock_total_map.get(int(insumo.id), Decimal("0"))
         shortage = max(required_qty - stock_actual, Decimal("0"))
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])
@@ -3192,16 +3201,26 @@ def _faltantes_rows(nivel: str):
             bucket = SimpleNamespace(
                 insumo=canonical,
                 stock_actual=Decimal("0"),
-                stock_minimo=_to_decimal(existencia.stock_minimo, "0"),
-                stock_maximo=_to_decimal(existencia.stock_maximo, "0"),
-                punto_reorden=_to_decimal(existencia.punto_reorden, "0"),
-                inventario_promedio=_to_decimal(existencia.inventario_promedio, "0"),
-                dias_llegada_pedido=int(existencia.dias_llegada_pedido or 0),
-                consumo_diario_promedio=_to_decimal(existencia.consumo_diario_promedio, "0"),
+                stock_minimo=Decimal("0"),
+                stock_maximo=Decimal("0"),
+                punto_reorden=Decimal("0"),
+                inventario_promedio=Decimal("0"),
+                dias_llegada_pedido=0,
+                consumo_diario_promedio=Decimal("0"),
                 canonical_variant_count=canonical_by_id[canonical.id]["variant_count"],
+                _config_priority=0,
             )
             grouped[canonical.id] = bucket
         bucket.stock_actual += _to_decimal(existencia.stock_actual, "0")
+        config_priority = 2 if existencia.insumo_id == canonical.id else 1
+        if existencia.almacen == "ALMACEN_1" and config_priority > bucket._config_priority:
+            bucket.stock_minimo = _to_decimal(existencia.stock_minimo, "0")
+            bucket.stock_maximo = _to_decimal(existencia.stock_maximo, "0")
+            bucket.punto_reorden = _to_decimal(existencia.punto_reorden, "0")
+            bucket.inventario_promedio = _to_decimal(existencia.inventario_promedio, "0")
+            bucket.dias_llegada_pedido = int(existencia.dias_llegada_pedido or 0)
+            bucket.consumo_diario_promedio = _to_decimal(existencia.consumo_diario_promedio, "0")
+            bucket._config_priority = config_priority
 
     existencias = list(grouped.values())
 

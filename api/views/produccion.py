@@ -514,8 +514,12 @@ class MRPRequerimientosView(APIView):
                     row["costo_unitario"] = unit_cost
 
         existencias = {
-            e.insumo_id: Decimal(str(e.stock_actual or 0))
-            for e in ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos.keys()))
+            row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
+            for row in (
+                ExistenciaInsumo.objects.filter(insumo_id__in=list(insumos.keys()))
+                .values("insumo_id")
+                .annotate(stock_total=Sum("stock_actual"))
+            )
         }
 
         alertas_capacidad = 0
@@ -1363,6 +1367,5 @@ class ForecastInsightsView(APIView):
         if export_format:
             return _forecast_insights_export_response(payload, export_format)
         return Response(payload, status=status.HTTP_200_OK)
-
 
 
