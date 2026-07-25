@@ -64,6 +64,9 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
             "actor": {"id": "ops-17", "nombre": "Operaciones"},
         }
 
+    def _allow(self, *repartidores):
+        self.api_client.repartidores_logistica_autorizados.add(*repartidores)
+
     def test_requiere_api_key_valida_y_capability_opt_in(self):
         missing = self.client.get(self.catalog_url)
         invalid = self.client.get(
@@ -114,9 +117,11 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
     def test_catalogo_scoped_reutiliza_reglas_y_envuelve_results(self):
         disponible = self._repartidor("m2m_disponible")
+        fuera_scope = self._repartidor("m2m_fuera_scope")
         inactivo = self._repartidor("m2m_inactivo")
         inactivo.user.is_active = False
         inactivo.user.save(update_fields=["is_active"])
+        self._allow(disponible, inactivo)
 
         response = self.client.get(
             self.catalog_url,
@@ -128,6 +133,10 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         self.assertEqual(
             [item["id"] for item in response.data["results"]],
             [disponible.id],
+        )
+        self.assertNotIn(
+            fuera_scope.id,
+            [item["id"] for item in response.data["results"]],
         )
         self.assertEqual(set(response.data), {"results"})
         self.assertEqual(
@@ -147,6 +156,7 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
     def test_asignacion_retry_y_reasignacion_auditada_sin_pii_excesiva(self):
         primero = self._repartidor("m2m_primero")
         segundo = self._repartidor("m2m_segundo")
+        self._allow(primero, segundo)
         payload = self._payload(primero)
         payload["actor"]["email"] = "no-guardar@example.com"
         payload["actor"]["telefono"] = "6671234567"
@@ -214,6 +224,7 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
     def test_retry_exacto_terminal_e_inactivo_permanece_idempotente(self):
         repartidor = self._repartidor("m2m_terminal")
+        self._allow(repartidor)
         self.solicitud.repartidor = repartidor
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
         self.solicitud.save(update_fields=["repartidor", "estatus"])
@@ -238,6 +249,7 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
     def test_cross_client_y_ownerless_son_404_incluso_en_retry_exacto(self):
         repartidor = self._repartidor("m2m_owned")
+        self._allow(repartidor)
         self.solicitud.repartidor = repartidor
         self.solicitud.save(update_fields=["repartidor"])
         ownerless = SolicitudDomicilio.objects.create(
@@ -283,6 +295,60 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["detail"], "solicitud_id es obligatorio.")
+
+    def test_allowlist_vacia_falla_cerrado_y_fuera_scope_no_asigna(self):
+        permitido = self._repartidor("m2m_permitido")
+        fuera_scope = self._repartidor("m2m_no_permitido")
+
+        empty_catalog = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
+            **self.auth,
+        )
+        self.solicitud.repartidor = fuera_scope
+        self.solicitud.save(update_fields=["repartidor"])
+        rejected = self.client.post(
+            self.assign_url,
+            self._payload(fuera_scope),
+            format="json",
+            **self.auth,
+        )
+        self._allow(permitido)
+        scoped_catalog = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
+            **self.auth,
+        )
+
+        self.assertEqual(empty_catalog.status_code, status.HTTP_200_OK)
+        self.assertEqual(empty_catalog.data, {"results": []})
+        self.assertEqual(rejected.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(rejected.data, {"detail": "Repartidor no disponible."})
+        self.assertEqual(
+            [item["id"] for item in scoped_catalog.data["results"]],
+            [permitido.id],
+        )
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, fuera_scope.id)
+        self.assertEqual(AuditLog.objects.count(), 0)
+
+    def test_solicitud_id_sobredimensionado_retorna_400_y_access_log(self):
+        response = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": "9" * 5000},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            PublicApiAccessLog.objects.filter(
+                client=self.api_client,
+                endpoint=self.catalog_url,
+                method="GET",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            ).count(),
+            1,
+        )
 
     def test_actor_minimo_es_obligatorio_y_error_queda_auditado(self):
         repartidor = self._repartidor("m2m_actor_required")

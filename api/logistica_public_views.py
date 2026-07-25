@@ -31,6 +31,17 @@ class PublicDomicilioAssignmentSerializer(serializers.Serializer):
         return value
 
 
+class PublicLogisticaCatalogQuerySerializer(serializers.Serializer):
+    solicitud_id = serializers.RegexField(
+        regex=r"^[1-9][0-9]{0,18}$",
+        min_length=1,
+        max_length=19,
+    )
+
+    def validate_solicitud_id(self, value):
+        return int(value)
+
+
 def _authorize_logistica_assignment(api_client, request):
     capability = PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
     if api_client.has_capability(capability):
@@ -56,23 +67,30 @@ class PublicLogisticaRepartidoresDisponiblesView(APIView):
         if capability_error:
             return capability_error
 
-        solicitud_id = (request.query_params.get("solicitud_id") or "").strip()
-        if not solicitud_id.isdigit() or int(solicitud_id) < 1:
+        serializer = PublicLogisticaCatalogQuerySerializer(
+            data=request.query_params,
+        )
+        if not serializer.is_valid():
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
             return Response(
                 {"detail": "solicitud_id es obligatorio."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        solicitud_id = serializer.validated_data["solicitud_id"]
         try:
             get_owned_domicilio_or_404(
-                solicitud_id=int(solicitud_id),
+                solicitud_id=solicitud_id,
                 api_client=api_client,
             )
         except Http404:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
             raise
 
-        payload = {"results": list_repartidores_disponibles_minimal()}
+        payload = {
+            "results": list_repartidores_disponibles_minimal(
+                api_client=api_client,
+            )
+        }
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload, status=status.HTTP_200_OK)
 

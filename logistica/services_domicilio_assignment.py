@@ -58,7 +58,7 @@ def list_repartidores_disponibles() -> list[dict[str, Any]]:
     ]
 
 
-def list_repartidores_disponibles_minimal() -> list[dict[str, Any]]:
+def list_repartidores_disponibles_minimal(*, api_client) -> list[dict[str, Any]]:
     """Catálogo M2M mínimo.
 
     Solicitud.unidad, PedidoCliente.sucursal_ref y Repartidor.unidad_asignada son
@@ -70,7 +70,9 @@ def list_repartidores_disponibles_minimal() -> list[dict[str, Any]]:
             "id": repartidor.id,
             "nombre": nombre_operativo_usuario(repartidor.user),
         }
-        for repartidor in repartidores_disponibles_queryset()
+        for repartidor in repartidores_disponibles_queryset().filter(
+            api_clients_logistica_autorizados=api_client,
+        )
     ]
 
 
@@ -97,6 +99,13 @@ def assign_domicilio(
                 pedido_cliente__public_api_client=owner_api_client,
             )
         solicitud = get_object_or_404(solicitudes, pk=solicitud_id)
+        if (
+            owner_api_client is not None
+            and not owner_api_client.repartidores_logistica_autorizados.filter(
+                pk=repartidor_id,
+            ).exists()
+        ):
+            raise DomicilioAssignmentError("Repartidor no disponible.", 400)
         if solicitud.repartidor_id == repartidor_id:
             return {
                 "id": solicitud.id,

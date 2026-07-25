@@ -28,6 +28,11 @@ class PublicApiClient(models.Model):
     clave_hash = models.CharField(max_length=64)
     descripcion = models.CharField(max_length=255, blank=True, default="")
     capabilities = models.JSONField(default=list, blank=True)
+    repartidores_logistica_autorizados = models.ManyToManyField(
+        "logistica.Repartidor",
+        blank=True,
+        related_name="api_clients_logistica_autorizados",
+    )
     activo = models.BooleanField(default=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
