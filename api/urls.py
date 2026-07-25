@@ -123,6 +123,8 @@ from .logistica_views import (
     LogisticaMiPerfilView,
     LogisticaTutorialCargaConfirmarView,
     LogisticaMisReportesView,
+    LogisticaRepartidoresDisponiblesView,
+    LogisticaDomicilioAsignarView,
     LogisticaReportesUnidadAbiertosView,
     LogisticaReporteCreateView,
     LogisticaReporteDetailView,
@@ -382,6 +384,8 @@ urlpatterns = [
     path("logistica/rutas/activa/", LogisticaRutaActivaView.as_view(), name="api_logistica_ruta_activa"),
     path("logistica/entregas-ecommerce/", LogisticaEntregasEcommerceView.as_view(), name="api_logistica_entregas_ecommerce"),
     path("logistica/domicilios-generales/asignados/", LogisticaDomiciliosGeneralesAsignadosView.as_view(), name="api_logistica_domicilios_generales_asignados"),
+    path("logistica/repartidores-disponibles/", LogisticaRepartidoresDisponiblesView.as_view(), name="api_logistica_repartidores_disponibles"),
+    path("logistica/domicilios/<int:solicitud_id>/asignar/", LogisticaDomicilioAsignarView.as_view(), name="api_logistica_domicilio_asignar"),
     path("logistica/rutas/control/", LogisticaRutasControlView.as_view(), name="api_logistica_rutas_control"),
     path("logistica/rutas/<int:ruta_id>/carga-checklist/", LogisticaRutaCargaChecklistView.as_view(), name="api_logistica_ruta_carga_checklist"),
     path(
