@@ -71,6 +71,12 @@ jobs:
           --tag=performance
           --verbosity=2
 
+      - name: Run saneadas (bloqueante)
+        # Suites saneadas en la auditoría 2026-07-25; regresiones aquí SÍ bloquean.
+        run: python manage.py test inventario pos_bridge operacion reportes control
+
       - name: Run legacy full test suite
+        # continue-on-error mientras se sanea el resto (recetas, bonos_produccion,
+        # integraciones, ...). Quitarlo cuando la suite completa quede en verde.
         continue-on-error: true
         run: python manage.py test
