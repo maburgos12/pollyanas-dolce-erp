@@ -255,8 +255,10 @@ class MermasOnlyMiddleware:
     ALLOWED_PATHS = (
         "/app/",
         "/app/sw.js",
+        "/app/sucursal/",
     )
     ALLOWED_PREFIXES = (
+        "/app/api/mermas-insumos/",
         "/merma/",
         "/mermas/",
         "/logout/",

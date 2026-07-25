@@ -8,7 +8,7 @@ from django.core import mail
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Sucursal, UserProfile
+from core.models import Sucursal, UserModuleAccess, UserProfile
 from mermas.models import MermaInsumo, OrdenAjustePoint
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob, PointTransferLine
 from rrhh.models import Empleado
@@ -73,6 +73,33 @@ class OperacionMermasInsumosApiTests(TestCase):
         }
         data.update(overrides)
         return data
+
+    def habilitar_usuario_solo_mermas(self):
+        UserModuleAccess.objects.create(
+            user=self.user,
+            module="mermas.captura",
+            access=UserModuleAccess.ACCESS_MANAGE,
+        )
+
+    def test_usuario_solo_mermas_puede_abrir_captura_de_insumos(self):
+        self.habilitar_usuario_solo_mermas()
+
+        response = self.client.get(reverse("operacion:sucursal_tools"), {"tab": "mermas"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Registrar merma de insumo")
+
+    def test_usuario_solo_mermas_puede_enviar_merma_de_insumo(self):
+        self.habilitar_usuario_solo_mermas()
+
+        response = self.client.post(
+            reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(MermaInsumo.objects.count(), 1)
 
     def test_catalogo_y_creacion_derivan_sucursal_point_y_jefe_rrhh(self):
         catalogo = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"))
