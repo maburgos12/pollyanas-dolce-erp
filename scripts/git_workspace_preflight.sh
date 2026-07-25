@@ -33,6 +33,27 @@ if [[ "$current_branch" == "main" ]]; then
   exit 1
 fi
 
+registry_root="$common_dir/task-workspaces"
+if [[ -d "$registry_root" ]]; then
+  record=""
+  while IFS= read -r candidate; do
+    if grep -Fq "\"worktree\": \"$repo_root\"" "$candidate"; then
+      record="$candidate"
+      break
+    fi
+  done < <(find "$registry_root/active" "$registry_root/delivered" \
+    -maxdepth 1 -type f -name '*.json' 2>/dev/null)
+  if [[ -z "$record" ]]; then
+    echo "ERROR: el worktree no tiene tarea y propietario registrados." >&2
+    exit 1
+  fi
+  registered_branch="$(sed -n 's/.*"branch": "\([^"]*\)".*/\1/p' "$record" | head -1)"
+  if [[ "$registered_branch" != "$current_branch" ]]; then
+    echo "ERROR: la rama no coincide con el registro de la tarea." >&2
+    exit 1
+  fi
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "ERROR: el worktree ya contiene cambios o archivos sin seguimiento." >&2
   git status --short --branch >&2
