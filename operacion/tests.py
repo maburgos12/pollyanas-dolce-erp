@@ -538,6 +538,14 @@ class OperacionAppTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido="decimal-final",
         )
+        unidad_cfp = UnidadMedida.objects.create(codigo="kg-dec", nombre="Kilogramo decimal")
+        insumo_cfp = Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-DEC",
+            codigo_point="RC-DEC",
+            nombre="Relleno decimal",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad_cfp,
+        )
         self.client.force_login(user)
 
         required_decimal_fields = {
@@ -554,21 +562,22 @@ class OperacionAppTests(TestCase):
         self.assertLessEqual(required_decimal_fields, DECIMAL_FIELDS)
 
         field_cases = (
-            ("ROTACION", preparacion, "cantidad"),
-            ("HORNOS", preparacion, "existencia"),
-            ("HORNOS", preparacion, "preparacion"),
-            ("CFP11", preparacion, "existencia_fisica"),
-            ("CFP11", preparacion, "salida_armado"),
-            ("ARMADO", producto_final, "consumo_real"),
-            ("ARMADO", producto_final, "producto_terminado"),
+            ("ROTACION", {"receta_0": str(preparacion.id)}, "cantidad"),
+            ("HORNOS", {"receta_0": str(preparacion.id)}, "existencia"),
+            ("HORNOS", {"receta_0": str(preparacion.id)}, "preparacion"),
+            # CFP11 usa filas fijas por insumo Point, no dropdown de recetas.
+            ("CFP11", {"insumo_0": str(insumo_cfp.id)}, "existencia_fisica"),
+            ("CFP11", {"insumo_0": str(insumo_cfp.id)}, "salida_armado"),
+            ("ARMADO", {"receta_0": str(producto_final.id)}, "consumo_real"),
+            ("ARMADO", {"receta_0": str(producto_final.id)}, "producto_terminado"),
         )
-        for tipo, receta, campo in field_cases:
+        for tipo, identidad, campo in field_cases:
             for invalid_value in ("texto", "NaN", "Infinity", "-Infinity"):
                 with self.subTest(tipo=tipo, campo=campo, invalid_value=invalid_value):
                     BitacoraOperativa.objects.all().delete()
                     response = self.client.post(
                         f"/app/bitacoras/{tipo}/",
-                        {"receta_0": str(receta.id), f"{campo}_0": invalid_value},
+                        {**identidad, f"{campo}_0": invalid_value},
                     )
 
                     self.assertEqual(response.status_code, 200)
@@ -603,6 +612,15 @@ class OperacionAppTests(TestCase):
         config = BITACORA_CONFIG[BitacoraOperativa.TIPO_CFP11]
         user = self._user("produccion.cfp11-config")
         self._grant(user, "produccion")
+        # CFP11 renderiza una fila fija por insumo Point configurado.
+        unidad = UnidadMedida.objects.create(codigo="kg-cfg", nombre="Kilogramo config")
+        Insumo.objects.create(
+            codigo="DERIVADO:RECETA:CFP-CFG",
+            codigo_point="RC-CFG",
+            nombre="Relleno config",
+            tipo_item=Insumo.TIPO_INTERNO,
+            unidad_base=unidad,
+        )
         self.client.force_login(user)
 
         self.assertEqual(config["familia"], "custodia_lotes")
@@ -615,8 +633,10 @@ class OperacionAppTests(TestCase):
 
         self.assertContains(response, "Existencia física")
         self.assertContains(response, "Salida a armado")
-        self.assertContains(response, "Producto")
-        self.assertContains(response, "Producto Point")
+        # Fila fija por producto Point: nombre y código visibles, sin dropdown.
+        self.assertContains(response, "Relleno config")
+        self.assertContains(response, "RC-CFG")
+        self.assertContains(response, 'name="insumo_0"')
         self.assertContains(response, 'name="existencia_fisica_0"')
         self.assertNotContains(response, 'name="bloque_0"')
         self.assertNotContains(response, "Existencia_fisica")
@@ -3095,5 +3115,5 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v26-cfp-filas-producto", sw_content)
+        self.assertIn("v27-lotes-trazabilidad", sw_content)
         self.assertNotIn("v21-", sw_content)
