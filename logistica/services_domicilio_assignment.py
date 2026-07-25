@@ -133,6 +133,10 @@ def assign_domicilio(
             raise DomicilioAssignmentError("Repartidor no disponible.", 400)
 
         anterior_id = solicitud.repartidor_id
+        unidad_anterior_id = solicitud.unidad_id
+        unidad_anterior_codigo = (
+            solicitud.unidad.codigo if solicitud.unidad_id else None
+        )
         solicitud.repartidor = repartidor
         if unidad is not None:
             solicitud.unidad = unidad
@@ -143,11 +147,16 @@ def assign_domicilio(
         if unidad is not None:
             update_fields.append("unidad")
         solicitud.save(update_fields=update_fields)
-        payload = {
+        unidad_nueva = unidad if unidad is not None else solicitud.unidad
+        payload = dict(audit_metadata or {})
+        payload.update({
             "repartidor_anterior_id": anterior_id,
             "repartidor_nuevo_id": repartidor.id,
-        }
-        payload.update(audit_metadata or {})
+            "unidad_anterior_id": unidad_anterior_id,
+            "unidad_anterior_codigo": unidad_anterior_codigo,
+            "unidad_nueva_id": unidad_nueva.id if unidad_nueva else None,
+            "unidad_nueva_codigo": unidad_nueva.codigo if unidad_nueva else None,
+        })
         log_event(
             audit_user,
             "ASSIGN",

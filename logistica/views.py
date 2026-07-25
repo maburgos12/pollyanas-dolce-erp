@@ -52,6 +52,7 @@ from .services_google_routes import recalcular_ruta_programada
 from .services_domicilio_assignment import (
     DomicilioAssignmentError,
     assign_domicilio,
+    repartidores_disponibles_queryset,
 )
 from .services_google_roads import snap_gps_path_to_roads
 from .services_ecommerce import EcommerceClient, EcommerceIntegrationError
@@ -3788,7 +3789,13 @@ def domicilios_generales(request):
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
 
             solicitud = SolicitudDomicilio.objects.filter(pk=int(solicitud_id)).first() if solicitud_id.isdigit() else None
-            repartidor = Repartidor.objects.filter(pk=int(repartidor_id), user__is_active=True).first() if repartidor_id.isdigit() else None
+            repartidor = (
+                repartidores_disponibles_queryset()
+                .filter(pk=int(repartidor_id))
+                .first()
+                if repartidor_id.isdigit()
+                else None
+            )
             unidad = Unidad.objects.filter(pk=int(unidad_id), activa=True).first() if unidad_id.isdigit() else None
 
             if solicitud is None:
@@ -3831,6 +3838,6 @@ def domicilios_generales(request):
             "solicitudes_pendientes": solicitudes_pendientes,
             "solicitudes_recientes": solicitudes_recientes,
             "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
-            "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user").order_by("user__first_name", "user__username"),
+            "repartidores": repartidores_disponibles_queryset(),
         },
     )

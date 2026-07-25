@@ -12,6 +12,7 @@ from logistica.models import (
     SolicitudDomicilio,
     Unidad,
 )
+from logistica.services_domicilio_assignment import assign_domicilio
 from rrhh.models import Empleado
 
 
@@ -289,3 +290,91 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_ENTREGADO)
         self.assertEqual(self.solicitud.revision, 7)
         self.assertEqual(AuditLog.objects.count(), 0)
+
+    def test_html_no_ofrece_ni_acepta_tecnico_o_baja_rrhh(self):
+        self.client.force_login(self.manager)
+        disponible = self._repartidor("rep_html_disponible")
+        tecnico = self._repartidor(
+            "rep_html_tecnico",
+            tipo_identidad=Repartidor.TIPO_CUENTA_TECNICA,
+        )
+        baja = self._repartidor("rep_html_baja")
+        Empleado.objects.create(
+            codigo="EMP-HTML-BAJA",
+            nombre="Baja HTML",
+            usuario_erp=baja.user,
+            activo=False,
+        )
+        unidad = Unidad.objects.create(
+            codigo="DOM-FILTER",
+            descripcion="Unidad filtro",
+            sucursal=self.sucursal,
+        )
+
+        page = self.client.get(reverse("logistica:domicilios_generales"))
+
+        repartidor_ids = {
+            item.id for item in page.context["repartidores"]
+        }
+        self.assertIn(disponible.id, repartidor_ids)
+        self.assertNotIn(tecnico.id, repartidor_ids)
+        self.assertNotIn(baja.id, repartidor_ids)
+        rejected = self.client.post(
+            reverse("logistica:domicilios_generales"),
+            {
+                "accion": "asignar",
+                "solicitud_id": self.solicitud.id,
+                "repartidor": tecnico.id,
+                "unidad_operativa": unidad.id,
+            },
+        )
+        self.assertEqual(rejected.status_code, status.HTTP_302_FOUND)
+        self.solicitud.refresh_from_db()
+        self.assertIsNone(self.solicitud.repartidor_id)
+        self.assertEqual(AuditLog.objects.count(), 0)
+
+    def test_cambio_solo_unidad_audita_snapshot_canonico_y_retry_no_audita(self):
+        repartidor = self._repartidor("rep_unit_only")
+        anterior = Unidad.objects.create(
+            codigo="DOM-U1",
+            descripcion="Unidad anterior",
+            sucursal=self.sucursal,
+        )
+        nueva = Unidad.objects.create(
+            codigo="DOM-U2",
+            descripcion="Unidad nueva",
+            sucursal=self.sucursal,
+        )
+        self.solicitud.repartidor = repartidor
+        self.solicitud.unidad = anterior
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
+        self.solicitud.save(update_fields=["repartidor", "unidad", "estatus"])
+
+        changed = assign_domicilio(
+            solicitud_id=self.solicitud.id,
+            repartidor_id=repartidor.id,
+            unidad=nueva,
+            audit_user=self.manager,
+            audit_metadata={
+                "unidad_anterior_id": 999999,
+                "unidad_nueva_codigo": "FALSO",
+            },
+        )
+        retried = assign_domicilio(
+            solicitud_id=self.solicitud.id,
+            repartidor_id=repartidor.id,
+            unidad=nueva,
+            audit_user=self.manager,
+        )
+
+        self.assertFalse(changed["idempotent"])
+        self.assertTrue(retried["idempotent"])
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.unidad_id, nueva.id)
+        self.assertEqual(self.solicitud.revision, 1)
+        audit = AuditLog.objects.get(action="ASSIGN")
+        self.assertEqual(audit.payload["unidad_anterior_id"], anterior.id)
+        self.assertEqual(audit.payload["unidad_anterior_codigo"], anterior.codigo)
+        self.assertEqual(audit.payload["unidad_nueva_id"], nueva.id)
+        self.assertEqual(audit.payload["unidad_nueva_codigo"], nueva.codigo)
+        self.assertEqual(AuditLog.objects.count(), 1)
