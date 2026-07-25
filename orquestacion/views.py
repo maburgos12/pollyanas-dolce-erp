@@ -300,8 +300,59 @@ def dashboard(request):
             "severity_breakdown_items": severity_breakdown_items,
             "decision_breakdown_items": decision_breakdown_items,
             "run_status_breakdown_items": run_status_breakdown_items,
+            "can_manage": can_manage_orquestacion(request.user),
         },
     )
+
+
+@login_required
+def suggestion_decide(request, suggestion_id: int):
+    """Aprueba o rechaza una sugerencia de agente desde el tablero.
+
+    Registra la decisión humana (no ejecuta acciones operativas); el operador
+    va luego a la pantalla del ERP (source_url) a aplicar la corrección real.
+    """
+    if not can_view_orquestacion(request.user):
+        raise PermissionDenied("No tienes permisos para ver sugerencias.")
+
+    suggestion = get_object_or_404(
+        AgentSuggestion.objects.select_related("task__agent"), pk=suggestion_id
+    )
+
+    if request.method == "POST":
+        if not can_manage_orquestacion(request.user):
+            raise PermissionDenied("No tienes permisos para decidir sugerencias.")
+
+        action = (request.POST.get("action") or "").strip()
+        if suggestion.decision_status != AgentSuggestion.DECISION_PENDING:
+            messages.info(
+                request,
+                f"La sugerencia ya está {suggestion.get_decision_status_display().lower()}.",
+            )
+        elif action == "approve":
+            suggestion.decision_status = AgentSuggestion.DECISION_APPROVED
+            suggestion.approved_by = request.user
+            suggestion.approved_at = timezone.now()
+            suggestion.save(
+                update_fields=["decision_status", "approved_by", "approved_at", "updated_at"]
+            )
+            messages.success(request, "Sugerencia aprobada.")
+        elif action == "reject":
+            suggestion.decision_status = AgentSuggestion.DECISION_REJECTED
+            suggestion.rejected_by = request.user
+            suggestion.rejected_at = timezone.now()
+            suggestion.save(
+                update_fields=["decision_status", "rejected_by", "rejected_at", "updated_at"]
+            )
+            messages.success(request, "Sugerencia rechazada.")
+        else:
+            messages.error(request, "Acción de sugerencia no válida.")
+
+    next_url = request.POST.get("next") or ""
+    # ponytail: evitar open-redirect — solo rutas internas de orquestación.
+    if not next_url.startswith("/orquestacion/"):
+        next_url = reverse("orquestacion:dashboard")
+    return redirect(next_url)
 
 
 @login_required
