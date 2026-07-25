@@ -5079,4 +5079,4 @@ if (operation === "segment") {
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
         self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v66-carga-estable")
-        self.assertIn("?v=route-control-v66-carga-estable", html)
+        self.assertIn("?v=route-control-v67-totales-claros", html)

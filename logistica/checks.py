@@ -135,7 +135,7 @@ REMOVED_PWA_MARKERS = {
 }
 
 REQUIRED_TEMPLATE_MARKERS = {
-    "route-control-v66-carga-estable": "versionado exacto del service worker para forzar actualizacion de la PWA",
+    "route-control-v67-totales-claros": "versionado exacto del service worker para forzar actualizacion de la PWA",
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
