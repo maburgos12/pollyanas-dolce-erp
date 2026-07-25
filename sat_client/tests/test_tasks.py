@@ -170,3 +170,23 @@ class SatTaskEnabledFlagTests(TestCase):
         self.assertTrue(
             LogDescargaSat.objects.filter(nivel=LogDescargaSat.NIVEL_ERROR).exists()
         )
+
+
+class SatAlertDedupeTests(TestCase):
+    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1)
+    @patch("sat_client.tasks.periodos_diarios_a_descargar", return_value=[(date(2026, 6, 7), date(2026, 6, 7))])
+    @patch("sat_client.tasks._procesar_con_split")
+    @patch("sat_client.tasks.send_mail", return_value=1)
+    def test_config_error_alert_email_sent_once_per_day(self, send_mail_mock, procesar, _periodos):
+        from sat_client.services.base import SatConfigurationError
+
+        procesar.side_effect = SatConfigurationError("Falta SAT_RFC")
+
+        primera = ejecutar_descarga_sat_nocturna.run()
+        segunda = ejecutar_descarga_sat_nocturna.run()
+
+        self.assertEqual(primera["status"], "configuracion_incompleta")
+        self.assertEqual(segunda["status"], "configuracion_incompleta")
+        # El log SIEMPRE se escribe; el correo solo la primera vez en 24h.
+        self.assertEqual(LogDescargaSat.objects.filter(nivel=LogDescargaSat.NIVEL_ERROR).count(), 2)
+        send_mail_mock.assert_called_once()

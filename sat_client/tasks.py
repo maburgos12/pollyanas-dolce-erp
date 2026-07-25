@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.utils import timezone
 
 from sat_client.models import CfdiDescargado, LogDescargaSat, SolicitudDescarga
 from sat_client.services.autenticacion import obtener_token
@@ -76,6 +77,16 @@ def _solicitud_periodo_registrada(fecha_inicial: date, fecha_final: date, direcc
     return base.filter(
         estado=SolicitudDescarga.ESTADO_RECHAZADA,
         codigo_estado__in=CODIGOS_RECHAZO_DEFINITIVO,
+    ).exists()
+
+
+def _alerta_repetida_reciente(mensaje: str, *, horas: int = 24) -> bool:
+    """Evita reenviar por correo el mismo error ya alertado en las últimas horas."""
+    limite = timezone.now() - timedelta(hours=horas)
+    return LogDescargaSat.objects.filter(
+        nivel=LogDescargaSat.NIVEL_ERROR,
+        mensaje=mensaje,
+        creado_en__gte=limite,
     ).exists()
 
 
@@ -182,12 +193,15 @@ def ejecutar_descarga_sat_nocturna(self):
                 resultados.extend(_procesar_con_split(fecha_inicial, fecha_final, direccion))
             except SatConfigurationError as exc:
                 mensaje = f"Descarga SAT no configurada: {exc}"
+                # Consultar ANTES de crear el log de hoy, para no encontrarnos a nosotros mismos.
+                alerta_repetida = _alerta_repetida_reciente(mensaje)
                 LogDescargaSat.objects.create(
                     nivel=LogDescargaSat.NIVEL_ERROR,
                     mensaje=mensaje,
                     duracion_segundos=int(time.monotonic() - inicio),
                 )
-                _alertar_error(mensaje)
+                if not alerta_repetida:
+                    _alertar_error(mensaje)
                 return {"status": "configuracion_incompleta", "error": str(exc)}
             except SatServiceError as exc:
                 # Un dia fallido no debe bloquear el resto del run: registrar y seguir.
