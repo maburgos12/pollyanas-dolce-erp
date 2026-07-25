@@ -1806,6 +1806,17 @@ class LogisticaDomicilioAsignarView(_LogisticaBaseView):
                 SolicitudDomicilio.objects.select_for_update(),
                 pk=solicitud_id,
             )
+            repartidor_id = int(repartidor_id)
+            if solicitud.repartidor_id == repartidor_id:
+                return Response(
+                    {
+                        "id": solicitud.id,
+                        "repartidor_id": repartidor_id,
+                        "estatus": solicitud.estatus,
+                        "idempotent": True,
+                    },
+                    status=status.HTTP_200_OK,
+                )
             if solicitud.estatus in {
                 SolicitudDomicilio.ESTATUS_EN_RUTA,
                 SolicitudDomicilio.ESTATUS_ENTREGADO,
@@ -1816,22 +1827,12 @@ class LogisticaDomicilioAsignarView(_LogisticaBaseView):
                     status=status.HTTP_409_CONFLICT,
                 )
             repartidor = _repartidores_disponibles_queryset().filter(
-                pk=int(repartidor_id)
+                pk=repartidor_id
             ).first()
             if repartidor is None:
                 return Response(
                     {"detail": "Repartidor no disponible."},
                     status=status.HTTP_400_BAD_REQUEST,
-                )
-            if solicitud.repartidor_id == repartidor.id:
-                return Response(
-                    {
-                        "id": solicitud.id,
-                        "repartidor_id": repartidor.id,
-                        "estatus": solicitud.estatus,
-                        "idempotent": True,
-                    },
-                    status=status.HTTP_200_OK,
                 )
             anterior_id = solicitud.repartidor_id
             solicitud.repartidor = repartidor

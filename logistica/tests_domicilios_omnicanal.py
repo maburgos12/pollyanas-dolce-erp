@@ -140,6 +140,59 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(EntregaEcommerce.objects.count(), 0)
         self.assertEqual(Notificacion.objects.count(), 0)
 
+    def test_repeticion_idempotente_conserva_estado_terminal_sin_efectos(self):
+        repartidor = self._repartidor("rep_entregado")
+        reemplazo = self._repartidor("rep_reemplazo_terminal")
+        self.solicitud.repartidor = repartidor
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
+        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
+
+        response = self.client.post(
+            url,
+            {"repartidor_id": repartidor.id},
+            format="json",
+        )
+        cambio_real = self.client.post(
+            url,
+            {"repartidor_id": reemplazo.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["idempotent"])
+        self.assertEqual(cambio_real.status_code, status.HTTP_409_CONFLICT)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_ENTREGADO)
+        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
+        self.assertEqual(AuditLog.objects.count(), 0)
+        self.assertEqual(EntregaEcommerce.objects.count(), 0)
+        self.assertEqual(Notificacion.objects.count(), 0)
+
+    def test_repeticion_idempotente_acepta_repartidor_que_quedo_inactivo(self):
+        repartidor = self._repartidor("rep_asignado_inactivo")
+        self.solicitud.repartidor = repartidor
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
+        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        repartidor.user.is_active = False
+        repartidor.user.save(update_fields=["is_active"])
+        url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
+
+        response = self.client.post(
+            url,
+            {"repartidor_id": repartidor.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["idempotent"])
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_CANCELADO)
+        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
+        self.assertEqual(AuditLog.objects.count(), 0)
+        self.assertEqual(EntregaEcommerce.objects.count(), 0)
+        self.assertEqual(Notificacion.objects.count(), 0)
+
     def test_rechaza_sin_permisos_y_repartidor_no_disponible(self):
         repartidor = self._repartidor("rep_no_disponible")
         repartidor.user.is_active = False
