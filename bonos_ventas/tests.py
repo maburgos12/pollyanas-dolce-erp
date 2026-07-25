@@ -423,7 +423,7 @@ class BonosVentasTests(TestCase):
         sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
         periodo = ConfigBonoVentasPeriodo.objects.create(mes=5, anio=2026)
         con_sucursal = Empleado.objects.create(nombre="Empleado Con Sucursal", area="VENTAS", sucursal="Payán")
-        repartidor = Empleado.objects.create(nombre="Repartidor Con Sucursal", area="REPARTIDORES", puesto_operativo="REPARTIDOR", participa_bonos_ventas=True, sucursal="Payán")
+        repartidor = Empleado.objects.create(nombre="Repartidor Con Sucursal", area="REPARTIDOR", puesto_operativo="REPARTIDOR", participa_bonos_ventas=True, sucursal="Payán")
         sin_sucursal = Empleado.objects.create(nombre="Empleado Sin Sucursal", area="VENTAS", sucursal="")
         Empleado.objects.create(nombre="Empleado Hornos", area="HORNOS", sucursal="Payán")
         Empleado.objects.create(nombre="Empleado Inactivo", area="VENTAS", sucursal="Payán", activo=False)
@@ -459,7 +459,7 @@ class BonosVentasTests(TestCase):
         )
         repartidor = Empleado.objects.create(
             nombre="Empleado Repartidor Permiso",
-            area="REPARTIDORES",
+            area="REPARTIDOR",
             puesto_operativo="REPARTIDOR",
             participa_bonos_ventas=True,
             sucursal="Payán",

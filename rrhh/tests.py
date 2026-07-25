@@ -1862,7 +1862,7 @@ class RRHHViewsTests(TestCase):
             {
                 "action": "create",
                 "nombre": "VALDEZ FÉLIX REY IVÁN",
-                "area": "REPARTIDORES",
+                "area": "REPARTIDOR",
                 "usuario_erp": str(usuario.id),
                 "sucursal_app_id": str(sucursal.id),
                 "salario_diario": "300.00",
@@ -1891,7 +1891,7 @@ class RRHHViewsTests(TestCase):
         empleado = Empleado.objects.create(
             nombre="REPARTIDOR BAJA",
             fecha_ingreso=timezone.localdate(),
-            area="REPARTIDORES",
+            area="REPARTIDOR",
             puesto_operativo="REPARTIDOR",
             usuario_erp=usuario,
             activo=True,
@@ -1934,7 +1934,7 @@ class RRHHViewsTests(TestCase):
             {
                 "action": "create",
                 "nombre": "REPARTIDOR NUEVO",
-                "area": "REPARTIDORES",
+                "area": "REPARTIDOR",
                 "crear_usuario_erp": "on",
                 "nuevo_usuario_username": "rep.nuevo",
                 "nuevo_usuario_password": "Temporal123",
@@ -2015,7 +2015,7 @@ class RRHHViewsTests(TestCase):
             {
                 "action": "create",
                 "nombre": "REPARTIDOR DUPLICADO",
-                "area": "REPARTIDORES",
+                "area": "REPARTIDOR",
                 "crear_usuario_erp": "on",
                 "nuevo_usuario_username": "rep.duplicado",
                 "nuevo_usuario_password": "Temporal123",
@@ -2559,7 +2559,7 @@ class RRHHViewsTests(TestCase):
             reverse("rrhh:empleados"),
             {
                 "nombre": "Empleado Bono Logistica",
-                "area": "REPARTIDORES",
+                "area": "REPARTIDOR",
                 "puesto": "Apoyo",
                 "departamento": Empleado.DEP_LOGISTICA,
                 "bono_esquema_otro_nombre": "Bono logística",
@@ -2575,7 +2575,7 @@ class RRHHViewsTests(TestCase):
         empleado = Empleado.objects.get(nombre="Empleado Bono Logistica")
         esquema = BonoEsquema.objects.get(codigo="BONO_LOGISTICA")
         self.assertEqual(esquema.departamento, Empleado.DEP_LOGISTICA)
-        self.assertEqual(esquema.area, "REPARTIDORES")
+        self.assertEqual(esquema.area, "REPARTIDOR")
         self.assertIn(esquema, empleado.bonos_esquemas.all())
         self.assertFalse(empleado.participa_bonos_ventas)
         self.assertFalse(empleado.participa_bonos_produccion)
@@ -2694,7 +2694,7 @@ class RRHHViewsTests(TestCase):
 
         repartidor = Empleado.objects.create(
             nombre="REPARTIDOR BONO RRHH",
-            area="REPARTIDORES",
+            area="REPARTIDOR",
             departamento_origen=Empleado.DEP_LOGISTICA,
             departamento=Empleado.DEP_VENTAS,
             puesto_operativo="REPARTIDOR",

@@ -71,6 +71,7 @@ from .services_catalogos import (
     area_division_choices,
     area_division_map,
     area_division_values,
+    canonical_area_division_code,
     funciones_operativas_catalogo,
     puesto_operativo_choices,
     puesto_operativo_values,
@@ -176,8 +177,10 @@ def _guardar_upload_temporal(archivo) -> Path:
         return Path(tmp.name)
 
 
-def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], current_value: str = "") -> str:
+def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], current_value: str = "", normalizer=None) -> str:
     value = (post_data.get(field_name) or "").strip()
+    if normalizer:
+        value = normalizer(value)
     if value == "__otro__":
         raise ValidationError("Solo se permiten valores del catalogo oficial.")
     if value and value not in allowed_values and value != (current_value or ""):
@@ -186,7 +189,13 @@ def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], 
 
 
 def _organizacion_desde_post(post_data, empleado: Empleado | None = None) -> dict:
-    area = _catalogo_value(post_data, "area", area_division_values(), empleado.area if empleado else "")
+    area = _catalogo_value(
+        post_data,
+        "area",
+        area_division_values(),
+        empleado.area if empleado else "",
+        normalizer=canonical_area_division_code,
+    )
     defaults = area_division_map().get(area, {})
     puesto_operativo = (
         _catalogo_value(

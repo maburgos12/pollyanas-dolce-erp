@@ -561,7 +561,7 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                     reason="Si ya tiene acceso a la PWA, capturar esa cuenta en Empleado.usuario_erp para unir persona RRHH, usuario y logistica.",
                 )
             )
-        if normalize_catalog_key(empleado.area) != "REPARTIDORES":
+        if normalize_catalog_key(empleado.area) != "REPARTIDOR":
             proposals.append(
                 _proposal(
                     key=f"repartidor.area:{empleado.pk}",
@@ -570,7 +570,7 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                     entity_id=empleado.pk,
                     display=empleado.nombre,
                     current_value=empleado.area or "(vacio)",
-                    proposed_value="REPARTIDORES",
+                    proposed_value="REPARTIDOR",
                     action="alinear_area_repartidor",
                     severity="warning",
                     reason="Repartidores deben quedar separados de ventas/produccion para no mezclarse en bonos y apps.",
@@ -734,7 +734,7 @@ def _requires_branch(empleado: Empleado) -> bool:
         empleado.departamento == Empleado.DEP_VENTAS
         or empleado.puesto_operativo == "REPARTIDOR"
         or empleado.participa_bonos_ventas
-        or normalize_catalog_key(empleado.area) in {"CAJAS", "AUXILIAR_CAJAS", "CALL_CENTER", "REPARTIDORES", "VENTAS"}
+        or normalize_catalog_key(empleado.area) in {"CAJAS", "AUXILIAR_CAJAS", "CALL_CENTER", "REPARTIDOR", "REPARTIDORES", "VENTAS"}
     )
 
 

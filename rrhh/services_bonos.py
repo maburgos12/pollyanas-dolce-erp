@@ -8,6 +8,7 @@ from django.utils import timezone
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import BonoEsquema, Empleado
+from .services_catalogos import canonical_area_division_code
 
 
 BASE_BONO_ESQUEMAS = {
@@ -64,7 +65,7 @@ def crear_esquema_otro_desde_post(post_data) -> BonoEsquema | None:
         defaults={
             "nombre": nombre,
             "departamento": (post_data.get("bono_esquema_otro_departamento") or "").strip(),
-            "area": (post_data.get("bono_esquema_otro_area") or "").strip(),
+            "area": canonical_area_division_code(post_data.get("bono_esquema_otro_area")),
             "descripcion": (post_data.get("bono_esquema_otro_descripcion") or "").strip(),
             "activo": True,
         },

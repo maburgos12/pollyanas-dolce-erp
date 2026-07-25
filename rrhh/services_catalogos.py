@@ -6,6 +6,11 @@ from django.db import OperationalError, ProgrammingError
 
 from .models import CatalogoFuncionOperativa, Empleado
 
+AREA_REPARTIDOR = "REPARTIDOR"
+LEGACY_AREA_ALIASES = {
+    "REPARTIDORES": AREA_REPARTIDOR,
+}
+
 
 @dataclass(frozen=True)
 class FuncionOperativa:
@@ -32,7 +37,7 @@ FUNCIONES_OPERATIVAS: tuple[FuncionOperativa, ...] = (
     FuncionOperativa("CAJAS", "Cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CAJAS"),
     FuncionOperativa("AUXILIAR CAJAS", "Auxiliar cajas", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "AUXILIAR_CAJAS"),
     FuncionOperativa("CALL CENTER", "Call center", Empleado.DEP_VENTAS, Empleado.DEP_VENTAS, "CALL_CENTER"),
-    FuncionOperativa("REPARTIDORES", "Repartidores", Empleado.DEP_LOGISTICA, Empleado.DEP_VENTAS, "REPARTIDOR"),
+    FuncionOperativa(AREA_REPARTIDOR, "Repartidor", Empleado.DEP_LOGISTICA, Empleado.DEP_VENTAS, AREA_REPARTIDOR),
     FuncionOperativa("COMPRAS", "Compras", Empleado.DEP_COMPRAS, Empleado.DEP_COMPRAS, "COMPRAS"),
     FuncionOperativa("ALMACEN", "Almacén", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "ALMACEN"),
     FuncionOperativa("LIMPIEZA", "Limpieza / afanadoras", Empleado.DEP_ADMINISTRACION, Empleado.DEP_ADMINISTRACION, "LIMPIEZA"),
@@ -135,6 +140,10 @@ def area_division_map() -> dict[str, dict[str, str]]:
         }
         for funcion in funciones_operativas_catalogo()
     }
+
+
+def canonical_area_division_code(value: str) -> str:
+    return LEGACY_AREA_ALIASES.get((value or "").strip().upper(), (value or "").strip().upper())
 
 
 def puesto_operativo_choices() -> tuple[tuple[str, str], ...]:

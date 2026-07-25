@@ -52,7 +52,7 @@ class Command(BaseCommand):
 
         if sin_empleado:
             self.stdout.write(self.style.WARNING(f"\n⚠  Sin Empleado vinculado: {len(sin_empleado)}"))
-            self.stdout.write("   Acción requerida: crear un Empleado con área=REPARTIDORES y puesto_operativo=REPARTIDOR")
+            self.stdout.write("   Acción requerida: crear un Empleado con área=REPARTIDOR y puesto_operativo=REPARTIDOR")
             self.stdout.write("   y asignar Empleado.usuario_erp = ese User.\n")
             for r in sin_empleado:
                 self.stdout.write(
@@ -89,12 +89,12 @@ class Command(BaseCommand):
             emp = candidatos.first()
             emp.usuario_erp = user
             if (emp.puesto_operativo or "").strip().upper() != "REPARTIDOR":
-                emp.area = "REPARTIDORES"
+                emp.area = "REPARTIDOR"
                 emp.puesto_operativo = "REPARTIDOR"
             emp.save(update_fields=["usuario_erp", "area", "puesto_operativo"])
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"  [FIX] {user.username} → Empleado '{emp.nombre}' vinculado, area=REPARTIDORES, puesto_operativo=REPARTIDOR"
+                    f"  [FIX] {user.username} → Empleado '{emp.nombre}' vinculado, area=REPARTIDOR, puesto_operativo=REPARTIDOR"
                 )
             )
             return emp
