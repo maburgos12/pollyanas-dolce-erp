@@ -19,6 +19,7 @@ urlpatterns = [
         chat_views.stream_message_api,
         name="chat_message_stream_api",
     ),
+    path("sugerencias/<int:suggestion_id>/decidir/", views.suggestion_decide, name="suggestion_decide"),
     path("memory/", views.memory_proposals, name="memory_proposals"),
     path("memory/<int:proposal_id>/", views.memory_proposal_detail, name="memory_proposal_detail"),
     path("quality/", views.quality_findings, name="quality_findings"),
