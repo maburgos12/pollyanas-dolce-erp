@@ -534,6 +534,44 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 - Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `CLAUDE.md` en el mismo cambio para mantenerlas alineadas (deben quedar con el mismo contenido).
 - Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado, ejecutar `git worktree prune --dry-run` y limpiar ramas/worktrees atorados que puedan obstruir otros hilos.
 
+## Ciclo de vida obligatorio de ramas y worktrees
+
+Las reglas escritas no limpian Git por sí solas. Toda tarea nueva debe crearse con
+`scripts/task_workspace_start.sh`, que registra tarea, propietario, rama, worktree,
+alcance y commit base bajo el directorio común de Git. Después debe ejecutarse
+`scripts/git_workspace_preflight.sh --write`; un fallo detiene toda escritura.
+Los worktrees heredados que deban continuar se registran primero mediante
+`scripts/task_workspace_adopt.sh`; no se adoptan árboles sucios ni detached HEAD.
+
+El preflight bloquea checkout raíz, `main`, detached HEAD, árbol sucio, atraso
+frente a `origin/main`, rama distinta a la registrada y worktree sin propietario.
+No reutilizar una rama o worktree para otro objetivo ni cambiar de rama mientras
+otro agente o proceso lo utiliza.
+
+Cada hilo debe terminar en exactamente un estado:
+
+1. **Cerrado:** merge, deploy y validación completados cuando apliquen; limpieza
+   corroborada con `scripts/task_workspace_close.sh --state merged`.
+2. **Entregado:** trabajo y siguiente responsable registrados mediante
+   `scripts/task_workspace_handoff.sh`.
+3. **Bloqueado:** causa, evidencia, cambios y pasos de reanudación documentados.
+4. **Descartado:** respaldo recuperable creado antes de cualquier eliminación y
+   cierre mediante `scripts/task_workspace_close.sh --state discarded`.
+
+El cierre rechaza árboles sucios y, para `merged`, cualquier commit ausente de
+`origin/main`. Solo entonces elimina el worktree y las ramas exactas y ejecuta
+`fetch --prune`. Para `discarded`, crea primero un `git bundle`; `-D` solo está
+permitido dentro de ese flujo respaldado. El cierre es idempotente.
+
+Ejecutar `scripts/task_workspace_audit.sh --repo <checkout-base>` al iniciar y
+cerrar. La auditoría es read-only. Clasificar elementos ajenos; nunca borrarlos por
+edad, nombre o cantidad. Solo se limpia automáticamente la tarea actual ya
+corroborada. Un inventario creciente requiere una auditoría explícita con conteos
+antes/después, rescates, eliminaciones y motivos de conservación.
+
+“Terminé”, “ya está en main”, “PR cerrado” o el fin de una sesión no constituyen
+por sí solos un estado terminal.
+
 ## Acciones que cambian estado — contrato obligatorio
 
 - Toda pantalla nueva con acciones como Guardar, Autorizar, Aprobar, Rechazar, Cancelar o Resolver debe mantener la posición y el contexto del usuario.
