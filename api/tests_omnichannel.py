@@ -243,6 +243,10 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(different.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(same.data["code"], "OMNICHANNEL_ORDER_OWNERSHIP_CONFLICT")
         self.assertEqual(different.data["code"], same.data["code"])
+        self.assertEqual(set(same.data), {"detail", "code"})
+        self.assertEqual(set(different.data), {"detail", "code"})
+        order = PedidoCliente.objects.get(id=created.data["pedido_id"])
+        self.assertIsNone(order.public_api_client_id)
         self.assertEqual(
             before_counts,
             (
