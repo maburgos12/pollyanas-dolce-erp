@@ -230,6 +230,14 @@ class PersonalEnviosSucursal(models.Model):
 
 
 class MermaInsumo(models.Model):
+    VALORIZACION_PENDIENTE = "PENDIENTE"
+    VALORIZACION_CON_COSTO = "CON_COSTO"
+    VALORIZACION_SIN_COSTO = "SIN_COSTO"
+    VALORIZACION_CHOICES = [
+        (VALORIZACION_PENDIENTE, "Pendiente"),
+        (VALORIZACION_CON_COSTO, "Con costo"),
+        (VALORIZACION_SIN_COSTO, "Sin costo"),
+    ]
     ESTATUS_BORRADOR = "BORRADOR"
     ESTATUS_ENVIADA = "ENVIADA"
     ESTATUS_SIN_RESPONSABLE = "SIN_RESPONSABLE"
@@ -292,6 +300,14 @@ class MermaInsumo(models.Model):
     unidad_point = models.CharField(max_length=40)
     cantidad_reportada = models.DecimalField(max_digits=18, decimal_places=3)
     cantidad_aprobada = models.DecimalField(max_digits=18, decimal_places=3, null=True, blank=True)
+    costo_unitario_historico = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    costo_moneda = models.CharField(max_length=10, blank=True, default="")
+    costo_fecha = models.DateField(null=True, blank=True)
+    costo_fuente_id = models.CharField(max_length=80, blank=True, default="")
+    estado_valorizacion = models.CharField(
+        max_length=16, choices=VALORIZACION_CHOICES, default=VALORIZACION_PENDIENTE, db_index=True
+    )
+    costo_resuelto_en = models.DateTimeField(null=True, blank=True)
     motivo = models.CharField(max_length=80)
     comentario = models.TextField()
     foto_evidencia = models.ImageField(upload_to="mermas/insumos/%Y/%m/", null=True, blank=True)
@@ -320,6 +336,18 @@ class MermaInsumo(models.Model):
                 errors["cantidad_aprobada"] = "El jefe no puede aumentar la cantidad reportada."
         if errors:
             raise ValidationError(errors)
+
+    @property
+    def costo_confirmado(self):
+        if self.costo_unitario_historico is None or self.cantidad_aprobada is None:
+            return None
+        return self.costo_unitario_historico * self.cantidad_aprobada
+
+    @property
+    def costo_pendiente(self):
+        if self.costo_unitario_historico is None:
+            return None
+        return self.costo_unitario_historico * self.cantidad_reportada
 
     @transaction.atomic
     def aprobar(self, *, jefe, cantidad, motivo=""):

@@ -1,4 +1,7 @@
+from calendar import monthrange
+from datetime import date
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth import logout
@@ -6,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -16,7 +19,10 @@ from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from logistica.models import Repartidor
 from recetas.models import Receta
 
-from .models import MermaEvidencia, MermaProducto, MermaRegistro, PersonalEnviosSucursal
+from .models import (
+    MermaEvidencia, MermaInsumo, MermaProducto, MermaRegistro,
+    PersonalEnviosSucursal,
+)
 
 
 def _explicit_access(user, *scopes: str) -> str:
@@ -94,12 +100,52 @@ def _registros_visibles(user):
         .prefetch_related("productos", "evidencias")
         .all()
     )
-    if _can_dashboard(user) or _can_receive(user) or _can_manage_mermas(user):
+    if _can_manage_mermas(user) or _explicit_access(user, "dashboard") == ACCESS_MANAGE:
         return qs
     sucursal = _sucursal_usuario(user)
     if sucursal:
         return qs.filter(sucursal=sucursal)
     return qs.filter(registrado_por=user)
+
+
+def _periodo_insumos(request):
+    hoy = timezone.localdate()
+    inicio_default = hoy.replace(day=1)
+    fin_default = hoy.replace(day=monthrange(hoy.year, hoy.month)[1])
+    try:
+        inicio = date.fromisoformat(request.GET.get("desde", "")) if request.GET.get("desde") else inicio_default
+        fin = date.fromisoformat(request.GET.get("hasta", "")) if request.GET.get("hasta") else fin_default
+    except ValueError:
+        inicio, fin = inicio_default, fin_default
+    return min(inicio, fin), max(inicio, fin)
+
+
+def _mermas_insumos_visibles(user):
+    qs = MermaInsumo.objects.select_related(
+        "sucursal", "insumo", "reportado_por", "jefe_inmediato", "orden_point"
+    )
+    if _explicit_access(user, "dashboard") != ACCESS_MANAGE:
+        sucursal_usuario = _sucursal_usuario(user)
+        qs = qs.filter(sucursal=sucursal_usuario) if sucursal_usuario else qs.none()
+    return qs
+
+
+def _mermas_insumos_filtradas(request):
+    inicio, fin = _periodo_insumos(request)
+    qs = _mermas_insumos_visibles(request.user).filter(creado_en__date__range=(inicio, fin))
+    sucursal_id = request.GET.get("sucursal", "").strip()
+    estatus = request.GET.get("estatus_insumo", "").strip()
+    motivo = request.GET.get("motivo", "").strip()
+    insumo = request.GET.get("insumo", "").strip()
+    if sucursal_id:
+        qs = qs.filter(sucursal_id=sucursal_id)
+    if estatus:
+        qs = qs.filter(estatus=estatus)
+    if motivo:
+        qs = qs.filter(motivo=motivo)
+    if insumo:
+        qs = qs.filter(Q(nombre_point__icontains=insumo) | Q(codigo_point__icontains=insumo))
+    return qs, inicio, fin
 
 
 @login_required
@@ -131,6 +177,32 @@ def dashboard(request):
         .annotate(registros=Count("id"), productos=Count("productos"))
         .order_by("-registros", "sucursal__nombre")[:10]
     )
+    insumos_qs, inicio_insumos, fin_insumos = _mermas_insumos_filtradas(request)
+    insumos_all = list(insumos_qs)
+    insumos_rows = insumos_all[:200]
+    estados_confirmados = {
+        MermaInsumo.ESTATUS_APROBADA, MermaInsumo.ESTATUS_EJECUTANDO,
+        MermaInsumo.ESTATUS_APLICADA, MermaInsumo.ESTATUS_REQUIERE_REVISION,
+        MermaInsumo.ESTATUS_INTERVENCION_TECNICA,
+    }
+    estados_pendientes = {
+        MermaInsumo.ESTATUS_ENVIADA, MermaInsumo.ESTATUS_SIN_RESPONSABLE,
+        MermaInsumo.ESTATUS_EN_ACLARACION,
+    }
+    costo_confirmado = sum(
+        (row.costo_confirmado or Decimal("0"))
+        for row in insumos_all if row.estatus in estados_confirmados
+    )
+    costo_pendiente = sum(
+        (row.costo_pendiente or Decimal("0"))
+        for row in insumos_all if row.estatus in estados_pendientes
+    )
+    insumos_summary = {
+        "costo_confirmado": costo_confirmado,
+        "costo_pendiente": costo_pendiente,
+        "registros": len(insumos_all),
+        "sin_costo": sum(row.estado_valorizacion == MermaInsumo.VALORIZACION_SIN_COSTO for row in insumos_all),
+    }
 
     return render(
         request,
@@ -146,8 +218,62 @@ def dashboard(request):
             "filters": {"estatus": estatus, "sucursal": sucursal_id},
             "can_manage_mermas": _can_manage_mermas(request.user),
             "can_capture_mermas": _can_capture(request.user),
+            "tab_activa": request.GET.get("tab", "resumen"),
+            "insumos_rows": insumos_rows,
+            "insumos_summary": insumos_summary,
+            "insumos_periodo": {"desde": inicio_insumos, "hasta": fin_insumos},
+            "estatus_insumo_choices": MermaInsumo.ESTATUS_CHOICES,
         },
     )
+
+
+@login_required
+@require_GET
+def detalle_insumo(request, pk):
+    _require_dashboard(request.user)
+    merma = get_object_or_404(
+        _mermas_insumos_visibles(request.user).prefetch_related("eventos__actor"),
+        pk=pk,
+    )
+    return render(request, "mermas/detalle_insumo.html", {"merma": merma})
+
+
+@login_required
+@require_GET
+def exportar_insumos(request):
+    _require_dashboard(request.user)
+    from openpyxl import Workbook
+
+    rows, inicio, fin = _mermas_insumos_filtradas(request)
+    wb = Workbook()
+    resumen = wb.active
+    resumen.title = "Resumen"
+    resumen.append(["Periodo", f"{inicio:%d/%m/%Y} - {fin:%d/%m/%Y}"])
+    resumen.append(["Registros", rows.count()])
+    detalle = wb.create_sheet("Detalle")
+    detalle.append([
+        "Fecha", "Sucursal", "Código Point", "Insumo", "Motivo",
+        "Cantidad reportada", "Cantidad aprobada", "Unidad", "Costo unitario histórico",
+        "Costo confirmado", "Estado", "Reportó", "Autorizó", "Referencia Point",
+    ])
+    for merma in rows:
+        orden = getattr(merma, "orden_point", None)
+        detalle.append([
+            merma.creado_en.replace(tzinfo=None), merma.sucursal.nombre, merma.codigo_point,
+            merma.nombre_point, merma.motivo, merma.cantidad_reportada, merma.cantidad_aprobada,
+            merma.unidad_point, merma.costo_unitario_historico, merma.costo_confirmado,
+            merma.get_estatus_display(), merma.reportado_por.get_full_name() or merma.reportado_por.username,
+            (merma.jefe_inmediato.get_full_name() or merma.jefe_inmediato.username) if merma.jefe_inmediato else "",
+            orden.referencia_point if orden else "",
+        ])
+    output = BytesIO()
+    wb.save(output)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="mermas-insumos-{inicio:%Y%m%d}-{fin:%Y%m%d}.xlsx"'
+    return response
 
 
 def _producto_rows_from_post(post):

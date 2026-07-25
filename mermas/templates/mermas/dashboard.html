@@ -2,16 +2,16 @@
 {% block title %}Mermas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-dashboard.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-dashboard.css?v=20260725-insumos-v1">
 {% endblock %}
 
 {% block content %}
 <main class="mermas-page pd-page-gutters">
     <header class="mermas-header pd-page-head">
         <div>
-            <p class="pd-eyebrow">Operación · Mermas</p>
+            <p class="pd-eyebrow">Comercial · Control de pérdidas</p>
             <h1 class="pd-page-title">Panel de mermas</h1>
-            <p class="pd-page-copy">Seguimiento operativo desde salida de sucursal hasta recepción CEDIS, con evidencias, repartidor y diferencias para ventas.</p>
+            <p class="pd-page-copy">Consulta producto terminado e insumos sin mezclar sus unidades ni sus ciclos operativos.</p>
         </div>
         {% if can_capture_mermas %}
         <div class="mermas-actions">
@@ -20,6 +20,57 @@
         {% endif %}
     </header>
 
+    <nav class="mermas-tabs" aria-label="Secciones de mermas">
+        <a href="?tab=resumen" {% if tab_activa == 'resumen' %}aria-current="page"{% endif %}>Resumen general</a>
+        <a href="?tab=producto" {% if tab_activa == 'producto' %}aria-current="page"{% endif %}>Producto</a>
+        <a href="?tab=insumos" {% if tab_activa == 'insumos' %}aria-current="page"{% endif %}>Insumos</a>
+        <a href="/app/sucursal/?tab=mermas">Autorizaciones</a>
+    </nav>
+
+    {% if tab_activa == 'insumos' %}
+    <section class="insumos-head">
+        <div>
+            <h2>Mermas de insumos</h2>
+            <p>Costo histórico del insumo vigente cuando la sucursal envió la merma.</p>
+        </div>
+        <a class="mermas-btn" href="{% url 'mermas:exportar_insumos' %}?{{ request.GET.urlencode }}">Exportar Excel</a>
+    </section>
+    <section class="metrics-grid">
+        <article class="metric-card"><div class="metric-label">Costo confirmado</div><div class="metric-value">${{ insumos_summary.costo_confirmado|floatformat:2 }}</div></article>
+        <article class="metric-card"><div class="metric-label">Costo pendiente</div><div class="metric-value">${{ insumos_summary.costo_pendiente|floatformat:2 }}</div></article>
+        <article class="metric-card"><div class="metric-label">Registros</div><div class="metric-value">{{ insumos_summary.registros }}</div></article>
+        <article class="metric-card"><div class="metric-label">Sin costo</div><div class="metric-value">{{ insumos_summary.sin_costo }}</div></article>
+    </section>
+    <section class="panel">
+        <form class="filters" method="get">
+            <input type="hidden" name="tab" value="insumos">
+            <label>Desde<input type="date" name="desde" value="{{ insumos_periodo.desde|date:'Y-m-d' }}"></label>
+            <label>Hasta<input type="date" name="hasta" value="{{ insumos_periodo.hasta|date:'Y-m-d' }}"></label>
+            <label>Sucursal<select name="sucursal"><option value="">Todas</option>{% for sucursal in sucursales %}<option value="{{ sucursal.id }}" {% if filters.sucursal == sucursal.id|stringformat:"s" %}selected{% endif %}>{{ sucursal.nombre }}</option>{% endfor %}</select></label>
+            <label>Estado<select name="estatus_insumo"><option value="">Todos</option>{% for value,label in estatus_insumo_choices %}<option value="{{ value }}" {% if request.GET.estatus_insumo == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Insumo<input name="insumo" value="{{ request.GET.insumo }}" placeholder="Nombre o código Point"></label>
+            <button class="mermas-btn primary" type="submit">Aplicar filtros</button>
+        </form>
+        <div class="table-scroll">
+        <table class="data-table">
+            <thead><tr><th>Fecha</th><th>Sucursal</th><th>Insumo</th><th>Motivo</th><th>Cant. aprobada</th><th>Costo histórico</th><th>Impacto</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+            {% for item in insumos_rows %}
+                <tr>
+                    <td>{{ item.creado_en|date:"d/m/Y H:i" }}</td><td>{{ item.sucursal.nombre }}</td>
+                    <td><strong>{{ item.nombre_point }}</strong><small>{{ item.codigo_point }} · {{ item.unidad_point }}</small></td>
+                    <td>{{ item.motivo|title }}</td><td>{{ item.cantidad_aprobada|default:"—" }}</td>
+                    <td>{% if item.costo_unitario_historico != None %}${{ item.costo_unitario_historico|floatformat:2 }}{% else %}<span class="badge warn">Sin costo</span>{% endif %}</td>
+                    <td>{% if item.costo_confirmado != None %}${{ item.costo_confirmado|floatformat:2 }}{% else %}—{% endif %}</td>
+                    <td><span class="badge">{{ item.get_estatus_display }}</span></td>
+                    <td><a href="{% url 'mermas:detalle_insumo' item.pk %}">Ver detalle</a></td>
+                </tr>
+            {% empty %}<tr><td colspan="9" class="empty">No hay mermas de insumos con estos filtros.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </section>
+    {% else %}
     <section class="metrics-grid">
         <article class="metric-card"><div class="metric-label">Hoy</div><div class="metric-value">{{ summary.hoy }}</div></article>
         <article class="metric-card"><div class="metric-label">Enviado CEDIS</div><div class="metric-value">{{ summary.enviado }}</div></article>
@@ -128,5 +179,6 @@
             </tbody>
         </table>
     </section>
+    {% endif %}
 </main>
 {% endblock %}
