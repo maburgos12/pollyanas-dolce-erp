@@ -612,7 +612,9 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:aliases_catalog"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bloqueo ERP prioritario")
+        # "Bloqueo ERP prioritario" se rediseñó en 78666c73; el bloque vive ahora en "Mesa de referencias abiertas"
+        self.assertContains(response, "Mesa de referencias abiertas")
+        self.assertContains(response, "Abrir referencias filtradas")
         self.assertEqual(response.context["pending_focus"]["tone"], "warning")
         self.assertEqual(response.context["pending_focus"]["label"], "2 filas · inventario, recetas")
         self.assertEqual(len(response.context["pending_source_cards"]), 2)
@@ -736,7 +738,9 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "Bloqueo maestro prioritario")
+        # El header "Bloqueo maestro prioritario" se rediseñó en 78666c73: ahora se muestra master_focus.label
+        self.assertContains(response, "Empaque · maestro")
+        self.assertContains(response, "Corregir maestro")
 
     def test_movimientos_shows_enterprise_row_summary_and_actions(self):
         unidad = UnidadMedida.objects.create(
@@ -769,10 +773,8 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertContains(response, "Falta: código Point")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Ruta operativa")
-        self.assertContains(response, "Dependencias previas")
-        self.assertContains(response, "Prioridades de cierre")
-        self.assertContains(response, "Salud operativa")
+        # Secciones de gobernanza ("Ruta operativa", "Dependencias previas", "Prioridades de cierre",
+        # "Salud operativa") eliminadas del template en 78666c73; el contexto sigue disponible.
         self.assertNotContains(response, "Centro de mando ERP")
         self.assertNotContains(response, "Ruta troncal ERP")
         self.assertIn("enterprise_chain", response.context)
@@ -1095,9 +1097,9 @@ class InventarioAliasesPendingTests(TestCase):
         focus_row = response.context["master_focus_rows"][0]
         self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
-        self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "Bloqueo maestro prioritario")
-        self.assertContains(response, "Bloquea inventario")
+        # Capa enterprise eliminada de existencias.html en 78666c73; la página es una tabla simple
+        # y el contexto de bloqueos sigue disponible (asserts de contexto arriba).
+        self.assertContains(response, "Caja Focus Inventario")
 
     def test_existencias_shows_enterprise_row_summary_and_actions(self):
         unidad = UnidadMedida.objects.create(
@@ -1122,21 +1124,10 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:existencias"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso operativo")
-        self.assertContains(response, "Maestro")
-        self.assertContains(response, "Empaque final")
-        self.assertContains(response, "Incompleto")
-        self.assertContains(response, "Editar artículo")
-        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
-        self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Cadena de control")
-        self.assertContains(response, "Ruta operativa")
-        self.assertContains(response, "Dependencias previas")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Seguimiento por frente")
-        self.assertContains(response, "Entrega a otros frentes")
-        self.assertContains(response, "Salud operativa")
+        # Capa enterprise/gobernanza eliminada de existencias.html en 78666c73; queda la tabla operativa
+        # con el artículo y su stock, y el contexto enterprise sigue disponible (asserts abajo).
+        self.assertContains(response, "Empaque Row Inventario")
+        self.assertContains(response, "Stock por Insumo")
         self.assertNotContains(response, "Cadena documental ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
@@ -1196,17 +1187,9 @@ class InventarioAliasesPendingTests(TestCase):
 
         response_exist = self.client.get(reverse("inventario:existencias"))
         self.assertEqual(response_exist.status_code, 200)
-        self.assertContains(response_exist, "Señal histórica de demanda")
-        self.assertContains(response_exist, "Semáforo comercial")
-        self.assertContains(response_exist, "Años observados")
-        self.assertContains(response_exist, "Temporadas comparables")
-        self.assertContains(response_exist, "Control de demanda comercial")
-        self.assertContains(response_exist, "Artículos prioritarios por demanda")
-        self.assertContains(response_exist, "Aseguramiento comercial prioritario")
-        self.assertContains(response_exist, "Demanda crítica bloqueada por maestro")
-        self.assertContains(response_exist, "Liberación operativa retenida")
-        self.assertContains(response_exist, "Faltante maestro")
-        self.assertContains(response_exist, "Pastel Demanda Inventario")
+        # La señal de demanda ya no se renderiza en existencias.html (rediseño 78666c73);
+        # vive en alertas.html. Aquí se conserva el contexto y el contenido operativo real.
+        self.assertContains(response_exist, "Harina Demanda Inventario")
         self.assertIn("sales_demand_signal", response_exist.context)
         self.assertIn("years_observed", response_exist.context["sales_demand_signal"])
         self.assertIn("comparable_years", response_exist.context["sales_demand_signal"])
@@ -1219,14 +1202,13 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertTrue(response_exist.context["supply_focus_rows"])
         self.assertIn("daily_critical_close_focus", response_exist.context)
         self.assertIsNotNone(response_exist.context["daily_critical_close_focus"])
-        self.assertContains(response_exist, "Cierre prioritario del día")
 
         response_alert = self.client.get(reverse("inventario:alertas"))
         self.assertEqual(response_alert.status_code, 200)
         self.assertContains(response_alert, "Señal histórica de demanda")
         self.assertContains(response_alert, "Semáforo comercial")
         self.assertContains(response_alert, "Años observados")
-        self.assertContains(response_alert, "Temporadas comparables")
+        self.assertContains(response_alert, "temporadas comparables")
         self.assertContains(response_alert, "Control de demanda comercial")
         self.assertContains(response_alert, "Artículos prioritarios por demanda")
         self.assertContains(response_alert, "Aseguramiento comercial prioritario")
@@ -1286,9 +1268,9 @@ class InventarioAliasesPendingTests(TestCase):
 
         response = self.client.get(reverse("inventario:existencias"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Referencia maestra: existen variantes activas con impacto en inventario.")
-        self.assertContains(response, "Consolidar")
-        self.assertContains(response, "canonical_status=variantes")
+        # Aviso "Referencia maestra"/"Consolidar" eliminado de existencias.html en 78666c73;
+        # la tabla ahora muestra la fila canónica consolidada.
+        self.assertContains(response, "Caja Canonica Operativa Inventario")
 
     def test_existencias_can_focus_master_blocker_group(self):
         unidad = UnidadMedida.objects.create(
@@ -1319,7 +1301,9 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response.context["selected_master_focus_key"], "EMPAQUE:codigo_point")
         self.assertTrue(response.context["master_focus_rows"])
         self.assertTrue(any(row["class_label"] == "Empaque" for row in response.context["master_focus_rows"]))
-        self.assertContains(response, "Vista enfocada")
+        # El aviso "Vista enfocada" ya no se renderiza en existencias.html (rediseño 78666c73);
+        # el foco se valida vía contexto arriba.
+        self.assertContains(response, "Caja Focus Group")
 
     def test_alertas_shows_master_focus_for_operational_blockers(self):
         unidad = UnidadMedida.objects.create(
@@ -1353,7 +1337,9 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "Bloqueo maestro prioritario")
+        # El header "Bloqueo maestro prioritario" se rediseñó en 78666c73: ahora se muestra master_focus.label
+        self.assertContains(response, "Empaque · maestro")
+        self.assertContains(response, "Corregir maestro")
         self.assertContains(response, "Bloquea inventario")
 
     def test_alertas_shows_enterprise_row_summary_and_actions(self):
@@ -1386,14 +1372,8 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertContains(response, "Editar artículo")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={insumo.id}")
-        self.assertContains(response, "Cadena de control")
-        self.assertContains(response, "Ruta operativa")
-        self.assertContains(response, "Dependencias previas")
-        self.assertContains(response, "Prioridades de atención")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Entrega a otros frentes")
-        self.assertContains(response, "Salud operativa")
+        # Secciones de gobernanza ("Cadena de control", "Ruta operativa", etc.) eliminadas
+        # de alertas.html en 78666c73; el contexto enterprise sigue disponible (asserts abajo).
         self.assertNotContains(response, "Cadena documental ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
@@ -1464,7 +1444,9 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertIn(f"insumo_id={insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "Bloqueo maestro prioritario")
+        # El header "Bloqueo maestro prioritario" se rediseñó en 78666c73: ahora se muestra master_focus.label
+        self.assertContains(response, "Empaque · maestro")
+        self.assertContains(response, "Corregir maestro")
 
     def test_ajustes_shows_enterprise_row_summary_and_actions(self):
         unidad = UnidadMedida.objects.create(
@@ -1498,14 +1480,8 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertContains(response, "Falta: código Point")
         self.assertContains(response, reverse("maestros:insumo_update", args=[insumo.id]))
         self.assertContains(response, f"insumo_id={ajuste.insumo_id}")
-        self.assertContains(response, "Cadena de control")
-        self.assertContains(response, "Ruta operativa")
-        self.assertContains(response, "Dependencias previas")
-        self.assertContains(response, "Prioridades de cierre")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Entrega a otros frentes")
-        self.assertContains(response, "Salud operativa")
+        # Secciones de gobernanza ("Cadena de control", "Ruta operativa", etc.) eliminadas
+        # de ajustes.html en 78666c73; el contexto enterprise sigue disponible (asserts abajo).
         self.assertNotContains(response, "Radar ejecutivo ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
@@ -2293,11 +2269,12 @@ class InventarioAliasesPendingTests(TestCase):
         Insumo.objects.create(nombre="Azucar Normal", unidad_base=unidad)
         response = self.client.get(reverse("inventario:aliases_catalog"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resumen del módulo")
-        self.assertContains(response, "Flujo de referencias")
-        self.assertContains(response, "Seguimiento por frente")
+        # "Resumen del módulo" / "Flujo de referencias" / "Seguimiento por frente" / "Siguiente paso"
+        # se rediseñaron en 78666c73; se validan los headers vivos del módulo de referencias.
+        self.assertContains(response, "Centro operativo de referencias")
+        self.assertContains(response, "Mesa de referencias abiertas")
+        self.assertContains(response, "Catálogo de equivalencias ERP")
         self.assertContains(response, "Control de referencias")
-        self.assertContains(response, "Siguiente paso")
         self.assertNotContains(response, "Centro de mando ERP")
         self.assertIn("erp_command_center", response.context)
         self.assertIn("erp_governance_rows", response.context)
@@ -2669,8 +2646,9 @@ class InventarioAliasesPendingTests(TestCase):
     def test_existencias_view_shows_release_gate_enterprise_block(self):
         response = self.client.get(reverse("inventario:existencias"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Criterios de cierre")
-        self.assertContains(response, "Cierre global")
+        # Bloque "Criterios de cierre"/"Cierre global" eliminado de existencias.html en 78666c73;
+        # el release gate sigue calculándose en el contexto.
+        self.assertContains(response, "Stock por Insumo")
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
 

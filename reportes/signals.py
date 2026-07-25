@@ -34,6 +34,13 @@ def _local_day(value) -> date:
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, str):
+        # Django acepta strings ISO al asignar DateField; la instancia conserva
+        # el string hasta refrescarse, así que el signal debe tolerarlo.
+        try:
+            return date.fromisoformat(value.strip())
+        except ValueError:
+            return timezone.localdate()
     return value.date()
 
 

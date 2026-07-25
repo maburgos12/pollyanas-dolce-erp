@@ -68,7 +68,9 @@ class ExpansionCalibrationService:
         policy = self.get_policy()
         metadata = dict(policy.metadata or {})
         current = metadata.get("calibration", {})
-        metadata["calibration"] = _deep_merge_dict(current, payload)
+        # El metadata vive en un JSONField: los Decimal del payload de
+        # calibración deben serializarse (como string) antes de guardar.
+        metadata["calibration"] = _json_safe(_deep_merge_dict(current, payload))
         policy.metadata = metadata
         policy.save(update_fields=["metadata", "actualizado_en"])
         cache.delete(self._cache_key("context"))
