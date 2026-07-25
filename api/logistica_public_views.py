@@ -11,7 +11,8 @@ from integraciones.models import PublicApiClient
 from logistica.services_domicilio_assignment import (
     DomicilioAssignmentError,
     assign_domicilio,
-    list_repartidores_disponibles,
+    get_owned_domicilio_or_404,
+    list_repartidores_disponibles_minimal,
 )
 
 
@@ -55,7 +56,23 @@ class PublicLogisticaRepartidoresDisponiblesView(APIView):
         if capability_error:
             return capability_error
 
-        payload = {"results": list_repartidores_disponibles()}
+        solicitud_id = (request.query_params.get("solicitud_id") or "").strip()
+        if not solicitud_id.isdigit() or int(solicitud_id) < 1:
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "solicitud_id es obligatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            get_owned_domicilio_or_404(
+                solicitud_id=int(solicitud_id),
+                api_client=api_client,
+            )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+
+        payload = {"results": list_repartidores_disponibles_minimal()}
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload, status=status.HTTP_200_OK)
 
@@ -91,6 +108,7 @@ class PublicLogisticaDomicilioAsignarView(APIView):
                         "nombre": actor["nombre"],
                     },
                 },
+                owner_api_client=api_client,
             )
         except Http404:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)

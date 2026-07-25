@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import AuditLog, Notificacion, Sucursal
+from crm.models import Cliente, PedidoCliente
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from logistica.models import EntregaEcommerce, Repartidor, SolicitudDomicilio
 
@@ -20,11 +21,28 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         ]
         self.api_client.save(update_fields=["capabilities"])
         self.auth = {"HTTP_X_API_KEY": self.raw_key}
+        self.other_client, self.other_key = PublicApiClient.create_with_generated_key(
+            nombre="Otro integrador logístico",
+        )
+        self.other_client.capabilities = [
+            PublicApiClient.CAPABILITY_LOGISTICA_ASSIGNMENT
+        ]
+        self.other_client.save(update_fields=["capabilities"])
         self.sucursal = Sucursal.objects.create(
             codigo="M2M-LOG",
             nombre="M2M Logística",
         )
+        cliente = Cliente.objects.create(
+            nombre="Cliente M2M",
+            telefono="6670000000",
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            descripcion="Pedido M2M",
+            public_api_client=self.api_client,
+        )
         self.solicitud = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
             cliente_nombre="Cliente M2M",
             direccion="Calle M2M 10",
         )
@@ -50,6 +68,7 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         missing = self.client.get(self.catalog_url)
         invalid = self.client.get(
             self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
             HTTP_X_API_KEY="pk_invalid",
         )
         capture_client, capture_key = PublicApiClient.create_with_generated_key(
@@ -59,6 +78,7 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         capture_client.save(update_fields=["capabilities"])
         forbidden = self.client.get(
             self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
             HTTP_X_API_KEY=capture_key,
         )
         forbidden_assignment = self.client.post(
@@ -98,7 +118,11 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         inactivo.user.is_active = False
         inactivo.user.save(update_fields=["is_active"])
 
-        response = self.client.get(self.catalog_url, **self.auth)
+        response = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
+            **self.auth,
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
@@ -106,6 +130,10 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
             [disponible.id],
         )
         self.assertEqual(set(response.data), {"results"})
+        self.assertEqual(
+            set(response.data["results"][0]),
+            {"id", "nombre"},
+        )
         self.assertEqual(
             PublicApiAccessLog.objects.filter(
                 client=self.api_client,
@@ -207,6 +235,54 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
             SolicitudDomicilio.ESTATUS_CANCELADO,
         )
         self.assertEqual(AuditLog.objects.count(), 0)
+
+    def test_cross_client_y_ownerless_son_404_incluso_en_retry_exacto(self):
+        repartidor = self._repartidor("m2m_owned")
+        self.solicitud.repartidor = repartidor
+        self.solicitud.save(update_fields=["repartidor"])
+        ownerless = SolicitudDomicilio.objects.create(
+            cliente_nombre="Interno",
+            direccion="Sin owner",
+            repartidor=repartidor,
+        )
+
+        cross_catalog = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": self.solicitud.id},
+            HTTP_X_API_KEY=self.other_key,
+        )
+        cross_retry = self.client.post(
+            self.assign_url,
+            self._payload(repartidor),
+            format="json",
+            HTTP_X_API_KEY=self.other_key,
+        )
+        ownerless_catalog = self.client.get(
+            self.catalog_url,
+            {"solicitud_id": ownerless.id},
+            **self.auth,
+        )
+        ownerless_retry = self.client.post(
+            reverse(
+                "api_public_logistica_domicilio_asignar",
+                args=[ownerless.id],
+            ),
+            self._payload(repartidor),
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(cross_catalog.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(cross_retry.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(ownerless_catalog.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(ownerless_retry.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(AuditLog.objects.count(), 0)
+
+    def test_catalogo_requiere_solicitud_owned_no_es_global(self):
+        response = self.client.get(self.catalog_url, **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["detail"], "solicitud_id es obligatorio.")
 
     def test_actor_minimo_es_obligatorio_y_error_queda_auditado(self):
         repartidor = self._repartidor("m2m_actor_required")

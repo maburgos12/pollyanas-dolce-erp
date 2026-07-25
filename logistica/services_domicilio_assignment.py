@@ -58,18 +58,45 @@ def list_repartidores_disponibles() -> list[dict[str, Any]]:
     ]
 
 
+def list_repartidores_disponibles_minimal() -> list[dict[str, Any]]:
+    """Catálogo M2M mínimo.
+
+    Solicitud.unidad, PedidoCliente.sucursal_ref y Repartidor.unidad_asignada son
+    opcionales y el dominio actual no exige que coincidan. No se infiere una
+    compatibilidad nueva que pudiera ocultar repartidores válidos.
+    """
+    return [
+        {
+            "id": repartidor.id,
+            "nombre": nombre_operativo_usuario(repartidor.user),
+        }
+        for repartidor in repartidores_disponibles_queryset()
+    ]
+
+
+def get_owned_domicilio_or_404(*, solicitud_id: int, api_client):
+    return get_object_or_404(
+        SolicitudDomicilio.objects.select_related("pedido_cliente"),
+        pk=solicitud_id,
+        pedido_cliente__public_api_client=api_client,
+    )
+
+
 def assign_domicilio(
     *,
     solicitud_id: int,
     repartidor_id: int,
     audit_user=None,
     audit_metadata: dict[str, Any] | None = None,
+    owner_api_client=None,
 ) -> dict[str, Any]:
     with transaction.atomic():
-        solicitud = get_object_or_404(
-            SolicitudDomicilio.objects.select_for_update(),
-            pk=solicitud_id,
-        )
+        solicitudes = SolicitudDomicilio.objects.select_for_update()
+        if owner_api_client is not None:
+            solicitudes = solicitudes.filter(
+                pedido_cliente__public_api_client=owner_api_client,
+            )
+        solicitud = get_object_or_404(solicitudes, pk=solicitud_id)
         if solicitud.repartidor_id == repartidor_id:
             return {
                 "id": solicitud.id,
