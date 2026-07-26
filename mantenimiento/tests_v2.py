@@ -33,6 +33,21 @@ from mantenimiento.services_history import canonical_status, period_bounds
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 
 
+# El post_save de ReporteUnidad (logistica.signals) encola una notificación
+# Celery real contra el broker Redis; sin broker local los fixtures truenan
+# con ConnectionError. Se mockea a nivel módulo, igual que el patrón usado en
+# mantenimiento/tests.py y en las suites saneadas de PR #1136.
+_notificar_reporte_patcher = patch("logistica.signals.notificar_reporte_nuevo.delay")
+
+
+def setUpModule():
+    _notificar_reporte_patcher.start()
+
+
+def tearDownModule():
+    _notificar_reporte_patcher.stop()
+
+
 class EvidenceValidationTests(SimpleTestCase):
     def upload(self, name="foto.jpg", content=b"\xff\xd8\xffimagen", content_type="image/jpeg"):
         return SimpleUploadedFile(name, content, content_type=content_type)

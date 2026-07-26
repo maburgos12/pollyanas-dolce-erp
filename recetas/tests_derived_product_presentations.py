@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -51,6 +52,9 @@ from recetas.views.plan import (
 
 class DerivedProductPresentationCostingTests(TestCase):
     def setUp(self):
+        # Varios tableros cachean resúmenes por fecha en LocMemCache (p.ej.
+        # _ventas_historicas_plan_summary); limpiamos para aislar cada prueba.
+        cache.clear()
         self.client = Client()
         self.user = get_user_model().objects.create_superuser(
             username="derived-cost-user",
@@ -300,14 +304,20 @@ class DerivedProductPresentationCostingTests(TestCase):
         plan = PlanProduccion.objects.create(nombre="Plan visibilidad consumo", fecha_produccion=date(2026, 3, 19))
         PlanProduccionItem.objects.create(plan=plan, receta=self.derived, cantidad=Decimal("6"))
 
-        response_before = self.client.get(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+        # El estatus de consumo vive en el control documental del plan, que se
+        # carga con la sección de diagnóstico (carga por secciones del plan).
+        response_before = self.client.get(
+            f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}&seccion=diagnostico"
+        )
         self.assertEqual(response_before.status_code, 200)
         self.assertContains(response_before, "SOLO SIMULACIÓN")
         self.assertContains(response_before, "sigue en simulación")
 
         _apply_plan_consumption(plan, self.user)
 
-        response_after = self.client.get(f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}")
+        response_after = self.client.get(
+            f"{reverse('recetas:plan_produccion')}?plan_id={plan.id}&seccion=diagnostico"
+        )
         self.assertEqual(response_after.status_code, 200)
         self.assertContains(response_after, "CONSUMO APLICADO")
         self.assertContains(response_after, "Aplicado")
@@ -327,7 +337,7 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(plan.estado, PlanProduccion.ESTADO_CONSUMO_APLICADO)
 
         with patch(
-            "recetas.views._plan_document_control",
+            "recetas.views.plan._plan_document_control",
             return_value={"blocked_total": 0, "closure_summary": {"pending_count": 0}},
         ):
             response = self.client.post(reverse("recetas:plan_produccion_cerrar", args=[plan.id]))
@@ -530,10 +540,12 @@ class DerivedProductPresentationCostingTests(TestCase):
 
     def test_plan_page_exposes_dg_dashboard_context(self):
         PlanProduccion.objects.create(nombre="Plan dg abierto", fecha_produccion=date(2026, 3, 17))
-        response = self.client.get(reverse("recetas:plan_produccion"))
+        # El plan carga por secciones; el tablero DG vive en seccion=dg.
+        response = self.client.get(reverse("recetas:plan_produccion"), {"seccion": "dg"})
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("plan_status_dashboard", response.context)
+        self.assertIsNotNone(response.context["plan_status_dashboard"])
         self.assertContains(response, "Tablero DG de estados del plan")
 
     def test_plan_page_applies_dg_grouping_filters(self):
@@ -620,7 +632,9 @@ class DerivedProductPresentationCostingTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Operación diaria")
-        self.assertContains(response, "Dirección General · Operación Integrada")
+        # base.html ya no pinta el bloque page_title (rediseño de sidebar
+        # 5bc3ffe1); el título vive solo en el <title>/template del tablero.
+        self.assertTemplateUsed(response, "recetas/dg_operacion_dashboard.html")
         self.assertContains(response, "Fecha visible")
         self.assertContains(response, "2026-03-20")
         self.assertContains(response, "Corte 2026-03-20")
@@ -1119,11 +1133,26 @@ class PreparationSnapshotResolutionTests(TestCase):
         )
 
     def test_resolve_preparation_recipe_prefers_derived_code_recipe(self):
+        # Desde 4c6d357e "Prioriza codigo Point en preparaciones" el código
+        # Point del insumo decide primero (contrato validado también en
+        # reportes/tests_auto_production.py).
+        recipe = resolve_preparation_recipe_for_insumo(self.internal_prep)
+        self.assertIsNotNone(recipe)
+        self.assertEqual(recipe.id, self.competing_recipe.id)
+
+        # Sin código Point, el código DERIVADO sigue resolviendo la receta
+        # origen correcta (la preferencia que valida esta prueba).
+        self.internal_prep.codigo_point = ""
+        self.internal_prep.save(update_fields=["codigo_point"])
         recipe = resolve_preparation_recipe_for_insumo(self.internal_prep)
         self.assertIsNotNone(recipe)
         self.assertEqual(recipe.id, self.correct_recipe.id)
 
     def test_resolve_line_snapshot_uses_preparation_unit_when_line_unit_missing(self):
+        # Se aísla la resolución al código DERIVADO (sin código Point) para
+        # validar el fallback de unidad de la preparación.
+        self.internal_prep.codigo_point = ""
+        self.internal_prep.save(update_fields=["codigo_point"])
         snapshot_cost, source = resolve_line_snapshot_cost(self.line)
         self.assertEqual(source, "RECETA_PREPARACION")
         self.assertEqual(snapshot_cost, Decimal("12.000000"))

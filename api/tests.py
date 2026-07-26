@@ -18,6 +18,7 @@ from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointSalesDailyProductFact
+from ventas.models import VentaAutoritativaPoint
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -270,7 +271,8 @@ class RecetasCosteoApiTests(TestCase):
 
     def test_endpoint_versiones_handles_missing_table_gracefully(self):
         url = reverse("api_receta_versiones", args=[self.receta.id])
-        with patch("api.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+        # La partición de api/views (87d06c5b) movió el helper a views/recetas.py.
+        with patch("api.views.recetas._load_versiones_costeo", side_effect=OperationalError("missing table")):
             resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -304,7 +306,8 @@ class RecetasCosteoApiTests(TestCase):
 
     def test_endpoint_costo_historico_handles_missing_table_gracefully(self):
         url = reverse("api_receta_costo_historico", args=[self.receta.id])
-        with patch("api.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+        # La partición de api/views (87d06c5b) movió el helper a views/recetas.py.
+        with patch("api.views.recetas._load_versiones_costeo", side_effect=OperationalError("missing table")):
             resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -1116,7 +1119,7 @@ class RecetasCosteoApiTests(TestCase):
         resp_csv = self.client.get(url, {"export": "csv", "min_sources": 2})
         self.assertEqual(resp_csv.status_code, 200)
         self.assertIn("text/csv", resp_csv["Content-Type"])
-        self.assertIn("inventario_homologacion_pendientes_", resp_csv["Content-Disposition"])
+        self.assertIn("inventario_catalogo_pendientes_", resp_csv["Content-Disposition"])
         csv_body = resp_csv.content.decode("utf-8")
         self.assertIn("nombre_muestra,nombre_normalizado", csv_body)
         self.assertIn("harina pastelera premium", csv_body.lower())
@@ -1127,7 +1130,7 @@ class RecetasCosteoApiTests(TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             resp_xlsx["Content-Type"],
         )
-        self.assertIn("inventario_homologacion_pendientes_", resp_xlsx["Content-Disposition"])
+        self.assertIn("inventario_catalogo_pendientes_", resp_xlsx["Content-Disposition"])
         self.assertTrue(resp_xlsx.content.startswith(b"PK"))
 
     def test_endpoint_inventario_aliases_pendientes_unificados_offset_sort(self):
@@ -5546,6 +5549,15 @@ class RecetasCosteoApiTests(TestCase):
                 cantidad=Decimal(qty),
                 fuente="API_TEST",
             )
+            # El forecast canónico ya no lee VentaHistorica: se alimenta de
+            # PointSalesDailyProductFact / VentaAutoritativaPoint (lector
+            # protegido de ventas); sembramos la fuente autoritativa.
+            VentaAutoritativaPoint.objects.create(
+                branch=sucursal,
+                product=self.receta,
+                sale_date=date(year, month_idx, 15),
+                quantity=Decimal(qty),
+            )
 
         url = reverse("api_ventas_solicitud")
         resp = self.client.post(
@@ -5595,6 +5607,15 @@ class RecetasCosteoApiTests(TestCase):
                 fecha=date(year, month_idx, 15),
                 cantidad=Decimal(qty),
                 fuente="API_TEST",
+            )
+            # El forecast canónico ya no lee VentaHistorica: se alimenta de
+            # PointSalesDailyProductFact / VentaAutoritativaPoint (lector
+            # protegido de ventas); sembramos la fuente autoritativa.
+            VentaAutoritativaPoint.objects.create(
+                branch=sucursal,
+                product=self.receta,
+                sale_date=date(year, month_idx, 15),
+                quantity=Decimal(qty),
             )
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -5649,6 +5670,15 @@ class RecetasCosteoApiTests(TestCase):
                 cantidad=Decimal(qty),
                 fuente="API_TEST",
             )
+            # El forecast canónico ya no lee VentaHistorica: se alimenta de
+            # PointSalesDailyProductFact / VentaAutoritativaPoint (lector
+            # protegido de ventas); sembramos la fuente autoritativa.
+            VentaAutoritativaPoint.objects.create(
+                branch=sucursal,
+                product=self.receta,
+                sale_date=date(year, month_idx, 15),
+                quantity=Decimal(qty),
+            )
         SolicitudVenta.objects.create(
             receta=self.receta,
             sucursal=sucursal,
@@ -5700,6 +5730,15 @@ class RecetasCosteoApiTests(TestCase):
                 fecha=date(year, month_idx, 15),
                 cantidad=Decimal(qty),
                 fuente="API_TEST",
+            )
+            # El forecast canónico ya no lee VentaHistorica: se alimenta de
+            # PointSalesDailyProductFact / VentaAutoritativaPoint (lector
+            # protegido de ventas); sembramos la fuente autoritativa.
+            VentaAutoritativaPoint.objects.create(
+                branch=sucursal,
+                product=self.receta,
+                sale_date=date(year, month_idx, 15),
+                quantity=Decimal(qty),
             )
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -5779,6 +5818,15 @@ class RecetasCosteoApiTests(TestCase):
                 fecha=date(year, month_idx, 15),
                 cantidad=Decimal(qty),
                 fuente="API_TEST",
+            )
+            # El forecast canónico ya no lee VentaHistorica: se alimenta de
+            # PointSalesDailyProductFact / VentaAutoritativaPoint (lector
+            # protegido de ventas); sembramos la fuente autoritativa.
+            VentaAutoritativaPoint.objects.create(
+                branch=sucursal,
+                product=self.receta,
+                sale_date=date(year, month_idx, 15),
+                quantity=Decimal(qty),
             )
         SolicitudVenta.objects.create(
             receta=self.receta,

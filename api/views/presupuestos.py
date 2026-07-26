@@ -344,13 +344,19 @@ class PresupuestosConsolidadoView(APIView):
         categoria_raw = request.GET.get("categoria")
         reabasto_raw = request.GET.get("reabasto")
 
+        # La firma de _filtered_solicitudes creció con los filtros de workflow
+        # de compras (estatus/workflow_action/blocker_key); este endpoint no
+        # los usa, pero debe respetar el contrato actual del helper.
         (
             solicitudes,
             source_filter,
             plan_filter,
             categoria_filter,
             reabasto_filter,
-            _,
+            _estatus_filter,
+            _workflow_action_filter,
+            _blocker_key_filter,
+            _plan_options,
             _periodo_tipo,
             _periodo_mes,
             periodo_label,
@@ -359,6 +365,9 @@ class PresupuestosConsolidadoView(APIView):
             plan_raw,
             categoria_raw,
             reabasto_raw,
+            None,
+            None,
+            None,
             periodo_tipo,
             periodo_mes,
         )

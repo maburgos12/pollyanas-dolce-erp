@@ -1133,6 +1133,10 @@ class ForecastBacktestView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if export_format:
+            # Import perezoso: el helper vive en ventas.py y ventas.py importa
+            # de este módulo (evita ciclo de imports tras la partición 87d06c5b).
+            from .ventas import _forecast_backtest_export_response
+
             return _forecast_backtest_export_response(payload, export_format)
         return Response(payload, status=status.HTTP_200_OK)
 
@@ -1238,6 +1242,8 @@ class ForecastInsightsView(APIView):
                 "top_recetas": [],
             }
             if export_format:
+                from .ventas import _forecast_insights_export_response
+
                 return _forecast_insights_export_response(payload, export_format)
             return Response(payload, status=status.HTTP_200_OK)
 
@@ -1365,6 +1371,8 @@ class ForecastInsightsView(APIView):
             "top_recetas": top_recetas,
         }
         if export_format:
+            from .ventas import _forecast_insights_export_response
+
             return _forecast_insights_export_response(payload, export_format)
         return Response(payload, status=status.HTTP_200_OK)
 

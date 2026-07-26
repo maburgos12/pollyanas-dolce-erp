@@ -138,9 +138,10 @@ class Command(BaseCommand):
                 None,
                 "IMPORT",
                 "integraciones.PickupCatalogSync",
-                str(csv_path),
+                csv_path.name,
                 payload={
                     "counts": summary["counts"],
+                    "csv_path": str(csv_path),
                     "report_path": str(report_path) if report_path else "",
                 },
             )

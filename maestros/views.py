@@ -1072,7 +1072,12 @@ def _match_missing_field(insumo: Insumo, missing_field: str) -> bool:
     if missing_field == "categoria":
         return "categoría" in profile["missing"]
     if missing_field == "codigo_point":
-        return "código comercial" in profile["missing"] or "código externo" in profile["missing"]
+        # 79fa92a6 renombró la etiqueta a "código comercial Point"; se compara
+        # por prefijo para no volver a romper el filtro si el copy evoluciona.
+        return any(
+            entry.startswith("código comercial") or entry.startswith("código externo")
+            for entry in profile["missing"]
+        )
     return True
 
 

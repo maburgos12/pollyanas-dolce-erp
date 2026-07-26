@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 
@@ -216,8 +217,15 @@ class BonosVentasTests(TestCase):
         self.assertIn("Imprimir / PDF", content)
         self.assertIn("label:'Sucursal',value:contextLabel", content)
         self.assertNotIn("Monto calculado", content)
-        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", content)
-        self.assertIn("margin:28px auto 0", content)
+        # El rediseño UI (commit 71e46ad1) movió el CSS inline de la PWA a un
+        # módulo estático; el grid de firmas imprimible vive ahora ahí.
+        self.assertIn("/static/css/template_modules/bonos-ventas-templates-bonos-ventas-index.css", content)
+        css_path = finders.find("css/template_modules/bonos-ventas-templates-bonos-ventas-index.css")
+        self.assertIsNotNone(css_path)
+        with open(css_path, encoding="utf-8") as css_file:
+            css = css_file.read()
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", css)
+        self.assertIn("margin:28px auto 0", css)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("Sincronizar repartidores", content)
@@ -225,13 +233,14 @@ class BonosVentasTests(TestCase):
         self.assertIn("const REPARTIDORES_KEY = 'REPARTIDORES';", content)
         self.assertIn("grupoVentasKey", content)
         self.assertIn("ReactDOM.createPortal", content)
-        self.assertIn("body > :not(.print-modal)", content)
-        self.assertIn("transform:none!important", content)
+        self.assertIn("body > :not(.print-modal)", css)
+        self.assertIn("transform:none!important", css)
         self.assertIn("Firma empleado", content)
         self.assertNotIn("pointer-events:none", content)
+        self.assertNotIn("pointer-events:none", css)
         self.assertNotIn("if(!dom)", content)
-        self.assertIn(".day-cell.dom.worked", content)
-        self.assertIn(".day-cell.saving", content)
+        self.assertIn(".day-cell.dom.worked", css)
+        self.assertIn(".day-cell.saving", css)
         self.assertIn("savingDia", content)
         self.assertIn("const nextWorked=!(r&&r.tiene_asistencia);", content)
         self.assertIn("{tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked}", content)
@@ -253,7 +262,8 @@ class BonosVentasTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-ventas-pwa-v16", sw_content)
+        # Versión vigente del SW (bump 71e46ad1, estandarización UI).
+        self.assertIn("pollyanas-bonos-ventas-pwa-v17-ui100", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -306,6 +316,10 @@ class BonosVentasTests(TestCase):
             anio=2026,
             dias_laborables=23,
             limite_asistencia=0,
+            # Desde a3586993 la cancelación total es opt-in por checkbox;
+            # se activa la regla para conservar el contrato de este test.
+            cancela_por_asistencia=True,
+            limite_asistencia_cancelacion=1,
             pct_uniforme=Decimal("15.00"),
             pct_asistencia=Decimal("45.00"),
             pct_puntualidad=Decimal("40.00"),
@@ -334,6 +348,9 @@ class BonosVentasTests(TestCase):
             anio=2026,
             dias_laborables=23,
             limite_asistencia=0,
+            # Desde a3586993 la cancelación total es opt-in por checkbox.
+            cancela_por_asistencia=True,
+            limite_asistencia_cancelacion=1,
             pct_uniforme=Decimal("15.00"),
             pct_asistencia=Decimal("45.00"),
             pct_puntualidad=Decimal("40.00"),
@@ -362,6 +379,9 @@ class BonosVentasTests(TestCase):
             anio=2026,
             dias_laborables=23,
             limite_puntualidad=2,
+            # Desde a3586993 la cancelación total es opt-in por checkbox.
+            cancela_por_puntualidad=True,
+            limite_retardos_cancelacion=3,
             pct_uniforme=Decimal("15.00"),
             pct_asistencia=Decimal("45.00"),
             pct_puntualidad=Decimal("40.00"),

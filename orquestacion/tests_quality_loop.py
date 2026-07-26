@@ -454,13 +454,20 @@ class QualityLoopViewTests(TestCase):
             suggested_fix="Usar sales_read_service en vez de PointDailySale directo.",
         )
 
-    def test_quality_findings_list_allows_admin_and_denies_reader(self):
+    def test_quality_findings_list_allows_admin_and_reader_denies_roleless(self):
         self.client.force_login(self.admin)
         response = self.client.get(reverse("orquestacion:quality_findings"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Loop de calidad y remediación")
 
+        # Matriz RBAC vigente: LECTURA tiene vista global (core/access.py,
+        # _role_module_access) — el lector ve la lista en solo lectura.
         self.client.force_login(self.reader)
+        reader_response = self.client.get(reverse("orquestacion:quality_findings"))
+        self.assertEqual(reader_response.status_code, 200)
+
+        roleless = get_user_model().objects.create_user(username="quality_roleless", password="pass123")
+        self.client.force_login(roleless)
         denied = self.client.get(reverse("orquestacion:quality_findings"))
         self.assertEqual(denied.status_code, 403)
 

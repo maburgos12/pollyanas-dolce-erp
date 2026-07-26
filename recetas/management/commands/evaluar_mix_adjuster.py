@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from core.branch_catalog import eligible_operational_branch_qs
 from core.models import Sucursal
-from recetas.views import _build_forecast_backtest_preview, _parse_date_safe
+from recetas.views.plan import _build_forecast_backtest_preview, _parse_date_safe
 
 
 def _json_default(value):

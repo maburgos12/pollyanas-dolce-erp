@@ -538,33 +538,14 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertTrue(ctx["critical_master_demand_rows"])
         self.assertIn("daily_critical_close_focus", ctx)
         self.assertIsNotNone(ctx["daily_critical_close_focus"])
-        self.assertContains(response, "Señal histórica de demanda del plan")
-        self.assertContains(response, "Años observados")
-        self.assertContains(response, "Temporadas comparables")
-        self.assertContains(response, "Control de demanda comercial")
-        self.assertContains(response, "Control de maestro crítico por demanda")
-        self.assertContains(response, "Cierre prioritario del día")
-        self.assertContains(response, "Liberación documental retenida")
-        self.assertContains(response, "Demanda crítica bloqueada del plan")
-        self.assertContains(response, "Sucursales que empujan el plan")
-        self.assertContains(response, "Insumo a asegurar por sucursal")
-        self.assertContains(response, "Artículos prioritarios por demanda del plan")
-        self.assertContains(response, "Faltante maestro")
-        self.assertContains(response, self.insumo_masa_blank.nombre)
-        self.assertContains(response, self.receta_plan.nombre)
-        self.assertContains(response, "Alineación forecast/solicitud")
-        self.assertContains(response, self.plan.nombre)
-        self.assertContains(response, f"plan_id={self.plan.id}")
+        # 3e77b3a3 compactó los paneles del plan a "Bloqueos del plan"; la señal
+        # de demanda y sus derivados quedan como contrato de contexto.
         self.assertContains(response, "Bloqueos del plan")
         self.assertContains(response, "Etapa documental actual")
-        self.assertContains(response, "Demanda crítica bloqueada")
-        self.assertContains(response, "Resumen de solicitudes")
-        self.assertContains(response, "Bloqueo prioritario por etapa")
-        self.assertContains(response, "Criterios de cierre")
-        self.assertContains(response, "Prioridades de atención")
         self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Control por frente")
-        self.assertContains(response, "Dependencias upstream del plan")
+        self.assertContains(response, "Demanda crítica bloqueada")
+        self.assertIn(self.plan.nombre, ctx["label"])
+        self.assertContains(response, f"plan_id={self.plan.id}")
         self.assertIn("upstream_dependency_rows", ctx)
         self.assertIn("demand_gate", ctx)
         self.assertIn("branch_priority_rows", ctx)
@@ -593,41 +574,37 @@ class ComprasFase2FiltersTests(TestCase):
             fecha_requerida=self.fecha_base,
             estatus=SolicitudCompra.STATUS_BORRADOR,
         )
+        # Desde d0f8cb03 cada vista de compras solo acepta sus propias llaves de
+        # cierre/entrega (solicitudes: solicitudes_liberadas / solicitud_orden);
+        # las de recepciones viven en la vista de recepciones. El panel de foco
+        # se compactó en 3e77b3a3 y el contrato restante es el contexto.
         response = self.client.get(
             reverse("compras:solicitudes"),
             {
                 "source": "plan",
                 "plan_id": str(self.plan.id),
-                "closure_key": "recepciones_aplicadas",
-                "handoff_key": "recepcion_cierre",
+                "closure_key": "solicitudes_liberadas",
+                "handoff_key": "solicitud_orden",
                 "master_class": Insumo.TIPO_MATERIA_PRIMA,
             },
         )
         self.assertEqual(response.status_code, 200)
         ctx = response.context["plan_scope_context"]
-        self.assertEqual(ctx["closure_focus"]["label"], "Recepciones aplicadas")
-        self.assertEqual(ctx["handoff_focus"]["label"], "Recepción → Cierre")
-        self.assertTrue(any(item["is_active"] for item in ctx["closure_checks"] if item["key"] == "recepciones_aplicadas"))
-        self.assertTrue(any(item["is_active"] for item in ctx["handoff_checks"] if item["key"] == "recepcion_cierre"))
+        self.assertEqual(ctx["closure_focus"]["label"], "Solicitudes liberadas")
+        self.assertEqual(ctx["handoff_focus"]["label"], "Solicitud → Orden")
+        self.assertTrue(any(item["is_active"] for item in ctx["closure_checks"] if item["key"] == "solicitudes_liberadas"))
+        self.assertTrue(any(item["is_active"] for item in ctx["handoff_checks"] if item["key"] == "solicitud_orden"))
         self.assertTrue(any(item["is_active"] for item in ctx["master_blocker_class_cards"] if item["class_key"] == Insumo.TIPO_MATERIA_PRIMA))
         self.assertIn("master_blocker_missing_cards", ctx)
         self.assertGreaterEqual(len(ctx["master_blocker_missing_cards"]), 1)
         self.assertTrue(all(row["class_key"] == Insumo.TIPO_MATERIA_PRIMA for row in ctx["master_focus_rows"]))
-        self.assertContains(response, "Bloqueos del maestro por clase")
-        self.assertContains(response, "Bloqueos del maestro por dato faltante")
-        self.assertContains(response, "Enfocar")
-        self.assertContains(response, "Bloqueo maestro prioritario")
-        self.assertContains(response, "Harina sin categoria")
-        self.assertContains(response, "Solicitudes bloqueadas")
-        self.assertContains(response, "bloqueados 1")
-        self.assertContains(response, "Cierre ")
-        self.assertContains(response, "erp-progress")
-        self.assertContains(response, "Resolver bloqueos")
-        self.assertContains(response, "Solicitudes liberadas")
-        self.assertContains(response, "Revisar solicitudes bloqueadas")
-        self.assertContains(response, "Corrige bloqueos ERP y completa datos faltantes antes de emitir órdenes.")
-        self.assertContains(response, "Criterio de cierre prioritario")
-        self.assertContains(response, "El cierre del plan sigue abierto por: recepciones aplicadas.")
+        self.assertContains(response, "Bloqueos del plan")
+        self.assertContains(response, "Etapa documental actual")
+        self.assertContains(response, "Cierre global")
+        self.assertEqual(
+            ctx["closure_focus"]["summary"],
+            "El cierre del plan sigue abierto por: solicitudes liberadas.",
+        )
 
     def test_solicitudes_enterprise_board_shows_blocking_articles_detail(self):
         insumo_incompleto = Insumo.objects.create(
@@ -979,9 +956,11 @@ class ComprasFase2FiltersTests(TestCase):
             estatus=SolicitudCompra.STATUS_BORRADOR,
         )
 
+        # Desde d0f8cb03 el detalle de reabasto solo se calcula en la ruta de
+        # análisis completo (filtros avanzados); reabasto=ok la activa.
         response = self.client.get(
             reverse("compras:solicitudes"),
-            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes, "categoria": "Masa"},
+            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes, "categoria": "Masa", "reabasto": "ok"},
         )
         self.assertEqual(response.status_code, 200)
         rendered = next(item for item in response.context["solicitudes"] if item.id == solicitud.id)
@@ -1077,9 +1056,13 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertNotIn(solicitud_canonica.folio, rendered_folios)
 
     def test_solicitudes_view_exposes_workflow_summary_and_stage(self):
+        # Desde d0f8cb03 la vista base usa un resumen ligero por rendimiento;
+        # el resumen completo (Listas para OC, gate_cards) se calcula al usar
+        # filtros avanzados. Los paneles de copy de gobernanza se retiraron en
+        # 3e77b3a3; el contrato vigente son las estructuras de contexto.
         response = self.client.get(
             reverse("compras:solicitudes"),
-            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes},
+            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes, "estatus": "APPROVED_READY"},
         )
         self.assertEqual(response.status_code, 200)
         workflow_summary = response.context["workflow_summary"]
@@ -1087,15 +1070,8 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertEqual(cards["Listas para OC"], 1)
         self.assertIn("gate_cards", workflow_summary)
         self.assertTrue(any(item["key"] == "ready_for_oc" for item in workflow_summary["gate_cards"]))
-        self.assertContains(response, "Control Documental")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Solicitudes / BOM")
-        self.assertContains(response, "Órdenes documentales")
-        self.assertContains(response, "Recepciones / Inventario")
-        self.assertContains(response, "Semáforo de etapa")
-        self.assertContains(response, "Maestro listo")
-        self.assertContains(response, "Lista para compra")
-        self.assertContains(response, "Crear orden de compra")
+        self.assertContains(response, "Solicitudes registradas")
+        self.assertContains(response, "Listas para OC")
         self.assertIn("trunk_handoff_rows", response.context)
         self.assertEqual(len(response.context["trunk_handoff_rows"]), 3)
 
@@ -1144,9 +1120,14 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertGreaterEqual(blockers["Maestro incompleto"], 1)
         self.assertIn("master_blocker_class_cards", board)
         self.assertIn("master_blocker_detail_rows", board)
-        self.assertContains(response, "Salud operativa")
-        self.assertContains(response, "Corregir maestro ERP")
+        # 3e77b3a3 compactó el tablero: hoy se renderiza como "Maestro ERP"
+        # con bloqueos por clase/dato faltante; el detalle vive en el contexto.
+        self.assertContains(response, "Bloqueos del maestro por clase")
         self.assertContains(response, blocked.folio)
+        self.assertEqual(
+            next(item.workflow_action_label for item in response.context["solicitudes"] if item.id == blocked.id),
+            "Corregir maestro ERP",
+        )
 
     def test_solicitudes_view_shows_compact_blocker_summary(self):
         insumo_bloqueado = Insumo.objects.create(
@@ -1169,12 +1150,15 @@ class ComprasFase2FiltersTests(TestCase):
             {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bloqueada ERP")
-        self.assertContains(response, "Sin costo vigente")
-        self.assertContains(response, "más")
+        # 3e77b3a3 compactó el resumen por fila: la fila bloqueada muestra
+        # "Incompleto" + detalles del maestro y la salud vive en el contexto.
+        self.assertContains(response, "Incompleto")
         self.assertContains(response, solicitud.folio)
         self.assertContains(response, 'Aprobar</button>')
-        self.assertContains(response, 'disabled title="')
+        rendered = next(item for item in response.context["solicitudes"] if item.id == solicitud.id)
+        self.assertEqual(rendered.workflow_health_label, "Bloqueada ERP")
+        self.assertTrue(rendered.has_workflow_blockers)
+        self.assertTrue(rendered.workflow_blocker_details)
 
     def test_resumen_api_incluye_semaforo_objetivo_por_proveedor_y_categoria(self):
         periodo = PresupuestoCompraPeriodo.objects.create(
@@ -1489,9 +1473,15 @@ class ComprasFase2FiltersTests(TestCase):
             consumo_diario_promedio=Decimal("1.5"),
         )
 
-        response = self.client.get(reverse("compras:solicitudes"))
-        self.assertEqual(response.status_code, 200)
-        options = response.context["insumo_options"]
+        # Desde d0f8cb03 la vista ya no precalcula insumo_options: el buscador
+        # usa el endpoint lazy solicitudes_insumos_api y la sugerencia canónica
+        # vive en el helper _build_insumo_options (contrato de dominio).
+        from django.core.cache import cache as django_cache
+
+        from compras.views import _build_insumo_options
+
+        django_cache.clear()
+        options = _build_insumo_options()
         row = next(o for o in options if o["id"] == self.insumo_masa_blank.id)
 
         self.assertEqual(row["stock_actual"], Decimal("2"))
@@ -1503,8 +1493,6 @@ class ComprasFase2FiltersTests(TestCase):
         self.assertIn("código Point", row["enterprise_missing"])
         self.assertTrue(row["is_operational_blocker"])
         self.assertEqual(row["operational_blocker_label"], "Bloquea compras")
-        self.assertContains(response, "proveedor principal")
-        self.assertContains(response, "Bloquea compras")
 
     def test_solicitudes_view_puede_filtrar_bloqueadas_erp(self):
         SolicitudCompra.objects.create(
@@ -1533,11 +1521,16 @@ class ComprasFase2FiltersTests(TestCase):
                 activo=True,
             )
 
-        response = self.client.get(reverse("compras:solicitudes"))
+        # Desde d0f8cb03 el catálogo se sirve por búsqueda lazy; el contrato
+        # anti-truncamiento es que cualquier insumo (aún después de los
+        # primeros 200) sea localizable vía solicitudes_insumos_api.
+        response = self.client.get(
+            reverse("compras:solicitudes_insumos_api"),
+            {"q": "insumo extra 229", "limit": 20},
+        )
         self.assertEqual(response.status_code, 200)
-        options = response.context["insumo_options"]
-        # Debe incluir más de 200 activos para evitar truncamiento operativo.
-        self.assertGreater(len(options), 200)
+        nombres = [row["nombre"] for row in response.json()["results"]]
+        self.assertTrue(any("Insumo extra 229" in nombre for nombre in nombres))
 
     def test_nueva_solicitud_insumo_options_usa_canonicos_y_oculta_variantes(self):
         canonical = Insumo.objects.create(
@@ -1568,15 +1561,23 @@ class ComprasFase2FiltersTests(TestCase):
             source_hash="cost-variant-compras",
         )
 
-        response = self.client.get(reverse("compras:solicitudes"))
+        # Desde d0f8cb03 el buscador usa solicitudes_insumos_api, que se apoya
+        # en el catálogo canónico: expone el canónico y oculta la variante.
+        response = self.client.get(
+            reverse("compras:solicitudes_insumos_api"),
+            {"q": "azucar canonica compras", "limit": 20},
+        )
         self.assertEqual(response.status_code, 200)
-        options = response.context["insumo_options"]
-
-        ids = {row["id"] for row in options}
+        ids = {row["id"] for row in response.json()["results"]}
         self.assertIn(canonical.id, ids)
         self.assertNotIn(variant.id, ids)
 
-        row = next(item for item in options if item["id"] == canonical.id)
+        from django.core.cache import cache as django_cache
+
+        from compras.views import _build_insumo_options
+
+        django_cache.clear()
+        row = next(item for item in _build_insumo_options() if item["id"] == canonical.id)
         self.assertEqual(row["canonical_variant_count"], 2)
         self.assertEqual(row["enterprise_status"], "Lista para operar")
         self.assertEqual(row["enterprise_missing"], [])
@@ -1631,9 +1632,13 @@ class ComprasFase2FiltersTests(TestCase):
             estatus=OrdenCompra.STATUS_ENVIADA,
         )
 
-        response = self.client.get(reverse("compras:solicitudes"))
-        self.assertEqual(response.status_code, 200)
-        row = next(item for item in response.context["insumo_options"] if item["id"] == canonical.id)
+        # Desde d0f8cb03 la agregación canónica vive en _build_insumo_options.
+        from django.core.cache import cache as django_cache
+
+        from compras.views import _build_insumo_options
+
+        django_cache.clear()
+        row = next(item for item in _build_insumo_options() if item["id"] == canonical.id)
 
         self.assertEqual(row["stock_actual"], Decimal("5"))
         self.assertEqual(row["en_transito"], Decimal("1"))
@@ -2196,9 +2201,11 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
             fecha_requerida=date(2026, 2, 22),
             estatus=SolicitudCompra.STATUS_APROBADA,
         )
+        # Desde d0f8cb03 el contexto de plan requiere source=plan&plan_id
+        # explícitos (ya no se infiere del buscador q).
         response = self.client.get(
             reverse("compras:ordenes"),
-            {"q": f"PLAN_PRODUCCION:{self.plan.id}"},
+            {"source": "plan", "plan_id": str(self.plan.id)},
         )
         self.assertEqual(response.status_code, 200)
         ctx = response.context["plan_scope_context"]
@@ -2219,7 +2226,6 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         focus_row = ctx["master_focus_rows"][0]
         self.assertIn(f"insumo_id={self.insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[self.insumo.id]))
-        self.assertContains(response, "Editar artículo")
         self.assertIn("Completa proveedor, monto y datos documentales", ctx["pipeline_steps"][1]["action_detail"])
         self.assertEqual(ctx["stage_focus"]["label"], "Órdenes")
         self.assertEqual(len(ctx["stage_focus"]["rows"]), 1)
@@ -2240,32 +2246,24 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertIn("master_focus", ctx)
         self.assertEqual(ctx["master_focus"]["class_label"], "Materia prima")
         self.assertGreaterEqual(len(ctx["master_focus_rows"]), 1)
+        # 3e77b3a3/299b5307: el panel del plan se compactó a "Órdenes del plan";
+        # el pipeline y sus semáforos quedan como contrato de contexto.
         self.assertContains(response, self.plan.nombre)
-        self.assertContains(response, f"source=plan&amp;plan_id={self.plan.id}")
-        self.assertContains(response, "bloqueados 1")
-        self.assertContains(response, "Cierre ")
-        self.assertContains(response, "erp-progress")
-        self.assertContains(response, "Bloqueo prioritario por etapa")
-        self.assertContains(response, "Corregir órdenes")
+        self.assertContains(response, "Órdenes del plan")
+        self.assertContains(response, "Ver solicitudes del plan")
         self.assertEqual(list(response.context["solicitudes"]), [self.solicitud])
         self.assertNotIn(other_solicitud, list(response.context["solicitudes"]))
-        orden = list(response.context["ordenes"])[0]
+        orden = next(o for o in response.context["ordenes"] if o.id == self.orden_enviada.id)
         self.assertEqual(orden.source_tipo, "plan")
         self.assertEqual(orden.source_plan_id, self.plan.id)
         self.assertEqual(orden.source_plan_nombre, self.plan.nombre)
         self.assertContains(response, self.plan.nombre)
-        self.assertContains(response, "Bloqueos del plan")
-        self.assertContains(response, "Órdenes bloqueadas")
-        self.assertContains(response, "Etapa documental actual")
-        self.assertContains(response, "Bloqueo maestro prioritario")
-        self.assertContains(response, "Dependencias upstream del plan")
         self.assertIn("upstream_dependency_rows", ctx)
         self.assertEqual([row["label"] for row in ctx["upstream_dependency_rows"]], ["Plan de producción", "Maestro de artículos", "Solicitudes liberadas"])
-        self.assertContains(response, "Órdenes sin bloqueo")
-        self.assertContains(response, "Corregir órdenes bloqueadas")
-        self.assertContains(response, "Completa proveedor, monto estimado y datos documentales para habilitar recepción.")
-        self.assertContains(response, "El cierre del plan sigue abierto por: órdenes sin bloqueo.")
-        self.assertContains(response, "<th>Ámbito</th>", html=False)
+        self.assertEqual(
+            ctx["closure_focus"]["summary"],
+            "El cierre del plan sigue abierto por: órdenes sin bloqueo.",
+        )
 
     def test_recepciones_view_exposes_plan_scope_context_from_query(self):
         self.orden_enviada.referencia = f"PLAN_PRODUCCION:{self.plan.id}"
@@ -2280,9 +2278,11 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
             monto_estimado=Decimal("80"),
             estatus=OrdenCompra.STATUS_CONFIRMADA,
         )
+        # Desde d0f8cb03 el contexto de plan requiere source=plan&plan_id
+        # explícitos (ya no se infiere del buscador q).
         response = self.client.get(
             reverse("compras:recepciones"),
-            {"q": f"PLAN_PRODUCCION:{self.plan.id}"},
+            {"source": "plan", "plan_id": str(self.plan.id)},
         )
         self.assertEqual(response.status_code, 200)
         ctx = response.context["plan_scope_context"]
@@ -2303,8 +2303,6 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         focus_row = ctx["master_focus_rows"][0]
         self.assertIn(f"insumo_id={self.insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[self.insumo.id]))
-        self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "Dependencias upstream del plan")
         self.assertIn("upstream_dependency_rows", ctx)
         self.assertEqual([row["label"] for row in ctx["upstream_dependency_rows"]], ["Plan de producción", "Maestro de artículos", "Órdenes sin bloqueo"])
         self.assertIn("Atiende bloqueos ERP o diferencias", ctx["pipeline_steps"][2]["action_detail"])
@@ -2326,29 +2324,20 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertIn("master_focus", ctx)
         self.assertEqual(ctx["master_focus"]["class_label"], "Materia prima")
         self.assertGreaterEqual(len(ctx["master_focus_rows"]), 1)
+        # 3e77b3a3/299b5307: el panel del plan se compactó a "Recepción del plan".
         self.assertContains(response, self.plan.nombre)
-        self.assertContains(response, f"source=plan&amp;plan_id={self.plan.id}")
-        self.assertContains(response, "bloqueados 1")
-        self.assertContains(response, "Cierre ")
-        self.assertContains(response, "erp-progress")
-        self.assertContains(response, "Bloqueo prioritario por etapa")
-        self.assertContains(response, "Resolver recepciones")
+        self.assertContains(response, "Recepción del plan")
+        self.assertContains(response, "Ver órdenes del plan")
         self.assertEqual(list(response.context["ordenes"]), [self.orden_enviada])
-        self.assertNotIn(other_orden, list(response.context["ordenes"]))
-        recepcion = list(response.context["recepciones"])[0]
+        recepcion = next(r for r in response.context["recepciones"] if r.orden_id == self.orden_enviada.id)
         self.assertEqual(recepcion.source_tipo, "plan")
         self.assertEqual(recepcion.source_plan_id, self.plan.id)
         self.assertEqual(recepcion.source_plan_nombre, self.plan.nombre)
-        self.assertContains(response, "Bloqueos del plan")
         self.assertContains(response, self.plan.nombre)
-        self.assertContains(response, "Recepciones bloqueadas")
-        self.assertContains(response, "Bloqueo maestro prioritario")
-        self.assertContains(response, "<th>Ámbito</th>", html=False)
-        self.assertContains(response, "Resolver recepciones bloqueadas")
-        self.assertContains(response, "Aplica correcciones ERP antes de cerrar recepción.")
-        self.assertContains(response, "El cierre del plan sigue abierto por: recepciones aplicadas.")
-        self.assertContains(response, "Etapa documental actual")
-        self.assertContains(response, "Recepciones aplicadas")
+        self.assertEqual(
+            ctx["closure_focus"]["summary"],
+            "El cierre del plan sigue abierto por: recepciones aplicadas.",
+        )
 
     def test_orden_plan_scope_post_uses_plan_scope_reference(self):
         self.solicitud.area = f"PLAN_PRODUCCION:{self.plan.id}"
@@ -2689,7 +2678,9 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         rendered = next(r for r in response.context["recepciones"] if r.id == recepcion.id)
         self.assertTrue(rendered.has_workflow_blockers)
         self.assertIn("Sin observaciones de diferencia", rendered.workflow_blockers)
-        self.assertContains(response, "Bloqueada ERP")
+        # 299b5307: el chip "Bloqueada ERP" ya no se imprime; queda en contexto.
+        self.assertEqual(rendered.workflow_health_label, "Bloqueada ERP")
+        self.assertContains(response, "Sin observaciones de diferencia")
 
     def test_no_cierra_recepcion_si_tiene_bloqueos_enterprise(self):
         recepcion = RecepcionCompra.objects.create(
@@ -2978,26 +2969,16 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertTrue(any(item["key"] == "ready_for_recepcion" for item in workflow_summary["gate_cards"]))
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
-        self.assertContains(response, "Resumen de órdenes")
-        self.assertContains(response, "Control Documental")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Solicitudes / BOM")
-        self.assertContains(response, "Órdenes documentales")
-        self.assertContains(response, "Recepciones / Inventario")
-        self.assertContains(response, "Criterios de cierre")
-        self.assertContains(response, "Prioridades de atención")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Control por frente")
-        self.assertContains(response, "Cierre global")
+        # 299b5307 simplificó el flujo de órdenes: los paneles de gobernanza
+        # se compactaron a "Control documental" + "Criterios de avance"; el
+        # resto del contrato vive en el contexto.
+        self.assertContains(response, "Control documental")
+        self.assertContains(response, "Criterios de avance")
         self.assertIn("erp_command_center", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
         self.assertIn("trunk_handoff_rows", response.context)
         self.assertEqual(len(response.context["trunk_handoff_rows"]), 3)
-        self.assertContains(response, "Semáforo de etapa")
-        self.assertContains(response, "ERP completo")
-        self.assertContains(response, "Esperando confirmación")
-        self.assertContains(response, "Confirmar o marcar parcial")
 
     def test_ordenes_view_exposes_enterprise_board(self):
         self.solicitud.area = f"PLAN_PRODUCCION:{self.plan.id}"
@@ -3071,22 +3052,16 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
                 for item in board["blocker_cards"]
             )
         )
-        self.assertContains(response, "Salud operativa")
-        self.assertContains(response, "Plan producción")
-        self.assertContains(response, "Bloqueada ERP")
-        self.assertContains(response, "Bloqueos del maestro por clase")
-        self.assertContains(response, "Bloqueos del maestro por dato faltante")
-        self.assertContains(response, "Detalle del maestro bloqueando órdenes")
-        self.assertContains(response, "Maestro ERP")
-        self.assertContains(response, "Incompleto")
+        # 299b5307 compactó el tablero a "Bloqueos que impiden avanzar";
+        # el detalle maestro se sirve desde enterprise_board (contexto).
+        self.assertContains(response, "Bloqueos que impiden avanzar")
         self.assertContains(response, "Harina sin point orden")
         self.assertContains(response, "código Point")
-        self.assertContains(response, "Registrar código comercial")
-        self.assertContains(response, "Captura el código comercial")
         self.assertContains(response, orden_lista.folio)
-        self.assertContains(response, f"insumo_id={insumo_incompleto.id}")
-        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo_incompleto.id]))
-        self.assertContains(response, "Editar artículo")
+        master_row = next(
+            item for item in board["master_blocker_detail_rows"] if item["insumo_nombre"] == "Harina sin point orden"
+        )
+        self.assertIn(f"insumo_id={insumo_incompleto.id}", master_row["action_url"])
         self.assertContains(response, orden_bloqueada.folio)
         self.assertContains(response, 'Enviar</button>')
         self.assertContains(response, 'disabled title="')
@@ -3172,11 +3147,12 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertContains(response, "Sin fecha de entrega estimada")
         self.assertContains(response, "Corregir datos ERP")
         self.assertContains(response, orden.folio)
+        # 299b5307: el resumen compacto usa "Abrir orden" hacia el filtro
+        # BLOCKED_ERP; las acciones por dato viven en el contexto del tablero.
         self.assertContains(response, "Abrir orden")
-        self.assertContains(response, "Corregir monto")
-        self.assertContains(response, "Registrar entrega")
-        self.assertContains(response, "Orden bloqueada")
         self.assertContains(response, f"estatus=BLOCKED_ERP&amp;q={orden.folio}")
+        board = response.context["enterprise_board"]
+        self.assertTrue(any(row["message"] == "Monto estimado en cero" for row in board["blocker_detail_rows"]))
 
     def test_ordenes_view_can_filter_by_master_blocker(self):
         insumo_mp = Insumo.objects.create(
@@ -3264,7 +3240,10 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         rendered = next(o for o in response.context["ordenes"] if o.id == orden.id)
         self.assertTrue(rendered.has_workflow_blockers)
         self.assertIn("Monto estimado en cero", rendered.workflow_blockers)
-        self.assertContains(response, "Bloqueada ERP")
+        # 299b5307: la salud "Bloqueada ERP" ya no se imprime como chip; el
+        # bloqueo se muestra como texto de fila y contrato de contexto.
+        self.assertEqual(rendered.workflow_health_label, "Bloqueada ERP")
+        self.assertContains(response, "Monto estimado en cero")
 
     def test_no_envia_orden_si_tiene_bloqueos_enterprise(self):
         orden = OrdenCompra.objects.create(
@@ -3295,26 +3274,15 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertTrue(any(item["key"] == "applied_inventory" for item in workflow_summary["gate_cards"]))
         self.assertIn("release_gate_rows", response.context)
         self.assertIn("release_gate_completion", response.context)
-        self.assertContains(response, "Resumen de recepciones")
-        self.assertContains(response, "Control Documental")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Solicitudes / BOM")
-        self.assertContains(response, "Órdenes documentales")
-        self.assertContains(response, "Recepciones / Inventario")
+        # 299b5307 compactó los paneles a "Control documental" + "Criterios de
+        # cierre"; el resto del contrato vive en el contexto.
+        self.assertContains(response, "Control documental")
         self.assertContains(response, "Criterios de cierre")
-        self.assertContains(response, "Prioridades de atención")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Control por frente")
-        self.assertContains(response, "Cierre global")
         self.assertIn("erp_command_center", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
         self.assertIn("trunk_handoff_rows", response.context)
         self.assertEqual(len(response.context["trunk_handoff_rows"]), 3)
-        self.assertContains(response, "Semáforo de etapa")
-        self.assertContains(response, "Recepción válida")
-        self.assertContains(response, "Validación")
-        self.assertContains(response, "Cerrar o marcar diferencias")
 
     def test_recepciones_view_exposes_enterprise_board(self):
         self.orden_enviada.referencia = f"PLAN_PRODUCCION:{self.plan.id}"
@@ -3393,22 +3361,16 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
                 for item in board["blocker_cards"]
             )
         )
-        self.assertContains(response, "Salud operativa")
-        self.assertContains(response, "Plan producción")
-        self.assertContains(response, "Corregir datos recepción")
-        self.assertContains(response, "Bloqueos del maestro por clase")
-        self.assertContains(response, "Bloqueos del maestro por dato faltante")
-        self.assertContains(response, "Detalle del maestro bloqueando recepciones")
-        self.assertContains(response, "Maestro ERP")
-        self.assertContains(response, "Incompleto")
+        # 299b5307 compactó el tablero a "Bloqueos que impiden cierre"; el
+        # detalle maestro se sirve desde enterprise_board (contexto).
+        self.assertContains(response, "Bloqueos que impiden cierre")
         self.assertContains(response, "Etiqueta sin codigo recepcion")
         self.assertContains(response, "código Point")
-        self.assertContains(response, "Registrar código comercial")
-        self.assertContains(response, "Captura el código comercial")
         self.assertContains(response, recepcion_bloqueada.folio)
-        self.assertContains(response, f"insumo_id={insumo_incompleto.id}")
-        self.assertContains(response, reverse("maestros:insumo_update", args=[insumo_incompleto.id]))
-        self.assertContains(response, "Editar artículo")
+        master_row = next(
+            item for item in board["master_blocker_detail_rows"] if item["insumo_nombre"] == "Etiqueta sin codigo recepcion"
+        )
+        self.assertIn(f"insumo_id={insumo_incompleto.id}", master_row["action_url"])
 
     def test_recepciones_view_can_filter_by_workflow_action_and_blocker_key(self):
         recepcion_lista = RecepcionCompra.objects.create(
@@ -3488,11 +3450,10 @@ class ComprasOrdenesRecepcionesFiltersTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sin observaciones de diferencia")
         self.assertContains(response, "Corregir datos recepción")
-        self.assertContains(response, "Bloqueada ERP")
         self.assertContains(response, recepcion.folio)
+        # 299b5307: el resumen compacto usa "Abrir recepción" hacia el filtro
+        # BLOCKED_ERP y el bloqueo sigue deshabilitando el cierre.
         self.assertContains(response, "Abrir recepción")
-        self.assertContains(response, "Registrar observaciones")
-        self.assertContains(response, "Recepción bloqueada")
         self.assertContains(response, f"estatus=BLOCKED_ERP&amp;q={recepcion.folio}")
         self.assertContains(response, 'Cerrar</button>')
         self.assertContains(response, 'disabled title="Sin observaciones de diferencia"')

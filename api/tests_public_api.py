@@ -28,6 +28,12 @@ from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 class PublicApiTests(APITestCase):
     def setUp(self):
         cache.clear()
+        # El .env local puede activar PICKUP_LIVE_POINT_LOOKUP_ENABLED y estos
+        # tests terminarían consultando el Point real; se aísla el flag. Los
+        # tests del lookup vivo parchean get_stock explícitamente.
+        live_env = patch.dict(os.environ, {"PICKUP_LIVE_POINT_LOOKUP_ENABLED": "0"}, clear=False)
+        live_env.start()
+        self.addCleanup(live_env.stop)
         self.unidad_kg = UnidadMedida.objects.create(
             codigo="kg",
             nombre="Kilogramo",

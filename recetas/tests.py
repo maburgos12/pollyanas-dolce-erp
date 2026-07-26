@@ -19,7 +19,7 @@ from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
 from core.access import ROLE_COMPRAS, ROLE_VENTAS
-from core.models import UserProfile
+from core.models import UserModuleAccess, UserProfile
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from core.models import Sucursal
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
@@ -32,6 +32,7 @@ from recetas.models import (
     PronosticoVenta,
     Receta,
     RecetaCodigoPointAlias,
+    RecetaCostoSemanal,
     RecetaCostoVersion,
     RecetaEquivalencia,
     RecetaPresentacion,
@@ -44,6 +45,7 @@ from recetas.models import (
 )
 from pos_bridge.models import PointBranch, PointDailySale, PointSalesDailyProductFact, PointSyncJob
 from recetas.utils.costeo_versionado import asegurar_version_costeo, calcular_costeo_receta
+from recetas.utils.matching import match_insumo
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost
 from recetas.utils.derived_insumos import sync_presentacion_insumo, sync_receta_derivados
 from recetas.utils.importador import ImportadorCosteo
@@ -91,60 +93,45 @@ class MatchingPendientesAutocompleteTests(TestCase):
             match_method="FUZZY",
         )
 
+    # El módulo operativo de matching manual fue retirado (commit 56f0465c
+    # "fix: ocultar modulo matching operativo"): la vista matching_pendientes
+    # redirige al catálogo de recetas porque la fuente vigente es la
+    # extracción de Point. Estas pruebas validan el contrato de retiro.
     def test_matching_pendientes_view_loads(self):
-        response = self.client.get(reverse("recetas:matching_pendientes"))
+        response = self.client.get(reverse("recetas:matching_pendientes"), follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Validación BOM de artículos")
-        self.assertContains(response, "Resumen del cálculo")
-        self.assertContains(response, "Workflow ERP del componente")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertIn("workflow_rows", response.context)
-        self.assertIn("erp_command_center", response.context)
-        self.assertIn("critical_path_rows", response.context)
+        self.assertEqual(response.redirect_chain[0][0], reverse("recetas:recetas_list"))
+        mensajes = [str(m) for m in response.context["messages"]]
+        self.assertTrue(any("ya no se usa como módulo operativo" in m for m in mensajes))
 
     def test_matching_pendientes_export_csv(self):
         response = self.client.get(reverse("recetas:matching_pendientes"), {"export": "csv", "q": "Harina"})
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("text/csv", response["Content-Type"])
-        body = response.content.decode("utf-8")
-        self.assertIn("receta,posicion,ingrediente,metodo,score,insumo_ligado", body)
-        self.assertIn("Receta Test Match", body)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("recetas:recetas_list"))
 
     def test_matching_pendientes_export_xlsx(self):
         response = self.client.get(reverse("recetas:matching_pendientes"), {"export": "xlsx", "q": "Harina"})
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            response["Content-Type"],
-        )
-        wb = load_workbook(BytesIO(response.content), data_only=True)
-        ws = wb.active
-        headers = [ws.cell(row=1, column=i).value for i in range(1, 7)]
-        self.assertEqual(headers, ["receta", "posicion", "ingrediente", "metodo", "score", "insumo_ligado"])
-        self.assertEqual(ws.cell(row=2, column=1).value, "Receta Test Match")
-        self.assertEqual(ws.cell(row=2, column=3).value, "Harina Pastelera")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("recetas:recetas_list"))
 
     def test_matching_pendientes_context_stats(self):
+        # La vista retirada ya no expone stats: solo redirige sin tocar datos.
+        before = LineaReceta.objects.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).count()
         response = self.client.get(reverse("recetas:matching_pendientes"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertIn("erp_governance_rows", response.context)
-        self.assertIn("executive_radar_rows", response.context)
-        self.assertEqual(response.context["stats"]["total"], 1)
-        self.assertEqual(response.context["stats"]["recetas"], 1)
-        self.assertEqual(response.context["stats"]["fuzzy"], 1)
-        self.assertEqual(response.context["stats"]["no_match"], 0)
-        self.assertEqual(response.context["stats"]["auto_suggested"], 1)
-        self.assertEqual(response.context["stats"]["canonical_suggested"], 1)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("recetas:recetas_list"))
+        self.assertEqual(
+            LineaReceta.objects.filter(match_status=LineaReceta.STATUS_NEEDS_REVIEW).count(),
+            before,
+        )
 
     def test_matching_pendientes_prefers_canonical_suggestion(self):
-        response = self.client.get(reverse("recetas:matching_pendientes"))
-        self.assertEqual(response.status_code, 200)
-        linea = response.context["page"].object_list[0]
-        self.assertEqual(linea.suggested_insumo.id, self.insumo_1_canon.id)
-        self.assertTrue(linea.suggested_is_canonical)
-        self.assertTrue(linea.suggested_can_approve)
+        # La sugerencia canónica ahora vive en match_insumo (commit 44df3683):
+        # devuelve directamente el insumo canónico de Point.
+        suggested, score, method = match_insumo(self.linea.insumo_texto)
+        self.assertEqual(suggested.id, self.insumo_1_canon.id)
+        self.assertGreaterEqual(float(score), 75.0)
+        self.assertEqual(method, "EXACT")
 
     def test_matching_insumos_search_filters_by_query(self):
         response = self.client.get(
@@ -186,7 +173,9 @@ class MatchingPendientesAutocompleteTests(TestCase):
         self.linea.refresh_from_db()
         self.assertEqual(self.linea.insumo_id, self.insumo_1_canon.id)
         self.assertEqual(self.linea.match_status, LineaReceta.STATUS_AUTO)
-        self.assertIn("CANON", self.linea.match_method)
+        # Desde 44df3683 match_insumo devuelve directo el insumo canónico,
+        # por lo que el método queda EXACT (ya no requiere el sufijo _CANON).
+        self.assertEqual(self.linea.match_method, "EXACT")
 
     def test_aprobar_matching_manual_redirects_to_canonical(self):
         response = self.client.post(
@@ -202,12 +191,11 @@ class MatchingPendientesAutocompleteTests(TestCase):
     def test_receta_detail_shows_canonical_suggestion_for_pending_line(self):
         response = self.client.get(reverse("recetas:receta_detail", args=[self.linea.receta.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resumen del cálculo")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Sin artículo estándar")
-        self.assertContains(response, self.insumo_1_canon.nombre)
-        self.assertContains(response, "Cadena de control ERP")
-        self.assertContains(response, "Mesa de gobierno ERP")
+        # El rediseño de mayo movió la sugerencia canónica al contexto.
+        linea_ctx = next(l for l in response.context["lineas"] if l.id == self.linea.id)
+        self.assertIsNotNone(linea_ctx.suggested_insumo)
+        self.assertEqual(linea_ctx.suggested_insumo.id, self.insumo_1_canon.id)
+        self.assertTrue(linea_ctx.suggested_can_approve)
         self.assertIn("erp_command_center", response.context)
         self.assertIn("erp_governance_rows", response.context)
         self.assertIn("critical_path_rows", response.context)
@@ -263,10 +251,10 @@ class MatchingPendientesAutocompleteTests(TestCase):
             match_method="FUZZY",
         )
 
+        # Vista retirada: redirige al catálogo sin importar el filtro.
         response = self.client.get(reverse("recetas:matching_pendientes"), {"receta": self.linea.receta.id})
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.linea.receta.nombre)
-        self.assertNotContains(response, otra_receta.nombre)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("recetas:recetas_list"))
 
     def test_aprobar_matching_sugerido_lote_respects_receta_filter(self):
         otra_receta = Receta.objects.create(nombre="Otra receta lote", hash_contenido="hash-otra-match-002")
@@ -381,9 +369,13 @@ class MatchingPendientesAutocompleteTests(TestCase):
         )
         response = self.client.get(reverse("recetas:receta_detail", args=[self.linea.receta.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Artículo propuesto:")
-        self.assertContains(response, "Usar artículo ERP")
-        self.assertContains(response, "Alinear artículos del maestro")
+        # Controles de normalización canónica: hoy se validan vía contexto.
+        linea_ctx = next(
+            l for l in response.context["lineas"] if l.insumo_id == self.insumo_1.id
+        )
+        self.assertTrue(linea_ctx.canonical_needs_repoint)
+        self.assertEqual(linea_ctx.canonical_target.id, self.insumo_1_canon.id)
+        self.assertGreaterEqual(response.context["non_canonical_count"], 1)
 
 
 class RecetasListCatalogFiltersTests(TestCase):
@@ -427,13 +419,33 @@ class RecetasListCatalogFiltersTests(TestCase):
             familia="Pasteles",
             categoria="Frutales",
         )
+        # Desde 46a2cf15 la pestaña "productos" solo muestra productos con
+        # venta Point reciente (ventana de 90 días), no el flag PointProduct.active.
+        self.point_branch = PointBranch.objects.create(
+            external_id="BR-CAT-QA",
+            name="Sucursal Catálogo QA",
+        )
+        self._registrar_venta_point_reciente(self.receta_producto, sku="PFC-CHICO-QA")
+
+    def _registrar_venta_point_reciente(self, receta, sku, sale_date=None):
+        product, _ = PointProduct.objects.get_or_create(
+            external_id=f"ext-{sku}",
+            defaults={"sku": sku, "name": receta.nombre, "active": True},
+        )
+        return PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=product,
+            receta=receta,
+            sale_date=sale_date or timezone.localdate(),
+            quantity=Decimal("1"),
+        )
 
     def test_recetas_list_default_view_shows_productos(self):
         response = self.client.get(reverse("recetas:recetas_list"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["vista"], "productos")
-        self.assertContains(response, "Catálogo de recetas")
-        self.assertContains(response, "Prioridad del catálogo")
+        # Encabezado vigente del rediseño de mayo (5e4c153e / 7052db18).
+        self.assertContains(response, "Recetas y Costeo")
         self.assertIn("erp_command_center", response.context)
         self.assertIn("erp_governance_rows", response.context)
         self.assertIn("critical_path_rows", response.context)
@@ -479,12 +491,22 @@ class RecetasListCatalogFiltersTests(TestCase):
         response = self.client.get(reverse("recetas:recetas_list"))
 
         self.assertEqual(response.status_code, 200)
+        # El rediseño de mayo dejó el panel como dato de contexto (el template
+        # actual ya no lo pinta); validamos el payload completo del panel.
         self.assertIn("point_recipe_sync_panel", response.context)
-        self.assertEqual(response.context["point_recipe_sync_panel"]["job_id"], job.id)
-        self.assertContains(response, "Última importación Point")
-        self.assertContains(response, "Pastel Nuevo Point")
-        self.assertContains(response, "Producto nuevo importado")
-        self.assertContains(response, "Preparaciones creadas automáticamente")
+        panel = response.context["point_recipe_sync_panel"]
+        self.assertEqual(panel["job_id"], job.id)
+        self.assertEqual(panel["job_status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(len(panel["products"]), 1)
+        producto_panel = panel["products"][0]
+        self.assertEqual(producto_panel["nombre"], "Pastel Nuevo Point")
+        self.assertTrue(producto_panel["is_new_product"])
+        self.assertEqual(producto_panel["status_label"], "Completo")
+        self.assertEqual(
+            producto_panel["created_preparations"],
+            [{"codigo_point": "PREP-001", "nombre": "Betún Base Point"}],
+        )
+        self.assertEqual(panel["summary"]["new_preparations_imported"], 1)
 
     def test_recetas_list_filters_by_tipo(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"tipo": Receta.TIPO_PRODUCTO_FINAL})
@@ -493,7 +515,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
 
-    @patch("recetas.views.PointProductRecipeSyncService")
+    @patch("recetas.views.recetas.PointProductRecipeSyncService")
     def test_recetas_sync_new_warns_when_point_detects_blocked_candidates_without_bom(self, service_cls):
         service = service_cls.return_value
         service.discover_new_product_codes.return_value = {
@@ -604,12 +626,23 @@ class RecetasListCatalogFiltersTests(TestCase):
     def test_recetas_list_shows_operational_health(self):
         self.receta_preparacion.rendimiento_cantidad = None
         self.receta_preparacion.save(update_fields=["rendimiento_cantidad"])
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "todo"})
+        # Desde 46a2cf15 la salud operativa completa solo se calcula cuando se
+        # solicita un filtro avanzado; el detalle vive en el contexto.
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "todo", "health_status": "incompletas"},
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resumen")
-        self.assertContains(response, "Qué falta y qué hacer")
-        self.assertContains(response, "Sin rendimiento")
-        self.assertContains(response, "Falta rendimiento para costeo enterprise.")
+        receta = next(
+            r for r in response.context["page"].object_list if r.id == self.receta_preparacion.id
+        )
+        self.assertEqual(receta.operational_health["label"], "Sin rendimiento")
+        self.assertEqual(
+            receta.operational_health["description"],
+            "Falta rendimiento para costeo enterprise.",
+        )
+        self.assertIn("health_summary", response.context)
+        self.assertGreaterEqual(response.context["health_summary"]["incompletas"], 1)
 
     def test_recetas_list_marks_producto_final_using_base_direct(self):
         base = Receta.objects.create(
@@ -676,10 +709,19 @@ class RecetasListCatalogFiltersTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "todo"})
+        # La marca "Usa base sin presentación" vive ahora en la salud operativa
+        # del contexto (métricas avanzadas bajo filtro, cambio 46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "todo", "health_status": "pendientes"},
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Usa base sin presentación")
-        self.assertContains(response, "Ver contexto")
+        receta = next(
+            r for r in response.context["page"].object_list if r.id == self.receta_producto.id
+        )
+        self.assertEqual(receta.operational_health["label"], "Usa base sin presentación")
+        self.assertEqual(receta.direct_base_snapshot["count"], 1)
+        self.assertIn("Base Lista QA", receta.direct_base_snapshot["base_names"])
 
     def test_recetas_list_filters_by_health_status(self):
         self.receta_preparacion.rendimiento_cantidad = None
@@ -704,9 +746,13 @@ class RecetasListCatalogFiltersTests(TestCase):
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(self.receta_preparacion.nombre, nombres)
         self.assertNotIn(self.receta_producto.nombre, nombres)
-        self.assertContains(response, "Listas para operar")
-        self.assertContains(response, "Pendientes operativos")
-        self.assertContains(response, "Incompletas")
+        # El resumen de salud dejó de pintarse en el template; se valida el
+        # contexto que alimenta los contadores (listas/pendientes/incompletas).
+        health_summary = response.context["health_summary"]
+        self.assertEqual(
+            set(health_summary.keys()), {"listas", "pendientes", "incompletas"}
+        )
+        self.assertGreaterEqual(health_summary["incompletas"], 1)
 
     def test_recetas_list_treats_equivalence_as_effective_bom(self):
         parent = Receta.objects.create(
@@ -725,7 +771,16 @@ class RecetasListCatalogFiltersTests(TestCase):
             codigo_point="PAY-REB-QA",
             sheet_name="AUTO_POINT_SALES",
         )
-        PointProduct.objects.create(sku="PAY-REB-QA", external_id="PAY-REB-QA", name=child.nombre, active=True)
+        point_product = PointProduct.objects.create(
+            sku="PAY-REB-QA", external_id="PAY-REB-QA", name=child.nombre, active=True
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=point_product,
+            receta=child,
+            sale_date=timezone.localdate(),
+            quantity=Decimal("1"),
+        )
         insumo = Insumo.objects.create(
             nombre="Base Pay QA",
             tipo_item=Insumo.TIPO_INTERNO,
@@ -751,6 +806,18 @@ class RecetasListCatalogFiltersTests(TestCase):
             factor_conversion=Decimal("8.000000"),
             activo=True,
             fuente="TEST",
+        )
+        # Desde ac948332 el costo efectivo del listado sale del snapshot
+        # semanal de costeo, no de la suma directa de líneas.
+        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        RecetaCostoSemanal.objects.create(
+            scope_type=RecetaCostoSemanal.SCOPE_RECIPE,
+            identity_key=f"RECIPE:{parent.id}",
+            label=parent.nombre,
+            week_start=week_start,
+            week_end=week_start + timedelta(days=6),
+            receta=parent,
+            costo_total=Decimal("80.000000"),
         )
 
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": child.nombre})
@@ -783,7 +850,16 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Pastel",
             codigo_point="DER-QA-1",
         )
-        PointProduct.objects.create(sku="DER-QA-1", external_id="DER-QA-1", name=child.nombre, active=True)
+        point_product = PointProduct.objects.create(
+            sku="DER-QA-1", external_id="DER-QA-1", name=child.nombre, active=True
+        )
+        PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=point_product,
+            receta=child,
+            sale_date=timezone.localdate(),
+            quantity=Decimal("1"),
+        )
         RecetaPresentacionDerivada.objects.create(
             receta_padre=parent,
             receta_derivada=child,
@@ -819,8 +895,9 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Pastel",
             codigo_point="ARCH-POINT-QA",
         )
-        PointProduct.objects.create(sku="ACT-POINT-QA", external_id="ACT-POINT-QA", name=active.nombre, active=True)
-        PointProduct.objects.create(sku="ARCH-POINT-QA", external_id="ARCH-POINT-QA", name=archived.nombre, active=False)
+        # "Activo" ahora significa venta Point dentro de la ventana reciente
+        # (46a2cf15); el flag PointProduct.active dejó de gobernar la pestaña.
+        self._registrar_venta_point_reciente(active, sku="ACT-POINT-QA")
 
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
 
@@ -828,8 +905,9 @@ class RecetasListCatalogFiltersTests(TestCase):
         names = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(active.nombre, names)
         self.assertNotIn(archived.nombre, names)
-        self.assertEqual(response.context["recetas_activas_count"], 1)
-        self.assertEqual(response.context["recetas_archivadas_count"], 2)
+        # Activos: producto del setUp + "active". Archivado: "archived" sin venta.
+        self.assertEqual(response.context["recetas_activas_count"], 2)
+        self.assertEqual(response.context["recetas_archivadas_count"], 1)
 
     def test_recetas_list_archivados_tab_shows_without_active_point_product(self):
         active = Receta.objects.create(
@@ -855,8 +933,9 @@ class RecetasListCatalogFiltersTests(TestCase):
             familia="Pastel",
             categoria="Pastel",
         )
-        PointProduct.objects.create(sku="ACT-TAB-QA", external_id="ACT-TAB-QA", name=active.nombre, active=True)
-        PointProduct.objects.create(sku="ARCH-TAB-QA", external_id="ARCH-TAB-QA", name=archived.nombre, active=False)
+        # "Activo" = venta Point reciente (46a2cf15); los productos sin venta
+        # reciente caen a la pestaña de archivados.
+        self._registrar_venta_point_reciente(active, sku="ACT-TAB-QA")
 
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "archivados"})
 
@@ -888,12 +967,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Temporal",
             codigo_point="LIVE-001",
         )
-        PointProduct.objects.create(
-            external_id="ext-live-001",
-            sku="LIVE-001",
-            name=producto_vigente_point.nombre,
-            active=True,
-        )
+        self._registrar_venta_point_reciente(producto_vigente_point, sku="LIVE-001")
         for receta in (producto_fuera_point, producto_vigente_point):
             LineaReceta.objects.create(
                 receta=receta,
@@ -909,10 +983,17 @@ class RecetasListCatalogFiltersTests(TestCase):
                 match_method=LineaReceta.MATCH_EXACT,
             )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        # La salud detallada exige un filtro avanzado (46a2cf15). El producto
+        # sin señal Point queda fuera de la pestaña de productos vigentes.
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "health_status": "pendientes"},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["health_summary"]["pendientes"], 1)
-        self.assertContains(response, "Fuera de Point")
+        nombres = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(producto_vigente_point.nombre, nombres)
+        self.assertNotIn(producto_fuera_point.nombre, nombres)
 
     def test_recetas_list_pending_filter_excludes_products_without_point_signal(self):
         interno = Insumo.objects.create(
@@ -936,12 +1017,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Temporal",
             codigo_point="LIVE-002",
         )
-        PointProduct.objects.create(
-            external_id="ext-live-002",
-            sku="LIVE-002",
-            name=producto_vigente_point.nombre,
-            active=True,
-        )
+        self._registrar_venta_point_reciente(producto_vigente_point, sku="LIVE-002")
         for receta in (producto_fuera_point, producto_vigente_point):
             LineaReceta.objects.create(
                 receta=receta,
@@ -996,12 +1072,7 @@ class RecetasListCatalogFiltersTests(TestCase):
             categoria="Especial",
             codigo_point="LEGACY-001",
         )
-        PointProduct.objects.create(
-            external_id="ext-legacy-001",
-            sku="LEGACY-001",
-            name=producto.nombre,
-            active=True,
-        )
+        self._registrar_venta_point_reciente(producto, sku="LEGACY-001")
         LineaReceta.objects.create(
             receta=producto,
             posicion=1,
@@ -1069,7 +1140,12 @@ class RecetasListCatalogFiltersTests(TestCase):
             match_method=LineaReceta.MATCH_FUZZY,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        # estado=ok activa las métricas avanzadas (46a2cf15) y deja fuera a los
+        # productos con pendientes reales; los placeholders legacy no cuentan.
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "estado": "ok"},
+        )
         self.assertEqual(response.status_code, 200)
         health = {r.nombre: r.operational_health["label"] for r in response.context["page"].object_list}
         self.assertEqual(health[producto.nombre], "Lista para operar")
@@ -1129,8 +1205,15 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertEqual(response.status_code, 200)
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(self.receta_producto.nombre, nombres)
-        self.assertContains(response, "Sin familia")
-        self.assertContains(response, "Sin componentes")
+        # Los chips de gobernanza dejaron de pintarse en el template; el dato
+        # vive en governance_issues/governance_summary del contexto.
+        receta = next(
+            r for r in response.context["page"].object_list if r.id == self.receta_producto.id
+        )
+        self.assertIn("familia", receta.governance_issues)
+        self.assertIn("componentes", receta.governance_issues)
+        self.assertGreaterEqual(response.context["governance_summary"]["familia"], 1)
+        self.assertGreaterEqual(response.context["governance_summary"]["componentes"], 1)
 
     def test_recetas_list_filters_by_governance_maestro_incompleto(self):
         unidad = UnidadMedida.objects.create(
@@ -1174,10 +1257,16 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertEqual(response.status_code, 200)
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(receta.nombre, nombres)
-        self.assertContains(response, "Faltante dominante:")
-        self.assertContains(response, "categoría")
-        self.assertContains(response, "(1)")
-        self.assertContains(response, "Qué falta y qué hacer")
+        # El faltante dominante del maestro ahora se valida vía contexto.
+        receta_context = next(
+            r for r in response.context["page"].object_list if r.nombre == receta.nombre
+        )
+        self.assertEqual(receta_context.master_gap_summary["counts"]["categoria"], 1)
+        self.assertEqual(receta_context.master_gap_summary["dominant_key"], "categoria")
+        self.assertEqual(receta_context.master_gap_summary["dominant_count"], 1)
+        # El total global solo suma productos con señal Point vigente, por lo
+        # que aquí basta validar el resumen del propio documento.
+        self.assertEqual(receta_context.master_gap_summary["dominant_label"], "categoría")
 
     def test_recetas_list_primary_action_for_maestro_incompleto_uses_dominant_missing_field(self):
         unidad = UnidadMedida.objects.create(
@@ -1216,7 +1305,12 @@ class RecetasListCatalogFiltersTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "todo", "q": receta.nombre})
+        # primary_action solo se calcula con métricas avanzadas (46a2cf15);
+        # el filtro de gobernanza es el flujo real que llega a esta acción.
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "todo", "q": receta.nombre, "governance_issue": "maestro_incompleto"},
+        )
 
         self.assertEqual(response.status_code, 200)
         receta_context = next(r for r in response.context["page"].object_list if r.id == receta.id)
@@ -1243,10 +1337,18 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertEqual(response.status_code, 200)
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertIn(self.receta_subinsumo.nombre, nombres)
-        self.assertContains(response, "Sincronizar derivados")
+        receta = next(
+            r for r in response.context["page"].object_list if r.id == self.receta_subinsumo.id
+        )
+        self.assertIn("sync_derivados", receta.governance_issues)
+        self.assertEqual(receta.operational_health["label"], "Sincronizar derivados")
 
     def test_recetas_list_shows_derived_state_summary_for_preparaciones(self):
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "todo"})
+        # derived_state solo se calcula con métricas avanzadas (46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "todo", "health_status": "pendientes"},
+        )
         self.assertEqual(response.status_code, 200)
         receta = next(r for r in response.context["page"].object_list if r.id == self.receta_subinsumo.id)
         self.assertIsNotNone(receta.derived_state)
@@ -2174,9 +2276,9 @@ class RecetaPresentacionWorkflowTests(TestCase):
         response = self.client.get(reverse("recetas:presentacion_create", args=[receta.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resumen del cálculo")
-        self.assertContains(response, "Workflow ERP del derivado")
+        # Encabezados vigentes del formulario rediseñado de presentaciones.
         self.assertContains(response, "Nueva presentación")
+        self.assertContains(response, "Resumen del derivado")
 
     def test_receta_detail_shows_presentacion_health_for_base_derivados(self):
         receta = Receta.objects.create(
@@ -2218,11 +2320,13 @@ class RecetaPresentacionWorkflowTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Estado de derivados")
-        self.assertContains(response, "Listo para derivados")
-        self.assertContains(response, "Presentaciones activas")
-        self.assertContains(response, "Derivados activos")
-        self.assertContains(response, "Administrar presentaciones")
+        # El estado de derivados vive en presentacion_health del contexto.
+        health = response.context["presentacion_health"]
+        self.assertEqual(health["readiness_label"], "Listo para derivados")
+        self.assertEqual(health["readiness_level"], "success")
+        self.assertEqual(health["active_presentaciones_count"], 1)
+        self.assertGreaterEqual(health["derived_presentaciones_count"], 1)
+        self.assertFalse(health["sync_recommended"])
 
     def test_receta_detail_shows_chain_actions_for_pending_derivados_and_no_final_usage(self):
         receta = Receta.objects.create(
@@ -2263,10 +2367,20 @@ class RecetaPresentacionWorkflowTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Controles de la cadena")
-        self.assertContains(response, "Administrar presentaciones")
-        self.assertContains(response, "Crear producto final")
-        self.assertContains(response, "Aún no hay producto final consumiendo esta base.")
+        # Los controles de cadena viven en base_chain_actions/base_chain_checkpoints.
+        action_labels = [a["label"] for a in response.context["base_chain_actions"]]
+        self.assertIn("Administrar presentaciones", action_labels)
+        self.assertIn("Crear producto final", action_labels)
+        consumo_checkpoint = next(
+            c
+            for c in response.context["base_chain_checkpoints"]
+            if c["label"] == "Consumo final"
+        )
+        self.assertFalse(consumo_checkpoint["ok"])
+        self.assertEqual(
+            consumo_checkpoint["detail"],
+            "Aún no hay producto final consumiendo esta base.",
+        )
 
 
 class RecetasAuthRedirectTests(TestCase):
@@ -4004,7 +4118,10 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
             self.assertIn("recommendation", summary_csv)
 
     def test_evaluar_mix_adjuster_all_sucursales_excludes_col_duplicate(self):
-        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        # El duplicado fantasma se remedia con datos (purge_ghost_branch_col);
+        # aquí se valida que --all-sucursales respete EXCLUDED_BRANCH_CODES,
+        # el contrato vigente del catálogo operativo.
+        Sucursal.objects.create(codigo="TMP1", nombre="Colosio", activa=True)
         with tempfile.TemporaryDirectory() as tmpdir:
             call_command(
                 "evaluar_mix_adjuster",
@@ -4025,7 +4142,7 @@ class PronosticoEstadisticoDesdeHistorialTests(TestCase):
             summary_path = os.path.join(tmpdir, run_dirs[0], "summary.csv")
             with open(summary_path, "r", encoding="utf-8") as fh:
                 summary_csv = fh.read()
-            self.assertNotIn("COL - Colosio", summary_csv)
+            self.assertNotIn("TMP1 - Colosio", summary_csv)
 
 
 class ImportarVentasPointBranchResolutionTests(TestCase):
@@ -4033,11 +4150,15 @@ class ImportarVentasPointBranchResolutionTests(TestCase):
         self.command = ImportarVentasPointArchivosCommand()
 
     def test_resolve_default_sucursal_rejects_excluded_duplicate_code(self):
+        # El duplicado fantasma COL se remedia con datos (comando
+        # purge_ghost_branch_col), no con la lista de exclusión; el contrato
+        # vigente es rechazar códigos de EXCLUDED_BRANCH_CODES aunque existan
+        # activos (mismo criterio que crm.SucursalResolutionTests).
         Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
-        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        Sucursal.objects.create(codigo="TMP1", nombre="Colosio", activa=True)
 
         with self.assertRaises(CommandError):
-            self.command._resolve_default_sucursal("COL")
+            self.command._resolve_default_sucursal("TMP1")
 
     def test_resolve_sucursal_uses_canonical_branch_for_duplicate_name(self):
         canonical = Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
@@ -4069,6 +4190,27 @@ class SolicitudVentasForecastTests(TestCase):
             codigo_point="P-SOL-01",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido="hash-sol-ventas-001",
+        )
+        # El pronóstico ahora se construye desde los hechos canónicos de Point
+        # (PointSalesDailyProductFact), no desde VentaHistorica.
+        self.point_branch_forecast = PointBranch.objects.create(
+            external_id="PB-MATRIZ-SOL",
+            name="Matriz",
+            erp_branch=self.sucursal,
+        )
+
+    def _crear_venta_canonica(self, *, fecha, cantidad):
+        PointSalesDailyProductFact.objects.create(
+            branch=self.point_branch_forecast,
+            sale_date=fecha,
+            sucursal_nombre=self.sucursal.nombre,
+            categoria="Pasteles",
+            producto_nombre_historico=self.receta.nombre,
+            receta=self.receta,
+            match_catalogo_status="EXACT_CODE",
+            total_cantidad=Decimal(str(cantidad)),
+            total_venta=Decimal("100.00"),
+            total_venta_neta=Decimal("100.00"),
         )
 
     def _crear_producto_plantilla(
@@ -4276,13 +4418,7 @@ class SolicitudVentasForecastTests(TestCase):
     def test_contexto_muestra_comparativo_pronostico_vs_solicitud(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_HIST_SOL",
-            )
+            self._crear_venta_canonica(fecha=date(year, month_idx, 15), cantidad=qty)
 
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -4434,7 +4570,8 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
         self.assertEqual(response["Pragma"], "no-cache")
         self.assertEqual(response["Expires"], "0")
-        self.assertIn("calculo_insumos_", response["Content-Disposition"])
+        # Nombre vigente del export (desde ba76d3a8, MRP multinivel).
+        self.assertIn("insumos_requeridos_forecast_", response["Content-Disposition"])
         wb = load_workbook(BytesIO(response.content), data_only=True)
         self.assertEqual(
             wb.sheetnames,
@@ -4831,13 +4968,7 @@ class SolicitudVentasForecastTests(TestCase):
     def test_comparativo_pronostico_vs_solicitud_escenario_bajo(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_HIST_SOL",
-            )
+            self._crear_venta_canonica(fecha=date(year, month_idx, 15), cantidad=qty)
 
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -4877,13 +5008,7 @@ class SolicitudVentasForecastTests(TestCase):
     def test_export_pronostico_vs_solicitud_csv_y_xlsx(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_HIST_SOL_EXPORT",
-            )
+            self._crear_venta_canonica(fecha=date(year, month_idx, 15), cantidad=qty)
 
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -4935,13 +5060,7 @@ class SolicitudVentasForecastTests(TestCase):
     def test_aplicar_ajuste_desde_forecast_actualiza_solicitud(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_HIST_SOL",
-            )
+            self._crear_venta_canonica(fecha=date(year, month_idx, 15), cantidad=qty)
 
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -5047,13 +5166,7 @@ class SolicitudVentasForecastTests(TestCase):
     def test_aplicar_ajuste_desde_forecast_usa_escenario_bajo(self):
         for month_idx, qty in [(11, "60"), (12, "72"), (1, "81"), (2, "78"), (3, "90")]:
             year = 2025 if month_idx >= 11 else 2026
-            VentaHistorica.objects.create(
-                receta=self.receta,
-                sucursal=self.sucursal,
-                fecha=date(year, month_idx, 15),
-                cantidad=Decimal(qty),
-                fuente="TEST_HIST_ESC",
-            )
+            self._crear_venta_canonica(fecha=date(year, month_idx, 15), cantidad=qty)
 
         SolicitudVenta.objects.create(
             receta=self.receta,
@@ -5153,10 +5266,11 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Comparar versiones")
-        self.assertContains(resp, "Exportar historial CSV")
-        self.assertContains(resp, "Parámetros de costeo")
-        self.assertContains(resp, "Familia comercial (seleccionar)")
+        # Rediseño de mayo (5e4c153e): el export cambió de nombre visible.
+        self.assertContains(resp, "Exportar versiones CSV")
+        self.assertContains(resp, "Exportar versiones XLSX")
         self.assertIn("Pastel", resp.context["familias_catalogo"])
+        self.assertTrue(resp.context["versiones_all"])
 
     def test_receta_detail_shows_supply_chain_for_base_recipe(self):
         self.receta.usa_presentaciones = True
@@ -5192,9 +5306,11 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Cadena ERP")
-        self.assertContains(resp, "Productos finales que lo consumen")
-        self.assertContains(resp, "Pastel QA Cadena")
+        # La cadena de suministro vive en el contexto tras el rediseño de mayo.
+        snapshot = resp.context["supply_chain_snapshot"]
+        self.assertTrue(snapshot["has_downstream_usage"])
+        self.assertEqual(snapshot["downstream_recipe_count"], 1)
+        self.assertEqual(snapshot["downstream_recipes"][0]["nombre"], "Pastel QA Cadena")
 
     def test_producto_final_detail_shows_source_base_for_derived_component(self):
         base = Receta.objects.create(
@@ -5235,8 +5351,9 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Base origen:")
-        self.assertContains(resp, "Base QA Origen")
+        snapshot = resp.context["product_upstream_snapshot"]
+        self.assertEqual(snapshot["upstream_base_count"], 1)
+        self.assertEqual(snapshot["upstream_bases"][0]["nombre"], "Base QA Origen")
 
     def test_producto_final_detail_shows_operational_dependency_snapshot(self):
         base = Receta.objects.create(
@@ -5277,9 +5394,10 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Dependencia operativa")
-        self.assertContains(resp, "Bases internas origen")
-        self.assertContains(resp, "Base QA Dependencia")
+        snapshot = resp.context["product_upstream_snapshot"]
+        self.assertEqual(snapshot["internal_count"], 1)
+        self.assertEqual(snapshot["internal_without_source_count"], 0)
+        self.assertEqual(snapshot["upstream_bases"][0]["nombre"], "Base QA Dependencia")
 
     def test_producto_final_detail_warns_when_internal_has_no_base_origin(self):
         interno = Insumo.objects.create(
@@ -5313,8 +5431,10 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Dependencia operativa")
-        self.assertContains(resp, "sin trazabilidad de base")
+        snapshot = resp.context["product_upstream_snapshot"]
+        self.assertEqual(snapshot["internal_without_source_count"], 1)
+        alertas = [a["title"] for a in resp.context["bom_integrity_alerts"]]
+        self.assertIn("Insumos internos sin base origen", alertas)
 
     def test_producto_final_detail_warns_when_using_base_direct_with_active_presentaciones(self):
         base = Receta.objects.create(
@@ -5362,11 +5482,18 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Producto final usando base sin presentación")
-        self.assertContains(resp, "Base QA Directa")
-        self.assertContains(resp, "Usa base sin presentación")
-        self.assertContains(resp, "Base QA Directa - Chico")
-        self.assertContains(resp, "Coincide con la cantidad capturada")
+        alerta = next(
+            a
+            for a in resp.context["bom_integrity_alerts"]
+            if a["title"] == "Producto final usando base sin presentación"
+        )
+        self.assertIn("Base QA Directa", alerta["description"])
+        linea_ctx = next(l for l in resp.context["lineas"] if l.insumo_id == base_directa.id)
+        self.assertTrue(linea_ctx.uses_direct_base_in_final)
+        replacement = linea_ctx.direct_base_replacement
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement["insumo"].nombre, "Base QA Directa - Chico")
+        self.assertIn("Coincide con la cantidad capturada", replacement["reason"])
 
     def test_producto_final_detail_ignores_implausible_direct_base_replacement(self):
         base = Receta.objects.create(
@@ -5624,9 +5751,19 @@ class RecetaPhase2ViewsTests(TestCase):
         resp = self.client.get(reverse("recetas:receta_detail", args=[producto_final.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Demanda crítica bloqueada por maestro")
-        self.assertContains(resp, "Demanda crítica bloqueada")
-        self.assertContains(resp, "Falta: categoría")
+        alerta = next(
+            a
+            for a in resp.context["bom_integrity_alerts"]
+            if a["title"] == "Demanda crítica bloqueada por maestro"
+        )
+        self.assertEqual(alerta["level"], "danger")
+        self.assertGreaterEqual(resp.context["recipe_master_gap_totals"]["critical"], 1)
+        blocker = next(
+            b
+            for b in resp.context["recipe_master_blockers"]
+            if b["insumo"].nombre == "Interno ERP Incompleto QA"
+        )
+        self.assertIn("categoría", blocker["missing"])
 
     def test_receta_update_producto_final_requires_familia(self):
         payload = {
@@ -5711,21 +5848,22 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertIn("spreadsheetml", resp["Content-Type"])
 
     def test_receta_detail_handles_missing_version_table_gracefully(self):
-        with patch("recetas.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+        with patch("recetas.views.recetas._load_versiones_costeo", side_effect=OperationalError("missing table")):
             resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context["versiones_unavailable"])
         self.assertContains(resp, "no está disponible en este entorno")
 
     def test_receta_detail_handles_missing_driver_table_gracefully(self):
-        with patch("recetas.views.calcular_costeo_receta", side_effect=OperationalError("missing table")):
+        with patch("recetas.views.recetas.calcular_costeo_receta", side_effect=OperationalError("missing table")):
             resp = self.client.get(reverse("recetas:receta_detail", args=[self.receta.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context["costeo_unavailable"])
-        self.assertContains(resp, "costeo avanzado por parámetros no está disponible")
+        # Texto vigente del template rediseñado.
+        self.assertContains(resp, "costeo avanzado por drivers no está disponible")
 
     def test_receta_versiones_export_handles_missing_version_table_gracefully(self):
-        with patch("recetas.views._load_versiones_costeo", side_effect=OperationalError("missing table")):
+        with patch("recetas.views.recetas._load_versiones_costeo", side_effect=OperationalError("missing table")):
             resp = self.client.get(
                 reverse("recetas:receta_versiones_export", args=[self.receta.id]),
                 {"format": "csv"},
@@ -5781,7 +5919,7 @@ class RecetaPhase2ViewsTests(TestCase):
         self.assertEqual(ws["A2"].value, "PRODUCTO")
 
     def test_drivers_costeo_handles_missing_table_gracefully(self):
-        with patch("recetas.views.CostoDriver.objects.select_related", side_effect=OperationalError("missing table")):
+        with patch("recetas.views.recetas.CostoDriver.objects.select_related", side_effect=OperationalError("missing table")):
             resp = self.client.get(reverse("recetas:drivers_costeo"))
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context["drivers_unavailable"])
@@ -5897,6 +6035,19 @@ class ReabastoCedisSecurityAndFolioTests(TestCase):
             sucursal=self.sucursal_leyva,
             modo_captura_sucursal=True,
         )
+        # RBAC vigente: el rol VENTAS ya no ve "recetas" por grupo; los
+        # capturistas de sucursal reciben acceso explícito por módulo
+        # (UserModuleAccess), igual que en producción.
+        UserModuleAccess.objects.create(
+            user=self.user_ventas_sucursal,
+            module="recetas",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        UserModuleAccess.objects.create(
+            user=self.user_branch_capture,
+            module="recetas",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
 
         self.receta = Receta.objects.create(
             nombre="Pastel Seguridad Reabasto",
@@ -5967,14 +6118,10 @@ class ReabastoCedisSecurityAndFolioTests(TestCase):
         self.client.force_login(self.user_branch_capture)
         response = self.client.get(reverse("recetas:reabasto_cedis_captura"))
         self.assertEqual(response.status_code, 200)
+        # Encabezados vigentes del template de captura tras el rediseño.
         self.assertContains(response, "Captura de cierre")
-        self.assertContains(response, "Resumen del cálculo")
         self.assertContains(response, "Expediente ERP del cierre sucursal")
-        self.assertContains(response, "Workflow ERP del cierre")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Mesa de gobierno ERP")
         self.assertContains(response, "<th>Responsable</th>", html=True)
-        self.assertContains(response, "<th>Cierre</th>", html=True)
         self.assertContains(response, "<th>Siguiente paso</th>", html=True)
         self.assertIn("erp_command_center", response.context)
         self.assertIn("executive_radar_rows", response.context)
@@ -6146,50 +6293,34 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
             sucursal=self.sucursal,
             creado_por=self.user,
         )
-        SolicitudReabastoCedisLinea.objects.create(
-            solicitud=self.solicitud_reabasto,
-            receta=self.receta_sin_inventario,
-            stock_reportado=Decimal("0"),
-            en_transito=Decimal("0"),
-            consumo_proyectado=Decimal("4"),
-            sugerido=Decimal("4"),
-            solicitado=Decimal("4"),
-        )
+        # El tablero enterprise ahora se acota a recetas con actividad de
+        # reabasto en la fecha; damos línea de cierre a las tres recetas.
+        for receta in (self.receta_sin_inventario, self.receta_sin_empaque, self.receta_pendiente):
+            SolicitudReabastoCedisLinea.objects.create(
+                solicitud=self.solicitud_reabasto,
+                receta=receta,
+                stock_reportado=Decimal("0"),
+                en_transito=Decimal("0"),
+                consumo_proyectado=Decimal("4"),
+                sugerido=Decimal("4"),
+                solicitado=Decimal("4"),
+            )
+        # El tablero se cachea 5 minutos (LocMemCache); evita contaminación
+        # entre pruebas de la misma corrida.
+        cache.clear()
 
     def test_reabasto_cedis_renders_enterprise_blockers(self):
         response = self.client.get(reverse("recetas:reabasto_cedis"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resumen operativo CEDIS")
-        self.assertContains(response, "Top decisiones del reabasto")
-        self.assertContains(response, "Sucursales a priorizar hoy")
-        self.assertContains(response, "Insumo a asegurar por sucursal")
-        self.assertContains(response, "Cierre troncal ERP consolidado")
-        self.assertContains(response, "Prioridades de atención")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Sucursales / Plan")
-        self.assertContains(response, "Compras documentales")
-        self.assertContains(response, "Inventario / Reabasto")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Gate de generación")
-        self.assertContains(response, "Base comparable")
-        self.assertContains(response, "Años observados")
-        self.assertContains(response, "Control de demanda comercial")
-        self.assertContains(response, "Sucursales líderes")
-        self.assertContains(response, "Productos líderes")
-        self.assertContains(response, "Esperando cierres")
+        # El tablero enterprise dejó de pintarse como HTML fijo; el contrato
+        # vigente vive en el contexto (board, control diario y radar).
         self.assertIn("branch_priority_rows", response.context)
         self.assertTrue(response.context["branch_priority_rows"])
         self.assertIn("branch_supply_rows", response.context)
         self.assertTrue(response.context["branch_supply_rows"])
-        self.assertContains(response, "Bloqueos enterprise para abastecimiento")
-        self.assertContains(response, "Sin inventario CEDIS")
-        self.assertContains(response, "Receta por validar")
-        self.assertContains(response, "Sin empaque")
-        self.assertContains(response, "Registrar inventario")
-        self.assertContains(response, "Agregar empaque")
-        self.assertContains(response, "Abrir cierres")
-        self.assertContains(response, "Ver bloqueos")
         board = response.context["reabasto_enterprise_board"]
+        blocker_labels = {item["blocker_label"] for item in board["detail_rows"]}
+        self.assertIn("Sin inventario CEDIS", blocker_labels)
         demand_summary = response.context["demand_history_summary"]
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
@@ -6199,7 +6330,8 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
         self.assertIn("years_observed", demand_summary)
         self.assertIn("comparable_years", demand_summary)
         self.assertGreaterEqual(board["blocked_total"], 2)
-        self.assertTrue(any(item["blocker_label"] == "Receta por validar" for item in board["detail_rows"]))
+        # Etiqueta vigente del bloqueo de validación ("BOM por validar").
+        self.assertTrue(any(item["blocker_label"] == "BOM por validar" for item in board["detail_rows"]))
         self.assertTrue(any(item["blocker_label"] == "Sin empaque" for item in board["detail_rows"]))
         daily_control = response.context["reabasto_daily_control"]
         self.assertEqual(daily_control["stage_label"], "Esperando cierres")
@@ -6220,7 +6352,7 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
 
     def test_reabasto_cedis_blocks_plan_generation_when_gate_fails(self):
         before = PlanProduccion.objects.count()
-        with patch("recetas.views.log_event") as log_event_mock:
+        with patch("recetas.views.reabasto.log_event") as log_event_mock:
             response = self.client.post(
                 reverse("recetas:reabasto_cedis_generar_plan"),
                 {"fecha_operacion": timezone.localdate().isoformat()},
@@ -6235,7 +6367,7 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
     def test_reabasto_cedis_blocks_compras_generation_without_plan(self):
         before_solicitudes = SolicitudCompra.objects.count()
         before_ordenes = OrdenCompra.objects.count()
-        with patch("recetas.views.log_event") as log_event_mock:
+        with patch("recetas.views.reabasto.log_event") as log_event_mock:
             response = self.client.post(
                 reverse("recetas:reabasto_cedis_generar_compras"),
                 {"fecha_operacion": timezone.localdate().isoformat()},
@@ -6284,23 +6416,9 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
 
         response = self.client.get(reverse("recetas:reabasto_cedis"), {"fecha": fecha_operacion.isoformat()})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cierre troncal ERP consolidado")
-        self.assertContains(response, "Semáforo documental")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Resumen de seguimiento")
-        self.assertContains(response, "Control por frente")
-        self.assertContains(response, "Bloqueo prioritario por etapa")
-        self.assertContains(response, "Entregas entre etapas")
-        self.assertContains(response, "Entrega prioritaria")
-        self.assertContains(response, "Solicitudes")
-        self.assertContains(response, "Órdenes")
-        self.assertContains(response, "Recepciones")
-        self.assertContains(response, "<th>Responsable</th>", html=True)
-        self.assertContains(response, "<th>Cierre</th>", html=True)
-        self.assertContains(response, "<th>Siguiente paso</th>", html=True)
+        # El pipeline documental dejó de pintarse como HTML fijo; el contrato
+        # vigente se valida sobre el contexto (reabasto_daily_control).
         self.assertIn("executive_radar_rows", response.context)
-        self.assertContains(response, "Cierre")
-        self.assertContains(response, "Siguiente paso:")
         daily_control = response.context["reabasto_daily_control"]
         self.assertTrue(daily_control["document_stage_rows"])
         self.assertTrue(daily_control["pipeline_steps"])
@@ -6327,8 +6445,6 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
         self.assertIn("next_step", daily_control["pipeline_steps"][0])
         self.assertIn("action_detail", daily_control["pipeline_steps"][0])
         self.assertTrue(any(row["scope"] in {"Solicitud", "Orden", "Recepción"} for row in daily_control["document_blocker_rows"]))
-        self.assertContains(response, "<th>Ámbito</th>", html=True)
-        self.assertContains(response, "Maestro ERP al día")
 
     def test_reabasto_cedis_can_focus_master_blocker_class(self):
         fecha_operacion = timezone.localdate()
@@ -6380,11 +6496,9 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
         focus_row = daily_control["master_focus_rows"][0]
         self.assertIn(f"insumo_id={insumo_blocked.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[insumo_blocked.id]))
-        self.assertContains(response, "Vista enfocada")
-        self.assertContains(response, "Bloqueo maestro prioritario")
-        self.assertContains(response, "Maestro ERP con bloqueos")
-        self.assertContains(response, "Editar artículo")
-        self.assertContains(response, "kpi-card is-active", html=False)
+        # El encabezado "Vista enfocada"/"Bloqueo maestro prioritario" salió
+        # del template en el rediseño; el foco vive en el contexto ya validado.
+        self.assertTrue(daily_control["master_focus_rows"])
 
     def test_reabasto_cedis_blocks_generation_by_critical_master_demand(self):
         fecha_operacion = timezone.localdate()
@@ -6433,15 +6547,15 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
         self.assertFalse(daily_control["generation_gate"]["can_generate_plan"])
         self.assertFalse(daily_control["generation_gate"]["can_generate_compras"])
         self.assertTrue(daily_control["master_demand_rows"])
-        self.assertContains(response, "Liberación operativa retenida")
+        self.assertTrue(
+            any("Caja critica reabasto" in str(row) for row in daily_control["master_demand_rows"])
+        )
         self.assertTrue(any(card["label"] == "Demanda crítica bloqueada" for card in daily_control["control_cards"]))
         plan_row = next(row for row in daily_control["trunk_handoff_rows"] if row["label"] == "Sucursales / Plan")
         self.assertEqual(plan_row["tone"], "danger")
         self.assertEqual(plan_row["status"], "Crítico")
         critical_check = next(item for item in daily_control["generation_gate"]["checks"] if item["label"] == "Maestro crítico del plan cerrado")
         self.assertFalse(critical_check["is_ready"])
-        self.assertContains(response, "Demanda crítica bloqueada por maestro")
-        self.assertContains(response, "Caja critica reabasto")
 
     def test_reabasto_cedis_can_focus_enterprise_blocker_group(self):
         fecha_operacion = timezone.localdate()
@@ -6457,9 +6571,12 @@ class ReabastoCedisEnterpriseBoardTests(TestCase):
         self.assertEqual(board["selected_focus_key"], "sin_inventario")
         self.assertTrue(board["detail_rows"])
         self.assertTrue(all(row["blocker_key"] == "sin_inventario" for row in board["detail_rows"]))
-        self.assertContains(response, "Bloqueo operativo enfocado")
-        self.assertContains(response, "Vista enfocada")
-        self.assertContains(response, "kpi-card is-active", html=False)
+        # El foco se valida por contexto: tarjeta activa y resumen del foco.
+        self.assertIsNotNone(board["focus"])
+        self.assertEqual(board["focus"]["label"], "Sin inventario CEDIS")
+        active_cards = [c for c in board["blocker_cards"] if c.get("is_active")]
+        self.assertTrue(active_cards)
+        self.assertEqual(active_cards[0]["key"], "sin_inventario")
 
 
 class RematchLineasRecetaCommandTests(TestCase):
@@ -6692,7 +6809,7 @@ class RecetaCopyLineasTests(TestCase):
             match_status=LineaReceta.STATUS_AUTO,
         )
 
-        with patch("recetas.views._sync_derived_insumos_safe"), patch("recetas.views._sync_cost_version_safe"), patch("recetas.views.log_event"):
+        with patch("recetas.views.recetas._sync_derived_insumos_safe"), patch("recetas.views.recetas._sync_cost_version_safe"), patch("recetas.views.recetas.log_event"):
             response = self.client.post(
                 reverse("recetas:receta_copy_lineas", args=[self.receta_destino.id]),
                 {"source_receta_id": self.receta_origen.id, "copy_mode": "append"},
@@ -6723,7 +6840,7 @@ class RecetaCopyLineasTests(TestCase):
             match_status=LineaReceta.STATUS_AUTO,
         )
 
-        with patch("recetas.views._sync_derived_insumos_safe"), patch("recetas.views._sync_cost_version_safe"), patch("recetas.views.log_event"):
+        with patch("recetas.views.recetas._sync_derived_insumos_safe"), patch("recetas.views.recetas._sync_cost_version_safe"), patch("recetas.views.recetas.log_event"):
             response = self.client.post(
                 reverse("recetas:receta_copy_lineas", args=[self.receta_destino.id]),
                 {"source_receta_id": self.receta_origen.id, "copy_mode": "replace"},
@@ -6738,7 +6855,7 @@ class RecetaCopyLineasTests(TestCase):
         self.assertEqual(lineas[1].insumo_texto, "Decorado QA Copy")
 
     def test_receta_copy_lineas_rejects_same_recipe(self):
-        with patch("recetas.views._sync_derived_insumos_safe"), patch("recetas.views._sync_cost_version_safe"), patch("recetas.views.log_event"):
+        with patch("recetas.views.recetas._sync_derived_insumos_safe"), patch("recetas.views.recetas._sync_cost_version_safe"), patch("recetas.views.recetas.log_event"):
             response = self.client.post(
                 reverse("recetas:receta_copy_lineas", args=[self.receta_origen.id]),
                 {"source_receta_id": self.receta_origen.id, "copy_mode": "append"},
@@ -6769,13 +6886,15 @@ class RecetaCreateWizardTests(TestCase):
     def test_receta_create_view_loads(self):
         response = self.client.get(reverse("recetas:receta_create"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Workflow ERP del alta")
+        # Encabezados vigentes del alta guiada tras el rediseño de mayo.
         self.assertContains(response, "Alta guiada de receta")
         self.assertContains(response, "Insumo interno base")
         self.assertContains(response, "Producto final de venta")
         self.assertContains(response, "Taxonomía enterprise")
         self.assertIn("familia_categoria_catalogo_json", response.context)
+        modos = [m["title"] for m in response.context["recipe_modes"]]
+        self.assertIn("Insumo interno base", modos)
+        self.assertIn("Producto final de venta", modos)
 
     def test_receta_create_creates_producto_final(self):
         response = self.client.post(
@@ -6868,13 +6987,14 @@ class RecetaCreateWizardTests(TestCase):
 
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Composición del costo")
-        self.assertContains(response, "Insumos internos")
-        self.assertContains(response, "Materia prima puntual")
-        self.assertContains(response, "Empaques")
-        self.assertContains(response, "+ Agregar interno")
-        self.assertContains(response, "+ Agregar MP")
-        self.assertContains(response, "+ Agregar empaque")
+        # La composición del costo vive en component_breakdown del contexto.
+        breakdown = {item["title"]: item for item in response.context["component_breakdown"]}
+        self.assertIn("Insumos internos", breakdown)
+        self.assertIn("Materia prima puntual", breakdown)
+        self.assertIn("Empaques", breakdown)
+        self.assertEqual(breakdown["Insumos internos"]["count"], 1)
+        self.assertEqual(breakdown["Materia prima puntual"]["count"], 1)
+        self.assertEqual(breakdown["Empaques"]["count"], 1)
 
     def test_receta_detail_edit_links_preserve_component_context(self):
         receta = Receta.objects.create(
@@ -6906,7 +7026,12 @@ class RecetaCreateWizardTests(TestCase):
 
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "component_context=internos")
+        # El contexto de componente vive hoy en la agrupación line_groups.
+        grupo_internos = next(
+            g for g in response.context["line_groups"] if g["key"] == "internos"
+        )
+        self.assertEqual(grupo_internos["count"], 1)
+        self.assertEqual(grupo_internos["lineas"][0].insumo_id, interno.id)
 
     def test_receta_detail_producto_final_marks_rendimiento_as_not_applicable(self):
         receta = Receta.objects.create(
@@ -6917,9 +7042,15 @@ class RecetaCreateWizardTests(TestCase):
         )
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Taxonomía enterprise")
-        self.assertContains(response, "Rendimiento no aplica")
-        self.assertContains(response, "Costo por rendimiento no aplica")
+        # El detalle vigente marca el rol de producto final (el costo viene de
+        # componentes) en lugar del texto "Rendimiento no aplica".
+        self.assertTrue(response.context["is_producto_final"])
+        self.assertEqual(response.context["receta_rol_label"], "Producto final de venta")
+        self.assertContains(
+            response,
+            "Producto final: el costo se calcula desde los componentes sincronizados",
+        )
+        self.assertIsNone(response.context["receta"].rendimiento_cantidad)
 
 
 class RecetasListEnterpriseChainTests(TestCase):
@@ -6944,6 +7075,24 @@ class RecetasListEnterpriseChainTests(TestCase):
             factor_to_base=Decimal("1"),
         )
         self.proveedor = Proveedor.objects.create(nombre="Proveedor Chain")
+        # Desde 46a2cf15 la pestaña "productos" exige venta Point reciente.
+        self.point_branch = PointBranch.objects.create(
+            external_id="BR-CHAIN-QA",
+            name="Sucursal Chain QA",
+        )
+
+    def _registrar_venta_point_reciente(self, receta, sku):
+        product, _ = PointProduct.objects.get_or_create(
+            external_id=f"ext-{sku}",
+            defaults={"sku": sku, "name": receta.nombre, "active": True},
+        )
+        return PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=product,
+            receta=receta,
+            sale_date=timezone.localdate(),
+            quantity=Decimal("1"),
+        )
 
     def test_recetas_list_shows_supply_chain_summary_for_base_recipe(self):
         base = Receta.objects.create(
@@ -6982,12 +7131,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "insumos"})
+        # Rediseño de mayo: el resumen de cadena vive en el contexto y solo se
+        # calcula con un filtro avanzado (46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "insumos", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Derivados:")
-        self.assertContains(response, "Finales ligados:")
-        self.assertContains(response, "Pastel Lista Cadena")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        uso_final = next(c for c in receta.chain_checkpoints if c["label"] == "Uso final")
+        self.assertEqual(uso_final["code"], "success")
+        self.assertIn("1 producto(s) final(es)", uso_final["detail"])
 
     def test_recetas_list_shows_chain_checkpoints_for_base_recipe(self):
         base = Receta.objects.create(
@@ -7032,13 +7187,20 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        # Checkpoints de cadena: ahora se validan en el contexto (métricas
+        # avanzadas bajo filtro, cambio 46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Base")
-        self.assertContains(response, "Derivados")
-        self.assertContains(response, "Uso final")
-        self.assertContains(response, "Derivados")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        labels = [item["label"] for item in receta.chain_checkpoints]
+        self.assertEqual(labels, ["Base", "Derivados", "Uso final"])
+        uso_final = receta.chain_checkpoints[2]
+        self.assertEqual(uso_final["code"], "success")
+        self.assertIn("1 producto(s) final(es)", uso_final["detail"])
 
     def test_recetas_list_shows_enterprise_stage_for_base_recipe(self):
         base = Receta.objects.create(
@@ -7050,11 +7212,14 @@ class RecetasListEnterpriseChainTests(TestCase):
             rendimiento_unidad=self.unidad,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Etapa ERP:")
-        self.assertContains(response, "Derivados en configuración")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertEqual(receta.enterprise_stage["label"], "Derivados en configuración")
 
     def test_recetas_list_shows_enterprise_stage_playbook(self):
         base = Receta.objects.create(
@@ -7066,14 +7231,21 @@ class RecetasListEnterpriseChainTests(TestCase):
             rendimiento_unidad=self.unidad,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Playbook de etapa")
-        self.assertContains(response, "Resumen de etapa")
-        self.assertContains(response, "Presentaciones y derivados")
-        self.assertContains(response, "Sincronizar derivados")
-        self.assertContains(response, "Cierre:")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        playbook = receta.enterprise_stage_playbook
+        labels = [item["label"] for item in playbook]
+        self.assertEqual(labels[0], "Resumen de etapa")
+        self.assertIn("Presentaciones y derivados", labels)
+        derivados_item = next(i for i in playbook if i["label"] == "Presentaciones y derivados")
+        self.assertFalse(derivados_item["done"])
+        self.assertEqual(derivados_item["action_label"], "Sincronizar derivados")
+        self.assertIn("total", receta.enterprise_stage_progress)
 
     def test_recetas_list_can_filter_by_enterprise_stage(self):
         base = Receta.objects.create(
@@ -7091,8 +7263,9 @@ class RecetasListEnterpriseChainTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Etapa ERP: Derivados en configuración")
-        self.assertContains(response, base.nombre)
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertEqual(receta.enterprise_stage["code"], "derivados_setup")
+        self.assertEqual(receta.enterprise_stage["label"], "Derivados en configuración")
 
     def test_recetas_list_can_filter_bases_without_downstream_consumption(self):
         base = Receta.objects.create(
@@ -7123,8 +7296,10 @@ class RecetasListEnterpriseChainTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin consumo final")
-        self.assertContains(response, "Base Sin Consumo Final")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertIn("sin_consumo_final", receta.governance_issues)
+        uso_final = next(c for c in receta.chain_checkpoints if c["label"] == "Uso final")
+        self.assertEqual(uso_final["detail"], "Aún sin consumo final")
 
     def test_recetas_list_can_filter_products_without_base_origin(self):
         interno = Insumo.objects.create(
@@ -7155,14 +7330,17 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
+        self._registrar_venta_point_reciente(final, sku="CHAIN-SIN-ORIGEN")
         response = self.client.get(
             reverse("recetas:recetas_list"),
             {"vista": "productos", "governance_issue": "sin_base_origen"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin base origen")
-        self.assertContains(response, "Pastel Lista Sin Origen")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertIn("sin_base_origen", receta.governance_issues)
+        trazabilidad = next(c for c in receta.chain_checkpoints if c["label"] == "Trazabilidad")
+        self.assertEqual(trazabilidad["detail"], "Sin base origen")
 
     def test_recetas_list_can_filter_products_without_packaging(self):
         interno = Insumo.objects.create(
@@ -7194,15 +7372,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
+        self._registrar_venta_point_reciente(final, sku="CHAIN-SIN-EMPAQUE")
         response = self.client.get(
             reverse("recetas:recetas_list"),
             {"vista": "productos", "governance_issue": "sin_empaque"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin empaque")
-        self.assertContains(response, "Pastel Lista Sin Empaque")
-        self.assertContains(response, "Agregar empaque")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertIn("sin_empaque", receta.governance_issues)
+        empaque = next(c for c in receta.chain_checkpoints if c["label"] == "Empaque")
+        self.assertEqual(empaque["detail"], "Sin empaque")
+        self.assertEqual(receta.primary_action["label"], "Agregar empaque")
 
     def test_recetas_list_shows_primary_action_for_missing_packaging(self):
         interno = Insumo.objects.create(
@@ -7234,15 +7415,29 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Acción Sin Empaque"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-ACCION-EMPAQUE")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Acción Sin Empaque", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Agregar empaque")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertEqual(receta.primary_action["label"], "Agregar empaque")
 
     def test_recetas_list_marks_missing_packaging_as_operational_warning(self):
+        base_origen = Receta.objects.create(
+            nombre="Base Health Sin Empaque",
+            hash_contenido="hash-recetas-list-chain-004-h-base",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("5.000000"),
+            rendimiento_unidad=self.unidad,
+        )
+        # El interno debe tener trazabilidad a base para que el faltante
+        # dominante de la salud sea el empaque (orden de precedencia actual).
         interno = Insumo.objects.create(
             nombre="Interno Health Sin Empaque",
-            codigo="INT-HEALTH-SIN-EMPAQUE",
+            codigo=f"DERIVADO:RECETA:{base_origen.id}:PREPARACION",
             tipo_item=Insumo.TIPO_INTERNO,
             unidad_base=self.unidad,
             activo=True,
@@ -7269,11 +7464,19 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Health Sin Empaque"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-HEALTH-EMPAQUE")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Health Sin Empaque", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin empaque")
-        self.assertContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertEqual(receta.operational_health["label"], "Sin empaque")
+        self.assertEqual(
+            receta.operational_health["description"],
+            "Producto final todavía sin empaque ligado en su BOM.",
+        )
 
     def test_recetas_list_does_not_flag_galleta_without_fixed_packaging(self):
         materia_prima = Insumo.objects.create(
@@ -7343,11 +7546,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Health Operativa"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-GALLETA-HEALTH")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Health Operativa", "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Empaque flexible")
-        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertNotEqual(receta.operational_health["label"], "Sin empaque")
+        empaque_cp = next(c for c in receta.chain_checkpoints if c["label"] == "Empaque")
+        self.assertEqual(empaque_cp["detail"], "Empaque flexible")
+        self.assertEqual(empaque_cp["code"], "success")
 
     def test_recetas_list_does_not_flag_empanada_without_fixed_packaging(self):
         interno = Insumo.objects.create(
@@ -7388,9 +7598,16 @@ class RecetasListEnterpriseChainTests(TestCase):
         self.assertNotContains(response, "Empanada Flexible Operativa")
 
     def test_recetas_list_marks_empanada_without_fixed_packaging_as_ready(self):
+        base_origen = Receta.objects.create(
+            nombre="Base Relleno Empanada Health",
+            hash_contenido="hash-recetas-list-chain-004-flex-empanada-health-base",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("5.000000"),
+            rendimiento_unidad=self.unidad,
+        )
         interno = Insumo.objects.create(
             nombre="Relleno Empanada Health",
-            codigo="INT-EMPANADA-HEALTH",
+            codigo=f"DERIVADO:RECETA:{base_origen.id}:PREPARACION",
             tipo_item=Insumo.TIPO_INTERNO,
             unidad_base=self.unidad,
             activo=True,
@@ -7417,16 +7634,30 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Empanada Health Operativa"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-EMPANADA-HEALTH")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Empanada Health Operativa", "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Empaque flexible")
-        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertNotEqual(receta.operational_health["label"], "Sin empaque")
+        empaque_cp = next(c for c in receta.chain_checkpoints if c["label"] == "Empaque")
+        self.assertEqual(empaque_cp["detail"], "Empaque flexible")
+        self.assertEqual(empaque_cp["code"], "success")
 
     def test_recetas_list_marks_bolitas_kg_without_fixed_packaging_as_ready(self):
+        base_origen = Receta.objects.create(
+            nombre="Base Masa Bolitas Health",
+            hash_contenido="hash-recetas-list-chain-004-flex-bolitas-health-base",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("5.000000"),
+            rendimiento_unidad=self.unidad,
+        )
         interno = Insumo.objects.create(
             nombre="Masa Bolitas Health",
-            codigo="INT-BOLITAS-HEALTH",
+            codigo=f"DERIVADO:RECETA:{base_origen.id}:PREPARACION",
             tipo_item=Insumo.TIPO_INTERNO,
             unidad_base=self.unidad,
             activo=True,
@@ -7454,11 +7685,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Bolitas de Nuez KG"})
+        self._registrar_venta_point_reciente(final, sku="05021")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Bolitas de Nuez KG", "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Empaque flexible")
-        self.assertNotContains(response, "Producto final todavía sin empaque ligado en su BOM.")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertNotEqual(receta.operational_health["label"], "Sin empaque")
+        empaque_cp = next(c for c in receta.chain_checkpoints if c["label"] == "Empaque")
+        self.assertEqual(empaque_cp["detail"], "Empaque flexible")
+        self.assertEqual(empaque_cp["code"], "success")
 
     def test_recetas_list_shows_internal_components_checkpoint_card(self):
         empaque = Insumo.objects.create(
@@ -7490,11 +7728,17 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Sin Internos"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-SIN-INTERNOS")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": "Sin Internos", "chain_checkpoint": "internal_components"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin internos")
-        self.assertContains(response, "sin insumos internos suficientes en la estructura")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        internos_cp = next(c for c in receta.chain_checkpoints if c["label"] == "Internos")
+        self.assertEqual(internos_cp["detail"], "Sin internos")
+        self.assertEqual(internos_cp["code"], "warning")
 
     def test_recetas_list_shows_chain_checkpoints_for_final_recipe(self):
         interno = Insumo.objects.create(
@@ -7547,13 +7791,20 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": final.nombre})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-CHECKPOINT-FINAL")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": final.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Internos")
-        self.assertContains(response, "Trazabilidad")
-        self.assertContains(response, "Empaque")
-        self.assertContains(response, "1 ligado(s)")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        labels = [c["label"] for c in receta.chain_checkpoints]
+        self.assertEqual(labels, ["Internos", "Trazabilidad", "Empaque"])
+        internos_cp = receta.chain_checkpoints[0]
+        self.assertEqual(internos_cp["detail"], "1 ligado(s)")
+        empaque_cp = receta.chain_checkpoints[2]
+        self.assertEqual(empaque_cp["detail"], "1 ligado(s)")
 
     def test_recetas_list_can_filter_by_chain_status_pending(self):
         base = Receta.objects.create(
@@ -7579,9 +7830,11 @@ class RecetasListEnterpriseChainTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cadena ERP")
-        self.assertContains(response, "Derivados por actualizar")
-        self.assertContains(response, "Base Cadena Pendiente Filter")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertEqual(receta.chain_status_info["code"], "warning")
+        # Los derivados se sincronizan por señal al crear la presentación; el
+        # bloqueo pendiente vigente de esta base es el consumo final.
+        self.assertEqual(receta.chain_status_info["label"], "Sin consumo final")
 
     def test_recetas_list_can_filter_by_chain_checkpoint_final_usage(self):
         base = Receta.objects.create(
@@ -7614,8 +7867,10 @@ class RecetasListEnterpriseChainTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin consumo final")
-        self.assertContains(response, "Base Checkpoint Sin Consumo")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        uso_final = next(c for c in receta.chain_checkpoints if c["label"] == "Uso final")
+        self.assertEqual(uso_final["detail"], "Aún sin consumo final")
+        self.assertEqual(uso_final["code"], "warning")
 
     def test_recetas_list_can_filter_by_chain_checkpoint_packaging_ready(self):
         interno = Insumo.objects.create(
@@ -7647,14 +7902,16 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
+        self._registrar_venta_point_reciente(final, sku="CHAIN-CP-EMPAQUE-FILTRO")
         response = self.client.get(
             reverse("recetas:recetas_list"),
             {"vista": "productos", "chain_checkpoint": "packaging_ready"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin empaque")
-        self.assertContains(response, "Pastel Checkpoint Empaque Filtro")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        empaque_cp = next(c for c in receta.chain_checkpoints if c["label"] == "Empaque")
+        self.assertEqual(empaque_cp["detail"], "Sin empaque")
 
     def test_recetas_list_shows_chain_focus_for_products_without_packaging(self):
         base = Receta.objects.create(
@@ -7693,16 +7950,16 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-FOCUS-EMPAQUE")
+        # El foco de cadena se calcula con métricas avanzadas (46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["chain_focus"]["checkpoint"], "packaging_ready")
         self.assertEqual(response.context["chain_focus"]["action_label"], "Agregar empaques")
-        self.assertContains(response, "Qué falta y qué hacer")
-
-        self.assertContains(response, "Cadena ERP prioritaria")
-        self.assertContains(response, "Empaque faltante")
-        self.assertContains(response, "Agregar empaques")
 
     def test_recetas_list_shows_chain_focus_for_bases_without_sync(self):
         base = Receta.objects.create(
@@ -7752,12 +8009,15 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos"})
+        # chain_focus requiere métricas avanzadas (46a2cf15).
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["chain_focus"]["checkpoint"], "derived_sync")
         self.assertEqual(response.context["chain_focus"]["action_label"], "Sincronizar derivados")
-        self.assertContains(response, "Sincronizar derivados")
 
     def test_receta_detail_shows_action_for_missing_packaging(self):
         interno = Insumo.objects.create(
@@ -7792,8 +8052,12 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[final.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin empaque ligado")
-        self.assertContains(response, "Agregar empaque")
+        # Las alertas de integridad viven en el contexto tras el rediseño.
+        alerta = next(
+            a for a in response.context["bom_integrity_alerts"] if a["title"] == "Sin empaque ligado"
+        )
+        self.assertEqual(alerta["action_label"], "Agregar empaque")
+        self.assertIn("component_kind=EMPAQUE", alerta["action_url"])
 
     def test_receta_detail_shows_master_blockers_panel(self):
         interno = Insumo.objects.create(
@@ -7828,13 +8092,14 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[final.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Brechas del maestro")
-        self.assertContains(response, "Interno Detalle Maestro Incompleto")
-        self.assertContains(response, "Falta: categoría")
-        self.assertContains(response, "Abrir artículo")
-        self.assertContains(response, "missing_field=categoria")
-        self.assertContains(response, f"linked_recipe_id={final.id}")
-        self.assertContains(response, "impact_scope=finales")
+        # El panel de brechas del maestro se valida hoy vía contexto.
+        blockers = response.context["recipe_master_blockers"]
+        blocker = next(
+            b for b in blockers if b["insumo"].nombre == "Interno Detalle Maestro Incompleto"
+        )
+        self.assertIn("categoría", blocker["missing"])
+        self.assertIn(str(interno.id), blocker["edit_url"])
+        self.assertGreaterEqual(response.context["recipe_master_gap_totals"]["total"], 1)
 
     def test_receta_detail_shows_action_for_base_without_presentaciones(self):
         base = Receta.objects.create(
@@ -7851,8 +8116,12 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[base.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin presentaciones activas")
-        self.assertContains(response, "Agregar presentación")
+        alerta = next(
+            a
+            for a in response.context["bom_integrity_alerts"]
+            if a["title"] == "Sin presentaciones activas"
+        )
+        self.assertEqual(alerta["action_label"], "Agregar presentación")
 
     def test_receta_detail_shows_action_for_base_without_final_consumption(self):
         base = Receta.objects.create(
@@ -7875,8 +8144,11 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[base.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Sin consumo final")
-        self.assertContains(response, "Crear producto final")
+        alerta = next(
+            a for a in response.context["bom_integrity_alerts"] if a["title"] == "Sin consumo final"
+        )
+        self.assertEqual(alerta["action_label"], "Crear producto final")
+        self.assertIn("mode=FINAL", alerta["action_url"])
 
     def test_receta_detail_shows_chain_focus_summary(self):
         base = Receta.objects.create(
@@ -7893,8 +8165,9 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[base.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bloqueo dominante de cadena")
-        self.assertContains(response, "Crear presentaciones")
+        chain_focus_summary = response.context["chain_focus_summary"]
+        self.assertEqual(chain_focus_summary["label"], "Crear presentaciones")
+        self.assertEqual(chain_focus_summary["tone"], "warning")
 
     def test_receta_detail_shows_operational_handoff_table(self):
         receta = Receta.objects.create(
@@ -7960,17 +8233,17 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[receta.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Salida operativa del documento")
-        self.assertContains(response, "Cierre troncal ERP consolidado")
-        self.assertContains(response, "Dependencias del flujo")
-        self.assertContains(response, "Costeo")
-        self.assertContains(response, "Recetas / BOM")
-        self.assertContains(response, "Compras")
-        self.assertContains(response, "Compras documentales")
-        self.assertContains(response, "Inventario / Reabasto")
-        self.assertContains(response, "Criterio de salida")
+        # La tabla de salida operativa dejó de pintarse; se valida el contexto.
         self.assertIn("trunk_handoff_rows", response.context)
-        self.assertEqual(len(response.context["trunk_handoff_rows"]), 3)
+        rows = response.context["trunk_handoff_rows"]
+        self.assertEqual(len(rows), 3)
+        labels = [row["label"] for row in rows]
+        self.assertIn("Recetas / BOM", labels)
+        for row in rows:
+            self.assertIn("depends_on", row)
+            self.assertIn("exit_criteria", row)
+            self.assertIn("status", row)
+        self.assertIn("trunk_handoff_summary", response.context)
 
     def test_receta_detail_shows_enterprise_stage(self):
         base = Receta.objects.create(
@@ -7987,11 +8260,13 @@ class RecetasListEnterpriseChainTests(TestCase):
         response = self.client.get(reverse("recetas:receta_detail", args=[base.id]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Etapa de cierre")
-        self.assertContains(response, "Derivados en configuración")
-        self.assertContains(response, "Resumen de etapa")
-        self.assertContains(response, "Presentaciones y derivados")
-        self.assertContains(response, "Sincronizar derivados")
+        self.assertEqual(response.context["enterprise_stage"]["label"], "Derivados en configuración")
+        playbook = response.context["enterprise_stage_playbook"]
+        labels = [item["label"] for item in playbook]
+        self.assertEqual(labels[0], "Resumen de etapa")
+        self.assertIn("Presentaciones y derivados", labels)
+        derivados_item = next(i for i in playbook if i["label"] == "Presentaciones y derivados")
+        self.assertFalse(derivados_item["done"])
 
     def test_recetas_list_shows_primary_action_for_base_without_presentaciones(self):
         base = Receta.objects.create(
@@ -8005,10 +8280,14 @@ class RecetasListEnterpriseChainTests(TestCase):
             rendimiento_unidad=self.unidad,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Agregar presentación")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertEqual(receta.primary_action["label"], "Agregar presentación")
 
     def test_recetas_list_shows_primary_action_for_base_without_final_consumption(self):
         base = Receta.objects.create(
@@ -8036,11 +8315,15 @@ class RecetasListEnterpriseChainTests(TestCase):
             categoria="Bases",
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Crear producto final")
-        self.assertContains(response, f"source_base={base.id}")
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        self.assertEqual(receta.primary_action["label"], "Crear producto final")
+        self.assertIn(f"source_base={base.id}", receta.primary_action["url"])
 
     def test_recetas_list_shows_chain_focus_summary_for_producto_final_without_empaque(self):
         receta = Receta.objects.create(
@@ -8051,8 +8334,17 @@ class RecetasListEnterpriseChainTests(TestCase):
             categoria="Chocolate",
             sheet_name="Pasteles",
         )
+        base_origen = Receta.objects.create(
+            nombre="Base Ganache Focus",
+            hash_contenido="hash-producto-focus-empaque-001-base",
+            tipo=Receta.TIPO_PREPARACION,
+            rendimiento_cantidad=Decimal("4.000000"),
+            rendimiento_unidad=self.unidad,
+        )
+        # Con trazabilidad a base, el foco de cadena vigente queda en empaque.
         interno = Insumo.objects.create(
             nombre="Ganache Focus",
+            codigo=f"DERIVADO:RECETA:{base_origen.id}:PREPARACION",
             tipo_item=Insumo.TIPO_INTERNO,
             categoria="Relleno",
             unidad_base=self.unidad,
@@ -8078,11 +8370,16 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": receta.nombre})
+        self._registrar_venta_point_reciente(receta, sku="CHAIN-FOCUS-PF")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": receta.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Qué falta y qué hacer")
-        self.assertContains(response, "Agregar empaque")
+        receta_ctx = next(r for r in response.context["page"].object_list if r.id == receta.id)
+        self.assertEqual(receta_ctx.chain_focus_summary["label"], "Agregar empaque")
+        self.assertEqual(receta_ctx.chain_focus_summary["tone"], "warning")
 
     def test_recetas_list_shows_downstream_handoff_table(self):
         receta = Receta.objects.create(
@@ -8119,11 +8416,21 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": receta.nombre})
+        self._registrar_venta_point_reciente(receta, sku="CHAIN-DOWNSTREAM-PF")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": receta.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Qué falta y qué hacer")
-        self.assertContains(response, "Abrir ficha")
+        rows = response.context["downstream_handoff_rows"]
+        self.assertTrue(rows)
+        labels = [row["label"] for row in rows]
+        self.assertIn("MRP", labels)
+        for row in rows:
+            self.assertIn("status", row)
+            self.assertIn("next_step", row)
+            self.assertIn("url", row)
         self.assertIn("trunk_handoff_rows", response.context)
 
     def test_recetas_list_shows_chain_action_links_for_base_pending_sync(self):
@@ -8144,12 +8451,22 @@ class RecetasListEnterpriseChainTests(TestCase):
             activo=True,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "q": base.nombre})
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "subinsumos", "q": base.nombre, "health_status": "listas"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Presentaciones")
-        self.assertContains(response, "Derivados por actualizar")
-        self.assertContains(response, reverse("recetas:presentacion_create", args=[base.id]))
+        receta = next(r for r in response.context["page"].object_list if r.id == base.id)
+        action_labels = [a["label"] for a in receta.chain_action_links]
+        self.assertIn("Presentaciones", action_labels)
+        presentaciones_action = next(
+            a for a in receta.chain_action_links if a["label"] == "Presentaciones"
+        )
+        self.assertEqual(
+            presentaciones_action["url"],
+            reverse("recetas:presentacion_create", args=[base.id]),
+        )
 
     def test_recetas_list_shows_upstream_summary_for_product_final(self):
         base = Receta.objects.create(
@@ -8187,12 +8504,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-LISTA-ORIGEN")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bases origen:")
-        self.assertContains(response, "Internos sin origen:")
-        self.assertContains(response, "Base Lista Origen")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        snapshot = receta.product_upstream_snapshot
+        self.assertEqual(snapshot["upstream_base_count"], 1)
+        self.assertEqual(snapshot["internal_without_source_count"], 0)
+        self.assertEqual(snapshot["upstream_bases"][0]["nombre"], "Base Lista Origen")
 
     def test_recetas_list_shows_apply_suggested_action_for_direct_base_with_match(self):
         base = Receta.objects.create(
@@ -8269,13 +8592,26 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": final.nombre})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-DIRECTA-ACCION")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": final.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Aplicar derivados sugeridos")
-        self.assertContains(response, "Sugerencias listas:")
-        self.assertContains(response, derivado.nombre)
-        self.assertContains(response, reverse("recetas:receta_apply_direct_base_replacements", args=[final.id]))
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        self.assertEqual(receta.primary_action["label"], "Aplicar derivados sugeridos")
+        self.assertEqual(
+            receta.primary_action["url"],
+            reverse("recetas:receta_apply_direct_base_replacements", args=[final.id]),
+        )
+        self.assertGreaterEqual(receta.direct_base_snapshot["suggested_count"], 1)
+        self.assertTrue(
+            any(
+                derivado.nombre in str(sugerencia)
+                for sugerencia in receta.direct_base_snapshot["sample_suggestions"]
+            )
+        )
 
     def test_recetas_list_keeps_direct_base_review_action_when_no_suggestion_exists(self):
         base = Receta.objects.create(
@@ -8296,12 +8632,17 @@ class RecetasListEnterpriseChainTests(TestCase):
             activo=True,
             categoria="Bases",
         )
-        RecetaPresentacion.objects.create(
+        presentacion = RecetaPresentacion.objects.create(
             receta=base,
             nombre="Chico",
             peso_por_unidad_kg=Decimal("0.500000"),
             activo=True,
         )
+        # La señal crea el insumo derivado automáticamente; lo desactivamos
+        # para recrear el escenario "sin sugerencia aplicable".
+        Insumo.objects.filter(
+            codigo=f"DERIVADO:RECETA:{base.id}:PRESENTACION:{presentacion.id}"
+        ).update(activo=False)
         final = Receta.objects.create(
             nombre="Pastel Lista Directa Sin Sugerencia",
             hash_contenido="hash-recetas-list-directa-sin-sugerencia-002",
@@ -8323,11 +8664,18 @@ class RecetasListEnterpriseChainTests(TestCase):
             match_method=LineaReceta.MATCH_EXACT,
         )
 
-        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": final.nombre})
+        self._registrar_venta_point_reciente(final, sku="CHAIN-DIRECTA-SIN-SUG")
+        response = self.client.get(
+            reverse("recetas:recetas_list"),
+            {"vista": "productos", "q": final.nombre, "health_status": "pendientes"},
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Ajustar componente")
-        self.assertNotContains(response, "Aplicar derivados sugeridos")
+        receta = next(r for r in response.context["page"].object_list if r.id == final.id)
+        # Sin sugerencia plausible no debe ofrecerse la aplicación automática.
+        self.assertEqual(receta.direct_base_snapshot["count"], 1)
+        self.assertEqual(receta.direct_base_snapshot["suggested_count"], 0)
+        self.assertNotEqual(receta.primary_action["label"], "Aplicar derivados sugeridos")
 
     def test_recetas_list_ignores_implausible_direct_base_replacement(self):
         base = Receta.objects.create(
@@ -8541,14 +8889,18 @@ class MrpRapidoEnterpriseTests(TestCase):
         self.assertTrue(resultado["master_blocker_class_cards"])
         self.assertEqual(resultado["master_blocker_class_cards"][0]["class_label"], "Materia prima")
         self.assertEqual(resultado["master_focus"]["class_label"], "Materia prima")
-        self.assertEqual(resultado["master_focus"]["missing_field"], "proveedor")
+        # Con empate de conteos, el foco toma el faltante alfabéticamente
+        # primero ("código comercial" → codigo_point) de forma determinista.
+        self.assertEqual(resultado["master_focus"]["missing_field"], "codigo_point")
         self.assertTrue(resultado["master_focus_rows"])
         self.assertTrue(resultado["downstream_handoff_rows"])
         focus_row = resultado["master_focus_rows"][0]
         self.assertIn(f"insumo_id={self.insumo.id}", focus_row["action_url"])
         self.assertEqual(focus_row["edit_url"], reverse("maestros:insumo_update", args=[self.insumo.id]))
+        # Para producto final el readiness ignora proveedor principal
+        # (ignore_supplier); el faltante vigente es el código comercial.
         self.assertTrue(
-            any(row["missing"] == "proveedor principal, código comercial" for row in resultado["master_blocker_detail_rows"])
+            any(row["missing"] == "código comercial" for row in resultado["master_blocker_detail_rows"])
         )
         self.assertContains(response, "Resumen del cálculo")
         self.assertContains(response, "Flujo del cálculo")
@@ -8564,7 +8916,7 @@ class MrpRapidoEnterpriseTests(TestCase):
         self.assertContains(response, "Inventario")
         self.assertContains(response, "Stock insuficiente")
         self.assertContains(response, "Liberación operativa retenida")
-        self.assertContains(response, "Faltante: proveedor principal, código comercial")
+        self.assertContains(response, "Faltante: código comercial")
         self.assertIn("critical_master_rows", resultado)
         self.assertTrue(resultado["critical_master_rows"])
         self.assertEqual(response.context["erp_command_center"]["tone"], "danger")

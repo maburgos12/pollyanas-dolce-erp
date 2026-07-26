@@ -282,9 +282,11 @@ class MisReportesActionsTests(TestCase):
         ]
 
         self.assertEqual([group["key"] for group in fallas_groups], ["fallas"])
+        # 4581f98f (unificar navegación de grupos) agregó el submódulo
+        # "Categorías" al grupo de fallas para staff.
         self.assertEqual(
             [item["label"] for item in fallas_groups[0]["items"] if item["module"] == "fallas"],
-            ["Reportes de fallas", "Reportar falla", "Reportes"],
+            ["Reportes de fallas", "Reportar falla", "Reportes", "Categorías"],
         )
 
     def test_navegacion_muestra_fallas_una_sola_vez_para_usuario_ventas_autorizado(self):
