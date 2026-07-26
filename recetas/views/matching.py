@@ -8955,7 +8955,9 @@ def matching_insumos_search(request: HttpRequest) -> JsonResponse:
     if q:
         queryset = queryset.filter(nombre__icontains=q)
     grouped = {}
-    for insumo in queryset.order_by("nombre")[: limit * 5]:
+    # Desempate por id: con nombres iguales, el backend de BD decide el orden
+    # y el canónico resuelto variaba entre Postgres y SQLite.
+    for insumo in queryset.order_by("nombre", "id")[: limit * 5]:
         key = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
         grouped.setdefault(key, []).append(insumo)
 
