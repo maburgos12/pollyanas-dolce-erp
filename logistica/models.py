@@ -1628,6 +1628,20 @@ class SolicitudDomicilio(models.Model):
         blank=True,
         related_name="solicitudes_domicilio",
     )
+    cliente = models.ForeignKey(
+        "crm.Cliente",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
+    direccion_cliente = models.ForeignKey(
+        "crm.DireccionCliente",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio",
+    )
     cliente_nombre = models.CharField(max_length=160)
     cliente_telefono = models.CharField(max_length=30, blank=True, default="")
     direccion = models.CharField(max_length=255)
@@ -1649,6 +1663,7 @@ class SolicitudDomicilio(models.Model):
         related_name="solicitudes_domicilio",
     )
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    revision = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -1667,3 +1682,39 @@ class SolicitudDomicilio(models.Model):
 
     def __str__(self) -> str:
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
+
+
+class SolicitudDomicilioStatusOperation(models.Model):
+    """Recibo durable de una mutación M2M de estatus."""
+
+    solicitud = models.ForeignKey(
+        SolicitudDomicilio,
+        on_delete=models.CASCADE,
+        related_name="status_operations",
+    )
+    operation_id = models.UUIDField()
+    api_client = models.ForeignKey(
+        "integraciones.PublicApiClient",
+        on_delete=models.PROTECT,
+        related_name="logistica_status_operations",
+    )
+    repartidor = models.ForeignKey(
+        Repartidor,
+        on_delete=models.PROTECT,
+        related_name="domicilio_status_operations",
+    )
+    requested_status = models.CharField(max_length=20)
+    final_status = models.CharField(max_length=20)
+    actor_id = models.CharField(max_length=64)
+    actor_nombre = models.CharField(max_length=120)
+    result_snapshot = models.JSONField(default=dict, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["solicitud", "operation_id"],
+                name="logistica_status_operation_unica",
+            ),
+        ]

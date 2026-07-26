@@ -1,11 +1,12 @@
 from django.contrib.auth.models import Group, User
+from django.db import IntegrityError, transaction
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.access import ROLE_LECTURA, ROLE_VENTAS
 from core.models import Sucursal
-from crm.models import Cliente, PedidoCliente
+from crm.models import Cliente, DireccionCliente, PedidoCliente
 from pos_bridge.models import PointBranch
 
 
@@ -74,6 +75,72 @@ class CRMApiTests(APITestCase):
         self.assertFalse(cliente.activo)
         self.assertEqual(cliente.notas, "Actualizado por API")
 
+    def test_cliente_direcciones_create_deduplicates_and_returns_gps(self):
+        self.client.force_authenticate(self.user_ventas)
+        cliente = Cliente.objects.create(nombre="Cliente con domicilio", telefono="6671112233")
+        direcciones_url = reverse("api_crm_cliente_direcciones", kwargs={"pk": cliente.id})
+        payload = {
+            "alias": "Casa",
+            "direccion": "Av. Álvaro Obregón 123, Centro, Culiacán",
+            "referencias": "Portón blanco",
+            "latitud": "24.809064",
+            "longitud": "-107.394011",
+            "place_id": "ChIJ-casa-pol",
+            "es_predeterminada": True,
+        }
+
+        first = self.client.post(direcciones_url, payload, format="json")
+        duplicate = self.client.post(
+            direcciones_url,
+            {**payload, "direccion": "  Av. Álvaro Obregón 123, Centro, Culiacán  "},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(duplicate.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["id"], duplicate.data["id"])
+        self.assertEqual(cliente.direcciones.count(), 1)
+        self.assertEqual(first.data["latitud"], "24.809064")
+        self.assertEqual(first.data["longitud"], "-107.394011")
+
+        detail = self.client.get(reverse("api_crm_cliente_detail", kwargs={"pk": cliente.id}))
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["direcciones"][0]["alias"], "Casa")
+        self.assertTrue(detail.data["direcciones"][0]["es_predeterminada"])
+
+    def test_cliente_direcciones_rejects_incomplete_gps_pair(self):
+        self.client.force_authenticate(self.user_ventas)
+        cliente = Cliente.objects.create(nombre="Cliente GPS incompleto")
+
+        response = self.client.post(
+            reverse("api_crm_cliente_direcciones", kwargs={"pk": cliente.id}),
+            {
+                "alias": "Casa",
+                "direccion": "Calle sin número, Culiacán",
+                "latitud": "24.809064",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("longitud", response.data)
+        self.assertEqual(cliente.direcciones.count(), 0)
+
+    def test_lectura_can_list_direcciones_but_cannot_create_them(self):
+        cliente = Cliente.objects.create(nombre="Cliente solo lectura")
+        direcciones_url = reverse("api_crm_cliente_direcciones", kwargs={"pk": cliente.id})
+        self.client.force_authenticate(self.user_lectura)
+
+        listed = self.client.get(direcciones_url)
+        created = self.client.post(
+            direcciones_url,
+            {"alias": "Casa", "direccion": "Calle Uno 123"},
+            format="json",
+        )
+
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(created.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_pedidos_create_followup_and_dashboard(self):
         self.client.force_authenticate(self.user_ventas)
         cliente = Cliente.objects.create(nombre="Cliente Pedido API")
@@ -114,6 +181,84 @@ class CRMApiTests(APITestCase):
         self.assertEqual(resp_dashboard.status_code, status.HTTP_200_OK)
         self.assertIn("clientes", resp_dashboard.data)
         self.assertIn("pedidos", resp_dashboard.data)
+
+    def test_pedido_omnicanal_conserva_direccion_y_origen_externo(self):
+        cliente = Cliente.objects.create(nombre="Cliente omnicanal")
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            alias="Casa",
+            direccion="Av. Obregón 123",
+            latitud="24.809064",
+            longitud="-107.394011",
+        )
+
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            descripcion="Pastel de chocolate",
+            canal=PedidoCliente.CANAL_WHATSAPP,
+            external_source="CALL_CENTER",
+            external_id="wa-6670000000-001",
+        )
+
+        self.assertEqual(pedido.direccion_entrega_id, direccion.id)
+        self.assertEqual(pedido.external_source, "CALL_CENTER")
+        self.assertEqual(pedido.external_id, "wa-6670000000-001")
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                PedidoCliente.objects.create(
+                    cliente=cliente,
+                    direccion_entrega=direccion,
+                    descripcion="Reintento duplicado",
+                    canal=PedidoCliente.CANAL_WHATSAPP,
+                    external_source="CALL_CENTER",
+                    external_id="wa-6670000000-001",
+                )
+
+    def test_pedido_api_rechaza_direccion_de_otro_cliente(self):
+        self.client.force_authenticate(self.user_ventas)
+        cliente_pedido = Cliente.objects.create(nombre="Cliente del pedido")
+        otro_cliente = Cliente.objects.create(nombre="Dueño de otra dirección")
+        direccion_ajena = DireccionCliente.objects.create(
+            cliente=otro_cliente,
+            direccion="Calle ajena 456",
+        )
+
+        response = self.client.post(
+            reverse("api_crm_pedidos"),
+            {
+                "cliente": cliente_pedido.id,
+                "direccion_entrega": direccion_ajena.id,
+                "descripcion": "Pedido inválido",
+                "sucursal": self.point_branch.external_id,
+                "canal": PedidoCliente.CANAL_TELEFONO,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("direccion_entrega", response.data)
+        self.assertFalse(PedidoCliente.objects.filter(descripcion="Pedido inválido").exists())
+
+    def test_pedido_api_rechaza_origen_externo_incompleto(self):
+        self.client.force_authenticate(self.user_ventas)
+        cliente = Cliente.objects.create(nombre="Cliente referencia incompleta")
+
+        response = self.client.post(
+            reverse("api_crm_pedidos"),
+            {
+                "cliente": cliente.id,
+                "descripcion": "Pedido sin identificador",
+                "sucursal": self.point_branch.external_id,
+                "canal": PedidoCliente.CANAL_WEB,
+                "external_source": "ECOMMERCE",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("external_id", response.data)
 
     def test_lectura_can_view_but_cannot_create(self):
         self.client.force_authenticate(self.user_lectura)

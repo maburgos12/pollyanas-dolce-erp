@@ -84,6 +84,11 @@ from logistica.services_entregas import (
     obtener_respuesta_idempotente,
     tiene_llegada_geocerca_confiable,
 )
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+    list_repartidores_disponibles,
+)
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -1744,6 +1749,37 @@ class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
             ],
             status=status.HTTP_200_OK,
         )
+
+
+class LogisticaRepartidoresDisponiblesView(_LogisticaBaseView):
+    def get(self, request):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            raise DRFPermissionDenied("No tienes permisos para gestionar Logística.")
+        return Response(
+            list_repartidores_disponibles(),
+            status=status.HTTP_200_OK,
+        )
+
+
+class LogisticaDomicilioAsignarView(_LogisticaBaseView):
+    def post(self, request, solicitud_id: int):
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            raise DRFPermissionDenied("No tienes permisos para gestionar Logística.")
+        repartidor_id = request.data.get("repartidor_id")
+        if isinstance(repartidor_id, bool) or not str(repartidor_id or "").isdigit():
+            return Response(
+                {"detail": "repartidor_id es obligatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            payload = assign_domicilio(
+                solicitud_id=solicitud_id,
+                repartidor_id=int(repartidor_id),
+                audit_user=request.user,
+            )
+        except DomicilioAssignmentError as exc:
+            return Response({"detail": exc.detail}, status=exc.status_code)
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class LogisticaRutaCargaChecklistView(_LogisticaBaseView):

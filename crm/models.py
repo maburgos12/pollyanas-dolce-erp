@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -37,6 +38,49 @@ class Cliente(models.Model):
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
         if not self.codigo:
             self.codigo = self._generate_codigo()
+        super().save(*args, **kwargs)
+
+
+class DireccionCliente(models.Model):
+    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name="direcciones")
+    alias = models.CharField(max_length=80, blank=True, default="")
+    direccion = models.CharField(max_length=300)
+    direccion_normalizada = models.CharField(max_length=300, editable=False)
+    referencias = models.CharField(max_length=300, blank=True, default="")
+    latitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitud = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    place_id = models.CharField(max_length=255, blank=True, default="")
+    es_predeterminada = models.BooleanField(default=False)
+    activa = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-es_predeterminada", "-updated_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cliente", "direccion_normalizada"],
+                name="crm_direccion_cliente_normalizada_unica",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(latitud__isnull=True, longitud__isnull=True)
+                    | models.Q(latitud__isnull=False, longitud__isnull=False)
+                ),
+                name="crm_direccion_gps_par_completo",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.alias or self.direccion
+
+    @staticmethod
+    def normalizar_direccion(value: str) -> str:
+        return normalizar_nombre((value or "").strip())
+
+    def save(self, *args, **kwargs):
+        self.direccion = (self.direccion or "").strip()
+        self.direccion_normalizada = self.normalizar_direccion(self.direccion)
         super().save(*args, **kwargs)
 
 
@@ -84,6 +128,30 @@ class PedidoCliente(models.Model):
 
     folio = models.CharField(max_length=40, unique=True, blank=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="pedidos")
+    direccion_entrega = models.ForeignKey(
+        DireccionCliente,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="pedidos",
+    )
+    external_source = models.CharField(max_length=40, blank=True, default="", db_index=True)
+    external_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    payload_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    tracking_token = models.UUIDField(
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+    )
+    public_api_client = models.ForeignKey(
+        "integraciones.PublicApiClient",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.PROTECT,
+        related_name="pedidos_omnichannel",
+    )
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
     sucursal = models.CharField(max_length=120, blank=True, default="")
@@ -117,6 +185,13 @@ class PedidoCliente(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["external_source", "external_id"],
+                condition=~models.Q(external_source="") & ~models.Q(external_id=""),
+                name="crm_pedido_origen_externo_unico",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.folio or f"Pedido {self.id}"
@@ -140,6 +215,24 @@ class PedidoCliente(models.Model):
         return f"{prefix}-{seq:04d}"
 
     def save(self, *args, **kwargs):
+        allow_snapshot_backfill = kwargs.pop("_allow_payload_snapshot_backfill", False)
+        if not self._state.adding:
+            persisted_snapshot = (
+                PedidoCliente.objects.filter(pk=self.pk)
+                .values_list("payload_snapshot", flat=True)
+                .first()
+            )
+            snapshot_changed = persisted_snapshot != self.payload_snapshot
+            valid_backfill = (
+                allow_snapshot_backfill
+                and not persisted_snapshot
+                and bool(self.payload_snapshot)
+            )
+            if snapshot_changed and not valid_backfill:
+                raise ValidationError(
+                    {"payload_snapshot": "El snapshot omnicanal es inmutable."},
+                )
+
         if not self.folio:
             self.folio = self._generate_folio()
 

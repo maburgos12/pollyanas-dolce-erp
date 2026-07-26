@@ -87,10 +87,22 @@ from .views import (
 )
 from .crm_views import (
     CRMClienteDetailView,
+    CRMClienteDireccionesView,
     CRMClientesView,
     CRMDashboardView,
     CRMPedidoSeguimientoView,
     CRMPedidosView,
+)
+from .omnichannel_views import (
+    PublicOmnichannelCustomersView,
+    PublicOmnichannelOrderStatusView,
+    PublicOmnichannelOrdersView,
+)
+from .logistica_public_views import (
+    PublicLogisticaDomicilioAsignarView,
+    PublicLogisticaDomicilioStatusView,
+    PublicLogisticaRepartidorDomiciliosView,
+    PublicLogisticaRepartidoresDisponiblesView,
 )
 from .rrhh_views import (
     RRHHEmpleadoAsignarSucursalView,
@@ -117,6 +129,8 @@ from .logistica_views import (
     LogisticaMiPerfilView,
     LogisticaTutorialCargaConfirmarView,
     LogisticaMisReportesView,
+    LogisticaRepartidoresDisponiblesView,
+    LogisticaDomicilioAsignarView,
     LogisticaReportesUnidadAbiertosView,
     LogisticaReporteCreateView,
     LogisticaReporteDetailView,
@@ -323,6 +337,11 @@ urlpatterns = [
     path("crm/dashboard/", CRMDashboardView.as_view(), name="api_crm_dashboard"),
     path("crm/clientes/", CRMClientesView.as_view(), name="api_crm_clientes"),
     path("crm/clientes/<int:pk>/", CRMClienteDetailView.as_view(), name="api_crm_cliente_detail"),
+    path(
+        "crm/clientes/<int:pk>/direcciones/",
+        CRMClienteDireccionesView.as_view(),
+        name="api_crm_cliente_direcciones",
+    ),
     path("crm/pedidos/", CRMPedidosView.as_view(), name="api_crm_pedidos"),
     path("crm/pedidos/<int:pedido_id>/seguimiento/", CRMPedidoSeguimientoView.as_view(), name="api_crm_pedido_seguimiento"),
     path("rrhh/dashboard/", RRHHDashboardView.as_view(), name="api_rrhh_dashboard"),
@@ -371,6 +390,8 @@ urlpatterns = [
     path("logistica/rutas/activa/", LogisticaRutaActivaView.as_view(), name="api_logistica_ruta_activa"),
     path("logistica/entregas-ecommerce/", LogisticaEntregasEcommerceView.as_view(), name="api_logistica_entregas_ecommerce"),
     path("logistica/domicilios-generales/asignados/", LogisticaDomiciliosGeneralesAsignadosView.as_view(), name="api_logistica_domicilios_generales_asignados"),
+    path("logistica/repartidores-disponibles/", LogisticaRepartidoresDisponiblesView.as_view(), name="api_logistica_repartidores_disponibles"),
+    path("logistica/domicilios/<int:solicitud_id>/asignar/", LogisticaDomicilioAsignarView.as_view(), name="api_logistica_domicilio_asignar"),
     path("logistica/rutas/control/", LogisticaRutasControlView.as_view(), name="api_logistica_rutas_control"),
     path("logistica/rutas/<int:ruta_id>/carga-checklist/", LogisticaRutaCargaChecklistView.as_view(), name="api_logistica_ruta_carga_checklist"),
     path(
@@ -436,6 +457,26 @@ urlpatterns = [
     path("public/v1/recetas/", PublicRecetasView.as_view(), name="api_public_recetas"),
     path("public/v1/resumen/", PublicResumenView.as_view(), name="api_public_resumen"),
     path("public/v1/domicilios-generales/resumen/", PublicDomiciliosGeneralesResumenView.as_view(), name="api_public_domicilios_generales_resumen"),
+    path(
+        "public/v1/logistica/repartidores-disponibles/",
+        PublicLogisticaRepartidoresDisponiblesView.as_view(),
+        name="api_public_logistica_repartidores_disponibles",
+    ),
+    path(
+        "public/v1/logistica/domicilios/<int:solicitud_id>/asignar/",
+        PublicLogisticaDomicilioAsignarView.as_view(),
+        name="api_public_logistica_domicilio_asignar",
+    ),
+    path(
+        "public/v1/logistica/repartidores/<int:repartidor_id>/domicilios/",
+        PublicLogisticaRepartidorDomiciliosView.as_view(),
+        name="api_public_logistica_repartidor_domicilios",
+    ),
+    path(
+        "public/v1/logistica/domicilios/<int:solicitud_id>/estatus/",
+        PublicLogisticaDomicilioStatusView.as_view(),
+        name="api_public_logistica_domicilio_estatus",
+    ),
     path("public/v1/pickup-availability/", PublicPickupAvailabilityView.as_view(), name="api_public_pickup_availability"),
     path("public/v1/pickup-reservations/", PublicPickupReservationsView.as_view(), name="api_public_pickup_reservations"),
     path(
@@ -449,6 +490,21 @@ urlpatterns = [
         name="api_public_pickup_reservations_release",
     ),
     path("public/v1/pedidos/", PublicPedidosCreateView.as_view(), name="api_public_pedidos_create"),
+    path(
+        "public/v1/omnichannel-orders/",
+        PublicOmnichannelOrdersView.as_view(),
+        name="api_public_omnichannel_orders",
+    ),
+    path(
+        "public/v1/omnichannel-customers/",
+        PublicOmnichannelCustomersView.as_view(),
+        name="api_public_omnichannel_customers",
+    ),
+    path(
+        "public/v1/omnichannel-orders/<uuid:tracking_token>/",
+        PublicOmnichannelOrderStatusView.as_view(),
+        name="api_public_omnichannel_order_status",
+    ),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
     path("compras/solicitudes/import-confirm/", ComprasSolicitudesImportConfirmView.as_view(), name="api_compras_solicitudes_import_confirm"),
