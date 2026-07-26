@@ -163,9 +163,15 @@ class MatchingPendientesAutocompleteTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["results"][0]["id"], self.insumo_1_canon.id)
-        self.assertIn("Maestro", payload["results"][0]["label"])
-        self.assertEqual(payload["results"][0]["variant_count"], 2)
+        # El orden de resultados es alfabético y depende de la collation del
+        # backend (SQLite binario vs Postgres locale) — se busca la entrada
+        # canónica sin asumir posición.
+        result_ids = [item["id"] for item in payload["results"]]
+        self.assertIn(self.insumo_1_canon.id, result_ids)
+        self.assertNotIn(self.insumo_1.id, result_ids)
+        canon_entry = next(item for item in payload["results"] if item["id"] == self.insumo_1_canon.id)
+        self.assertIn("Maestro", canon_entry["label"])
+        self.assertEqual(canon_entry["variant_count"], 2)
 
     def test_aprobar_matching_sugerido_redirects_to_canonical(self):
         response = self.client.post(reverse("recetas:aprobar_matching_sugerido", args=[self.linea.id]))
