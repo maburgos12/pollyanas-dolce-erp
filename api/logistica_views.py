@@ -1732,7 +1732,11 @@ class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
 
         solicitudes = SolicitudDomicilio.objects.filter(
             repartidor=repartidor,
-            estatus__in=[SolicitudDomicilio.ESTATUS_ASIGNADO, SolicitudDomicilio.ESTATUS_EN_RUTA],
+            estatus__in=[
+                SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY,
+                SolicitudDomicilio.ESTATUS_LISTO,
+                SolicitudDomicilio.ESTATUS_EN_RUTA,
+            ],
         ).order_by("-asignado_en")
 
         return Response(

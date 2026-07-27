@@ -5,6 +5,9 @@ from importlib import import_module
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -88,6 +91,16 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
 
         self.assertIn("repartidor", error.exception.message_dict)
 
+    def test_save_cannot_bypass_ready_invariants(self):
+        solicitud = SolicitudDomicilio(
+            cliente_nombre="Sin contrato Point",
+            direccion="Sin GPS",
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+        )
+
+        with self.assertRaises(ValidationError):
+            solicitud.save()
+
     def test_entregado_requires_existing_delivery_evidence(self):
         solicitud = self._solicitud(
             estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
@@ -112,14 +125,18 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         solicitud.full_clean()
 
     def test_legacy_terminal_without_point_preserves_history(self):
-        solicitud = SolicitudDomicilio(
-            cliente_nombre="Histórico",
-            direccion="Dirección histórica",
-            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
-            legacy_without_point=True,
-        )
-
-        solicitud.full_clean()
+        for estatus in (
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+            SolicitudDomicilio.ESTATUS_CANCELADO,
+        ):
+            with self.subTest(estatus=estatus):
+                solicitud = SolicitudDomicilio(
+                    cliente_nombre="Histórico",
+                    direccion="Dirección histórica",
+                    estatus=estatus,
+                    legacy_without_point=True,
+                )
+                solicitud.full_clean()
 
     def test_delivery_window_end_cannot_precede_start(self):
         solicitud = self._solicitud(
@@ -134,7 +151,9 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         self.assertIn("ventana_fin", error.exception.message_dict)
 
     def test_data_migration_maps_point_and_legacy_records_without_losing_history(self):
-        _, _, pedido = self._pedido_y_direccion(point_note_id="POINT-MIGRATION")
+        _, direccion, pedido = self._pedido_y_direccion(
+            point_note_id="POINT-MIGRATION"
+        )
         linked_pending = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
             cliente_nombre="Ligado pendiente",
@@ -143,19 +162,32 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         )
         linked_assigned = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
+            direccion_cliente=direccion,
             cliente_nombre="Ligado asignado",
             direccion="Calle ligada",
             estatus="ASIGNADO",
         )
-        active_without_point = SolicitudDomicilio.objects.create(
-            cliente_nombre="Activo legado",
-            direccion="Calle activa",
-            estatus="EN_RUTA",
+        linked_assigned_without_gps = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente_nombre="Ligado asignado sin GPS",
+            direccion="Calle sin GPS",
+            estatus="ASIGNADO",
         )
-        delivered_without_point = SolicitudDomicilio.objects.create(
-            cliente_nombre="Entregado legado",
-            direccion="Calle histórica",
-            estatus="ENTREGADO",
+        active_without_point, delivered_without_point = (
+            SolicitudDomicilio.objects.bulk_create(
+                [
+                    SolicitudDomicilio(
+                        cliente_nombre="Activo legado",
+                        direccion="Calle activa",
+                        estatus="EN_RUTA",
+                    ),
+                    SolicitudDomicilio(
+                        cliente_nombre="Entregado legado",
+                        direccion="Calle histórica",
+                        estatus="ENTREGADO",
+                    ),
+                ]
+            )
         )
 
         migration = import_module(
@@ -165,10 +197,15 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
 
         linked_pending.refresh_from_db()
         linked_assigned.refresh_from_db()
+        linked_assigned_without_gps.refresh_from_db()
         active_without_point.refresh_from_db()
         delivered_without_point.refresh_from_db()
         self.assertEqual(linked_pending.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
         self.assertEqual(linked_assigned.estatus, SolicitudDomicilio.ESTATUS_LISTO)
+        self.assertEqual(
+            linked_assigned_without_gps.estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         self.assertEqual(
             active_without_point.estatus,
             SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
@@ -310,12 +347,34 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(EntregaEcommerce.objects.count(), 0)
         self.assertEqual(Notificacion.objects.count(), 0)
 
+    def test_asignar_repartidor_no_promueve_pendiente_point_a_listo(self):
+        repartidor = self._repartidor("rep_sin_point")
+
+        result = assign_domicilio(
+            solicitud_id=self.solicitud.id,
+            repartidor_id=repartidor.id,
+            audit_user=self.manager,
+        )
+
+        self.solicitud.refresh_from_db()
+        self.assertEqual(
+            self.solicitud.estatus,
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
+        self.assertEqual(
+            result["estatus"],
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
+
     def test_repeticion_idempotente_conserva_estado_terminal_sin_efectos(self):
         repartidor = self._repartidor("rep_entregado")
         reemplazo = self._repartidor("rep_reemplazo_terminal")
         self.solicitud.repartidor = repartidor
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        self.solicitud.legacy_without_point = True
+        self.solicitud.save(
+            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        )
         url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
 
         response = self.client.post(
@@ -343,7 +402,10 @@ class AsignacionDomicilioApiTests(APITestCase):
         repartidor = self._repartidor("rep_asignado_inactivo")
         self.solicitud.repartidor = repartidor
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        self.solicitud.legacy_without_point = True
+        self.solicitud.save(
+            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        )
         repartidor.user.is_active = False
         repartidor.user.save(update_fields=["is_active"])
         url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
@@ -407,7 +469,10 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.solicitud.refresh_from_db()
         self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
         self.assertEqual(self.solicitud.unidad_id, unidad.id)
-        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_ASIGNADO)
+        self.assertEqual(
+            self.solicitud.estatus,
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
         self.assertEqual(self.solicitud.revision, 1)
         audit = AuditLog.objects.get(
             model="logistica.SolicitudDomicilio",
@@ -429,9 +494,16 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.solicitud.repartidor = actual
         self.solicitud.unidad = unidad
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
+        self.solicitud.legacy_without_point = True
         self.solicitud.revision = 7
         self.solicitud.save(
-            update_fields=["repartidor", "unidad", "estatus", "revision"]
+            update_fields=[
+                "repartidor",
+                "unidad",
+                "estatus",
+                "legacy_without_point",
+                "revision",
+            ]
         )
 
         response = self.client.post(
@@ -542,3 +614,88 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(audit.payload["unidad_nueva_id"], nueva.id)
         self.assertEqual(audit.payload["unidad_nueva_codigo"], nueva.codigo)
         self.assertEqual(AuditLog.objects.count(), 1)
+
+
+class SolicitudDomicilioCanonicalMigrationTests(TransactionTestCase):
+    migrate_from = [
+        ("crm", "0007_pedidocliente_point_note_fetched_at_and_more"),
+        ("logistica", "0045_alter_solicituddomicilio_canal_origen"),
+    ]
+    migrate_to = [("logistica", "0046_solicituddomicilio_operacion_canonica")]
+
+    def setUp(self):
+        super().setUp()
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+
+        ClienteOld = old_apps.get_model("crm", "Cliente")
+        DireccionOld = old_apps.get_model("crm", "DireccionCliente")
+        PedidoOld = old_apps.get_model("crm", "PedidoCliente")
+        SolicitudOld = old_apps.get_model("logistica", "SolicitudDomicilio")
+
+        cliente = ClienteOld.objects.create(nombre="Migración real")
+        direccion = DireccionOld.objects.create(
+            cliente=cliente,
+            direccion="Calle con GPS",
+            latitud="25.790001",
+            longitud="-108.990001",
+        )
+        pedido = PedidoOld.objects.create(
+            cliente=cliente,
+            descripcion="Nota Point histórica",
+            point_note_id="POINT-MIGRATION-EXECUTOR",
+            point_note_snapshot={"pk_nota": "POINT-MIGRATION-EXECUTOR"},
+        )
+        self.ids = {
+            "ready": SolicitudOld.objects.create(
+                pedido_cliente=pedido,
+                direccion_cliente=direccion,
+                cliente_nombre="Con GPS",
+                direccion=direccion.direccion,
+                estatus="ASIGNADO",
+            ).pk,
+            "not_ready": SolicitudOld.objects.create(
+                pedido_cliente=pedido,
+                cliente_nombre="Sin GPS",
+                direccion="Sin GPS",
+                estatus="ASIGNADO",
+            ).pk,
+            "active_legacy": SolicitudOld.objects.create(
+                cliente_nombre="Activo legado",
+                direccion="Sin Point",
+                estatus="EN_RUTA",
+            ).pk,
+            "cancelled_legacy": SolicitudOld.objects.create(
+                cliente_nombre="Cancelado legado",
+                direccion="Sin Point",
+                estatus="CANCELADO",
+            ).pk,
+        }
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+        self.new_apps = executor.loader.project_state(self.migrate_to).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate(self.migrate_to)
+        super().tearDown()
+
+    def test_forward_mapping_preserves_terminals_and_never_creates_invalid_ready(self):
+        SolicitudNew = self.new_apps.get_model("logistica", "SolicitudDomicilio")
+
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["ready"]).estatus,
+            "LISTO",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["not_ready"]).estatus,
+            "CONFIRMADO",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["active_legacy"]).estatus,
+            "PENDIENTE_POINT",
+        )
+        cancelled = SolicitudNew.objects.get(pk=self.ids["cancelled_legacy"])
+        self.assertEqual(cancelled.estatus, "CANCELADO")
+        self.assertTrue(cancelled.legacy_without_point)

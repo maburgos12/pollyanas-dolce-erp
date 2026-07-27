@@ -140,10 +140,9 @@ def assign_domicilio(
         solicitud.repartidor = repartidor
         if unidad is not None:
             solicitud.unidad = unidad
-        solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO
         solicitud.asignado_en = timezone.now()
         solicitud.revision += 1
-        update_fields = ["repartidor", "estatus", "asignado_en", "revision"]
+        update_fields = ["repartidor", "asignado_en", "revision"]
         if unidad is not None:
             update_fields.append("unidad")
         solicitud.save(update_fields=update_fields)

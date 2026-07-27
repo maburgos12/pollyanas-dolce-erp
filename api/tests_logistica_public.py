@@ -244,7 +244,10 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         self._allow(repartidor)
         self.solicitud.repartidor = repartidor
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        self.solicitud.legacy_without_point = True
+        self.solicitud.save(
+            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        )
         repartidor.user.is_active = False
         repartidor.user.save(update_fields=["is_active"])
 
@@ -434,6 +437,8 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             canal=PedidoCliente.CANAL_WHATSAPP,
             public_api_client=self.api_client,
             payload_snapshot={"token": "no-exponer"},
+            point_note_id="POINT-EXEC-1",
+            point_note_snapshot={"pk_nota": "POINT-EXEC-1"},
         )
         self.solicitud = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
@@ -444,7 +449,7 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             direccion=direccion.direccion,
             notas="otra nota interna",
             repartidor=self.driver,
-            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
         )
         self.list_url = reverse(
             "api_public_logistica_repartidor_domicilios",
@@ -482,7 +487,8 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.assertNotIn("secreta", rendered)
         self.assertNotIn("no-exponer", rendered)
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.save(update_fields=["estatus"])
+        self.solicitud.legacy_without_point = True
+        self.solicitud.save(update_fields=["estatus", "legacy_without_point"])
         terminal = self.client.get(self.list_url, **self.auth)
         self.assertEqual(terminal.data, {"results": []})
 
@@ -549,6 +555,16 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         )
         self.assertEqual(invalid.status_code, status.HTTP_409_CONFLICT)
 
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY
+        self.solicitud.save(update_fields=["estatus"])
+        legacy_assigned = self.client.post(
+            self.status_url,
+            self.payload("4a0e139e-b87d-48a5-a3ec-218a8bb63d53"),
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(legacy_assigned.status_code, status.HTTP_409_CONFLICT)
+
 
 class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
     def setUp(self):
@@ -566,17 +582,27 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             self.drivers.append(Repartidor.objects.create(user=user, sucursal=sucursal))
         self.api_client.repartidores_logistica_autorizados.add(*self.drivers)
         cliente = Cliente.objects.create(nombre="Race")
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Race",
+            latitud="24.809100",
+            longitud="-107.394000",
+        )
         pedido = PedidoCliente.objects.create(
             cliente=cliente,
+            direccion_entrega=direccion,
             descripcion="Race",
             public_api_client=self.api_client,
+            point_note_id="POINT-RACE-1",
+            point_note_snapshot={"pk_nota": "POINT-RACE-1"},
         )
         self.solicitud = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
+            direccion_cliente=direccion,
             cliente_nombre="Race",
             direccion="Race",
             repartidor=self.drivers[0],
-            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
         )
 
     def _status(self, operation_id):
@@ -662,7 +688,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         self.assertIn(
             (self.solicitud.repartidor_id, self.solicitud.estatus),
             {
-                (self.drivers[1].id, SolicitudDomicilio.ESTATUS_ASIGNADO),
+                (self.drivers[1].id, SolicitudDomicilio.ESTATUS_LISTO),
                 (self.drivers[0].id, SolicitudDomicilio.ESTATUS_EN_RUTA),
             },
         )

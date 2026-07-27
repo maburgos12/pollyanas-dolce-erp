@@ -1617,9 +1617,10 @@ class SolicitudDomicilio(models.Model):
     ESTATUS_EN_RUTA = "EN_RUTA"
     ESTATUS_ENTREGADO = "ENTREGADO"
     ESTATUS_CANCELADO = "CANCELADO"
-    # Alias temporales para consumidores existentes durante la migración canónica.
+    ESTATUS_ASIGNADO_LEGACY = "ASIGNADO"
+    # Alias de lectura temporal; nunca debe usarse para promover una asignación.
     ESTATUS_PENDIENTE = ESTATUS_PENDIENTE_POINT
-    ESTATUS_ASIGNADO = ESTATUS_LISTO
+    ESTATUS_ASIGNADO = ESTATUS_ASIGNADO_LEGACY
     ESTATUS_CHOICES = [
         (ESTATUS_PENDIENTE_POINT, "Pendiente de Point"),
         (ESTATUS_CONFIRMADO, "Confirmado"),
@@ -1700,6 +1701,16 @@ class SolicitudDomicilio(models.Model):
 
     def __str__(self) -> str:
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
+
+    def save(self, *args, **kwargs):
+        if self.estatus in {
+            self.ESTATUS_LISTO,
+            self.ESTATUS_EN_RUTA,
+            self.ESTATUS_ENTREGADO,
+            self.ESTATUS_CANCELADO,
+        }:
+            self.full_clean()
+        super().save(*args, **kwargs)
 
     def clean(self):
         super().clean()

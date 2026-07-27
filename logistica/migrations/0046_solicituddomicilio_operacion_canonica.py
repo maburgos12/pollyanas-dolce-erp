@@ -10,7 +10,20 @@ def migrate_delivery_states(apps, schema_editor):
         pedido_cliente__point_note_id__gt="",
     )
     linked_to_point.filter(estatus="PENDIENTE").update(estatus="CONFIRMADO")
-    linked_to_point.filter(estatus="ASIGNADO").update(estatus="LISTO")
+    linked_assigned = linked_to_point.filter(estatus="ASIGNADO")
+    linked_assigned.filter(
+        direccion_cliente__latitud__isnull=False,
+        direccion_cliente__longitud__isnull=False,
+    ).update(estatus="LISTO")
+    linked_assigned.filter(
+        models.Q(direccion_cliente__latitud__isnull=True)
+        | models.Q(direccion_cliente__longitud__isnull=True)
+    ).update(estatus="CONFIRMADO")
+    linked_to_point.filter(estatus="EN_RUTA").filter(
+        models.Q(repartidor__isnull=True)
+        | models.Q(direccion_cliente__latitud__isnull=True)
+        | models.Q(direccion_cliente__longitud__isnull=True)
+    ).update(estatus="CONFIRMADO")
 
     without_point = SolicitudDomicilio.objects.exclude(
         pedido_cliente__point_note_id__gt="",

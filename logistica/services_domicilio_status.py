@@ -86,7 +86,7 @@ def update_domicilio_status(
 
         expected = {
             SolicitudDomicilio.ESTATUS_EN_RUTA:
-                SolicitudDomicilio.ESTATUS_ASIGNADO,
+                SolicitudDomicilio.ESTATUS_LISTO,
             SolicitudDomicilio.ESTATUS_ENTREGADO:
                 SolicitudDomicilio.ESTATUS_EN_RUTA,
         }[requested_status]
@@ -102,6 +102,7 @@ def update_domicilio_status(
         if requested_status == SolicitudDomicilio.ESTATUS_ENTREGADO:
             solicitud.entregado_en = timezone.now()
             update_fields.append("entregado_en")
+        solicitud.full_clean()
         solicitud.save(update_fields=update_fields)
         snapshot = {
             "id": solicitud.id,
