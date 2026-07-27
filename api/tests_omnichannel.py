@@ -1,19 +1,30 @@
 from copy import deepcopy
+from datetime import timedelta
+from decimal import Decimal
 from threading import Barrier, Thread
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
+from core.models import Sucursal
 from integraciones.models import PublicApiAccessLog, PublicApiClient
-from logistica.models import SolicitudDomicilio
+from logistica.models import Repartidor, SolicitudDomicilio
+from pos_bridge.services.point_note_detail_service import (
+    PointNote,
+    PointNoteLine,
+    PointNoteUnavailableError,
+)
 
 
 class OmnichannelPublicApiTests(APITestCase):
@@ -641,3 +652,412 @@ class OmnichannelConcurrencyTests(TransactionTestCase):
             PedidoCliente.objects.values("folio").distinct().count(),
             2,
         )
+
+
+def _point_note_for_api(pk_nota="900001"):
+    return PointNote(
+        pk_nota=pk_nota,
+        folio="18452",
+        branch_name="Matriz",
+        sold_at=timezone.now(),
+        total=Decimal("565.00"),
+        invoiced=False,
+        payment_type="CONTADO",
+        point_channel="Mostrador",
+        lines=(
+            PointNoteLine(
+                point_code="P001",
+                description="Pastel chocolate",
+                quantity=Decimal("1"),
+                unit_price=Decimal("565.00"),
+                discount=Decimal("0"),
+                line_total=Decimal("565.00"),
+            ),
+        ),
+        source_endpoint="/Clientes/get_detalle_nota/",
+        customer_external_id="POINT-CUSTOMER-1",
+    )
+
+
+class CanonicalOmnichannelApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.actor = get_user_model().objects.create_user(
+            username="api-call-center",
+            password="unused",
+        )
+        self.api_client, raw_key = PublicApiClient.create_with_generated_key(
+            nombre="Centro operativo",
+            created_by=self.actor,
+        )
+        self.api_client.capabilities = ["OMNICHANNEL"]
+        self.api_client.save(update_fields=["capabilities"])
+        self.auth = {"HTTP_X_API_KEY": raw_key}
+        self.point_payload = {
+            "pk_nota": "900001",
+            "canal": "FACEBOOK",
+            "social_reference": "thread-123",
+            "cliente": {
+                "nombre": "Ana Pérez",
+                "telefono": "6671234567",
+                "email": "ana@example.com",
+            },
+            "direccion": {
+                "direccion": "Av. Obregón 123",
+                "referencias": "Portón blanco",
+                "latitud": "24.809064",
+                "longitud": "-107.394011",
+                "place_id": "place-123",
+            },
+            "ventana_inicio": (timezone.now() + timedelta(hours=1)).isoformat(),
+            "ventana_fin": (timezone.now() + timedelta(hours=2)).isoformat(),
+            "instrucciones_entrega": "Tocar el timbre",
+        }
+
+    @patch(
+        "api.omnichannel_views._fetch_point_note_candidates",
+        return_value=[
+            {
+                "pk_nota": "900001",
+                "folio": "18452",
+                "sucursal": "Matriz",
+                "fecha": "2026-07-27",
+                "hora": "13:15",
+                "total": "565.00",
+                "facturado": False,
+                "canal_point": "Mostrador",
+                "tipo_pago": "Contado",
+            },
+        ],
+    )
+    def test_note_search_returns_sanitized_candidates(self, fetch):
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {"folio": "18452", "sucursal": "Matriz"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"][0]["pk_nota"], "900001")
+        self.assertEqual(
+            set(response.data["results"][0]),
+            {
+                "pk_nota", "folio", "sucursal", "fecha", "hora", "total",
+                "facturado", "canal_point", "tipo_pago",
+            },
+        )
+        fetch.assert_called_once()
+
+    def test_note_search_rejects_unbounded_or_oversized_queries(self):
+        missing = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            **self.auth,
+        )
+        oversized = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {"folio": "1" * 81, "sucursal": "Matriz"},
+            **self.auth,
+        )
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(oversized.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("api.omnichannel_views.PointTicketThresholdService")
+    def test_note_search_filters_real_report_contract_and_closes_point_session(self, service_type):
+        session = MagicMock()
+        session.get.return_value.json.return_value = [
+            {
+                "PK_NOTA": "900001",
+                "FOLIO": "18452",
+                "SUCURSAL": "Matriz",
+                "DIA": "27/07/2026",
+                "HORA": "13:15",
+                "MONTO": "565.00",
+                "FACTURADO": "False",
+                "CANAL_VENTA": "Mostrador",
+                "TIPO": "Contado",
+                "Cliente": "No exponer",
+            },
+            {
+                "PK_NOTA": "900002",
+                "FOLIO": "18452",
+                "SUCURSAL": "Otra",
+                "MONTO": "999.00",
+            },
+        ]
+        service = service_type.return_value
+        service.NOTES_BY_PLAZA_PATH = "/Report/NotasByPlaza"
+        service.settings = SimpleNamespace(
+            base_url="https://point.test",
+            timeout_ms=30000,
+        )
+        service._build_params.return_value = {"fi": "1", "ff": "2"}
+        service.http_session_service.create.return_value = SimpleNamespace(
+            session=session,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {
+                "folio": "18452",
+                "sucursal": "matriz",
+                "fecha": "2026-07-27",
+            },
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertFalse(response.data["results"][0]["facturado"])
+        self.assertNotIn("Cliente", str(response.data))
+        service._build_params.assert_called_once()
+        session.get.assert_called_once_with(
+            "https://point.test/Report/NotasByPlaza",
+            params={"fi": "1", "ff": "2"},
+            timeout=60,
+        )
+        session.close.assert_called_once()
+
+    @patch("api.omnichannel_views.PointTicketThresholdService")
+    def test_note_search_closes_point_session_when_http_fails(self, service_type):
+        session = MagicMock()
+        session.get.side_effect = RuntimeError("fallo de red")
+        service = service_type.return_value
+        service.NOTES_BY_PLAZA_PATH = "/Report/NotasByPlaza"
+        service.settings = SimpleNamespace(
+            base_url="https://point.test",
+            timeout_ms=30000,
+        )
+        service._build_params.return_value = {"fi": "1", "ff": "2"}
+        service.http_session_service.create.return_value = SimpleNamespace(
+            session=session,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {"folio": "18452", "sucursal": "Matriz"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        session.close.assert_called_once()
+
+    @patch(
+        "api.omnichannel_views.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_point_note_detail_uses_server_source_and_excludes_customer_snapshot(self, _fetch):
+        response = self.client.get(
+            reverse(
+                "api_public_omnichannel_point_note_detail",
+                kwargs={"pk_nota": "900001"},
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["pk_nota"], "900001")
+        self.assertEqual(response.data["productos"][0]["codigo"], "P001")
+        self.assertNotIn("customer_external_id", str(response.data))
+        self.assertNotIn("cliente", response.data)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_create_from_point_is_idempotent_and_owns_single_canonical_delivery(self, _fetch):
+        url = reverse("api_public_omnichannel_point_orders")
+        first = self.client.post(url, self.point_payload, format="json", **self.auth)
+        second = self.client.post(url, self.point_payload, format="json", **self.auth)
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["pedido_id"], second.data["pedido_id"])
+        self.assertEqual(
+            first.data["solicitud_domicilio_id"],
+            second.data["solicitud_domicilio_id"],
+        )
+        order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
+        self.assertEqual(order.public_api_client_id, self.api_client.id)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_delivery_list_detail_filters_legacy_and_do_not_duplicate_point_snapshot(self, _fetch):
+        created = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        delivery_id = created.data["solicitud_domicilio_id"]
+        SolicitudDomicilio.objects.create(
+            cliente_nombre="Legacy",
+            direccion="No visible",
+        )
+
+        listing = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {"canal": "FACEBOOK", "page_size": 10},
+            **self.auth,
+        )
+        detail = self.client.get(
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={"solicitud_id": delivery_id},
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual(listing.data["count"], 1)
+        self.assertEqual(listing.data["results"][0]["id"], delivery_id)
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["fuente"]["tipo"], "POINT")
+        self.assertEqual(detail.data["productos"][0]["codigo"], "P001")
+        self.assertNotIn("point_note_snapshot", detail.data)
+        self.assertNotIn("payload_snapshot", str(detail.data))
+        self.assertIn("auditoria", detail.data)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_delivery_detail_is_scoped_by_api_client_without_existence_leak(self, _fetch):
+        created = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        other, other_key = PublicApiClient.create_with_generated_key(
+            nombre="Otro centro",
+            created_by=self.actor,
+        )
+        other.capabilities = ["OMNICHANNEL"]
+        other.save(update_fields=["capabilities"])
+
+        response = self.client.get(
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={"solicitud_id": created.data["solicitud_domicilio_id"]},
+            ),
+            HTTP_X_API_KEY=other_key,
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_every_new_route_requires_key_and_capability(self):
+        unscoped, unscoped_key = PublicApiClient.create_with_generated_key(
+            nombre="Sin capability",
+            created_by=self.actor,
+        )
+        urls = (
+            reverse("api_public_omnichannel_point_notes"),
+            reverse(
+                "api_public_omnichannel_point_note_detail",
+                kwargs={"pk_nota": "900001"},
+            ),
+            reverse("api_public_omnichannel_deliveries"),
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={"solicitud_id": 999},
+            ),
+        )
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+                denied = self.client.get(url, HTTP_X_API_KEY=unscoped_key)
+                self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(unscoped.capabilities)
+
+        point_orders = reverse("api_public_omnichannel_point_orders")
+        self.assertEqual(
+            self.client.post(point_orders, self.point_payload, format="json").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        denied = self.client.post(
+            point_orders,
+            self.point_payload,
+            format="json",
+            HTTP_X_API_KEY=unscoped_key,
+        )
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+
+    @override_settings(PUBLIC_API_RATE_LIMIT_PER_MINUTE=1)
+    @patch(
+        "api.omnichannel_views._fetch_point_note_candidates",
+        return_value=[],
+    )
+    def test_rate_limit_applies_to_new_point_search(self, _fetch):
+        url = reverse("api_public_omnichannel_point_notes")
+        query = {"folio": "18452", "sucursal": "Matriz"}
+        first = self.client.get(url, query, **self.auth)
+        second = self.client.get(url, query, **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    @patch(
+        "api.omnichannel_views.PointNoteDetailService.fetch",
+        side_effect=PointNoteUnavailableError("token=secreto cliente=Ana"),
+    )
+    def test_point_error_is_typed_retryable_and_does_not_leak_internal_message(self, _fetch):
+        response = self.client.get(
+            reverse(
+                "api_public_omnichannel_point_note_detail",
+                kwargs={"pk_nota": "900001"},
+            ),
+            **self.auth,
+        )
+        rendered = str(response.data)
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "POINT_UNAVAILABLE")
+        self.assertTrue(response.data["retryable"])
+        self.assertNotIn("secreto", rendered)
+        self.assertNotIn("Ana", rendered)
+        access = PublicApiAccessLog.objects.filter(client=self.api_client).latest("id")
+        self.assertNotIn("secreto", str(access))
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_patch_status_calls_canonical_idempotent_transition(self, _fetch):
+        created = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        delivery = SolicitudDomicilio.objects.get(
+            pk=created.data["solicitud_domicilio_id"],
+        )
+        branch = Sucursal.objects.create(codigo="API-DOM", nombre="API Domicilios")
+        driver_user = get_user_model().objects.create_user(
+            username="api-driver",
+            password="unused",
+        )
+        driver = Repartidor.objects.create(user=driver_user, sucursal=branch)
+        self.api_client.repartidores_logistica_autorizados.add(driver)
+        delivery.repartidor = driver
+        delivery.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        delivery.save(update_fields=["repartidor", "estatus"])
+        url = reverse(
+            "api_public_omnichannel_delivery_status",
+            kwargs={"solicitud_id": delivery.id},
+        )
+        payload = {
+            "repartidor_id": driver.id,
+            "estatus": "EN_RUTA",
+            "operation_id": str(uuid4()),
+            "actor": {"id": "call-center", "nombre": "Centro operativo"},
+        }
+
+        first = self.client.patch(url, payload, format="json", **self.auth)
+        replay = self.client.patch(url, payload, format="json", **self.auth)
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertFalse(first.data["idempotent"])
+        self.assertEqual(replay.status_code, status.HTTP_200_OK)
+        self.assertTrue(replay.data["idempotent"])

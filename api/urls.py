@@ -95,8 +95,14 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicOmnichannelDeliveriesView,
+    PublicOmnichannelDeliveryDetailView,
+    PublicOmnichannelDeliveryStatusView,
     PublicOmnichannelOrderStatusView,
     PublicOmnichannelOrdersView,
+    PublicOmnichannelPointNoteDetailView,
+    PublicOmnichannelPointNotesView,
+    PublicOmnichannelPointOrdersView,
 )
 from .logistica_public_views import (
     PublicLogisticaDomicilioAsignarView,
@@ -504,6 +510,36 @@ urlpatterns = [
         "public/v1/omnichannel-orders/<uuid:tracking_token>/",
         PublicOmnichannelOrderStatusView.as_view(),
         name="api_public_omnichannel_order_status",
+    ),
+    path(
+        "public/v1/omnichannel/point-notes/",
+        PublicOmnichannelPointNotesView.as_view(),
+        name="api_public_omnichannel_point_notes",
+    ),
+    path(
+        "public/v1/omnichannel/point-notes/<str:pk_nota>/",
+        PublicOmnichannelPointNoteDetailView.as_view(),
+        name="api_public_omnichannel_point_note_detail",
+    ),
+    path(
+        "public/v1/omnichannel/point-orders/",
+        PublicOmnichannelPointOrdersView.as_view(),
+        name="api_public_omnichannel_point_orders",
+    ),
+    path(
+        "public/v1/omnichannel/deliveries/",
+        PublicOmnichannelDeliveriesView.as_view(),
+        name="api_public_omnichannel_deliveries",
+    ),
+    path(
+        "public/v1/omnichannel/deliveries/<int:solicitud_id>/",
+        PublicOmnichannelDeliveryDetailView.as_view(),
+        name="api_public_omnichannel_delivery_detail",
+    ),
+    path(
+        "public/v1/omnichannel/deliveries/<int:solicitud_id>/status/",
+        PublicOmnichannelDeliveryStatusView.as_view(),
+        name="api_public_omnichannel_delivery_status",
     ),
     path("compras/solicitudes/", ComprasSolicitudesListView.as_view(), name="api_compras_solicitudes"),
     path("compras/solicitudes/import-preview/", ComprasSolicitudesImportPreviewView.as_view(), name="api_compras_solicitudes_import_preview"),
