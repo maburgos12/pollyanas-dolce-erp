@@ -495,6 +495,23 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertEqual(second.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
+    @override_settings(
+        PUBLIC_API_RATE_LIMIT_PER_MINUTE=100,
+        OMNICHANNEL_POINT_SEARCH_RATE_LIMIT_PER_MINUTE=1,
+    )
+    @patch(
+        "api.omnichannel_views._fetch_point_note_candidates",
+        return_value=[],
+    )
+    def test_point_search_has_stricter_endpoint_specific_throttle(self, _fetch):
+        url = reverse("api_public_omnichannel_point_notes")
+        query = {"folio": "18452", "sucursal": "Matriz"}
+        first = self.client.get(url, query, **self.auth)
+        second = self.client.get(url, query, **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(second.data["code"], "POINT_SEARCH_RATE_LIMITED")
+
     def test_direccion_igual_no_se_cruza_entre_clientes(self):
         first_payload = self.payload
         second_payload = {
@@ -818,9 +835,39 @@ class CanonicalOmnichannelApiTests(APITestCase):
         session.get.assert_called_once_with(
             "https://point.test/Report/NotasByPlaza",
             params={"fi": "1", "ff": "2"},
-            timeout=60,
+            timeout=30,
         )
         session.close.assert_called_once()
+
+    @patch("api.omnichannel_views.PointTicketThresholdService")
+    def test_note_search_without_date_uses_small_default_window(self, service_type):
+        session = MagicMock()
+        session.get.return_value.json.return_value = []
+        service = service_type.return_value
+        service.NOTES_BY_PLAZA_PATH = "/Report/NotasByPlaza"
+        service.settings = SimpleNamespace(
+            base_url="https://point.test",
+            timeout_ms=7000,
+        )
+        service._build_params.return_value = {"fi": "1", "ff": "2"}
+        service.http_session_service.create.return_value = SimpleNamespace(
+            session=session,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {"folio": "18452", "sucursal": "Matriz"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        dates = service._build_params.call_args.kwargs
+        self.assertEqual((dates["end_date"] - dates["start_date"]).days, 2)
+        session.get.assert_called_once_with(
+            "https://point.test/Report/NotasByPlaza",
+            params={"fi": "1", "ff": "2"},
+            timeout=7,
+        )
 
     @patch("api.omnichannel_views.PointTicketThresholdService")
     def test_note_search_filters_exact_real_date_and_skips_invalid_rows(self, service_type):
@@ -941,6 +988,26 @@ class CanonicalOmnichannelApiTests(APITestCase):
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_point_note_for_api(),
     )
+    def test_point_order_replay_with_materially_different_payload_returns_generic_409(self, _fetch):
+        url = reverse("api_public_omnichannel_point_orders")
+        first = self.client.post(url, self.point_payload, format="json", **self.auth)
+        changed = deepcopy(self.point_payload)
+        changed["canal"] = "INSTAGRAM"
+        changed["social_reference"] = "otro-thread"
+
+        replay = self.client.post(url, changed, format="json", **self.auth)
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(replay.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(replay.data["code"], "POINT_ORDER_CONFLICT")
+        self.assertNotIn("otro-thread", str(replay.data))
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
     def test_delivery_list_detail_filters_legacy_and_do_not_duplicate_point_snapshot(self, _fetch):
         created = self.client.post(
             reverse("api_public_omnichannel_point_orders"),
@@ -976,6 +1043,48 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertNotIn("point_note_snapshot", detail.data)
         self.assertNotIn("payload_snapshot", str(detail.data))
         self.assertIn("auditoria", detail.data)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_delivery_list_combines_branch_sale_date_status_channel_driver_and_pagination(self, _fetch):
+        created = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        delivery = SolicitudDomicilio.objects.get(
+            pk=created.data["solicitud_domicilio_id"],
+        )
+        sold_date = PedidoCliente.objects.get(
+            pk=created.data["pedido_id"],
+        ).point_note_snapshot["sold_at"][:10]
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {
+                "sucursal": "Matriz",
+                "fecha": sold_date,
+                "estatus": delivery.estatus,
+                "canal": "FACEBOOK",
+                "page": 1,
+                "page_size": 1,
+            },
+            **self.auth,
+        )
+        wrong_branch = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {"sucursal": "Otra", "fecha": sold_date},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["page_size"], 1)
+        self.assertEqual(response.data["results"][0]["id"], delivery.id)
+        self.assertEqual(wrong_branch.data["count"], 0)
 
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",
@@ -1154,6 +1263,8 @@ class CanonicalOmnichannelApiTests(APITestCase):
             password="unused",
         )
         driver = Repartidor.objects.create(user=driver_user, sucursal=branch)
+        self.api_client.capabilities = ["OMNICHANNEL", "LOGISTICA_ASSIGNMENT"]
+        self.api_client.save(update_fields=["capabilities"])
         self.api_client.repartidores_logistica_autorizados.add(driver)
         delivery.repartidor = driver
         delivery.estatus = SolicitudDomicilio.ESTATUS_LISTO
@@ -1177,7 +1288,30 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertEqual(replay.status_code, status.HTTP_200_OK)
         self.assertTrue(replay.data["idempotent"])
 
+    def test_patch_status_requires_logistica_capability_in_addition_to_omnichannel(self):
+        response = self.client.patch(
+            reverse(
+                "api_public_omnichannel_delivery_status",
+                kwargs={"solicitud_id": 999},
+            ),
+            {
+                "repartidor_id": 1,
+                "estatus": "EN_RUTA",
+                "operation_id": str(uuid4()),
+                "actor": {"id": "scope", "nombre": "Scope"},
+            },
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            response.data["code"],
+            "LOGISTICA_ASSIGNMENT_CAPABILITY_REQUIRED",
+        )
+
     def test_patch_status_hides_non_point_and_legacy_deliveries(self):
+        self.api_client.capabilities = ["OMNICHANNEL", "LOGISTICA_ASSIGNMENT"]
+        self.api_client.save(update_fields=["capabilities"])
         branch = Sucursal.objects.create(codigo="API-SCOPE", nombre="API Scope")
         driver_user = get_user_model().objects.create_user(
             username="api-scope-driver",

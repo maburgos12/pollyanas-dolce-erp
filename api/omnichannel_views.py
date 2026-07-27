@@ -6,6 +6,8 @@ from datetime import date, datetime, timedelta
 from uuid import uuid4
 
 import requests
+from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q
@@ -27,7 +29,12 @@ from api.omnichannel_serializers import (
     PointNoteSearchSerializer,
 )
 from api.public_views import _auth_public_client, _log_access
-from crm.services.point_order_link import LinkPointOrderCommand, link_point_note
+from api.logistica_public_views import _authorize_logistica_assignment
+from crm.services.point_order_link import (
+    LinkPointOrderCommand,
+    LinkPointOrderResult,
+    link_point_note,
+)
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from logistica.models import SolicitudDomicilio
 from logistica.services_domicilio_status import (
@@ -57,6 +64,7 @@ from pos_bridge.utils.exceptions import (
 IDEMPOTENCY_CONFLICT_CODE = "OMNICHANNEL_IDEMPOTENCY_CONFLICT"
 OMNICHANNEL_CAPABILITY = "OMNICHANNEL"
 POINT_SEARCH_MAX_RESULTS = 20
+POINT_SEARCH_DEFAULT_DAYS = 3
 
 
 def _normalize_phone(value: str) -> str:
@@ -205,7 +213,9 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
     except (PosBridgeError, requests.RequestException) as exc:
         raise _coerce_point_error(exc) from exc
     end_date = fecha or timezone.localdate()
-    start_date = fecha or (end_date - timedelta(days=119))
+    start_date = fecha or (
+        end_date - timedelta(days=POINT_SEARCH_DEFAULT_DAYS - 1)
+    )
     params = service._build_params(start_date=start_date, end_date=end_date)
     request_url = (
         service.settings.base_url.rstrip("/")
@@ -220,7 +230,7 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
             response = auth_session.session.get(
                 request_url,
                 params=params,
-                timeout=max(service.settings.timeout_ms / 1000, 60),
+                timeout=service.settings.timeout_ms / 1000,
             )
             response.raise_for_status()
         except Exception as exc:
@@ -290,6 +300,27 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
         if len(candidates) >= POINT_SEARCH_MAX_RESULTS:
             break
     return candidates
+
+
+def _consume_point_search_limit(api_client):
+    limit = int(
+        getattr(
+            settings,
+            "OMNICHANNEL_POINT_SEARCH_RATE_LIMIT_PER_MINUTE",
+            10,
+        ),
+    )
+    if limit <= 0:
+        return True
+    bucket = timezone.now().strftime("%Y%m%d%H%M")
+    key = f"omnichannel_point_search:{api_client.id}:{bucket}"
+    cache.add(key, 0, timeout=90)
+    try:
+        current = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=90)
+        current = 1
+    return current <= limit
 
 
 def _find_customer(data: dict) -> Cliente | None:
@@ -652,6 +683,15 @@ class PublicOmnichannelPointNotesView(APIView):
         capability_error = _authorize_omnichannel(api_client, request)
         if capability_error:
             return capability_error
+        if not _consume_point_search_limit(api_client):
+            _log_access(api_client, request, status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response(
+                {
+                    "detail": "Límite de búsquedas Point por minuto excedido.",
+                    "code": "POINT_SEARCH_RATE_LIMITED",
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
         serializer = PointNoteSearchSerializer(data=request.query_params)
         if not serializer.is_valid():
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
@@ -710,6 +750,54 @@ class PublicOmnichannelPointNoteDetailView(APIView):
         return Response(_serialize_point_note(note))
 
 
+def _point_replay_matches(order, delivery, command):
+    customer = order.cliente
+    address = order.direccion_entrega
+    if (
+        order.canal != command.channel
+        or _normalize_text(order.social_reference)
+        != _normalize_text(command.social_reference)
+        or address is None
+        or DireccionCliente.normalizar_direccion(command.address)
+        != address.direccion_normalizada
+        or delivery.ventana_inicio != command.delivery_window_start
+        or delivery.ventana_fin != command.delivery_window_end
+        or _normalize_text(delivery.instrucciones_entrega)
+        != _normalize_text(command.instructions)
+    ):
+        return False
+
+    incoming_phone = _normalize_phone(command.customer_phone)
+    incoming_email = _normalize_email(command.customer_email)
+    if incoming_phone:
+        if _normalize_phone(customer.telefono) != incoming_phone:
+            return False
+    elif incoming_email:
+        if _normalize_email(customer.email) != incoming_email:
+            return False
+    elif _normalize_text(customer.nombre).casefold() != _normalize_text(
+        command.customer_name,
+    ).casefold():
+        return False
+
+    optional_pairs = (
+        (command.references, address.referencias),
+        (command.place_id, address.place_id),
+    )
+    if any(
+        _normalize_text(incoming)
+        and _normalize_text(incoming) != _normalize_text(persisted)
+        for incoming, persisted in optional_pairs
+    ):
+        return False
+    if command.latitude is not None and (
+        address.latitud != command.latitude
+        or address.longitud != command.longitude
+    ):
+        return False
+    return True
+
+
 class PublicOmnichannelPointOrdersView(APIView):
     permission_classes = [AllowAny]
 
@@ -754,13 +842,55 @@ class PublicOmnichannelPointOrdersView(APIView):
         )
         try:
             with transaction.atomic():
-                result = link_point_note(
-                    command=command,
-                    actor=api_client.created_by,
+                existing = (
+                    PedidoCliente.objects.select_for_update(of=("self",))
+                    .select_related("cliente", "direccion_entrega")
+                    .filter(point_note_id=command.pk_nota)
+                    .first()
                 )
-                order = PedidoCliente.objects.select_for_update().get(
-                    pk=result.order.pk,
-                )
+                if existing is not None:
+                    delivery = (
+                        SolicitudDomicilio.objects.select_for_update()
+                        .filter(pedido_cliente=existing)
+                        .first()
+                    )
+                    if (
+                        existing.public_api_client_id != api_client.id
+                        or delivery is None
+                        or not _point_replay_matches(
+                            existing,
+                            delivery,
+                            command,
+                        )
+                    ):
+                        raise ValidationError(
+                            {"pk_nota": "La nota Point ya está vinculada."},
+                        )
+                    result = LinkPointOrderResult(
+                        order=existing,
+                        delivery=delivery,
+                        created=False,
+                    )
+                    order = existing
+                else:
+                    result = link_point_note(
+                        command=command,
+                        actor=api_client.created_by,
+                    )
+                    order = PedidoCliente.objects.select_for_update().get(
+                        pk=result.order.pk,
+                    )
+                if (
+                    not result.created
+                    and not _point_replay_matches(
+                        order,
+                        result.delivery,
+                        command,
+                    )
+                ):
+                    raise ValidationError(
+                        {"pk_nota": "La nota Point ya está vinculada."},
+                    )
                 if order.public_api_client_id not in (None, api_client.id):
                     raise ValidationError(
                         {"pk_nota": "La nota Point ya está vinculada."},
@@ -823,7 +953,6 @@ def _owned_deliveries(api_client):
             "repartidor__user",
             "unidad",
         )
-        .prefetch_related("status_operations")
     )
 
 
@@ -953,6 +1082,16 @@ class PublicOmnichannelDeliveriesView(APIView):
             deliveries = deliveries.filter(
                 repartidor_id=values["repartidor_id"],
             )
+        if values.get("sucursal"):
+            deliveries = deliveries.filter(
+                pedido_cliente__sucursal__iexact=values["sucursal"],
+            )
+        if values.get("fecha"):
+            deliveries = deliveries.filter(
+                pedido_cliente__point_note_snapshot__sold_at__startswith=(
+                    values["fecha"].isoformat()
+                ),
+            )
         deliveries = deliveries.order_by(values["ordering"], "id")
         count = deliveries.count()
         start = (values["page"] - 1) * values["page_size"]
@@ -977,7 +1116,12 @@ class PublicOmnichannelDeliveryDetailView(APIView):
         capability_error = _authorize_omnichannel(api_client, request)
         if capability_error:
             return capability_error
-        delivery = _owned_deliveries(api_client).filter(pk=solicitud_id).first()
+        delivery = (
+            _owned_deliveries(api_client)
+            .prefetch_related("status_operations")
+            .filter(pk=solicitud_id)
+            .first()
+        )
         if not delivery:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
             raise Http404
@@ -995,6 +1139,9 @@ class PublicOmnichannelDeliveryStatusView(APIView):
         capability_error = _authorize_omnichannel(api_client, request)
         if capability_error:
             return capability_error
+        logistics_error = _authorize_logistica_assignment(api_client, request)
+        if logistics_error:
+            return logistics_error
         serializer = OmnichannelDeliveryStatusSerializer(data=request.data)
         if not serializer.is_valid():
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)

@@ -146,6 +146,10 @@ class OmnichannelDeliveryQuerySerializer(serializers.Serializer):
         choices=PedidoCliente.CANAL_CHOICES, required=False,
     )
     repartidor_id = serializers.IntegerField(min_value=1, required=False)
+    sucursal = serializers.CharField(
+        max_length=120, required=False, trim_whitespace=True,
+    )
+    fecha = serializers.DateField(required=False)
     page = serializers.IntegerField(min_value=1, max_value=10000, default=1)
     page_size = serializers.IntegerField(min_value=1, max_value=100, default=25)
     ordering = serializers.ChoiceField(
