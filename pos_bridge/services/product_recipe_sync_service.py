@@ -168,6 +168,7 @@ class PointProductRecipeSyncService:
                     continue
                 if not include_without_recipe and not product.get("hasReceta"):
                     continue
+                self._upsert_point_product_catalog_signal(product)
                 summary["products_selected"] += 1
                 self._extract_product_node(
                     client=client,
@@ -470,6 +471,42 @@ class PointProductRecipeSyncService:
                     seen.add(norm)
                     found.append(row)
         return self._hydrate_selected_products(client=client, products=found, selected_codes=selected_codes)
+
+    def _upsert_point_product_catalog_signal(self, product: dict) -> PointProduct | None:
+        external_id = str(product.get("PK_Producto") or "").strip()
+        sku = str(product.get("Codigo") or "").strip()
+        name = str(product.get("Nombre") or "").strip()
+        if not external_id or not sku or not name:
+            return None
+
+        point_product = PointProduct.objects.filter(external_id=external_id).first()
+        if point_product is None:
+            point_product = PointProduct.objects.filter(sku__iexact=sku).order_by("-updated_at", "-id").first()
+
+        metadata = dict((point_product.metadata if point_product else {}) or {})
+        metadata.update(
+            {
+                "source": "POINT_RECIPE_SYNC",
+                "family": str(product.get("Familia") or "").strip(),
+                "has_recipe": bool(product.get("hasReceta")),
+                "recipe_catalog_active": True,
+                "recipe_catalog_synced_at": timezone.now().isoformat(),
+            }
+        )
+        values = {
+            "sku": sku,
+            "name": name,
+            "category": str(product.get("Categoria") or "").strip(),
+            "active": True,
+            "metadata": metadata,
+        }
+        if point_product is None:
+            return PointProduct.objects.create(external_id=external_id, **values)
+
+        for field, value in values.items():
+            setattr(point_product, field, value)
+        point_product.save(update_fields=[*values.keys(), "normalized_name", "updated_at"])
+        return point_product
 
     def _hydrate_selected_products(self, *, client, products: list[dict], selected_codes: set[str]) -> list[dict]:
         if not selected_codes:

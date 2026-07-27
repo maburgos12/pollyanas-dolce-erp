@@ -22,6 +22,7 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
 
         expected_task_exports = {
             "task_analytics_refresh_cycle",
+            "task_catalog_recipe_sync",
             "task_operations_automation_cycle",
             "task_visible_cut_refresh_cycle",
         }
