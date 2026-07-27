@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import requests
+from django.utils import timezone
 
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
@@ -18,7 +19,19 @@ class PointNoteDetailError(ExtractionError):
     """Point did not return a usable note-detail contract."""
 
 
-class PointNoteIntegrityError(PointNoteDetailError):
+class PointNoteNotFoundError(PointNoteDetailError):
+    """The requested PK_NOTA does not exist in Point."""
+
+
+class PointNoteUnavailableError(PointNoteDetailError):
+    """Point could not answer the note request and may be retried."""
+
+
+class PointNoteContractError(PointNoteDetailError):
+    """Point answered, but its note payload did not satisfy the contract."""
+
+
+class PointNoteIntegrityError(PointNoteContractError):
     """The header and line-level facts for a Point note do not reconcile."""
 
 
@@ -81,7 +94,7 @@ class PointNoteDetailService:
     def fetch(self, *, pk_nota: str) -> PointNote:
         note_id = str(pk_nota or "").strip()
         if not note_id:
-            raise PointNoteDetailError("PK_NOTA es obligatorio para consultar Point.")
+            raise PointNoteContractError("PK_NOTA es obligatorio para consultar Point.")
 
         auth_session = self.http_session_service.create()
         try:
@@ -106,12 +119,12 @@ class PointNoteDetailService:
         header_rows = self._require_rows(header_payload, label="cabecera", empty_means_not_found=True)
         detail_rows = self._require_rows(detail_payload, label="detalle", empty_means_not_found=True)
         if len(header_rows) != 1:
-            raise PointNoteDetailError("Point devolvió una estructura inválida en cabecera de nota.")
+            raise PointNoteContractError("Point devolvió una estructura inválida en cabecera de nota.")
 
         header = header_rows[0]
         self._require_fields(header, self._HEADER_REQUIRED_FIELDS, label="cabecera")
         lines = tuple(self._normalize_line(row, index=index) for index, row in enumerate(detail_rows))
-        total = self._decimal(header["Importe"], field="Importe", minimum=Decimal("0"))
+        total = self._money(header["Importe"], field="Importe")
         line_total = sum((line.line_total for line in lines), Decimal("0"))
         if self._currency(total) != self._currency(line_total):
             raise PointNoteIntegrityError(
@@ -148,7 +161,7 @@ class PointNoteDetailService:
             )
             response.raise_for_status()
         except requests.RequestException as exc:
-            raise PointNoteDetailError(f"Falló la consulta de {label} de nota en Point ({path}).") from exc
+            raise PointNoteUnavailableError(f"Falló la consulta de {label} de nota en Point ({path}).") from exc
 
         try:
             return response.json()
@@ -156,7 +169,7 @@ class PointNoteDetailService:
             try:
                 return json.loads(response.text)
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise PointNoteDetailError(f"Point devolvió JSON inválido en {label} ({path}).") from exc
+                raise PointNoteContractError(f"Point devolvió JSON inválido en {label} ({path}).") from exc
 
     def _require_rows(
         self,
@@ -166,15 +179,15 @@ class PointNoteDetailService:
         empty_means_not_found: bool = False,
     ) -> list[dict[str, Any]]:
         if empty_means_not_found and payload == []:
-            raise PointNoteDetailError("La nota solicitada no existe en Point.")
+            raise PointNoteNotFoundError("La nota solicitada no existe en Point.")
         if not isinstance(payload, list) or not payload or not all(isinstance(row, dict) for row in payload):
-            raise PointNoteDetailError(f"Point devolvió una estructura inválida en {label} de nota.")
+            raise PointNoteContractError(f"Point devolvió una estructura inválida en {label} de nota.")
         return payload
 
     def _require_fields(self, row: dict[str, Any], fields: tuple[str, ...], *, label: str) -> None:
         missing = [field for field in fields if field not in row]
         if missing:
-            raise PointNoteDetailError(f"Point omitió campos obligatorios en {label}: {', '.join(missing)}.")
+            raise PointNoteContractError(f"Point omitió campos obligatorios en {label}: {', '.join(missing)}.")
 
     def _normalize_line(self, row: dict[str, Any], *, index: int) -> PointNoteLine:
         self._require_fields(row, self._LINE_REQUIRED_FIELDS, label=f"detalle fila {index}")
@@ -193,22 +206,26 @@ class PointNoteDetailService:
                 minimum=Decimal("0"),
                 minimum_inclusive=False,
             ),
-            unit_price=self._decimal(
+            unit_price=self._money(
                 row["Precio_Venta"],
                 field=f"Precio_Venta fila {index}",
-                minimum=Decimal("0"),
             ),
-            discount=self._decimal(
+            discount=self._money(
                 row["Descuento"],
                 field=f"Descuento fila {index}",
-                minimum=Decimal("0"),
             ),
-            line_total=self._decimal(
+            line_total=self._money(
                 row["Total"],
                 field=f"Total fila {index}",
-                minimum=Decimal("0"),
             ),
         )
+
+    def _money(self, value: Any, *, field: str) -> Decimal:
+        result = self._decimal(value, field=field, minimum=Decimal("0"))
+        canonical = self._currency(result)
+        if result != canonical:
+            raise PointNoteContractError(f"Point devolvió una precisión menor a centavos en {field}.")
+        return canonical
 
     def _decimal(
         self,
@@ -223,15 +240,15 @@ class PointNoteDetailService:
             normalized = str(value).replace("$", "").replace(",", "").strip()
             result = Decimal(normalized)
         except (InvalidOperation, TypeError, ValueError) as exc:
-            raise PointNoteDetailError(f"Point devolvió un decimal inválido en {field}.") from exc
+            raise PointNoteContractError(f"Point devolvió un decimal inválido en {field}.") from exc
         if not result.is_finite():
-            raise PointNoteDetailError(f"Point devolvió un decimal inválido en {field}.")
+            raise PointNoteContractError(f"Point devolvió un decimal inválido en {field}.")
         if minimum is not None and (
             result < minimum or (not minimum_inclusive and result == minimum)
         ):
-            raise PointNoteDetailError(f"Point devolvió un valor inválido en {field}.")
+            raise PointNoteContractError(f"Point devolvió un valor inválido en {field}.")
         if maximum is not None and result > maximum:
-            raise PointNoteDetailError(f"Point devolvió un valor inválido en {field}.")
+            raise PointNoteContractError(f"Point devolvió un valor inválido en {field}.")
         return result
 
     def _currency(self, value: Decimal) -> Decimal:
@@ -239,15 +256,22 @@ class PointNoteDetailService:
 
     def _datetime(self, value: Any, *, field: str) -> datetime:
         text = self._required_text(value, field=field)
+        parsed: datetime | None = None
         try:
-            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
             for date_format in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
                 try:
-                    return datetime.strptime(text, date_format)
+                    parsed = datetime.strptime(text, date_format)
+                    break
                 except ValueError:
                     continue
-        raise PointNoteDetailError(f"Point devolvió una fecha inválida en {field}.")
+        if parsed is None:
+            raise PointNoteContractError(f"Point devolvió una fecha inválida en {field}.")
+        project_timezone = timezone.get_default_timezone()
+        if timezone.is_naive(parsed):
+            return timezone.make_aware(parsed, project_timezone)
+        return timezone.localtime(parsed, project_timezone)
 
     def _boolean(self, value: Any, *, field: str) -> bool:
         if isinstance(value, bool):
@@ -259,7 +283,7 @@ class PointNoteDetailService:
             return True
         if token in {"no", "false", "0"}:
             return False
-        raise PointNoteDetailError(f"Point devolvió un booleano inválido en {field}.")
+        raise PointNoteContractError(f"Point devolvió un booleano inválido en {field}.")
 
     def _optional_boolean(self, value: Any, *, field: str, default: bool) -> bool:
         if value is None or str(value).strip() == "":
@@ -269,7 +293,7 @@ class PointNoteDetailService:
     def _required_text(self, value: Any, *, field: str) -> str:
         text = self._optional_text(value)
         if not text:
-            raise PointNoteDetailError(f"Point devolvió un texto vacío en {field}.")
+            raise PointNoteContractError(f"Point devolvió un texto vacío en {field}.")
         return text
 
     @staticmethod

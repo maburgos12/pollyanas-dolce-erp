@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import datetime
+from dataclasses import FrozenInstanceError
+from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import requests
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from pos_bridge.services.point_note_detail_service import (
+    PointNoteContractError,
     PointNoteDetailError,
     PointNoteDetailService,
     PointNoteIntegrityError,
+    PointNoteNotFoundError,
+    PointNoteUnavailableError,
 )
 
 
@@ -92,13 +97,16 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         self.assertEqual(note.pk_nota, "900001")
         self.assertEqual(note.folio, "18452")
         self.assertEqual(note.branch_name, "Matriz")
-        self.assertEqual(note.sold_at, datetime(2026, 7, 27, 12, 40))
+        self.assertTrue(timezone.is_aware(note.sold_at))
+        self.assertEqual(timezone.localtime(note.sold_at).replace(tzinfo=None), datetime(2026, 7, 27, 12, 40))
         self.assertEqual(note.total, Decimal("565.00"))
+        self.assertEqual(note.total.as_tuple().exponent, -2)
         self.assertFalse(note.invoiced)
         self.assertEqual(note.payment_type, "CONTADO")
         self.assertEqual(note.customer_external_id, "customer-001")
         self.assertEqual(note.lines[1].point_code, "257")
         self.assertEqual(note.lines[0].line_total, Decimal("525.00"))
+        self.assertEqual(note.lines[0].unit_price.as_tuple().exponent, -2)
         self.assertEqual(
             note.source_endpoint,
             "/Clientes/get_detalle_nota/",
@@ -115,6 +123,10 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         self.assertTrue(session.closed)
         self.assertFalse(hasattr(note.lines[0], "autoriza"))
         self.assertFalse(hasattr(note.lines[0], "json_descuentos"))
+        with self.assertRaises(FrozenInstanceError):
+            note.folio = "changed"
+        with self.assertRaises(FrozenInstanceError):
+            note.lines[0].quantity = Decimal("2")
 
     def test_fetch_rejects_total_mismatch_against_sum_of_point_line_totals(self):
         header = deepcopy(self.header)
@@ -129,21 +141,21 @@ class PointNoteDetailServiceTests(SimpleTestCase):
     def test_fetch_rejects_invalid_json_and_invalid_structure(self):
         service, session = self._service()
         session.invalid_detail_json = True
-        with self.assertRaisesRegex(PointNoteDetailError, "JSON.*detalle"):
+        with self.assertRaisesRegex(PointNoteContractError, "JSON.*detalle"):
             service.fetch(pk_nota="900001")
         self.assertTrue(session.closed)
 
         for invalid_detail in (None, {}, "expired", [None]):
             with self.subTest(invalid_detail=invalid_detail):
                 service, session = self._service(detail=invalid_detail)
-                with self.assertRaisesRegex(PointNoteDetailError, "estructura.*detalle"):
+                with self.assertRaisesRegex(PointNoteContractError, "estructura.*detalle"):
                     service.fetch(pk_nota="900001")
                 self.assertTrue(session.closed)
 
     def test_fetch_treats_empty_detail_as_note_not_found(self):
         service, session = self._service(detail=[])
 
-        with self.assertRaisesRegex(PointNoteDetailError, "no existe"):
+        with self.assertRaisesRegex(PointNoteNotFoundError, "no existe"):
             service.fetch(pk_nota="missing")
 
         self.assertTrue(session.closed)
@@ -151,7 +163,7 @@ class PointNoteDetailServiceTests(SimpleTestCase):
     def test_fetch_treats_empty_header_and_detail_as_note_not_found(self):
         service, session = self._service(header=[], detail=[])
 
-        with self.assertRaisesRegex(PointNoteDetailError, "no existe"):
+        with self.assertRaisesRegex(PointNoteNotFoundError, "no existe"):
             service.fetch(pk_nota="missing")
 
         self.assertTrue(session.closed)
@@ -161,7 +173,7 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         del detail[0]["Total"]
         service, _session = self._service(detail=detail)
 
-        with self.assertRaisesRegex(PointNoteDetailError, "Total"):
+        with self.assertRaisesRegex(PointNoteContractError, "Total"):
             service.fetch(pk_nota="900001")
 
     def test_fetch_rejects_invalid_decimal_and_invalid_quantity_price_or_discount(self):
@@ -178,7 +190,7 @@ class PointNoteDetailServiceTests(SimpleTestCase):
                 detail = deepcopy(self.detail)
                 detail[0][field] = value
                 service, _session = self._service(detail=detail)
-                with self.assertRaises(PointNoteDetailError):
+                with self.assertRaises(PointNoteContractError):
                     service.fetch(pk_nota="900001")
 
     def test_fetch_closes_session_when_http_request_fails(self):
@@ -188,7 +200,7 @@ class PointNoteDetailServiceTests(SimpleTestCase):
             raise requests.Timeout("late")
 
         session.get = fail_get
-        with self.assertRaisesRegex(PointNoteDetailError, "Point"):
+        with self.assertRaisesRegex(PointNoteUnavailableError, "Point"):
             service.fetch(pk_nota="900001")
         self.assertTrue(session.closed)
 
@@ -198,6 +210,55 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         service.fetch(pk_nota="900001")
 
         self.assertEqual([request["timeout"] for request in session.requests], [0.75, 0.75])
+
+    def test_fetch_classifies_http_failure_as_point_unavailable(self):
+        service, session = self._service()
+
+        def fail_get(*_args, **_kwargs):
+            raise requests.HTTPError("503 Server Error")
+
+        session.get = fail_get
+        with self.assertRaises(PointNoteUnavailableError):
+            service.fetch(pk_nota="900001")
+        self.assertTrue(session.closed)
+
+    def test_fetch_localizes_naive_point_datetime_to_project_timezone(self):
+        service, _session = self._service()
+
+        sold_at = service.fetch(pk_nota="900001").sold_at
+
+        self.assertTrue(timezone.is_aware(sold_at))
+        self.assertEqual(sold_at.tzinfo, timezone.get_default_timezone())
+        self.assertEqual(sold_at.replace(tzinfo=None), datetime(2026, 7, 27, 12, 40))
+
+    def test_fetch_normalizes_offset_datetime_preserving_the_instant(self):
+        header = deepcopy(self.header)
+        header[0]["Fecha_Hora"] = "2026-07-27T19:40:00+00:00"
+        service, _session = self._service(header=header)
+
+        sold_at = service.fetch(pk_nota="900001").sold_at
+
+        self.assertTrue(timezone.is_aware(sold_at))
+        self.assertEqual(
+            sold_at.astimezone(datetime_timezone.utc),
+            datetime(2026, 7, 27, 19, 40, tzinfo=datetime_timezone.utc),
+        )
+        self.assertEqual(timezone.localtime(sold_at).hour, 12)
+
+    def test_fetch_rejects_subcent_money_instead_of_rounding_point_facts(self):
+        header = deepcopy(self.header)
+        header[0]["Importe"] = "565.001"
+        service, _session = self._service(header=header)
+        with self.assertRaisesRegex(PointNoteContractError, "centavos"):
+            service.fetch(pk_nota="900001")
+
+        for field in ("Precio_Venta", "Descuento", "Total"):
+            with self.subTest(field=field):
+                detail = deepcopy(self.detail)
+                detail[0][field] = "0.001"
+                service, _session = self._service(detail=detail)
+                with self.assertRaisesRegex(PointNoteContractError, "centavos"):
+                    service.fetch(pk_nota="900001")
 
     def test_fetch_normalizes_boolean_variants(self):
         truthy_header = deepcopy(self.header)
