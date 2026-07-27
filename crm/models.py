@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -84,6 +84,41 @@ class DireccionCliente(models.Model):
         super().save(*args, **kwargs)
 
 
+class PedidoClienteQuerySet(models.QuerySet):
+    IMMUTABLE_BULK_FIELDS = frozenset(
+        {
+            "payload_snapshot",
+            "point_note_id",
+            "point_note_folio",
+            "point_note_snapshot",
+            "point_note_fetched_at",
+        }
+    )
+
+    @classmethod
+    def _reject_immutable_fields(cls, fields) -> None:
+        forbidden = cls.IMMUTABLE_BULK_FIELDS.intersection(fields)
+        if forbidden:
+            field_list = ", ".join(sorted(forbidden))
+            raise ValidationError(
+                f"No se permite actualización masiva de campos inmutables: {field_list}.",
+            )
+
+    def update(self, **kwargs):
+        self._reject_immutable_fields(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_immutable_fields(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._reject_immutable_fields(kwargs.get("update_fields") or ())
+        for pedido in objs:
+            pedido._validate_point_note_identity()
+        return super().bulk_create(objs, *args, **kwargs)
+
+
 class PedidoCliente(models.Model):
     ESTATUS_NUEVO = "NUEVO"
     ESTATUS_COTIZADO = "COTIZADO"
@@ -147,6 +182,7 @@ class PedidoCliente(models.Model):
     point_note_snapshot = models.JSONField(default=dict, blank=True, editable=False)
     point_note_fetched_at = models.DateTimeField(null=True, blank=True, editable=False)
     social_reference = models.CharField(max_length=180, blank=True, default="")
+    objects = PedidoClienteQuerySet.as_manager()
     tracking_token = models.UUIDField(
         null=True,
         blank=True,
@@ -228,24 +264,123 @@ class PedidoCliente(models.Model):
                 seq = 1
         return f"{prefix}-{seq:04d}"
 
+    @staticmethod
+    def _point_note_snapshot_identity(snapshot) -> str:
+        if not isinstance(snapshot, dict):
+            return ""
+
+        candidates = []
+        for key in ("pk_nota", "PK_NOTA", "id_nota"):
+            value = snapshot.get(key)
+            if value not in (None, ""):
+                candidates.append(str(value).strip())
+
+        reference = snapshot.get("reference")
+        if isinstance(reference, dict):
+            for key in ("pk_nota", "PK_NOTA", "id_nota"):
+                value = reference.get(key)
+                if value not in (None, ""):
+                    candidates.append(str(value).strip())
+
+        identities = {value for value in candidates if value}
+        if len(identities) > 1:
+            raise ValidationError(
+                {"point_note_snapshot": "El snapshot contiene identidades Point contradictorias."},
+            )
+        return next(iter(identities), "")
+
+    def _validate_point_note_identity(self) -> None:
+        self.point_note_id = str(self.point_note_id or "").strip()
+        snapshot_identity = self._point_note_snapshot_identity(self.point_note_snapshot)
+        has_snapshot = bool(self.point_note_snapshot)
+        has_point_metadata = bool(
+            has_snapshot or self.point_note_folio or self.point_note_fetched_at
+        )
+
+        if not self.point_note_id and has_point_metadata:
+            raise ValidationError(
+                {"point_note_id": "La procedencia Point requiere point_note_id."},
+            )
+        if self.point_note_id and not snapshot_identity:
+            raise ValidationError(
+                {
+                    "point_note_snapshot": (
+                        "El snapshot Point debe incluir pk_nota, PK_NOTA o id_nota."
+                    )
+                },
+            )
+        if snapshot_identity and snapshot_identity != self.point_note_id:
+            raise ValidationError(
+                {
+                    "point_note_snapshot": (
+                        "La identidad del snapshot Point no coincide con point_note_id."
+                    )
+                },
+            )
+
+    def backfill_point_note_provenance(
+        self,
+        *,
+        point_note_id,
+        point_note_snapshot,
+        point_note_folio="",
+        point_note_fetched_at=None,
+    ) -> None:
+        if self._state.adding:
+            raise ValidationError(
+                {"point_note_id": "El backfill Point requiere un pedido ya guardado."},
+            )
+        with transaction.atomic():
+            persisted = PedidoCliente.objects.select_for_update().get(pk=self.pk)
+            persisted.point_note_id = point_note_id
+            persisted.point_note_folio = point_note_folio
+            persisted.point_note_snapshot = point_note_snapshot
+            persisted.point_note_fetched_at = point_note_fetched_at
+            persisted.save(
+                _allow_point_note_backfill=True,
+                update_fields=[
+                    "point_note_id",
+                    "point_note_folio",
+                    "point_note_snapshot",
+                    "point_note_fetched_at",
+                    "updated_at",
+                ],
+            )
+
+        self.point_note_id = persisted.point_note_id
+        self.point_note_folio = persisted.point_note_folio
+        self.point_note_snapshot = persisted.point_note_snapshot
+        self.point_note_fetched_at = persisted.point_note_fetched_at
+        self.updated_at = persisted.updated_at
+
     def save(self, *args, **kwargs):
+        allow_point_note_backfill = kwargs.pop("_allow_point_note_backfill", False)
+        # Alias temporal para consumidores que adoptaron el nombre de la primera
+        # versión antes de que la procedencia completa se volviera inmutable.
+        allow_point_note_backfill = (
+            kwargs.pop("_allow_point_note_snapshot_backfill", False)
+            or allow_point_note_backfill
+        )
         snapshot_backfills = {
             "payload_snapshot": kwargs.pop("_allow_payload_snapshot_backfill", False),
-            "point_note_snapshot": kwargs.pop("_allow_point_note_snapshot_backfill", False),
         }
-        if not self._state.adding:
-            persisted_snapshots = (
+        if self._state.adding:
+            self._validate_point_note_identity()
+        else:
+            persisted_values = (
                 PedidoCliente.objects.filter(pk=self.pk)
-                .values("payload_snapshot", "point_note_snapshot")
+                .values(
+                    "payload_snapshot",
+                    "point_note_id",
+                    "point_note_folio",
+                    "point_note_snapshot",
+                    "point_note_fetched_at",
+                )
                 .first()
             )
             snapshot_errors = {}
-            error_messages = {
-                "payload_snapshot": "El snapshot omnicanal es inmutable.",
-                "point_note_snapshot": "El snapshot de la nota Point es inmutable.",
-            }
             for field_name, allow_backfill in snapshot_backfills.items():
-                persisted_snapshot = (persisted_snapshots or {}).get(field_name)
+                persisted_snapshot = (persisted_values or {}).get(field_name)
                 current_snapshot = getattr(self, field_name)
                 snapshot_changed = persisted_snapshot != current_snapshot
                 valid_backfill = (
@@ -254,9 +389,38 @@ class PedidoCliente(models.Model):
                     and bool(current_snapshot)
                 )
                 if snapshot_changed and not valid_backfill:
-                    snapshot_errors[field_name] = error_messages[field_name]
+                    snapshot_errors[field_name] = "El snapshot omnicanal es inmutable."
             if snapshot_errors:
                 raise ValidationError(snapshot_errors)
+
+            point_fields = (
+                "point_note_id",
+                "point_note_folio",
+                "point_note_snapshot",
+                "point_note_fetched_at",
+            )
+            point_changed = any(
+                (persisted_values or {}).get(field_name) != getattr(self, field_name)
+                for field_name in point_fields
+            )
+            persisted_has_point = any(
+                bool((persisted_values or {}).get(field_name))
+                for field_name in point_fields
+            )
+            current_has_point = any(bool(getattr(self, field_name)) for field_name in point_fields)
+            valid_point_backfill = (
+                allow_point_note_backfill
+                and not persisted_has_point
+                and current_has_point
+                and bool(self.point_note_id)
+                and bool(self.point_note_snapshot)
+            )
+            if point_changed:
+                if not valid_point_backfill:
+                    raise ValidationError(
+                        {"point_note_id": "La procedencia Point es inmutable."},
+                    )
+                self._validate_point_note_identity()
 
         if not self.folio:
             self.folio = self._generate_folio()

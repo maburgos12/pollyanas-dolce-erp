@@ -1605,6 +1605,8 @@ class SolicitudDomicilio(models.Model):
     CANAL_WHATSAPP = PedidoCliente.CANAL_WHATSAPP
     CANAL_TELEFONO = PedidoCliente.CANAL_TELEFONO
     CANAL_WEB = PedidoCliente.CANAL_WEB
+    CANAL_FACEBOOK = PedidoCliente.CANAL_FACEBOOK
+    CANAL_INSTAGRAM = PedidoCliente.CANAL_INSTAGRAM
     CANAL_OTRO = PedidoCliente.CANAL_OTRO
     CANAL_CHOICES = PedidoCliente.CANAL_CHOICES
 

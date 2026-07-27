@@ -23,6 +23,8 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal)
 
     def test_solicitud_accepts_social_channels_shared_with_crm(self):
+        self.assertEqual(SolicitudDomicilio.CANAL_FACEBOOK, PedidoCliente.CANAL_FACEBOOK)
+        self.assertEqual(SolicitudDomicilio.CANAL_INSTAGRAM, PedidoCliente.CANAL_INSTAGRAM)
         self.assertIn(("FACEBOOK", "Facebook"), SolicitudDomicilio.CANAL_CHOICES)
         self.assertIn(("INSTAGRAM", "Instagram"), SolicitudDomicilio.CANAL_CHOICES)
         self.assertEqual(SolicitudDomicilio.CANAL_CHOICES, PedidoCliente.CANAL_CHOICES)

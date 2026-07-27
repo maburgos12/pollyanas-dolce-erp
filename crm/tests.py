@@ -1,8 +1,11 @@
+from datetime import timedelta
+
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.access import ROLE_VENTAS
 from core.models import Sucursal
@@ -368,25 +371,126 @@ class PedidoClientePointLinkTests(TestCase):
 
         with self.assertRaisesMessage(
             ValidationError,
-            "El snapshot de la nota Point es inmutable.",
+            "La procedencia Point es inmutable.",
         ):
             pedido.save()
 
         pedido.refresh_from_db()
         self.assertEqual(pedido.point_note_snapshot, {"pk_nota": "900001"})
 
-    def test_point_note_snapshot_allows_explicit_legacy_backfill_once(self):
+    def test_point_note_provenance_allows_explicit_legacy_backfill_once(self):
         pedido = PedidoCliente.objects.create(
             cliente=self.cliente,
             descripcion="Legacy",
-            point_note_id="900001",
         )
-        pedido.point_note_snapshot = {"pk_nota": "900001"}
+        fetched_at = timezone.now()
 
-        pedido.save(_allow_point_note_snapshot_backfill=True)
+        pedido.backfill_point_note_provenance(
+            point_note_id="900001",
+            point_note_folio="18452",
+            point_note_snapshot={"pk_nota": "900001"},
+            point_note_fetched_at=fetched_at,
+        )
         pedido.refresh_from_db()
 
+        self.assertEqual(pedido.point_note_id, "900001")
+        self.assertEqual(pedido.point_note_folio, "18452")
         self.assertEqual(pedido.point_note_snapshot, {"pk_nota": "900001"})
+        self.assertEqual(pedido.point_note_fetched_at, fetched_at)
+
+        with self.assertRaisesMessage(ValidationError, "La procedencia Point es inmutable."):
+            pedido.backfill_point_note_provenance(
+                point_note_id="900001",
+                point_note_folio="otro",
+                point_note_snapshot={"pk_nota": "900001"},
+                point_note_fetched_at=fetched_at,
+            )
+
+    def test_point_note_provenance_fields_are_immutable_as_a_set(self):
+        fetched_at = timezone.now()
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Uno",
+            point_note_id="900001",
+            point_note_folio="18452",
+            point_note_snapshot={"pk_nota": "900001"},
+            point_note_fetched_at=fetched_at,
+        )
+        changes = {
+            "point_note_id": "900002",
+            "point_note_folio": "18453",
+            "point_note_snapshot": {"pk_nota": "900001", "folio": "otro"},
+            "point_note_fetched_at": fetched_at + timedelta(seconds=1),
+        }
+
+        for field_name, changed_value in changes.items():
+            with self.subTest(field=field_name):
+                pedido.refresh_from_db()
+                setattr(pedido, field_name, changed_value)
+                with self.assertRaisesMessage(ValidationError, "La procedencia Point es inmutable."):
+                    pedido.save()
+
+    def test_point_note_snapshot_identity_must_match_point_note_id(self):
+        with self.assertRaisesMessage(ValidationError, "no coincide"):
+            PedidoCliente.objects.create(
+                cliente=self.cliente,
+                descripcion="Mismatch",
+                point_note_id="900001",
+                point_note_snapshot={"pk_nota": "900002"},
+            )
+
+    def test_point_note_snapshot_accepts_real_uppercase_identity_key(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Contrato real",
+            point_note_id="900001",
+            point_note_snapshot={"PK_NOTA": "900001"},
+        )
+
+        self.assertEqual(pedido.point_note_id, "900001")
+
+    def test_queryset_update_cannot_overwrite_immutable_snapshots_or_point_provenance(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Uno",
+            point_note_id="900001",
+            point_note_snapshot={"pk_nota": "900001"},
+        )
+
+        forbidden_updates = (
+            {"payload_snapshot": {"alterado": True}},
+            {"point_note_snapshot": {"pk_nota": "900002"}},
+            {"point_note_id": "900002"},
+            {"point_note_folio": "otro"},
+            {"point_note_fetched_at": timezone.now()},
+        )
+        for update_kwargs in forbidden_updates:
+            with self.subTest(fields=tuple(update_kwargs)):
+                with self.assertRaisesMessage(ValidationError, "actualización masiva"):
+                    PedidoCliente.objects.filter(pk=pedido.pk).update(**update_kwargs)
+
+    def test_bulk_update_cannot_overwrite_immutable_snapshots_or_point_provenance(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Uno",
+            point_note_id="900001",
+            point_note_snapshot={"pk_nota": "900001"},
+        )
+        pedido.point_note_snapshot = {"pk_nota": "900002"}
+
+        with self.assertRaisesMessage(ValidationError, "actualización masiva"):
+            PedidoCliente.objects.bulk_update([pedido], ["point_note_snapshot"])
+
+    def test_bulk_create_validates_point_note_identity(self):
+        pedido = PedidoCliente(
+            cliente=self.cliente,
+            descripcion="Mismatch masivo",
+            point_note_id="900001",
+            point_note_snapshot={"PK_NOTA": "900002"},
+        )
+
+        with self.assertRaisesMessage(ValidationError, "no coincide"):
+            PedidoCliente.objects.bulk_create([pedido])
 
     def test_payload_snapshot_remains_immutable_after_refactor(self):
         pedido = PedidoCliente.objects.create(
