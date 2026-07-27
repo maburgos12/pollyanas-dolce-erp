@@ -204,7 +204,6 @@ class PublicLogisticaRepartidorDomiciliosView(APIView):
                 pedido_cliente__public_api_client=api_client,
                 repartidor_id=repartidor_id,
                 estatus__in=[
-                    SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY,
                     SolicitudDomicilio.ESTATUS_LISTO,
                     SolicitudDomicilio.ESTATUS_EN_RUTA,
                 ],

@@ -101,6 +101,54 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         with self.assertRaises(ValidationError):
             solicitud.save()
 
+    def test_partial_save_validates_effective_persisted_state(self):
+        solicitud = SolicitudDomicilio.objects.create(
+            cliente_nombre="Persistido sin Point",
+            direccion="Sin GPS",
+        )
+        cliente, direccion, pedido = self._pedido_y_direccion()
+        solicitud.cliente = cliente
+        solicitud.direccion_cliente = direccion
+        solicitud.pedido_cliente = pedido
+        solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+
+        with self.assertRaises(ValidationError):
+            solicitud.save(update_fields=["estatus"])
+
+        solicitud.refresh_from_db()
+        self.assertEqual(
+            solicitud.estatus,
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
+
+    def test_queryset_writes_cannot_bypass_operational_invariants(self):
+        solicitud = SolicitudDomicilio.objects.create(
+            cliente_nombre="Actualización masiva",
+            direccion="Sin GPS",
+        )
+
+        with self.assertRaises(ValidationError):
+            SolicitudDomicilio.objects.filter(pk=solicitud.pk).update(
+                estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            )
+
+        solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        with self.assertRaises(ValidationError):
+            SolicitudDomicilio.objects.bulk_update([solicitud], ["estatus"])
+
+    def test_save_rejects_inverted_window_in_pending_state(self):
+        solicitud = SolicitudDomicilio(
+            cliente_nombre="Ventana inválida",
+            direccion="Calle",
+            ventana_inicio=timezone.now(),
+            ventana_fin=timezone.now() - timedelta(minutes=30),
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            solicitud.save()
+
+        self.assertIn("ventana_fin", error.exception.message_dict)
+
     def test_entregado_requires_existing_delivery_evidence(self):
         solicitud = self._solicitud(
             estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
@@ -269,9 +317,7 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         response = self.client.get(reverse("api_logistica_domicilios_generales_asignados"))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data[0]["cliente_nombre"], "Cliente legado")
-        self.assertEqual(response.data[0]["direccion"], "Dirección histórica 45")
-        self.assertEqual(response.data[0]["notas"], "Tocar timbre")
+        self.assertEqual(response.data, [])
 
 
 class AsignacionDomicilioApiTests(APITestCase):
@@ -671,6 +717,18 @@ class SolicitudDomicilioCanonicalMigrationTests(TransactionTestCase):
                 direccion="Sin Point",
                 estatus="CANCELADO",
             ).pk,
+            "point_delivered_incomplete": SolicitudOld.objects.create(
+                pedido_cliente=pedido,
+                cliente_nombre="Point entregado histórico",
+                direccion="Sin evidencia nueva",
+                estatus="ENTREGADO",
+            ).pk,
+            "point_cancelled_incomplete": SolicitudOld.objects.create(
+                pedido_cliente=pedido,
+                cliente_nombre="Point cancelado histórico",
+                direccion="Sin motivo nuevo",
+                estatus="CANCELADO",
+            ).pk,
         }
 
         executor = MigrationExecutor(connection)
@@ -699,3 +757,45 @@ class SolicitudDomicilioCanonicalMigrationTests(TransactionTestCase):
         cancelled = SolicitudNew.objects.get(pk=self.ids["cancelled_legacy"])
         self.assertEqual(cancelled.estatus, "CANCELADO")
         self.assertTrue(cancelled.legacy_without_point)
+        point_delivered = SolicitudNew.objects.get(
+            pk=self.ids["point_delivered_incomplete"]
+        )
+        point_cancelled = SolicitudNew.objects.get(
+            pk=self.ids["point_cancelled_incomplete"]
+        )
+        self.assertEqual(point_delivered.estatus, "ENTREGADO")
+        self.assertTrue(point_delivered.legacy_without_point)
+        self.assertEqual(point_cancelled.estatus, "CANCELADO")
+        self.assertTrue(point_cancelled.legacy_without_point)
+
+    def test_reverse_mapping_is_explicitly_lossy_but_preserves_terminals(self):
+        migration = import_module(
+            "logistica.migrations.0046_solicituddomicilio_operacion_canonica"
+        )
+        migration.reverse_delivery_states(self.new_apps, None)
+        SolicitudNew = self.new_apps.get_model("logistica", "SolicitudDomicilio")
+
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["ready"]).estatus,
+            "ASIGNADO",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["not_ready"]).estatus,
+            "PENDIENTE",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(pk=self.ids["active_legacy"]).estatus,
+            "PENDIENTE",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(
+                pk=self.ids["point_delivered_incomplete"]
+            ).estatus,
+            "ENTREGADO",
+        )
+        self.assertEqual(
+            SolicitudNew.objects.get(
+                pk=self.ids["point_cancelled_incomplete"]
+            ).estatus,
+            "CANCELADO",
+        )

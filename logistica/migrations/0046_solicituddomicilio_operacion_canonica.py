@@ -5,8 +5,15 @@ from django.db import migrations, models
 
 def migrate_delivery_states(apps, schema_editor):
     SolicitudDomicilio = apps.get_model("logistica", "SolicitudDomicilio")
+    solicitudes = SolicitudDomicilio._base_manager
 
-    linked_to_point = SolicitudDomicilio.objects.filter(
+    # Los terminales preceden este contrato: no se inventan motivo, GPS ni
+    # evidencia. Se preservan como históricos, incluso si tenían nota Point.
+    solicitudes.filter(
+        estatus__in=["ENTREGADO", "CANCELADO"],
+    ).update(legacy_without_point=True)
+
+    linked_to_point = solicitudes.filter(
         pedido_cliente__point_note_id__gt="",
     )
     linked_to_point.filter(estatus="PENDIENTE").update(estatus="CONFIRMADO")
@@ -25,11 +32,8 @@ def migrate_delivery_states(apps, schema_editor):
         | models.Q(direccion_cliente__longitud__isnull=True)
     ).update(estatus="CONFIRMADO")
 
-    without_point = SolicitudDomicilio.objects.exclude(
+    without_point = solicitudes.exclude(
         pedido_cliente__point_note_id__gt="",
-    )
-    without_point.filter(estatus__in=["ENTREGADO", "CANCELADO"]).update(
-        legacy_without_point=True,
     )
     without_point.exclude(estatus__in=["ENTREGADO", "CANCELADO"]).update(
         estatus="PENDIENTE_POINT",
@@ -37,15 +41,18 @@ def migrate_delivery_states(apps, schema_editor):
 
 
 def reverse_delivery_states(apps, schema_editor):
+    # Rollback deliberadamente lossy: los estados nuevos se colapsan a los dos
+    # estados activos que entendía 0045; los terminales conservan su valor.
     SolicitudDomicilio = apps.get_model("logistica", "SolicitudDomicilio")
-    SolicitudDomicilio.objects.filter(estatus="CONFIRMADO").update(estatus="PENDIENTE")
-    SolicitudDomicilio.objects.filter(
+    solicitudes = SolicitudDomicilio._base_manager
+    solicitudes.filter(estatus="CONFIRMADO").update(estatus="PENDIENTE")
+    solicitudes.filter(
         estatus__in=["PREPARANDO", "LISTO"],
     ).update(estatus="ASIGNADO")
-    SolicitudDomicilio.objects.filter(estatus="PENDIENTE_POINT").update(
+    solicitudes.filter(estatus="PENDIENTE_POINT").update(
         estatus="PENDIENTE",
     )
-    SolicitudDomicilio.objects.update(legacy_without_point=False)
+    solicitudes.update(legacy_without_point=False)
 
 
 class Migration(migrations.Migration):

@@ -1595,6 +1595,43 @@ class EntregaEcommerce(models.Model):
         return f"#{self.ecommerce_order_number or self.ecommerce_order_id} · {nombre_operativo_usuario(self.repartidor.user)}"
 
 
+class SolicitudDomicilioQuerySet(models.QuerySet):
+    OPERATIONAL_FIELDS = frozenset(
+        {
+            "estatus",
+            "pedido_cliente",
+            "pedido_cliente_id",
+            "direccion_cliente",
+            "direccion_cliente_id",
+            "repartidor",
+            "repartidor_id",
+            "entregado_en",
+            "cancelacion_motivo",
+            "ventana_inicio",
+            "ventana_fin",
+            "legacy_without_point",
+        }
+    )
+
+    @classmethod
+    def _reject_operational_fields(cls, fields):
+        forbidden = cls.OPERATIONAL_FIELDS.intersection(fields)
+        if forbidden:
+            raise ValidationError(
+                "Las invariantes operativas de domicilio no admiten escritura masiva: "
+                + ", ".join(sorted(forbidden))
+                + "."
+            )
+
+    def update(self, **kwargs):
+        self._reject_operational_fields(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_operational_fields(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
 class SolicitudDomicilio(models.Model):
     """Servicio a domicilio capturado por un canal distinto a la tienda en línea
     (llamada, WhatsApp, redes sociales). Vive aparte de EntregaEcommerce porque no
@@ -1663,6 +1700,7 @@ class SolicitudDomicilio(models.Model):
     instrucciones_entrega = models.CharField(max_length=500, blank=True, default="")
     cancelacion_motivo = models.CharField(max_length=300, blank=True, default="")
     legacy_without_point = models.BooleanField(default=False, editable=False)
+    objects = SolicitudDomicilioQuerySet.as_manager()
     repartidor = models.ForeignKey(
         "Repartidor",
         on_delete=models.SET_NULL,
@@ -1703,13 +1741,18 @@ class SolicitudDomicilio(models.Model):
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
 
     def save(self, *args, **kwargs):
-        if self.estatus in {
-            self.ESTATUS_LISTO,
-            self.ESTATUS_EN_RUTA,
-            self.ESTATUS_ENTREGADO,
-            self.ESTATUS_CANCELADO,
-        }:
-            self.full_clean()
+        update_fields = kwargs.get("update_fields")
+        candidate = self
+        if self.pk and update_fields is not None:
+            candidate = type(self)._base_manager.get(pk=self.pk)
+            for field_name in update_fields:
+                field = self._meta.get_field(field_name)
+                setattr(
+                    candidate,
+                    field.attname,
+                    getattr(self, field.attname),
+                )
+        candidate.clean()
         super().save(*args, **kwargs)
 
     def clean(self):
