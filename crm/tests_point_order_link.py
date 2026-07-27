@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
+from django.db import IntegrityError
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -290,6 +291,101 @@ class PointOrderLinkTests(TestCase):
         self.assertEqual(first.delivery.pk, second.delivery.pk)
         self.assertEqual(SolicitudDomicilio.objects.filter(pedido_cliente=existing).count(), 1)
 
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_shared_email_with_different_non_empty_phone_is_rejected_without_pii(self, _fetch):
+        Cliente.objects.create(
+            nombre="Familiar uno",
+            telefono="6671111111",
+            email="familia@example.com",
+        )
+
+        with self.assertRaises(ValidationError) as captured:
+            link_point_note(
+                command=_command(
+                    customer_phone="6672222222",
+                    customer_email="FAMILIA@EXAMPLE.COM",
+                ),
+                actor=self.actor,
+            )
+
+        self.assertNotIn("667", str(captured.exception))
+        self.assertNotIn("familia@example.com", str(captured.exception).lower())
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 0)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_email_candidate_without_phone_is_safely_enriched(self, _fetch):
+        customer = Cliente.objects.create(
+            nombre="Cliente correo",
+            telefono="",
+            email="correo@example.com",
+        )
+
+        result = link_point_note(
+            command=_command(
+                customer_phone="6673333333",
+                customer_email="CORREO@EXAMPLE.COM",
+            ),
+            actor=self.actor,
+        )
+        customer.refresh_from_db()
+
+        self.assertEqual(result.order.cliente_id, customer.id)
+        self.assertEqual(customer.telefono, "6673333333")
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_customer_code_collision_retries_only_unique_code_constraint(self, _fetch):
+        Cliente.objects.create(
+            codigo="CLI-00001",
+            nombre="Cliente externo",
+            telefono="6670000000",
+        )
+
+        with patch.object(
+            Cliente,
+            "_generate_codigo",
+            side_effect=("CLI-00001", "CLI-00002"),
+        ):
+            result = link_point_note(
+                command=_command(
+                    customer_phone="6679999999",
+                    customer_email="nuevo@example.com",
+                ),
+                actor=self.actor,
+            )
+
+        self.assertEqual(result.order.cliente.codigo, "CLI-00002")
+        self.assertEqual(Cliente.objects.count(), 2)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_non_code_integrity_error_is_not_retried_or_hidden(self, _fetch):
+        with patch(
+            "crm.services.point_order_link.Cliente.objects.create",
+            side_effect=IntegrityError("otra restricción"),
+        ) as create:
+            with self.assertRaises(IntegrityError):
+                link_point_note(
+                    command=_command(
+                        customer_phone="6678888888",
+                        customer_email="otro@example.com",
+                    ),
+                    actor=self.actor,
+                )
+
+        create.assert_called_once()
+
 
 class PointOrderLinkConcurrencyTests(TransactionTestCase):
     reset_sequences = True
@@ -413,24 +509,53 @@ class PointOrderLinkConcurrencyTests(TransactionTestCase):
             2,
         )
 
-    def test_two_notes_with_same_email_and_different_phones_reuse_customer(self):
-        order_ids = self._link_distinct_notes(
-            (
-                _command(
-                    pk_nota="900031",
-                    customer_phone="6671111111",
-                    customer_email="same@example.com",
-                ),
-                _command(
-                    pk_nota="900032",
-                    customer_phone="6672222222",
-                    customer_email="SAME@EXAMPLE.COM",
-                ),
+    def test_two_notes_with_shared_email_and_different_phones_do_not_merge(self):
+        commands = (
+            _command(
+                pk_nota="900031",
+                customer_phone="6671111111",
+                customer_email="shared@example.com",
+            ),
+            _command(
+                pk_nota="900032",
+                customer_phone="6672222222",
+                customer_email="SHARED@EXAMPLE.COM",
             ),
         )
+        ready = Barrier(2)
 
-        self.assertEqual(len(set(order_ids)), 2)
+        def attempt(command, folio):
+            close_old_connections()
+            try:
+                ready.wait(timeout=10)
+                note = _note(pk_nota=command.pk_nota, folio=folio)
+                point_service = type(
+                    "FakePointService",
+                    (),
+                    {"fetch": lambda self, **kwargs: note},
+                )()
+                try:
+                    result = link_point_note(
+                        command=command,
+                        actor=self.actor,
+                        point_service=point_service,
+                    )
+                    return ("created", result.order.pk)
+                except ValidationError:
+                    return ("conflict", None)
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(attempt, command, f"F-{index}")
+                for index, command in enumerate(commands, start=1)
+            ]
+            outcomes = [future.result(timeout=20) for future in futures]
+
+        self.assertEqual(sorted(outcome[0] for outcome in outcomes), ["conflict", "created"])
         self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
 
     def test_two_notes_without_phone_or_email_create_distinct_customers_safely(self):
         order_ids = self._link_distinct_notes(

@@ -188,16 +188,40 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
             .first()
         )
         if customer:
+            persisted_phone = _phone(customer.telefono)
+            if normalized_phone and persisted_phone and persisted_phone != normalized_phone:
+                raise ValidationError(
+                    {
+                        "customer": (
+                            "El correo coincide con otro cliente que tiene un "
+                            "teléfono diferente; seleccione el cliente explícitamente."
+                        )
+                    },
+                )
+            if normalized_phone and not persisted_phone:
+                customer.telefono = normalized_phone
+                customer.save(update_fields=["telefono", "updated_at"])
             return customer
 
     # Cliente.save() derives ``codigo`` from the current global maximum. This
     # lock serializes that legacy allocation even for unrelated identities.
     _lock_key("crm-customer-code", "global")
-    return Cliente.objects.create(
-        nombre=_text(command.customer_name),
-        telefono=normalized_phone,
-        email=normalized_email,
-    )
+    for attempt in range(3):
+        try:
+            with transaction.atomic():
+                return Cliente.objects.create(
+                    nombre=_text(command.customer_name),
+                    telefono=normalized_phone,
+                    email=normalized_email,
+                )
+        except IntegrityError as exc:
+            cause = getattr(exc, "__cause__", None)
+            diagnostic = getattr(cause, "diag", None)
+            constraint_name = getattr(diagnostic, "constraint_name", "")
+            is_customer_code_collision = constraint_name == "crm_cliente_codigo_key"
+            if not is_customer_code_collision or attempt == 2:
+                raise
+    raise AssertionError("unreachable")
 
 
 def _find_or_create_address(
