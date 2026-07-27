@@ -191,6 +191,65 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         self.assertTrue(historical.legacy_without_point)
         self.assertEqual(historical.notas, "Cambio ajeno permitido")
 
+    def test_legacy_history_cannot_become_active_without_clearing_flag(self):
+        historical = SolicitudDomicilio.objects.create(
+            cliente_nombre="Histórico terminal",
+            direccion="Calle histórica",
+        )
+        SolicitudDomicilio._base_manager.filter(pk=historical.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        historical.refresh_from_db()
+        historical.estatus = SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
+
+        with self.assertRaises(ValidationError) as error:
+            historical.save(update_fields=["estatus"])
+
+        self.assertIn("legacy_without_point", error.exception.message_dict)
+        historical.refresh_from_db()
+        self.assertEqual(historical.estatus, SolicitudDomicilio.ESTATUS_ENTREGADO)
+        self.assertTrue(historical.legacy_without_point)
+
+    def test_legacy_reconciliation_validates_effective_fields_in_same_save(self):
+        historical = SolicitudDomicilio.objects.create(
+            cliente_nombre="Histórico por reconciliar",
+            direccion="Calle histórica",
+        )
+        SolicitudDomicilio._base_manager.filter(pk=historical.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        historical.refresh_from_db()
+        cliente, direccion, pedido = self._pedido_y_direccion(
+            point_note_id="POINT-RECONCILIADO"
+        )
+        historical.legacy_without_point = False
+        historical.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        historical.cliente = cliente
+        historical.pedido_cliente = pedido
+        historical.direccion_cliente = direccion
+
+        with self.assertRaises(ValidationError):
+            historical.save(
+                update_fields=["legacy_without_point", "estatus"],
+            )
+
+        historical.save(
+            update_fields=[
+                "legacy_without_point",
+                "estatus",
+                "cliente",
+                "pedido_cliente",
+                "direccion_cliente",
+            ],
+        )
+        historical.refresh_from_db()
+        self.assertFalse(historical.legacy_without_point)
+        self.assertEqual(historical.estatus, SolicitudDomicilio.ESTATUS_LISTO)
+        self.assertEqual(historical.pedido_cliente_id, pedido.id)
+        self.assertEqual(historical.direccion_cliente_id, direccion.id)
+
     def test_save_rejects_inverted_window_in_pending_state(self):
         solicitud = SolicitudDomicilio(
             cliente_nombre="Ventana inválida",

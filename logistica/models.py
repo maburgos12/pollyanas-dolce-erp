@@ -1798,6 +1798,11 @@ class SolicitudDomicilio(models.Model):
                 self.ESTATUS_CANCELADO,
             }:
                 return
+            else:
+                errors["legacy_without_point"] = (
+                    "Un domicilio histórico debe permanecer entregado o cancelado "
+                    "hasta que una reconciliación quite el indicador."
+                )
 
         ready_or_later = {
             self.ESTATUS_LISTO,
