@@ -42,6 +42,14 @@ def _to_int(value, default: int = 0) -> int:
         return default
 
 
+# Política escalonada de puntualidad (ratificada por dirección, jul-2026):
+# 3 llegadas tarde = 1 retardo formal · 3 retardos formales = 1 falta.
+# La falta (real o por retardos) es la que dispara la cancelación del bono;
+# la cancelación directa por retardos queda como mecanismo opt-in aparte.
+LLEGADAS_TARDE_POR_RETARDO = 3
+RETARDOS_POR_FALTA = 3
+
+
 class ConfigBonoVentasPeriodo(models.Model):
     mes = models.PositiveSmallIntegerField()
     anio = models.PositiveSmallIntegerField()
@@ -244,12 +252,18 @@ class BonoVentasEmpleado(models.Model):
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
         faltas = max(dias_exigibles - dias_asistencia, 0)
         retardos = max(dias_base - int(self.dias_puntualidad or 0), 0)
+        faltas_por_retardos = (retardos // LLEGADAS_TARDE_POR_RETARDO) // RETARDOS_POR_FALTA
+        faltas_totales = faltas + faltas_por_retardos
         motivos = []
         limite_cancel_asistencia = _to_int(getattr(cfg, "limite_asistencia_cancelacion", None), cfg.limite_asistencia)
         # límite 0 = regla inactiva; con límite >= 1 la cancelación aplica sobre
-        # faltas ya exigibles (prorrateadas), nunca sobre días que aún no llegan
-        if cfg.cancela_por_asistencia and limite_cancel_asistencia > 0 and faltas >= limite_cancel_asistencia:
-            motivos.append(f"{faltas} falta{'s' if faltas != 1 else ''} (límite {limite_cancel_asistencia})")
+        # faltas ya exigibles (prorrateadas + las derivadas de retardos), nunca
+        # sobre días que aún no llegan
+        if cfg.cancela_por_asistencia and limite_cancel_asistencia > 0 and faltas_totales >= limite_cancel_asistencia:
+            detalle = f"{faltas_totales} falta{'s' if faltas_totales != 1 else ''} (límite {limite_cancel_asistencia})"
+            if faltas_por_retardos:
+                detalle += f", incluye {faltas_por_retardos} por retardos"
+            motivos.append(detalle)
         limite_cancel_retardos = _to_int(getattr(cfg, "limite_retardos_cancelacion", None), cfg.limite_puntualidad)
         if cfg.cancela_por_puntualidad and limite_cancel_retardos > 0 and retardos >= limite_cancel_retardos:
             motivos.append(f"{retardos} retardo{'s' if retardos != 1 else ''} (límite {limite_cancel_retardos})")
