@@ -45,6 +45,44 @@
       </article>
     </div>
 
+    {% if perms.recetas.change_receta %}
+    <section class="point-sync-strip" aria-labelledby="pointSyncTitle">
+      <div class="point-sync-copy">
+        <h3 id="pointSyncTitle">Catálogo y recetas de Point</h3>
+        <p id="pointSyncDescription">
+          Point es la fuente de verdad. Incorpora productos nuevos con receta o refresca todas las composiciones existentes.
+        </p>
+      </div>
+      <div class="point-sync-actions" aria-describedby="pointSyncDescription">
+        <form
+          method="post"
+          action="{% url 'recetas:recetas_sync_new' %}"
+          data-async-action
+          data-reset-on-success="false"
+        >
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-primary" type="submit" data-pending-label="Buscando productos…">
+            Incorporar productos nuevos
+          </button>
+        </form>
+        <form
+          method="post"
+          action="{% url 'recetas:recetas_sync_all' %}"
+          data-async-action
+          data-reset-on-success="false"
+          data-confirm-message="Se reemplazarán en el ERP las composiciones vigentes con la información actual de Point. La actualización puede tardar varios minutos. ¿Deseas continuar?"
+        >
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button class="btn btn-secondary" type="submit" data-pending-label="Actualizando recetas…">
+            Actualizar todas las recetas
+          </button>
+        </form>
+      </div>
+    </section>
+    {% endif %}
+
     <div class="module-tabs mb-3">
       <a class="module-tab {% if vista == 'productos' %}active{% endif %}" href="?vista=productos">Activas ({{ recetas_activas_count }})</a>
       <a class="module-tab {% if vista == 'archivados' %}active{% endif %}" href="?vista=archivados">Archivadas ({{ recetas_archivadas_count }})</a>
