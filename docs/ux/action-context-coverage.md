@@ -18,6 +18,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Inventario / Ajustes | Aprobar y aplicar ajuste pendiente | Sí, toast y redirect seguro | Sí, `#ajuste-<id>` | `InventarioAjustesApprovalTests` + `ERPActionContractTests` | Parcial: solo aprobación/aplicación |
 | Inventario, recetas, bonos, mantenimiento y activos | Demás guardados y cambios de estado | No inventariado por pantalla | No | No | Pendiente etapa 3 |
 | App Operativa / Sucursal | Reportar falla, registrar merma, aprobar, aclarar, rechazar, reenviar y reasignar | Sí, bloquea el botón y muestra toast | Sí, conserva datos y vuelve al registro/formulario estable | `operacion.tests_fallas_api` + `operacion.tests_mermas_insumos_api` | Automatizado; navegador local pendiente por política del entorno |
+| RRHH / Asistencias | Corregir o capturar horarios de un día (modal con motivo obligatorio) | Sí, `data-async-action` + toast y bloqueo del botón | Sí, conserva filtros vía `next_query` y regresa a `#asistencia-<empleado>-<fecha>` | `rrhh.tests_ajustar_asistencia_view` | Aplica ajuste con bitácora (`AjusteAsistencia`) y re-evalúa incidencias y bonos del día |
 | Resto del ERP | Acciones mutantes restantes | No inventariado por pantalla | No | No | Pendiente etapa 4 |
 
 No se declarará cobertura total hasta que cada pantalla candidata tenga una fila con evidencia de implementación o una excepción justificada.

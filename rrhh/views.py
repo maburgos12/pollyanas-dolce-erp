@@ -2576,6 +2576,7 @@ def asistencias_view(request):
         qs = qs.filter(empleado_id=int(empleado_id))
     context = {
         "module_tabs": _module_tabs("asistencias", request.user),
+        "can_manage": can_manage_rrhh(request.user),
         "asistencias": qs[:500],
         "empleados": Empleado.objects.filter(activo=True).order_by("nombre")[:1000],
         "mes": mes,
