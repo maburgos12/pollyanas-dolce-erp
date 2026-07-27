@@ -1,0 +1,10 @@
+[Unit]
+Description=Corre el catch-up Hik-Connect una vez al dia
+
+[Timer]
+# 11:00 UTC = 04:00 America/Mazatlan: sin gente checando, el servidor corre en UTC.
+OnCalendar=*-*-* 11:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
