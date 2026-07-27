@@ -1,9 +1,11 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Barrier
 
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.db import IntegrityError, close_old_connections, transaction
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -430,6 +432,27 @@ class PedidoClientePointLinkTests(TestCase):
                 with self.assertRaisesMessage(ValidationError, "La procedencia Point es inmutable."):
                     pedido.save()
 
+    def test_save_kwargs_cannot_authorize_point_note_backfill(self):
+        forbidden_kwargs = (
+            "_allow_point_note_backfill",
+            "_allow_point_note_snapshot_backfill",
+        )
+
+        for forbidden_kwarg in forbidden_kwargs:
+            with self.subTest(kwarg=forbidden_kwarg):
+                pedido = PedidoCliente.objects.create(
+                    cliente=self.cliente,
+                    descripcion=f"Legacy {forbidden_kwarg}",
+                )
+                pedido.point_note_id = "900001"
+                pedido.point_note_snapshot = {"pk_nota": "900001"}
+
+                with self.assertRaisesMessage(
+                    TypeError,
+                    "solo puede ejecutarse mediante backfill_point_note_provenance",
+                ):
+                    pedido.save(**{forbidden_kwarg: True})
+
     def test_point_note_snapshot_identity_must_match_point_note_id(self):
         with self.assertRaisesMessage(ValidationError, "no coincide"):
             PedidoCliente.objects.create(
@@ -525,6 +548,54 @@ class PedidoClientePointLinkTests(TestCase):
             "El snapshot omnicanal es inmutable.",
         ):
             pedido.save(_allow_payload_snapshot_backfill=True)
+
+
+class PedidoClientePointBackfillConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente concurrencia Point")
+        self.pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Pedido legacy concurrente",
+        )
+
+    def test_two_concurrent_backfills_cannot_overwrite_each_other(self):
+        ready = Barrier(2)
+
+        def attempt_backfill(point_note_id):
+            close_old_connections()
+            try:
+                pedido = PedidoCliente.objects.get(pk=self.pedido.pk)
+                ready.wait(timeout=10)
+                pedido.backfill_point_note_provenance(
+                    point_note_id=point_note_id,
+                    point_note_folio=f"F-{point_note_id}",
+                    point_note_snapshot={"pk_nota": point_note_id},
+                    point_note_fetched_at=timezone.now(),
+                )
+                return ("won", point_note_id)
+            except ValidationError:
+                return ("rejected", point_note_id)
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(attempt_backfill, "900001"),
+                executor.submit(attempt_backfill, "900002"),
+            ]
+            results = [future.result(timeout=20) for future in futures]
+
+        winners = [point_note_id for result, point_note_id in results if result == "won"]
+        rejected = [point_note_id for result, point_note_id in results if result == "rejected"]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(len(rejected), 1)
+
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.point_note_id, winners[0])
+        self.assertEqual(self.pedido.point_note_snapshot["pk_nota"], winners[0])
+        self.assertEqual(self.pedido.point_note_folio, f"F-{winners[0]}")
 
 
 class SucursalResolutionTests(TestCase):

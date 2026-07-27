@@ -332,12 +332,24 @@ class PedidoCliente(models.Model):
             )
         with transaction.atomic():
             persisted = PedidoCliente.objects.select_for_update().get(pk=self.pk)
+            point_fields = (
+                "point_note_id",
+                "point_note_folio",
+                "point_note_snapshot",
+                "point_note_fetched_at",
+            )
+            if any(bool(getattr(persisted, field_name)) for field_name in point_fields):
+                raise ValidationError(
+                    {"point_note_id": "La procedencia Point es inmutable."},
+                )
+
             persisted.point_note_id = point_note_id
             persisted.point_note_folio = point_note_folio
             persisted.point_note_snapshot = point_note_snapshot
             persisted.point_note_fetched_at = point_note_fetched_at
-            persisted.save(
-                _allow_point_note_backfill=True,
+            persisted._validate_point_note_identity()
+            models.Model.save(
+                persisted,
                 update_fields=[
                     "point_note_id",
                     "point_note_folio",
@@ -354,13 +366,15 @@ class PedidoCliente(models.Model):
         self.updated_at = persisted.updated_at
 
     def save(self, *args, **kwargs):
-        allow_point_note_backfill = kwargs.pop("_allow_point_note_backfill", False)
-        # Alias temporal para consumidores que adoptaron el nombre de la primera
-        # versión antes de que la procedencia completa se volviera inmutable.
-        allow_point_note_backfill = (
-            kwargs.pop("_allow_point_note_snapshot_backfill", False)
-            or allow_point_note_backfill
-        )
+        forbidden_point_backfill_kwargs = {
+            "_allow_point_note_backfill",
+            "_allow_point_note_snapshot_backfill",
+        }.intersection(kwargs)
+        if forbidden_point_backfill_kwargs:
+            raise TypeError(
+                "El backfill Point solo puede ejecutarse mediante "
+                "backfill_point_note_provenance().",
+            )
         snapshot_backfills = {
             "payload_snapshot": kwargs.pop("_allow_payload_snapshot_backfill", False),
         }
@@ -403,24 +417,10 @@ class PedidoCliente(models.Model):
                 (persisted_values or {}).get(field_name) != getattr(self, field_name)
                 for field_name in point_fields
             )
-            persisted_has_point = any(
-                bool((persisted_values or {}).get(field_name))
-                for field_name in point_fields
-            )
-            current_has_point = any(bool(getattr(self, field_name)) for field_name in point_fields)
-            valid_point_backfill = (
-                allow_point_note_backfill
-                and not persisted_has_point
-                and current_has_point
-                and bool(self.point_note_id)
-                and bool(self.point_note_snapshot)
-            )
             if point_changed:
-                if not valid_point_backfill:
-                    raise ValidationError(
-                        {"point_note_id": "La procedencia Point es inmutable."},
-                    )
-                self._validate_point_note_identity()
+                raise ValidationError(
+                    {"point_note_id": "La procedencia Point es inmutable."},
+                )
 
         if not self.folio:
             self.folio = self._generate_folio()
