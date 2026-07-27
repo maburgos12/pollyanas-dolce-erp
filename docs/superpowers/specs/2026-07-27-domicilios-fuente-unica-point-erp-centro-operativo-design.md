@@ -298,6 +298,33 @@ Contrato:
 
 Ninguna historia se considerará terminada sin capturas reales de desktop, tablet y móvil.
 
+### 11.1 Sistema de orden visual con UI/UX Pro Max
+
+La construcción y revisión del frontend utilizarán `ui-ux-pro-max` como guía obligatoria. Sus recomendaciones se aplicarán dentro del sistema visual actual de Pollyana's Dolce; no se sustituirá la marca por una paleta o tipografía genérica.
+
+El patrón elegido será un dashboard operativo de densidad adaptable:
+
+- escritorio: alta visibilidad de datos, filtros persistentes y jerarquía compacta;
+- tablet: tarjetas en dos columnas, filtros plegables y acciones táctiles;
+- móvil: una columna, una acción primaria por bloque y detalle progresivo;
+- encabezados, filtros, tarjetas, formularios, estados y acciones conservarán el mismo orden semántico en todos los tamaños;
+- el orden de tabulación coincidirá con el orden visual;
+- el color no será el único indicador de estado;
+- texto normal con contraste mínimo 4.5:1;
+- cuerpo de texto móvil de al menos 16 px y altura de línea entre 1.5 y 1.75;
+- etiquetas visibles asociadas a cada campo;
+- foco de teclado visible;
+- iconografía SVG consistente, sin emojis como iconos;
+- estados hover sin desplazamiento de layout y transiciones de 150–300 ms;
+- botones asíncronos deshabilitados durante el envío y con retroalimentación de carga;
+- mensajes de validación próximos al campo que los originó;
+- espacio reservado para contenido asíncrono, evitando saltos al cargar;
+- `prefers-reduced-motion` respetado;
+- escala de capas definida para navegación, paneles, menús y diálogos;
+- imágenes responsivas optimizadas y con texto alternativo cuando comuniquen información.
+
+Antes de entregar cada pantalla se ejecutará la lista de control de `ui-ux-pro-max` para accesibilidad, interacción, contraste, layout y responsive. Las recomendaciones automáticas que contradigan la marca o el flujo aprobado se documentarán y se descartarán de forma explícita.
+
 ## 12. Seguridad, fallback y auditoría
 
 - Las llamadas entre Centro Operativo y ERP usarán autenticación de servicio y permisos por rol.
@@ -341,6 +368,9 @@ Ninguna historia se considerará terminada sin capturas reales de desktop, table
 - validación GPS;
 - estados de error, vacío y carga;
 - teclado y controles táctiles.
+- revisión `ui-ux-pro-max` de jerarquía, espaciado, accesibilidad, interacción y consistencia;
+- navegación completa por teclado y foco visible;
+- contraste, reducción de movimiento y ausencia de desplazamiento horizontal.
 
 ### Regresión
 
