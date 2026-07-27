@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import re
 from datetime import date, datetime, timedelta
 from uuid import uuid4
@@ -35,7 +34,7 @@ from crm.services.point_order_link import (
     LinkPointOrderCommand,
     LinkPointOrderResult,
     link_point_note,
-    point_link_fingerprint,
+    verify_point_link_fingerprint,
 )
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from logistica.models import SolicitudDomicilio
@@ -754,10 +753,7 @@ class PublicOmnichannelPointNoteDetailView(APIView):
 
 def _point_replay_matches(order, delivery, command):
     persisted = order.point_link_fingerprint
-    return bool(persisted) and hmac.compare_digest(
-        persisted,
-        point_link_fingerprint(command),
-    )
+    return bool(persisted) and verify_point_link_fingerprint(command, persisted)
 
 
 class PublicOmnichannelPointOrdersView(APIView):

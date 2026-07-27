@@ -6,14 +6,18 @@ from threading import Barrier
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import close_old_connections
 from django.db import IntegrityError
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
-from crm.services.point_order_link import LinkPointOrderCommand, link_point_note
+from crm.services.point_order_link import (
+    LinkPointOrderCommand,
+    link_point_note,
+    point_link_fingerprint,
+)
 from logistica.models import SolicitudDomicilio
 from pos_bridge.services.point_note_detail_service import PointNote, PointNoteLine
 
@@ -96,6 +100,83 @@ class PointOrderLinkTests(TestCase):
         self.assertEqual(first.delivery.pk, second.delivery.pk)
         self.assertEqual(PedidoCliente.objects.count(), 1)
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_fingerprint_rotation_accepts_old_primary_only_as_configured_fallback(
+        self,
+        _fetch,
+    ):
+        command = _command()
+        with override_settings(POINT_LINK_FINGERPRINT_KEY="key-A"):
+            first = link_point_note(command=command, actor=self.actor)
+            fingerprint_a = first.order.point_link_fingerprint
+
+        with override_settings(
+            POINT_LINK_FINGERPRINT_KEY="key-B",
+            POINT_LINK_FINGERPRINT_KEY_FALLBACKS=["key-A"],
+        ):
+            fingerprint_b = point_link_fingerprint(command)
+            second = link_point_note(command=command, actor=self.actor)
+
+        self.assertNotEqual(fingerprint_a, fingerprint_b)
+        self.assertEqual(second.order.pk, first.order.pk)
+        self.assertFalse(second.created)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_fingerprint_rotation_without_old_fallback_rejects_replay(self, _fetch):
+        command = _command()
+        with override_settings(POINT_LINK_FINGERPRINT_KEY="key-A"):
+            link_point_note(command=command, actor=self.actor)
+
+        with override_settings(
+            POINT_LINK_FINGERPRINT_KEY="key-B",
+            POINT_LINK_FINGERPRINT_KEY_FALLBACKS=[],
+            SECRET_KEY_FALLBACKS=[],
+        ):
+            with self.assertRaises(ValidationError):
+                link_point_note(command=command, actor=self.actor)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_secret_key_rotation_accepts_django_secret_key_fallbacks(self, _fetch):
+        command = _command()
+        with override_settings(SECRET_KEY="secret-A", SECRET_KEY_FALLBACKS=[]):
+            first = link_point_note(command=command, actor=self.actor)
+
+        with override_settings(
+            SECRET_KEY="secret-B",
+            SECRET_KEY_FALLBACKS=["secret-A"],
+        ):
+            second = link_point_note(command=command, actor=self.actor)
+
+        self.assertEqual(second.order.pk, first.order.pk)
+        self.assertFalse(second.created)
+
+    def test_fingerprint_key_configuration_accepts_bytes_and_rejects_bad_shapes(self):
+        command = _command()
+        with override_settings(POINT_LINK_FINGERPRINT_KEY=b"binary-key"):
+            binary_fingerprint = point_link_fingerprint(command)
+        with override_settings(POINT_LINK_FINGERPRINT_KEY="binary-key"):
+            text_fingerprint = point_link_fingerprint(command)
+        self.assertEqual(binary_fingerprint, text_fingerprint)
+
+        with override_settings(POINT_LINK_FINGERPRINT_KEY=123):
+            with self.assertRaises(ImproperlyConfigured):
+                point_link_fingerprint(command)
+        with override_settings(
+            POINT_LINK_FINGERPRINT_KEY="primary",
+            POINT_LINK_FINGERPRINT_KEY_FALLBACKS="not-a-list",
+        ):
+            with self.assertRaises(ImproperlyConfigured):
+                point_link_fingerprint(command)
 
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",

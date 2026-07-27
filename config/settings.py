@@ -74,6 +74,16 @@ if not SECRET_KEY:
             "SECRET_KEY must be set. "
             "Use ALLOW_INSECURE_LOCAL_SECRET_KEY=1 only for temporary local development."
         )
+SECRET_KEY_FALLBACKS = env_list("SECRET_KEY_FALLBACKS")
+
+_point_link_fingerprint_key = (
+    os.getenv("POINT_LINK_FINGERPRINT_KEY") or ""
+).strip()
+if _point_link_fingerprint_key:
+    POINT_LINK_FINGERPRINT_KEY = _point_link_fingerprint_key
+POINT_LINK_FINGERPRINT_KEY_FALLBACKS = env_list(
+    "POINT_LINK_FINGERPRINT_KEY_FALLBACKS",
+)
 
 LOCAL_DEV_HOST_PORT = os.getenv("WEB_HOST_PORT", "8011")
 CANONICAL_LOCAL_HOST = os.getenv("CANONICAL_LOCAL_HOST", f"localhost:{LOCAL_DEV_HOST_PORT}")

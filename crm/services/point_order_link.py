@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.validators import validate_email
 from django.db import IntegrityError, connection, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -66,7 +66,74 @@ def _canonical_datetime(value: datetime | None) -> str | None:
     return value.astimezone(dt_timezone.utc).isoformat()
 
 
-def point_link_fingerprint(command: LinkPointOrderCommand) -> str:
+def _fingerprint_key_bytes(value, *, setting_name: str) -> bytes:
+    if isinstance(value, str):
+        encoded = value.encode()
+    elif isinstance(value, bytes):
+        encoded = value
+    else:
+        raise ImproperlyConfigured(
+            f"{setting_name} debe ser texto o bytes.",
+        )
+    if not encoded:
+        raise ImproperlyConfigured(
+            f"{setting_name} no puede estar vacío.",
+        )
+    return encoded
+
+
+def _fingerprint_fallback_values(value, *, setting_name: str) -> list:
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ImproperlyConfigured(
+            f"{setting_name} debe ser una lista o tupla.",
+        )
+    return list(value)
+
+
+def _point_link_fingerprint_keys() -> tuple[bytes, tuple[bytes, ...]]:
+    dedicated_key = getattr(settings, "POINT_LINK_FINGERPRINT_KEY", None)
+    uses_dedicated_key = dedicated_key is not None
+    primary_value = dedicated_key if uses_dedicated_key else settings.SECRET_KEY
+    primary = _fingerprint_key_bytes(
+        primary_value,
+        setting_name=(
+            "POINT_LINK_FINGERPRINT_KEY"
+            if uses_dedicated_key
+            else "SECRET_KEY"
+        ),
+    )
+
+    fallback_values = _fingerprint_fallback_values(
+        getattr(settings, "POINT_LINK_FINGERPRINT_KEY_FALLBACKS", []),
+        setting_name="POINT_LINK_FINGERPRINT_KEY_FALLBACKS",
+    )
+    if uses_dedicated_key:
+        # Permite adoptar una clave dedicada sin invalidar huellas históricas
+        # que se firmaron con SECRET_KEY.
+        fallback_values.append(settings.SECRET_KEY)
+    fallback_values.extend(
+        _fingerprint_fallback_values(
+            getattr(settings, "SECRET_KEY_FALLBACKS", []),
+            setting_name="SECRET_KEY_FALLBACKS",
+        ),
+    )
+
+    fallbacks = []
+    seen = {primary}
+    for index, value in enumerate(fallback_values):
+        key = _fingerprint_key_bytes(
+            value,
+            setting_name=f"fallback de fingerprint #{index + 1}",
+        )
+        if key not in seen:
+            seen.add(key)
+            fallbacks.append(key)
+    return primary, tuple(fallbacks)
+
+
+def _point_link_fingerprint_message(command: LinkPointOrderCommand) -> bytes:
     payload = {
         "v": 1,
         "channel": command.channel,
@@ -97,7 +164,7 @@ def point_link_fingerprint(command: LinkPointOrderCommand) -> str:
         },
         "instructions": _text(command.instructions),
     }
-    message = (
+    return (
         "pollyanas:point-link:v1\0"
         + json.dumps(
             payload,
@@ -106,11 +173,32 @@ def point_link_fingerprint(command: LinkPointOrderCommand) -> str:
             separators=(",", ":"),
         )
     ).encode()
+
+
+def point_link_fingerprint(command: LinkPointOrderCommand) -> str:
+    primary, _fallbacks = _point_link_fingerprint_keys()
     return hmac.new(
-        settings.SECRET_KEY.encode(),
-        message,
+        primary,
+        _point_link_fingerprint_message(command),
         digestmod=hashlib.sha256,
     ).hexdigest()
+
+
+def verify_point_link_fingerprint(
+    command: LinkPointOrderCommand,
+    persisted_fingerprint: str,
+) -> bool:
+    primary, fallbacks = _point_link_fingerprint_keys()
+    message = _point_link_fingerprint_message(command)
+    matched = False
+    for key in (primary, *fallbacks):
+        candidate = hmac.new(
+            key,
+            message,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+        matched |= hmac.compare_digest(persisted_fingerprint, candidate)
+    return matched
 
 
 def _validate_command(command: LinkPointOrderCommand, actor) -> None:
@@ -467,9 +555,9 @@ def link_point_note(
                         )
                     },
                 )
-            if not hmac.compare_digest(
+            if not verify_point_link_fingerprint(
+                command,
                 existing.point_link_fingerprint,
-                fingerprint,
             ):
                 raise ValidationError(
                     {"pedido": "La nota Point ya existe con otra captura."},
