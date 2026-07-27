@@ -1,7 +1,7 @@
 # Domicilios con fuente única: Point, ERP y Centro Operativo
 
-Fecha: 2026-07-27  
-Estado: diseño aprobado por el usuario  
+Fecha: 2026-07-27
+Estado: diseño aprobado por el usuario
 Repositorios involucrados:
 
 - ERP: `/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1`
