@@ -37,6 +37,27 @@ El detalle respondió HTTP 200 como `text/plain`, pero su cuerpo es un arreglo J
 Cada línea incluyó: `Codigo`, `Producto`, `Cantidad`, `Precio_Venta`, `Descuento`,
 `Descuento_p`, `Total`, `autoriza`, `jsonDescuentos`.
 
+## Semántica monetaria verificada
+
+El 2026-07-27 se hizo una segunda verificación exclusivamente mediante `GET`, sin
+guardar ni imprimir identificadores, productos, clientes ni otros datos personales.
+Se localizaron dos notas recientes representativas:
+
+- una línea con `Cantidad=2`, `Precio_Venta=70`, `Descuento=0` y `Total=140`;
+  la cabecera tuvo `Importe=140` y la suma de `Total` de sus tres líneas fue `140`;
+- una línea con `Cantidad=1`, `Precio_Venta=395`, `Descuento=19.987`,
+  `Descuento_p=0.0506` y `Total=375.013`; la cabecera tuvo `Importe=375.01`
+  y la suma cruda de `Total` de sus dos líneas fue `375.013`.
+
+Esto confirma que Point puede entregar descuentos y totales con subcentavos. En
+los ejemplos observados la aritmética de cada línea fue consistente, pero dos
+notas no bastan para declarar una fórmula universal de descuentos o impuestos.
+La regla segura implementada es conservar `Total` como hecho autoritativo de
+Point, sumar sus valores crudos y redondear una sola vez a centavos antes de
+comparar con `Importe`. Los importes del objeto canónico se exponen a dos
+decimales. No se compara `Importe` contra la suma de líneas ya redondeadas ni se
+reconstruye `Total` desde cantidad, precio o descuento.
+
 Comportamiento de error observado en el endpoint de líneas:
 
 - sin `id_nota`: HTTP 500 con HTML genérico;
@@ -72,8 +93,9 @@ cualquier campo desconocido o de texto libre se redacta como `***`. Esto incluye
 `Cliente`, `Cajero`, `FK_Cliente`, `FK_Cajero`, `MotivoCancelacion`, `autoriza`,
 `jsonDescuentos`, cookies, tokens y claves PII inesperadas.
 
-El probe solo declara `DIRECT_API` después de comprobar que cabecera y detalle son
-listas no vacías de objetos con sus campos operativos mínimos. HTML de sesión
+El probe y el normalizador comparten el mismo esquema mínimo. El probe solo declara
+`DIRECT_API` después de comprobar que cabecera y detalle son listas no vacías de
+objetos con todos los campos que el normalizador requiere. HTML de sesión
 expirada, `null`, objetos, strings, JSON inválido, líneas vacías y errores HTTP
 producen `CommandError` con el endpoint de cabecera o detalle identificado.
 

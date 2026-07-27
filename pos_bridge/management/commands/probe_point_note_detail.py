@@ -11,12 +11,16 @@ import requests
 from django.core.management.base import BaseCommand, CommandError
 
 from pos_bridge.config import load_point_bridge_settings
+from pos_bridge.services.point_note_detail_service import (
+    POINT_NOTE_DETAIL_REQUIRED_FIELDS,
+    POINT_NOTE_HEADER_REQUIRED_FIELDS,
+)
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
 
 HEADER_PATH = "/Clientes/get_encabezado_nota/"
 DETAIL_PATH = "/Clientes/get_detalle_nota/"
-HEADER_REQUIRED_FIELDS = {"Folio", "FK_Sucursal", "Sucursal", "Importe"}
-DETAIL_REQUIRED_FIELDS = {"Codigo", "Producto", "Cantidad", "Precio_Venta", "Total"}
+HEADER_REQUIRED_FIELDS = set(POINT_NOTE_HEADER_REQUIRED_FIELDS)
+DETAIL_REQUIRED_FIELDS = set(POINT_NOTE_DETAIL_REQUIRED_FIELDS)
 HEADER_SAFE_FIELDS = {
     "Folio",
     "FK_Sucursal",

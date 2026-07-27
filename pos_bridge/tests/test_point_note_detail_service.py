@@ -99,13 +99,14 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         self.assertEqual(note.branch_name, "Matriz")
         self.assertTrue(timezone.is_aware(note.sold_at))
         self.assertEqual(timezone.localtime(note.sold_at).replace(tzinfo=None), datetime(2026, 7, 27, 12, 40))
-        self.assertEqual(note.total, Decimal("565.00"))
+        self.assertEqual(note.total, Decimal("375.01"))
         self.assertEqual(note.total.as_tuple().exponent, -2)
         self.assertFalse(note.invoiced)
         self.assertEqual(note.payment_type, "CONTADO")
         self.assertEqual(note.customer_external_id, "customer-001")
-        self.assertEqual(note.lines[1].point_code, "257")
-        self.assertEqual(note.lines[0].line_total, Decimal("525.00"))
+        self.assertEqual(note.lines[0].point_code, "P001")
+        self.assertEqual(note.lines[0].discount, Decimal("19.99"))
+        self.assertEqual(note.lines[0].line_total, Decimal("375.01"))
         self.assertEqual(note.lines[0].unit_price.as_tuple().exponent, -2)
         self.assertEqual(
             note.source_endpoint,
@@ -245,20 +246,32 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         )
         self.assertEqual(timezone.localtime(sold_at).hour, 12)
 
-    def test_fetch_rejects_subcent_money_instead_of_rounding_point_facts(self):
-        header = deepcopy(self.header)
-        header[0]["Importe"] = "565.001"
-        service, _session = self._service(header=header)
-        with self.assertRaisesRegex(PointNoteContractError, "centavos"):
-            service.fetch(pk_nota="900001")
+    def test_fetch_canonicalizes_real_point_subcent_discount_values(self):
+        service, _session = self._service()
 
-        for field in ("Precio_Venta", "Descuento", "Total"):
-            with self.subTest(field=field):
-                detail = deepcopy(self.detail)
-                detail[0][field] = "0.001"
-                service, _session = self._service(detail=detail)
-                with self.assertRaisesRegex(PointNoteContractError, "centavos"):
-                    service.fetch(pk_nota="900001")
+        note = service.fetch(pk_nota="900001")
+
+        self.assertEqual(note.total, Decimal("375.01"))
+        self.assertEqual(note.lines[0].unit_price, Decimal("395.00"))
+        self.assertEqual(note.lines[0].discount, Decimal("19.99"))
+        self.assertEqual(note.lines[0].line_total, Decimal("375.01"))
+
+    def test_fetch_reconciles_header_against_raw_line_totals_before_canonical_rounding(self):
+        header = deepcopy(self.header)
+        header[0]["Importe"] = "4.01"
+        detail = [deepcopy(self.detail[0]), deepcopy(self.detail[0])]
+        for index, line in enumerate(detail):
+            line["Codigo"] = f"P{index}"
+            line["Precio_Venta"] = "2.005"
+            line["Descuento"] = "0"
+            line["Descuento_p"] = "0"
+            line["Total"] = "2.005"
+        service, _session = self._service(header=header, detail=detail)
+
+        note = service.fetch(pk_nota="900001")
+
+        self.assertEqual(note.total, Decimal("4.01"))
+        self.assertEqual([line.line_total for line in note.lines], [Decimal("2.01"), Decimal("2.01")])
 
     def test_fetch_normalizes_boolean_variants(self):
         truthy_header = deepcopy(self.header)

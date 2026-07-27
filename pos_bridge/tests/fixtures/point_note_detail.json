@@ -5,7 +5,7 @@
       "FK_Cliente": "customer-001",
       "FK_Sucursal": "branch-001",
       "Fecha_Hora": "2026-07-27T12:40:00",
-      "Importe": "565.00",
+      "Importe": "375.01",
       "Sucursal": "Matriz",
       "isCredito": false,
       "isFacturado": "NO"
@@ -14,36 +14,14 @@
   "detail": [
     {
       "Codigo": "P001",
-      "Producto": "Pastel tres leches",
+      "Producto": "Producto sanitizado",
       "Cantidad": "1",
-      "Precio_Venta": "525.00",
-      "Descuento": "0",
-      "Descuento_p": "0",
-      "Total": "525.00",
+      "Precio_Venta": "395.00",
+      "Descuento": "19.987",
+      "Descuento_p": "0.0506",
+      "Total": "375.013",
       "autoriza": "redacted",
       "jsonDescuentos": "redacted"
-    },
-    {
-      "Codigo": "257",
-      "Producto": "Servicio Domicilio 2",
-      "Cantidad": "1",
-      "Precio_Venta": "15.00",
-      "Descuento": "0",
-      "Descuento_p": "0",
-      "Total": "15.00",
-      "autoriza": "",
-      "jsonDescuentos": ""
-    },
-    {
-      "Codigo": "V001",
-      "Producto": "Velas",
-      "Cantidad": "1",
-      "Precio_Venta": "25.00",
-      "Descuento": "0",
-      "Descuento_p": "0",
-      "Total": "25.00",
-      "autoriza": "",
-      "jsonDescuentos": ""
     }
   ]
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,16 @@ import requests
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase
 
-from pos_bridge.management.commands.probe_point_note_detail import discover_note_detail
+from pos_bridge.management.commands.probe_point_note_detail import (
+    DETAIL_REQUIRED_FIELDS,
+    HEADER_REQUIRED_FIELDS,
+    discover_note_detail,
+)
+from pos_bridge.services.point_note_detail_service import (
+    POINT_NOTE_DETAIL_REQUIRED_FIELDS,
+    POINT_NOTE_HEADER_REQUIRED_FIELDS,
+    PointNoteDetailService,
+)
 
 
 VALID_HEADER = [
@@ -21,7 +31,10 @@ VALID_HEADER = [
         "FK_Cliente": "customer-1",
         "FK_Sucursal": "branch-1",
         "Sucursal": "Matriz",
+        "Fecha_Hora": "2026-07-27T12:40:00",
         "Importe": 565,
+        "isCredito": False,
+        "isFacturado": False,
         "MotivoCancelacion": "texto libre privado",
         "unexpected_pii": "dato inesperado",
     }
@@ -32,6 +45,8 @@ VALID_DETAIL = [
         "Producto": "Producto operativo",
         "Cantidad": 1,
         "Precio_Venta": 565,
+        "Descuento": 0,
+        "Descuento_p": 0,
         "Total": 565,
         "autoriza": "Nombre privado",
         "jsonDescuentos": '{"observacion":"texto libre"}',
@@ -138,6 +153,36 @@ class ProbePointNoteDetailCommandTests(SimpleTestCase):
         self.assertEqual(session.requests[0]["params"]["id_nota"], "900001")
         self.assertEqual(session.requests[0]["timeout"], 30)
         self.assertTrue(session.closed)
+
+    def test_probe_and_normalizer_share_the_same_minimum_direct_api_contract(self):
+        self.assertEqual(HEADER_REQUIRED_FIELDS, set(POINT_NOTE_HEADER_REQUIRED_FIELDS))
+        self.assertEqual(DETAIL_REQUIRED_FIELDS, set(POINT_NOTE_DETAIL_REQUIRED_FIELDS))
+        session = _FakeSession()
+        settings = self._settings()
+        with (
+            patch(
+                "pos_bridge.management.commands.probe_point_note_detail.PointHttpSessionService",
+                _service_class_for(session),
+            ),
+            patch(
+                "pos_bridge.management.commands.probe_point_note_detail.load_point_bridge_settings",
+                return_value=settings,
+            ),
+        ):
+            probe_payload = discover_note_detail(pk_nota="900001")
+
+        normalizer_session = _FakeSession(
+            header=probe_payload["header"],
+            detail=probe_payload["detail"],
+            detail_text_plain=True,
+        )
+        note = PointNoteDetailService(
+            bridge_settings=settings,
+            http_session_service=_service_class_for(normalizer_session)(settings),
+        ).fetch(pk_nota="900001")
+
+        self.assertEqual(note.pk_nota, "900001")
+        self.assertEqual(note.total, Decimal("565.00"))
 
     def test_probe_parses_text_plain_json_detail(self):
         session = _FakeSession(detail_text_plain=True)

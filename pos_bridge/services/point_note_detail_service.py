@@ -15,6 +15,26 @@ from pos_bridge.services.point_http_session_service import PointHttpSessionServi
 from pos_bridge.utils.exceptions import ExtractionError
 
 
+POINT_NOTE_HEADER_REQUIRED_FIELDS = (
+    "Folio",
+    "FK_Sucursal",
+    "Sucursal",
+    "Fecha_Hora",
+    "Importe",
+    "isCredito",
+    "isFacturado",
+)
+POINT_NOTE_DETAIL_REQUIRED_FIELDS = (
+    "Codigo",
+    "Producto",
+    "Cantidad",
+    "Precio_Venta",
+    "Descuento",
+    "Descuento_p",
+    "Total",
+)
+
+
 class PointNoteDetailError(ExtractionError):
     """Point did not return a usable note-detail contract."""
 
@@ -63,24 +83,8 @@ class PointNote:
 class PointNoteDetailService:
     HEADER_PATH = "/Clientes/get_encabezado_nota/"
     DETAIL_PATH = "/Clientes/get_detalle_nota/"
-    _HEADER_REQUIRED_FIELDS = (
-        "Folio",
-        "FK_Sucursal",
-        "Sucursal",
-        "Fecha_Hora",
-        "Importe",
-        "isCredito",
-        "isFacturado",
-    )
-    _LINE_REQUIRED_FIELDS = (
-        "Codigo",
-        "Producto",
-        "Cantidad",
-        "Precio_Venta",
-        "Descuento",
-        "Descuento_p",
-        "Total",
-    )
+    _HEADER_REQUIRED_FIELDS = POINT_NOTE_HEADER_REQUIRED_FIELDS
+    _LINE_REQUIRED_FIELDS = POINT_NOTE_DETAIL_REQUIRED_FIELDS
     _MONEY_QUANTUM = Decimal("0.01")
 
     def __init__(
@@ -125,14 +129,24 @@ class PointNoteDetailService:
         self._require_fields(header, self._HEADER_REQUIRED_FIELDS, label="cabecera")
         lines = tuple(self._normalize_line(row, index=index) for index, row in enumerate(detail_rows))
         total = self._money(header["Importe"], field="Importe")
-        line_total = sum((line.line_total for line in lines), Decimal("0"))
-        if self._currency(total) != self._currency(line_total):
+        raw_line_total = sum(
+            (
+                self._decimal(
+                    row["Total"],
+                    field=f"Total fila {index}",
+                    minimum=Decimal("0"),
+                )
+                for index, row in enumerate(detail_rows)
+            ),
+            Decimal("0"),
+        )
+        if total != self._currency(raw_line_total):
             raise PointNoteIntegrityError(
                 "El total de cabecera Point no coincide con la suma de Total de sus líneas.",
                 context={
                     "pk_nota": note_id,
                     "header_total": str(total),
-                    "line_total": str(line_total),
+                    "raw_line_total": str(raw_line_total),
                 },
             )
 
@@ -222,10 +236,10 @@ class PointNoteDetailService:
 
     def _money(self, value: Any, *, field: str) -> Decimal:
         result = self._decimal(value, field=field, minimum=Decimal("0"))
-        canonical = self._currency(result)
-        if result != canonical:
-            raise PointNoteContractError(f"Point devolvió una precisión menor a centavos en {field}.")
-        return canonical
+        # Point entrega descuentos y totales con subcentavos. El dominio expone
+        # moneda a dos decimales, pero la reconciliación usa primero los valores
+        # crudos y redondea una sola vez al final de la suma.
+        return self._currency(result)
 
     def _decimal(
         self,
