@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Merma de insumo #{{ merma.id }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-dashboard.css?v=20260725-insumos-v1">{% endblock %}
+{% block content %}
+<main class="mermas-page pd-page-gutters">
+  <a class="back-link" href="{% url 'mermas:dashboard' %}?tab=insumos">← Volver a mermas de insumos</a>
+  <header class="mermas-header pd-page-head"><div><p class="pd-eyebrow">{{ merma.sucursal.nombre }} · {{ merma.creado_en|date:"d/m/Y H:i" }}</p><h1 class="pd-page-title">{{ merma.nombre_point }}</h1><p class="pd-page-copy">{{ merma.codigo_point }} · {{ merma.cantidad_reportada }} {{ merma.unidad_point }} · {{ merma.get_estatus_display }}</p></div></header>
+  <section class="detail-grid">
+    <article class="panel"><h2>Registro</h2><dl><dt>Reportó</dt><dd>{{ merma.reportado_por.get_full_name|default:merma.reportado_por.username }}</dd><dt>Motivo</dt><dd>{{ merma.motivo|title }}</dd><dt>Comentario</dt><dd>{{ merma.comentario }}</dd><dt>Justificación sin foto</dt><dd>{{ merma.justificacion_sin_foto|default:"—" }}</dd></dl></article>
+    <article class="panel"><h2>Valorización</h2><dl><dt>Cantidad aprobada</dt><dd>{{ merma.cantidad_aprobada|default:"Pendiente" }}</dd><dt>Costo unitario histórico</dt><dd>{% if merma.costo_unitario_historico != None %}${{ merma.costo_unitario_historico|floatformat:2 }} {{ merma.costo_moneda }}{% else %}Sin costo disponible{% endif %}</dd><dt>Fecha del costo</dt><dd>{{ merma.costo_fecha|date:"d/m/Y"|default:"—" }}</dd><dt>Impacto confirmado</dt><dd>{% if merma.costo_confirmado != None %}${{ merma.costo_confirmado|floatformat:2 }}{% else %}—{% endif %}</dd></dl></article>
+  </section>
+  <section class="panel"><h2>Línea de tiempo</h2><ol class="timeline">{% for evento in merma.eventos.all %}<li><strong>{{ evento.estado_nuevo|title }}</strong><span>{{ evento.creado_en|date:"d/m/Y H:i" }} · {{ evento.actor|default:"Sistema" }}</span>{% if evento.motivo %}<p>{{ evento.motivo }}</p>{% endif %}</li>{% empty %}<li>Sin eventos registrados.</li>{% endfor %}</ol></section>
+  {% if merma.orden_point %}<section class="panel"><h2>Orden Point</h2><dl><dt>Estado</dt><dd>{{ merma.orden_point.get_estatus_display }}</dd><dt>Existencia antes</dt><dd>{{ merma.orden_point.existencia_antes|default:"—" }}</dd><dt>Existencia después</dt><dd>{{ merma.orden_point.existencia_despues|default:"—" }}</dd><dt>Referencia</dt><dd>{{ merma.orden_point.referencia_point|default:"—" }}</dd><dt>Intentos</dt><dd>{{ merma.orden_point.intentos }}</dd><dt>Error</dt><dd>{{ merma.orden_point.ultimo_error|default:"—" }}</dd></dl></section>{% endif %}
+</main>
+{% endblock %}

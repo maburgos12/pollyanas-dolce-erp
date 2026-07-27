@@ -366,7 +366,6 @@ class NavigationActiveStateTests(TestCase):
                 "Puntos",
                 "Unidades",
                 "Capturas",
-                "Mermas",
                 "Captura merma",
             ],
         )
@@ -432,6 +431,8 @@ class NavigationActiveStateTests(TestCase):
         )
         self.assertEqual(self._active_labels("/ventas/pronostico/?tab=proyecciones"), ["Proyecciones"])
         self.assertEqual(self._active_labels("/ventas/pronostico/?tab=pronosticos"), ["Pronóstico"])
+        self.assertIn("Mermas", [item["label"] for item in comercial["items"]])
+        self.assertEqual(self._active_labels("/mermas/?tab=insumos"), ["Mermas"])
 
     def test_administracion_sidebar_group_defines_horizontal_tabs(self):
         with patch("core.navigation.can_view_submodule", return_value=True):

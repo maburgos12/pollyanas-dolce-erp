@@ -9,6 +9,7 @@ from django.db.models import Subquery
 from django.utils import timezone
 
 from core.access import is_admin_or_dg
+from maestros.models import CostoInsumo, Insumo
 from mermas.models import MermaInsumo, MermaInsumoEvento, OrdenAjustePoint
 from pos_bridge.models import PointInventorySnapshot, PointTransferLine
 from rrhh.services_identidad import empleado_vinculado_usuario
@@ -47,6 +48,33 @@ def enviar_merma_insumo(*, merma_id, usuario):
     )
 
     estado_anterior = merma.estatus
+    if not merma.insumo_id:
+        merma.insumo = (
+            Insumo.objects.filter(codigo_point=merma.codigo_point, activo=True)
+            .order_by("id")
+            .first()
+        )
+    fecha_merma = timezone.localtime(merma.creado_en).date()
+    costo = None
+    if merma.insumo_id:
+        costo = (
+            CostoInsumo.objects.filter(insumo_id=merma.insumo_id, fecha__lte=fecha_merma)
+            .order_by("-fecha", "-id")
+            .first()
+        )
+    if costo:
+        merma.costo_unitario_historico = costo.costo_unitario
+        merma.costo_moneda = costo.moneda
+        merma.costo_fecha = costo.fecha
+        merma.costo_fuente_id = str(costo.id)
+        merma.estado_valorizacion = MermaInsumo.VALORIZACION_CON_COSTO
+    else:
+        merma.costo_unitario_historico = None
+        merma.costo_moneda = ""
+        merma.costo_fecha = None
+        merma.costo_fuente_id = ""
+        merma.estado_valorizacion = MermaInsumo.VALORIZACION_SIN_COSTO
+    merma.costo_resuelto_en = timezone.now()
     if identidad_valida:
         merma.reportante_empleado = reportante
         merma.jefe_empleado = jefe
@@ -65,7 +93,14 @@ def enviar_merma_insumo(*, merma_id, usuario):
             "reportante_empleado",
             "jefe_empleado",
             "jefe_inmediato",
+            "insumo",
             "estatus",
+            "costo_unitario_historico",
+            "costo_moneda",
+            "costo_fecha",
+            "costo_fuente_id",
+            "estado_valorizacion",
+            "costo_resuelto_en",
             "actualizado_en",
         ]
     )
