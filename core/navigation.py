@@ -1,6 +1,37 @@
 from core.access import can_review_seguimiento_global, can_view_reportes, can_view_submodule
 
 
+def _seguimiento_asignado_submodules(user) -> set[str]:
+    """Secciones personales visibles por asignación, sin ampliar acceso global."""
+    if not (user and user.is_authenticated and getattr(user, "pk", None)):
+        return set()
+
+    from django.db.models import Q
+
+    from seguimiento.models import SeguimientoItem
+    from seguimiento.services import empleado_de_usuario
+
+    asignado = Q(responsable_user=user) | Q(participantes_user=user)
+    empleado = empleado_de_usuario(user)
+    if empleado:
+        asignado |= Q(responsable_empleado=empleado) | Q(participantes_empleado=empleado)
+
+    tipos = set(
+        SeguimientoItem.objects.filter(asignado)
+        .values_list("tipo", flat=True)
+        .distinct()
+    )
+    return {
+        submodule
+        for tipo, submodule in {
+            SeguimientoItem.TIPO_MINUTA: "minutas",
+            SeguimientoItem.TIPO_PROYECTO: "proyectos",
+            SeguimientoItem.TIPO_COMPROMISO: "compromisos",
+        }.items()
+        if tipo in tipos
+    }
+
+
 def _puede_capturar_presupuesto(user) -> bool:
     """Responsables de área de presupuesto (o perfiles de reportes).
 
@@ -239,10 +270,12 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     current_path = current_path or ""
     visible_groups = []
     best_match_len = 0
+    seguimiento_asignado = _seguimiento_asignado_submodules(user)
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
-            if not can_view_submodule(user, module, submodule):
+            tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
+            if not (can_view_submodule(user, module, submodule) or tiene_acceso_personal):
                 continue
             match_len = max((len(prefix) for prefix in prefixes if current_path.startswith(prefix)), default=0)
             best_match_len = max(best_match_len, match_len)
