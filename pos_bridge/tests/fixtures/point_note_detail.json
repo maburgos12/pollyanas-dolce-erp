@@ -1,0 +1,49 @@
+{
+  "header": [
+    {
+      "Folio": "18452",
+      "FK_Cliente": "customer-001",
+      "FK_Sucursal": "branch-001",
+      "Fecha_Hora": "2026-07-27T12:40:00",
+      "Importe": "565.00",
+      "Sucursal": "Matriz",
+      "isCredito": false,
+      "isFacturado": "NO"
+    }
+  ],
+  "detail": [
+    {
+      "Codigo": "P001",
+      "Producto": "Pastel tres leches",
+      "Cantidad": "1",
+      "Precio_Venta": "525.00",
+      "Descuento": "0",
+      "Descuento_p": "0",
+      "Total": "525.00",
+      "autoriza": "redacted",
+      "jsonDescuentos": "redacted"
+    },
+    {
+      "Codigo": "257",
+      "Producto": "Servicio Domicilio 2",
+      "Cantidad": "1",
+      "Precio_Venta": "15.00",
+      "Descuento": "0",
+      "Descuento_p": "0",
+      "Total": "15.00",
+      "autoriza": "",
+      "jsonDescuentos": ""
+    },
+    {
+      "Codigo": "V001",
+      "Producto": "Velas",
+      "Cantidad": "1",
+      "Precio_Venta": "25.00",
+      "Descuento": "0",
+      "Descuento_p": "0",
+      "Total": "25.00",
+      "autoriza": "",
+      "jsonDescuentos": ""
+    }
+  ]
+}
