@@ -1610,14 +1610,21 @@ class SolicitudDomicilio(models.Model):
     CANAL_OTRO = PedidoCliente.CANAL_OTRO
     CANAL_CHOICES = PedidoCliente.CANAL_CHOICES
 
-    ESTATUS_PENDIENTE = "PENDIENTE"
-    ESTATUS_ASIGNADO = "ASIGNADO"
+    ESTATUS_PENDIENTE_POINT = "PENDIENTE_POINT"
+    ESTATUS_CONFIRMADO = "CONFIRMADO"
+    ESTATUS_PREPARANDO = "PREPARANDO"
+    ESTATUS_LISTO = "LISTO"
     ESTATUS_EN_RUTA = "EN_RUTA"
     ESTATUS_ENTREGADO = "ENTREGADO"
     ESTATUS_CANCELADO = "CANCELADO"
+    # Alias temporales para consumidores existentes durante la migración canónica.
+    ESTATUS_PENDIENTE = ESTATUS_PENDIENTE_POINT
+    ESTATUS_ASIGNADO = ESTATUS_LISTO
     ESTATUS_CHOICES = [
-        (ESTATUS_PENDIENTE, "Pendiente"),
-        (ESTATUS_ASIGNADO, "Asignado"),
+        (ESTATUS_PENDIENTE_POINT, "Pendiente de Point"),
+        (ESTATUS_CONFIRMADO, "Confirmado"),
+        (ESTATUS_PREPARANDO, "Preparando"),
+        (ESTATUS_LISTO, "Listo"),
         (ESTATUS_EN_RUTA, "En ruta"),
         (ESTATUS_ENTREGADO, "Entregado"),
         (ESTATUS_CANCELADO, "Cancelado"),
@@ -1650,6 +1657,11 @@ class SolicitudDomicilio(models.Model):
     canal_origen = models.CharField(max_length=20, choices=CANAL_CHOICES, default=CANAL_TELEFONO)
     canal_detalle = models.CharField(max_length=60, blank=True, default="")
     notas = models.TextField(blank=True, default="")
+    ventana_inicio = models.DateTimeField(null=True, blank=True)
+    ventana_fin = models.DateTimeField(null=True, blank=True)
+    instrucciones_entrega = models.CharField(max_length=500, blank=True, default="")
+    cancelacion_motivo = models.CharField(max_length=300, blank=True, default="")
+    legacy_without_point = models.BooleanField(default=False, editable=False)
     repartidor = models.ForeignKey(
         "Repartidor",
         on_delete=models.SET_NULL,
@@ -1664,7 +1676,11 @@ class SolicitudDomicilio(models.Model):
         blank=True,
         related_name="solicitudes_domicilio",
     )
-    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE)
+    estatus = models.CharField(
+        max_length=20,
+        choices=ESTATUS_CHOICES,
+        default=ESTATUS_PENDIENTE_POINT,
+    )
     revision = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1684,6 +1700,51 @@ class SolicitudDomicilio(models.Model):
 
     def __str__(self) -> str:
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
+
+    def clean(self):
+        super().clean()
+        if self.legacy_without_point and self.estatus in {
+            self.ESTATUS_ENTREGADO,
+            self.ESTATUS_CANCELADO,
+        }:
+            return
+
+        errors = {}
+        ready_or_later = {
+            self.ESTATUS_LISTO,
+            self.ESTATUS_EN_RUTA,
+            self.ESTATUS_ENTREGADO,
+        }
+        if self.estatus in ready_or_later:
+            if not self.pedido_cliente_id or not self.pedido_cliente.point_note_id:
+                errors["pedido_cliente"] = (
+                    "Se requiere un pedido vinculado con una nota de Point antes de marcarlo listo."
+                )
+            if (
+                not self.direccion_cliente_id
+                or self.direccion_cliente.latitud is None
+                or self.direccion_cliente.longitud is None
+            ):
+                errors["direccion_cliente"] = (
+                    "Se requiere una dirección con coordenadas GPS antes de marcarlo listo."
+                )
+
+        if self.estatus in {self.ESTATUS_EN_RUTA, self.ESTATUS_ENTREGADO} and not self.repartidor_id:
+            errors["repartidor"] = "Se requiere asignar un repartidor antes de iniciar la ruta."
+
+        if self.estatus == self.ESTATUS_ENTREGADO and not self.entregado_en:
+            errors["entregado_en"] = (
+                "Se requiere la evidencia temporal de entrega antes de marcarlo entregado."
+            )
+
+        if self.estatus == self.ESTATUS_CANCELADO and not self.cancelacion_motivo.strip():
+            errors["cancelacion_motivo"] = "El motivo de cancelación es obligatorio."
+
+        if self.ventana_inicio and self.ventana_fin and self.ventana_fin < self.ventana_inicio:
+            errors["ventana_fin"] = "El fin de la ventana no puede ser anterior al inicio."
+
+        if errors:
+            raise ValidationError(errors)
 
 
 class SolicitudDomicilioStatusOperation(models.Model):

@@ -1,5 +1,12 @@
+from decimal import Decimal
+from datetime import timedelta
+from importlib import import_module
+
+from django.apps import apps
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -21,6 +28,156 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         self.sucursal = Sucursal.objects.create(codigo="DOM-TEST", nombre="Domicilios Test")
         self.user = User.objects.create_user(username="repartidor_domicilios", password="pass123")
         self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal)
+
+    def _pedido_y_direccion(self, *, point_note_id="900001", gps=True):
+        cliente = Cliente.objects.create(nombre="Cliente estados", telefono="6671112233")
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            alias="Casa",
+            direccion="Calle Estado 123",
+            latitud=Decimal("25.790001") if gps else None,
+            longitud=Decimal("-108.990001") if gps else None,
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            descripcion="Pedido para validar domicilio",
+            point_note_id=point_note_id,
+            point_note_snapshot={"pk_nota": point_note_id} if point_note_id else {},
+        )
+        return cliente, direccion, pedido
+
+    def _solicitud(self, *, estatus, point_note_id="900001", gps=True, **kwargs):
+        cliente, direccion, pedido = self._pedido_y_direccion(
+            point_note_id=point_note_id,
+            gps=gps,
+        )
+        return SolicitudDomicilio(
+            cliente=cliente,
+            direccion_cliente=direccion,
+            pedido_cliente=pedido,
+            cliente_nombre=cliente.nombre,
+            cliente_telefono=cliente.telefono,
+            direccion=direccion.direccion,
+            estatus=estatus,
+            **kwargs,
+        )
+
+    def test_domicilio_listo_requires_point_note_and_gps(self):
+        without_point = self._solicitud(
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            point_note_id="",
+        )
+        with self.assertRaises(ValidationError) as point_error:
+            without_point.full_clean()
+        self.assertIn("pedido_cliente", point_error.exception.message_dict)
+
+        without_gps = self._solicitud(
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            gps=False,
+        )
+        with self.assertRaises(ValidationError) as gps_error:
+            without_gps.full_clean()
+        self.assertIn("direccion_cliente", gps_error.exception.message_dict)
+
+    def test_en_ruta_requires_assignment(self):
+        solicitud = self._solicitud(estatus=SolicitudDomicilio.ESTATUS_EN_RUTA)
+
+        with self.assertRaises(ValidationError) as error:
+            solicitud.full_clean()
+
+        self.assertIn("repartidor", error.exception.message_dict)
+
+    def test_entregado_requires_existing_delivery_evidence(self):
+        solicitud = self._solicitud(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            repartidor=self.repartidor,
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            solicitud.full_clean()
+        self.assertIn("entregado_en", error.exception.message_dict)
+
+        solicitud.entregado_en = timezone.now()
+        solicitud.full_clean()
+
+    def test_cancelado_requires_reason(self):
+        solicitud = self._solicitud(estatus=SolicitudDomicilio.ESTATUS_CANCELADO)
+
+        with self.assertRaises(ValidationError) as error:
+            solicitud.full_clean()
+        self.assertIn("cancelacion_motivo", error.exception.message_dict)
+
+        solicitud.cancelacion_motivo = "Cliente solicitó cancelar"
+        solicitud.full_clean()
+
+    def test_legacy_terminal_without_point_preserves_history(self):
+        solicitud = SolicitudDomicilio(
+            cliente_nombre="Histórico",
+            direccion="Dirección histórica",
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+
+        solicitud.full_clean()
+
+    def test_delivery_window_end_cannot_precede_start(self):
+        solicitud = self._solicitud(
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            ventana_inicio=timezone.now(),
+            ventana_fin=timezone.now() - timedelta(hours=1),
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            solicitud.full_clean()
+
+        self.assertIn("ventana_fin", error.exception.message_dict)
+
+    def test_data_migration_maps_point_and_legacy_records_without_losing_history(self):
+        _, _, pedido = self._pedido_y_direccion(point_note_id="POINT-MIGRATION")
+        linked_pending = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente_nombre="Ligado pendiente",
+            direccion="Calle ligada",
+            estatus="PENDIENTE",
+        )
+        linked_assigned = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente_nombre="Ligado asignado",
+            direccion="Calle ligada",
+            estatus="ASIGNADO",
+        )
+        active_without_point = SolicitudDomicilio.objects.create(
+            cliente_nombre="Activo legado",
+            direccion="Calle activa",
+            estatus="EN_RUTA",
+        )
+        delivered_without_point = SolicitudDomicilio.objects.create(
+            cliente_nombre="Entregado legado",
+            direccion="Calle histórica",
+            estatus="ENTREGADO",
+        )
+
+        migration = import_module(
+            "logistica.migrations.0046_solicituddomicilio_operacion_canonica"
+        )
+        migration.migrate_delivery_states(apps, None)
+
+        linked_pending.refresh_from_db()
+        linked_assigned.refresh_from_db()
+        active_without_point.refresh_from_db()
+        delivered_without_point.refresh_from_db()
+        self.assertEqual(linked_pending.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        self.assertEqual(linked_assigned.estatus, SolicitudDomicilio.ESTATUS_LISTO)
+        self.assertEqual(
+            active_without_point.estatus,
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
+        self.assertEqual(
+            delivered_without_point.estatus,
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+        )
+        self.assertTrue(delivered_without_point.legacy_without_point)
 
     def test_solicitud_accepts_social_channels_shared_with_crm(self):
         self.assertEqual(SolicitudDomicilio.CANAL_FACEBOOK, PedidoCliente.CANAL_FACEBOOK)
