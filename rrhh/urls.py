@@ -74,6 +74,7 @@ urlpatterns = [
     path("empleados/<int:empleado_pk>/documentos/", views_documentos.empleado_documentos, name="rrhh_empleado_documentos"),
     path("empleados/<int:empleado_pk>/documentos/<int:doc_pk>/eliminar/", views_documentos.empleado_documento_eliminar, name="rrhh_documento_eliminar"),
     path("asistencias/", views.asistencias_view, name="rrhh_asistencias"),
+    path("asistencias/ajustar/", views_asistencia.ajustar_asistencia, name="rrhh_asistencias_ajustar"),
     path("asistencias/monitor/", views_asistencia.monitor_sincronizacion, name="rrhh_monitor_sync"),
     path("reporte-asistencia/", views_asistencia.reporte_asistencia, name="rrhh_reporte_asistencia"),
     path(
