@@ -117,12 +117,16 @@ class PedidoCliente(models.Model):
     CANAL_WHATSAPP = "WHATSAPP"
     CANAL_TELEFONO = "TELEFONO"
     CANAL_WEB = "WEB"
+    CANAL_FACEBOOK = "FACEBOOK"
+    CANAL_INSTAGRAM = "INSTAGRAM"
     CANAL_OTRO = "OTRO"
     CANAL_CHOICES = [
         (CANAL_MOSTRADOR, "Mostrador"),
         (CANAL_WHATSAPP, "WhatsApp"),
         (CANAL_TELEFONO, "Teléfono"),
         (CANAL_WEB, "Web"),
+        (CANAL_FACEBOOK, "Facebook"),
+        (CANAL_INSTAGRAM, "Instagram"),
         (CANAL_OTRO, "Otro"),
     ]
 
@@ -138,6 +142,11 @@ class PedidoCliente(models.Model):
     external_source = models.CharField(max_length=40, blank=True, default="", db_index=True)
     external_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
     payload_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    point_note_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    point_note_folio = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    point_note_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    point_note_fetched_at = models.DateTimeField(null=True, blank=True, editable=False)
+    social_reference = models.CharField(max_length=180, blank=True, default="")
     tracking_token = models.UUIDField(
         null=True,
         blank=True,
@@ -191,6 +200,11 @@ class PedidoCliente(models.Model):
                 condition=~models.Q(external_source="") & ~models.Q(external_id=""),
                 name="crm_pedido_origen_externo_unico",
             ),
+            models.UniqueConstraint(
+                fields=["point_note_id"],
+                condition=~models.Q(point_note_id=""),
+                name="crm_pedido_point_note_unico",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -215,23 +229,34 @@ class PedidoCliente(models.Model):
         return f"{prefix}-{seq:04d}"
 
     def save(self, *args, **kwargs):
-        allow_snapshot_backfill = kwargs.pop("_allow_payload_snapshot_backfill", False)
+        snapshot_backfills = {
+            "payload_snapshot": kwargs.pop("_allow_payload_snapshot_backfill", False),
+            "point_note_snapshot": kwargs.pop("_allow_point_note_snapshot_backfill", False),
+        }
         if not self._state.adding:
-            persisted_snapshot = (
+            persisted_snapshots = (
                 PedidoCliente.objects.filter(pk=self.pk)
-                .values_list("payload_snapshot", flat=True)
+                .values("payload_snapshot", "point_note_snapshot")
                 .first()
             )
-            snapshot_changed = persisted_snapshot != self.payload_snapshot
-            valid_backfill = (
-                allow_snapshot_backfill
-                and not persisted_snapshot
-                and bool(self.payload_snapshot)
-            )
-            if snapshot_changed and not valid_backfill:
-                raise ValidationError(
-                    {"payload_snapshot": "El snapshot omnicanal es inmutable."},
+            snapshot_errors = {}
+            error_messages = {
+                "payload_snapshot": "El snapshot omnicanal es inmutable.",
+                "point_note_snapshot": "El snapshot de la nota Point es inmutable.",
+            }
+            for field_name, allow_backfill in snapshot_backfills.items():
+                persisted_snapshot = (persisted_snapshots or {}).get(field_name)
+                current_snapshot = getattr(self, field_name)
+                snapshot_changed = persisted_snapshot != current_snapshot
+                valid_backfill = (
+                    allow_backfill
+                    and not persisted_snapshot
+                    and bool(current_snapshot)
                 )
+                if snapshot_changed and not valid_backfill:
+                    snapshot_errors[field_name] = error_messages[field_name]
+            if snapshot_errors:
+                raise ValidationError(snapshot_errors)
 
         if not self.folio:
             self.folio = self._generate_folio()

@@ -1,4 +1,6 @@
 from django.contrib.auth.models import Group, User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 
@@ -321,6 +323,70 @@ class PedidoClienteSaveTests(TestCase):
         pedido.refresh_from_db()
 
         self.assertEqual(pedido.sucursal, "Matriz")
+
+
+class PedidoClientePointLinkTests(TestCase):
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente Point")
+        self.otro_cliente = Cliente.objects.create(nombre="Otro cliente Point")
+
+    def test_pedido_accepts_social_channels(self):
+        self.assertIn(("FACEBOOK", "Facebook"), PedidoCliente.CANAL_CHOICES)
+        self.assertIn(("INSTAGRAM", "Instagram"), PedidoCliente.CANAL_CHOICES)
+
+    def test_point_note_identity_is_unique_when_present(self):
+        PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Uno",
+            point_note_id="900001",
+            point_note_snapshot={"pk_nota": "900001"},
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                PedidoCliente.objects.create(
+                    cliente=self.otro_cliente,
+                    descripcion="Dos",
+                    point_note_id="900001",
+                    point_note_snapshot={"pk_nota": "900001"},
+                )
+
+    def test_empty_point_note_identity_is_not_unique(self):
+        PedidoCliente.objects.create(cliente=self.cliente, descripcion="Uno")
+        PedidoCliente.objects.create(cliente=self.otro_cliente, descripcion="Dos")
+
+        self.assertEqual(PedidoCliente.objects.filter(point_note_id="").count(), 2)
+
+    def test_point_note_snapshot_is_immutable(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Uno",
+            point_note_id="900001",
+            point_note_snapshot={"pk_nota": "900001"},
+        )
+        pedido.point_note_snapshot = {"pk_nota": "alterada"}
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "El snapshot de la nota Point es inmutable.",
+        ):
+            pedido.save()
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.point_note_snapshot, {"pk_nota": "900001"})
+
+    def test_point_note_snapshot_allows_explicit_legacy_backfill_once(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Legacy",
+            point_note_id="900001",
+        )
+        pedido.point_note_snapshot = {"pk_nota": "900001"}
+
+        pedido.save(_allow_point_note_snapshot_backfill=True)
+        pedido.refresh_from_db()
+
+        self.assertEqual(pedido.point_note_snapshot, {"pk_nota": "900001"})
 
 
 class SucursalResolutionTests(TestCase):
