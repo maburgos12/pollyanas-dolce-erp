@@ -1,84 +1,129 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+import requests
 from django.core.management.base import BaseCommand, CommandError
 
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
-from pos_bridge.utils.helpers import sanitize_sensitive_data
 
 HEADER_PATH = "/Clientes/get_encabezado_nota/"
 DETAIL_PATH = "/Clientes/get_detalle_nota/"
-PERSONAL_KEYS = {
-    "apellidos",
-    "cajero",
-    "celular",
-    "cliente",
-    "correo",
-    "direccion",
-    "direccion1",
-    "direccion2",
-    "email",
-    "fk_cajero",
-    "fk_cliente",
-    "nombre",
-    "nombre_completo",
-    "observaciones",
-    "telefono",
-    "telefono1",
-    "telefono2",
+HEADER_REQUIRED_FIELDS = {"Folio", "FK_Sucursal", "Sucursal", "Importe"}
+DETAIL_REQUIRED_FIELDS = {"Codigo", "Producto", "Cantidad", "Precio_Venta", "Total"}
+HEADER_SAFE_FIELDS = {
+    "Folio",
+    "FK_Sucursal",
+    "Fecha_Hora",
+    "Importe",
+    "Sucursal",
+    "isCredito",
+    "isFacturado",
 }
-SECRET_KEY_PARTS = ("authorization", "cookie", "password", "passwd", "secret", "token")
+DETAIL_SAFE_FIELDS = {
+    "Cantidad",
+    "Codigo",
+    "Descuento",
+    "Descuento_p",
+    "Precio_Venta",
+    "Producto",
+    "Total",
+}
 
 
-def sanitize_note_payload(value: Any) -> Any:
-    value = sanitize_sensitive_data(value)
-    if isinstance(value, dict):
-        return {
-            key: (
-                "***"
-                if str(key).lower() in PERSONAL_KEYS
-                or any(part in str(key).lower() for part in SECRET_KEY_PARTS)
-                else sanitize_note_payload(item)
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [sanitize_note_payload(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(sanitize_note_payload(item) for item in value)
-    return value
+def _safe_scalar(value: Any) -> Any:
+    return value if value is None or isinstance(value, (str, int, float, bool)) else "***"
 
 
-def _response_payload(response) -> Any:
+def _sanitize_rows(rows: Any, allowed_fields: set[str]) -> list[dict[str, Any]]:
+    return [
+        {key: _safe_scalar(value) if key in allowed_fields else "***" for key, value in row.items()}
+        for row in rows
+    ]
+
+
+def sanitize_note_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"payload": "***"}
+    request = value.get("request") if isinstance(value.get("request"), dict) else {}
+    reference = value.get("reference") if isinstance(value.get("reference"), dict) else {}
+    sanitized = {
+        "classification": value.get("classification") if value.get("classification") == "DIRECT_API" else "***",
+        "request": {
+            "method": request.get("method") if request.get("method") == "GET" else "***",
+            "header_path": request.get("header_path") if request.get("header_path") == HEADER_PATH else "***",
+            "detail_path": request.get("detail_path") if request.get("detail_path") == DETAIL_PATH else "***",
+            "params": {"id_nota": _safe_scalar((request.get("params") or {}).get("id_nota"))},
+        },
+        "reference": {
+            "pk_nota": _safe_scalar(reference.get("pk_nota")),
+            "folio": _safe_scalar(reference.get("folio")),
+            "sucursal": _safe_scalar(reference.get("sucursal")),
+        },
+        "header": _sanitize_rows(value.get("header", []), HEADER_SAFE_FIELDS),
+        "detail": _sanitize_rows(value.get("detail", []), DETAIL_SAFE_FIELDS),
+    }
+    for key in value.keys() - sanitized.keys():
+        sanitized[key] = "***"
+    return sanitized
+
+
+def _response_payload(response, *, label: str, path: str) -> Any:
     try:
         return response.json()
-    except (ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError):
         try:
             return json.loads(response.text)
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise CommandError("Point devolvió una respuesta de detalle no JSON.") from exc
+            raise CommandError(f"Point devolvió JSON inválido en {label} ({path}).") from exc
+
+
+def _validate_rows(payload: Any, *, label: str, path: str, required_fields: set[str]) -> list[dict[str, Any]]:
+    if not isinstance(payload, list) or not payload or not all(isinstance(row, dict) for row in payload):
+        raise CommandError(f"Point devolvió una forma inválida en {label} ({path}).")
+    for index, row in enumerate(payload):
+        missing = required_fields - row.keys()
+        if missing:
+            raise CommandError(
+                f"Point omitió campos mínimos en {label} ({path}), fila {index}: {', '.join(sorted(missing))}."
+            )
+    return payload
 
 
 def discover_note_detail(*, pk_nota: str, folio: str = "", sucursal: str = "") -> dict[str, Any]:
     settings = load_point_bridge_settings()
     auth_session = PointHttpSessionService(settings).create()
     params = {"id_nota": pk_nota}
-    timeout = max(settings.timeout_ms / 1000, 60)
+    timeout = settings.timeout_ms / 1000
     try:
         responses = {}
-        for label, path in (("header", HEADER_PATH), ("detail", DETAIL_PATH)):
-            response = auth_session.session.get(
-                urljoin(settings.base_url.rstrip("/") + "/", path.lstrip("/")),
-                params=params,
-                timeout=timeout,
+        endpoints = (
+            ("cabecera", "header", HEADER_PATH, HEADER_REQUIRED_FIELDS),
+            ("detalle", "detail", DETAIL_PATH, DETAIL_REQUIRED_FIELDS),
+        )
+        for label, result_key, path, required_fields in endpoints:
+            try:
+                response = auth_session.session.get(
+                    urljoin(settings.base_url.rstrip("/") + "/", path.lstrip("/")),
+                    params=params,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+            except requests.RequestException as exc:
+                raise CommandError(f"Falló endpoint de {label} Point ({path}): {exc}.") from exc
+            payload = _response_payload(response, label=label, path=path)
+            responses[result_key] = _validate_rows(
+                payload,
+                label=label,
+                path=path,
+                required_fields=required_fields,
             )
-            response.raise_for_status()
-            responses[label] = _response_payload(response)
     finally:
         auth_session.session.close()
 
@@ -93,6 +138,29 @@ def discover_note_detail(*, pk_nota: str, folio: str = "", sucursal: str = "") -
         "reference": {"pk_nota": pk_nota, "folio": folio, "sucursal": sucursal},
         **responses,
     }
+
+
+def _write_json_atomic(output: Path, payload: dict[str, Any]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(payload, temp_file, ensure_ascii=False, indent=2, default=str)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, output)
+    except OSError as exc:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise CommandError(f"No fue posible escribir la salida atómica {output}: {exc}.") from exc
 
 
 class Command(BaseCommand):
@@ -115,9 +183,5 @@ class Command(BaseCommand):
             sucursal=str(options["sucursal"] or "").strip(),
         )
         output = Path(options["output"]).expanduser()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(sanitize_note_payload(result), ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
+        _write_json_atomic(output, sanitize_note_payload(result))
         self.stdout.write(self.style.SUCCESS(f"Detalle Point sanitizado guardado en {output}"))

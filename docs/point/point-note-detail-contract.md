@@ -63,6 +63,20 @@ campos para todos los clientes.
 ## Seguridad del probe
 
 `probe_point_note_detail` exige `--pk-nota`, acepta `--folio`, `--sucursal` y
-`--output`, reutiliza `PointHttpSessionService`, cierra la sesión y escribe
-únicamente JSON sanitizado. Cookies, tokens, autorización y campos personales se
-redactan como `***`; el comando no imprime la respuesta.
+`--output`, reutiliza `PointHttpSessionService` y cierra la sesión incluso si falla
+la autenticación o la selección del workspace.
+
+La salida usa una lista permitida, no una lista de secretos conocidos. Solo
+conserva identificadores y campos operativos explícitos de cabecera y líneas;
+cualquier campo desconocido o de texto libre se redacta como `***`. Esto incluye
+`Cliente`, `Cajero`, `FK_Cliente`, `FK_Cajero`, `MotivoCancelacion`, `autoriza`,
+`jsonDescuentos`, cookies, tokens y claves PII inesperadas.
+
+El probe solo declara `DIRECT_API` después de comprobar que cabecera y detalle son
+listas no vacías de objetos con sus campos operativos mínimos. HTML de sesión
+expirada, `null`, objetos, strings, JSON inválido, líneas vacías y errores HTTP
+producen `CommandError` con el endpoint de cabecera o detalle identificado.
+
+El timeout HTTP respeta `POINT_TIMEOUT` y la escritura es atómica: crea un temporal
+en el mismo directorio, sincroniza y usa `os.replace`. Un fallo conserva el archivo
+anterior y elimina el temporal. El comando no imprime la respuesta.

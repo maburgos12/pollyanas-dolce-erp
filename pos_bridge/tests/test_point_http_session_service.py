@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import requests
 from django.test import SimpleTestCase
 
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
@@ -27,6 +28,17 @@ class PointHttpSessionServiceTests(SimpleTestCase):
 
         with self.assertRaises(ConfigurationError):
             service.create()
+
+    @patch("pos_bridge.services.point_http_session_service.requests.Session")
+    def test_create_closes_internal_session_when_authentication_fails(self, session_cls):
+        session = Mock()
+        session_cls.return_value = session
+        session.get.side_effect = requests.ConnectionError("Point unavailable")
+
+        with self.assertRaises(requests.ConnectionError):
+            PointHttpSessionService(self._settings()).create()
+
+        session.close.assert_called_once_with()
 
     @patch("pos_bridge.services.point_http_session_service.requests.Session")
     def test_create_selects_account_matching_branch(self, session_cls):
