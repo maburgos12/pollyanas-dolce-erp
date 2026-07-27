@@ -73,6 +73,8 @@ class BonoProduccionResumenSerializer(serializers.ModelSerializer):
             "pasa_asistencia",
             "pasa_produccion",
             "gano_premio_embetunado",
+            "cancela_bono",
+            "cancela_motivo",
             "monto_uniforme",
             "monto_puntualidad",
             "monto_asistencia",

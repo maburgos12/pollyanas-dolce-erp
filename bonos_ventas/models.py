@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import calendar
+from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
@@ -79,6 +81,31 @@ class ConfigBonoVentasPeriodo(models.Model):
 
     def __str__(self) -> str:
         return f"Config Ventas {self.mes}/{self.anio}"
+
+    def rango_fechas(self) -> tuple[date, date]:
+        if self.fecha_inicio and self.fecha_fin and self.fecha_inicio <= self.fecha_fin:
+            return self.fecha_inicio, self.fecha_fin
+        ultimo_dia = calendar.monthrange(self.anio, self.mes)[1]
+        return date(self.anio, self.mes, 1), date(self.anio, self.mes, ultimo_dia)
+
+    def dias_laborables_exigibles(self, hoy: date | None = None, total: int | None = None) -> int:
+        """Días laborables ya exigibles a la fecha (prorrateo lineal del periodo).
+
+        Durante el periodo en curso evita contar como faltas los días que aún
+        no llegan; desde fecha_fin en adelante regresa dias_laborables completo,
+        por lo que el cierre conserva la fórmula histórica
+        (faltas = dias_laborables - días asistidos).
+        """
+        total = int(self.dias_laborables if total is None else total)
+        hoy = hoy or timezone.localdate()
+        inicio, fin = self.rango_fechas()
+        if hoy >= fin:
+            return total
+        if hoy < inicio:
+            return 0
+        transcurridos = (hoy - inicio).days + 1
+        dias_periodo = (fin - inicio).days + 1
+        return min(total, (total * transcurridos) // dias_periodo)
 
     def get_peso_categoria(self, categoria: str) -> Decimal:
         return {
@@ -164,6 +191,8 @@ class BonoVentasEmpleado(models.Model):
     pasa_uniforme = models.BooleanField(default=False)
     pasa_asistencia = models.BooleanField(default=False)
     pasa_puntualidad = models.BooleanField(default=False)
+    cancela_bono = models.BooleanField(default=False)
+    cancela_motivo = models.CharField(max_length=200, blank=True, default="")
     monto_uniforme = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     monto_asistencia = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     monto_puntualidad = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
@@ -203,34 +232,30 @@ class BonoVentasEmpleado(models.Model):
     def _es_repartidor(self) -> bool:
         return (self.empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR"
 
-    def _periodo_en_curso(self) -> bool:
-        hoy = timezone.localdate()
-        if self.periodo.fecha_inicio and self.periodo.fecha_fin:
-            return self.periodo.fecha_inicio <= hoy <= self.periodo.fecha_fin
-        return False
-
     def recalcular(self) -> None:
         cfg = self.periodo
         base = _money(cfg.bono_base)
         dias_base = self._dias_base()
         dias_laborables_cfg = int(cfg.dias_laborables or dias_base or 0)
-        dias_laborables = int(dias_base or 0) if self._periodo_en_curso() and dias_base else dias_laborables_cfg
+        dias_exigibles = cfg.dias_laborables_exigibles(total=dias_laborables_cfg)
         dias_asistencia = int(self.dias_asistencia or self.dias_trabajados or 0)
-        self.pasa_asistencia = (dias_laborables - dias_asistencia) <= cfg.limite_asistencia
+        self.pasa_asistencia = (dias_exigibles - dias_asistencia) <= cfg.limite_asistencia
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= cfg.limite_uniforme
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= cfg.limite_puntualidad
-        faltas = dias_laborables - int(self.dias_asistencia or 0)
-        retardos = dias_base - int(self.dias_puntualidad or 0)
-        cancela_bono = False
-        cancel_por_asistencia = getattr(cfg, "cancela_por_asistencia", False)
+        faltas = max(dias_exigibles - dias_asistencia, 0)
+        retardos = max(dias_base - int(self.dias_puntualidad or 0), 0)
+        motivos = []
         limite_cancel_asistencia = _to_int(getattr(cfg, "limite_asistencia_cancelacion", None), cfg.limite_asistencia)
-        if cancel_por_asistencia and (faltas >= limite_cancel_asistencia):
-            cancela_bono = True
-        cancel_por_puntualidad = getattr(cfg, "cancela_por_puntualidad", False)
+        # límite 0 = regla inactiva; con límite >= 1 la cancelación aplica sobre
+        # faltas ya exigibles (prorrateadas), nunca sobre días que aún no llegan
+        if cfg.cancela_por_asistencia and limite_cancel_asistencia > 0 and faltas >= limite_cancel_asistencia:
+            motivos.append(f"{faltas} falta{'s' if faltas != 1 else ''} (límite {limite_cancel_asistencia})")
         limite_cancel_retardos = _to_int(getattr(cfg, "limite_retardos_cancelacion", None), cfg.limite_puntualidad)
-        if cancel_por_puntualidad and (retardos >= limite_cancel_retardos):
-            cancela_bono = True
+        if cfg.cancela_por_puntualidad and limite_cancel_retardos > 0 and retardos >= limite_cancel_retardos:
+            motivos.append(f"{retardos} retardo{'s' if retardos != 1 else ''} (límite {limite_cancel_retardos})")
+        cancela_bono = bool(motivos)
         self.cancela_bono = cancela_bono
+        self.cancela_motivo = " · ".join(motivos)[:200]
         self.monto_uniforme = self._monto_concepto(base, cfg.pct_uniforme, self.pasa_uniforme and not cancela_bono)
         self.monto_asistencia = self._monto_concepto(base, cfg.pct_asistencia, self.pasa_asistencia and not cancela_bono)
         self.monto_puntualidad = self._monto_concepto(base, cfg.pct_puntualidad, self.pasa_puntualidad and not cancela_bono)

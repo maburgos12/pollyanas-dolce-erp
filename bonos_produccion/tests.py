@@ -552,7 +552,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v20-autosolicitudes", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v21-cancelacion-visible", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -644,7 +644,8 @@ class BonosProduccionTests(TestCase):
         regla.limite_asistencia = 2
         regla.limite_puntualidad = 2
         regla.cancela_por_asistencia = True
-        regla.limite_asistencia_cancelacion = 0
+        # límite 0 ahora significa regla inactiva; 1 falta = cancela requiere límite 1
+        regla.limite_asistencia_cancelacion = 1
         regla.save()
         bono = BonoProduccionEmpleado.objects.create(
             periodo=periodo,

@@ -43,11 +43,15 @@ def _parse_int(raw: str | None, default: int = 0) -> int:
         return default
 
 
-def _parse_decimal(raw: str | None) -> Decimal:
+def _parse_decimal(raw: str | None, default: Decimal | int = 0) -> Decimal:
+    # campo vacío o inválido conserva el valor actual (default) en vez de
+    # escribir 0 y dejar montos/porcentajes del bono en cero por accidente
+    if raw is None or str(raw).strip() == "":
+        return Decimal(default)
     try:
-        return Decimal(str(raw or "0"))
+        return Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
-        return Decimal("0")
+        return Decimal(default)
 
 
 def _dashboard_redirect(mes: int, anio: int):
@@ -120,10 +124,10 @@ def bonos_ventas_dashboard(request):
         if action == "config":
             periodo, _ = ConfigBonoVentasPeriodo.objects.get_or_create(mes=mes, anio=anio)
             periodo.dias_laborables = _parse_int(request.POST.get("dias_laborables"), periodo.dias_laborables)
-            periodo.bono_base = _parse_decimal(request.POST.get("bono_base"))
-            periodo.pct_uniforme = _parse_decimal(request.POST.get("pct_uniforme"))
-            periodo.pct_asistencia = _parse_decimal(request.POST.get("pct_asistencia"))
-            periodo.pct_puntualidad = _parse_decimal(request.POST.get("pct_puntualidad"))
+            periodo.bono_base = _parse_decimal(request.POST.get("bono_base"), periodo.bono_base)
+            periodo.pct_uniforme = _parse_decimal(request.POST.get("pct_uniforme"), periodo.pct_uniforme)
+            periodo.pct_asistencia = _parse_decimal(request.POST.get("pct_asistencia"), periodo.pct_asistencia)
+            periodo.pct_puntualidad = _parse_decimal(request.POST.get("pct_puntualidad"), periodo.pct_puntualidad)
             periodo.limite_uniforme = _parse_int(request.POST.get("limite_uniforme"), periodo.limite_uniforme)
             periodo.limite_asistencia = _parse_int(request.POST.get("limite_asistencia"), periodo.limite_asistencia)
             periodo.limite_puntualidad = _parse_int(request.POST.get("limite_puntualidad"), periodo.limite_puntualidad)
@@ -131,16 +135,36 @@ def bonos_ventas_dashboard(request):
             periodo.limite_asistencia_cancelacion = _parse_int(
                 request.POST.get("limite_asistencia_cancelacion"), periodo.limite_asistencia_cancelacion
             )
+            if periodo.cancela_por_asistencia and periodo.limite_asistencia_cancelacion < 1:
+                periodo.cancela_por_asistencia = False
+                messages.warning(
+                    request,
+                    "La cancelación por faltas requiere límite de al menos 1; quedó desactivada.",
+                )
             periodo.cancela_por_puntualidad = request.POST.get("cancela_por_puntualidad") == "on"
             periodo.limite_retardos_cancelacion = _parse_int(
                 request.POST.get("limite_retardos_cancelacion"), periodo.limite_retardos_cancelacion
             )
-            periodo.bono_ventas_adicional = _parse_decimal(request.POST.get("bono_ventas_adicional"))
-            periodo.umbral_crecimiento_pct = _parse_decimal(request.POST.get("umbral_crecimiento_pct"))
-            periodo.bono_repartidor_adicional = _parse_decimal(request.POST.get("bono_repartidor_adicional"))
-            periodo.umbral_efectividad_pct = _parse_decimal(request.POST.get("umbral_efectividad_pct"))
+            if periodo.cancela_por_puntualidad and periodo.limite_retardos_cancelacion < 1:
+                periodo.cancela_por_puntualidad = False
+                messages.warning(
+                    request,
+                    "La cancelación por retardos requiere límite de al menos 1; quedó desactivada.",
+                )
+            periodo.bono_ventas_adicional = _parse_decimal(
+                request.POST.get("bono_ventas_adicional"), periodo.bono_ventas_adicional
+            )
+            periodo.umbral_crecimiento_pct = _parse_decimal(
+                request.POST.get("umbral_crecimiento_pct"), periodo.umbral_crecimiento_pct
+            )
+            periodo.bono_repartidor_adicional = _parse_decimal(
+                request.POST.get("bono_repartidor_adicional"), periodo.bono_repartidor_adicional
+            )
+            periodo.umbral_efectividad_pct = _parse_decimal(
+                request.POST.get("umbral_efectividad_pct"), periodo.umbral_efectividad_pct
+            )
             for category, field in CATEGORY_WEIGHT_FIELDS.items():
-                setattr(periodo, field, _parse_decimal(request.POST.get(field)))
+                setattr(periodo, field, _parse_decimal(request.POST.get(field), getattr(periodo, field)))
             fecha_inicio = parse_date(request.POST.get("fecha_inicio") or "")
             if fecha_inicio is not None:
                 periodo.fecha_inicio = fecha_inicio

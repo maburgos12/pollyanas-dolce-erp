@@ -1,14 +1,51 @@
 from __future__ import annotations
 
+from datetime import date
+
 from django.contrib.auth.models import AbstractBaseUser
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.utils import timezone
 
 from core.access import ROLE_DG, group_name_variants
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import Empleado, PermisoSalida
+
+
+def _fecha_local(valor) -> date:
+    if timezone.is_aware(valor):
+        return timezone.localtime(valor).date()
+    return valor.date()
+
+
+def reevaluar_asistencia_permiso(
+    permiso: PermisoSalida,
+    *,
+    inicio: date | None = None,
+    fin: date | None = None,
+) -> None:
+    """Re-evalúa las incidencias de los días ya transcurridos del permiso.
+
+    Mismo patrón que vacaciones/incapacidades/suspensiones: aprobar un permiso
+    (incluso retroactivo) concilia de inmediato los retardos/faltas que cubre,
+    y un rechazo o cancelación posterior los regresa a pendiente, sin esperar
+    al barrido del día siguiente. Se agenda on_commit para leer el estado ya
+    persistido.
+    """
+    inicio = inicio or _fecha_local(permiso.fecha_inicio)
+    fin = min(fin or _fecha_local(permiso.fecha_fin or permiso.fecha_inicio), timezone.localdate())
+    if inicio > fin:
+        return
+    empleado = permiso.empleado
+
+    def _correr() -> None:
+        from .services_asistencia_reglas import evaluar_rango_asistencia
+
+        evaluar_rango_asistencia(inicio, fin, empleados=[empleado])
+
+    transaction.on_commit(_correr)
 
 
 DIRECCION_DEPARTAMENTOS = {
@@ -120,6 +157,8 @@ def resolver_permiso_jefe(
                 "actualizado_en",
             ]
         )
+    if permiso.estado in {PermisoSalida.ESTADO_APROBADO, PermisoSalida.ESTADO_RECHAZADO}:
+        reevaluar_asistencia_permiso(permiso)
     return permiso
 
 
@@ -167,6 +206,7 @@ def resolver_permiso_direccion(
             "actualizado_en",
         ]
     )
+    reevaluar_asistencia_permiso(permiso)
     return permiso
 
 

@@ -38,11 +38,15 @@ def _parse_int(raw: str | None, default: int = 0) -> int:
         return default
 
 
-def _parse_decimal(raw: str | None) -> Decimal:
+def _parse_decimal(raw: str | None, default: Decimal | int = 0) -> Decimal:
+    # campo vacío o inválido conserva el valor actual (default) en vez de
+    # escribir 0 y dejar montos/porcentajes del bono en cero por accidente
+    if raw is None or str(raw).strip() == "":
+        return Decimal(default)
     try:
-        return Decimal(str(raw or "0"))
+        return Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
-        return Decimal("0")
+        return Decimal(default)
 
 
 def _dashboard_redirect(mes: int, anio: int):
@@ -71,8 +75,8 @@ def bonos_produccion_dashboard(request):
             periodo, _ = ConfigBonoPeriodo.objects.get_or_create(mes=mes, anio=anio)
             periodo.dias_laborables = _parse_int(request.POST.get("dias_laborables"), periodo.dias_laborables)
             for area, amount_field in AREA_AMOUNT_FIELDS.items():
-                setattr(periodo, amount_field, _parse_decimal(request.POST.get(amount_field)))
-            periodo.premio_embetunado = _parse_decimal(request.POST.get("premio_embetunado"))
+                setattr(periodo, amount_field, _parse_decimal(request.POST.get(amount_field), getattr(periodo, amount_field)))
+            periodo.premio_embetunado = _parse_decimal(request.POST.get("premio_embetunado"), periodo.premio_embetunado)
             fecha_inicio = parse_date(request.POST.get("fecha_inicio") or "")
             if fecha_inicio is not None:
                 periodo.fecha_inicio = fecha_inicio
@@ -83,23 +87,39 @@ def bonos_produccion_dashboard(request):
             periodo.save()
 
             periodo.asegurar_reglas_area()
-            for area, _label in AREAS_PRODUCCION:
+            for area, label in AREAS_PRODUCCION:
                 regla = periodo.get_regla_area(area)
                 prefix = f"regla_{area.lower()}"
                 usa_produccion = request.POST.get(f"{prefix}_usa_produccion") == "on"
                 regla.usa_produccion = usa_produccion
-                regla.pct_produccion = _parse_decimal(request.POST.get(f"{prefix}_pct_produccion")) if usa_produccion else Decimal("0.00")
-                regla.pct_asistencia = _parse_decimal(request.POST.get(f"{prefix}_pct_asistencia"))
-                regla.pct_puntualidad = _parse_decimal(request.POST.get(f"{prefix}_pct_puntualidad"))
-                regla.pct_uniforme = _parse_decimal(request.POST.get(f"{prefix}_pct_uniforme"))
+                regla.pct_produccion = (
+                    _parse_decimal(request.POST.get(f"{prefix}_pct_produccion"), regla.pct_produccion)
+                    if usa_produccion
+                    else Decimal("0.00")
+                )
+                regla.pct_asistencia = _parse_decimal(request.POST.get(f"{prefix}_pct_asistencia"), regla.pct_asistencia)
+                regla.pct_puntualidad = _parse_decimal(request.POST.get(f"{prefix}_pct_puntualidad"), regla.pct_puntualidad)
+                regla.pct_uniforme = _parse_decimal(request.POST.get(f"{prefix}_pct_uniforme"), regla.pct_uniforme)
                 regla.cancela_por_asistencia = request.POST.get(f"{prefix}_cancela_por_asistencia") == "on"
                 regla.limite_asistencia_cancelacion = _parse_int(
                     request.POST.get(f"{prefix}_limite_asistencia_cancelacion"), regla.limite_asistencia_cancelacion
                 )
+                if regla.cancela_por_asistencia and regla.limite_asistencia_cancelacion < 1:
+                    regla.cancela_por_asistencia = False
+                    messages.warning(
+                        request,
+                        f"{label}: la cancelación por faltas requiere límite de al menos 1; quedó desactivada.",
+                    )
                 regla.cancela_por_puntualidad = request.POST.get(f"{prefix}_cancela_por_puntualidad") == "on"
                 regla.limite_retardos_cancelacion = _parse_int(
                     request.POST.get(f"{prefix}_limite_retardos_cancelacion"), regla.limite_retardos_cancelacion
                 )
+                if regla.cancela_por_puntualidad and regla.limite_retardos_cancelacion < 1:
+                    regla.cancela_por_puntualidad = False
+                    messages.warning(
+                        request,
+                        f"{label}: la cancelación por retardos requiere límite de al menos 1; quedó desactivada.",
+                    )
                 regla.limite_produccion = (
                     _parse_int(request.POST.get(f"{prefix}_limite_produccion"), regla.limite_produccion)
                     if usa_produccion

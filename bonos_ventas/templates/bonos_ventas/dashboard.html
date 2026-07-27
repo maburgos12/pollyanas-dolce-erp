@@ -218,7 +218,11 @@
             <span class="status-pill neutral">{{ bono.sucursal.nombre }}</span>
             {% endif %}
             <span>{{ bono.dias_trabajados }} días</span>
+            {% if bono.cancela_bono %}
+            <span class="status-pill bad">Cancelado: {{ bono.cancela_motivo }}</span>
+            {% else %}
             <span class="status-pill {% if bono.pasa_asistencia %}ok{% else %}bad{% endif %}">{% if bono.pasa_asistencia %}Asistencia{% else %}No asistencia{% endif %}</span>
+            {% endif %}
             <span class="employee-total">${{ bono.total_a_pagar|floatformat:2|intcomma }}</span>
           </summary>
           <form class="employee-body" method="post">
