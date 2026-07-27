@@ -200,22 +200,29 @@ class PointHttpSessionService:
         branch_display_name: str | None = None,
     ) -> PointAuthenticatedSession:
         session = requests.Session()
-        session.headers.update(self._ajax_headers())
-        self._sign_in(session)
-        accounts = self._get_workspaces(session)
-        current_account_id = self._current_account_id(session)
-        account_id, resolved_name = self._resolve_account(
-            accounts=accounts,
-            branch_external_id=branch_external_id,
-            branch_display_name=branch_display_name,
-            current_account_id=current_account_id,
-        )
-        self._select_account(
-            session=session,
-            account_id=account_id,
-            branch_external_id=branch_external_id,
-            branch_display_name=branch_display_name or resolved_name,
-        )
+        try:
+            session.headers.update(self._ajax_headers())
+            self._sign_in(session)
+            accounts = self._get_workspaces(session)
+            current_account_id = self._current_account_id(session)
+            account_id, resolved_name = self._resolve_account(
+                accounts=accounts,
+                branch_external_id=branch_external_id,
+                branch_display_name=branch_display_name,
+                current_account_id=current_account_id,
+            )
+            self._select_account(
+                session=session,
+                account_id=account_id,
+                branch_external_id=branch_external_id,
+                branch_display_name=branch_display_name or resolved_name,
+            )
+        except Exception:
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
         return PointAuthenticatedSession(
             session=session,
             account_id=account_id,
