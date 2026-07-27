@@ -105,6 +105,12 @@ def _lock_key(namespace: str, value: str) -> None:
 
 def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
     normalized_phone = _phone(command.customer_phone)
+    normalized_email = _email(command.customer_email)
+    if normalized_phone:
+        _lock_key("crm-customer-phone", normalized_phone)
+    elif normalized_email:
+        _lock_key("crm-customer-email", normalized_email)
+
     if normalized_phone:
         customer = (
             Cliente.objects.extra(
@@ -117,7 +123,6 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
         if customer:
             return customer
 
-    normalized_email = _email(command.customer_email)
     if normalized_email:
         customer = (
             Cliente.objects.annotate(email_lower=Lower("email"))
@@ -147,6 +152,49 @@ def _find_or_create_address(
         .first()
     )
     if address:
+        updates: list[str] = []
+        conflicts: list[str] = []
+
+        incoming_references = _text(command.references)
+        if incoming_references:
+            if address.referencias and address.referencias != incoming_references:
+                conflicts.append("referencias")
+            elif not address.referencias:
+                address.referencias = incoming_references
+                updates.append("referencias")
+
+        incoming_place_id = _text(command.place_id)
+        if incoming_place_id:
+            if address.place_id and address.place_id != incoming_place_id:
+                conflicts.append("place_id")
+            elif not address.place_id:
+                address.place_id = incoming_place_id
+                updates.append("place_id")
+
+        if command.latitude is not None and command.longitude is not None:
+            has_saved_gps = address.latitud is not None or address.longitud is not None
+            if has_saved_gps and (
+                address.latitud != command.latitude
+                or address.longitud != command.longitude
+            ):
+                conflicts.append("GPS")
+            elif not has_saved_gps:
+                address.latitud = command.latitude
+                address.longitud = command.longitude
+                updates.extend(("latitud", "longitud"))
+
+        if conflicts:
+            raise ValidationError(
+                {
+                    "address": (
+                        "La dirección guardada contiene datos distintos en "
+                        + ", ".join(conflicts)
+                        + "; debe seleccionarse o corregirse explícitamente."
+                    )
+                },
+            )
+        if updates:
+            address.save(update_fields=updates)
         return address
 
     try:
@@ -218,6 +266,9 @@ def _create_delivery(
     command: LinkPointOrderCommand,
     actor,
 ) -> SolicitudDomicilio:
+    channel_detail = order.canal
+    if order.canal == PedidoCliente.CANAL_OTRO:
+        channel_detail = _text(command.social_reference)[:60]
     return SolicitudDomicilio.objects.create(
         pedido_cliente=order,
         cliente=customer,
@@ -226,7 +277,7 @@ def _create_delivery(
         cliente_telefono=customer.telefono,
         direccion=address.direccion,
         canal_origen=order.canal,
-        canal_detalle=_text(command.social_reference),
+        canal_detalle=channel_detail,
         notas=_text(command.references),
         ventana_inicio=command.delivery_window_start,
         ventana_fin=command.delivery_window_end,

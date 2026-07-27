@@ -16,10 +16,10 @@ from logistica.models import SolicitudDomicilio
 from pos_bridge.services.point_note_detail_service import PointNote, PointNoteLine
 
 
-def _note() -> PointNote:
+def _note(*, pk_nota="900001", folio="18452") -> PointNote:
     return PointNote(
-        pk_nota="900001",
-        folio="18452",
+        pk_nota=pk_nota,
+        folio=folio,
         branch_name="Matriz",
         sold_at=timezone.now(),
         total=Decimal("565.00"),
@@ -158,6 +158,62 @@ class PointOrderLinkTests(TestCase):
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_note(),
     )
+    def test_existing_address_is_enriched_only_when_fields_are_empty(self, _fetch):
+        customer = Cliente.objects.create(nombre="María", telefono="6671234567")
+        address = DireccionCliente.objects.create(
+            cliente=customer,
+            direccion="Av. Central 123",
+        )
+
+        result = link_point_note(command=_command(), actor=self.actor)
+        address.refresh_from_db()
+
+        self.assertEqual(address.latitud, Decimal("25.790466"))
+        self.assertEqual(address.longitud, Decimal("-108.985886"))
+        self.assertEqual(address.place_id, "place-123")
+        self.assertEqual(address.referencias, "Portón blanco")
+        result.delivery.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        result.delivery.save(update_fields=["estatus"])
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_existing_address_rejects_conflicting_non_empty_location(self, _fetch):
+        customer = Cliente.objects.create(nombre="María", telefono="6671234567")
+        DireccionCliente.objects.create(
+            cliente=customer,
+            direccion="Av. Central 123",
+            referencias="Casa azul",
+            latitud=Decimal("25.700000"),
+            longitud=Decimal("-108.900000"),
+            place_id="existing-place",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "dirección guardada"):
+            link_point_note(command=_command(), actor=self.actor)
+        self.assertEqual(PedidoCliente.objects.count(), 0)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_social_reference_180_is_canonical_without_overflowing_delivery_detail(self, _fetch):
+        reference = "m" * 180
+
+        result = link_point_note(
+            command=_command(social_reference=reference),
+            actor=self.actor,
+        )
+
+        self.assertEqual(result.order.social_reference, reference)
+        self.assertLessEqual(len(result.delivery.canal_detalle), 60)
+        self.assertEqual(result.delivery.canal_detalle, PedidoCliente.CANAL_FACEBOOK)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
     def test_invalid_channel_gps_window_or_actor_is_rejected(self, _fetch):
         invalid_commands = (
             _command(channel="TIKTOK"),
@@ -213,3 +269,38 @@ class PointOrderLinkConcurrencyTests(TransactionTestCase):
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
         self.assertEqual(Cliente.objects.count(), 1)
         self.assertEqual(DireccionCliente.objects.count(), 1)
+
+    def test_two_notes_with_same_phone_create_one_customer(self):
+        ready = Barrier(2)
+
+        def attempt(pk_nota, folio):
+            close_old_connections()
+            try:
+                ready.wait(timeout=10)
+                note = _note(pk_nota=pk_nota, folio=folio)
+                point_service = type(
+                    "FakePointService",
+                    (),
+                    {"fetch": lambda self, **kwargs: note},
+                )()
+                command = _command(pk_nota=pk_nota)
+                return link_point_note(
+                    command=command,
+                    actor=self.actor,
+                    point_service=point_service,
+                ).order.pk
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (
+                executor.submit(attempt, "900001", "18452"),
+                executor.submit(attempt, "900002", "18453"),
+            )
+            order_ids = [future.result(timeout=20) for future in futures]
+
+        self.assertEqual(len(set(order_ids)), 2)
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(DireccionCliente.objects.count(), 1)
+        self.assertEqual(PedidoCliente.objects.count(), 2)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 2)
