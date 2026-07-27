@@ -22,6 +22,11 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         self.user = User.objects.create_user(username="repartidor_domicilios", password="pass123")
         self.repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal)
 
+    def test_solicitud_accepts_social_channels_shared_with_crm(self):
+        self.assertIn(("FACEBOOK", "Facebook"), SolicitudDomicilio.CANAL_CHOICES)
+        self.assertIn(("INSTAGRAM", "Instagram"), SolicitudDomicilio.CANAL_CHOICES)
+        self.assertEqual(SolicitudDomicilio.CANAL_CHOICES, PedidoCliente.CANAL_CHOICES)
+
     def test_solicitud_ligada_conserva_cliente_direccion_y_texto_historico(self):
         cliente = Cliente.objects.create(nombre="Ana Pérez", telefono="6671234567")
         direccion = DireccionCliente.objects.create(

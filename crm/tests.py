@@ -388,6 +388,40 @@ class PedidoClientePointLinkTests(TestCase):
 
         self.assertEqual(pedido.point_note_snapshot, {"pk_nota": "900001"})
 
+    def test_payload_snapshot_remains_immutable_after_refactor(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Omnicanal",
+            payload_snapshot={"external_id": "web-001"},
+        )
+        pedido.payload_snapshot = {"external_id": "alterado"}
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "El snapshot omnicanal es inmutable.",
+        ):
+            pedido.save()
+
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.payload_snapshot, {"external_id": "web-001"})
+
+    def test_payload_snapshot_allows_legacy_backfill_only_once(self):
+        pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Omnicanal legacy",
+        )
+        pedido.payload_snapshot = {"external_id": "web-001"}
+        pedido.save(_allow_payload_snapshot_backfill=True)
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.payload_snapshot, {"external_id": "web-001"})
+
+        pedido.payload_snapshot = {"external_id": "web-002"}
+        with self.assertRaisesMessage(
+            ValidationError,
+            "El snapshot omnicanal es inmutable.",
+        ):
+            pedido.save(_allow_payload_snapshot_backfill=True)
+
 
 class SucursalResolutionTests(TestCase):
     def test_resolve_sucursal_excludes_col_duplicate_and_keeps_canonical_branch(self):
