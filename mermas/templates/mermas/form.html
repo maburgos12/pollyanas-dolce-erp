@@ -120,6 +120,45 @@
             event.formData.set("csrfmiddlewaretoken", token);
         }
     });
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submitButton = form.querySelector('button[type="submit"]');
+        const originalLabel = submitButton.textContent;
+        const cookieToken = document.cookie
+            .split("; ")
+            .find((row) => row.startsWith("csrftoken="))
+            ?.split("=")
+            .slice(1)
+            .join("=");
+        const fieldToken = form.querySelector('[name="csrfmiddlewaretoken"]')?.value;
+        const token = cookieToken ? decodeURIComponent(cookieToken) : fieldToken;
+        const formData = new FormData(form);
+        if (token) {
+            formData.set("csrfmiddlewaretoken", token);
+        }
+        submitButton.disabled = true;
+        submitButton.textContent = "Guardando…";
+        try {
+            const response = await fetch(form.action || window.location.href, {
+                method: "POST",
+                body: formData,
+                headers: token ? {"X-CSRFToken": token} : {},
+                credentials: "same-origin",
+                redirect: "follow",
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            window.location.assign(response.url || window.location.href);
+        } catch (error) {
+            submitButton.disabled = false;
+            submitButton.textContent = originalLabel;
+            window.ERPActionUI?.showToast({
+                type: "error",
+                message: "No se pudo guardar la merma. Revisa tu conexión e inténtalo de nuevo.",
+            });
+        }
+    });
     const syncProductId = (row) => {
         const textInput = row.querySelector('input[name="producto_texto[]"]');
         const idInput = row.querySelector('input[name="receta_id[]"]');
