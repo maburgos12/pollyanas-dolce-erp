@@ -1008,6 +1008,38 @@ class CanonicalOmnichannelApiTests(APITestCase):
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_point_note_for_api(),
     )
+    def test_point_order_fingerprint_rejects_symmetric_omissions_and_identity_changes(self, _fetch):
+        url = reverse("api_public_omnichannel_point_orders")
+        first = self.client.post(url, self.point_payload, format="json", **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        mutations = (
+            ("nombre", lambda payload: payload["cliente"].update(nombre="Otro nombre")),
+            ("email", lambda payload: payload["cliente"].update(email="otro@example.com")),
+            ("references", lambda payload: payload["direccion"].update(referencias="")),
+            ("place", lambda payload: payload["direccion"].update(place_id="")),
+            ("gps", lambda payload: (
+                payload["direccion"].pop("latitud"),
+                payload["direccion"].pop("longitud"),
+            )),
+            ("window", lambda payload: (
+                payload.pop("ventana_inicio"),
+                payload.pop("ventana_fin"),
+            )),
+            ("instructions", lambda payload: payload.update(instrucciones_entrega="")),
+        )
+
+        for label, mutate in mutations:
+            payload = deepcopy(self.point_payload)
+            mutate(payload)
+            with self.subTest(label=label):
+                response = self.client.post(url, payload, format="json", **self.auth)
+                self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+                self.assertEqual(response.data["code"], "POINT_ORDER_CONFLICT")
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
     def test_delivery_list_detail_filters_legacy_and_do_not_duplicate_point_snapshot(self, _fetch):
         created = self.client.post(
             reverse("api_public_omnichannel_point_orders"),
@@ -1058,9 +1090,11 @@ class CanonicalOmnichannelApiTests(APITestCase):
         delivery = SolicitudDomicilio.objects.get(
             pk=created.data["solicitud_domicilio_id"],
         )
-        sold_date = PedidoCliente.objects.get(
+        sold_at = PedidoCliente.objects.get(
             pk=created.data["pedido_id"],
-        ).point_note_snapshot["sold_at"][:10]
+        ).point_note_sold_at
+        self.assertIsNotNone(sold_at)
+        sold_date = timezone.localtime(sold_at).date().isoformat()
 
         response = self.client.get(
             reverse("api_public_omnichannel_deliveries"),

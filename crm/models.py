@@ -181,6 +181,12 @@ class PedidoCliente(models.Model):
     point_note_folio = models.CharField(max_length=80, blank=True, default="", db_index=True)
     point_note_snapshot = models.JSONField(default=dict, blank=True, editable=False)
     point_note_fetched_at = models.DateTimeField(null=True, blank=True, editable=False)
+    point_note_sold_at = models.DateTimeField(
+        null=True, blank=True, editable=False, db_index=True,
+    )
+    point_link_fingerprint = models.CharField(
+        max_length=64, blank=True, default="", editable=False,
+    )
     social_reference = models.CharField(max_length=180, blank=True, default="")
     objects = PedidoClienteQuerySet.as_manager()
     tracking_token = models.UUIDField(
@@ -199,7 +205,9 @@ class PedidoCliente(models.Model):
     )
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
-    sucursal = models.CharField(max_length=120, blank=True, default="")
+    sucursal = models.CharField(
+        max_length=120, blank=True, default="", db_index=True,
+    )
     sucursal_ref = models.ForeignKey(
         Sucursal,
         null=True,
@@ -294,7 +302,11 @@ class PedidoCliente(models.Model):
         snapshot_identity = self._point_note_snapshot_identity(self.point_note_snapshot)
         has_snapshot = bool(self.point_note_snapshot)
         has_point_metadata = bool(
-            has_snapshot or self.point_note_folio or self.point_note_fetched_at
+            has_snapshot
+            or self.point_note_folio
+            or self.point_note_fetched_at
+            or self.point_note_sold_at
+            or self.point_link_fingerprint
         )
 
         if not self.point_note_id and has_point_metadata:
@@ -337,6 +349,8 @@ class PedidoCliente(models.Model):
                 "point_note_folio",
                 "point_note_snapshot",
                 "point_note_fetched_at",
+                "point_note_sold_at",
+                "point_link_fingerprint",
             )
             if any(bool(getattr(persisted, field_name)) for field_name in point_fields):
                 raise ValidationError(
@@ -389,6 +403,8 @@ class PedidoCliente(models.Model):
                     "point_note_folio",
                     "point_note_snapshot",
                     "point_note_fetched_at",
+                    "point_note_sold_at",
+                    "point_link_fingerprint",
                 )
                 .first()
             )
@@ -412,6 +428,8 @@ class PedidoCliente(models.Model):
                 "point_note_folio",
                 "point_note_snapshot",
                 "point_note_fetched_at",
+                "point_note_sold_at",
+                "point_link_fingerprint",
             )
             point_changed = any(
                 (persisted_values or {}).get(field_name) != getattr(self, field_name)

@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from importlib import import_module
 from threading import Barrier
 from unittest.mock import patch
 
@@ -15,6 +16,9 @@ from crm.models import Cliente, DireccionCliente, PedidoCliente
 from crm.services.point_order_link import LinkPointOrderCommand, link_point_note
 from logistica.models import SolicitudDomicilio
 from pos_bridge.services.point_note_detail_service import PointNote, PointNoteLine
+
+
+_DEFAULT_WINDOW_START = datetime(2030, 1, 15, 18, 0, tzinfo=dt_timezone.utc)
 
 
 def _note(*, pk_nota="900001", folio="18452") -> PointNote:
@@ -63,8 +67,8 @@ def _command(**overrides) -> LinkPointOrderCommand:
         "longitude": Decimal("-108.985886"),
         "place_id": "place-123",
         "social_reference": "facebook-thread-1",
-        "delivery_window_start": timezone.now() + timedelta(hours=1),
-        "delivery_window_end": timezone.now() + timedelta(hours=2),
+        "delivery_window_start": _DEFAULT_WINDOW_START,
+        "delivery_window_end": _DEFAULT_WINDOW_START + timedelta(hours=1),
         "instructions": "Tocar el timbre",
     }
     data.update(overrides)
@@ -134,6 +138,24 @@ class PointOrderLinkTests(TestCase):
         self.assertNotIn("customer_phone", snapshot)
         self.assertEqual(result.order.created_by, self.actor)
         self.assertEqual(result.delivery.created_by, self.actor)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_point_link_stores_non_reversible_fingerprint_and_indexed_sale_facts(self, fetch):
+        result = link_point_note(command=_command(), actor=self.actor)
+        order = result.order
+
+        self.assertEqual(len(order.point_link_fingerprint), 64)
+        self.assertNotIn("6671234567", order.point_link_fingerprint)
+        self.assertNotIn("example.com", order.point_link_fingerprint)
+        self.assertEqual(order.point_note_sold_at, fetch.return_value.sold_at)
+        self.assertEqual(order.sucursal, "Matriz")
+
+        order.point_link_fingerprint = "0" * 64
+        with self.assertRaises(ValidationError):
+            order.save()
 
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",
@@ -267,7 +289,7 @@ class PointOrderLinkTests(TestCase):
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_note(),
     )
-    def test_existing_point_order_without_address_or_delivery_is_repaired_idempotently(
+    def test_existing_point_order_without_fingerprint_requires_reconciliation(
         self,
         _fetch,
     ):
@@ -281,15 +303,66 @@ class PointOrderLinkTests(TestCase):
             point_note_fetched_at=timezone.now(),
         )
 
-        first = link_point_note(command=_command(), actor=self.actor)
-        second = link_point_note(command=_command(), actor=self.actor)
+        with self.assertRaises(ValidationError) as captured:
+            link_point_note(command=_command(), actor=self.actor)
         existing.refresh_from_db()
 
-        self.assertEqual(first.order.pk, existing.pk)
-        self.assertEqual(second.order.pk, existing.pk)
-        self.assertIsNotNone(existing.direccion_entrega_id)
-        self.assertEqual(first.delivery.pk, second.delivery.pk)
-        self.assertEqual(SolicitudDomicilio.objects.filter(pedido_cliente=existing).count(), 1)
+        self.assertIn("conciliación", str(captured.exception))
+        self.assertIsNone(existing.direccion_entrega_id)
+        self.assertEqual(SolicitudDomicilio.objects.filter(pedido_cliente=existing).count(), 0)
+
+    def test_migration_backfills_only_valid_indexed_point_facts(self):
+        migration = import_module("crm.migrations.0008_point_link_fingerprint_indexes")
+
+        class FakeOrder:
+            def __init__(self, snapshot):
+                self.point_note_snapshot = snapshot
+                self.point_note_sold_at = None
+                self.sucursal = ""
+                self.saved_fields = []
+
+            def save(self, *, update_fields):
+                self.saved_fields.append(tuple(update_fields))
+
+        valid = FakeOrder(
+            {
+                "sold_at": "2026-07-27T16:30:00-07:00",
+                "branch_name": "Matriz",
+            },
+        )
+        invalid = FakeOrder(
+            {
+                "sold_at": "fecha-inválida",
+                "branch_name": "",
+            },
+        )
+
+        class FakeQuerySet:
+            def exclude(self, **_kwargs):
+                return self
+
+            def iterator(self, **_kwargs):
+                return iter((valid, invalid))
+
+        class FakePedidoCliente:
+            objects = FakeQuerySet()
+
+        class FakeApps:
+            @staticmethod
+            def get_model(app_label, model_name):
+                self.assertEqual((app_label, model_name), ("crm", "PedidoCliente"))
+                return FakePedidoCliente
+
+        migration.backfill_point_indexed_facts(FakeApps(), None)
+
+        self.assertEqual(valid.sucursal, "Matriz")
+        self.assertEqual(
+            valid.point_note_sold_at,
+            datetime(2026, 7, 27, 16, 30, tzinfo=dt_timezone(timedelta(hours=-7))),
+        )
+        self.assertEqual(valid.saved_fields, [("point_note_sold_at", "sucursal")])
+        self.assertIsNone(invalid.point_note_sold_at)
+        self.assertEqual(invalid.saved_fields, [])
 
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",

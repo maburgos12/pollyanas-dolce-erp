@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from datetime import date, datetime, timedelta
 from uuid import uuid4
@@ -34,6 +35,7 @@ from crm.services.point_order_link import (
     LinkPointOrderCommand,
     LinkPointOrderResult,
     link_point_note,
+    point_link_fingerprint,
 )
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from logistica.models import SolicitudDomicilio
@@ -751,51 +753,11 @@ class PublicOmnichannelPointNoteDetailView(APIView):
 
 
 def _point_replay_matches(order, delivery, command):
-    customer = order.cliente
-    address = order.direccion_entrega
-    if (
-        order.canal != command.channel
-        or _normalize_text(order.social_reference)
-        != _normalize_text(command.social_reference)
-        or address is None
-        or DireccionCliente.normalizar_direccion(command.address)
-        != address.direccion_normalizada
-        or delivery.ventana_inicio != command.delivery_window_start
-        or delivery.ventana_fin != command.delivery_window_end
-        or _normalize_text(delivery.instrucciones_entrega)
-        != _normalize_text(command.instructions)
-    ):
-        return False
-
-    incoming_phone = _normalize_phone(command.customer_phone)
-    incoming_email = _normalize_email(command.customer_email)
-    if incoming_phone:
-        if _normalize_phone(customer.telefono) != incoming_phone:
-            return False
-    elif incoming_email:
-        if _normalize_email(customer.email) != incoming_email:
-            return False
-    elif _normalize_text(customer.nombre).casefold() != _normalize_text(
-        command.customer_name,
-    ).casefold():
-        return False
-
-    optional_pairs = (
-        (command.references, address.referencias),
-        (command.place_id, address.place_id),
+    persisted = order.point_link_fingerprint
+    return bool(persisted) and hmac.compare_digest(
+        persisted,
+        point_link_fingerprint(command),
     )
-    if any(
-        _normalize_text(incoming)
-        and _normalize_text(incoming) != _normalize_text(persisted)
-        for incoming, persisted in optional_pairs
-    ):
-        return False
-    if command.latitude is not None and (
-        address.latitud != command.latitude
-        or address.longitud != command.longitude
-    ):
-        return False
-    return True
 
 
 class PublicOmnichannelPointOrdersView(APIView):
@@ -1084,12 +1046,17 @@ class PublicOmnichannelDeliveriesView(APIView):
             )
         if values.get("sucursal"):
             deliveries = deliveries.filter(
-                pedido_cliente__sucursal__iexact=values["sucursal"],
+                pedido_cliente__sucursal=values["sucursal"],
             )
         if values.get("fecha"):
+            day_start = timezone.make_aware(
+                datetime.combine(values["fecha"], datetime.min.time()),
+                timezone.get_current_timezone(),
+            )
             deliveries = deliveries.filter(
-                pedido_cliente__point_note_snapshot__sold_at__startswith=(
-                    values["fecha"].isoformat()
+                pedido_cliente__point_note_sold_at__gte=day_start,
+                pedido_cliente__point_note_sold_at__lt=(
+                    day_start + timedelta(days=1)
                 ),
             )
         deliveries = deliveries.order_by(values["ordering"], "id")

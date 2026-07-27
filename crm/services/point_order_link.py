@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -55,6 +58,59 @@ def _phone(value: str) -> str:
 
 def _email(value: str) -> str:
     return _text(value).lower()
+
+
+def _canonical_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(dt_timezone.utc).isoformat()
+
+
+def point_link_fingerprint(command: LinkPointOrderCommand) -> str:
+    payload = {
+        "v": 1,
+        "channel": command.channel,
+        "social_reference": _text(command.social_reference),
+        "customer": {
+            "name": _text(command.customer_name),
+            "phone": _phone(command.customer_phone),
+            "email": _email(command.customer_email),
+        },
+        "address": {
+            "value": DireccionCliente.normalizar_direccion(command.address),
+            "references": _text(command.references),
+            "latitude": (
+                format(command.latitude, "f")
+                if command.latitude is not None
+                else None
+            ),
+            "longitude": (
+                format(command.longitude, "f")
+                if command.longitude is not None
+                else None
+            ),
+            "place_id": _text(command.place_id),
+        },
+        "delivery_window": {
+            "start": _canonical_datetime(command.delivery_window_start),
+            "end": _canonical_datetime(command.delivery_window_end),
+        },
+        "instructions": _text(command.instructions),
+    }
+    message = (
+        "pollyanas:point-link:v1\0"
+        + json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    ).encode()
+    return hmac.new(
+        settings.SECRET_KEY.encode(),
+        message,
+        digestmod=hashlib.sha256,
+    ).hexdigest()
 
 
 def _validate_command(command: LinkPointOrderCommand, actor) -> None:
@@ -385,6 +441,7 @@ def link_point_note(
     """
 
     _validate_command(command, actor)
+    fingerprint = point_link_fingerprint(command)
     note = (point_service or PointNoteDetailService()).fetch(
         pk_nota=_text(command.pk_nota),
     )
@@ -401,6 +458,22 @@ def link_point_note(
             .first()
         )
         if existing:
+            if not existing.point_link_fingerprint:
+                raise ValidationError(
+                    {
+                        "pedido": (
+                            "El pedido Point anterior requiere conciliación "
+                            "antes de aceptar un replay."
+                        )
+                    },
+                )
+            if not hmac.compare_digest(
+                existing.point_link_fingerprint,
+                fingerprint,
+            ):
+                raise ValidationError(
+                    {"pedido": "La nota Point ya existe con otra captura."},
+                )
             delivery = _delivery_for_existing(existing)
             if delivery is None:
                 customer = existing.cliente
@@ -437,6 +510,8 @@ def link_point_note(
                     point_note_folio=note.folio,
                     point_note_snapshot=snapshot,
                     point_note_fetched_at=timezone.now(),
+                    point_note_sold_at=note.sold_at,
+                    point_link_fingerprint=fingerprint,
                     social_reference=_text(command.social_reference),
                     canal=command.channel,
                     descripcion=_description(note),
