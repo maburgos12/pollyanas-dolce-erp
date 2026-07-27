@@ -115,6 +115,47 @@ class RecalcularCancelacionTests(TestCase):
         bono = self.recalcular_en(bono, date(2026, 7, 25))
         self.assertFalse(bono.cancela_bono)
 
+    def test_nueve_llegadas_tarde_se_convierten_en_falta_y_cancelan(self):
+        # política escalonada: 3 llegadas tarde = 1 retardo formal;
+        # 3 retardos formales = 1 falta; 1 falta cancela (límite 1)
+        bono = self.crear_bono(
+            dias_trabajados=21,
+            dias_asistencia=21,
+            dias_uniforme=21,
+            dias_puntualidad=12,
+            dias_produccion=21,
+        )
+        bono = self.recalcular_en(bono, date(2026, 7, 25))
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.cancela_motivo, "1 falta (límite 1), incluye 1 por retardos")
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
+    def test_ocho_llegadas_tarde_no_llegan_a_falta_y_paga(self):
+        bono = self.crear_bono(
+            dias_trabajados=21,
+            dias_asistencia=21,
+            dias_uniforme=21,
+            dias_puntualidad=13,
+            dias_produccion=21,
+        )
+        bono = self.recalcular_en(bono, date(2026, 7, 25))
+        self.assertFalse(bono.cancela_bono)
+        # pierde el concepto de puntualidad (8 retardos > límite 2) pero cobra el resto
+        self.assertFalse(bono.pasa_puntualidad)
+        self.assertGreater(bono.total_a_pagar, Decimal("0.00"))
+
+    def test_falta_real_y_faltas_por_retardos_se_suman_en_motivo(self):
+        bono = self.crear_bono(
+            dias_trabajados=20,
+            dias_asistencia=20,
+            dias_uniforme=20,
+            dias_puntualidad=11,
+            dias_produccion=20,
+        )
+        bono = self.recalcular_en(bono, date(2026, 7, 25))
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.cancela_motivo, "2 faltas (límite 1), incluye 1 por retardos")
+
     def test_cancela_por_retardos_con_motivo(self):
         bono = self.crear_bono(
             cancela_faltas=False,
