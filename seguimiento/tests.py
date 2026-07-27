@@ -281,6 +281,45 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIn("Bonos producción", labels)
         self.assertTrue(can_view_submodule(self.user, "produccion", "bonos"))
 
+    def test_usuario_sin_rol_ve_en_navegacion_solo_el_tipo_que_tiene_asignado(self):
+        usuario = get_user_model().objects.create_user(
+            username="yesenia.sin.rol",
+            password="test12345",
+        )
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta asignada directamente",
+            responsable_user=usuario,
+        )
+
+        groups = build_nav_groups(usuario, "/seguimiento/minutas/")
+        seguimiento_items = [
+            item
+            for group in groups
+            for item in group["items"]
+            if item["module"] == "seguimiento"
+        ]
+
+        self.assertEqual([item["label"] for item in seguimiento_items], ["Minutas"])
+
+    def test_usuario_sin_rol_no_puede_ver_minuta_asignada_a_otra_persona(self):
+        usuario = get_user_model().objects.create_user(
+            username="yesenia.aislada",
+            password="test12345",
+        )
+        minuta_ajena = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta de otra persona",
+            responsable_user=self.user,
+        )
+        self.client.force_login(usuario)
+
+        listado = self.client.get("/seguimiento/minutas/")
+        detalle = self.client.get(f"/seguimiento/{minuta_ajena.pk}/")
+
+        self.assertNotContains(listado, minuta_ajena.titulo)
+        self.assertEqual(detalle.status_code, 404)
+
     def test_colaborador_staff_no_hereda_panel_dg_de_seguimiento(self):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
