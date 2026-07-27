@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import calendar
+from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
 
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
@@ -121,6 +124,31 @@ class ConfigBonoPeriodo(models.Model):
     def asegurar_reglas_area(self) -> None:
         for area, _label in AREAS_PRODUCCION:
             self.reglas_area.get_or_create(area=area, defaults=ConfigBonoArea.defaults_for_area(area))
+
+    def rango_fechas(self) -> tuple[date, date]:
+        if self.fecha_inicio and self.fecha_fin and self.fecha_inicio <= self.fecha_fin:
+            return self.fecha_inicio, self.fecha_fin
+        ultimo_dia = calendar.monthrange(self.anio, self.mes)[1]
+        return date(self.anio, self.mes, 1), date(self.anio, self.mes, ultimo_dia)
+
+    def dias_laborables_exigibles(self, hoy: date | None = None, total: int | None = None) -> int:
+        """Días laborables ya exigibles a la fecha (prorrateo lineal del periodo).
+
+        Durante el periodo en curso evita contar como faltas los días que aún
+        no llegan; desde fecha_fin en adelante regresa dias_laborables completo,
+        por lo que el cierre conserva la fórmula histórica
+        (faltas = dias_laborables - días asistidos).
+        """
+        total = int(self.dias_laborables if total is None else total)
+        hoy = hoy or timezone.localdate()
+        inicio, fin = self.rango_fechas()
+        if hoy >= fin:
+            return total
+        if hoy < inicio:
+            return 0
+        transcurridos = (hoy - inicio).days + 1
+        dias_periodo = (fin - inicio).days + 1
+        return min(total, (total * transcurridos) // dias_periodo)
 
     @transaction.atomic
     def recalcular_todos(self) -> int:
@@ -249,6 +277,8 @@ class BonoProduccionEmpleado(models.Model):
     pasa_asistencia = models.BooleanField(default=False)
     pasa_produccion = models.BooleanField(default=False)
     gano_premio_embetunado = models.BooleanField(default=False)
+    cancela_bono = models.BooleanField(default=False)
+    cancela_motivo = models.CharField(max_length=200, blank=True, default="")
     monto_uniforme = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     monto_puntualidad = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
     monto_asistencia = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0.00"))
@@ -288,26 +318,34 @@ class BonoProduccionEmpleado(models.Model):
         regla = cfg.get_regla_area(self.area)
         base = _money(cfg.get_monto_area(self.area))
         dias_base = self._base_dias()
-        dias_laborables = int(cfg.dias_laborables or dias_base or 0)
+        total_laborables = int(cfg.dias_laborables or dias_base or 0)
+        dias_exigibles = cfg.dias_laborables_exigibles(total=total_laborables)
 
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= regla.limite_uniforme
-        self.pasa_asistencia = (dias_laborables - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
+        self.pasa_asistencia = (dias_exigibles - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= regla.limite_puntualidad
         self.pasa_produccion = True
         if regla.usa_produccion:
             self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= regla.limite_produccion
 
-        faltas = dias_laborables - int(self.dias_asistencia or 0)
-        retardos = dias_base - int(self.dias_puntualidad or 0)
-        cancela_bono = False
-        cancel_por_asistencia = getattr(regla, "cancela_por_asistencia", False)
-        limite_cancel_asistencia = _to_int(getattr(regla, "limite_asistencia_cancelacion", None), regla.limite_asistencia)
-        if cancel_por_asistencia and (faltas >= limite_cancel_asistencia):
-            cancela_bono = True
-        cancel_por_puntualidad = getattr(regla, "cancela_por_puntualidad", False)
-        limite_cancel_retardos = _to_int(getattr(regla, "limite_retardos_cancelacion", None), regla.limite_puntualidad)
-        if cancel_por_puntualidad and (retardos >= limite_cancel_retardos):
-            cancela_bono = True
+        faltas = max(dias_exigibles - int(self.dias_asistencia or 0), 0)
+        retardos = max(dias_base - int(self.dias_puntualidad or 0), 0)
+        motivos = []
+        limite_cancel_asistencia = _to_int(
+            getattr(regla, "limite_asistencia_cancelacion", None), regla.limite_asistencia
+        )
+        # límite 0 = regla inactiva; con límite >= 1 la cancelación aplica sobre
+        # faltas ya exigibles (prorrateadas), nunca sobre días que aún no llegan
+        if regla.cancela_por_asistencia and limite_cancel_asistencia > 0 and faltas >= limite_cancel_asistencia:
+            motivos.append(f"{faltas} falta{'s' if faltas != 1 else ''} (límite {limite_cancel_asistencia})")
+        limite_cancel_retardos = _to_int(
+            getattr(regla, "limite_retardos_cancelacion", None), regla.limite_puntualidad
+        )
+        if regla.cancela_por_puntualidad and limite_cancel_retardos > 0 and retardos >= limite_cancel_retardos:
+            motivos.append(f"{retardos} retardo{'s' if retardos != 1 else ''} (límite {limite_cancel_retardos})")
+        cancela_bono = bool(motivos)
+        self.cancela_bono = cancela_bono
+        self.cancela_motivo = " · ".join(motivos)[:200]
         self.monto_uniforme = self._monto_concepto(base, regla.pct_uniforme, self.pasa_uniforme and not cancela_bono)
         self.monto_asistencia = self._monto_concepto(base, regla.pct_asistencia, self.pasa_asistencia and not cancela_bono)
         self.monto_puntualidad = self._monto_concepto(base, regla.pct_puntualidad, self.pasa_puntualidad and not cancela_bono)

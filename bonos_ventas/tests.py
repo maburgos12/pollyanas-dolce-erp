@@ -263,7 +263,7 @@ class BonosVentasTests(TestCase):
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
         # Versión vigente del SW (bump 71e46ad1, estandarización UI).
-        self.assertIn("pollyanas-bonos-ventas-pwa-v17-ui100", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v18-cancelacion-visible", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -292,20 +292,23 @@ class BonosVentasTests(TestCase):
             fecha_inicio=date(2026, 5, 28),
             fecha_fin=date(2026, 6, 27),
         )
+        # al 11-jun han transcurrido 15 de 31 días del periodo: con prorrateo
+        # solo esos 15 son exigibles; los 16 futuros no cuentan como faltas
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,
             sucursal=sucursal,
-            dias_trabajados=10,
-            dias_asistencia=10,
-            dias_uniforme=10,
-            dias_puntualidad=10,
+            dias_trabajados=15,
+            dias_asistencia=15,
+            dias_uniforme=15,
+            dias_puntualidad=15,
         )
 
         with patch("bonos_ventas.models.timezone.localdate", return_value=date(2026, 6, 11)):
             bono.recalcular()
 
         self.assertTrue(bono.pasa_asistencia)
+        self.assertFalse(bono.cancela_bono)
         self.assertEqual(bono.sub1, Decimal("225.00"))
 
     def test_una_falta_cancela_bono_ventas_con_limite_cero(self):
@@ -416,7 +419,8 @@ class BonosVentasTests(TestCase):
             pct_puntualidad=Decimal("40.00"),
         )
         periodo.cancela_por_asistencia = True
-        periodo.limite_asistencia_cancelacion = 0
+        # límite 0 ahora significa regla inactiva; 1 falta = cancela requiere límite 1
+        periodo.limite_asistencia_cancelacion = 1
         bono = BonoVentasEmpleado.objects.create(
             periodo=periodo,
             empleado=empleado,

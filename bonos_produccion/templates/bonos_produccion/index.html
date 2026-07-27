@@ -61,6 +61,7 @@ function BonusRight({bono}){
   if(Number(bono.ajuste_positivo||0)>0)extras.push(`Ajuste +${money(bono.ajuste_positivo)}`);
   if(Number(bono.bono_extra||0)>0)extras.push(`Extra ${money(bono.bono_extra)}`);
   if(Number(bono.ajuste_negativo||0)>0)extras.push(`Desc. ${money(bono.ajuste_negativo)}`);
+  if(bono.cancela_bono)extras.unshift(`Cancelado: ${bono.cancela_motivo||'regla del periodo'}`);
   return h('div',{className:'bonus-right'},
     h('div',null,money(bono.total_a_pagar)),
     extras.length?h('div',{className:'bonus-right-meta'},extras.join(' · ')):null
@@ -255,7 +256,7 @@ function ProduccionCollaboratorPage({bono,periodoLabel}){
   const bonoExtra=Number(bono.bono_extra||0);
   const conceptos=[h(PrintField,{label:'Uniforme',value:`${statusTxt(bono.pasa_uniforme)} · ${money(bono.monto_uniforme||0)}`}),h(PrintField,{label:'Asistencia',value:`${statusTxt(bono.pasa_asistencia)} · ${money(bono.monto_asistencia||0)}`}),h(PrintField,{label:'Puntualidad',value:`${statusTxt(bono.pasa_puntualidad)} · ${money(bono.monto_puntualidad||0)}`}),h(PrintField,{label:'Produccion',value:`${statusTxt(bono.pasa_produccion)} · ${money(bono.monto_produccion||0)}`}),h(PrintField,{label:'Embetunados',value:String(bono.total_embetunados||0)}),h(PrintField,{label:'Premio',value:money(bono.monto_premio_embetunado||0)})];
   if(bonoExtra>0)conceptos.push(h(PrintField,{label:'Bono extra',value:money(bonoExtra)}));
-  conceptos.push(h(PrintField,{label:'Estatus',value:(bono.pasa_uniforme&&bono.pasa_asistencia&&bono.pasa_puntualidad&&bono.pasa_produccion)?'Pasa':'Cancelado/Revisar'}));
+  conceptos.push(h(PrintField,{label:'Estatus',value:bono.cancela_bono?`Cancelado: ${bono.cancela_motivo||'regla del periodo'}`:((bono.pasa_uniforme&&bono.pasa_asistencia&&bono.pasa_puntualidad&&bono.pasa_produccion)?'Pasa':'Revisar')}));
   return h('section',{className:'print-page'},
     h('div',{className:'print-head'},h('div',null,h('div',{className:'print-brand'},"Pollyana's Dolce"),h('div',{className:'print-foot'},'Bonos de Produccion · '+periodoLabel)),h('div',null,h('div',{className:'print-doc-title'},'Resumen colaborador'),h('div',{className:'print-folio'},AREA_LABELS[bono.area]||bono.area))),
     h('div',{className:'print-section'},h('div',{className:'print-section-title'},'Datos'),h('div',{className:'print-grid'},h(PrintField,{label:'Colaborador',value:bono.empleado_nombre}),h(PrintField,{label:'Area',value:AREA_LABELS[bono.area]||bono.area}),h(PrintField,{label:'Dias trabajados',value:String(bono.dias_trabajados||0)}),h(PrintField,{label:'Total a pagar',value:money(bono.total_a_pagar)}))),
@@ -380,7 +381,7 @@ function ConfigTab({bonos,area,setArea}){
           h('td',null,h(AreaPill,{area:b.area})),
           h('td',null,h(Badge,{ok:b.pasa_uniforme})),h('td',null,h(Badge,{ok:b.pasa_asistencia})),
           h('td',null,h(Badge,{ok:b.pasa_puntualidad})),h('td',null,h(Badge,{ok:b.pasa_produccion})),
-          h('td',{className:'text-total'},money(b.total_a_pagar))
+          h('td',{className:'text-total',title:b.cancela_bono?(b.cancela_motivo||'Bono cancelado'):undefined},b.cancela_bono?`Cancelado · ${money(b.total_a_pagar)}`:money(b.total_a_pagar))
         )))
       ))
     )

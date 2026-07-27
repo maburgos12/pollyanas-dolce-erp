@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-bonos-produccion-pwa-v20-autosolicitudes";
+const CACHE_NAME = "pollyanas-bonos-produccion-pwa-v21-cancelacion-visible";
 const SHELL_ASSETS = [
   "/bonos-produccion/manifest.json",
   "/static/bonos_produccion/icons/icon-192.png",

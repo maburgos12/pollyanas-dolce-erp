@@ -208,7 +208,7 @@
               <div class="employee-meta">Código {{ bono.empleado.codigo|default:"-" }} · {{ bono.get_area_display }}</div>
             </div>
             <span class="status-pill neutral">{{ bono.dias_trabajados }} días</span>
-            {% if bono.area == "PRODUCCION" %}<span class="status-pill neutral">{{ bono.total_embetunados }} embet.</span>{% else %}<span></span>{% endif %}
+            {% if bono.cancela_bono %}<span class="status-pill bad">Cancelado: {{ bono.cancela_motivo }}</span>{% elif bono.area == "PRODUCCION" %}<span class="status-pill neutral">{{ bono.total_embetunados }} embet.</span>{% else %}<span></span>{% endif %}
             <div class="employee-total">${{ bono.total_a_pagar|floatformat:2|intcomma }}</div>
           </summary>
           <div class="employee-body">
@@ -235,7 +235,7 @@
               </div>
               <div class="bonos-field"><label>Observaciones</label><textarea name="observaciones" rows="2" placeholder="Observación del ajuste">{{ bono.observaciones }}</textarea></div>
               <div class="bonos-actions">
-                {% if bono.pasa_asistencia and bono.pasa_uniforme and bono.pasa_puntualidad and bono.pasa_produccion %}<span class="status-pill ok">Pasa</span>{% else %}<span class="status-pill bad">Revisar</span>{% endif %}
+                {% if bono.cancela_bono %}<span class="status-pill bad">Bono cancelado: {{ bono.cancela_motivo }}</span>{% elif bono.pasa_asistencia and bono.pasa_uniforme and bono.pasa_puntualidad and bono.pasa_produccion %}<span class="status-pill ok">Pasa</span>{% else %}<span class="status-pill bad">Revisar</span>{% endif %}
                 {% if bono.gano_premio_embetunado %}<span class="status-pill ok">Premio embetunado</span>{% endif %}
                 <button class="bonos-btn primary" type="submit" {% if not can_manage %}disabled{% endif %}>Guardar ajuste</button>
               </div>

@@ -11,7 +11,11 @@ from rest_framework.response import Response
 from core.access import has_any_role, ROLE_DG, ROLE_ADMIN
 from core.notificaciones import notificar_permiso_solicitado
 from rrhh.models import Empleado, PermisoSalida, PermisoSalidaCambio
-from rrhh.services_permisos import can_resolver_permiso_jefe, resolver_permiso_jefe
+from rrhh.services_permisos import (
+    can_resolver_permiso_jefe,
+    reevaluar_asistencia_permiso,
+    resolver_permiso_jefe,
+)
 
 ESTADOS_EDITABLES = {PermisoSalida.ESTADO_SOLICITADO, PermisoSalida.ESTADO_APROBADO}
 ESTADOS_ELIMINABLES = {PermisoSalida.ESTADO_SOLICITADO, PermisoSalida.ESTADO_APROBADO}
@@ -245,6 +249,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
 
         campos_auditados = ["tipo", "fecha_inicio", "fecha_fin", "motivo", "goce_sueldo"]
         antes = {campo: _valor_permiso(permiso, campo) for campo in campos_auditados}
+        fechas_previas = [f for f in (permiso.fecha_inicio, permiso.fecha_fin) if f]
 
         if tipo:
             permiso.tipo = tipo
@@ -263,6 +268,14 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if not cambios:
             return Response({"detail": "No hay cambios para guardar."}, status=status.HTTP_400_BAD_REQUEST)
         permiso.save()
+        if permiso.estado == PermisoSalida.ESTADO_APROBADO:
+            # re-evaluar la unión de fechas viejas y nuevas: el rango anterior
+            # debe soltar sus conciliaciones y el nuevo debe adquirirlas
+            from rrhh.services_permisos import _fecha_local
+
+            fechas = fechas_previas + [f for f in (permiso.fecha_inicio, permiso.fecha_fin) if f]
+            dias = [_fecha_local(f) for f in fechas]
+            reevaluar_asistencia_permiso(permiso, inicio=min(dias), fin=max(dias))
         _registrar_cambio_permiso(
             permiso,
             request.user,
@@ -286,8 +299,13 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             "estado_jefe": permiso.estado_jefe,
             "estado_direccion": permiso.estado_direccion,
         }
+        estaba_aprobado = antes["estado"] == PermisoSalida.ESTADO_APROBADO
         permiso.estado = PermisoSalida.ESTADO_CANCELADO
         permiso.save(update_fields=["estado", "actualizado_en"])
+        if estaba_aprobado:
+            # el permiso ya había conciliado incidencias; al cancelarlo hay que
+            # regresarlas a pendiente re-evaluando esos días
+            reevaluar_asistencia_permiso(permiso)
         _registrar_cambio_permiso(
             permiso,
             request.user,
