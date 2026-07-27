@@ -213,15 +213,24 @@ def _faltas_vigentes(empleado: Empleado, fecha: date) -> int:
     ).count()
 
 
-def _faltas_retardos_existentes(empleado: Empleado, fecha: date) -> int:
-    desde = fecha - timedelta(days=VENTANA_RETARDOS_DIAS - 1)
-    return IncidenciaAsistencia.objects.filter(
-        empleado=empleado,
-        fecha__gte=desde,
-        fecha__lte=fecha,
-        tipo=IncidenciaAsistencia.TIPO_FALTA_RETARDOS,
-        estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
-    ).count()
+def _emitidas_en_ventana(empleado: Empleado, tipo: str, desde: date, hasta_exclusiva: date) -> int:
+    """Emisiones previas del episodio: incidencias no resueltas del tipo en [desde, hasta_exclusiva).
+
+    Excluye la fecha evaluada para que la incidencia de ese día se re-emita
+    (refresque) mientras siga justificada, en lugar de resolverse y renacer en
+    evaluaciones alternadas. Cuenta conciliadas: un episodio ya atendido no se
+    vuelve a emitir.
+    """
+    return (
+        IncidenciaAsistencia.objects.filter(
+            empleado=empleado,
+            tipo=tipo,
+            fecha__gte=desde,
+            fecha__lt=hasta_exclusiva,
+        )
+        .exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
+        .count()
+    )
 
 
 def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
@@ -266,7 +275,12 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
             tipo=IncidenciaAsistencia.TIPO_USO_TOLERANCIA,
             estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
         ).count()
-        if usos_tolerancia >= MARCAS_TOLERANCIA_POR_RETARDO:
+        # 3 usos = 1 retardo (no un retardo por cada uso a partir del tercero).
+        retardos_tolerancia_esperados = usos_tolerancia // MARCAS_TOLERANCIA_POR_RETARDO
+        retardos_tolerancia_previos = _emitidas_en_ventana(
+            empleado, IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA, desde, fecha
+        )
+        if retardos_tolerancia_esperados > retardos_tolerancia_previos:
             tipo = IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA
             touched.add(tipo)
             _, creada, actualizada = _upsert_incidencia(
@@ -494,8 +508,10 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
     desde_retardos = fecha - timedelta(days=VENTANA_RETARDOS_DIAS - 1)
     retardos = _retardos_vigentes(empleado, fecha)
     faltas_retardos_esperadas = retardos // RETARDOS_POR_FALTA
-    faltas_retardos_actuales = _faltas_retardos_existentes(empleado, fecha)
-    if faltas_retardos_esperadas > faltas_retardos_actuales:
+    faltas_retardos_previas = _emitidas_en_ventana(
+        empleado, IncidenciaAsistencia.TIPO_FALTA_RETARDOS, desde_retardos, fecha
+    )
+    if faltas_retardos_esperadas > faltas_retardos_previas:
         tipo = IncidenciaAsistencia.TIPO_FALTA_RETARDOS
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(
@@ -515,7 +531,11 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
 
     desde_faltas = fecha - timedelta(days=VENTANA_FALTAS_DIAS - 1)
     faltas = _faltas_vigentes(empleado, fecha)
-    if faltas >= FALTAS_AVISO_BAJA:
+    # Un aviso / una baja por episodio de ventana, no una por día mientras
+    # el conteo siga arriba del umbral.
+    if faltas >= FALTAS_AVISO_BAJA and not _emitidas_en_ventana(
+        empleado, IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS, desde_faltas, fecha
+    ):
         tipo = IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(
@@ -533,7 +553,9 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
         creados += int(creada)
         actualizados += int(actualizada)
 
-    if faltas >= FALTAS_BAJA:
+    if faltas >= FALTAS_BAJA and not _emitidas_en_ventana(
+        empleado, IncidenciaAsistencia.TIPO_BAJA_FALTAS, desde_faltas, fecha
+    ):
         tipo = IncidenciaAsistencia.TIPO_BAJA_FALTAS
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(

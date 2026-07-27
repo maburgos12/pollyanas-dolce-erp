@@ -200,3 +200,37 @@ class ReporteAsistenciaTests(TestCase):
         self.assertEqual(self.incidencia.minutos, 3)
         self.assertEqual(self.incidencia.detalle, "Ajuste manual validado.")
         self.assertTrue(self.incidencia.editado_manual)
+
+    def test_falta_conciliada_suma_aparte_y_no_en_kpi_faltas(self):
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
+            detalle="Falta de registro conciliada con vacaciones aprobadas.",
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            tipo=IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO,
+            severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            self.url,
+            {
+                "fecha_inicio": "2026-06-10",
+                "fecha_fin": "2026-06-10",
+                "empleado": str(self.empleado.id),
+            },
+        )
+
+        resumen = response.context["reportes"][0]["resumen"]
+        self.assertEqual(resumen["faltas"], 0)
+        self.assertEqual(resumen["faltas_conciliadas"], 1)
+        self.assertEqual(resumen["avisos_baja"], 0)
+        # La pendiente de comida del setUp sí cuenta.
+        self.assertEqual(resumen["comida_excedida"], 1)
