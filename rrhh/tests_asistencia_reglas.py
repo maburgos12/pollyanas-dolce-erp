@@ -753,3 +753,147 @@ class ExencionChecadorTests(TestCase):
             empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA
         )
         self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+
+
+class EscalamientosDeduplicadosTests(TestCase):
+    """Regresiones del bug de escalamientos repetidos/oscilantes (jul-2026)."""
+
+    def setUp(self):
+        self.turno = Turno.objects.create(
+            nombre="Matutino",
+            hora_entrada=time(8, 0),
+            hora_salida=time(16, 0),
+            tolerancia_minutos=10,
+        )
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Escalamientos",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2026, 1, 1),
+        )
+
+    def crear_asistencia(self, fecha: date, entrada: time, minutos=475):
+        return AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            entrada=dt_local(fecha, entrada),
+            salida=dt_local(fecha, time(16, 0)),
+            minutos_trabajados=minutos,
+            turno=self.turno,
+            fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API,
+        )
+
+    def _no_resueltas(self, tipo):
+        return IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, tipo=tipo
+        ).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
+
+    def test_aviso_y_baja_se_emiten_una_sola_vez_por_episodio(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(10):
+            evaluar_dia_empleado(self.empleado, inicio + timedelta(days=offset))
+
+        avisos = self._no_resueltas(IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS)
+        bajas = self._no_resueltas(IncidenciaAsistencia.TIPO_BAJA_FALTAS)
+        self.assertEqual(avisos.count(), 1)
+        self.assertEqual(avisos.get().fecha, inicio + timedelta(days=2))
+        self.assertEqual(bajas.count(), 1)
+        self.assertEqual(bajas.get().fecha, inicio + timedelta(days=3))
+
+    def test_reevaluar_el_dia_del_aviso_no_lo_apaga_ni_duplica(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(3):
+            evaluar_dia_empleado(self.empleado, inicio + timedelta(days=offset))
+        fecha_aviso = inicio + timedelta(days=2)
+
+        evaluar_dia_empleado(self.empleado, fecha_aviso)
+        evaluar_dia_empleado(self.empleado, fecha_aviso)
+
+        avisos = self._no_resueltas(IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS)
+        self.assertEqual(avisos.count(), 1)
+        self.assertEqual(avisos.get().estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+
+    def test_reevaluar_el_dia_no_apaga_falta_por_retardos(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(3):
+            IncidenciaAsistencia.objects.create(
+                empleado=self.empleado,
+                fecha=inicio + timedelta(days=offset),
+                tipo=IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA,
+                estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+            )
+        fecha = inicio + timedelta(days=3)
+        self.crear_asistencia(fecha, time(8, 0), minutos=480)
+
+        evaluar_dia_empleado(self.empleado, fecha)
+        evaluar_dia_empleado(self.empleado, fecha)
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        faltas_retardos = self._no_resueltas(IncidenciaAsistencia.TIPO_FALTA_RETARDOS)
+        self.assertEqual(faltas_retardos.count(), 1)
+        self.assertEqual(faltas_retardos.get().estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+
+    def test_usos_de_tolerancia_generan_un_retardo_por_cada_tres(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(4):
+            fecha = inicio + timedelta(days=offset)
+            self.crear_asistencia(fecha, time(8, 5))
+            evaluar_dia_empleado(self.empleado, fecha)
+
+        # 4 usos = 1 retardo (no 2, como generaba el bug con >= 3)
+        self.assertEqual(
+            self._no_resueltas(IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA).count(), 1
+        )
+
+        for offset in (4, 5):
+            fecha = inicio + timedelta(days=offset)
+            self.crear_asistencia(fecha, time(8, 5))
+            evaluar_dia_empleado(self.empleado, fecha)
+
+        # 6 usos = 2 retardos
+        self.assertEqual(
+            self._no_resueltas(IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA).count(), 2
+        )
+
+    def test_reevaluar_el_dia_no_apaga_retardo_por_tolerancia(self):
+        inicio = date(2026, 6, 1)
+        for offset in range(3):
+            fecha = inicio + timedelta(days=offset)
+            self.crear_asistencia(fecha, time(8, 5))
+            evaluar_dia_empleado(self.empleado, fecha)
+        fecha_retardo = inicio + timedelta(days=2)
+
+        evaluar_dia_empleado(self.empleado, fecha_retardo)
+        evaluar_dia_empleado(self.empleado, fecha_retardo)
+
+        retardos = self._no_resueltas(IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA)
+        self.assertEqual(retardos.count(), 1)
+        self.assertEqual(retardos.get().estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+
+    def test_barrido_limpia_avisos_y_bajas_repetidos_heredados(self):
+        """Los duplicados que dejó el bug en producción se resuelven al re-evaluar."""
+        inicio = date(2026, 6, 1)
+        for offset in range(3):
+            IncidenciaAsistencia.objects.create(
+                empleado=self.empleado,
+                fecha=inicio + timedelta(days=offset),
+                tipo=IncidenciaAsistencia.TIPO_FALTA,
+                estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            )
+        # Avisos repetidos como los generaba el bug: uno por día laborable.
+        for offset in range(2, 6):
+            IncidenciaAsistencia.objects.create(
+                empleado=self.empleado,
+                fecha=inicio + timedelta(days=offset),
+                tipo=IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS,
+                estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
+            )
+
+        for offset in range(2, 6):
+            evaluar_dia_empleado(self.empleado, inicio + timedelta(days=offset))
+
+        avisos = self._no_resueltas(IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS)
+        self.assertEqual(avisos.count(), 1)
+        self.assertEqual(avisos.get().fecha, inicio + timedelta(days=2))

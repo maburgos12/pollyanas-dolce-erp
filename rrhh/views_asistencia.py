@@ -192,6 +192,7 @@ def _build_reporte_asistencia(
     resumenes = defaultdict(
         lambda: {
             "faltas": 0,
+            "faltas_conciliadas": 0,
             "falta_retardos": 0,
             "retardos": 0,
             "comida_excedida": 0,
@@ -209,20 +210,31 @@ def _build_reporte_asistencia(
         if empleado and _es_fecha_pre_ingreso(empleado, incidencia.fecha):
             continue
         resumen = resumenes[incidencia.empleado_id]
+        # Los KPI disciplinarios cuentan solo pendientes; una incidencia
+        # conciliada (permiso/vacaciones) no debe sumar como sanción.
+        pendiente = incidencia.estado == IncidenciaAsistencia.ESTADO_PENDIENTE
         if incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA:
-            resumen["faltas"] += 1
+            if pendiente:
+                resumen["faltas"] += 1
+            else:
+                resumen["faltas_conciliadas"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA_RETARDOS:
-            resumen["falta_retardos"] += 1
+            if pendiente:
+                resumen["falta_retardos"] += 1
         elif incidencia.tipo in {IncidenciaAsistencia.TIPO_RETARDO, IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA}:
-            resumen["retardos"] += 1
+            if pendiente:
+                resumen["retardos"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA:
-            resumen["comida_excedida"] += 1
+            if pendiente:
+                resumen["comida_excedida"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_JORNADA_INCOMPLETA:
-            resumen["jornada_incompleta"] += 1
+            if pendiente:
+                resumen["jornada_incompleta"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE:
             resumen["hora_extra"] += 1
         elif incidencia.tipo in {IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS, IncidenciaAsistencia.TIPO_BAJA_FALTAS}:
-            resumen["avisos_baja"] += 1
+            if pendiente:
+                resumen["avisos_baja"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_SUSPENSION:
             resumen["suspensiones"] += 1
 
