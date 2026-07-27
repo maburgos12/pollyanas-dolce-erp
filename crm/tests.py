@@ -340,8 +340,12 @@ class SucursalResolutionTests(TestCase):
         self.assertEqual(resolution.sucursal.codigo, "COLOSIO")
 
     def test_resolve_sucursal_rejects_excluded_duplicate_code(self):
+        # El duplicado fantasma COL se remedia con datos (comando
+        # purge_ghost_branch_col, 0ba49d89), no con la lista de exclusión del
+        # resolver; el contrato vigente del resolver es rechazar códigos de
+        # EXCLUDED_BRANCH_CODES (core.branch_catalog) aunque existan activos.
         Sucursal.objects.create(codigo="COLOSIO", nombre="Colosio", activa=True)
-        Sucursal.objects.create(codigo="COL", nombre="Colosio", activa=True)
+        Sucursal.objects.create(codigo="TMP1", nombre="Colosio", activa=True)
 
         with self.assertRaises(SucursalResolutionError):
-            resolve_sucursal("COL")
+            resolve_sucursal("TMP1")

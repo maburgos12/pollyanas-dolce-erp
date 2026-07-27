@@ -9387,7 +9387,7 @@ def _apply_direct_base_replacement_to_line(
     linea.costo_unitario_snapshot = None
     linea.costo_linea_excel = None
     linea.match_status = LineaReceta.STATUS_AUTO
-    linea.match_method = "DIRECT_BASE_PRESENTACION"
+    linea.match_method = "DIRECT_BASE_PRES"
     linea.match_score = 100
 
 
@@ -9757,6 +9757,18 @@ def _normalize_driver_scope(raw: str | None) -> str:
     if key in {"lote", "batch"}:
         return CostoDriver.SCOPE_LOTE
     return CostoDriver.SCOPE_GLOBAL
+
+
+def _to_decimal_safe(value: object) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        txt = str(value).strip().replace(",", ".")
+        if txt == "":
+            return Decimal("0")
+        return Decimal(txt)
+    except Exception:
+        return Decimal("0")
 
 
 def _to_int_safe(value: object, default: int = 0) -> int:

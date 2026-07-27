@@ -7214,7 +7214,7 @@ def _apply_direct_base_replacement_to_line(
     linea.costo_unitario_snapshot = None
     linea.costo_linea_excel = None
     linea.match_status = LineaReceta.STATUS_AUTO
-    linea.match_method = "DIRECT_BASE_PRESENTACION"
+    linea.match_method = "DIRECT_BASE_PRES"
     linea.match_score = 100
 
 

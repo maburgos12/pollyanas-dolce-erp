@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.contrib.staticfiles import finders
 from django.test import Client, TestCase, override_settings
 
 from core.access import ROLE_PRODUCCION, ROLE_RRHH
@@ -475,13 +476,20 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Imprimir / PDF", content)
         self.assertIn("label:'Area',value:contextLabel", content)
         self.assertNotIn("Monto calculado", content)
-        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", content)
-        self.assertIn("margin:28px auto 0", content)
+        # El rediseño UI (commit 71e46ad1) movió el CSS inline de la PWA a un
+        # módulo estático; el grid de firmas imprimible vive ahora ahí.
+        self.assertIn("/static/css/template_modules/bonos-produccion-templates-bonos-produccion-index.css", content)
+        css_path = finders.find("css/template_modules/bonos-produccion-templates-bonos-produccion-index.css")
+        self.assertIsNotNone(css_path)
+        with open(css_path, encoding="utf-8") as css_file:
+            css = css_file.read()
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", css)
+        self.assertIn("margin:28px auto 0", css)
         self.assertIn("Permiso ${lastPermiso.folio} registrado", content)
         self.assertIn("Imprimir / guardar PDF", content)
         self.assertIn("ReactDOM.createPortal", content)
-        self.assertIn("body > :not(.print-modal)", content)
-        self.assertIn("transform:none!important", content)
+        self.assertIn("body > :not(.print-modal)", css)
+        self.assertIn("transform:none!important", css)
         self.assertIn("Firma empleado", content)
         self.assertIn("const FORCE_CAPTURE=", content)
         self.assertIn("const initialTab=", content)
@@ -490,9 +498,10 @@ class BonosProduccionTests(TestCase):
         self.assertIn("includeAll:true", content)
         self.assertIn("r.redirected", content)
         self.assertNotIn("pointer-events:none", content)
+        self.assertNotIn("pointer-events:none", css)
         self.assertNotIn("if(!dom)", content)
-        self.assertIn(".day-cell.dom.worked", content)
-        self.assertIn(".day-cell.saving", content)
+        self.assertIn(".day-cell.dom.worked", css)
+        self.assertIn(".day-cell.saving", css)
         self.assertIn("savingDia", content)
         self.assertIn("onClick:()=>togDia(d)", content)
         self.assertNotIn("togDia(d);setSelDia(d);", content)

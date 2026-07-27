@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand
 
-from recetas.views import (
+from recetas.views.plan import (
     _build_dg_operacion_dashboard_payload,
     _export_dg_operacion_dashboard_csv,
     _export_dg_operacion_dashboard_xlsx,

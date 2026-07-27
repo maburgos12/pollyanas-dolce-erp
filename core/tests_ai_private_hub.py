@@ -55,7 +55,8 @@ class AIPrivateHubViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Configuración pendiente del modelo")
-        self.assertContains(response, "falta completar la configuración del modelo")
+        # Copy vigente del template (6d612668): "conexión del modelo".
+        self.assertContains(response, "falta completar la conexión del modelo")
 
     def test_ai_private_hub_forbidden_for_non_governance_role(self):
         self.client.force_login(self.produccion)

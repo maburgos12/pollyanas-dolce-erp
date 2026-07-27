@@ -1309,8 +1309,12 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
             client_event_id="secundario-ocupado",
             comentario="Evento anterior",
         )
+        # Desde 21e8e6b3 el estado ENTREGADA es un hito administrativo y la vista
+        # descarta las evidencias del payload; el flujo con evidencias (y por lo
+        # tanto la invariante de colisión secundaria) vive en CON_DIFERENCIA.
         payload = self._payload(
             client_event_id="confirmacion-nueva",
+            entrega_estado=ParadaRuta.ENTREGA_CON_DIFERENCIA,
             evidencias=[
                 {"comentario": "Primaria"},
                 {"comentario": "Secundaria", "client_event_id": "secundario-ocupado"},
@@ -1589,10 +1593,13 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
     def test_pwa_avisa_pide_motivo_y_envia_contexto_idempotente(self):
         pwa_html = (Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html").read_text(encoding="utf-8")
 
-        self.assertIn("La entrega se registrará, pero será revisada por tu jefe.", pwa_html)
-        self.assertIn("Explica por qué confirmas la entrega sin geocerca", pwa_html)
-        self.assertIn('id="motivo-sin-geocerca"', pwa_html)
-        self.assertIn("state.recepcionSucursal.motivoSinGeocerca", pwa_html)
+        # Desde 21e8e6b3 (separar entrega PWA de recepción Point) el banner con
+        # textarea de motivo desapareció: la entrega administrativa sin geocerca
+        # se anota automáticamente y la revisión vive en services_discrepancias;
+        # para diferencias sigue siendo obligatorio describir el motivo.
+        self.assertIn("Entrega administrativa confirmada sin geocerca validada.", pwa_html)
+        self.assertIn('const fueraDeGeocerca = parada?.geocerca_confiable !== true;', pwa_html)
+        self.assertIn("Describe la diferencia o el motivo antes de guardar.", pwa_html)
         self.assertNotIn("window.confirm(", pwa_html)
         self.assertNotIn("window.prompt(", pwa_html)
         self.assertIn("client_event_id: clientEventId", pwa_html)

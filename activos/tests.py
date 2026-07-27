@@ -127,19 +127,15 @@ class ActivosFlowsTests(TestCase):
         )
         response = self.client.get(reverse("activos:planes"), {"enterprise_gap": "SIN_RESPONSABLE"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
+        # El rediseño de planes (792b2503 + estandarización 71e46ad1) retiró el
+        # cockpit de gobernanza del template; las estructuras siguen siendo
+        # contrato de contexto de la vista.
+        self.assertContains(response, "Planes de mantenimiento")
         self.assertTrue(response.context["enterprise_cards"])
         self.assertTrue(response.context["enterprise_chain"])
         self.assertTrue(response.context["operational_health_cards"])
         self.assertTrue(response.context["document_stage_rows"])
         self.assertIn("erp_command_center", response.context)
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Cadena troncal del mantenimiento")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Salud operativa ERP")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Mesa de gobierno ERP")
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
         rows = response.context["planes_rows"]

@@ -49,7 +49,7 @@ class DiagnoseErpRuntimeContextTests(SimpleTestCase):
             "port": "5432",
             "user": "postgres",
             "database_url_present": False,
-            "database_public_url_present": False,
+            "db_host_present": False,
             "table_statuses": [
                 TableStatus(name="pos_bridge_daily_sales", exists=True, count=1),
                 TableStatus(name="ventas_autoritativas_point", exists=True, count=1),
@@ -58,12 +58,11 @@ class DiagnoseErpRuntimeContextTests(SimpleTestCase):
             ],
         }
 
+        # El fallback _prefer_public_database_url_if_needed se eliminó del
+        # comando en 4f86228c; solo queda _collect_context por parchear.
         with patch(
             "core.management.commands.diagnose_erp_runtime_context._collect_context",
             return_value=fake_context,
-        ), patch(
-            "core.management.commands.diagnose_erp_runtime_context._prefer_public_database_url_if_needed",
-            return_value=None,
         ):
             with self.assertRaisesMessage(CommandError, "Contexto DB del ERP riesgoso en modo estricto."):
                 call_command("diagnose_erp_runtime_context", "--strict")

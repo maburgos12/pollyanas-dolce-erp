@@ -123,4 +123,5 @@ class TutorialCargaPwaTests(TutorialCargaBaseTests):
         self.assertIn("mostrar_tutorial_carga_sucursal", html)
         self.assertIn("prefers-reduced-motion", html)
         self.assertIn("confirmarTutorialCarga", html)
-        self.assertIn("v78-gps-ruta-activa", html)
+        # Versión vigente de la PWA (bump ae54e299); antes v78-gps-ruta-activa.
+        self.assertIn("v80-combustible-km-turno", html)

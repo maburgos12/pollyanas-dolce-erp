@@ -7216,7 +7216,7 @@ def _apply_direct_base_replacement_to_line(
     linea.costo_unitario_snapshot = None
     linea.costo_linea_excel = None
     linea.match_status = LineaReceta.STATUS_AUTO
-    linea.match_method = "DIRECT_BASE_PRESENTACION"
+    linea.match_method = "DIRECT_BASE_PRES"
     linea.match_score = 100
 
 
@@ -8955,7 +8955,9 @@ def matching_insumos_search(request: HttpRequest) -> JsonResponse:
     if q:
         queryset = queryset.filter(nombre__icontains=q)
     grouped = {}
-    for insumo in queryset.order_by("nombre")[: limit * 5]:
+    # Desempate por id: con nombres iguales, el backend de BD decide el orden
+    # y el canónico resuelto variaba entre Postgres y SQLite.
+    for insumo in queryset.order_by("nombre", "id")[: limit * 5]:
         key = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
         grouped.setdefault(key, []).append(insumo)
 

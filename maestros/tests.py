@@ -420,7 +420,9 @@ class PointPendingReviewTests(TestCase):
         row = next(item for item in response.context["page"].object_list if item.id == pending.id)
         self.assertEqual(row.canonical_target.id, canonical.id)
         self.assertEqual(row.canonical_target_variants, 2)
-        self.assertContains(response, "Artículo maestro propuesto:")
+        # Copy vigente (486608bd): la sugerencia canónica se muestra como
+        # "Maestro: <nombre>" en la columna "Artículo propuesto ERP".
+        self.assertContains(response, "Maestro:")
         self.assertContains(response, "Etiqueta Canonica")
 
     def test_point_pending_review_renders_enterprise_workflow(self):
@@ -435,11 +437,11 @@ class PointPendingReviewTests(TestCase):
 
         response = self.client.get(reverse("maestros:point_pending_review"), {"tipo": "INSUMO"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Workflow ERP de integración comercial")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Mesa de gobierno ERP")
+        # 486608bd compactó el workflow al hero de sincronización; las filas
+        # de ruta crítica y radar siguen en el contexto.
+        self.assertContains(response, "Sincronización Point")
+        self.assertContains(response, "Pendientes de resolver")
+        self.assertContains(response, "Avance de integración")
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("executive_radar_rows", response.context)
 
@@ -527,11 +529,9 @@ class ProveedorListEnterpriseTests(TestCase):
     def test_proveedor_list_renders_enterprise_cockpit(self):
         response = self.client.get(reverse("maestros:proveedor_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Workflow ERP del proveedor")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Mesa de gobierno ERP")
+        # 486608bd compactó el cockpit del listado a hero BI + tabla; las
+        # estructuras de workflow siguen en el contexto.
+        self.assertContains(response, "Proveedores")
         self.assertContains(response, "Lead time promedio")
         self.assertContains(response, "Inactivos")
         self.assertIn("erp_command_center", response.context)
@@ -641,15 +641,10 @@ class InsumoTipoItemCatalogTests(TestCase):
     def test_insumo_list_shows_enterprise_document_chain(self):
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Cadena documental ERP")
-        self.assertContains(response, "Ruta crítica ERP")
-        self.assertContains(response, "Modelo SAP / ERP del artículo")
-        self.assertContains(response, "Cierre por etapa documental")
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertContains(response, "Frente")
-        self.assertContains(response, "Cierre global:")
-        self.assertContains(response, "Salud operativa ERP")
+        # El rediseño 486608bd retiró el cockpit de gobernanza del listado;
+        # el contrato vigente es el hero BI + los datos de contexto de la vista.
+        self.assertContains(response, "Catálogo de insumos")
+        self.assertContains(response, "Incompletos ERP")
         self.assertIn("enterprise_chain", response.context)
         self.assertIn("critical_path_rows", response.context)
         self.assertIn("erp_model_rows", response.context)
@@ -681,13 +676,13 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertEqual(response.context["total_productos_finales"], 1)
         self.assertEqual(response.context["total_batidas_base"], 1)
         self.assertEqual(response.context["total_subinsumos_derivados"], 1)
-        self.assertContains(response, "Jerarquía enterprise del artículo")
-        self.assertContains(response, "Producto final")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=MATERIA_PRIMA")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=INSUMO_INTERNO")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=EMPAQUE")
-        self.assertContains(response, reverse("recetas:receta_create") + "?mode=BASE")
-        self.assertContains(response, reverse("recetas:receta_create") + "?mode=BASE_DERIVADOS")
+        # 486608bd retiró la sección de jerarquía y los atajos de alta del
+        # listado; el alta por clase vive ahora en el formulario de insumo.
+        self.assertContains(response, "Catálogo de insumos")
+        form_response = self.client.get(reverse("maestros:insumo_create"))
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=MATERIA_PRIMA")
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=INSUMO_INTERNO")
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=EMPAQUE")
 
     def test_insumo_list_filters_by_categoria(self):
         response = self.client.get(reverse("maestros:insumo_list"), {"categoria": "Batidas"})
@@ -705,7 +700,8 @@ class InsumoTipoItemCatalogTests(TestCase):
         form = response.context["form"]
         self.assertEqual(form.initial["tipo_item"], Insumo.TIPO_INTERNO)
         self.assertEqual(form.initial["nombre"], "Dream Whip QA")
-        self.assertContains(response, "Estado maestro")
+        # 486608bd: las sugerencias de categoría viven en el json_script del form.
+        self.assertContains(response, "category-suggestions-data")
         self.assertContains(response, "Batidas")
         self.assertContains(response, "Panes")
 
@@ -713,29 +709,31 @@ class InsumoTipoItemCatalogTests(TestCase):
         response = self.client.get(reverse("maestros:insumo_create"), {"tipo_item": Insumo.TIPO_EMPAQUE})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Nueva empaque")
-        self.assertContains(response, "Alta guiada:")
         self.assertContains(response, "Material de presentación final")
         self.assertContains(response, "Guardar empaque")
-        self.assertContains(response, "Requisitos ERP por clase")
-        self.assertContains(response, "Categorías sugeridas")
-        self.assertContains(response, "Uso en producto final o presentación")
+        # 486608bd: la guía por clase se simplificó a chips de categoría y
+        # requisitos por clase marcados en vivo por JS.
+        self.assertContains(response, "category-suggestions-data")
+        self.assertContains(response, "erp-type-requirements-data")
         self.assertContains(response, "Caja pastel")
 
     def test_insumo_create_shows_live_erp_readiness_checklist(self):
         response = self.client.get(reverse("maestros:insumo_create"), {"tipo_item": Insumo.TIPO_MATERIA_PRIMA})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Checklist ERP en vivo")
-        self.assertContains(response, "Bloqueos actuales")
+        # 486608bd: el checklist en vivo se sustituyó por el resaltado JS de
+        # campos requeridos por clase (is-required-by-type).
         self.assertContains(response, "Proveedor principal")
-        self.assertContains(response, "Código de venta recomendado")
+        self.assertContains(response, "Código de venta (Point)")
         self.assertContains(response, "erp-type-requirements-data")
-        self.assertContains(response, "erp-type-titles-data")
+        self.assertContains(response, "is-required-by-type")
 
     def test_insumo_update_shows_live_erp_readiness_checklist(self):
         response = self.client.get(reverse("maestros:insumo_update", args=[self.insumo_mp.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Checklist ERP en vivo")
-        self.assertContains(response, "Bloqueos actuales")
+        # 486608bd: el checklist vive ahora en el hero (Estado ERP + Falta:)
+        # y en la tabla "Bloqueos por módulo".
+        self.assertContains(response, "Estado ERP")
+        self.assertContains(response, "Bloqueos por módulo")
         self.assertContains(response, "Falta:")
         self.assertContains(response, "Producto final")
         self.assertContains(response, "Costeo / MRP")
@@ -826,15 +824,18 @@ class InsumoTipoItemCatalogTests(TestCase):
 
         response = self.client.get(reverse("maestros:insumo_update", args=[self.insumo_mp.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Impacto operativo")
-        self.assertContains(response, "Navegación rápida")
+        # 486608bd: el resumen de impacto se compactó al hero de uso y a la
+        # tabla de bloqueos con navegación por módulo.
+        self.assertContains(response, "Uso en recetas")
         self.assertContains(response, "Ver recetas")
         self.assertContains(response, "Ver finales")
         self.assertContains(response, "Ver compras")
         self.assertContains(response, "Ver inventario")
-        self.assertContains(response, "Impacto ERP")
-        self.assertContains(response, "Pastel QA Impacto")
-        self.assertContains(response, "Batida QA Impacto")
+        self.assertEqual(response.context["usage_profile"]["recipe_count"], 2)
+        self.assertEqual(response.context["usage_profile"]["final_recipe_count"], 1)
+        self.assertEqual(response.context["usage_profile"]["base_recipe_count"], 1)
+        self.assertEqual(response.context["usage_profile"]["purchase_count"], 1)
+        self.assertGreaterEqual(response.context["usage_profile"]["inventory_refs"], 1)
 
     def test_insumo_list_context_includes_enterprise_readiness_kpis(self):
         response = self.client.get(reverse("maestros:insumo_list"))
@@ -842,21 +843,23 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertIn("total_enterprise_ready", response.context)
         self.assertIn("total_enterprise_incomplete", response.context)
         self.assertContains(response, "Listos ERP")
-        self.assertContains(response, "Estado maestro")
-        self.assertContains(response, "Estado maestro por tipo")
-        self.assertContains(response, "Categorías operativas por tipo")
-        self.assertContains(response, "Gobierno del maestro")
+        # 486608bd: los paneles de gobierno se compactaron al hero y la tabla.
+        self.assertContains(response, "Incompletos ERP")
+        self.assertContains(response, "Estado ERP")
 
     def test_insumo_list_shows_quick_create_by_class(self):
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Alta rápida por clase")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=MATERIA_PRIMA")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=INSUMO_INTERNO")
-        self.assertContains(response, reverse("maestros:insumo_create") + "?tipo_item=EMPAQUE")
-        self.assertContains(response, "+ Crear materia prima")
-        self.assertContains(response, "+ Crear insumo interno")
-        self.assertContains(response, "+ Crear empaque")
+        # 486608bd: el listado conserva un solo CTA de alta; la selección de
+        # clase se hace dentro del formulario de insumo.
+        self.assertContains(response, "+ Nuevo insumo")
+        form_response = self.client.get(reverse("maestros:insumo_create"))
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=MATERIA_PRIMA")
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=INSUMO_INTERNO")
+        self.assertContains(form_response, reverse("maestros:insumo_create") + "?tipo_item=EMPAQUE")
+        self.assertContains(form_response, "Materia prima")
+        self.assertContains(form_response, "Insumo interno")
+        self.assertContains(form_response, "Empaque")
 
     def test_insumo_create_rejects_active_mp_without_supplier(self):
         response = self.client.post(
@@ -1041,8 +1044,9 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertEqual(response.status_code, 200)
         category_rows = response.context["category_navigation"]
         self.assertTrue(any(row["categoria"] == "Caja pastel" and row["tipo_item"] == Insumo.TIPO_EMPAQUE for row in category_rows))
-        self.assertContains(response, "Abrir categoría")
-        self.assertContains(response, "Ver faltantes")
+        # 486608bd: la navegación por categoría se hace vía el filtro del listado.
+        self.assertContains(response, "Todas las categorías")
+        self.assertContains(response, "Caja pastel")
 
     def test_insumo_list_filters_by_missing_field(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Faltantes QA", activo=True)
@@ -1084,6 +1088,10 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertNotIn(listo.nombre, names)
 
     def test_insumo_list_context_includes_usage_navigation_and_usage_profile(self):
+        # Desde 79fa92a6 el interno con categoría está "Listo"; se la quitamos
+        # para que su uso en producto final lo clasifique como Crítico.
+        self.insumo_int.categoria = ""
+        self.insumo_int.save(update_fields=["categoria"])
         receta = Receta.objects.create(
             nombre="Pastel Uso QA",
             hash_contenido="hash-uso-maestro-001",
@@ -1121,18 +1129,17 @@ class InsumoTipoItemCatalogTests(TestCase):
 
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Uso operativo del catálogo")
-        self.assertContains(response, "En recetas")
-        self.assertContains(response, "En compras")
-        self.assertContains(response, "En inventario")
+        # 486608bd retiró el panel de uso; el contrato vigente es el contexto.
+        usage_titles = {row["title"] for row in response.context["usage_navigation"]}
+        self.assertIn("En recetas", usage_titles)
+        self.assertIn("En compras", usage_titles)
+        self.assertIn("En inventario", usage_titles)
 
         page_map = {x.id: x for x in response.context["insumos"]}
         self.assertTrue(page_map[self.insumo_int.id].usage_profile["used_in_recipes"])
         self.assertEqual(page_map[self.insumo_int.id].usage_profile["final_recipe_count"], 1)
         self.assertTrue(page_map[self.insumo_mp.id].usage_profile["used_in_purchases"])
         self.assertTrue(page_map[self.insumo_emp.id].usage_profile["used_in_inventory"])
-        self.assertContains(response, "En producto final")
-        self.assertContains(response, "Ver finales")
         self.assertIn("impact_navigation", response.context)
         self.assertEqual(page_map[self.insumo_int.id].impact_profile["level"], "Crítico")
         self.assertTrue(page_map[self.insumo_mp.id].impact_profile["used_in_purchases"])
@@ -1165,14 +1172,13 @@ class InsumoTipoItemCatalogTests(TestCase):
         )
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Impacto operativo enterprise")
-        self.assertContains(response, "Multimódulo")
+        # 486608bd retiró el panel de impacto; el catálogo vigente de tarjetas
+        # es Críticos / En producto final / Bloquea costeo/MRP / Multimódulo.
         impact_map = {item["title"]: item["count"] for item in response.context["impact_navigation"]}
         self.assertGreaterEqual(impact_map["En producto final"], 1)
-        self.assertGreaterEqual(impact_map["Con compras activas"], 1)
+        self.assertGreaterEqual(impact_map["Multimódulo"], 1)
         page_map = {x.id: x for x in response.context["insumos"]}
         self.assertTrue(page_map[self.insumo_int.id].impact_profile["is_multimodule"])
-        self.assertContains(response, "Alcance ERP")
 
     def test_insumo_list_filters_by_impact_scope(self):
         receta = Receta.objects.create(
@@ -1199,6 +1205,11 @@ class InsumoTipoItemCatalogTests(TestCase):
             insumo=self.insumo_mp,
             cantidad=Decimal("2.000"),
         )
+        # Desde 79fa92a6 el código Point ya no es requisito de INSUMO_INTERNO;
+        # para que el artículo bloquee producto final (Crítico) debe estar
+        # Incompleto según el contrato vigente: le quitamos la categoría.
+        self.insumo_int.categoria = ""
+        self.insumo_int.save(update_fields=["categoria"])
         response = self.client.get(reverse("maestros:insumo_list"), {"impact_scope": "critical"})
         self.assertEqual(response.status_code, 200)
         names = [x.nombre for x in response.context["insumos"]]
@@ -1240,6 +1251,14 @@ class InsumoTipoItemCatalogTests(TestCase):
             dias_llegada_pedido=2,
             consumo_diario_promedio=Decimal("1.000"),
         )
+
+        # Desde 79fa92a6 (completitud diferenciada por clase) el código Point
+        # solo aplica a MATERIA_PRIMA; para que interno/empaque bloqueen sus
+        # módulos deben estar Incompletos: les quitamos la categoría requerida.
+        self.insumo_int.categoria = ""
+        self.insumo_int.save(update_fields=["categoria"])
+        self.insumo_emp.categoria = ""
+        self.insumo_emp.save(update_fields=["categoria"])
 
         response_costeo = self.client.get(reverse("maestros:insumo_list"), {"impact_scope": "bloquea_costeo"})
         self.assertEqual(response_costeo.status_code, 200)
@@ -1347,25 +1366,17 @@ class InsumoTipoItemCatalogTests(TestCase):
             consumo_diario_promedio=Decimal("1.000"),
         )
 
+        # Desde 79fa92a6 el código Point solo aplica a MATERIA_PRIMA: para que
+        # los fixtures internos/empaque bloqueen, deben quedar Incompletos.
+        self.insumo_int.categoria = ""
+        self.insumo_int.save(update_fields=["categoria"])
+        self.insumo_emp.categoria = ""
+        self.insumo_emp.save(update_fields=["categoria"])
+
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bloqueos operativos")
-        self.assertContains(response, "Bloqueos enterprise por módulo")
-        self.assertContains(response, "Bloquea recetas")
-        self.assertContains(response, "Bloquea producto final")
-        self.assertContains(response, "Bloquea compras")
-        self.assertContains(response, "Bloquea inventario")
-        self.assertContains(response, "Bloquea costeo/MRP")
-        self.assertContains(response, "Bloquea operación")
-        self.assertContains(response, "Ver bloqueo final")
-        self.assertContains(response, "Ver costeo/MRP")
-        self.assertContains(response, "Ver bloqueo compras")
-        self.assertContains(response, "Ver bloqueo inventario")
-        self.assertContains(response, "Bloqueos sobre producto final")
-        self.assertContains(response, "Bloqueo final por dato faltante")
-        self.assertContains(response, "Sin código comercial")
-        self.assertContains(response, "Pastel Bloqueo QA")
-
+        # 486608bd retiró el panel de bloqueos del template; el contrato
+        # vigente es el contexto de navegación de bloqueos y el preview.
         blockers = {item["title"]: item["count"] for item in response.context["operational_blockers_navigation"]}
         self.assertEqual(blockers["Bloquea recetas"], 1)
         self.assertEqual(blockers["Bloquea producto final"], 1)
@@ -1383,8 +1394,12 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertTrue(page_map[self.insumo_emp.id].usage_profile["is_operational_blocker"])
         self.assertTrue(page_map[self.insumo_emp.id].usage_profile["blocks_inventory"])
         self.assertEqual(response.context["final_product_blockers_preview"][0]["nombre"], self.insumo_int.nombre)
+        # Desde 79fa92a6 los faltantes por clase cambian: el interno bloquea
+        # producto final por categoría, la MP bloquea compras por proveedor y
+        # código Point, y el empaque bloquea inventario por categoría.
         blockers_by_missing = {item["key"]: item["count"] for item in response.context["final_product_blockers_by_missing"]}
-        self.assertEqual(blockers_by_missing["codigo_point"], 1)
+        self.assertEqual(blockers_by_missing["categoria"], 1)
+        self.assertEqual(blockers_by_missing["codigo_point"], 0)
         self.assertIn("missing_impact_navigation", response.context)
         enterprise_blockers = {item["title"]: item["count"] for item in response.context["enterprise_blocker_navigation"]}
         self.assertEqual(enterprise_blockers["Bloquea producto final"], 1)
@@ -1395,12 +1410,9 @@ class InsumoTipoItemCatalogTests(TestCase):
             (item["missing_key"], item["impact_key"]): item["count"]
             for item in response.context["missing_impact_navigation"]
         }
-        self.assertEqual(missing_impact_map[("codigo_point", "critical")], 1)
+        self.assertEqual(missing_impact_map[("categoria", "critical")], 1)
         self.assertEqual(missing_impact_map[("codigo_point", "compras")], 1)
-        self.assertEqual(missing_impact_map[("codigo_point", "inventario")], 1)
-        self.assertContains(response, "Faltante + impacto operativo")
-        self.assertContains(response, "Código de venta")
-        self.assertContains(response, "Bloquea producto final")
+        self.assertEqual(missing_impact_map[("categoria", "inventario")], 1)
 
     def test_insumo_list_can_filter_by_linked_recipe_id(self):
         receta_objetivo = Receta.objects.create(
@@ -1450,9 +1462,9 @@ class InsumoTipoItemCatalogTests(TestCase):
         names = [x.nombre for x in response.context["insumos"]]
         self.assertIn(self.insumo_int.nombre, names)
         self.assertNotIn(self.insumo_mp.nombre, names)
-        self.assertContains(response, "Vista filtrada a los artículos ligados a la receta")
-        self.assertContains(response, receta_objetivo.nombre)
-        self.assertContains(response, reverse("recetas:receta_detail", args=[receta_objetivo.id]))
+        # 486608bd retiró el banner de vista filtrada; el contrato vigente es
+        # el contexto linked_recipe + el filtrado del listado (arriba).
+        self.assertEqual(response.context["linked_recipe"].nombre, receta_objetivo.nombre)
 
     def test_insumo_list_can_filter_by_exact_insumo_id(self):
         response = self.client.get(
@@ -1464,7 +1476,7 @@ class InsumoTipoItemCatalogTests(TestCase):
         self.assertEqual(response.context["selected_insumo"].id, self.insumo_int.id)
         names = [x.nombre for x in response.context["insumos"]]
         self.assertEqual(names, [self.insumo_int.nombre])
-        self.assertContains(response, "Vista filtrada al artículo exacto")
+        # 486608bd retiró el banner de vista filtrada; el filtro sigue operando.
         self.assertContains(response, reverse("maestros:insumo_update", args=[self.insumo_int.id]))
 
     def test_insumo_list_filters_by_usage_scope(self):
@@ -1565,6 +1577,14 @@ class InsumoCanonicalResolveTests(TestCase):
             factor_to_base=Decimal("1000"),
         )
         self.proveedor = Proveedor.objects.create(nombre="Proveedor Canon", activo=True)
+        # Fixture usado por los tests de display_name y sync de catálogos Point.
+        self.insumo_harina = Insumo.objects.create(
+            nombre="Harina Pastelera",
+            categoria="Masa",
+            unidad_base=self.unidad,
+            proveedor_principal=self.proveedor,
+            activo=True,
+        )
 
     def test_resolve_duplicate_from_maestros_moves_references_to_canonical(self):
         source = Insumo.objects.create(
@@ -1837,15 +1857,9 @@ class MaestroEnterpriseCockpitTests(TestCase):
     def test_insumo_list_shows_module_responsables(self):
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Entrega del maestro a downstream")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Recetas / BOM")
-        self.assertContains(response, "Compras documentales")
-        self.assertContains(response, "Inventario / Reabasto")
-        self.assertContains(response, "Responsable Producción / Costeo")
-        self.assertContains(response, "Responsable Compras")
-        self.assertContains(response, "Responsable Inventario / Almacén")
+        # 486608bd retiró el radar del template; el contrato vigente son las
+        # filas de contexto que alimentaban ese panel.
+        self.assertContains(response, "Catálogo de insumos")
         self.assertIn("executive_radar_rows", response.context)
         self.assertIn("downstream_handoff_rows", response.context)
         self.assertIn("trunk_handoff_rows", response.context)
@@ -1856,20 +1870,13 @@ class MaestroEnterpriseCockpitTests(TestCase):
     def test_insumo_update_shows_module_responsables_table(self):
         response = self.client.get(reverse("maestros:insumo_update", args=[self.insumo.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Centro de mando ERP")
-        self.assertContains(response, "Puerta ERP por módulo")
-        self.assertContains(response, "Entrega del maestro a downstream")
-        self.assertContains(response, "Ruta troncal ERP")
-        self.assertContains(response, "Radar ejecutivo ERP")
-        self.assertContains(response, "Ruta crítica ERP del artículo")
-        self.assertContains(response, "Cierre multi-módulo del artículo")
-        self.assertContains(response, "Mesa de gobierno ERP")
-        self.assertContains(response, "Cadena troncal del artículo")
-        self.assertContains(response, "Dependencia")
-        self.assertContains(response, "<th>Responsable</th>", html=False)
-        self.assertContains(response, "Producción / Costeo")
+        # 486608bd compactó el centro de mando a la tabla "Bloqueos por módulo";
+        # las filas de gobierno siguen disponibles como contrato de contexto.
+        self.assertContains(response, "Bloqueos por módulo")
+        self.assertContains(response, "<th>Módulo</th>", html=False)
+        self.assertContains(response, "Costeo / MRP")
         self.assertContains(response, "Compras")
-        self.assertContains(response, "Inventario / Almacén")
+        self.assertContains(response, "Inventario")
         self.assertIn("erp_governance_rows", response.context)
         self.assertIn("downstream_handoff_rows", response.context)
         self.assertIn("trunk_handoff_rows", response.context)
@@ -1922,8 +1929,8 @@ class MaestroEnterpriseCockpitTests(TestCase):
 
         response = self.client.get(reverse("maestros:insumo_update", args=[self.insumo.id]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Impacto comercial reciente")
-        self.assertContains(response, "Señal comercial")
+        # Copy vigente del template (486608bd): "Actividad comercial reciente".
+        self.assertContains(response, "Actividad comercial reciente")
         self.assertContains(response, "Pastel Comercial Maestro")
         self.assertIn("commercial_signal", response.context)
         self.assertEqual(response.context["commercial_signal"]["days_count"], 2)
@@ -1965,17 +1972,14 @@ class MaestroEnterpriseCockpitTests(TestCase):
 
         response = self.client.get(reverse("maestros:insumo_list"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Artículos maestros prioritarios por demanda")
+        # 486608bd retiró el panel de prioridad por demanda; el contrato
+        # vigente son las filas de contexto (el artículo sigue en la tabla).
         self.assertContains(response, "Caja Prioritaria Maestro")
-        self.assertContains(response, "Demanda crítica bloqueada")
         self.assertIn("demand_priority_rows", response.context)
         self.assertIn("critical_demand_priority_rows", response.context)
         self.assertIn("daily_critical_close_focus", response.context)
         self.assertTrue(response.context["demand_priority_rows"])
         self.assertTrue(response.context["critical_demand_priority_rows"])
-        self.assertContains(response, "Cola crítica de cierre del maestro")
-        self.assertContains(response, "Cierre prioritario del día")
-        self.assertContains(response, "Liberación diaria retenida")
         self.assertEqual(response.context["demand_priority_summary"]["critical_count"], 1)
 
 
@@ -2003,12 +2007,40 @@ class CostosAdquisicionRecipeMappingTests(TestCase):
             modo_costeo=Receta.MODO_COSTEO_FABRICADO,
             hash_contenido="hash-latte",
         )
-        RecetaCostoVersion.objects.create(
+        # Desde 1634486e (contrato de costeo centralizado) costos_adquisicion
+        # clasifica "fabricado" solo con costo vivo (CURRENT_LIVE) calculado
+        # desde las líneas, ya no desde RecetaCostoVersion con fuente "RECETA".
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-latte",
+            nombre="Kilogramo Latte",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        proveedor = Proveedor.objects.create(nombre="Proveedor Latte QA", activo=True)
+        insumo = Insumo.objects.create(
+            nombre="Base Latte QA",
+            unidad_base=unidad,
+            proveedor_principal=proveedor,
+            activo=True,
+        )
+        CostoInsumo.objects.create(
+            insumo=insumo,
+            proveedor=proveedor,
+            costo_unitario=Decimal("5.60"),
+            source_hash="hash-latte-costo-vivo",
+        )
+        LineaReceta.objects.create(
             receta=receta,
-            version_num=1,
-            hash_snapshot="hash-latte-cost",
-            costo_total=Decimal("5.60"),
-            costo_por_unidad_rendimiento=Decimal("5.60"),
+            posicion=1,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=insumo,
+            insumo_texto=insumo.nombre,
+            cantidad=Decimal("1.000000"),
+            unidad=unidad,
+            unidad_texto="kg-latte",
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+            match_score=100.0,
         )
 
         response = self.client.get(reverse("maestros:costos_adquisicion"), {"q": "Latte"})
@@ -2017,7 +2049,7 @@ class CostosAdquisicionRecipeMappingTests(TestCase):
         row = response.context["rows"][0]
         self.assertEqual(row["nombre"], "Latte")
         self.assertEqual(row["tipo"], "fabricado")
-        self.assertEqual(row["fuente"], "RECETA")
+        self.assertEqual(row["fuente"], "CURRENT_LIVE")
         self.assertEqual(row["costo_vigente"], Decimal("5.60"))
 
     def test_tarjeta_dia_madres_is_reventa_not_anticipo(self):

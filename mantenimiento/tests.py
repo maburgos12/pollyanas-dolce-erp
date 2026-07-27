@@ -553,16 +553,19 @@ class MantenimientoUnifiedInboxTests(TestCase):
             },
             content_type="application/json",
         )
-        unidad = self.client.post(
-            "/api/mantenimiento/reportes-unidad/",
-            {
-                "unidad": self.unidad.id,
-                "tipo": ReporteUnidad.TIPO_FALLA,
-                "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
-                "descripcion": "Falla reportada desde mantenimiento móvil.",
-            },
-            content_type="application/json",
-        )
+        # El post_save de ReporteUnidad encola una notificación Celery real
+        # (broker Redis); se mockea como en el resto de la suite.
+        with patch("logistica.signals.notificar_reporte_nuevo.delay"):
+            unidad = self.client.post(
+                "/api/mantenimiento/reportes-unidad/",
+                {
+                    "unidad": self.unidad.id,
+                    "tipo": ReporteUnidad.TIPO_FALLA,
+                    "severidad": ReporteUnidad.SEVERIDAD_URGENTE,
+                    "descripcion": "Falla reportada desde mantenimiento móvil.",
+                },
+                content_type="application/json",
+            )
 
         self.assertEqual(catalogos.status_code, 200)
         self.assertIn(
@@ -1280,7 +1283,9 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
-        self.assertIn("20260721-mantenimiento-pruebas-v19", base)
-        self.assertIn("pollyanas-erp-shell-v19-mantenimiento-pruebas", service_worker)
+        # El shell del ERP se recacheó a v23 en 993563b6 (Ver como empleado);
+        # el marcador v19 de mantenimiento quedó superado por ese bump global.
+        self.assertIn("20260724-superuser-preview-v23", base)
+        self.assertIn("pollyanas-erp-shell-v23-superuser-preview", service_worker)
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)

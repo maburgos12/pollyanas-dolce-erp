@@ -94,6 +94,9 @@ from recetas.views import (
     _ui_to_model_alcance,
 )
 from recetas.utils.normalizacion import normalizar_nombre
+# La partición de api/views (87d06c5b) dejó este helper en produccion.py;
+# sin el import los endpoints bulk/import de ventas truenan con NameError.
+from .produccion import _resolve_receta_bulk_ref, _resolve_sucursal_bulk_ref
 from recetas.utils.matching import match_insumo
 from recetas.utils.costeo_versionado import asegurar_version_costeo, comparativo_versiones
 from ..serializers import (

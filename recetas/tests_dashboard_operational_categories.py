@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from recetas.views import _point_operational_category
+from recetas.views.plan import _point_operational_category
 
 
 class DashboardOperationalCategoryTests(SimpleTestCase):

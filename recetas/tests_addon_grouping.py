@@ -31,6 +31,12 @@ from recetas.utils.costeo_versionado import asegurar_version_costeo
 
 class RecetaAddonGroupingTests(TestCase):
     def setUp(self):
+        # El servicio siembra los mapeos curados una sola vez por proceso
+        # (_CURATED_COMMERCIAL_MAPPINGS_READY). Con TestCase el rollback borra
+        # los datos pero el flag persiste; hay que re-armarlo por prueba.
+        from recetas.utils import commercial_composition as _cc
+
+        _cc._CURATED_COMMERCIAL_MAPPINGS_READY = False
         self.user = get_user_model().objects.create_user(
             username="addon_agent",
             email="addon_agent@example.com",
@@ -489,6 +495,20 @@ class RecetaAddonGroupingTests(TestCase):
             codigo_point="0063",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido=f"hash-{uuid4()}",
+        )
+        # La relación derivada exige componentes directos (patrón #608); sin
+        # líneas propias la heurística conservadora bloquearía la rebanada.
+        LineaReceta.objects.create(
+            receta=slice_recipe,
+            posicion=1,
+            insumo=medium_input,
+            insumo_texto="Base crunch",
+            cantidad=Decimal("0.1"),
+            unidad=self.unit_pza,
+            unidad_texto="pza",
+            costo_unitario_snapshot=Decimal("200"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
         )
         RecetaPresentacionDerivada.objects.create(
             receta_padre=medium_recipe,

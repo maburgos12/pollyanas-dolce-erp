@@ -177,10 +177,23 @@ class AIGatewayApiTests(APITestCase):
         self.assertIn("erp.get_purchase_requests", tool_keys)
         self.assertIn("erp.get_purchase_orders", tool_keys)
         self.assertIn("erp.get_recipe_cost_history", tool_keys)
-        self.assertNotIn("erp.get_audit_logs", tool_keys)
+        # Contrato RBAC vigente (matriz por módulo, commits 31da88b1/2e2cf70f):
+        # el rol LECTURA tiene vista de todos los módulos, incluida la bitácora
+        # de auditoría; la restricción fina se hace con UserModuleAccess o
+        # lock_auditoria (ver aserciones de usuario sin rol más abajo).
+        self.assertIn("erp.get_audit_logs", tool_keys)
         self.assertNotIn("erp.get_sync_jobs", tool_keys)
         self.assertNotIn("erp.create_purchase_request_draft", tool_keys)
         self.assertNotIn("erp.create_production_plan_draft", tool_keys)
+        # Cobertura negativa: un usuario autenticado sin rol no ve la bitácora.
+        self.client.force_authenticate(self.user_plain)
+        plain_tools = self.client.get(reverse("api_ai_gateway_tools"))
+        self.assertEqual(plain_tools.status_code, status.HTTP_200_OK)
+        self.assertNotIn(
+            "erp.get_audit_logs",
+            {row["key"] for row in plain_tools.data["tools"]},
+        )
+        self.client.force_authenticate(self.user_lectura)
         sales_summary = next(row for row in response.data["tools"] if row["key"] == "erp.get_sales_summary")
         self.assertIn("argument_schema", sales_summary)
         self.assertIn("endpoints", sales_summary)
@@ -457,7 +470,9 @@ class AIGatewayApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         result = response.data["result"]
-        self.assertEqual(result["sources"], ["pos_bridge.PointProduct", "reportes.FactVentaDiaria", "recetas.Receta"])
+        # Desde f4211b83 las ventas de promociones se leen vía el lector canónico
+        # protegido (ventas.services.sales_read_service), no directo del fact.
+        self.assertEqual(result["sources"], ["pos_bridge.PointProduct", "ventas.services.sales_read_service", "recetas.Receta"])
         payload = result["payload"]
         self.assertEqual(payload["promotion_type"], "3x2")
         self.assertEqual(payload["event_name"], "Día del Estudiante")
@@ -672,10 +687,21 @@ class AIGatewayApiTests(APITestCase):
         self.assertEqual(payload["items"][0]["branch_external_id"], "SUC1")
         self.assertEqual(payload["items"][0]["total_sales"], 800.0)
 
-    def test_audit_logs_tool_requires_dg_or_admin(self):
-        self.client.force_authenticate(self.user_lectura)
+    def test_audit_logs_tool_respects_audit_module_access(self):
+        # Contrato RBAC vigente (matriz por módulo, commits 31da88b1/2e2cf70f):
+        # can_view_audit == can_view_module("auditoria"). Sin rol => 403,
+        # candado lock_auditoria => 403, LECTURA/DG con vista => 200.
+        self.client.force_authenticate(self.user_plain)
         forbidden = self.client.post(self._invoke_url("erp.get_audit_logs"), {"arguments": {}}, format="json")
         self.assertEqual(forbidden.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(self.user_lectura)
+        lectura_allowed = self.client.post(self._invoke_url("erp.get_audit_logs"), {"arguments": {"limit": 5}}, format="json")
+        self.assertEqual(lectura_allowed.status_code, status.HTTP_200_OK)
+
+        UserProfile.objects.create(user=self.user_lectura, lock_auditoria=True)
+        locked = self.client.post(self._invoke_url("erp.get_audit_logs"), {"arguments": {"limit": 5}}, format="json")
+        self.assertEqual(locked.status_code, status.HTTP_403_FORBIDDEN)
 
         self.client.force_authenticate(self.user_dg)
         allowed = self.client.post(self._invoke_url("erp.get_audit_logs"), {"arguments": {"limit": 10}}, format="json")
