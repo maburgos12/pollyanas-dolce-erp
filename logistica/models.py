@@ -1631,6 +1631,29 @@ class SolicitudDomicilioQuerySet(models.QuerySet):
         self._reject_operational_fields(fields)
         return super().bulk_update(objs, fields, batch_size=batch_size)
 
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        objs = list(objs)
+        if update_conflicts:
+            self._reject_operational_fields(update_fields or ())
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
 
 class SolicitudDomicilio(models.Model):
     """Servicio a domicilio capturado por un canal distinto a la tienda en línea
@@ -1757,13 +1780,25 @@ class SolicitudDomicilio(models.Model):
 
     def clean(self):
         super().clean()
-        if self.legacy_without_point and self.estatus in {
-            self.ESTATUS_ENTREGADO,
-            self.ESTATUS_CANCELADO,
-        }:
-            return
-
         errors = {}
+        if self.legacy_without_point:
+            persisted_as_legacy = (
+                bool(self.pk)
+                and type(self)._base_manager.filter(
+                    pk=self.pk,
+                    legacy_without_point=True,
+                ).exists()
+            )
+            if not persisted_as_legacy:
+                errors["legacy_without_point"] = (
+                    "El indicador histórico solo puede establecerse mediante la migración."
+                )
+            elif self.estatus in {
+                self.ESTATUS_ENTREGADO,
+                self.ESTATUS_CANCELADO,
+            }:
+                return
+
         ready_or_later = {
             self.ESTATUS_LISTO,
             self.ESTATUS_EN_RUTA,

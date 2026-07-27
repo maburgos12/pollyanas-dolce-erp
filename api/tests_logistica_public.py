@@ -242,12 +242,12 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
     def test_retry_exacto_terminal_e_inactivo_permanece_idempotente(self):
         repartidor = self._repartidor("m2m_terminal")
         self._allow(repartidor)
-        self.solicitud.repartidor = repartidor
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
-        self.solicitud.legacy_without_point = True
-        self.solicitud.save(
-            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            legacy_without_point=True,
         )
+        self.solicitud.refresh_from_db()
         repartidor.user.is_active = False
         repartidor.user.save(update_fields=["is_active"])
 
@@ -486,9 +486,11 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.assertNotIn("oculto@example.com", rendered)
         self.assertNotIn("secreta", rendered)
         self.assertNotIn("no-exponer", rendered)
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.legacy_without_point = True
-        self.solicitud.save(update_fields=["estatus", "legacy_without_point"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        self.solicitud.refresh_from_db()
         terminal = self.client.get(self.list_url, **self.auth)
         self.assertEqual(terminal.data, {"results": []})
 

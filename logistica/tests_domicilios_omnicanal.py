@@ -136,6 +136,61 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         with self.assertRaises(ValidationError):
             SolicitudDomicilio.objects.bulk_update([solicitud], ["estatus"])
 
+    def test_bulk_create_rejects_ready_without_point_or_gps_in_all_modes(self):
+        invalid = SolicitudDomicilio(
+            cliente_nombre="Bulk inválido",
+            direccion="Sin GPS",
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+        )
+
+        with self.assertRaises(ValidationError):
+            SolicitudDomicilio.objects.bulk_create([invalid])
+        with self.assertRaises(ValidationError):
+            SolicitudDomicilio.objects.bulk_create(
+                [invalid],
+                ignore_conflicts=True,
+            )
+        with self.assertRaises(ValidationError):
+            SolicitudDomicilio.objects.bulk_create(
+                [invalid],
+                update_conflicts=True,
+                update_fields=["estatus"],
+                unique_fields=["id"],
+            )
+
+    def test_legacy_flag_is_migration_only_but_existing_history_remains_editable(self):
+        runtime_created = SolicitudDomicilio(
+            cliente_nombre="Falso histórico",
+            direccion="Calle",
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        with self.assertRaises(ValidationError):
+            runtime_created.save()
+
+        normal = SolicitudDomicilio.objects.create(
+            cliente_nombre="Normal",
+            direccion="Calle normal",
+        )
+        normal.legacy_without_point = True
+        with self.assertRaises(ValidationError):
+            normal.save(update_fields=["legacy_without_point"])
+
+        historical = SolicitudDomicilio.objects.create(
+            cliente_nombre="Histórico migrado",
+            direccion="Calle histórica",
+        )
+        SolicitudDomicilio._base_manager.filter(pk=historical.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        historical.refresh_from_db()
+        historical.notas = "Cambio ajeno permitido"
+        historical.save(update_fields=["notas"])
+        historical.refresh_from_db()
+        self.assertTrue(historical.legacy_without_point)
+        self.assertEqual(historical.notas, "Cambio ajeno permitido")
+
     def test_save_rejects_inverted_window_in_pending_state(self):
         solicitud = SolicitudDomicilio(
             cliente_nombre="Ventana inválida",
@@ -178,12 +233,15 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
             SolicitudDomicilio.ESTATUS_CANCELADO,
         ):
             with self.subTest(estatus=estatus):
-                solicitud = SolicitudDomicilio(
+                solicitud = SolicitudDomicilio.objects.create(
                     cliente_nombre="Histórico",
                     direccion="Dirección histórica",
+                )
+                SolicitudDomicilio._base_manager.filter(pk=solicitud.pk).update(
                     estatus=estatus,
                     legacy_without_point=True,
                 )
+                solicitud.refresh_from_db()
                 solicitud.full_clean()
 
     def test_delivery_window_end_cannot_precede_start(self):
@@ -222,7 +280,7 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
             estatus="ASIGNADO",
         )
         active_without_point, delivered_without_point = (
-            SolicitudDomicilio.objects.bulk_create(
+            SolicitudDomicilio._base_manager.bulk_create(
                 [
                     SolicitudDomicilio(
                         cliente_nombre="Activo legado",
@@ -415,12 +473,12 @@ class AsignacionDomicilioApiTests(APITestCase):
     def test_repeticion_idempotente_conserva_estado_terminal_sin_efectos(self):
         repartidor = self._repartidor("rep_entregado")
         reemplazo = self._repartidor("rep_reemplazo_terminal")
-        self.solicitud.repartidor = repartidor
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.legacy_without_point = True
-        self.solicitud.save(
-            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
         )
+        self.solicitud.refresh_from_db()
         url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
 
         response = self.client.post(
@@ -446,12 +504,12 @@ class AsignacionDomicilioApiTests(APITestCase):
 
     def test_repeticion_idempotente_acepta_repartidor_que_quedo_inactivo(self):
         repartidor = self._repartidor("rep_asignado_inactivo")
-        self.solicitud.repartidor = repartidor
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
-        self.solicitud.legacy_without_point = True
-        self.solicitud.save(
-            update_fields=["repartidor", "estatus", "legacy_without_point"]
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            legacy_without_point=True,
         )
+        self.solicitud.refresh_from_db()
         repartidor.user.is_active = False
         repartidor.user.save(update_fields=["is_active"])
         url = reverse("api_logistica_domicilio_asignar", args=[self.solicitud.id])
@@ -537,20 +595,14 @@ class AsignacionDomicilioApiTests(APITestCase):
             descripcion="Unidad terminal",
             sucursal=self.sucursal,
         )
-        self.solicitud.repartidor = actual
-        self.solicitud.unidad = unidad
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.legacy_without_point = True
-        self.solicitud.revision = 7
-        self.solicitud.save(
-            update_fields=[
-                "repartidor",
-                "unidad",
-                "estatus",
-                "legacy_without_point",
-                "revision",
-            ]
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=actual,
+            unidad=unidad,
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+            revision=7,
         )
+        self.solicitud.refresh_from_db()
 
         response = self.client.post(
             reverse("logistica:domicilios_generales"),
