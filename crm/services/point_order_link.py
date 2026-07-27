@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import IntegrityError, connection, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -62,32 +63,85 @@ def _validate_command(command: LinkPointOrderCommand, actor) -> None:
         errors["actor"] = "Se requiere un usuario activo para auditar la vinculación."
     if not _text(command.pk_nota):
         errors["pk_nota"] = "La nota Point es obligatoria."
+    elif len(_text(command.pk_nota)) > 120:
+        errors["pk_nota"] = "La nota Point excede la longitud permitida."
     if command.channel not in dict(PedidoCliente.CANAL_CHOICES):
         errors["channel"] = "El canal no es válido."
     if command.channel == PedidoCliente.CANAL_OTRO and not _text(command.social_reference):
         errors["social_reference"] = "El canal Otro requiere una descripción."
     if not _text(command.customer_name):
         errors["customer_name"] = "El nombre del cliente es obligatorio."
+    elif len(_text(command.customer_name)) > 180:
+        errors["customer_name"] = "El nombre excede la longitud permitida."
+    if len(_phone(command.customer_phone)) > 40:
+        errors["customer_phone"] = "El teléfono excede la longitud permitida."
+    normalized_email = _email(command.customer_email)
+    if len(normalized_email) > 254:
+        errors["customer_email"] = "El correo excede la longitud permitida."
+    elif normalized_email:
+        try:
+            validate_email(normalized_email)
+        except ValidationError:
+            errors["customer_email"] = "El correo no tiene un formato válido."
     if not _text(command.address):
         errors["address"] = "La dirección es obligatoria."
+    elif len(_text(command.address)) > 300:
+        errors["address"] = "La dirección excede la longitud permitida."
+    if len(_text(command.references)) > 300:
+        errors["references"] = "Las referencias exceden la longitud permitida."
+    if len(_text(command.place_id)) > 255:
+        errors["place_id"] = "El identificador del lugar excede la longitud permitida."
+    if len(_text(command.social_reference)) > 180:
+        errors["social_reference"] = "La referencia del canal excede la longitud permitida."
+    if len(_text(command.instructions)) > 500:
+        errors["instructions"] = "Las instrucciones exceden la longitud permitida."
 
     has_latitude = command.latitude is not None
     has_longitude = command.longitude is not None
     if has_latitude != has_longitude:
         errors["gps"] = "Latitud y longitud deben capturarse juntas."
-    if has_latitude and not Decimal("-90") <= command.latitude <= Decimal("90"):
+    latitude_is_valid = (
+        isinstance(command.latitude, Decimal)
+        and command.latitude.is_finite()
+    )
+    longitude_is_valid = (
+        isinstance(command.longitude, Decimal)
+        and command.longitude.is_finite()
+    )
+    if has_latitude and not latitude_is_valid:
+        errors["latitude"] = "La latitud debe ser un decimal finito."
+    elif has_latitude and not Decimal("-90") <= command.latitude <= Decimal("90"):
         errors["latitude"] = "La latitud debe estar entre -90 y 90."
-    if has_longitude and not Decimal("-180") <= command.longitude <= Decimal("180"):
+    if has_longitude and not longitude_is_valid:
+        errors["longitude"] = "La longitud debe ser un decimal finito."
+    elif has_longitude and not Decimal("-180") <= command.longitude <= Decimal("180"):
         errors["longitude"] = "La longitud debe estar entre -180 y 180."
+    if latitude_is_valid and abs(command.latitude.as_tuple().exponent) > 6:
+        errors["latitude"] = "La latitud admite máximo seis decimales."
+    if longitude_is_valid and abs(command.longitude.as_tuple().exponent) > 6:
+        errors["longitude"] = "La longitud admite máximo seis decimales."
 
     has_window_start = command.delivery_window_start is not None
     has_window_end = command.delivery_window_end is not None
     if has_window_start != has_window_end:
         errors["delivery_window"] = "La ventana de entrega requiere inicio y fin."
-    if (
+    window_types_valid = (
+        (not has_window_start or isinstance(command.delivery_window_start, datetime))
+        and (not has_window_end or isinstance(command.delivery_window_end, datetime))
+    )
+    if not window_types_valid:
+        errors["delivery_window"] = "La ventana de entrega requiere fechas válidas."
+    elif (
         has_window_start
         and has_window_end
-        and command.delivery_window_end < command.delivery_window_start
+        and (
+            timezone.is_naive(command.delivery_window_start)
+            or timezone.is_naive(command.delivery_window_end)
+        )
+    ):
+        errors["delivery_window"] = "La ventana de entrega requiere zona horaria."
+    elif has_window_start and has_window_end and (
+        command.delivery_window_end < command.delivery_window_start
     ):
         errors["delivery_window_end"] = "El fin de la ventana no puede ser anterior al inicio."
     if errors:
@@ -106,10 +160,13 @@ def _lock_key(namespace: str, value: str) -> None:
 def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
     normalized_phone = _phone(command.customer_phone)
     normalized_email = _email(command.customer_email)
+    identity_keys = []
     if normalized_phone:
-        _lock_key("crm-customer-phone", normalized_phone)
-    elif normalized_email:
-        _lock_key("crm-customer-email", normalized_email)
+        identity_keys.append(f"phone:{normalized_phone}")
+    if normalized_email:
+        identity_keys.append(f"email:{normalized_email}")
+    for identity_key in sorted(identity_keys):
+        _lock_key("crm-customer-identity", identity_key)
 
     if normalized_phone:
         customer = (
@@ -133,6 +190,9 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
         if customer:
             return customer
 
+    # Cliente.save() derives ``codigo`` from the current global maximum. This
+    # lock serializes that legacy allocation even for unrelated identities.
+    _lock_key("crm-customer-code", "global")
     return Cliente.objects.create(
         nombre=_text(command.customer_name),
         telefono=normalized_phone,
@@ -323,6 +383,8 @@ def link_point_note(
                 address = existing.direccion_entrega
                 if address is None:
                     address = _find_or_create_address(customer, command)
+                    existing.direccion_entrega = address
+                    existing.save(update_fields=["direccion_entrega", "updated_at"])
                 delivery = _create_delivery(
                     order=existing,
                     customer=customer,

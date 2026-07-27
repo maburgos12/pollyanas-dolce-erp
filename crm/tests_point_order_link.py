@@ -234,6 +234,62 @@ class PointOrderLinkTests(TestCase):
             link_point_note(command=_command(), actor=None)
         self.assertEqual(PedidoCliente.objects.count(), 0)
 
+    @patch("crm.services.point_order_link.PointNoteDetailService.fetch")
+    def test_direct_contract_rejects_lengths_email_naive_dates_and_non_finite_gps_before_io(
+        self,
+        fetch,
+    ):
+        invalid_commands = (
+            _command(customer_name="x" * 181),
+            _command(customer_phone="1" * 41),
+            _command(customer_email="no-es-email"),
+            _command(address="x" * 301),
+            _command(references="x" * 301),
+            _command(place_id="x" * 256),
+            _command(social_reference="x" * 181),
+            _command(instructions="x" * 501),
+            _command(latitude=Decimal("NaN"), longitude=Decimal("-108")),
+            _command(
+                delivery_window_start=timezone.now().replace(tzinfo=None),
+                delivery_window_end=timezone.now().replace(tzinfo=None) + timedelta(hours=1),
+            ),
+        )
+
+        for command in invalid_commands:
+            with self.subTest(command=command):
+                with self.assertRaises(ValidationError):
+                    link_point_note(command=command, actor=self.actor)
+
+        fetch.assert_not_called()
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
+    def test_existing_point_order_without_address_or_delivery_is_repaired_idempotently(
+        self,
+        _fetch,
+    ):
+        customer = Cliente.objects.create(nombre="Cliente previo", telefono="6671234567")
+        existing = PedidoCliente.objects.create(
+            cliente=customer,
+            descripcion="Nota Point previa",
+            point_note_id="900001",
+            point_note_folio="18452",
+            point_note_snapshot={"pk_nota": "900001"},
+            point_note_fetched_at=timezone.now(),
+        )
+
+        first = link_point_note(command=_command(), actor=self.actor)
+        second = link_point_note(command=_command(), actor=self.actor)
+        existing.refresh_from_db()
+
+        self.assertEqual(first.order.pk, existing.pk)
+        self.assertEqual(second.order.pk, existing.pk)
+        self.assertIsNotNone(existing.direccion_entrega_id)
+        self.assertEqual(first.delivery.pk, second.delivery.pk)
+        self.assertEqual(SolicitudDomicilio.objects.filter(pedido_cliente=existing).count(), 1)
+
 
 class PointOrderLinkConcurrencyTests(TransactionTestCase):
     reset_sequences = True
@@ -304,3 +360,96 @@ class PointOrderLinkConcurrencyTests(TransactionTestCase):
         self.assertEqual(DireccionCliente.objects.count(), 1)
         self.assertEqual(PedidoCliente.objects.count(), 2)
         self.assertEqual(SolicitudDomicilio.objects.count(), 2)
+
+    def _link_distinct_notes(self, commands):
+        ready = Barrier(2)
+
+        def attempt(command, folio):
+            close_old_connections()
+            try:
+                ready.wait(timeout=10)
+                note = _note(pk_nota=command.pk_nota, folio=folio)
+                point_service = type(
+                    "FakePointService",
+                    (),
+                    {"fetch": lambda self, **kwargs: note},
+                )()
+                result = link_point_note(
+                    command=command,
+                    actor=self.actor,
+                    point_service=point_service,
+                )
+                return result.order.pk
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(attempt, command, f"F-{index}")
+                for index, command in enumerate(commands, start=1)
+            ]
+            return [future.result(timeout=20) for future in futures]
+
+    def test_two_notes_with_different_phones_get_distinct_customer_codes(self):
+        order_ids = self._link_distinct_notes(
+            (
+                _command(
+                    pk_nota="900011",
+                    customer_phone="6671111111",
+                    customer_email="one@example.com",
+                ),
+                _command(
+                    pk_nota="900012",
+                    customer_phone="6672222222",
+                    customer_email="two@example.com",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(set(order_ids)), 2)
+        self.assertEqual(Cliente.objects.count(), 2)
+        self.assertEqual(
+            len(set(Cliente.objects.values_list("codigo", flat=True))),
+            2,
+        )
+
+    def test_two_notes_with_same_email_and_different_phones_reuse_customer(self):
+        order_ids = self._link_distinct_notes(
+            (
+                _command(
+                    pk_nota="900031",
+                    customer_phone="6671111111",
+                    customer_email="same@example.com",
+                ),
+                _command(
+                    pk_nota="900032",
+                    customer_phone="6672222222",
+                    customer_email="SAME@EXAMPLE.COM",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(set(order_ids)), 2)
+        self.assertEqual(Cliente.objects.count(), 1)
+
+    def test_two_notes_without_phone_or_email_create_distinct_customers_safely(self):
+        order_ids = self._link_distinct_notes(
+            (
+                _command(
+                    pk_nota="900021",
+                    customer_phone="",
+                    customer_email="",
+                    customer_name="Cliente uno",
+                ),
+                _command(
+                    pk_nota="900022",
+                    customer_phone="",
+                    customer_email="",
+                    customer_name="Cliente dos",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(set(order_ids)), 2)
+        self.assertEqual(Cliente.objects.count(), 2)
+        self.assertEqual(PedidoCliente.objects.count(), 2)
