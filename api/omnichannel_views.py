@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from uuid import uuid4
 
+import requests
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q
@@ -35,6 +36,7 @@ from logistica.services_domicilio_status import (
 )
 from pos_bridge.services.point_note_detail_service import (
     PointNoteContractError,
+    PointNoteDetailError,
     PointNoteDetailService,
     PointNoteIntegrityError,
     PointNoteNotFoundError,
@@ -44,6 +46,12 @@ from pos_bridge.services.point_ticket_threshold_service import (
     PointTicketThresholdService,
 )
 from pos_bridge.utils.helpers import normalize_text
+from pos_bridge.utils.exceptions import (
+    AuthenticationError,
+    ConfigurationError,
+    ExtractionError,
+    PosBridgeError,
+)
 
 
 IDEMPOTENCY_CONFLICT_CODE = "OMNICHANNEL_IDEMPOTENCY_CONFLICT"
@@ -148,9 +156,54 @@ def _point_boolean(value):
     return str(value or "").strip().casefold() in {"1", "true", "si", "sí"}
 
 
+def _point_row_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    epoch_match = re.fullmatch(r"/Date\((-?\d+)(?:[+-]\d+)?\)/", raw)
+    if epoch_match:
+        try:
+            return datetime.fromtimestamp(
+                int(epoch_match.group(1)) / 1000,
+                tz=timezone.get_current_timezone(),
+            ).date()
+        except (OverflowError, OSError, ValueError):
+            return None
+    for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(raw[:10], date_format).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _coerce_point_error(exc):
+    if isinstance(exc, PointNoteDetailError):
+        return exc
+    if isinstance(exc, (ConfigurationError, ExtractionError)):
+        return PointNoteContractError(
+            "La integración Point no cumple el contrato requerido.",
+        )
+    if isinstance(exc, (AuthenticationError, PosBridgeError, requests.RequestException)):
+        return PointNoteUnavailableError(
+            "La sesión Point no está disponible.",
+        )
+    return PointNoteUnavailableError("Point no está disponible.")
+
+
 def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
     """Query Point's confirmed note report and expose only operational fields."""
-    service = PointTicketThresholdService()
+    try:
+        service = PointTicketThresholdService()
+    except (PosBridgeError, requests.RequestException) as exc:
+        raise _coerce_point_error(exc) from exc
     end_date = fecha or timezone.localdate()
     start_date = fecha or (end_date - timedelta(days=119))
     params = service._build_params(start_date=start_date, end_date=end_date)
@@ -158,7 +211,10 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
         service.settings.base_url.rstrip("/")
         + service.NOTES_BY_PLAZA_PATH
     )
-    auth_session = service.http_session_service.create()
+    try:
+        auth_session = service.http_session_service.create()
+    except (PosBridgeError, requests.RequestException) as exc:
+        raise _coerce_point_error(exc) from exc
     try:
         try:
             response = auth_session.session.get(
@@ -202,13 +258,17 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
         pk_nota = str(row.get("PK_NOTA") or row.get("Pk_Nota") or "").strip()
         if not pk_nota:
             continue
-        day = str(row.get("DIA") or row.get("Dia") or "").strip()
+        day = _point_row_date(row.get("DIA") or row.get("Dia"))
+        # Point occasionally returns malformed report rows. A row without a
+        # trustworthy date is never exposed as a candidate.
+        if day is None or (fecha is not None and day != fecha):
+            continue
         candidates.append(
             {
                 "pk_nota": pk_nota,
                 "folio": row_folio,
                 "sucursal": row_branch,
-                "fecha": day,
+                "fecha": day.isoformat(),
                 "hora": str(row.get("HORA") or row.get("Hora") or "").strip(),
                 "total": str(
                     row.get("MONTO")
@@ -605,6 +665,12 @@ class PublicOmnichannelPointNotesView(APIView):
             PointNoteIntegrityError,
         ) as exc:
             return _point_error_response(api_client, request, exc)
+        except (PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(
+                api_client,
+                request,
+                _coerce_point_error(exc),
+            )
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response({"count": len(results), "results": results})
 
@@ -634,6 +700,12 @@ class PublicOmnichannelPointNoteDetailView(APIView):
             PointNoteIntegrityError,
         ) as exc:
             return _point_error_response(api_client, request, exc)
+        except (PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(
+                api_client,
+                request,
+                _coerce_point_error(exc),
+            )
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(_serialize_point_note(note))
 
@@ -707,6 +779,12 @@ class PublicOmnichannelPointOrdersView(APIView):
             PointNoteIntegrityError,
         ) as exc:
             return _point_error_response(api_client, request, exc)
+        except (PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(
+                api_client,
+                request,
+                _coerce_point_error(exc),
+            )
         except ValidationError:
             _log_access(api_client, request, status.HTTP_409_CONFLICT)
             return Response(
@@ -923,14 +1001,23 @@ class PublicOmnichannelDeliveryStatusView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         values = serializer.validated_data
         try:
-            payload = update_domicilio_status(
-                solicitud_id=solicitud_id,
-                api_client=api_client,
-                repartidor_id=values["repartidor_id"],
-                requested_status=values["estatus"],
-                operation_id=values["operation_id"],
-                actor=values["actor"],
-            )
+            with transaction.atomic():
+                owned = (
+                    _owned_deliveries(api_client)
+                    .select_for_update()
+                    .filter(pk=solicitud_id)
+                    .exists()
+                )
+                if not owned:
+                    raise Http404
+                payload = update_domicilio_status(
+                    solicitud_id=solicitud_id,
+                    api_client=api_client,
+                    repartidor_id=values["repartidor_id"],
+                    requested_status=values["estatus"],
+                    operation_id=values["operation_id"],
+                    actor=values["actor"],
+                )
         except Http404:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
             raise

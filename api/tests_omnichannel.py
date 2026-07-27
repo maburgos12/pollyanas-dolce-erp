@@ -9,7 +9,7 @@ from uuid import uuid4
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +24,11 @@ from pos_bridge.services.point_note_detail_service import (
     PointNote,
     PointNoteLine,
     PointNoteUnavailableError,
+)
+from pos_bridge.utils.exceptions import (
+    AuthenticationError,
+    ConfigurationError,
+    ExtractionError,
 )
 
 
@@ -818,6 +823,57 @@ class CanonicalOmnichannelApiTests(APITestCase):
         session.close.assert_called_once()
 
     @patch("api.omnichannel_views.PointTicketThresholdService")
+    def test_note_search_filters_exact_real_date_and_skips_invalid_rows(self, service_type):
+        session = MagicMock()
+        session.get.return_value.json.return_value = [
+            {
+                "PK_NOTA": "same-date",
+                "FOLIO": "18452",
+                "SUCURSAL": "Matriz",
+                "DIA": "27/07/2026",
+            },
+            {
+                "PK_NOTA": "other-date",
+                "FOLIO": "18452",
+                "SUCURSAL": "Matriz",
+                "DIA": "26/07/2026",
+            },
+            {
+                "PK_NOTA": "invalid-date",
+                "FOLIO": "18452",
+                "SUCURSAL": "Matriz",
+                "DIA": "fecha privada no válida",
+            },
+        ]
+        service = service_type.return_value
+        service.NOTES_BY_PLAZA_PATH = "/Report/NotasByPlaza"
+        service.settings = SimpleNamespace(
+            base_url="https://point.test",
+            timeout_ms=30000,
+        )
+        service._build_params.return_value = {"fi": "1", "ff": "2"}
+        service.http_session_service.create.return_value = SimpleNamespace(
+            session=session,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {
+                "folio": "18452",
+                "sucursal": "Matriz",
+                "fecha": "2026-07-27",
+            },
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["pk_nota"], "same-date")
+        self.assertEqual(response.data["results"][0]["fecha"], "2026-07-27")
+        self.assertNotIn("other-date", str(response.data))
+        self.assertNotIn("invalid-date", str(response.data))
+
+    @patch("api.omnichannel_views.PointTicketThresholdService")
     def test_note_search_closes_point_session_when_http_fails(self, service_type):
         session = MagicMock()
         session.get.side_effect = RuntimeError("fallo de red")
@@ -1019,6 +1075,65 @@ class CanonicalOmnichannelApiTests(APITestCase):
         access = PublicApiAccessLog.objects.filter(client=self.api_client).latest("id")
         self.assertNotIn("secreto", str(access))
 
+    def test_point_session_failures_are_typed_audited_and_sanitized_on_all_three_routes(self):
+        cases = (
+            (
+                "api.omnichannel_views.PointTicketThresholdService",
+                "search",
+                AuthenticationError("login Point cliente=Ana token=secreto"),
+            ),
+            (
+                "api.omnichannel_views.PointNoteDetailService.fetch",
+                "detail",
+                ConfigurationError("POINT_PASSWORD=secreto"),
+            ),
+            (
+                "api.omnichannel_views.link_point_note",
+                "create",
+                ExtractionError("body_preview cliente=Ana"),
+            ),
+        )
+        for target, route, error in cases:
+            cache.clear()
+            before = PublicApiAccessLog.objects.filter(client=self.api_client).count()
+            with self.subTest(route=route), patch(target) as dependency:
+                if route == "search":
+                    dependency.side_effect = error
+                    response = self.client.get(
+                        reverse("api_public_omnichannel_point_notes"),
+                        {"folio": "18452", "sucursal": "Matriz"},
+                        **self.auth,
+                    )
+                elif route == "detail":
+                    dependency.side_effect = error
+                    response = self.client.get(
+                        reverse(
+                            "api_public_omnichannel_point_note_detail",
+                            kwargs={"pk_nota": "900001"},
+                        ),
+                        **self.auth,
+                    )
+                else:
+                    dependency.side_effect = error
+                    response = self.client.post(
+                        reverse("api_public_omnichannel_point_orders"),
+                        self.point_payload,
+                        format="json",
+                        **self.auth,
+                    )
+
+            self.assertIn(
+                response.status_code,
+                {status.HTTP_502_BAD_GATEWAY, status.HTTP_503_SERVICE_UNAVAILABLE},
+            )
+            self.assertIn(response.data["code"], {"POINT_UNAVAILABLE", "POINT_CONTRACT_ERROR"})
+            self.assertNotIn("secreto", str(response.data))
+            self.assertNotIn("Ana", str(response.data))
+            self.assertEqual(
+                PublicApiAccessLog.objects.filter(client=self.api_client).count(),
+                before + 1,
+            )
+
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_point_note_for_api(),
@@ -1061,3 +1176,74 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertFalse(first.data["idempotent"])
         self.assertEqual(replay.status_code, status.HTTP_200_OK)
         self.assertTrue(replay.data["idempotent"])
+
+    def test_patch_status_hides_non_point_and_legacy_deliveries(self):
+        branch = Sucursal.objects.create(codigo="API-SCOPE", nombre="API Scope")
+        driver_user = get_user_model().objects.create_user(
+            username="api-scope-driver",
+            password="unused",
+        )
+        driver = Repartidor.objects.create(user=driver_user, sucursal=branch)
+        self.api_client.repartidores_logistica_autorizados.add(driver)
+        customer = Cliente.objects.create(nombre="Scope")
+        address = DireccionCliente.objects.create(
+            cliente=customer,
+            direccion="Scope",
+            latitud="24.809064",
+            longitud="-107.394011",
+        )
+        non_point_order = PedidoCliente.objects.create(
+            cliente=customer,
+            direccion_entrega=address,
+            descripcion="Sin Point",
+            public_api_client=self.api_client,
+        )
+        non_point = SolicitudDomicilio.objects.create(
+            pedido_cliente=non_point_order,
+            direccion_cliente=address,
+            cliente_nombre="Scope",
+            direccion="Scope",
+            repartidor=driver,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
+        point_order = PedidoCliente.objects.create(
+            cliente=customer,
+            direccion_entrega=address,
+            descripcion="Point legacy",
+            public_api_client=self.api_client,
+            point_note_id="POINT-LEGACY-SCOPE",
+            point_note_snapshot={"pk_nota": "POINT-LEGACY-SCOPE"},
+        )
+        legacy = SolicitudDomicilio.objects.create(
+            pedido_cliente=point_order,
+            direccion_cliente=address,
+            cliente_nombre="Scope legacy",
+            direccion="Scope",
+            repartidor=driver,
+            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE logistica_solicituddomicilio "
+                "SET legacy_without_point = TRUE WHERE id = %s",
+                [legacy.id],
+            )
+        payload = {
+            "repartidor_id": driver.id,
+            "estatus": "EN_RUTA",
+            "operation_id": str(uuid4()),
+            "actor": {"id": "scope", "nombre": "Scope"},
+        }
+
+        for delivery in (non_point, legacy):
+            with self.subTest(delivery=delivery.id):
+                response = self.client.patch(
+                    reverse(
+                        "api_public_omnichannel_delivery_status",
+                        kwargs={"solicitud_id": delivery.id},
+                    ),
+                    payload,
+                    format="json",
+                    **self.auth,
+                )
+                self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
