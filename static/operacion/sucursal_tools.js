@@ -39,6 +39,48 @@
   const supply = document.querySelector("#codigo_point");
   const mermaForm = document.querySelector("#merma-form");
   let stockRequest = 0;
+  async function recoverSupplyCatalog() {
+    const status = document.querySelector("[data-catalog-status]");
+    if (!supply || !mermaForm?.dataset.stockUrl || supply.options.length > 1) {
+      if (status) status.hidden = true;
+      return;
+    }
+    if (status) {
+      status.hidden = false;
+      status.textContent = "Actualizando los insumos recibidos por esta sucursal…";
+    }
+    try {
+      const response = await fetch(mermaForm.dataset.stockUrl, {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No fue posible actualizar los insumos.");
+      const items = Array.isArray(payload.insumos) ? payload.insumos : [];
+      const fragment = document.createDocumentFragment();
+      items.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.codigo_point;
+        option.dataset.unit = item.unidad || "";
+        option.textContent = item.nombre;
+        fragment.appendChild(option);
+      });
+      supply.appendChild(fragment);
+      if (status) {
+        status.hidden = items.length > 0;
+        status.textContent = items.length
+          ? ""
+          : "No hay insumos recibidos disponibles para esta sucursal.";
+      }
+    } catch (error) {
+      if (status) {
+        status.hidden = false;
+        status.textContent = error.message;
+      }
+      showToast(error.message, "error");
+    }
+  }
   async function syncSupply() {
     const requestId = ++stockRequest;
     const selected = supply?.selectedOptions[0];
@@ -81,7 +123,7 @@
     }
   }
   supply?.addEventListener("change", syncSupply);
-  syncSupply();
+  recoverSupplyCatalog().then(syncSupply);
 
   document.querySelectorAll("form[data-async-action]").forEach((form) => {
     form.addEventListener("submit", async (event) => {

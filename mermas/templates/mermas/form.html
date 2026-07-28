@@ -142,12 +142,20 @@
             const response = await fetch(form.action || window.location.href, {
                 method: "POST",
                 body: formData,
-                headers: token ? {"X-CSRFToken": token} : {},
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                    ...(token ? {"X-CSRFToken": token} : {}),
+                },
                 credentials: "same-origin",
                 redirect: "follow",
             });
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.error || `HTTP ${response.status}`);
+            }
+            const finalPath = new URL(response.url || window.location.href).pathname;
+            if (response.redirected && finalPath === "/mermas/app/") {
+                throw new Error("La sesión del formulario expiró. Recarga la página e inténtalo de nuevo.");
             }
             window.location.assign(response.url || window.location.href);
         } catch (error) {
@@ -155,7 +163,7 @@
             submitButton.textContent = originalLabel;
             window.ERPActionUI?.showToast({
                 type: "error",
-                message: "No se pudo guardar la merma. Revisa tu conexión e inténtalo de nuevo.",
+                message: error.message || "No se pudo guardar la merma. Revisa tu conexión e inténtalo de nuevo.",
             });
         }
     });
