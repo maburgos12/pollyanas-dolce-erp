@@ -645,6 +645,7 @@ class AsignacionDomicilioApiTests(APITestCase):
         reemplazo = self._repartidor("rep_reemplazo_terminal")
         SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
             repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
             estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
             legacy_without_point=True,
         )
@@ -676,6 +677,7 @@ class AsignacionDomicilioApiTests(APITestCase):
         repartidor = self._repartidor("rep_asignado_inactivo")
         SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
             repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
             estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
             legacy_without_point=True,
         )

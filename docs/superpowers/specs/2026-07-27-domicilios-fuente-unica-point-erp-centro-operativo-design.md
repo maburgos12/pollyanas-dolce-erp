@@ -423,3 +423,24 @@ El trabajo estará completo cuando:
 - rutas antiguas no creen registros paralelos;
 - desktop, tablet y móvil pasen las pruebas y tengan evidencia visual;
 - producción quede verificada sin regresiones en pedidos web, despacho o logística.
+
+## 16. Compatibilidad temporal del contrato de asignación
+
+Durante la coordinación de versión con el BFF, `POST
+/api/public/v1/logistica/domicilios/<id>/asignar/` acepta temporalmente el
+payload legado con `repartidor_id` y `actor`, sin `unidad_id`. El ERP infiere
+exclusivamente la `unidad_asignada` canónica del repartidor cuando está activa,
+disponible y pertenece a la misma sucursal. Si esa relación no es válida, la
+API falla con `400` y no asigna.
+
+`unidad_id` permanece soportado y es el contrato recomendado para clientes
+actualizados. El BFF deberá empezar a enviarlo a partir de su siguiente versión
+y coordinar telemetría de payloads legados antes de retirar la inferencia. La
+omisión se considera deprecada: no deberá eliminarse hasta confirmar que no hay
+clientes activos usando el payload anterior y anunciar el cambio en una versión
+mayor del contrato público.
+
+En domicilios terminales no se infiere equivalencia material: repartidor y
+unidad deben coincidir exactamente con lo almacenado para responder de forma
+idempotente. Cualquier diferencia devuelve conflicto y nunca modifica el
+registro terminal.

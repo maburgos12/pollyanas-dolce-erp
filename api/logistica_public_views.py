@@ -30,7 +30,7 @@ class ExternalActorSerializer(serializers.Serializer):
 
 class PublicDomicilioAssignmentSerializer(serializers.Serializer):
     repartidor_id = serializers.IntegerField(min_value=1)
-    unidad_id = serializers.IntegerField(min_value=1)
+    unidad_id = serializers.IntegerField(min_value=1, required=False)
     actor = ExternalActorSerializer()
 
     def validate_repartidor_id(self, value):
@@ -137,15 +137,16 @@ class PublicLogisticaDomicilioAsignarView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         actor = serializer.validated_data["actor"]
-        unidad = unidades_disponibles_queryset().filter(
-            pk=serializer.validated_data["unidad_id"],
-        ).first()
-        if unidad is None:
-            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
-            return Response(
-                {"detail": "Unidad no disponible."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        unidad = None
+        unidad_id = serializer.validated_data.get("unidad_id")
+        if unidad_id is not None:
+            unidad = unidades_disponibles_queryset().filter(pk=unidad_id).first()
+            if unidad is None:
+                _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": "Unidad no disponible."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         try:
             payload = assign_domicilio(
                 solicitud_id=solicitud_id,

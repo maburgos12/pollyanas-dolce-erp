@@ -276,6 +276,8 @@ class PointOrderLinkTests(TestCase):
         self.assertEqual(address.longitud, Decimal("-108.985886"))
         self.assertEqual(address.place_id, "place-123")
         self.assertEqual(address.referencias, "Portón blanco")
+        result.delivery.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        result.delivery.save(update_fields=["estatus"])
         result.delivery.estatus = SolicitudDomicilio.ESTATUS_LISTO
         result.delivery.save(update_fields=["estatus"])
 

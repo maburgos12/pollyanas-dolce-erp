@@ -19,7 +19,7 @@ from rest_framework.test import APIClient, APITestCase
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from core.models import Sucursal
 from integraciones.models import PublicApiAccessLog, PublicApiClient
-from logistica.models import Repartidor, SolicitudDomicilio
+from logistica.models import Repartidor, SolicitudDomicilio, Unidad
 from pos_bridge.services.point_note_detail_service import (
     PointNote,
     PointNoteLine,
@@ -1296,13 +1296,25 @@ class CanonicalOmnichannelApiTests(APITestCase):
             username="api-driver",
             password="unused",
         )
-        driver = Repartidor.objects.create(user=driver_user, sucursal=branch)
+        unit = Unidad.objects.create(
+            codigo="API-DOM-U",
+            descripcion="Unidad API Domicilios",
+            sucursal=branch,
+        )
+        driver = Repartidor.objects.create(
+            user=driver_user,
+            sucursal=branch,
+            unidad_asignada=unit,
+        )
         self.api_client.capabilities = ["OMNICHANNEL", "LOGISTICA_ASSIGNMENT"]
         self.api_client.save(update_fields=["capabilities"])
         self.api_client.repartidores_logistica_autorizados.add(driver)
         delivery.repartidor = driver
+        delivery.unidad = unit
+        delivery.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        delivery.save(update_fields=["repartidor", "unidad", "estatus"])
         delivery.estatus = SolicitudDomicilio.ESTATUS_LISTO
-        delivery.save(update_fields=["repartidor", "estatus"])
+        delivery.save(update_fields=["estatus"])
         url = reverse(
             "api_public_omnichannel_delivery_status",
             kwargs={"solicitud_id": delivery.id},
@@ -1320,7 +1332,8 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertFalse(first.data["idempotent"])
         self.assertEqual(replay.status_code, status.HTTP_200_OK)
-        self.assertTrue(replay.data["idempotent"])
+        self.assertEqual(replay.data, first.data)
+        self.assertFalse(replay.data["idempotent"])
 
     def test_patch_status_requires_logistica_capability_in_addition_to_omnichannel(self):
         response = self.client.patch(
@@ -1351,7 +1364,16 @@ class CanonicalOmnichannelApiTests(APITestCase):
             username="api-scope-driver",
             password="unused",
         )
-        driver = Repartidor.objects.create(user=driver_user, sucursal=branch)
+        unit = Unidad.objects.create(
+            codigo="API-SCOPE-U",
+            descripcion="Unidad API Scope",
+            sucursal=branch,
+        )
+        driver = Repartidor.objects.create(
+            user=driver_user,
+            sucursal=branch,
+            unidad_asignada=unit,
+        )
         self.api_client.repartidores_logistica_autorizados.add(driver)
         customer = Cliente.objects.create(nombre="Scope")
         address = DireccionCliente.objects.create(
@@ -1372,7 +1394,7 @@ class CanonicalOmnichannelApiTests(APITestCase):
             cliente_nombre="Scope",
             direccion="Scope",
             repartidor=driver,
-            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            estatus=SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
         )
         point_order = PedidoCliente.objects.create(
             cliente=customer,
@@ -1388,8 +1410,13 @@ class CanonicalOmnichannelApiTests(APITestCase):
             cliente_nombre="Scope legacy",
             direccion="Scope",
             repartidor=driver,
-            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            unidad=unit,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        legacy.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        legacy.save(update_fields=["estatus"])
+        legacy.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        legacy.save(update_fields=["estatus"])
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE logistica_solicituddomicilio "

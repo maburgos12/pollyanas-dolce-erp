@@ -115,27 +115,51 @@ def assign_domicilio(
             ).exists()
         ):
             raise DomicilioAssignmentError("Repartidor no disponible.", 400)
-        if (
-            solicitud.repartidor_id == repartidor_id
-            and solicitud.estatus in SolicitudDomicilio.TERMINAL_STATUSES
-            and (
-                solicitud.unidad_id == getattr(unidad, "id", None)
-                or solicitud.unidad_id is None
+        repartidor_solicitado = (
+            Repartidor.objects.select_related("unidad_asignada", "sucursal")
+            .filter(pk=repartidor_id)
+            .first()
+        )
+        if repartidor_solicitado is None:
+            raise DomicilioAssignmentError("Repartidor no disponible.", 400)
+        if unidad is None:
+            unidad = repartidor_solicitado.unidad_asignada
+            if unidad is None or not unidad.activa:
+                raise DomicilioAssignmentError(
+                    "El repartidor no tiene una unidad activa asignada.",
+                    400,
+                )
+            if unidad.sucursal_id != repartidor_solicitado.sucursal_id:
+                raise DomicilioAssignmentError(
+                    "La unidad asignada al repartidor no pertenece a su sucursal.",
+                    400,
+                )
+        if solicitud.estatus in SolicitudDomicilio.TERMINAL_STATUSES:
+            if (
+                solicitud.repartidor_id == repartidor_id
+                and solicitud.unidad_id == unidad.id
+            ):
+                return {
+                    "id": solicitud.id,
+                    "repartidor_id": repartidor_id,
+                    "estatus": solicitud.estatus,
+                    "revision": solicitud.revision,
+                    "idempotent": True,
+                }
+            if solicitud.repartidor_id == repartidor_id:
+                raise DomicilioAssignmentError(
+                    "El domicilio terminal no coincide con la unidad solicitada.",
+                    409,
+                )
+            raise DomicilioAssignmentError(
+                "El domicilio ya no admite asignación.",
+                409,
             )
-        ):
-            return {
-                "id": solicitud.id,
-                "repartidor_id": repartidor_id,
-                "estatus": solicitud.estatus,
-                "revision": solicitud.revision,
-                "idempotent": True,
-            }
         repartidor = repartidores_disponibles_queryset().filter(
             pk=repartidor_id
         ).first()
         if repartidor is None:
             raise DomicilioAssignmentError("Repartidor no disponible.", 400)
-        unidad = unidad or repartidor.unidad_asignada
         if unidad is None or not unidades_disponibles_queryset().filter(pk=unidad.pk).exists():
             raise DomicilioAssignmentError("Unidad activa obligatoria.", 400)
         if unidad.sucursal_id != repartidor.sucursal_id:
@@ -153,15 +177,6 @@ def assign_domicilio(
                 "estatus": solicitud.estatus,
                 "idempotent": True,
             }
-        if solicitud.estatus in {
-            SolicitudDomicilio.ESTATUS_EN_RUTA,
-            SolicitudDomicilio.ESTATUS_ENTREGADO,
-            SolicitudDomicilio.ESTATUS_CANCELADO,
-        }:
-            raise DomicilioAssignmentError(
-                "El domicilio ya no admite asignación.",
-                409,
-            )
         anterior_id = solicitud.repartidor_id
         unidad_anterior_id = solicitud.unidad_id
         unidad_anterior_codigo = (

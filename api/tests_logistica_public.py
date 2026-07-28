@@ -256,11 +256,149 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
             3,
         )
 
+    def test_payload_legacy_infiere_unidad_activa_asignada(self):
+        repartidor = self._repartidor("m2m_legacy")
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
+        self.assertEqual(
+            self.solicitud.unidad_id,
+            repartidor.unidad_asignada_id,
+        )
+
+    def test_payload_legacy_rechaza_repartidor_sin_unidad(self):
+        user = User.objects.create_user(username="m2m_sin_unidad")
+        repartidor = Repartidor.objects.create(user=user, sucursal=self.sucursal)
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "El repartidor no tiene una unidad activa asignada.",
+        )
+
+    def test_payload_legacy_rechaza_unidad_inactiva(self):
+        repartidor = self._repartidor("m2m_unidad_inactiva")
+        self._allow(repartidor)
+        repartidor.unidad_asignada.activa = False
+        repartidor.unidad_asignada.save(update_fields=["activa"])
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "El repartidor no tiene una unidad activa asignada.",
+        )
+
+    def test_payload_legacy_rechaza_unidad_asignada_de_otra_sucursal(self):
+        repartidor = self._repartidor("m2m_unidad_otra_sucursal")
+        self._allow(repartidor)
+        otra_sucursal = Sucursal.objects.create(
+            codigo="M2M-OTRA",
+            nombre="Otra sucursal",
+        )
+        repartidor.unidad_asignada.sucursal = otra_sucursal
+        repartidor.unidad_asignada.save(update_fields=["sucursal"])
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "La unidad asignada al repartidor no pertenece a su sucursal.",
+        )
+
+    def test_payload_explicito_con_unidad_valida_se_conserva(self):
+        repartidor = self._repartidor("m2m_explicito")
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            self._payload(repartidor),
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(
+            self.solicitud.unidad_id,
+            repartidor.unidad_asignada_id,
+        )
+
+    def test_terminal_no_acepta_unidad_inferida_distinta_de_la_guardada(self):
+        repartidor = self._repartidor("m2m_terminal_sin_unidad")
+        self._allow(repartidor)
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            unidad=None,
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            legacy_without_point=True,
+        )
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.data["detail"],
+            "El domicilio terminal no coincide con la unidad solicitada.",
+        )
+        self.solicitud.refresh_from_db()
+        self.assertIsNone(self.solicitud.unidad_id)
+
     def test_retry_exacto_terminal_e_inactivo_permanece_idempotente(self):
         repartidor = self._repartidor("m2m_terminal")
         self._allow(repartidor)
         SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
             repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
             estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
             legacy_without_point=True,
         )
