@@ -25,6 +25,9 @@ from .services_vacaciones import es_dia_laborable
 
 VENTANA_RETARDOS_DIAS = 15
 VENTANA_FALTAS_DIAS = 30
+# Ventana semanal para acumular usos de tolerancia (regla R-03, ratificada por
+# Mauricio el 27-jul-2026: "la ventana es en un periodo de 7 días o la semana").
+VENTANA_TOLERANCIA_DIAS = 7
 RETARDOS_POR_FALTA = 3
 FALTAS_AVISO_BAJA = 3
 FALTAS_BAJA = 4
@@ -267,7 +270,7 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
         creados += int(creada)
         actualizados += int(actualizada)
 
-        desde = fecha - timedelta(days=VENTANA_RETARDOS_DIAS - 1)
+        desde = fecha - timedelta(days=VENTANA_TOLERANCIA_DIAS - 1)
         usos_tolerancia = IncidenciaAsistencia.objects.filter(
             empleado=empleado,
             fecha__gte=desde,
@@ -293,8 +296,8 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
                 minutos=minutos_tarde,
                 ventana_inicio=desde,
                 ventana_fin=fecha,
-                detalle="Uso recurrente de tolerancia en ventana de 15 dias.",
-                metadata={"usos_tolerancia_15d": usos_tolerancia},
+                detalle="Uso recurrente de tolerancia en ventana de 7 dias.",
+                metadata={"usos_tolerancia_7d": usos_tolerancia},
             )
             creados += int(creada)
             actualizados += int(actualizada)
