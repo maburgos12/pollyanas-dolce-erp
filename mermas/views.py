@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -393,7 +393,10 @@ def crear_registro(request):
             messages.success(request, f"Merma {registro.folio} registrada. Queda abierta hasta asignar repartidor.")
             return redirect("mermas:detalle", pk=registro.pk)
         except (ValidationError, PermissionDenied) as exc:
-            messages.error(request, exc.messages[0] if hasattr(exc, "messages") else str(exc))
+            error = exc.messages[0] if hasattr(exc, "messages") else str(exc)
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"error": error}, status=400)
+            messages.error(request, error)
 
     productos_iniciales = Receta.objects.order_by("nombre")
     return render(

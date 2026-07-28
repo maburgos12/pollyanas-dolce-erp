@@ -88,7 +88,9 @@
           <option value="">Selecciona un insumo</option>
           {% for insumo in insumos %}<option value="{{ insumo.codigo_point }}" data-unit="{{ insumo.unidad_point }}" {% if draft_mermas.codigo_point == insumo.codigo_point %}selected{% endif %}>{{ insumo.nombre_point }}</option>{% endfor %}
         </select>
-        {% if not insumos %}<p class="empty-state">Point no reporta insumos elegibles para esta sucursal. No se mostrará el catálogo general.</p>{% endif %}
+        <p class="empty-state" data-catalog-status {% if insumos %}hidden{% endif %}>
+          Actualizando los insumos recibidos por esta sucursal…
+        </p>
         <div class="stock-note" data-stock-note hidden></div>
         <label for="cantidad_merma">Cantidad <span data-unit-label></span></label>
         <input id="cantidad_merma" name="cantidad" type="number" inputmode="decimal" min="0.001" step="0.001" value="{{ draft_mermas.cantidad|default:'' }}" required>
@@ -124,6 +126,6 @@
     </section>
   </main>
   <div class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260728-point-live-v1" defer></script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260728-catalog-recovery-v2" defer></script>
 </body>
 </html>
