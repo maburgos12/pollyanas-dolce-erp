@@ -114,6 +114,11 @@ El job para y rearranca el agente porque ambos comparten `storage_state.json` y 
 lotes de 25 porque `erp_client.send_events` manda todo en un POST con `timeout=20` y revienta con
 volumen.
 
+Ojo al operar: **toda ingesta de checadas dispara el motor de reglas de asistencia** — el receptor del
+ERP llama `evaluar_dia_empleado` por cada empleado-dia y sincroniza bonos en BORRADOR. No es algo que
+introduzca el catch-up: el sync normal de 5 minutos hace lo mismo con cada marcaje. Lo que cambia con
+un catch-up ancho es el volumen de dias que se re-evaluan de golpe.
+
 ```bash
 # Ver que falta sin escribir nada:
 .venv/bin/python catchup.py --horas 72 --dry-run
@@ -123,7 +128,12 @@ systemctl stop agente-hikconnect
 systemctl start agente-hikconnect
 ```
 
-Despues de un catch-up grande, recalcular reglas y bonos en el ERP:
+Despues de un catch-up grande puede hacer falta recalcular reglas y bonos, **pero eso NO se corre por
+iniciativa propia**: desde el 27-jul-2026 el motor de asistencia esta bajo revision de Mauricio y
+cualquier recalculo en produccion requiere su autorizacion explicita. Si el backfill deja incidencias
+que se ven mal, reportarlas y esperar.
+
+Con autorizacion, el recalculo es:
 
 ```python
 from rrhh.services_asistencia_reglas import evaluar_rango_asistencia
