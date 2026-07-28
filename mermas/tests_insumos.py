@@ -341,6 +341,48 @@ class InsumosElegiblesPointTests(TestCase):
         self.assertEqual(rows[0].unidad_point, "KG")
         self.assertEqual(rows[0].existencia, Decimal("4.250"))
 
+    def test_consolida_aliases_point_de_la_misma_sucursal_erp(self):
+        self.recepcion(days_ago=1)
+        self.snapshot("2.000")
+        branch_actual = PointBranch.objects.create(
+            external_id="2-actual",
+            name="Payán",
+            erp_branch=self.sucursal,
+        )
+        PointTransferLine.objects.create(
+            origin_branch=self.cedis,
+            destination_branch=branch_actual,
+            erp_destination_branch=self.sucursal,
+            sync_job=self.job,
+            transfer_external_id="T-alias-actual",
+            detail_external_id="D-alias-actual",
+            source_hash="hash-alias-actual",
+            registered_at=timezone.now(),
+            received_at=timezone.now(),
+            item_name="Fresa fresca",
+            item_code="INS-001",
+            unit="KG",
+            received_quantity=Decimal("3.000"),
+            is_insumo=True,
+            is_received=True,
+            is_cancelled=False,
+            is_current_snapshot=True,
+        )
+        PointInventorySnapshot.objects.create(
+            branch=branch_actual,
+            product=self.product,
+            stock=Decimal("7.500"),
+            captured_at=timezone.now() + timezone.timedelta(seconds=1),
+            sync_job=self.job,
+        )
+        from mermas.services_insumos import insumos_elegibles_para_sucursal
+
+        rows = insumos_elegibles_para_sucursal(self.sucursal)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].codigo_point, "INS-001")
+        self.assertEqual(rows[0].existencia, Decimal("7.500"))
+
     def test_stock_cero_permanece_siete_dias_pero_no_ocho(self):
         self.recepcion(days_ago=7)
         self.snapshot("0")

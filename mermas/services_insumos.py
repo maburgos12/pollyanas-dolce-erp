@@ -127,7 +127,6 @@ def insumos_elegibles_para_sucursal(sucursal):
         "item_code",
         "item_name",
         "unit",
-        "destination_branch_id",
         "received_at",
         "registered_at",
     )
@@ -141,37 +140,34 @@ def insumos_elegibles_para_sucursal(sucursal):
         received_at = line["received_at"] or line["registered_at"]
         row = by_code.setdefault(
             code,
-            {"name": line["item_name"], "units": set(), "branches": set(), "last_movement": received_at},
+            {"name": line["item_name"], "units": set(), "last_movement": received_at},
         )
         row["units"].add(unit)
-        row["branches"].add(line["destination_branch_id"])
         if received_at and (not row["last_movement"] or received_at > row["last_movement"]):
             row["last_movement"] = received_at
 
     if not by_code:
         return []
 
-    snapshot_keys = {
-        (next(iter(data["branches"])), code)
+    product_codes = {
+        code
         for code, data in by_code.items()
-        if len(data["units"]) == 1 and len(data["branches"]) == 1
+        if len(data["units"]) == 1
     }
-    branch_ids = {branch_id for branch_id, _code in snapshot_keys}
-    product_codes = {code for _branch_id, code in snapshot_keys}
     latest_snapshot_ids = (
         PointInventorySnapshot.objects.filter(
-            branch_id__in=branch_ids,
+            branch__erp_branch=sucursal,
             product__sku__in=product_codes,
         )
-        .order_by("branch_id", "product_id", "-captured_at", "-id")
-        .distinct("branch_id", "product_id")
+        .order_by("product_id", "-captured_at", "-id")
+        .distinct("product_id")
         .values("id")
     )
     latest_snapshots = {}
     for snapshot in PointInventorySnapshot.objects.filter(
         id__in=Subquery(latest_snapshot_ids)
     ).select_related("product"):
-        key = (snapshot.branch_id, snapshot.product.sku)
+        key = snapshot.product.sku
         previous = latest_snapshots.get(key)
         if previous is None or (snapshot.captured_at, snapshot.id) > (previous.captured_at, previous.id):
             latest_snapshots[key] = snapshot
@@ -179,9 +175,9 @@ def insumos_elegibles_para_sucursal(sucursal):
     tolerance_date = timezone.localdate() - timedelta(days=7)
     result = []
     for code, data in by_code.items():
-        if len(data["units"]) != 1 or len(data["branches"]) != 1:
+        if len(data["units"]) != 1:
             continue
-        snapshot = latest_snapshots.get((next(iter(data["branches"])), code))
+        snapshot = latest_snapshots.get(code)
         if snapshot is None:
             continue
         last_movement = data["last_movement"]
