@@ -900,7 +900,6 @@ def _owned_deliveries(api_client):
     return (
         SolicitudDomicilio.objects.filter(
             pedido_cliente__public_api_client=api_client,
-            pedido_cliente__point_note_id__gt="",
             legacy_without_point=False,
         )
         .select_related(
@@ -930,6 +929,8 @@ def _serialize_delivery_summary(delivery):
         "direccion": delivery.direccion,
         "repartidor_id": delivery.repartidor_id,
         "created_at": delivery.created_at,
+        "external_source": order.external_source,
+        "external_id": order.external_id,
     }
 
 
@@ -1067,6 +1068,49 @@ class PublicOmnichannelDeliveriesView(APIView):
         }
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload)
+
+
+class PublicOmnichannelDeliveryIdentitiesView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        external_source = _normalize_text(request.query_params.get("external_source", ""))
+        external_ids = [
+            _normalize_text(value)
+            for value in request.query_params.getlist("external_id")
+            if _normalize_text(value)
+        ]
+        if not external_source or not external_ids or len(external_ids) > 100:
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "La consulta de identidades no es válida."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        identities = list(
+            _owned_deliveries(api_client)
+            .filter(
+                pedido_cliente__external_source=external_source,
+                pedido_cliente__external_id__in=external_ids,
+            )
+            .values("pedido_cliente__external_source", "pedido_cliente__external_id")
+            .distinct()
+        )
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response({
+            "identities": [
+                {
+                    "external_source": item["pedido_cliente__external_source"],
+                    "external_id": item["pedido_cliente__external_id"],
+                }
+                for item in identities
+            ],
+        })
 
 
 class PublicOmnichannelDeliveryDetailView(APIView):

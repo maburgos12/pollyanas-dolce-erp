@@ -95,6 +95,7 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicOmnichannelDeliveryIdentitiesView,
     PublicOmnichannelDeliveriesView,
     PublicOmnichannelDeliveryDetailView,
     PublicOmnichannelDeliveryStatusView,
@@ -530,6 +531,11 @@ urlpatterns = [
         "public/v1/omnichannel/deliveries/",
         PublicOmnichannelDeliveriesView.as_view(),
         name="api_public_omnichannel_deliveries",
+    ),
+    path(
+        "public/v1/omnichannel/delivery-identities/",
+        PublicOmnichannelDeliveryIdentitiesView.as_view(),
+        name="api_public_omnichannel_delivery_identities",
     ),
     path(
         "public/v1/omnichannel/deliveries/<int:solicitud_id>/",
