@@ -490,7 +490,10 @@ class PedidoDomicilioDetailTests(TestCase):
             response = pedido_domicilio_detail(request, self.pedido.id)
 
         self.assertEqual(response.status_code, 200)
-        self.assertLessEqual(len(queries), 20)
+        # The canonical ERP actions load the scoped driver and unit catalogs in
+        # addition to the read-only order graph. Keep the bound fixed so the
+        # status-operation history cannot introduce N+1 queries.
+        self.assertLessEqual(len(queries), 24)
 
     def test_domicilio_detail_has_responsive_semantics_and_touch_contract(self):
         self.client.force_login(self.ventas)

@@ -559,17 +559,22 @@ class PointOrderLinkConcurrencyTests(TransactionTestCase):
             close_old_connections()
             try:
                 ready.wait(timeout=10)
-                with patch(
-                    "crm.services.point_order_link.PointNoteDetailService.fetch",
-                    return_value=_note(),
-                ):
-                    result = link_point_note(command=_command(), actor=self.actor)
-                    return result.order.pk, result.delivery.pk
+                result = link_point_note(command=_command(), actor=self.actor)
+                return result.order.pk, result.delivery.pk
             finally:
                 close_old_connections()
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            results = [future.result(timeout=20) for future in (executor.submit(attempt), executor.submit(attempt))]
+        # Patch once around both workers. Overlapping per-thread patch contexts can
+        # restore another worker's mock and leak it into later test modules.
+        with patch(
+            "crm.services.point_order_link.PointNoteDetailService.fetch",
+            return_value=_note(),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = [
+                    future.result(timeout=20)
+                    for future in (executor.submit(attempt), executor.submit(attempt))
+                ]
 
         self.assertEqual(len({result[0] for result in results}), 1)
         self.assertEqual(len({result[1] for result in results}), 1)
