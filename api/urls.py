@@ -105,6 +105,10 @@ from .omnichannel_views import (
     PublicOmnichannelPointNotesView,
     PublicOmnichannelPointOrdersView,
 )
+from .driver_identity_views import (
+    PublicDriverIdentityLoginView,
+    PublicDriverIdentityStatusView,
+)
 from .logistica_public_views import (
     PublicLogisticaDomicilioAsignarView,
     PublicLogisticaDomicilioStatusView,
@@ -228,6 +232,16 @@ urlpatterns = [
         name="api_ai_gateway_approval_decision",
     ),
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
+    path(
+        "auth/driver-identity/",
+        PublicDriverIdentityLoginView.as_view(),
+        name="api_public_driver_identity_login",
+    ),
+    path(
+        "auth/driver-identity/<int:erp_user_id>/",
+        PublicDriverIdentityStatusView.as_view(),
+        name="api_public_driver_identity_status",
+    ),
     path("auth/token/rotate/", ApiTokenRotateView.as_view(), name="api_auth_token_rotate"),
     path("auth/token/revoke/", ApiTokenRevokeView.as_view(), name="api_auth_token_revoke"),
     path("auth/me/", ApiAuthMeView.as_view(), name="api_auth_me"),
