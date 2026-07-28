@@ -3236,12 +3236,20 @@
         `).join("") + `</div>`;
       }
 
+      function paradaCedisAvanzaTramo(parada) {
+        // El tramo de carga avanza sólo cuando la recarga CEDIS quedó registrada,
+        // no cuando la parada quedó VISITADA por geocerca. Espeja
+        // `_ordenes_tramo_carga_actual` del backend: si aquí avanzáramos antes, la
+        // captura se enviaría con productos que el backend considera de otro tramo.
+        return parada?.recarga_cedis_resuelta === true || Number(parada?.orden || 0) === 1;
+      }
+
       function segmentoCargaOperativo(lineas, paradas) {
         lineas = (lineas || []).filter((linea) => linea.point_enviada === true);
         const todas = (paradas || []).map((parada) => ({
           orden: Number(parada.orden || 0),
           tipo: (parada.punto?.tipo || "").toUpperCase(),
-          resuelta: paradaOperativamenteResuelta(parada),
+          resuelta: paradaCedisAvanzaTramo(parada),
         }));
         const cedis = todas
           .filter((parada) => parada.tipo === "CEDIS")
@@ -5438,7 +5446,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v80-combustible-km-turno", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v81-tramo-carga-recarga", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
