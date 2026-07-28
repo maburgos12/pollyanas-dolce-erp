@@ -352,7 +352,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v27-lotes-trazabilidad", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v28-mermas-point-live", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3107,7 +3107,7 @@ class ResponsiveDesignAndContentTests(TestCase):
         self.assertIn('data-layout="mobile-line"', content)
 
     def test_service_worker_version_updated_in_sw_js(self):
-        """Service worker cache name includes the responsive traceability version."""
+        """Service worker version changes and live App APIs are never cache-first."""
         from django.contrib.staticfiles import finders
         sw_path = finders.find("operacion/sw.js")
         self.assertIsNotNone(sw_path, "Service worker file not found")
@@ -3115,5 +3115,6 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v27-lotes-trazabilidad", sw_content)
+        self.assertIn("v28-mermas-point-live", sw_content)
+        self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertNotIn("v21-", sw_content)

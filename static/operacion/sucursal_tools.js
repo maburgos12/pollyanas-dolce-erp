@@ -37,17 +37,47 @@
   if (objectiveInputs.length) syncFailureTarget(false);
 
   const supply = document.querySelector("#codigo_point");
-  function syncSupply() {
+  const mermaForm = document.querySelector("#merma-form");
+  let stockRequest = 0;
+  async function syncSupply() {
+    const requestId = ++stockRequest;
     const selected = supply?.selectedOptions[0];
     const unit = selected?.dataset.unit || "";
-    const stock = selected?.dataset.stock || "";
+    const code = selected?.value || "";
     document.querySelector("[data-unit-label]").textContent = unit ? `(${unit})` : "";
     const note = document.querySelector("[data-stock-note]");
     const quantity = document.querySelector("#cantidad_merma");
-    if (quantity) quantity.max = stock || "";
+    const submit = mermaForm?.querySelector('button[type="submit"]');
+    if (quantity) quantity.removeAttribute("max");
+    if (submit) submit.disabled = true;
+    if (!code || !mermaForm?.dataset.stockUrl) {
+      if (note) note.hidden = true;
+      return;
+    }
     if (note) {
-      note.hidden = !unit;
-      note.textContent = unit ? `Existencia disponible en Point: ${stock} ${unit}` : "";
+      note.hidden = false;
+      note.textContent = "Consultando existencia vigente en Point…";
+    }
+    try {
+      const url = new URL(mermaForm.dataset.stockUrl, window.location.origin);
+      url.searchParams.set("codigo_point", code);
+      const response = await fetch(url, {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No fue posible consultar Point.");
+      if (requestId !== stockRequest) return;
+      const stock = payload.insumo?.existencia ?? "";
+      const liveUnit = payload.insumo?.unidad || unit;
+      document.querySelector("[data-unit-label]").textContent = liveUnit ? `(${liveUnit})` : "";
+      if (quantity) quantity.max = stock;
+      if (note) note.textContent = `Existencia disponible en Point: ${stock} ${liveUnit}`;
+      if (submit) submit.disabled = false;
+    } catch (error) {
+      if (requestId !== stockRequest) return;
+      if (note) note.textContent = error.message;
+      showToast(error.message, "error");
     }
   }
   supply?.addEventListener("change", syncSupply);
@@ -76,12 +106,12 @@
         showToast(form.id === "falla-form" ? "Reporte enviado a Mantenimiento." : "Merma enviada correctamente.");
         if (form.dataset.resetOnSuccess !== "false") form.reset();
         if (form.id === "falla-form") syncFailureTarget();
-        if (form.id === "merma-form") syncSupply();
+        if (form.id === "merma-form") await syncSupply();
         document.dispatchEvent(new CustomEvent("operacion:action-complete", { detail: payload }));
       } catch (error) {
         showToast(error.message, "error");
       } finally {
-        button.disabled = false;
+        button.disabled = form.id === "merma-form" && !supply?.value;
         button.textContent = original;
       }
     });

@@ -1,4 +1,6 @@
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -8,7 +10,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Sucursal
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob, PointTransferLine
+from pos_bridge.models import PointBranch, PointProduct, PointSyncJob, PointTransferLine
 from rrhh.models import Empleado
 
 
@@ -320,30 +322,19 @@ class InsumosElegiblesPointTests(TestCase):
             is_current_snapshot=True,
         )
 
-    def snapshot(self, stock):
-        return PointInventorySnapshot.objects.create(
-            branch=self.branch,
-            product=self.product,
-            stock=Decimal(stock),
-            captured_at=timezone.now(),
-            sync_job=self.job,
-        )
-
-    def test_stock_positivo_muestra_solo_insumo_recibido_por_sucursal(self):
+    def test_catalogo_muestra_insumo_recibido_sin_depender_del_snapshot(self):
         self.recepcion(days_ago=30)
-        self.snapshot("4.250")
-        from mermas.services_insumos import insumos_elegibles_para_sucursal
+        from mermas.services_insumos import insumos_recibidos_para_sucursal
 
-        rows = insumos_elegibles_para_sucursal(self.sucursal)
+        rows = insumos_recibidos_para_sucursal(self.sucursal)
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].codigo_point, "INS-001")
         self.assertEqual(rows[0].unidad_point, "KG")
-        self.assertEqual(rows[0].existencia, Decimal("4.250"))
+        self.assertIsNone(rows[0].existencia)
 
     def test_consolida_aliases_point_de_la_misma_sucursal_erp(self):
         self.recepcion(days_ago=1)
-        self.snapshot("2.000")
         branch_actual = PointBranch.objects.create(
             external_id="2-actual",
             name="Payán",
@@ -368,42 +359,47 @@ class InsumosElegiblesPointTests(TestCase):
             is_cancelled=False,
             is_current_snapshot=True,
         )
-        PointInventorySnapshot.objects.create(
-            branch=branch_actual,
-            product=self.product,
-            stock=Decimal("7.500"),
-            captured_at=timezone.now() + timezone.timedelta(seconds=1),
-            sync_job=self.job,
-        )
-        from mermas.services_insumos import insumos_elegibles_para_sucursal
+        from mermas.services_insumos import insumos_recibidos_para_sucursal
 
-        rows = insumos_elegibles_para_sucursal(self.sucursal)
+        rows = insumos_recibidos_para_sucursal(self.sucursal)
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].codigo_point, "INS-001")
-        self.assertEqual(rows[0].existencia, Decimal("7.500"))
+        self.assertIsNone(rows[0].existencia)
 
-    def test_stock_cero_permanece_siete_dias_pero_no_ocho(self):
-        self.recepcion(days_ago=7)
-        self.snapshot("0")
-        from mermas.services_insumos import insumos_elegibles_para_sucursal
+    def test_consulta_existencia_en_point_sin_depender_de_snapshot_local(self):
+        self.recepcion(days_ago=1)
+        live_service = Mock()
+        live_service.get_stock.return_value = SimpleNamespace(
+            stock_qty=Decimal("6.750"),
+            captured_at=timezone.now(),
+        )
+        from mermas.services_insumos import consultar_existencia_insumo_point
 
-        self.assertEqual(len(insumos_elegibles_para_sucursal(self.sucursal)), 1)
+        row = consultar_existencia_insumo_point(
+            self.sucursal,
+            "INS-001",
+            live_service=live_service,
+        )
 
-        PointTransferLine.objects.update(received_at=timezone.now() - timezone.timedelta(days=8))
-        self.assertEqual(insumos_elegibles_para_sucursal(self.sucursal), [])
+        self.assertEqual(row.codigo_point, "INS-001")
+        self.assertEqual(row.unidad_point, "KG")
+        self.assertEqual(row.existencia, Decimal("6.750"))
+        live_service.get_stock.assert_called_once_with(
+            product_codes=["INS-001"],
+            sucursal=self.sucursal,
+            point_branch=self.branch,
+        )
 
     def test_conflicto_de_unidad_excluye_insumo(self):
         self.recepcion(days_ago=1, unit="KG")
         self.recepcion(days_ago=0, unit="PZA")
-        self.snapshot("5")
-        from mermas.services_insumos import insumos_elegibles_para_sucursal
+        from mermas.services_insumos import insumos_recibidos_para_sucursal
 
-        self.assertEqual(insumos_elegibles_para_sucursal(self.sucursal), [])
+        self.assertEqual(insumos_recibidos_para_sucursal(self.sucursal), [])
 
-    def test_catalogo_resuelve_snapshots_en_consulta_acotada(self):
+    def test_catalogo_de_recepciones_se_resuelve_en_una_consulta(self):
         self.recepcion(days_ago=0)
-        self.snapshot("5")
         for index in range(2, 22):
             product = PointProduct.objects.create(
                 external_id=f"ext-{index}", sku=f"INS-{index:03d}", name=f"Insumo {index}"
@@ -427,17 +423,10 @@ class InsumosElegiblesPointTests(TestCase):
                 is_cancelled=False,
                 is_current_snapshot=True,
             )
-            PointInventorySnapshot.objects.create(
-                branch=self.branch,
-                product=product,
-                stock=Decimal("1"),
-                captured_at=timezone.now(),
-                sync_job=self.job,
-            )
-        from mermas.services_insumos import insumos_elegibles_para_sucursal
+        from mermas.services_insumos import insumos_recibidos_para_sucursal
 
-        with self.assertNumQueries(2):
-            rows = insumos_elegibles_para_sucursal(self.sucursal)
+        with self.assertNumQueries(1):
+            rows = insumos_recibidos_para_sucursal(self.sucursal)
 
         self.assertEqual(len(rows), 21)
 
@@ -471,13 +460,14 @@ class SimulacionOrdenPointTests(TestCase):
         )
         self.orden = OrdenAjustePoint.crear_desde_merma(self.merma)
 
-    def snapshot(self, stock):
-        return PointInventorySnapshot.objects.create(
-            branch=self.branch, product=self.product, stock=Decimal(stock), sync_job=self.job
+    @patch("mermas.services_insumos.consultar_existencia_insumo_point")
+    def test_simula_descuento_completo_sin_escribir_en_point_y_es_idempotente(self, mock_consultar):
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            unidad_point="KG",
+            existencia=Decimal("8"),
+            snapshot_capturado_en=timezone.now(),
         )
-
-    def test_simula_descuento_completo_sin_escribir_en_point_y_es_idempotente(self):
-        self.snapshot("8")
         from mermas.services_insumos import simular_orden_ajuste_point
 
         first = simular_orden_ajuste_point(self.orden.pk)
@@ -490,8 +480,51 @@ class SimulacionOrdenPointTests(TestCase):
         self.assertEqual(second.intentos, 1)
         self.assertEqual(second.evidencia_tecnica["modo"], "SIMULACION")
 
-    def test_stock_insuficiente_no_aplica_parcial_y_manda_a_revision(self):
-        self.snapshot("2")
+    @patch("mermas.services_insumos.consultar_existencia_insumo_point")
+    def test_consulta_point_fuera_de_transaccion(self, mock_consultar):
+        from django.db import connection
+        from mermas.services_insumos import simular_orden_ajuste_point
+
+        baseline_atomic_depth = len(connection.atomic_blocks)
+
+        def responder(*args, **kwargs):
+            self.assertEqual(len(connection.atomic_blocks), baseline_atomic_depth)
+            return SimpleNamespace(
+                codigo_point="INS-001",
+                unidad_point="KG",
+                existencia=Decimal("8"),
+                snapshot_capturado_en=timezone.now(),
+            )
+
+        mock_consultar.side_effect = responder
+
+        simular_orden_ajuste_point(self.orden.pk)
+
+    @patch("mermas.services_insumos.consultar_existencia_insumo_point")
+    def test_simulacion_revalida_en_point_sin_snapshot_local(self, mock_consultar):
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            unidad_point="KG",
+            existencia=Decimal("8"),
+            snapshot_capturado_en=timezone.now(),
+        )
+        from mermas.services_insumos import simular_orden_ajuste_point
+
+        result = simular_orden_ajuste_point(self.orden.pk)
+
+        self.assertEqual(result.estatus, self.OrdenAjustePoint.ESTATUS_SIMULADA)
+        self.assertEqual(result.existencia_antes, Decimal("8"))
+        self.assertEqual(result.existencia_despues, Decimal("5"))
+        mock_consultar.assert_called_once_with(self.sucursal, "INS-001")
+
+    @patch("mermas.services_insumos.consultar_existencia_insumo_point")
+    def test_stock_insuficiente_no_aplica_parcial_y_manda_a_revision(self, mock_consultar):
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            unidad_point="KG",
+            existencia=Decimal("2"),
+            snapshot_capturado_en=timezone.now(),
+        )
         from mermas.services_insumos import simular_orden_ajuste_point
 
         result = simular_orden_ajuste_point(self.orden.pk)

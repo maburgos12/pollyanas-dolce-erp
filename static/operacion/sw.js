@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-app-operativa-pwa-v27-lotes-trazabilidad";
+const CACHE_NAME = "pollyanas-app-operativa-pwa-v28-mermas-point-live";
 const SHELL_ASSETS = [
   "/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
@@ -21,7 +21,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/app/api/")) return;
   if (event.request.mode === "navigate") {
     event.respondWith(fetch(event.request));
     return;

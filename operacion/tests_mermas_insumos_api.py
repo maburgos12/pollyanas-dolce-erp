@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -11,6 +12,7 @@ from django.utils import timezone
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from mermas.models import MermaInsumo, OrdenAjustePoint
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob, PointTransferLine
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError
 from rrhh.models import Empleado
 
 
@@ -61,6 +63,25 @@ class OperacionMermasInsumosApiTests(TestCase):
             stock=Decimal("8.250"),
             sync_job=self.job,
         )
+        self.live_stock = SimpleNamespace(
+            codigo_point="INS-001",
+            nombre_point="Fresa fresca",
+            unidad_point="KG",
+            existencia=Decimal("8.250"),
+            snapshot_capturado_en=timezone.now(),
+        )
+        self.view_live_lookup = patch(
+            "operacion.views.consultar_existencia_insumo_point",
+            return_value=self.live_stock,
+        )
+        self.service_live_lookup = patch(
+            "mermas.services_insumos.consultar_existencia_insumo_point",
+            return_value=self.live_stock,
+        )
+        self.view_live_lookup.start()
+        self.service_live_lookup.start()
+        self.addCleanup(self.view_live_lookup.stop)
+        self.addCleanup(self.service_live_lookup.stop)
         self.client.force_login(self.user)
 
     def payload(self, **overrides):
@@ -118,6 +139,114 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertEqual(merma.estatus, MermaInsumo.ESTATUS_ENVIADA)
         self.assertEqual(merma.jefe_inmediato, self.jefe_user)
         self.assertEqual(merma.unidad_point, "KG")
+
+    def test_catalogo_muestra_insumo_recibido_sin_snapshot_local(self):
+        PointInventorySnapshot.objects.all().delete()
+
+        catalogo = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"))
+
+        self.assertEqual(catalogo.status_code, 200)
+        self.assertEqual(
+            catalogo.json()["insumos"],
+            [{
+                "codigo_point": "INS-001",
+                "nombre": "Fresa fresca",
+                "unidad": "KG",
+                "existencia": None,
+                "snapshot_en": None,
+            }],
+        )
+
+    def test_formulario_configura_consulta_point_al_seleccionar_insumo(self):
+        pagina = self.client.get(
+            reverse("operacion:sucursal_tools"),
+            {"tab": "mermas"},
+        )
+
+        self.assertEqual(pagina.status_code, 200)
+        self.assertContains(
+            pagina,
+            f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
+        )
+        self.assertContains(pagina, "La existencia se consulta directamente en Point")
+
+    @patch("operacion.views.consultar_existencia_insumo_point")
+    def test_catalogo_consulta_existencia_seleccionada_directamente_en_point(self, mock_consultar):
+        captured_at = timezone.now()
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            nombre_point="Fresa fresca",
+            unidad_point="KG",
+            existencia=Decimal("4.500"),
+            snapshot_capturado_en=captured_at,
+        )
+
+        response = self.client.get(
+            reverse("operacion:mermas_insumos_catalogo_api"),
+            {"codigo_point": "INS-001"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["insumo"]["existencia"], "4.500")
+        self.assertEqual(response.json()["insumo"]["unidad"], "KG")
+        mock_consultar.assert_called_once_with(self.sucursal, "INS-001")
+
+    @patch("operacion.views.consultar_existencia_insumo_point")
+    def test_creacion_revalida_existencia_directamente_en_point(self, mock_consultar):
+        PointInventorySnapshot.objects.all().delete()
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            nombre_point="Fresa fresca",
+            unidad_point="KG",
+            existencia=Decimal("4.500"),
+            snapshot_capturado_en=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload(cantidad="3.000")),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(MermaInsumo.objects.get().cantidad_reportada, Decimal("3.000"))
+        mock_consultar.assert_called_once()
+        args, kwargs = mock_consultar.call_args
+        self.assertEqual(args, (self.sucursal, "INS-001"))
+        self.assertEqual(kwargs["insumo_recibido"].codigo_point, "INS-001")
+
+    @patch(
+        "operacion.views.consultar_existencia_insumo_point",
+        side_effect=PointLiveInventoryLookupError("Point no respondió"),
+    )
+    def test_point_en_vivo_no_disponible_no_registra_merma(self, _mock_consultar):
+        response = self.client.post(
+            reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(MermaInsumo.objects.exists())
+
+    @patch("operacion.views.consultar_existencia_insumo_point")
+    def test_cantidad_superior_a_point_no_registra_merma(self, mock_consultar):
+        mock_consultar.return_value = SimpleNamespace(
+            codigo_point="INS-001",
+            nombre_point="Fresa fresca",
+            unidad_point="KG",
+            existencia=Decimal("2.000"),
+            snapshot_capturado_en=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload(cantidad="3.000")),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MermaInsumo.objects.exists())
 
     @patch("operacion.views._cargar_insumos_sucursal", return_value=([], True))
     def test_timeout_catalogo_muestra_fallback_y_no_escribe(self, _mock_cargar):
