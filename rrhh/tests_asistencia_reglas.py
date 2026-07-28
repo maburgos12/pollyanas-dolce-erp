@@ -154,7 +154,7 @@ class ReglasAsistenciaRRHHTests(TestCase):
             tipo=IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA,
         )
         self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
-        self.assertEqual(incidencia.metadata["usos_tolerancia_15d"], 3)
+        self.assertEqual(incidencia.metadata["usos_tolerancia_7d"], 3)
 
     def test_tres_retardos_en_quince_dias_generan_falta(self):
         inicio = date(2026, 6, 1)
@@ -897,3 +897,51 @@ class EscalamientosDeduplicadosTests(TestCase):
         avisos = self._no_resueltas(IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS)
         self.assertEqual(avisos.count(), 1)
         self.assertEqual(avisos.get().fecha, inicio + timedelta(days=2))
+
+
+class VentanaTolerancia7DiasTests(TestCase):
+    """R-03: los usos de tolerancia acumulan en ventana móvil de 7 días (no 15)."""
+
+    def setUp(self):
+        self.turno = Turno.objects.create(
+            nombre="Matutino",
+            hora_entrada=time(8, 0),
+            hora_salida=time(16, 0),
+            tolerancia_minutos=10,
+        )
+        self.empleado = Empleado.objects.create(
+            nombre="Empleado Ventana Semanal",
+            salario_diario=Decimal("400.00"),
+            fecha_ingreso=date(2026, 1, 1),
+        )
+
+    def _uso(self, fecha: date):
+        AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=fecha,
+            entrada=dt_local(fecha, time(8, 5)),
+            salida=dt_local(fecha, time(16, 0)),
+            minutos_trabajados=475,
+            turno=self.turno,
+            fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API,
+        )
+        evaluar_dia_empleado(self.empleado, fecha)
+
+    def _retardos(self):
+        return IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, tipo=IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA
+        ).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
+
+    def test_tres_usos_dentro_de_la_semana_generan_retardo(self):
+        inicio = date(2026, 6, 1)  # lunes
+        # lun, mié y sáb: tres usos dentro de la misma ventana de 7 días
+        for offset in (0, 2, 5):
+            self._uso(inicio + timedelta(days=offset))
+        self.assertEqual(self._retardos().count(), 1)
+
+    def test_tres_usos_repartidos_en_mas_de_siete_dias_no_generan_retardo(self):
+        inicio = date(2026, 6, 1)
+        # usos en días 0, 8 y 16: nunca hay 3 dentro de una ventana de 7 días
+        for offset in (0, 8, 16):
+            self._uso(inicio + timedelta(days=offset))
+        self.assertEqual(self._retardos().count(), 0)
