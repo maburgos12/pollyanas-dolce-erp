@@ -5,16 +5,21 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Sum
-from django.http import HttpRequest, HttpResponse
+from django.db.models import Count, Prefetch, Q, Sum
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from urllib.parse import urlencode
 
-from core.access import can_manage_crm, can_view_crm
+from core.access import (
+    can_manage_crm,
+    can_manage_submodule,
+    can_view_crm,
+    can_view_submodule,
+)
 from core.audit import log_event
 from core.models import Sucursal
 
@@ -35,6 +40,88 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Clientes", "url_name": "crm:clientes", "active": active == "clientes"},
         {"label": "Pedidos", "url_name": "crm:pedidos", "active": active == "pedidos"},
     ]
+
+
+def _can_view_domicilio_detail(user) -> bool:
+    return can_view_crm(user) or can_view_submodule(user, "logistica", "rutas")
+
+
+def _snapshot_text(value) -> str:
+    if isinstance(value, (str, int, float, Decimal)) and not isinstance(value, bool):
+        return str(value)
+    return ""
+
+
+def _snapshot_decimal(value) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
+
+
+def _point_snapshot_products(snapshot) -> list[dict]:
+    if not isinstance(snapshot, dict):
+        return []
+    products = []
+    for line in snapshot.get("lines", []):
+        if not isinstance(line, dict):
+            continue
+        products.append(
+            {
+                "codigo": _snapshot_text(line.get("point_code")),
+                "descripcion": _snapshot_text(line.get("description")),
+                "cantidad": _snapshot_decimal(line.get("quantity")) or Decimal("0"),
+                "precio_unitario": _snapshot_decimal(line.get("unit_price")) or Decimal("0"),
+                "descuento": _snapshot_decimal(line.get("discount")) or Decimal("0"),
+                "total": _snapshot_decimal(line.get("line_total")) or Decimal("0"),
+            }
+        )
+    return products
+
+
+def _point_snapshot_context(pedido: PedidoCliente) -> dict:
+    snapshot = pedido.point_note_snapshot
+    snapshot_total = (
+        _snapshot_decimal(snapshot.get("total"))
+        if isinstance(snapshot, dict)
+        else None
+    )
+    if (
+        not isinstance(snapshot, dict)
+        or snapshot_total is None
+        or not isinstance(snapshot.get("lines"), list)
+    ):
+        return {
+            "is_legacy_fallback": True,
+            "total": pedido.monto_estimado,
+            "total_label": "Monto estimado legacy",
+            "folio": "",
+            "branch_name": "",
+            "sold_at": "",
+            "fetched_at": None,
+            "invoiced": None,
+            "payment_type": "",
+            "point_channel": "",
+            "source_endpoint": "",
+        }
+    return {
+        "is_legacy_fallback": False,
+        "total": snapshot_total,
+        "total_label": "Total Point",
+        "folio": _snapshot_text(snapshot.get("folio")) or pedido.point_note_folio,
+        "branch_name": _snapshot_text(snapshot.get("branch_name")) or pedido.sucursal,
+        "sold_at": _snapshot_text(snapshot.get("sold_at")),
+        "fetched_at": pedido.point_note_fetched_at,
+        "invoiced": (
+            snapshot.get("invoiced")
+            if isinstance(snapshot.get("invoiced"), bool)
+            else None
+        ),
+        "payment_type": _snapshot_text(snapshot.get("payment_type")),
+        "point_channel": _snapshot_text(snapshot.get("point_channel")),
+        "source_endpoint": _snapshot_text(snapshot.get("source_endpoint")),
+    }
 
 
 def _crm_enterprise_chain(
@@ -880,8 +967,18 @@ def clientes(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def pedidos(request: HttpRequest) -> HttpResponse:
-    if not can_view_crm(request.user):
+    domicilios_only = (
+        request.resolver_match is not None
+        and request.resolver_match.url_name == "pedidos_domicilios"
+    )
+    logistics_can_view = domicilios_only and can_view_submodule(
+        request.user,
+        "logistica",
+        "rutas",
+    )
+    if not can_view_crm(request.user) and not logistics_can_view:
         raise PermissionDenied("No tienes permisos para ver CRM")
+    from logistica.models import SolicitudDomicilio
 
     if request.method == "POST":
         if not can_manage_crm(request.user):
@@ -935,6 +1032,9 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     estatus = (request.GET.get("estatus") or "").strip()
     prioridad = (request.GET.get("prioridad") or "").strip()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    if domicilios_only:
+        prioridad = ""
+        enterprise_focus = ""
     date_from_raw = (request.GET.get("date_from") or "").strip()
     date_to_raw = (request.GET.get("date_to") or "").strip()
     sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
@@ -955,10 +1055,30 @@ def pedidos(request: HttpRequest) -> HttpResponse:
         sucursal_id = None
 
     pedidos_qs = PedidoCliente.objects.select_related("cliente")
+    if domicilios_only:
+        pedidos_qs = pedidos_qs.filter(
+            solicitudes_domicilio__isnull=False,
+        ).distinct()
     if date_from:
-        pedidos_qs = pedidos_qs.filter(created_at__date__gte=date_from)
+        pedidos_qs = pedidos_qs.filter(
+            **{
+                (
+                    "solicitudes_domicilio__created_at__date__gte"
+                    if domicilios_only
+                    else "created_at__date__gte"
+                ): date_from
+            }
+        )
     if date_to:
-        pedidos_qs = pedidos_qs.filter(created_at__date__lte=date_to)
+        pedidos_qs = pedidos_qs.filter(
+            **{
+                (
+                    "solicitudes_domicilio__created_at__date__lte"
+                    if domicilios_only
+                    else "created_at__date__lte"
+                ): date_to
+            }
+        )
     if sucursal_id:
         pedidos_qs = pedidos_qs.filter(sucursal_ref_id=sucursal_id)
     if q:
@@ -969,18 +1089,23 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             | Q(sucursal__icontains=q)
         )
     if estatus:
-        pedidos_qs = pedidos_qs.filter(estatus=estatus)
-    if prioridad:
+        if domicilios_only:
+            pedidos_qs = pedidos_qs.filter(
+                solicitudes_domicilio__estatus=estatus,
+            )
+        else:
+            pedidos_qs = pedidos_qs.filter(estatus=estatus)
+    if prioridad and not domicilios_only:
         pedidos_qs = pedidos_qs.filter(prioridad=prioridad)
-    if enterprise_focus == "ABIERTOS":
+    if not domicilios_only and enterprise_focus == "ABIERTOS":
         pedidos_qs = pedidos_qs.exclude(
             estatus__in=[PedidoCliente.ESTATUS_ENTREGADO, PedidoCliente.ESTATUS_CANCELADO]
         )
-    elif enterprise_focus == "HOY":
+    elif not domicilios_only and enterprise_focus == "HOY":
         pedidos_qs = pedidos_qs.filter(created_at__date=timezone.localdate())
-    elif enterprise_focus == "PRODUCCION":
+    elif not domicilios_only and enterprise_focus == "PRODUCCION":
         pedidos_qs = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_EN_PRODUCCION)
-    elif enterprise_focus == "CIERRE":
+    elif not domicilios_only and enterprise_focus == "CIERRE":
         pedidos_qs = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_ENTREGADO)
 
     pedidos_abiertos = PedidoCliente.objects.exclude(
@@ -989,6 +1114,27 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     pedidos_hoy = PedidoCliente.objects.filter(created_at__date=timezone.localdate()).count()
     entregados = PedidoCliente.objects.filter(estatus=PedidoCliente.ESTATUS_ENTREGADO).count()
     cancelados = PedidoCliente.objects.filter(estatus=PedidoCliente.ESTATUS_CANCELADO).count()
+    if domicilios_only:
+        delivery_metrics_qs = SolicitudDomicilio.objects.filter(
+            pedido_cliente__isnull=False,
+            legacy_without_point=False,
+        )
+        terminal_delivery_statuses = {
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+            SolicitudDomicilio.ESTATUS_CANCELADO,
+        }
+        pedidos_abiertos = delivery_metrics_qs.exclude(
+            estatus__in=terminal_delivery_statuses,
+        ).count()
+        pedidos_hoy = delivery_metrics_qs.filter(
+            created_at__date=timezone.localdate(),
+        ).count()
+        entregados = delivery_metrics_qs.filter(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+        ).count()
+        cancelados = delivery_metrics_qs.filter(
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+        ).count()
     enterprise_chain = _crm_enterprise_chain(
         clientes_total=Cliente.objects.count(),
         clientes_activos=Cliente.objects.filter(activo=True).count(),
@@ -1022,11 +1168,42 @@ def pedidos(request: HttpRequest) -> HttpResponse:
         default_url=reverse("crm:pedidos"),
     )
 
+    if domicilios_only:
+        delivery_qs = SolicitudDomicilio.objects.select_related(
+            "repartidor__user",
+            "unidad",
+        ).order_by("id")
+        displayed_orders = list(
+            pedidos_qs.prefetch_related(
+                Prefetch(
+                    "solicitudes_domicilio",
+                    queryset=delivery_qs,
+                    to_attr="domicilios_canonicos",
+                )
+            ).order_by("-created_at")[:500]
+        )
+        for displayed_order in displayed_orders:
+            displayed_order.domicilio_canonico = (
+                displayed_order.domicilios_canonicos[0]
+                if displayed_order.domicilios_canonicos
+                else None
+            )
+            displayed_order.point_snapshot_display = _point_snapshot_context(
+                displayed_order
+            )
+    else:
+        displayed_orders = pedidos_qs.order_by("-created_at")[:500]
+
     ctx = {
         "module_tabs": _module_tabs("pedidos"),
+        "show_crm_tabs": can_view_crm(request.user),
         "clientes": Cliente.objects.filter(activo=True).order_by("nombre"),
-        "pedidos": pedidos_qs.order_by("-created_at")[:500],
-        "estatus_choices": PedidoCliente.ESTATUS_CHOICES,
+        "pedidos": displayed_orders,
+        "estatus_choices": (
+            SolicitudDomicilio.ESTATUS_CHOICES
+            if domicilios_only
+            else PedidoCliente.ESTATUS_CHOICES
+        ),
         "prioridad_choices": PedidoCliente.PRIORIDAD_CHOICES,
         "canal_choices": PedidoCliente.CANAL_CHOICES,
         "q": q,
@@ -1080,13 +1257,24 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             default_url=reverse("crm:pedidos"),
             default_cta="Abrir pedidos",
         ),
+        "domicilios_only": domicilios_only,
     }
 
     # Conteo por estatus para tarjeta rápida
-    conteos = {
-        key: PedidoCliente.objects.filter(estatus=key).count()
-        for key, _ in PedidoCliente.ESTATUS_CHOICES
-    }
+    if domicilios_only:
+        conteos = {
+            key: SolicitudDomicilio.objects.filter(
+                pedido_cliente__isnull=False,
+                legacy_without_point=False,
+                estatus=key,
+            ).count()
+            for key, _ in SolicitudDomicilio.ESTATUS_CHOICES
+        }
+    else:
+        conteos = {
+            key: PedidoCliente.objects.filter(estatus=key).count()
+            for key, _ in PedidoCliente.ESTATUS_CHOICES
+        }
     ctx["conteos_estatus"] = conteos
     return render(request, "crm/pedidos.html", ctx)
 
@@ -1294,6 +1482,179 @@ def pedido_detail(request: HttpRequest, pedido_id: int) -> HttpResponse:
         ),
     }
     return render(request, "crm/pedido_detail.html", ctx)
+
+
+@login_required
+def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpResponse:
+    """Ficha ERP de solo lectura para un pedido y su único domicilio canónico."""
+    if not _can_view_domicilio_detail(request.user):
+        raise PermissionDenied("No tienes permisos para ver servicios a domicilio")
+
+    from logistica.models import SolicitudDomicilio, SolicitudDomicilioStatusOperation
+
+    operation_qs = SolicitudDomicilioStatusOperation.objects.select_related(
+        "api_client",
+        "repartidor__user",
+    ).order_by("-created_at", "-id")
+    delivery_qs = (
+        SolicitudDomicilio.objects.select_related(
+            "cliente",
+            "direccion_cliente",
+            "repartidor__user",
+            "unidad",
+            "created_by",
+        )
+        .prefetch_related(
+            Prefetch("status_operations", queryset=operation_qs),
+        )
+        .order_by("id")
+    )
+    pedido = get_object_or_404(
+        PedidoCliente.objects.select_related(
+            "cliente",
+            "direccion_entrega",
+            "sucursal_ref",
+            "created_by",
+        ).prefetch_related(
+            Prefetch(
+                "solicitudes_domicilio",
+                queryset=delivery_qs,
+                to_attr="domicilios_canonicos",
+            ),
+        ),
+        pk=pedido_id,
+    )
+    domicilios = pedido.domicilios_canonicos
+    if len(domicilios) != 1:
+        raise Http404("El pedido no tiene un domicilio canónico único.")
+    solicitud = domicilios[0]
+    can_operate_delivery = can_manage_submodule(request.user, "logistica", "rutas")
+    from logistica.services_domicilio_assignment import (
+        DomicilioAssignmentError,
+        assign_domicilio,
+        repartidores_disponibles_queryset,
+        unidades_disponibles_queryset,
+    )
+    from logistica.services_domicilio_status import (
+        DomicilioStatusError,
+        transition_domicilio_status,
+    )
+
+    repartidores_qs = repartidores_disponibles_queryset()
+    unidades_qs = unidades_disponibles_queryset()
+    if pedido.sucursal_ref_id:
+        repartidores_qs = repartidores_qs.filter(sucursal_id=pedido.sucursal_ref_id)
+        unidades_qs = unidades_qs.filter(sucursal_id=pedido.sucursal_ref_id)
+
+    if request.method == "POST":
+        if not can_operate_delivery:
+            raise PermissionDenied("No tienes permisos para operar domicilios")
+        action = (request.POST.get("action") or "").strip()
+        try:
+            if action == "assign":
+                repartidor_id = int(request.POST.get("repartidor_id") or 0)
+                unidad_id = int(request.POST.get("unidad_id") or 0)
+                repartidor = repartidores_qs.filter(pk=repartidor_id).first()
+                unidad = unidades_qs.filter(pk=unidad_id).first()
+                if repartidor is None or unidad is None:
+                    raise DomicilioAssignmentError(
+                        "Selecciona un repartidor y una unidad activos de la sucursal.",
+                        400,
+                    )
+                assign_domicilio(
+                    solicitud_id=solicitud.id,
+                    repartidor_id=repartidor.id,
+                    unidad=unidad,
+                    audit_user=request.user,
+                )
+                messages.success(request, "Repartidor y unidad asignados.")
+            elif action in {"advance", "cancel"}:
+                requested_status = (
+                    SolicitudDomicilio.ESTATUS_CANCELADO
+                    if action == "cancel"
+                    else (request.POST.get("requested_status") or "").strip()
+                )
+                expected = SolicitudDomicilio.NEXT_STATUS.get(solicitud.estatus)
+                if action == "advance" and requested_status != expected:
+                    raise DomicilioStatusError(
+                        f"Transición inválida desde {solicitud.estatus}."
+                    )
+                transition_domicilio_status(
+                    solicitud_id=solicitud.id,
+                    requested_status=requested_status,
+                    cancelacion_motivo=request.POST.get("cancelacion_motivo") or "",
+                    audit_user=request.user,
+                )
+                messages.success(request, "Estado del domicilio actualizado.")
+            else:
+                raise DomicilioStatusError("Acción de domicilio inválida.", 400)
+        except (ValueError, DomicilioAssignmentError, DomicilioStatusError, ValidationError) as exc:
+            detail = (
+                getattr(exc, "detail", None)
+                or "; ".join(getattr(exc, "messages", []))
+                or str(exc)
+            )
+            messages.error(request, detail)
+        return redirect("crm:pedido_domicilio_detail", pedido_id=pedido.id)
+
+    direccion = solicitud.direccion_cliente or pedido.direccion_entrega
+    map_url = ""
+    if direccion and direccion.latitud is not None and direccion.longitud is not None:
+        map_url = (
+            "https://www.google.com/maps/search/?api=1&query="
+            f"{direccion.latitud},{direccion.longitud}"
+        )
+
+    status_labels = dict(SolicitudDomicilio.ESTATUS_CHOICES)
+    status_operations = [
+        {
+            "created_at": operation.created_at,
+            "requested_status": status_labels.get(
+                operation.requested_status,
+                operation.requested_status,
+            ),
+            "final_status": status_labels.get(
+                operation.final_status,
+                operation.final_status,
+            ),
+            "actor_nombre": operation.actor_nombre,
+            "repartidor": operation.repartidor,
+            "source": operation.api_client.nombre,
+        }
+        for operation in solicitud.status_operations.all()
+    ]
+
+    return render(
+        request,
+        "crm/pedido_domicilio_detail.html",
+        {
+            "module_tabs": _module_tabs("pedidos"),
+            "pedido": pedido,
+            "solicitud": solicitud,
+            "direccion": direccion,
+            "map_url": map_url,
+            "productos": _point_snapshot_products(pedido.point_note_snapshot),
+            "point_snapshot": _point_snapshot_context(pedido),
+            "status_operations": status_operations,
+            "can_view_crm": can_view_crm(request.user),
+            "can_manage_crm": can_manage_crm(request.user),
+            "can_manage_logistica": can_manage_submodule(
+                request.user,
+                "logistica",
+                "rutas",
+            ),
+            "can_operate_delivery": can_operate_delivery,
+            "repartidores_disponibles": repartidores_qs,
+            "unidades_disponibles": unidades_qs,
+            "next_delivery_status": SolicitudDomicilio.NEXT_STATUS.get(
+                solicitud.estatus
+            ),
+            "next_delivery_status_label": status_labels.get(
+                SolicitudDomicilio.NEXT_STATUS.get(solicitud.estatus),
+                "",
+            ),
+        },
+    )
 
 
 @login_required

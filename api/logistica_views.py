@@ -1732,7 +1732,10 @@ class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
 
         solicitudes = SolicitudDomicilio.objects.filter(
             repartidor=repartidor,
-            estatus__in=[SolicitudDomicilio.ESTATUS_ASIGNADO, SolicitudDomicilio.ESTATUS_EN_RUTA],
+            estatus__in=[
+                SolicitudDomicilio.ESTATUS_LISTO,
+                SolicitudDomicilio.ESTATUS_EN_RUTA,
+            ],
         ).order_by("-asignado_en")
 
         return Response(
@@ -1766,15 +1769,29 @@ class LogisticaDomicilioAsignarView(_LogisticaBaseView):
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise DRFPermissionDenied("No tienes permisos para gestionar Logística.")
         repartidor_id = request.data.get("repartidor_id")
+        unidad_id = request.data.get("unidad_id")
         if isinstance(repartidor_id, bool) or not str(repartidor_id or "").isdigit():
             return Response(
                 {"detail": "repartidor_id es obligatorio."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if isinstance(unidad_id, bool) or not str(unidad_id or "").isdigit():
+            return Response(
+                {"detail": "unidad_id es obligatorio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
+            from logistica.services_domicilio_assignment import unidades_disponibles_queryset
+            unidad = unidades_disponibles_queryset().filter(pk=int(unidad_id)).first()
+            if unidad is None:
+                return Response(
+                    {"detail": "Unidad no disponible."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             payload = assign_domicilio(
                 solicitud_id=solicitud_id,
                 repartidor_id=int(repartidor_id),
+                unidad=unidad,
                 audit_user=request.user,
             )
         except DomicilioAssignmentError as exc:

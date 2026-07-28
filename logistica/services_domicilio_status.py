@@ -23,6 +23,79 @@ class DomicilioStatusError(Exception):
     status_code: int = 409
 
 
+def apply_domicilio_status_transition(
+    *,
+    solicitud: SolicitudDomicilio,
+    requested_status: str,
+    cancelacion_motivo: str = "",
+) -> bool:
+    """Única máquina de estados para ERP y API pública.
+
+    La fila debe estar bloqueada por el llamador cuando la operación forme parte
+    de una transacción concurrente.
+    """
+    if requested_status == solicitud.estatus:
+        return False
+    if requested_status == SolicitudDomicilio.ESTATUS_CANCELADO:
+        if solicitud.estatus in SolicitudDomicilio.TERMINAL_STATUSES:
+            raise DomicilioStatusError(
+                f"Transición inválida desde {solicitud.estatus}."
+            )
+        if not cancelacion_motivo.strip():
+            raise DomicilioStatusError("El motivo de cancelación es obligatorio.")
+        solicitud.cancelacion_motivo = cancelacion_motivo.strip()
+    elif SolicitudDomicilio.NEXT_STATUS.get(solicitud.estatus) != requested_status:
+        raise DomicilioStatusError(
+            f"Transición inválida desde {solicitud.estatus}."
+        )
+    solicitud.estatus = requested_status
+    solicitud.revision += 1
+    update_fields = ["estatus", "revision"]
+    if requested_status == SolicitudDomicilio.ESTATUS_CANCELADO:
+        update_fields.append("cancelacion_motivo")
+    if requested_status == SolicitudDomicilio.ESTATUS_ENTREGADO:
+        solicitud.entregado_en = timezone.now()
+        update_fields.append("entregado_en")
+    solicitud.full_clean()
+    solicitud.save(update_fields=update_fields)
+    return True
+
+
+def transition_domicilio_status(
+    *,
+    solicitud_id: int,
+    requested_status: str,
+    audit_user,
+    cancelacion_motivo: str = "",
+) -> dict[str, Any]:
+    with transaction.atomic():
+        solicitud = SolicitudDomicilio.objects.select_for_update().get(pk=solicitud_id)
+        previous_status = solicitud.estatus
+        changed = apply_domicilio_status_transition(
+            solicitud=solicitud,
+            requested_status=requested_status,
+            cancelacion_motivo=cancelacion_motivo,
+        )
+        if changed:
+            log_event(
+                audit_user,
+                "STATUS_CHANGE",
+                "logistica.SolicitudDomicilio",
+                solicitud.id,
+                {
+                    "estatus_anterior": previous_status,
+                    "estatus_nuevo": solicitud.estatus,
+                    "source": "erp",
+                },
+            )
+        return {
+            "id": solicitud.id,
+            "estatus": solicitud.estatus,
+            "revision": solicitud.revision,
+            "idempotent": not changed,
+        }
+
+
 def _same_request(operation, *, api_client, repartidor_id, requested_status, actor):
     return (
         operation.api_client_id == api_client.id
@@ -69,7 +142,7 @@ def update_domicilio_status(
                 raise DomicilioStatusError(
                     "operation_id ya fue usado con otro payload."
                 )
-            return {**operation.result_snapshot, "idempotent": True}
+            return dict(operation.result_snapshot)
 
         if solicitud.repartidor_id != repartidor_id:
             raise DomicilioStatusError(
@@ -84,30 +157,37 @@ def update_domicilio_status(
         if not allowed or not available:
             raise DomicilioStatusError("Repartidor no disponible.")
 
-        expected = {
-            SolicitudDomicilio.ESTATUS_EN_RUTA:
-                SolicitudDomicilio.ESTATUS_ASIGNADO,
-            SolicitudDomicilio.ESTATUS_ENTREGADO:
-                SolicitudDomicilio.ESTATUS_EN_RUTA,
-        }[requested_status]
-        if solicitud.estatus != expected:
-            raise DomicilioStatusError(
-                f"Transición inválida desde {solicitud.estatus}."
-            )
-
         previous_status = solicitud.estatus
-        solicitud.estatus = requested_status
-        solicitud.revision += 1
-        update_fields = ["estatus", "revision"]
-        if requested_status == SolicitudDomicilio.ESTATUS_ENTREGADO:
-            solicitud.entregado_en = timezone.now()
-            update_fields.append("entregado_en")
-        solicitud.save(update_fields=update_fields)
+        changed = apply_domicilio_status_transition(
+            solicitud=solicitud,
+            requested_status=requested_status,
+        )
+        if not changed:
+            snapshot = {
+                "id": solicitud.id,
+                "repartidor_id": repartidor_id,
+                "estatus": solicitud.estatus,
+                "revision": solicitud.revision,
+                "idempotent": True,
+            }
+            SolicitudDomicilioStatusOperation.objects.create(
+                solicitud=solicitud,
+                operation_id=operation_id,
+                api_client=api_client,
+                repartidor_id=repartidor_id,
+                requested_status=requested_status,
+                final_status=solicitud.estatus,
+                actor_id=actor["id"],
+                actor_nombre=actor["nombre"],
+                result_snapshot=snapshot,
+            )
+            return snapshot
         snapshot = {
             "id": solicitud.id,
             "repartidor_id": repartidor_id,
             "estatus": solicitud.estatus,
             "revision": solicitud.revision,
+            "idempotent": False,
         }
         SolicitudDomicilioStatusOperation.objects.create(
             solicitud=solicitud,
@@ -137,4 +217,4 @@ def update_domicilio_status(
                 "actor_externo": actor,
             },
         )
-        return {**snapshot, "idempotent": False}
+        return snapshot

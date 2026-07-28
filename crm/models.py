@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -84,6 +84,41 @@ class DireccionCliente(models.Model):
         super().save(*args, **kwargs)
 
 
+class PedidoClienteQuerySet(models.QuerySet):
+    IMMUTABLE_BULK_FIELDS = frozenset(
+        {
+            "payload_snapshot",
+            "point_note_id",
+            "point_note_folio",
+            "point_note_snapshot",
+            "point_note_fetched_at",
+        }
+    )
+
+    @classmethod
+    def _reject_immutable_fields(cls, fields) -> None:
+        forbidden = cls.IMMUTABLE_BULK_FIELDS.intersection(fields)
+        if forbidden:
+            field_list = ", ".join(sorted(forbidden))
+            raise ValidationError(
+                f"No se permite actualización masiva de campos inmutables: {field_list}.",
+            )
+
+    def update(self, **kwargs):
+        self._reject_immutable_fields(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_immutable_fields(fields)
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._reject_immutable_fields(kwargs.get("update_fields") or ())
+        for pedido in objs:
+            pedido._validate_point_note_identity()
+        return super().bulk_create(objs, *args, **kwargs)
+
+
 class PedidoCliente(models.Model):
     ESTATUS_NUEVO = "NUEVO"
     ESTATUS_COTIZADO = "COTIZADO"
@@ -117,12 +152,16 @@ class PedidoCliente(models.Model):
     CANAL_WHATSAPP = "WHATSAPP"
     CANAL_TELEFONO = "TELEFONO"
     CANAL_WEB = "WEB"
+    CANAL_FACEBOOK = "FACEBOOK"
+    CANAL_INSTAGRAM = "INSTAGRAM"
     CANAL_OTRO = "OTRO"
     CANAL_CHOICES = [
         (CANAL_MOSTRADOR, "Mostrador"),
         (CANAL_WHATSAPP, "WhatsApp"),
         (CANAL_TELEFONO, "Teléfono"),
         (CANAL_WEB, "Web"),
+        (CANAL_FACEBOOK, "Facebook"),
+        (CANAL_INSTAGRAM, "Instagram"),
         (CANAL_OTRO, "Otro"),
     ]
 
@@ -138,6 +177,18 @@ class PedidoCliente(models.Model):
     external_source = models.CharField(max_length=40, blank=True, default="", db_index=True)
     external_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
     payload_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    point_note_id = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    point_note_folio = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    point_note_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    point_note_fetched_at = models.DateTimeField(null=True, blank=True, editable=False)
+    point_note_sold_at = models.DateTimeField(
+        null=True, blank=True, editable=False, db_index=True,
+    )
+    point_link_fingerprint = models.CharField(
+        max_length=64, blank=True, default="", editable=False,
+    )
+    social_reference = models.CharField(max_length=180, blank=True, default="")
+    objects = PedidoClienteQuerySet.as_manager()
     tracking_token = models.UUIDField(
         null=True,
         blank=True,
@@ -154,7 +205,9 @@ class PedidoCliente(models.Model):
     )
     descripcion = models.CharField(max_length=250)
     fecha_compromiso = models.DateField(null=True, blank=True)
-    sucursal = models.CharField(max_length=120, blank=True, default="")
+    sucursal = models.CharField(
+        max_length=120, blank=True, default="", db_index=True,
+    )
     sucursal_ref = models.ForeignKey(
         Sucursal,
         null=True,
@@ -191,6 +244,11 @@ class PedidoCliente(models.Model):
                 condition=~models.Q(external_source="") & ~models.Q(external_id=""),
                 name="crm_pedido_origen_externo_unico",
             ),
+            models.UniqueConstraint(
+                fields=["point_note_id"],
+                condition=~models.Q(point_note_id=""),
+                name="crm_pedido_point_note_unico",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -214,23 +272,172 @@ class PedidoCliente(models.Model):
                 seq = 1
         return f"{prefix}-{seq:04d}"
 
+    @staticmethod
+    def _point_note_snapshot_identity(snapshot) -> str:
+        if not isinstance(snapshot, dict):
+            return ""
+
+        candidates = []
+        for key in ("pk_nota", "PK_NOTA", "id_nota"):
+            value = snapshot.get(key)
+            if value not in (None, ""):
+                candidates.append(str(value).strip())
+
+        reference = snapshot.get("reference")
+        if isinstance(reference, dict):
+            for key in ("pk_nota", "PK_NOTA", "id_nota"):
+                value = reference.get(key)
+                if value not in (None, ""):
+                    candidates.append(str(value).strip())
+
+        identities = {value for value in candidates if value}
+        if len(identities) > 1:
+            raise ValidationError(
+                {"point_note_snapshot": "El snapshot contiene identidades Point contradictorias."},
+            )
+        return next(iter(identities), "")
+
+    def _validate_point_note_identity(self) -> None:
+        self.point_note_id = str(self.point_note_id or "").strip()
+        snapshot_identity = self._point_note_snapshot_identity(self.point_note_snapshot)
+        has_snapshot = bool(self.point_note_snapshot)
+        has_point_metadata = bool(
+            has_snapshot
+            or self.point_note_folio
+            or self.point_note_fetched_at
+            or self.point_note_sold_at
+            or self.point_link_fingerprint
+        )
+
+        if not self.point_note_id and has_point_metadata:
+            raise ValidationError(
+                {"point_note_id": "La procedencia Point requiere point_note_id."},
+            )
+        if self.point_note_id and not snapshot_identity:
+            raise ValidationError(
+                {
+                    "point_note_snapshot": (
+                        "El snapshot Point debe incluir pk_nota, PK_NOTA o id_nota."
+                    )
+                },
+            )
+        if snapshot_identity and snapshot_identity != self.point_note_id:
+            raise ValidationError(
+                {
+                    "point_note_snapshot": (
+                        "La identidad del snapshot Point no coincide con point_note_id."
+                    )
+                },
+            )
+
+    def backfill_point_note_provenance(
+        self,
+        *,
+        point_note_id,
+        point_note_snapshot,
+        point_note_folio="",
+        point_note_fetched_at=None,
+    ) -> None:
+        if self._state.adding:
+            raise ValidationError(
+                {"point_note_id": "El backfill Point requiere un pedido ya guardado."},
+            )
+        with transaction.atomic():
+            persisted = PedidoCliente.objects.select_for_update().get(pk=self.pk)
+            point_fields = (
+                "point_note_id",
+                "point_note_folio",
+                "point_note_snapshot",
+                "point_note_fetched_at",
+                "point_note_sold_at",
+                "point_link_fingerprint",
+            )
+            if any(bool(getattr(persisted, field_name)) for field_name in point_fields):
+                raise ValidationError(
+                    {"point_note_id": "La procedencia Point es inmutable."},
+                )
+
+            persisted.point_note_id = point_note_id
+            persisted.point_note_folio = point_note_folio
+            persisted.point_note_snapshot = point_note_snapshot
+            persisted.point_note_fetched_at = point_note_fetched_at
+            persisted._validate_point_note_identity()
+            models.Model.save(
+                persisted,
+                update_fields=[
+                    "point_note_id",
+                    "point_note_folio",
+                    "point_note_snapshot",
+                    "point_note_fetched_at",
+                    "updated_at",
+                ],
+            )
+
+        self.point_note_id = persisted.point_note_id
+        self.point_note_folio = persisted.point_note_folio
+        self.point_note_snapshot = persisted.point_note_snapshot
+        self.point_note_fetched_at = persisted.point_note_fetched_at
+        self.updated_at = persisted.updated_at
+
     def save(self, *args, **kwargs):
-        allow_snapshot_backfill = kwargs.pop("_allow_payload_snapshot_backfill", False)
-        if not self._state.adding:
-            persisted_snapshot = (
+        forbidden_point_backfill_kwargs = {
+            "_allow_point_note_backfill",
+            "_allow_point_note_snapshot_backfill",
+        }.intersection(kwargs)
+        if forbidden_point_backfill_kwargs:
+            raise TypeError(
+                "El backfill Point solo puede ejecutarse mediante "
+                "backfill_point_note_provenance().",
+            )
+        snapshot_backfills = {
+            "payload_snapshot": kwargs.pop("_allow_payload_snapshot_backfill", False),
+        }
+        if self._state.adding:
+            self._validate_point_note_identity()
+        else:
+            persisted_values = (
                 PedidoCliente.objects.filter(pk=self.pk)
-                .values_list("payload_snapshot", flat=True)
+                .values(
+                    "payload_snapshot",
+                    "point_note_id",
+                    "point_note_folio",
+                    "point_note_snapshot",
+                    "point_note_fetched_at",
+                    "point_note_sold_at",
+                    "point_link_fingerprint",
+                )
                 .first()
             )
-            snapshot_changed = persisted_snapshot != self.payload_snapshot
-            valid_backfill = (
-                allow_snapshot_backfill
-                and not persisted_snapshot
-                and bool(self.payload_snapshot)
+            snapshot_errors = {}
+            for field_name, allow_backfill in snapshot_backfills.items():
+                persisted_snapshot = (persisted_values or {}).get(field_name)
+                current_snapshot = getattr(self, field_name)
+                snapshot_changed = persisted_snapshot != current_snapshot
+                valid_backfill = (
+                    allow_backfill
+                    and not persisted_snapshot
+                    and bool(current_snapshot)
+                )
+                if snapshot_changed and not valid_backfill:
+                    snapshot_errors[field_name] = "El snapshot omnicanal es inmutable."
+            if snapshot_errors:
+                raise ValidationError(snapshot_errors)
+
+            point_fields = (
+                "point_note_id",
+                "point_note_folio",
+                "point_note_snapshot",
+                "point_note_fetched_at",
+                "point_note_sold_at",
+                "point_link_fingerprint",
             )
-            if snapshot_changed and not valid_backfill:
+            point_changed = any(
+                (persisted_values or {}).get(field_name) != getattr(self, field_name)
+                for field_name in point_fields
+            )
+            if point_changed:
                 raise ValidationError(
-                    {"payload_snapshot": "El snapshot omnicanal es inmutable."},
+                    {"point_note_id": "La procedencia Point es inmutable."},
                 )
 
         if not self.folio:

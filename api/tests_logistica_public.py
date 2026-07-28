@@ -16,6 +16,7 @@ from logistica.models import (
     Repartidor,
     SolicitudDomicilio,
     SolicitudDomicilioStatusOperation,
+    Unidad,
 )
 from logistica.services_domicilio_assignment import (
     DomicilioAssignmentError,
@@ -73,11 +74,21 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
     def _repartidor(self, username):
         user = User.objects.create_user(username=username, password="pass123")
-        return Repartidor.objects.create(user=user, sucursal=self.sucursal)
+        unidad = Unidad.objects.create(
+            codigo=f"U-{username}",
+            descripcion=f"Unidad {username}",
+            sucursal=self.sucursal,
+        )
+        return Repartidor.objects.create(
+            user=user,
+            sucursal=self.sucursal,
+            unidad_asignada=unidad,
+        )
 
     def _payload(self, repartidor):
         return {
             "repartidor_id": repartidor.id,
+            "unidad_id": repartidor.unidad_asignada_id,
             "actor": {"id": "ops-17", "nombre": "Operaciones"},
         }
 
@@ -158,7 +169,13 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         self.assertEqual(set(response.data), {"results"})
         self.assertEqual(
             set(response.data["results"][0]),
-            {"id", "nombre"},
+            {
+                "id",
+                "nombre",
+                "unidad_id",
+                "unidad_codigo",
+                "unidad_nombre",
+            },
         )
         self.assertEqual(
             PublicApiAccessLog.objects.filter(
@@ -239,12 +256,153 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
             3,
         )
 
+    def test_payload_legacy_infiere_unidad_activa_asignada(self):
+        repartidor = self._repartidor("m2m_legacy")
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
+        self.assertEqual(
+            self.solicitud.unidad_id,
+            repartidor.unidad_asignada_id,
+        )
+
+    def test_payload_legacy_rechaza_repartidor_sin_unidad(self):
+        user = User.objects.create_user(username="m2m_sin_unidad")
+        repartidor = Repartidor.objects.create(user=user, sucursal=self.sucursal)
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "El repartidor no tiene una unidad activa asignada.",
+        )
+
+    def test_payload_legacy_rechaza_unidad_inactiva(self):
+        repartidor = self._repartidor("m2m_unidad_inactiva")
+        self._allow(repartidor)
+        repartidor.unidad_asignada.activa = False
+        repartidor.unidad_asignada.save(update_fields=["activa"])
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "El repartidor no tiene una unidad activa asignada.",
+        )
+
+    def test_payload_legacy_rechaza_unidad_asignada_de_otra_sucursal(self):
+        repartidor = self._repartidor("m2m_unidad_otra_sucursal")
+        self._allow(repartidor)
+        otra_sucursal = Sucursal.objects.create(
+            codigo="M2M-OTRA",
+            nombre="Otra sucursal",
+        )
+        repartidor.unidad_asignada.sucursal = otra_sucursal
+        repartidor.unidad_asignada.save(update_fields=["sucursal"])
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "La unidad asignada al repartidor no pertenece a su sucursal.",
+        )
+
+    def test_payload_explicito_con_unidad_valida_se_conserva(self):
+        repartidor = self._repartidor("m2m_explicito")
+        self._allow(repartidor)
+
+        response = self.client.post(
+            self.assign_url,
+            self._payload(repartidor),
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(
+            self.solicitud.unidad_id,
+            repartidor.unidad_asignada_id,
+        )
+
+    def test_terminal_no_acepta_unidad_inferida_distinta_de_la_guardada(self):
+        repartidor = self._repartidor("m2m_terminal_sin_unidad")
+        self._allow(repartidor)
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            unidad=None,
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            legacy_without_point=True,
+        )
+
+        response = self.client.post(
+            self.assign_url,
+            {
+                "repartidor_id": repartidor.id,
+                "actor": {"id": "legacy-bff", "nombre": "BFF legado"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(
+            response.data["detail"],
+            "El domicilio terminal no coincide con la unidad solicitada.",
+        )
+        self.solicitud.refresh_from_db()
+        self.assertIsNone(self.solicitud.unidad_id)
+
     def test_retry_exacto_terminal_e_inactivo_permanece_idempotente(self):
         repartidor = self._repartidor("m2m_terminal")
         self._allow(repartidor)
-        self.solicitud.repartidor = repartidor
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=repartidor,
+            unidad=repartidor.unidad_asignada,
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            legacy_without_point=True,
+        )
+        self.solicitud.refresh_from_db()
         repartidor.user.is_active = False
         repartidor.user.save(update_fields=["is_active"])
 
@@ -411,7 +569,16 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.auth = {"HTTP_X_API_KEY": key}
         sucursal = Sucursal.objects.create(codigo="M2M-EXEC", nombre="M2M Exec")
         user = User.objects.create_user(username="driver_exec", password="x")
-        self.driver = Repartidor.objects.create(user=user, sucursal=sucursal)
+        self.unidad = Unidad.objects.create(
+            codigo="M2M-EXEC-U",
+            descripcion="Unidad ejecución",
+            sucursal=sucursal,
+        )
+        self.driver = Repartidor.objects.create(
+            user=user,
+            sucursal=sucursal,
+            unidad_asignada=self.unidad,
+        )
         self.api_client.repartidores_logistica_autorizados.add(self.driver)
         cliente = Cliente.objects.create(
             nombre="Cliente visible",
@@ -434,6 +601,8 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             canal=PedidoCliente.CANAL_WHATSAPP,
             public_api_client=self.api_client,
             payload_snapshot={"token": "no-exponer"},
+            point_note_id="POINT-EXEC-1",
+            point_note_snapshot={"pk_nota": "POINT-EXEC-1"},
         )
         self.solicitud = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
@@ -444,8 +613,13 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             direccion=direccion.direccion,
             notas="otra nota interna",
             repartidor=self.driver,
-            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        self.solicitud.save(update_fields=["estatus"])
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        self.solicitud.save(update_fields=["estatus"])
         self.list_url = reverse(
             "api_public_logistica_repartidor_domicilios",
             args=[self.driver.id],
@@ -481,8 +655,11 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.assertNotIn("oculto@example.com", rendered)
         self.assertNotIn("secreta", rendered)
         self.assertNotIn("no-exponer", rendered)
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ENTREGADO
-        self.solicitud.save(update_fields=["estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            legacy_without_point=True,
+        )
+        self.solicitud.refresh_from_db()
         terminal = self.client.get(self.list_url, **self.auth)
         self.assertEqual(terminal.data, {"results": []})
 
@@ -502,7 +679,8 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertFalse(first.data["idempotent"])
         self.assertEqual(replay.status_code, status.HTTP_200_OK)
-        self.assertTrue(replay.data["idempotent"])
+        self.assertFalse(replay.data["idempotent"])
+        self.assertEqual(first.data, replay.data)
         self.assertEqual(mismatch.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
@@ -538,9 +716,11 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         )
         self.assertEqual(foreign.status_code, status.HTTP_404_NOT_FOUND)
 
-        self.solicitud.repartidor = self.driver
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PENDIENTE
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=self.driver,
+            estatus=SolicitudDomicilio.ESTATUS_PENDIENTE,
+        )
+        self.solicitud.refresh_from_db()
         invalid = self.client.post(
             self.status_url,
             self.payload("f3a1d1ef-8996-4670-8fe2-094e4a6a1d56"),
@@ -548,6 +728,18 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             **self.auth,
         )
         self.assertEqual(invalid.status_code, status.HTTP_409_CONFLICT)
+
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY,
+        )
+        self.solicitud.refresh_from_db()
+        legacy_assigned = self.client.post(
+            self.status_url,
+            self.payload("4a0e139e-b87d-48a5-a3ec-218a8bb63d53"),
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(legacy_assigned.status_code, status.HTTP_409_CONFLICT)
 
 
 class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
@@ -563,21 +755,47 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         self.drivers = []
         for index in range(2):
             user = User.objects.create_user(username=f"race_{index}", password="x")
-            self.drivers.append(Repartidor.objects.create(user=user, sucursal=sucursal))
+            unidad = Unidad.objects.create(
+                codigo=f"RACE-U-{index}",
+                descripcion=f"Race {index}",
+                sucursal=sucursal,
+            )
+            self.drivers.append(
+                Repartidor.objects.create(
+                    user=user,
+                    sucursal=sucursal,
+                    unidad_asignada=unidad,
+                )
+            )
         self.api_client.repartidores_logistica_autorizados.add(*self.drivers)
         cliente = Cliente.objects.create(nombre="Race")
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Race",
+            latitud="24.809100",
+            longitud="-107.394000",
+        )
         pedido = PedidoCliente.objects.create(
             cliente=cliente,
+            direccion_entrega=direccion,
             descripcion="Race",
             public_api_client=self.api_client,
+            point_note_id="POINT-RACE-1",
+            point_note_snapshot={"pk_nota": "POINT-RACE-1"},
         )
         self.solicitud = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
+            direccion_cliente=direccion,
             cliente_nombre="Race",
             direccion="Race",
             repartidor=self.drivers[0],
-            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO,
+            unidad=self.drivers[0].unidad_asignada,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        self.solicitud.save(update_fields=["estatus"])
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        self.solicitud.save(update_fields=["estatus"])
 
     def _status(self, operation_id):
         close_old_connections()
@@ -598,13 +816,13 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(self._status, [operation_id, operation_id]))
 
-        self.assertEqual(sorted(item["idempotent"] for item in results), [False, True])
+        self.assertEqual(sorted(item["idempotent"] for item in results), [False, False])
         self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )
 
-    def test_operation_id_distintos_concurrentes_uno_gana_y_otro_409(self):
+    def test_operation_id_distintos_concurrentes_segundo_es_idempotente(self):
         operation_ids = [
             "355aa71e-872b-46df-b476-19105fd3a050",
             "79258634-b608-4b1a-81b1-4d6388a79f0b",
@@ -621,12 +839,39 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
 
         self.assertEqual(
             len([item for item in results if isinstance(item, dict)]),
-            1,
+            2,
         )
-        self.assertEqual(results.count(status.HTTP_409_CONFLICT), 1)
-        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        self.assertEqual(
+            sorted(item["idempotent"] for item in results),
+            [False, True],
+        )
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 2)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
+        )
+
+    def test_reasignacion_posterior_a_en_ruta_falla_cerrado(self):
+        status_result = self._status(
+            "c4bd79b7-0c63-4623-b57c-1a75f02ef954"
+        )
+
+        self.assertEqual(
+            status_result["estatus"],
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+        )
+        with self.assertRaises(DomicilioAssignmentError) as error:
+            assign_domicilio(
+                solicitud_id=self.solicitud.id,
+                repartidor_id=self.drivers[1].id,
+                owner_api_client=self.api_client,
+            )
+
+        self.assertEqual(error.exception.status_code, 409)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, self.drivers[0].id)
+        self.assertEqual(
+            self.solicitud.estatus,
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
         )
 
     def test_reasignacion_y_estatus_comparten_lock_y_no_se_cruzan(self):
@@ -662,7 +907,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         self.assertIn(
             (self.solicitud.repartidor_id, self.solicitud.estatus),
             {
-                (self.drivers[1].id, SolicitudDomicilio.ESTATUS_ASIGNADO),
+                (self.drivers[1].id, SolicitudDomicilio.ESTATUS_LISTO),
                 (self.drivers[0].id, SolicitudDomicilio.ESTATUS_EN_RUTA),
             },
         )

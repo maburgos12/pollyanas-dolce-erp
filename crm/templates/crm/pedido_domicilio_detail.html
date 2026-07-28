@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Domicilio · {{ pedido.folio }}{% endblock %}
+{% block page_title %}Domicilio · {{ pedido.folio }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .delivery-shell {
+    --delivery-wine: #8f3557;
+    --delivery-wine-dark: #6f2743;
+    --delivery-cream: #fffaf5;
+    --delivery-border: #ead8ce;
+    --delivery-ink: #302326;
+    display: grid;
+    gap: 1rem;
+    max-width: 1440px;
+    margin: 0 auto;
+    color: var(--delivery-ink);
+  }
+  .delivery-breadcrumbs,
+  .delivery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+  }
+  .delivery-form {
+    display: grid;
+    gap: .75rem;
+    width: 100%;
+    padding: .9rem;
+    border: 1px solid var(--delivery-border);
+    border-radius: .75rem;
+    background: var(--delivery-cream);
+  }
+  .delivery-form label { font-weight: 800; }
+  .delivery-form select,
+  .delivery-form input {
+    width: 100%;
+    min-height: 44px;
+    padding: .65rem .75rem;
+    border: 1px solid var(--delivery-border);
+    border-radius: .65rem;
+    background: #fff;
+    color: var(--delivery-ink);
+  }
+  .delivery-link,
+  .delivery-action {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: .65rem 1rem;
+    border-radius: .75rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .delivery-link {
+    color: var(--delivery-wine-dark);
+    background: #fff;
+    border: 1px solid var(--delivery-border);
+  }
+  .delivery-action {
+    color: #fff;
+    background: var(--delivery-wine);
+    border: 1px solid var(--delivery-wine);
+  }
+  .delivery-link:focus-visible,
+  .delivery-action:focus-visible {
+    outline: 3px solid #dca5ba;
+    outline-offset: 2px;
+  }
+  .delivery-hero,
+  .delivery-card {
+    background: #fff;
+    border: 1px solid var(--delivery-border);
+    border-radius: 1rem;
+    box-shadow: 0 8px 24px rgba(89, 53, 61, .07);
+  }
+  .delivery-hero {
+    padding: clamp(1rem, 2.5vw, 1.75rem);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .delivery-eyebrow {
+    color: #735d63;
+    font-size: .875rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .delivery-title {
+    margin: .35rem 0;
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+    line-height: 1.2;
+  }
+  .delivery-status {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .6rem .9rem;
+    border-radius: 999px;
+    background: #f7e8ee;
+    color: var(--delivery-wine-dark);
+    font-weight: 800;
+  }
+  .delivery-status::before {
+    content: "";
+    width: .65rem;
+    height: .65rem;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .delivery-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(17rem, .75fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  .delivery-main,
+  .delivery-aside {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+  }
+  .delivery-card {
+    padding: clamp(1rem, 2vw, 1.4rem);
+    min-width: 0;
+  }
+  .delivery-card h2 {
+    margin: 0 0 1rem;
+    font-size: 1.1rem;
+  }
+  .delivery-readonly {
+    display: inline-flex;
+    margin-left: .4rem;
+    padding: .2rem .55rem;
+    border-radius: 999px;
+    background: var(--delivery-cream);
+    border: 1px solid var(--delivery-border);
+    color: #735d63;
+    font-size: .75rem;
+    font-weight: 800;
+    vertical-align: middle;
+  }
+  .delivery-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .9rem;
+    margin: 0;
+  }
+  .delivery-fact {
+    min-width: 0;
+    padding: .85rem;
+    border-radius: .75rem;
+    background: var(--delivery-cream);
+  }
+  .delivery-fact dt {
+    color: #735d63;
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  .delivery-fact dd {
+    margin: .25rem 0 0;
+    overflow-wrap: anywhere;
+    font-weight: 700;
+  }
+  .delivery-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .delivery-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .delivery-table th,
+  .delivery-table td {
+    padding: .8rem .65rem;
+    border-bottom: 1px solid var(--delivery-border);
+    text-align: left;
+    vertical-align: top;
+  }
+  .delivery-table th {
+    color: #735d63;
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .delivery-total {
+    margin-top: 1rem;
+    display: flex;
+    justify-content: flex-end;
+    gap: .75rem;
+    font-size: 1.15rem;
+  }
+  .delivery-audit {
+    display: grid;
+    gap: .75rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+  .delivery-audit li {
+    padding: .85rem;
+    border-left: 4px solid var(--delivery-wine);
+    background: var(--delivery-cream);
+    border-radius: 0 .75rem .75rem 0;
+  }
+  .delivery-muted {
+    color: #735d63;
+    line-height: 1.6;
+  }
+  @media (max-width: 1023px) {
+    .delivery-detail-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .delivery-aside {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 767px) {
+    .delivery-shell {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .delivery-hero {
+      flex-direction: column;
+    }
+    .delivery-detail-grid,
+    .delivery-aside,
+    .delivery-facts {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .delivery-status,
+    .delivery-link,
+    .delivery-action {
+      width: 100%;
+    }
+    .delivery-table-wrap {
+      overflow: visible;
+    }
+    .delivery-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .delivery-table,
+    .delivery-table tbody,
+    .delivery-table tr,
+    .delivery-table td {
+      display: block;
+      width: 100%;
+    }
+    .delivery-table tr {
+      margin-bottom: .75rem;
+      padding: .75rem;
+      border: 1px solid var(--delivery-border);
+      border-radius: .75rem;
+      background: var(--delivery-cream);
+    }
+    .delivery-table td {
+      display: grid;
+      grid-template-columns: minmax(7rem, .8fr) minmax(0, 1.2fr);
+      gap: .5rem;
+      padding: .35rem 0;
+      border: 0;
+    }
+    .delivery-table td::before {
+      content: attr(data-label);
+      color: #735d63;
+      font-weight: 700;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .delivery-link,
+    .delivery-action {
+      scroll-behavior: auto;
+      transition: none;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="delivery-shell">
+  <nav class="delivery-breadcrumbs" aria-label="Navegación de domicilios">
+    <a class="delivery-link" href="{% url 'crm:pedidos_domicilios' %}">Volver a pedidos</a>
+    {% if can_view_crm %}
+    <a class="delivery-link" href="{% url 'crm:pedido_detail' pedido.id %}">Ver pedido comercial</a>
+    {% endif %}
+  </nav>
+
+  <header class="delivery-hero">
+    <div>
+      <div class="delivery-eyebrow">Servicio a domicilio · Fuente operativa ERP</div>
+      <h1 class="delivery-title">{{ pedido.folio }}</h1>
+      <div class="delivery-muted">
+        {% if point_snapshot.is_legacy_fallback %}
+        Registro histórico sin snapshot Point · {{ pedido.get_canal_display }}
+        {% else %}
+        Nota Point {{ point_snapshot.folio }} · {{ pedido.get_canal_display }} ·
+        {{ point_snapshot.branch_name|default:"Sucursal sin identificar" }}
+        {% endif %}
+      </div>
+    </div>
+    <div class="delivery-status" aria-label="Estado operativo del domicilio">
+      {{ solicitud.get_estatus_display }}
+    </div>
+  </header>
+
+  <div class="delivery-detail-grid">
+    <div class="delivery-main">
+      <section class="delivery-card" aria-labelledby="point-heading">
+        <h2 id="point-heading">
+          {% if point_snapshot.is_legacy_fallback %}Referencia comercial histórica{% else %}Venta en Point{% endif %}
+          <span class="delivery-readonly">Solo lectura</span>
+        </h2>
+        {% if point_snapshot.is_legacy_fallback %}
+        <p class="delivery-muted">
+          Registro histórico sin snapshot Point. El valor mostrado es el monto
+          estimado legado y no debe interpretarse como total confirmado de Point.
+        </p>
+        {% endif %}
+        <dl class="delivery-facts">
+          {% if not point_snapshot.is_legacy_fallback %}
+          <div class="delivery-fact"><dt>Folio de nota</dt><dd>{{ point_snapshot.folio|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>ID Point</dt><dd>{{ pedido.point_note_id }}</dd></div>
+          <div class="delivery-fact"><dt>Sucursal Point</dt><dd>{{ point_snapshot.branch_name|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Fecha de venta</dt><dd>{{ point_snapshot.sold_at|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Consultada en ERP</dt><dd>{{ point_snapshot.fetched_at|date:"d/m/Y H:i"|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Factura</dt><dd>{% if point_snapshot.invoiced is True %}Facturada{% elif point_snapshot.invoiced is False %}No facturada{% else %}Sin dato{% endif %}</dd></div>
+          <div class="delivery-fact"><dt>Tipo de pago</dt><dd>{{ point_snapshot.payment_type|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Canal Point</dt><dd>{{ point_snapshot.point_channel|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Fuente técnica</dt><dd>{{ point_snapshot.source_endpoint|default:"-" }}</dd></div>
+          {% endif %}
+        </dl>
+
+        {% if not point_snapshot.is_legacy_fallback %}
+        <div class="delivery-table-wrap table-responsive">
+          <table class="delivery-table" aria-label="Productos de la nota Point">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Precio</th>
+                <th>Descuento</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for producto in productos %}
+              <tr>
+                <td data-label="Código">{{ producto.codigo|default:"-" }}</td>
+                <td data-label="Producto">{{ producto.descripcion|default:"-" }}</td>
+                <td data-label="Cantidad">{{ producto.cantidad }}</td>
+                <td data-label="Precio">${{ producto.precio_unitario|floatformat:2|intcomma }}</td>
+                <td data-label="Descuento">${{ producto.descuento|floatformat:2|intcomma }}</td>
+                <td data-label="Total">${{ producto.total|floatformat:2|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6">La nota no contiene productos en el snapshot.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        <div class="delivery-total"><span>{{ point_snapshot.total_label }}</span><strong>${{ point_snapshot.total|floatformat:2|intcomma }}</strong></div>
+      </section>
+
+      <section class="delivery-card" aria-labelledby="delivery-heading">
+        <h2 id="delivery-heading">Entrega y ubicación</h2>
+        <dl class="delivery-facts">
+          <div class="delivery-fact"><dt>Cliente</dt><dd>{{ solicitud.cliente_nombre }}</dd></div>
+          <div class="delivery-fact"><dt>Teléfono</dt><dd>{{ solicitud.cliente_telefono|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Dirección</dt><dd>{{ direccion.direccion|default:solicitud.direccion }}</dd></div>
+          <div class="delivery-fact"><dt>Referencias</dt><dd>{{ direccion.referencias|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Ventana</dt><dd>{{ solicitud.ventana_inicio|date:"d/m/Y H:i"|default:"Sin programar" }}{% if solicitud.ventana_fin %} – {{ solicitud.ventana_fin|date:"H:i" }}{% endif %}</dd></div>
+          <div class="delivery-fact"><dt>Instrucciones</dt><dd>{{ solicitud.instrucciones_entrega|default:"-" }}</dd></div>
+        </dl>
+        {% if map_url %}
+        <div class="delivery-actions" style="margin-top: 1rem;">
+          <a class="delivery-action" href="{{ map_url }}" target="_blank" rel="noopener noreferrer">Abrir ubicación en mapa</a>
+        </div>
+        {% else %}
+        <p class="delivery-muted">Esta dirección todavía no tiene coordenadas GPS.</p>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="delivery-aside">
+      <section class="delivery-card" aria-labelledby="assignment-heading">
+        <h2 id="assignment-heading">Asignación</h2>
+        <dl class="delivery-facts">
+          <div class="delivery-fact"><dt>Repartidor</dt><dd>{{ solicitud.repartidor|default:"Sin asignar" }}</dd></div>
+          <div class="delivery-fact"><dt>Unidad</dt><dd>{{ solicitud.unidad|default:"Sin asignar" }}</dd></div>
+        </dl>
+        <p class="delivery-muted">
+          La asignación y los estados se actualizan sobre esta misma solicitud; esta ficha no crea otra entrega ni otra bitácora.
+        </p>
+      </section>
+
+      <section class="delivery-card" aria-labelledby="actions-heading">
+        <h2 id="actions-heading">Acciones ERP</h2>
+        <div class="delivery-actions">
+          {% if can_manage_crm %}
+          <a class="delivery-action" href="{% url 'crm:editar_cliente' pedido.cliente.id %}">Actualizar cliente</a>
+          {% endif %}
+          {% if can_manage_logistica %}
+          <div class="delivery-fact" data-operation-owner="centro-operativo-api">
+            <dt>Asignación y estados</dt>
+            <dd>Centro Operativo y esta ficha usan los mismos servicios canónicos.</dd>
+          </div>
+          {% endif %}
+        </div>
+        {% if can_operate_delivery %}
+        <form method="post" class="delivery-form" aria-label="Asignar domicilio">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="assign">
+          <label for="delivery-driver">Repartidor activo</label>
+          <select id="delivery-driver" name="repartidor_id" required>
+            <option value="">Seleccionar...</option>
+            {% for repartidor in repartidores_disponibles %}
+            <option value="{{ repartidor.id }}" {% if solicitud.repartidor_id == repartidor.id %}selected{% endif %}>{{ repartidor }}</option>
+            {% endfor %}
+          </select>
+          <label for="delivery-unit">Unidad activa</label>
+          <select id="delivery-unit" name="unidad_id" required>
+            <option value="">Seleccionar...</option>
+            {% for unidad in unidades_disponibles %}
+            <option value="{{ unidad.id }}" {% if solicitud.unidad_id == unidad.id %}selected{% endif %}>{{ unidad }}</option>
+            {% endfor %}
+          </select>
+          <button class="delivery-action" type="submit">Guardar asignación</button>
+        </form>
+        {% if next_delivery_status %}
+        <form method="post" class="delivery-form" aria-label="Avanzar estado">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="advance">
+          <input type="hidden" name="requested_status" value="{{ next_delivery_status }}">
+          <button class="delivery-action" type="submit">Avanzar a {{ next_delivery_status_label }}</button>
+        </form>
+        {% endif %}
+        {% if solicitud.estatus != "ENTREGADO" and solicitud.estatus != "CANCELADO" %}
+        <form method="post" class="delivery-form" aria-label="Cancelar domicilio">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cancel">
+          <label for="delivery-cancel-reason">Motivo de cancelación</label>
+          <input id="delivery-cancel-reason" name="cancelacion_motivo" maxlength="300" required>
+          <button class="delivery-action" type="submit">Cancelar domicilio</button>
+        </form>
+        {% endif %}
+        {% endif %}
+        {% if not can_manage_crm and not can_manage_logistica %}
+        <p class="delivery-muted">Tu rol tiene acceso de consulta.</p>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+
+  <section class="delivery-card" aria-labelledby="audit-heading">
+    <h2 id="audit-heading">Auditoría de estados</h2>
+    <ol class="delivery-audit">
+      {% for operation in status_operations %}
+      <li>
+        <strong>{{ operation.final_status }}</strong>
+        <div>{{ operation.created_at|date:"d/m/Y H:i" }} · {{ operation.actor_nombre }}</div>
+        <div class="delivery-muted">{{ operation.requested_status }} → {{ operation.final_status }} · {{ operation.repartidor }} · {{ operation.source }}</div>
+      </li>
+      {% empty %}
+      <li>No hay operaciones de estado registradas.</li>
+      {% endfor %}
+    </ol>
+  </section>
+</main>
+{% endblock %}
