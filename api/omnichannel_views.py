@@ -564,6 +564,12 @@ class PublicOmnichannelOrdersView(APIView):
                     payload = _response_payload(request, order, delivery, created=False)
                     response_status = status.HTTP_200_OK
                 else:
+                    references = _normalize_text(address.referencias)
+                    instructions = _normalize_text(data.get("instrucciones_entrega", ""))
+                    notes = "\n".join(part for part in (
+                        f"Referencias: {references}" if references else "",
+                        f"Instrucciones: {instructions}" if instructions else "",
+                    ) if part)
                     delivery = SolicitudDomicilio.objects.create(
                         pedido_cliente=order,
                         cliente=customer,
@@ -573,7 +579,8 @@ class PublicOmnichannelOrdersView(APIView):
                         direccion=address.direccion,
                         canal_origen=order.canal,
                         canal_detalle=data["external_source"],
-                        notas=address.referencias,
+                        notas=notes,
+                        instrucciones_entrega=instructions,
                     )
                     payload = _response_payload(request, order, delivery, created=True)
                     response_status = status.HTTP_201_CREATED
