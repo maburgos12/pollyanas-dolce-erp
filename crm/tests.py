@@ -316,6 +316,114 @@ class PedidoDomicilioDetailTests(TestCase):
         )
         self.assertEqual(list(excluded.context["pedidos"]), [])
 
+    def test_domicilios_inbox_hides_crm_tabs_from_logistics_but_keeps_them_for_crm(self):
+        url = reverse("crm:pedidos_domicilios")
+        self.client.force_login(self.logistica)
+
+        logistics_response = self.client.get(url)
+
+        self.assertEqual(logistics_response.status_code, 200)
+        self.assertNotContains(logistics_response, 'aria-label="Submódulos CRM"')
+        self.assertNotContains(logistics_response, f'href="{reverse("crm:home")}"')
+        self.assertNotContains(logistics_response, f'href="{reverse("crm:clientes")}"')
+        self.assertNotContains(logistics_response, f'href="{reverse("crm:pedidos")}"')
+
+        self.client.force_login(self.ventas)
+        crm_response = self.client.get(url)
+        self.assertContains(crm_response, 'aria-label="Submódulos CRM"')
+        self.assertContains(crm_response, f'href="{reverse("crm:home")}"')
+        self.assertContains(crm_response, f'href="{reverse("crm:clientes")}"')
+
+    def test_domicilios_metrics_and_dates_use_canonical_delivery_not_commercial_order(self):
+        old_order = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Pedido comercial creado hoy, domicilio anterior",
+            prioridad=PedidoCliente.PRIORIDAD_URGENTE,
+        )
+        old_delivery = SolicitudDomicilio.objects.create(
+            pedido_cliente=old_order,
+            cliente=self.cliente,
+            direccion_cliente=self.direccion,
+            cliente_nombre=self.cliente.nombre,
+            direccion=self.direccion.direccion,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
+        yesterday = timezone.now() - timedelta(days=1)
+        SolicitudDomicilio._base_manager.filter(pk=old_delivery.pk).update(
+            created_at=yesterday,
+        )
+        delivered_order = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Domicilio entregado hoy",
+            point_note_id="POINT-DELIVERED-TODAY",
+            point_note_snapshot={"pk_nota": "POINT-DELIVERED-TODAY", "total": "50.00"},
+        )
+        SolicitudDomicilio.objects.create(
+            pedido_cliente=delivered_order,
+            cliente=self.cliente,
+            direccion_cliente=self.direccion,
+            cliente_nombre=self.cliente.nombre,
+            direccion=self.direccion.direccion,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            entregado_en=timezone.now(),
+        )
+        legacy_order = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Domicilio histórico excluido de métricas",
+        )
+        legacy = SolicitudDomicilio.objects.create(
+            pedido_cliente=legacy_order,
+            cliente=self.cliente,
+            direccion_cliente=self.direccion,
+            cliente_nombre=self.cliente.nombre,
+            direccion=self.direccion.direccion,
+        )
+        SolicitudDomicilio._base_manager.filter(pk=legacy.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+            cancelacion_motivo="Histórico",
+            legacy_without_point=True,
+        )
+        self.client.force_login(self.logistica)
+
+        response = self.client.get(reverse("crm:pedidos_domicilios"))
+
+        self.assertEqual(response.context["pedidos_abiertos"], 2)
+        self.assertEqual(response.context["pedidos_hoy"], 2)
+        self.assertContains(response, "Servicios hoy 2")
+        self.assertContains(response, "Activos 2")
+
+        today = timezone.localdate().isoformat()
+        today_response = self.client.get(
+            reverse("crm:pedidos_domicilios"),
+            {"date_from": today, "date_to": today},
+        )
+        visible_ids = {order.id for order in today_response.context["pedidos"]}
+        self.assertNotIn(old_order.id, visible_ids)
+        self.assertIn(self.pedido.id, visible_ids)
+        self.assertIn(delivered_order.id, visible_ids)
+
+    def test_domicilios_ignores_hidden_commercial_priority_and_focus_params(self):
+        self.pedido.prioridad = PedidoCliente.PRIORIDAD_BAJA
+        self.pedido.estatus = PedidoCliente.ESTATUS_CANCELADO
+        self.pedido.save(update_fields=["prioridad", "estatus", "updated_at"])
+        self.client.force_login(self.logistica)
+
+        response = self.client.get(
+            reverse("crm:pedidos_domicilios"),
+            {
+                "prioridad": PedidoCliente.PRIORIDAD_URGENTE,
+                "enterprise_focus": "PRODUCCION",
+            },
+        )
+
+        self.assertContains(response, self.pedido.folio)
+        self.assertEqual(response.context["prioridad"], "")
+        self.assertEqual(response.context["enterprise_focus"], "")
+        self.assertNotContains(response, 'name="prioridad"')
+        self.assertNotContains(response, 'name="enterprise_focus"')
+
     def test_domicilio_detail_allows_logistics_owner_and_rejects_unrelated_role(self):
         url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
         self.client.force_login(self.logistica)

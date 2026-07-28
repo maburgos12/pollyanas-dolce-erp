@@ -1032,6 +1032,9 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     estatus = (request.GET.get("estatus") or "").strip()
     prioridad = (request.GET.get("prioridad") or "").strip()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    if domicilios_only:
+        prioridad = ""
+        enterprise_focus = ""
     date_from_raw = (request.GET.get("date_from") or "").strip()
     date_to_raw = (request.GET.get("date_to") or "").strip()
     sucursal_id_raw = (request.GET.get("sucursal_id") or "").strip()
@@ -1057,9 +1060,25 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             solicitudes_domicilio__isnull=False,
         ).distinct()
     if date_from:
-        pedidos_qs = pedidos_qs.filter(created_at__date__gte=date_from)
+        pedidos_qs = pedidos_qs.filter(
+            **{
+                (
+                    "solicitudes_domicilio__created_at__date__gte"
+                    if domicilios_only
+                    else "created_at__date__gte"
+                ): date_from
+            }
+        )
     if date_to:
-        pedidos_qs = pedidos_qs.filter(created_at__date__lte=date_to)
+        pedidos_qs = pedidos_qs.filter(
+            **{
+                (
+                    "solicitudes_domicilio__created_at__date__lte"
+                    if domicilios_only
+                    else "created_at__date__lte"
+                ): date_to
+            }
+        )
     if sucursal_id:
         pedidos_qs = pedidos_qs.filter(sucursal_ref_id=sucursal_id)
     if q:
@@ -1076,17 +1095,17 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             )
         else:
             pedidos_qs = pedidos_qs.filter(estatus=estatus)
-    if prioridad:
+    if prioridad and not domicilios_only:
         pedidos_qs = pedidos_qs.filter(prioridad=prioridad)
-    if enterprise_focus == "ABIERTOS":
+    if not domicilios_only and enterprise_focus == "ABIERTOS":
         pedidos_qs = pedidos_qs.exclude(
             estatus__in=[PedidoCliente.ESTATUS_ENTREGADO, PedidoCliente.ESTATUS_CANCELADO]
         )
-    elif enterprise_focus == "HOY":
+    elif not domicilios_only and enterprise_focus == "HOY":
         pedidos_qs = pedidos_qs.filter(created_at__date=timezone.localdate())
-    elif enterprise_focus == "PRODUCCION":
+    elif not domicilios_only and enterprise_focus == "PRODUCCION":
         pedidos_qs = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_EN_PRODUCCION)
-    elif enterprise_focus == "CIERRE":
+    elif not domicilios_only and enterprise_focus == "CIERRE":
         pedidos_qs = pedidos_qs.filter(estatus=PedidoCliente.ESTATUS_ENTREGADO)
 
     pedidos_abiertos = PedidoCliente.objects.exclude(
@@ -1095,6 +1114,27 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     pedidos_hoy = PedidoCliente.objects.filter(created_at__date=timezone.localdate()).count()
     entregados = PedidoCliente.objects.filter(estatus=PedidoCliente.ESTATUS_ENTREGADO).count()
     cancelados = PedidoCliente.objects.filter(estatus=PedidoCliente.ESTATUS_CANCELADO).count()
+    if domicilios_only:
+        delivery_metrics_qs = SolicitudDomicilio.objects.filter(
+            pedido_cliente__isnull=False,
+            legacy_without_point=False,
+        )
+        terminal_delivery_statuses = {
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+            SolicitudDomicilio.ESTATUS_CANCELADO,
+        }
+        pedidos_abiertos = delivery_metrics_qs.exclude(
+            estatus__in=terminal_delivery_statuses,
+        ).count()
+        pedidos_hoy = delivery_metrics_qs.filter(
+            created_at__date=timezone.localdate(),
+        ).count()
+        entregados = delivery_metrics_qs.filter(
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+        ).count()
+        cancelados = delivery_metrics_qs.filter(
+            estatus=SolicitudDomicilio.ESTATUS_CANCELADO,
+        ).count()
     enterprise_chain = _crm_enterprise_chain(
         clientes_total=Cliente.objects.count(),
         clientes_activos=Cliente.objects.filter(activo=True).count(),
@@ -1156,6 +1196,7 @@ def pedidos(request: HttpRequest) -> HttpResponse:
 
     ctx = {
         "module_tabs": _module_tabs("pedidos"),
+        "show_crm_tabs": can_view_crm(request.user),
         "clientes": Cliente.objects.filter(activo=True).order_by("nombre"),
         "pedidos": displayed_orders,
         "estatus_choices": (
@@ -1220,10 +1261,20 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     }
 
     # Conteo por estatus para tarjeta rápida
-    conteos = {
-        key: PedidoCliente.objects.filter(estatus=key).count()
-        for key, _ in PedidoCliente.ESTATUS_CHOICES
-    }
+    if domicilios_only:
+        conteos = {
+            key: SolicitudDomicilio.objects.filter(
+                pedido_cliente__isnull=False,
+                legacy_without_point=False,
+                estatus=key,
+            ).count()
+            for key, _ in SolicitudDomicilio.ESTATUS_CHOICES
+        }
+    else:
+        conteos = {
+            key: PedidoCliente.objects.filter(estatus=key).count()
+            for key, _ in PedidoCliente.ESTATUS_CHOICES
+        }
     ctx["conteos_estatus"] = conteos
     return render(request, "crm/pedidos.html", ctx)
 

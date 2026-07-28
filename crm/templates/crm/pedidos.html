@@ -10,11 +10,13 @@
 
 {% block content %}
 <div class="ops-shell">
+  {% if show_crm_tabs %}
   <section class="module-tabs" aria-label="Submódulos CRM">
     {% for tab in module_tabs %}
       <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
     {% endfor %}
   </section>
+  {% endif %}
 
   {% if not domicilios_only %}
   <section class="ops-topline">
@@ -68,6 +70,7 @@
           <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
+        {% if not domicilios_only %}
         <select class="input-field" name="prioridad">
           {% for value,label in prioridad_choices %}
           <option value="{{ value }}" {% if value == "MEDIA" %}selected{% endif %}>{{ label }}</option>
@@ -113,13 +116,16 @@
           <option value="{{ value }}" {% if prioridad == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
+        {% endif %}
+        {% if not domicilios_only %}
         <input type="hidden" name="enterprise_focus" value="{{ enterprise_focus }}">
+        {% endif %}
         <button class="btn btn-primary" type="submit">Aplicar filtros</button>
         <a class="btn btn-secondary" href="{% if domicilios_only %}{% url 'crm:pedidos_domicilios' %}{% else %}{% url 'crm:pedidos' %}{% endif %}">Limpiar</a>
       </form>
       <div class="ops-chip-row">
-        <span class="ops-chip">Pedidos hoy {{ pedidos_hoy }}</span>
-        <span class="ops-chip">Abiertos {{ pedidos_abiertos }}</span>
+        <span class="ops-chip">{% if domicilios_only %}Servicios hoy{% else %}Pedidos hoy{% endif %} {{ pedidos_hoy }}</span>
+        <span class="ops-chip">{% if domicilios_only %}Activos{% else %}Abiertos{% endif %} {{ pedidos_abiertos }}</span>
         {% if selected_sucursal_id %}<span class="ops-chip">Sucursal filtrada</span>{% endif %}
       </div>
     </article>
