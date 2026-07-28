@@ -208,6 +208,25 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.data["code"], "OMNICHANNEL_IDEMPOTENCY_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
 
+    def test_misma_clave_con_instrucciones_distintas_retorna_409_y_conserva_repartidor(self):
+        self.payload["instrucciones_entrega"] = "Llamar al llegar"
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "No tocar timbre"
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=first.data["solicitud_domicilio_id"])
+        self.assertEqual(second.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar al llegar")
+        self.assertEqual(delivery.notas, "Referencias: Portón blanco\nInstrucciones: Llamar al llegar")
+
+    def test_misma_clave_con_instrucciones_normalizadas_sigue_idempotente(self):
+        self.payload["instrucciones_entrega"] = "  Llamar al llegar  "
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "Llamar al llegar"
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
     def test_snapshot_no_puede_modificarse_despues_de_crear_pedido(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         order = PedidoCliente.objects.get(id=created.data["pedido_id"])
