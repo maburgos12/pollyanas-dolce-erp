@@ -1,0 +1,15 @@
+[Unit]
+Description=Agente Hik-Connect Cloud -> ERP Pollyana's Dolce
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agente-hikconnect
+EnvironmentFile=/opt/agente-hikconnect/.env
+ExecStart=/opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/main.py
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
