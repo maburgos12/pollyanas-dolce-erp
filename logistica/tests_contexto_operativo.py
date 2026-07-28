@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -136,3 +137,37 @@ class ContextoOperativoTests(TestCase):
             validar_contexto_operativo(token=firmado, ruta=self.ruta, actor=self.user_chofer)
 
         self.assertEqual(error.exception.codigo, "contexto_obsoleto")
+
+    def test_vista_como_repartidor_entrega_el_contexto_del_operador_suplantado(self):
+        """El preview de superadmin debe reflejar lo que ve el repartidor.
+
+        El contexto se construye con el operador suplantado; usar el superadmin
+        hace que `_construir_contexto` niegue el permiso y el endpoint devuelva
+        403 donde el repartidor real sí obtiene su contexto de captura.
+        """
+        superadmin = User.objects.create_superuser(username="dg.preview", password="secret")
+        self.client.force_login(superadmin)
+
+        response = self.client.get(
+            reverse("api_logistica_ruta_carga_checklist", args=[self.ruta.id]),
+            {"preview_repartidor": self.repartidor.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        contexto = response.json()["contexto_operativo"]
+        self.assertIsNotNone(contexto)
+        self.assertEqual(contexto["chofer_autorizado_id"], self.repartidor.id)
+        self.assertEqual(contexto["productos_permitidos"], [self.linea.id])
+        self.assertTrue(contexto["token"])
+
+    def test_superadmin_sin_vista_como_repartidor_consulta_la_carga_sin_contexto(self):
+        """Sin suplantar, el superadmin supervisa: ve la carga, no captura."""
+        superadmin = User.objects.create_superuser(username="dg.supervision", password="secret")
+        self.client.force_login(superadmin)
+
+        response = self.client.get(
+            reverse("api_logistica_ruta_carga_checklist", args=[self.ruta.id]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json().get("contexto_operativo"))
