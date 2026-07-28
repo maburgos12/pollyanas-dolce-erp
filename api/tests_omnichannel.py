@@ -195,7 +195,7 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(solicitud.cliente_nombre, "Ana Pérez")
         self.assertEqual(solicitud.cliente_telefono, "6671234567")
         self.assertEqual(solicitud.direccion, "Av. Obregón 123")
-        self.assertEqual(solicitud.notas, "Portón blanco")
+        self.assertEqual(solicitud.notas, "Referencias: Portón blanco")
 
     def test_misma_clave_con_payload_distinto_retorna_409(self):
         first = self.client.post(self.url, self.payload, format="json", **self.auth)
