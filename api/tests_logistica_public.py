@@ -169,7 +169,13 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
         self.assertEqual(set(response.data), {"results"})
         self.assertEqual(
             set(response.data["results"][0]),
-            {"id", "nombre"},
+            {
+                "id",
+                "nombre",
+                "unidad_id",
+                "unidad_codigo",
+                "unidad_nombre",
+            },
         )
         self.assertEqual(
             PublicApiAccessLog.objects.filter(
@@ -535,7 +541,8 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertFalse(first.data["idempotent"])
         self.assertEqual(replay.status_code, status.HTTP_200_OK)
-        self.assertTrue(replay.data["idempotent"])
+        self.assertFalse(replay.data["idempotent"])
+        self.assertEqual(first.data, replay.data)
         self.assertEqual(mismatch.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
@@ -671,7 +678,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(self._status, [operation_id, operation_id]))
 
-        self.assertEqual(sorted(item["idempotent"] for item in results), [False, True])
+        self.assertEqual(sorted(item["idempotent"] for item in results), [False, False])
         self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
@@ -700,7 +707,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             sorted(item["idempotent"] for item in results),
             [False, True],
         )
-        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 2)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )

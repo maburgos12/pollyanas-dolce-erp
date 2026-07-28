@@ -96,6 +96,15 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
             without_gps.full_clean()
         self.assertIn("direccion_cliente", gps_error.exception.message_dict)
 
+    def test_confirmado_requires_canonical_point_note(self):
+        without_point = self._solicitud(
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            point_note_id="",
+        )
+        with self.assertRaises(ValidationError) as error:
+            without_point.save()
+        self.assertIn("pedido_cliente", error.exception.message_dict)
+
     def test_en_ruta_requires_assignment(self):
         solicitud = self._solicitud(estatus=SolicitudDomicilio.ESTATUS_EN_RUTA)
 
@@ -319,7 +328,7 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
 
     def test_delivery_window_end_cannot_precede_start(self):
         solicitud = self._solicitud(
-            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            estatus=SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
             ventana_inicio=timezone.now(),
             ventana_fin=timezone.now() - timedelta(hours=1),
         )
@@ -490,6 +499,8 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
             cliente=cliente,
             direccion_entrega=direccion,
             descripcion="Pedido con domicilio",
+            point_note_id="POINT-LINKED-HISTORY",
+            point_note_snapshot={"pk_nota": "POINT-LINKED-HISTORY"},
         )
 
         solicitud = SolicitudDomicilio.objects.create(

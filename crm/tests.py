@@ -339,6 +339,8 @@ class PedidoDomicilioDetailTests(TestCase):
             cliente=self.cliente,
             descripcion="Pedido comercial creado hoy, domicilio anterior",
             prioridad=PedidoCliente.PRIORIDAD_URGENTE,
+            point_note_id="POINT-OLD-DELIVERY",
+            point_note_snapshot={"pk_nota": "POINT-OLD-DELIVERY"},
         )
         old_delivery = SolicitudDomicilio.objects.create(
             pedido_cliente=old_order,

@@ -95,6 +95,21 @@
     }
     .domicilio-row-action { width:100%; justify-content:center; }
   }
+  @media (max-width: 480px) {
+    .domicilios-table td {
+      grid-template-columns:minmax(0, 1fr);
+      gap:var(--pd-space-1);
+    }
+    .domicilio-status {
+      max-width:100%;
+      white-space:normal;
+      overflow-wrap:anywhere;
+    }
+    .domicilio-row-action {
+      display:flex;
+      width:100%;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .domicilio-row-action { transition:none; }
   }

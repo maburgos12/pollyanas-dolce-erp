@@ -142,7 +142,7 @@ def update_domicilio_status(
                 raise DomicilioStatusError(
                     "operation_id ya fue usado con otro payload."
                 )
-            return {**operation.result_snapshot, "idempotent": True}
+            return dict(operation.result_snapshot)
 
         if solicitud.repartidor_id != repartidor_id:
             raise DomicilioStatusError(
@@ -163,18 +163,31 @@ def update_domicilio_status(
             requested_status=requested_status,
         )
         if not changed:
-            return {
+            snapshot = {
                 "id": solicitud.id,
                 "repartidor_id": repartidor_id,
                 "estatus": solicitud.estatus,
                 "revision": solicitud.revision,
                 "idempotent": True,
             }
+            SolicitudDomicilioStatusOperation.objects.create(
+                solicitud=solicitud,
+                operation_id=operation_id,
+                api_client=api_client,
+                repartidor_id=repartidor_id,
+                requested_status=requested_status,
+                final_status=solicitud.estatus,
+                actor_id=actor["id"],
+                actor_nombre=actor["nombre"],
+                result_snapshot=snapshot,
+            )
+            return snapshot
         snapshot = {
             "id": solicitud.id,
             "repartidor_id": repartidor_id,
             "estatus": solicitud.estatus,
             "revision": solicitud.revision,
+            "idempotent": False,
         }
         SolicitudDomicilioStatusOperation.objects.create(
             solicitud=solicitud,
@@ -204,4 +217,4 @@ def update_domicilio_status(
                 "actor_externo": actor,
             },
         )
-        return {**snapshot, "idempotent": False}
+        return snapshot

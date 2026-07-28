@@ -1895,6 +1895,17 @@ class SolicitudDomicilio(models.Model):
             self.ESTATUS_EN_RUTA,
             self.ESTATUS_ENTREGADO,
         }
+        if (
+            self.estatus == self.ESTATUS_CONFIRMADO
+            and not legacy_terminal
+            and (
+                not self.pedido_cliente_id
+                or not self.pedido_cliente.point_note_id
+            )
+        ):
+            errors["pedido_cliente"] = (
+                "Se requiere un pedido vinculado con una nota de Point antes de confirmar."
+            )
         if self.estatus in ready_or_later and not legacy_terminal:
             if not self.pedido_cliente_id or not self.pedido_cliente.point_note_id:
                 errors["pedido_cliente"] = (

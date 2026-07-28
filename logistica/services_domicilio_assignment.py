@@ -29,6 +29,7 @@ def repartidores_disponibles_queryset():
             "unidad_asignada",
         )
         .filter(user__is_active=True)
+        .filter(unidad_asignada__isnull=False, unidad_asignada__activa=True)
         .filter(Q(user__empleado_rrhh__isnull=True) | Q(user__empleado_rrhh__activo=True))
         .exclude(tipo_identidad=Repartidor.TIPO_CUENTA_TECNICA)
         .order_by("user__first_name", "user__last_name", "user__username", "id")
@@ -73,6 +74,9 @@ def list_repartidores_disponibles_minimal(*, api_client) -> list[dict[str, Any]]
         {
             "id": repartidor.id,
             "nombre": nombre_operativo_usuario(repartidor.user),
+            "unidad_id": repartidor.unidad_asignada_id,
+            "unidad_codigo": repartidor.unidad_asignada.codigo,
+            "unidad_nombre": repartidor.unidad_asignada.descripcion,
         }
         for repartidor in repartidores_disponibles_queryset().filter(
             api_clients_logistica_autorizados=api_client,
