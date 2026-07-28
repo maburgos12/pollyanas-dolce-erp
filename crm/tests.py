@@ -77,6 +77,14 @@ class PedidoDomicilioDetailTests(TestCase):
             point_note_folio="18452",
             point_note_snapshot={
                 "pk_nota": "900001",
+                "folio": "18452",
+                "branch_name": "Centro Point",
+                "sold_at": "2026-07-27T18:30:00-07:00",
+                "total": "565.00",
+                "invoiced": True,
+                "payment_type": "TARJETA",
+                "point_channel": "MOSTRADOR",
+                "source_endpoint": "/Clientes/get_detalle_nota/",
                 "lines": [
                     {
                         "point_code": "P001",
@@ -158,11 +166,123 @@ class PedidoDomicilioDetailTests(TestCase):
         self.assertContains(response, "18452")
         self.assertContains(response, "Pastel tres leches")
         self.assertContains(response, "$565.00")
+        self.assertContains(response, "Centro Point")
+        self.assertContains(response, "TARJETA")
+        self.assertContains(response, "MOSTRADOR")
+        self.assertContains(response, "Facturada")
+        self.assertContains(response, "/Clientes/get_detalle_nota/")
         self.assertContains(response, self.solicitud.get_estatus_display())
         self.assertContains(response, "Av. Central 123")
         self.assertContains(response, "Call center")
         self.assertNotContains(response, "name=\"point_note")
         self.assertNotContains(response, "Registrar seguimiento")
+
+    def test_domicilio_detail_uses_snapshot_total_not_legacy_estimated_amount(self):
+        PedidoCliente.objects.filter(pk=self.pedido.pk).update(monto_estimado=Decimal("999.99"))
+        self.pedido.refresh_from_db()
+        self.client.force_login(self.ventas)
+
+        response = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+
+        self.assertContains(response, "Total Point")
+        self.assertContains(response, "$565.00")
+        self.assertNotContains(response, "$999.99")
+        self.assertFalse(response.context["point_snapshot"]["is_legacy_fallback"])
+
+    def test_domicilio_detail_marks_legacy_snapshot_fallback_explicitly(self):
+        legacy_order = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            direccion_entrega=self.direccion,
+            descripcion="Pedido histórico",
+            monto_estimado=Decimal("321.00"),
+            point_note_id="LEGACY-1",
+            point_note_folio="LEGACY-1",
+            point_note_snapshot={"pk_nota": "LEGACY-1", "total": "321.00"},
+        )
+        legacy_delivery = SolicitudDomicilio.objects.create(
+            pedido_cliente=legacy_order,
+            cliente=self.cliente,
+            direccion_cliente=self.direccion,
+            cliente_nombre=self.cliente.nombre,
+            direccion=self.direccion.direccion,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
+            entregado_en=timezone.now(),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE crm_pedidocliente
+                SET point_note_id = '', point_note_folio = '',
+                    point_note_snapshot = '{}'::jsonb,
+                    point_note_fetched_at = NULL, point_note_sold_at = NULL
+                WHERE id = %s
+                """,
+                [legacy_order.id],
+            )
+            cursor.execute(
+                """
+                UPDATE logistica_solicituddomicilio
+                SET legacy_without_point = TRUE
+                WHERE id = %s
+                """,
+                [legacy_delivery.id],
+            )
+        self.client.force_login(self.ventas)
+
+        response = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[legacy_order.id]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Registro histórico sin snapshot Point")
+        self.assertContains(response, "Monto estimado legacy")
+        self.assertTrue(response.context["point_snapshot"]["is_legacy_fallback"])
+
+    def test_domicilios_inbox_filters_and_links_each_row_to_exact_detail(self):
+        non_delivery = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Pedido sin domicilio",
+        )
+        self.client.force_login(self.ventas)
+
+        response = self.client.get(reverse("crm:pedidos_domicilios"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["domicilios_only"])
+        self.assertContains(response, self.pedido.folio)
+        self.assertNotContains(response, non_delivery.folio)
+        self.assertContains(
+            response,
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+        self.assertNotContains(
+            response,
+            f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
+        )
+        self.assertNotContains(response, "Nuevo pedido")
+
+    def test_generic_orders_keeps_generic_rows_and_commercial_detail_links(self):
+        non_delivery = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            descripcion="Pedido comercial normal",
+        )
+        self.client.force_login(self.ventas)
+
+        response = self.client.get(reverse("crm:pedidos"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["domicilios_only"])
+        self.assertContains(response, self.pedido.folio)
+        self.assertContains(response, non_delivery.folio)
+        self.assertContains(
+            response,
+            f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
+        )
+        self.assertContains(response, "Nuevo pedido")
 
     def test_domicilio_detail_allows_logistics_owner_and_rejects_unrelated_role(self):
         url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
@@ -171,6 +291,20 @@ class PedidoDomicilioDetailTests(TestCase):
 
         self.client.force_login(self.sin_acceso)
         self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_domicilio_actions_are_exact_and_hidden_by_role(self):
+        url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
+
+        self.client.force_login(self.logistica)
+        logistics_response = self.client.get(url)
+        self.assertContains(logistics_response, 'data-operation-owner="centro-operativo-api"')
+        self.assertNotContains(logistics_response, reverse("crm:editar_cliente", args=[self.cliente.id]))
+        self.assertNotContains(logistics_response, "Abrir operación logística")
+
+        self.client.force_login(self.ventas)
+        crm_response = self.client.get(url)
+        self.assertContains(crm_response, reverse("crm:editar_cliente", args=[self.cliente.id]))
+        self.assertNotContains(crm_response, "Abrir operación logística")
 
     def test_domicilio_detail_does_not_leak_existing_order_to_unauthorized_user(self):
         self.client.force_login(self.sin_acceso)

@@ -46,6 +46,20 @@ def _can_view_domicilio_detail(user) -> bool:
     return can_view_crm(user) or can_view_submodule(user, "logistica", "rutas")
 
 
+def _snapshot_text(value) -> str:
+    if isinstance(value, (str, int, float, Decimal)) and not isinstance(value, bool):
+        return str(value)
+    return ""
+
+
+def _snapshot_decimal(value) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
+
+
 def _point_snapshot_products(snapshot) -> list[dict]:
     if not isinstance(snapshot, dict):
         return []
@@ -55,15 +69,59 @@ def _point_snapshot_products(snapshot) -> list[dict]:
             continue
         products.append(
             {
-                "codigo": str(line.get("point_code") or ""),
-                "descripcion": str(line.get("description") or ""),
-                "cantidad": line.get("quantity") or "0",
-                "precio_unitario": line.get("unit_price") or "0",
-                "descuento": line.get("discount") or "0",
-                "total": line.get("line_total") or "0",
+                "codigo": _snapshot_text(line.get("point_code")),
+                "descripcion": _snapshot_text(line.get("description")),
+                "cantidad": _snapshot_decimal(line.get("quantity")) or Decimal("0"),
+                "precio_unitario": _snapshot_decimal(line.get("unit_price")) or Decimal("0"),
+                "descuento": _snapshot_decimal(line.get("discount")) or Decimal("0"),
+                "total": _snapshot_decimal(line.get("line_total")) or Decimal("0"),
             }
         )
     return products
+
+
+def _point_snapshot_context(pedido: PedidoCliente) -> dict:
+    snapshot = pedido.point_note_snapshot
+    snapshot_total = (
+        _snapshot_decimal(snapshot.get("total"))
+        if isinstance(snapshot, dict)
+        else None
+    )
+    if (
+        not isinstance(snapshot, dict)
+        or snapshot_total is None
+        or not isinstance(snapshot.get("lines"), list)
+    ):
+        return {
+            "is_legacy_fallback": True,
+            "total": pedido.monto_estimado,
+            "total_label": "Monto estimado legacy",
+            "folio": "",
+            "branch_name": "",
+            "sold_at": "",
+            "fetched_at": None,
+            "invoiced": None,
+            "payment_type": "",
+            "point_channel": "",
+            "source_endpoint": "",
+        }
+    return {
+        "is_legacy_fallback": False,
+        "total": snapshot_total,
+        "total_label": "Total Point",
+        "folio": _snapshot_text(snapshot.get("folio")) or pedido.point_note_folio,
+        "branch_name": _snapshot_text(snapshot.get("branch_name")) or pedido.sucursal,
+        "sold_at": _snapshot_text(snapshot.get("sold_at")),
+        "fetched_at": pedido.point_note_fetched_at,
+        "invoiced": (
+            snapshot.get("invoiced")
+            if isinstance(snapshot.get("invoiced"), bool)
+            else None
+        ),
+        "payment_type": _snapshot_text(snapshot.get("payment_type")),
+        "point_channel": _snapshot_text(snapshot.get("point_channel")),
+        "source_endpoint": _snapshot_text(snapshot.get("source_endpoint")),
+    }
 
 
 def _crm_enterprise_chain(
@@ -1122,6 +1180,7 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             default_url=reverse("crm:pedidos"),
             default_cta="Abrir pedidos",
         ),
+        "domicilios_only": domicilios_only,
     }
 
     # Conteo por estatus para tarjeta rápida
@@ -1419,6 +1478,7 @@ def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpRespons
             "direccion": direccion,
             "map_url": map_url,
             "productos": _point_snapshot_products(pedido.point_note_snapshot),
+            "point_snapshot": _point_snapshot_context(pedido),
             "status_operations": status_operations,
             "can_manage_crm": can_manage_crm(request.user),
             "can_manage_logistica": can_manage_submodule(

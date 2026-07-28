@@ -279,8 +279,12 @@
       <div class="delivery-eyebrow">Servicio a domicilio · Fuente operativa ERP</div>
       <h1 class="delivery-title">{{ pedido.folio }}</h1>
       <div class="delivery-muted">
-        Nota Point {{ pedido.point_note_folio }} · {{ pedido.get_canal_display }} ·
-        {{ pedido.sucursal|default:"Sucursal sin identificar" }}
+        {% if point_snapshot.is_legacy_fallback %}
+        Registro histórico sin snapshot Point · {{ pedido.get_canal_display }}
+        {% else %}
+        Nota Point {{ point_snapshot.folio }} · {{ pedido.get_canal_display }} ·
+        {{ point_snapshot.branch_name|default:"Sucursal sin identificar" }}
+        {% endif %}
       </div>
     </div>
     <div class="delivery-status" aria-label="Estado operativo del domicilio">
@@ -291,14 +295,31 @@
   <div class="delivery-detail-grid">
     <div class="delivery-main">
       <section class="delivery-card" aria-labelledby="point-heading">
-        <h2 id="point-heading">Venta en Point <span class="delivery-readonly">Solo lectura</span></h2>
+        <h2 id="point-heading">
+          {% if point_snapshot.is_legacy_fallback %}Referencia comercial histórica{% else %}Venta en Point{% endif %}
+          <span class="delivery-readonly">Solo lectura</span>
+        </h2>
+        {% if point_snapshot.is_legacy_fallback %}
+        <p class="delivery-muted">
+          Registro histórico sin snapshot Point. El valor mostrado es el monto
+          estimado legado y no debe interpretarse como total confirmado de Point.
+        </p>
+        {% endif %}
         <dl class="delivery-facts">
-          <div class="delivery-fact"><dt>Folio de nota</dt><dd>{{ pedido.point_note_folio }}</dd></div>
+          {% if not point_snapshot.is_legacy_fallback %}
+          <div class="delivery-fact"><dt>Folio de nota</dt><dd>{{ point_snapshot.folio|default:"-" }}</dd></div>
           <div class="delivery-fact"><dt>ID Point</dt><dd>{{ pedido.point_note_id }}</dd></div>
-          <div class="delivery-fact"><dt>Sucursal</dt><dd>{{ pedido.sucursal|default:"-" }}</dd></div>
-          <div class="delivery-fact"><dt>Fecha de venta</dt><dd>{{ pedido.point_note_sold_at|date:"d/m/Y H:i"|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Sucursal Point</dt><dd>{{ point_snapshot.branch_name|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Fecha de venta</dt><dd>{{ point_snapshot.sold_at|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Consultada en ERP</dt><dd>{{ point_snapshot.fetched_at|date:"d/m/Y H:i"|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Factura</dt><dd>{% if point_snapshot.invoiced is True %}Facturada{% elif point_snapshot.invoiced is False %}No facturada{% else %}Sin dato{% endif %}</dd></div>
+          <div class="delivery-fact"><dt>Tipo de pago</dt><dd>{{ point_snapshot.payment_type|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Canal Point</dt><dd>{{ point_snapshot.point_channel|default:"-" }}</dd></div>
+          <div class="delivery-fact"><dt>Fuente técnica</dt><dd>{{ point_snapshot.source_endpoint|default:"-" }}</dd></div>
+          {% endif %}
         </dl>
 
+        {% if not point_snapshot.is_legacy_fallback %}
         <div class="delivery-table-wrap table-responsive">
           <table class="delivery-table" aria-label="Productos de la nota Point">
             <thead>
@@ -327,7 +348,8 @@
             </tbody>
           </table>
         </div>
-        <div class="delivery-total"><span>Total Point</span><strong>${{ pedido.monto_estimado|floatformat:2|intcomma }}</strong></div>
+        {% endif %}
+        <div class="delivery-total"><span>{{ point_snapshot.total_label }}</span><strong>${{ point_snapshot.total|floatformat:2|intcomma }}</strong></div>
       </section>
 
       <section class="delivery-card" aria-labelledby="delivery-heading">
@@ -369,7 +391,10 @@
           <a class="delivery-action" href="{% url 'crm:editar_cliente' pedido.cliente.id %}">Actualizar cliente</a>
           {% endif %}
           {% if can_manage_logistica %}
-          <a class="delivery-link" href="{% url 'logistica:rutas' %}">Abrir operación logística</a>
+          <div class="delivery-fact" data-operation-owner="centro-operativo-api">
+            <dt>Asignación y estados</dt>
+            <dd>Se gestionan en Centro Operativo sobre esta solicitud mediante la API canónica.</dd>
+          </div>
           {% endif %}
         </div>
         {% if not can_manage_crm and not can_manage_logistica %}

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 
 {% load humanize %}
-{% block title %}CRM · Pedidos{% endblock %}
-{% block page_title %}CRM · Pedidos{% endblock %}
+{% block title %}{% if domicilios_only %}CRM · Pedidos a domicilio{% else %}CRM · Pedidos{% endif %}{% endblock %}
+{% block page_title %}{% if domicilios_only %}CRM · Pedidos a domicilio{% else %}CRM · Pedidos{% endif %}{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/template_modules/crm-templates-crm-pedidos.css?v=20260614-ui100-v1">
@@ -47,7 +47,8 @@
   </section>
   {% endif %}
 
-  <section class="ops-grid-2">
+  <section class="ops-grid-2 {% if domicilios_only %}pd-u-one-column{% endif %}">
+    {% if not domicilios_only %}
     <article class="card">
       <div class="card-header">Nuevo pedido</div>
       {% if can_manage_crm %}
@@ -84,6 +85,7 @@
       <div class="muted">Tu rol es de consulta. No puedes crear pedidos.</div>
       {% endif %}
     </article>
+    {% endif %}
 
     <article class="card">
       <div class="card-header">Filtro operativo</div>
@@ -111,7 +113,7 @@
         </select>
         <input type="hidden" name="enterprise_focus" value="{{ enterprise_focus }}">
         <button class="btn btn-primary" type="submit">Aplicar filtros</button>
-        <a class="btn btn-secondary" href="{% url 'crm:pedidos' %}">Limpiar</a>
+        <a class="btn btn-secondary" href="{% if domicilios_only %}{% url 'crm:pedidos_domicilios' %}{% else %}{% url 'crm:pedidos' %}{% endif %}">Limpiar</a>
       </form>
       <div class="ops-chip-row">
         <span class="ops-chip">Pedidos hoy {{ pedidos_hoy }}</span>
@@ -122,7 +124,7 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Seguimiento de pedidos</div>
+    <div class="card-header">{% if domicilios_only %}Bandeja canónica de domicilios{% else %}Seguimiento de pedidos{% endif %}</div>
     <div class="table-responsive">
       <table class="table table-striped ops-table">
         <thead>
@@ -159,7 +161,13 @@
               {% endif %}
             </td>
             <td class="text-end">${{ p.monto_estimado|floatformat:2|intcomma }}</td>
-            <td><a class="btn btn-secondary" href="{% url 'crm:pedido_detail' p.id %}">Ver</a></td>
+            <td>
+              {% if domicilios_only %}
+              <a class="btn btn-secondary" href="{% url 'crm:pedido_domicilio_detail' p.id %}">Gestionar en ERP</a>
+              {% else %}
+              <a class="btn btn-secondary" href="{% url 'crm:pedido_detail' p.id %}">Ver</a>
+              {% endif %}
+            </td>
           </tr>
           {% empty %}
           <tr><td colspan="9" class="muted">Sin pedidos para el filtro actual.</td></tr>
