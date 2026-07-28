@@ -391,6 +391,7 @@ def _canonical_payload(data: dict) -> dict:
         "external_source": data["external_source"],
         "external_id": data["external_id"],
         "canal": data["canal"],
+        "instrucciones_entrega": _normalize_text(data.get("instrucciones_entrega", "")),
         "cliente": {
             "nombre": _normalize_text(customer["nombre"]),
             "telefono": _normalize_phone(customer.get("telefono", "")),
