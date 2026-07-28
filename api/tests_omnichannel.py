@@ -1120,6 +1120,72 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertEqual(response.data["results"][0]["id"], delivery.id)
         self.assertEqual(wrong_branch.data["count"], 0)
 
+    def test_delivery_list_exposes_persisted_external_identity_without_point_note(self):
+        created = self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+                "canal": "WEB",
+                "cliente": {"nombre": "Ana", "telefono": "6671234567", "email": ""},
+                "direccion": {"direccion": "Av. Obregón 123"},
+                "pedido": {"descripcion": "Pastel", "monto_estimado": "565.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        listing = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {"canal": "WEB"},
+            **self.auth,
+        )
+
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual(listing.data["count"], 1)
+        self.assertEqual(
+            listing.data["results"][0]["external_source"],
+            "POLLYANAS_ECOMMERCE",
+        )
+        self.assertEqual(
+            listing.data["results"][0]["external_id"],
+            "ECOMMERCE:PD-TIMEOUT-42",
+        )
+
+    def test_delivery_identity_lookup_confirms_only_owned_external_keys(self):
+        self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+                "canal": "WEB",
+                "cliente": {"nombre": "Ana", "telefono": "6671234567", "email": ""},
+                "direccion": {"direccion": "Av. Obregón 123"},
+                "pedido": {"descripcion": "Pastel", "monto_estimado": "565.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_delivery_identities"),
+            [
+                ("external_source", "POLLYANAS_ECOMMERCE"),
+                ("external_id", "ECOMMERCE:PD-TIMEOUT-42"),
+                ("external_id", "ECOMMERCE:PD-MISSING"),
+            ],
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {
+            "identities": [{
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+            }],
+        })
+
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_point_note_for_api(),
