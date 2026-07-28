@@ -47,12 +47,42 @@ def build_events(records, dry_run: bool) -> tuple[list[dict], list]:
     return events, selected_records
 
 
+def empleados_rechazados(result: dict) -> set[str]:
+    """Codigos cuyos eventos el ERP NO ingirio en esta respuesta.
+
+    El detalle del receptor solo trae `employee_no`, sin id por evento, asi que
+    el empleado es la granularidad mas fina disponible. Los rechazos (empleado no
+    encontrado, campos faltantes, fecha invalida) se reconocen porque no llevan
+    `fecha`: nunca llegaron a agruparse en una asistencia.
+
+    Se detectan por la ausencia de `fecha` y no por el texto del motivo, para que
+    un motivo nuevo del ERP tambien cuente como rechazo. El sesgo es deliberado:
+    reintentar de mas es inocuo porque el ERP deduplica, mientras que dar por
+    enviado un marcaje rechazado lo pierde para siempre.
+    """
+    return {
+        str(item.get("employee_no", "")).strip()
+        for item in result.get("detalle") or []
+        if not item.get("fecha")
+    }
+
+
 def send_and_mark(events: list[dict], records: list, dry_run: bool) -> dict:
     if dry_run:
         return {"procesados": 0, "errores": 0, "duplicados": 0, "dry_run": len(events)}
     result = send_events(events)
     if result.get("procesados", 0) > 0:
-        for record in records:
+        rechazados = empleados_rechazados(result)
+        # events y records van en paralelo desde build_events; se compara contra
+        # el employee_no del evento porque es el que ya trae aplicado el alias.
+        for event, record in zip(events, records):
+            if str(event.get("employee_no", "")).strip() in rechazados:
+                log.warning(
+                    "ERP no acepto el marcaje de %s (%s): no se marca como enviado, se reintenta",
+                    event.get("employee_no"),
+                    record.device_time.isoformat(),
+                )
+                continue
             mark_sent(record.record_guid, record.employee_no, record.device_time.isoformat())
     return result
 
