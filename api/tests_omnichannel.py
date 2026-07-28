@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from datetime import timedelta
 from decimal import Decimal
 from threading import Barrier, Thread
@@ -225,6 +226,26 @@ class OmnichannelPublicApiTests(APITestCase):
         second = self.client.post(self.url, self.payload, format="json", **self.auth)
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_snapshot_historico_sin_instrucciones_recupera_valor_del_domicilio(self):
+        self.payload["instrucciones_entrega"] = "Llamar"
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
+        snapshot = deepcopy(order.payload_snapshot)
+        snapshot.pop("instrucciones_entrega")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE crm_pedidocliente SET payload_snapshot = %s WHERE id = %s",
+                [json.dumps(snapshot), order.pk],
+            )
+        same = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "Distinta"
+        different = self.client.post(self.url, self.payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=first.data["solicitud_domicilio_id"])
+        self.assertEqual(same.status_code, status.HTTP_200_OK)
+        self.assertEqual(different.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar")
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
 
     def test_snapshot_no_puede_modificarse_despues_de_crear_pedido(self):

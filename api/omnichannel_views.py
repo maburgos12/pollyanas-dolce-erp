@@ -417,7 +417,15 @@ def _canonical_payload(data: dict) -> dict:
 
 
 def _snapshot_matches(order: PedidoCliente, data: dict) -> bool:
-    return order.payload_snapshot == _canonical_payload(data)
+    snapshot = dict(order.payload_snapshot)
+    if "instrucciones_entrega" not in snapshot:
+        # Pre-fix snapshots did not record this field. Recover it only from the
+        # canonical delivery, never by assuming it was blank.
+        delivery = order.solicitudes_domicilio.only("instrucciones_entrega").first()
+        snapshot["instrucciones_entrega"] = _normalize_text(
+            delivery.instrucciones_entrega if delivery else ""
+        )
+    return snapshot == _canonical_payload(data)
 
 
 def _conflict_response(api_client, request, *, detail: str, code: str):
