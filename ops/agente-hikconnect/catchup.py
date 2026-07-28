@@ -21,7 +21,7 @@ import requests
 
 from config import ERP_API_KEY, ERP_BASE_URL, ERP_ENDPOINT, PAGE_SIZE, TIMEZONE
 from hikconnect_client import HikConnectClient
-from main import build_events  # configura logging al importarse
+from main import build_events, empleados_rechazados  # configura logging al importarse
 from state import init_db, mark_sent
 
 # send_events del agente manda todo en un POST con timeout=20; con volumen revienta.
@@ -56,7 +56,15 @@ def enviar_por_lotes(events: list[dict], records: list) -> dict[str, int]:
         for clave in total:
             total[clave] += resultado.get(clave, 0)
         if resultado.get("procesados", 0) > 0:
-            for record in lote_registros:
+            rechazados = empleados_rechazados(resultado)
+            for evento, record in zip(lote_eventos, lote_registros):
+                if str(evento.get("employee_no", "")).strip() in rechazados:
+                    log.warning(
+                        "ERP no acepto el marcaje de %s (%s): no se marca como enviado, se reintenta",
+                        evento.get("employee_no"),
+                        record.device_time.isoformat(),
+                    )
+                    continue
                 mark_sent(record.record_guid, record.employee_no, record.device_time.isoformat())
 
     return total

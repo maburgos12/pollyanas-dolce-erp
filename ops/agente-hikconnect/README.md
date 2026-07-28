@@ -157,6 +157,27 @@ Hoy se corta tras `PAGINAS_SECAS_PARA_CORTAR` paginas seguidas sin nada en venta
 .venv/bin/python test_pagination.py
 ```
 
+### Marcado de envio: solo lo que el ERP acepto
+
+Un marcaje que se guarda como enviado **no se reintenta nunca**. Antes se marcaba el lote completo
+cuando `procesados > 0`, asi que los eventos que el ERP rechazaba —tipicamente "empleado no
+encontrado", con un alta que todavia no existe en nomina— se daban por entregados y se perdian en
+silencio. Caso real: ARLETH codigo 328, cuyos primeros marcajes del 27-jul-2026 quedaron marcados
+como enviados sin haber entrado al ERP.
+
+Hoy `empleados_rechazados()` lee el `detalle` de la respuesta y omite el marcado de esos empleados,
+de modo que el siguiente ciclo los reintenta. Un rechazo se reconoce por la **ausencia de `fecha`** en
+su entrada del detalle, no por el texto del motivo: asi un motivo nuevo del ERP tambien cuenta como
+rechazo. Reintentar de mas es inocuo porque el ERP deduplica; darlo por enviado pierde el marcaje.
+
+Cuando aparezca un empleado rechazado, revisar `EmpleadoIdentidadPendiente` en el ERP y vincular la
+identidad; a partir de ahi el agente entrega sus checadas solo. Las que se perdieron antes de este
+arreglo hay que recuperarlas con `catchup.py` sobre la ventana correspondiente.
+
+```bash
+.venv/bin/python test_marcado.py
+```
+
 ### Fuera de git
 
 `.env` (credenciales Hik-Connect y API key del ERP), `storage_state.json` (sesion del portal),
