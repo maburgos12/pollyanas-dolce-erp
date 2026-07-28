@@ -850,6 +850,30 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )
 
+    def test_reasignacion_posterior_a_en_ruta_falla_cerrado(self):
+        status_result = self._status(
+            "c4bd79b7-0c63-4623-b57c-1a75f02ef954"
+        )
+
+        self.assertEqual(
+            status_result["estatus"],
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+        )
+        with self.assertRaises(DomicilioAssignmentError) as error:
+            assign_domicilio(
+                solicitud_id=self.solicitud.id,
+                repartidor_id=self.drivers[1].id,
+                owner_api_client=self.api_client,
+            )
+
+        self.assertEqual(error.exception.status_code, 409)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.repartidor_id, self.drivers[0].id)
+        self.assertEqual(
+            self.solicitud.estatus,
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+        )
+
     def test_reasignacion_y_estatus_comparten_lock_y_no_se_cruzan(self):
         def reassign():
             close_old_connections()

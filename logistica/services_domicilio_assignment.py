@@ -155,6 +155,11 @@ def assign_domicilio(
                 "El domicilio ya no admite asignación.",
                 409,
             )
+        if solicitud.estatus == SolicitudDomicilio.ESTATUS_EN_RUTA:
+            raise DomicilioAssignmentError(
+                "El domicilio ya no admite asignación.",
+                409,
+            )
         repartidor = repartidores_disponibles_queryset().filter(
             pk=repartidor_id
         ).first()
