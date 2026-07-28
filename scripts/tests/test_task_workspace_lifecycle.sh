@@ -206,11 +206,64 @@ test_safe_close() {
   cleanup_repo
 }
 
+test_close_with_stale_base_checkout() {
+  setup_repo
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task stale --branch codex/stale --owner test --scope scripts >/dev/null
+  echo stale >"$TEST_TMP/worktrees/stale/stale.txt"
+  git -C "$TEST_TMP/worktrees/stale" add stale.txt
+  git -C "$TEST_TMP/worktrees/stale" commit -m stale >/dev/null
+  git -C "$TEST_TMP/worktrees/stale" push -u origin codex/stale >/dev/null
+  # El commit llega a main en el remoto (equivale al merge del PR) mientras el
+  # checkout base se queda atrasado. Es el caso real: si la rama remota se borra
+  # antes que la local, `branch -d` valida contra ese main viejo y falla.
+  git -C "$TEST_TMP/worktrees/stale" push origin HEAD:main >/dev/null
+  assert_success "close works when base checkout is behind origin/main" \
+    "$CLOSE" --repo "$TEST_TMP/repo" --task stale --state merged
+  git -C "$TEST_TMP/repo" show-ref --verify --quiet refs/heads/codex/stale \
+    && fail "close removes local branch when base is behind" \
+    || pass "close removes local branch when base is behind"
+  if git -C "$TEST_TMP/repo" ls-remote --exit-code --heads origin codex/stale >/dev/null 2>&1; then
+    fail "close removes remote branch when base is behind"
+  else
+    pass "close removes remote branch when base is behind"
+  fi
+  cleanup_repo
+}
+
+test_close_resumes_after_missing_worktree() {
+  setup_repo
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task resumed --branch codex/resumed --owner test --scope scripts >/dev/null
+  echo resumed >"$TEST_TMP/worktrees/resumed/resumed.txt"
+  git -C "$TEST_TMP/worktrees/resumed" add resumed.txt
+  git -C "$TEST_TMP/worktrees/resumed" commit -m resumed >/dev/null
+  git -C "$TEST_TMP/worktrees/resumed" push -u origin codex/resumed >/dev/null
+  git -C "$TEST_TMP/worktrees/resumed" push origin HEAD:main >/dev/null
+  # Simula un cierre interrumpido justo despues de remover el worktree.
+  git -C "$TEST_TMP/repo" worktree remove "$TEST_TMP/worktrees/resumed"
+  assert_success "close resumes when worktree was already removed" \
+    "$CLOSE" --repo "$TEST_TMP/repo" --task resumed --state merged
+  [[ -f "$TEST_TMP/repo/.git/task-workspaces/closed/resumed.json" ]] \
+    && pass "resumed close archives registry" || fail "resumed close archives registry"
+
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task ghost --branch codex/ghost --owner test --scope scripts >/dev/null
+  # Borrar la carpeta a mano deja a Git listando un worktree inexistente: eso si
+  # es un estado inconsistente y debe frenar el cierre.
+  rm -rf "$TEST_TMP/worktrees/ghost"
+  assert_failure "close rejects worktree missing from disk but tracked by git" \
+    "$CLOSE" --repo "$TEST_TMP/repo" --task ghost --state merged
+  cleanup_repo
+}
+
 test_start_and_preflight
 test_preflight_guards
 test_handoff_and_audit
 test_adopt_legacy_worktree
 test_safe_close
+test_close_with_stale_base_checkout
+test_close_resumes_after_missing_worktree
 
 echo "RESULT: passed=$passed failed=$failed"
 (( failed == 0 ))

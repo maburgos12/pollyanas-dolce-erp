@@ -30,11 +30,28 @@ worktree="$(json_field "$record" worktree)"
 base="$(json_field "$record" base_commit)"
 scope="$(json_field "$record" scope)"
 owner="$(json_field "$record" owner)"
-[[ -d "$worktree" ]] || die "worktree ausente; auditar manualmente antes de cerrar"
-[[ -z "$(git -C "$worktree" status --porcelain)" ]] || die "worktree con cambios sin guardar"
+# Un cierre interrumpido puede dejar el worktree ya removido y la tarea todavía
+# activa. Ese reintento debe poder completarse: solo se exige auditoría manual
+# cuando Git aún lo lista, porque ahí sí hay un estado inconsistente que revisar.
+worktree_presente=1
+if [[ ! -d "$worktree" ]]; then
+  if git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $worktree"; then
+    die "worktree ausente del disco pero aún registrado en Git; auditar manualmente antes de cerrar"
+  fi
+  git -C "$repo" show-ref --verify --quiet "refs/heads/$branch" \
+    || die "worktree y rama ausentes; auditar manualmente antes de cerrar"
+  worktree_presente=0
+fi
+if (( worktree_presente )); then
+  [[ -z "$(git -C "$worktree" status --porcelain)" ]] || die "worktree con cambios sin guardar"
+fi
 
 git -C "$repo" fetch origin main --quiet
-head="$(git -C "$worktree" rev-parse HEAD)"
+if (( worktree_presente )); then
+  head="$(git -C "$worktree" rev-parse HEAD)"
+else
+  head="$(git -C "$repo" rev-parse "$branch")"
+fi
 if [[ "$state" == "merged" ]]; then
   git -C "$repo" merge-base --is-ancestor "$head" origin/main \
     || die "HEAD contiene commits ausentes de origin/main"
@@ -48,15 +65,23 @@ else
   git -C "$repo" bundle create "$recovery" "$branch" >/dev/null
 fi
 
-if [[ "$state" == "merged" ]] \
-  && git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-  git -C "$repo" push origin --delete "$branch" >/dev/null
+if (( worktree_presente )); then
+  git -C "$repo" worktree remove "$worktree"
 fi
-git -C "$repo" worktree remove "$worktree"
+# La rama local se borra ANTES que la remota. `git branch -d` valida contra el
+# upstream, y `push --delete` también borra refs/remotes/origin/<rama>: si la
+# remota se va primero, `-d` se queda sin referencia, cae en el HEAD del checkout
+# base —que suele estar atrasado respecto a origin/main— y falla con "not fully
+# merged", dejando la tarea a medio cerrar. La corroboración real ya ocurrió
+# arriba contra origin/main.
 if [[ "$state" == "discarded" ]]; then
   git -C "$repo" branch -D "$branch" >/dev/null
 else
   git -C "$repo" branch -d "$branch" >/dev/null
+fi
+if [[ "$state" == "merged" ]] \
+  && git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+  git -C "$repo" push origin --delete "$branch" >/dev/null
 fi
 destination="$registry/closed/$task.json"
 [[ "$state" == "discarded" ]] && destination="$registry/discarded/$task.json"
