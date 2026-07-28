@@ -140,6 +140,21 @@ class OmnichannelPublicApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_web_order_persists_references_and_instructions_without_merging_them(self):
+        payload = deepcopy(self.payload)
+        payload["instrucciones_entrega"] = "Llamar al llegar"
+        created = self.client.post(self.url, payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=created.data["solicitud_domicilio_id"])
+        detail = self.client.get(
+            reverse("api_public_omnichannel_delivery_detail", kwargs={"solicitud_id": delivery.id}),
+            **self.auth,
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar al llegar")
+        self.assertEqual(delivery.notas, "Referencias: Portón blanco\nInstrucciones: Llamar al llegar")
+        self.assertEqual(detail.data["direccion"]["referencias"], "Portón blanco")
+        self.assertEqual(detail.data["instrucciones_entrega"], "Llamar al llegar")
+
     def test_coordenadas_invalidas_retornan_400(self):
         self.payload["direccion"]["latitud"] = "91"
         response = self.client.post(self.url, self.payload, format="json", **self.auth)

@@ -61,6 +61,7 @@ class OmnichannelOrderInputSerializer(serializers.Serializer):
     cliente = OmnichannelCustomerInputSerializer()
     direccion = OmnichannelAddressInputSerializer()
     pedido = OmnichannelOrderDetailInputSerializer()
+    instrucciones_entrega = serializers.CharField(max_length=500, required=False, allow_blank=True, default="", trim_whitespace=True)
 
     def validate_external_source(self, value):
         value = value.strip().upper()
