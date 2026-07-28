@@ -248,6 +248,19 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(delivery.instrucciones_entrega, "Llamar")
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
 
+    def test_snapshot_historico_sin_domicilio_conserva_instrucciones_vacias(self):
+        self.payload["instrucciones_entrega"] = ""
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
+        SolicitudDomicilio.objects.filter(pk=first.data["solicitud_domicilio_id"]).delete()
+        snapshot = deepcopy(order.payload_snapshot)
+        snapshot.pop("instrucciones_entrega")
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE crm_pedidocliente SET payload_snapshot = %s WHERE id = %s", [json.dumps(snapshot), order.pk])
+        retry = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(retry.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(retry.data["code"], "OMNICHANNEL_ORDER_INCOMPLETE")
+
     def test_snapshot_no_puede_modificarse_despues_de_crear_pedido(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         order = PedidoCliente.objects.get(id=created.data["pedido_id"])
