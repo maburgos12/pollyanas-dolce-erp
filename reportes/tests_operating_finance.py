@@ -3282,6 +3282,10 @@ class OperatingExpenseImportAutomationServiceTests(TestCase):
         inbox.mkdir(parents=True, exist_ok=True)
         rows = [["GUAMUCHIL", "2026-03-01", "19000", "REAL", "", "Marzo real"]]
         self._build_workbook_path(inbox / "gastos_marzo.xlsx", rows)
+        # El dedup es por hash de bytes ("el mismo archivo re-depositado");
+        # reconstruir el workbook produce bytes distintos si openpyxl estampa
+        # otro segundo en docProps — guardamos los bytes originales.
+        original_bytes = (inbox / "gastos_marzo.xlsx").read_bytes()
 
         first_summary = self.automation_service.process_directory(
             inbox,
@@ -3295,7 +3299,7 @@ class OperatingExpenseImportAutomationServiceTests(TestCase):
         self.assertTrue((inbox / "processed").exists())
         self.assertEqual(GastoOperativoMensual.objects.filter(periodo=date(2026, 3, 1)).count(), 1)
 
-        self._build_workbook_path(inbox / "gastos_marzo_duplicado.xlsx", rows)
+        (inbox / "gastos_marzo_duplicado.xlsx").write_bytes(original_bytes)
 
         second_summary = self.automation_service.process_directory(
             inbox,

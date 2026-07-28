@@ -74,4 +74,8 @@ jobs:
       - name: Run full test suite (bloqueante)
         # Deuda legacy saneada al 100% en la auditoría 2026-07-25 (PRs #1136 y
         # ronda 2); desde entonces la suite completa bloquea el merge.
-        run: python manage.py test
+        # --keepdb: el contenedor de Postgres es efímero y el DROP final truena
+        # cuando algún test deja conexiones abiertas (ObjectInUse) aunque la
+        # suite esté en OK. ponytail: si el leak de conexiones causa flakes
+        # entre tests, cazarlo en vez de ampliar este workaround.
+        run: python manage.py test --keepdb

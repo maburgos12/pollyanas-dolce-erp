@@ -8,10 +8,10 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
@@ -22,6 +22,7 @@ from openpyxl import Workbook
 from core.access import can_manage_rrhh, can_view_rrhh
 
 from .models import (
+    AjusteAsistencia,
     AsistenciaEmpleado,
     Empleado,
     IncidenciaAsistencia,
@@ -192,6 +193,7 @@ def _build_reporte_asistencia(
     resumenes = defaultdict(
         lambda: {
             "faltas": 0,
+            "faltas_conciliadas": 0,
             "falta_retardos": 0,
             "retardos": 0,
             "comida_excedida": 0,
@@ -209,20 +211,31 @@ def _build_reporte_asistencia(
         if empleado and _es_fecha_pre_ingreso(empleado, incidencia.fecha):
             continue
         resumen = resumenes[incidencia.empleado_id]
+        # Los KPI disciplinarios cuentan solo pendientes; una incidencia
+        # conciliada (permiso/vacaciones) no debe sumar como sanción.
+        pendiente = incidencia.estado == IncidenciaAsistencia.ESTADO_PENDIENTE
         if incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA:
-            resumen["faltas"] += 1
+            if pendiente:
+                resumen["faltas"] += 1
+            else:
+                resumen["faltas_conciliadas"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA_RETARDOS:
-            resumen["falta_retardos"] += 1
+            if pendiente:
+                resumen["falta_retardos"] += 1
         elif incidencia.tipo in {IncidenciaAsistencia.TIPO_RETARDO, IncidenciaAsistencia.TIPO_RETARDO_TOLERANCIA}:
-            resumen["retardos"] += 1
+            if pendiente:
+                resumen["retardos"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA:
-            resumen["comida_excedida"] += 1
+            if pendiente:
+                resumen["comida_excedida"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_JORNADA_INCOMPLETA:
-            resumen["jornada_incompleta"] += 1
+            if pendiente:
+                resumen["jornada_incompleta"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE:
             resumen["hora_extra"] += 1
         elif incidencia.tipo in {IncidenciaAsistencia.TIPO_AVISO_BAJA_FALTAS, IncidenciaAsistencia.TIPO_BAJA_FALTAS}:
-            resumen["avisos_baja"] += 1
+            if pendiente:
+                resumen["avisos_baja"] += 1
         elif incidencia.tipo == IncidenciaAsistencia.TIPO_SUSPENSION:
             resumen["suspensiones"] += 1
 
@@ -475,3 +488,107 @@ def reporte_asistencia(request):
             "query_xlsx": query_xlsx,
         },
     )
+
+
+AJUSTE_CAMPOS_HORAS = {
+    "entrada": AjusteAsistencia.TIPO_ENTRADA,
+    "salida_comida": AjusteAsistencia.TIPO_SALIDA_COMIDA,
+    "regreso_comida": AjusteAsistencia.TIPO_REGRESO_COMIDA,
+    "salida": AjusteAsistencia.TIPO_SALIDA,
+}
+
+
+def _redirect_asistencias(request, *, fragment: str = "") -> str:
+    url = reverse("rrhh:rrhh_asistencias")
+    query = (request.POST.get("next_query") or "").strip()
+    if query:
+        url = f"{url}?{query}"
+    if fragment:
+        url = f"{url}#{fragment}"
+    return url
+
+
+@login_required
+@require_POST
+def ajustar_asistencia(request):
+    """Captura o corrige los horarios de un día desde la pantalla de asistencias.
+
+    Reutiliza el flujo formal de AjusteAsistencia (bitácora + re-evaluación de
+    incidencias) aplicado en un paso, porque solo usuarios con manage de RRHH
+    llegan aquí. Dispara la sincronización de bonos del día afectado.
+    """
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para corregir asistencias.")
+
+    from .services_ajustes_asistencia import aprobar_ajuste_asistencia, crear_ajuste_asistencia
+    from .services_bonos_checador import programar_sincronizacion_bonos_desde_checador
+    from .views import _wants_progressive_response
+
+    progressive = _wants_progressive_response(request)
+
+    def _responder_error(mensaje: str):
+        if progressive:
+            return JsonResponse(
+                {"ok": False, "toast": {"type": "error", "message": mensaje, "persistent": True}},
+                status=400,
+            )
+        messages.error(request, mensaje)
+        return redirect(_redirect_asistencias(request))
+
+    empleado = Empleado.objects.filter(pk=request.POST.get("empleado_id") or 0).first()
+    if empleado is None:
+        return _responder_error("Selecciona un empleado válido.")
+    fecha = parse_date(request.POST.get("fecha") or "")
+    if fecha is None:
+        return _responder_error("Captura una fecha válida.")
+    if fecha > timezone.localdate():
+        return _responder_error("No se pueden capturar asistencias de fechas futuras.")
+    motivo = (request.POST.get("motivo") or "").strip()
+    if not motivo:
+        return _responder_error("El motivo es obligatorio para corregir una asistencia.")
+
+    tz = timezone.get_current_timezone()
+    cambios = []
+    for campo, tipo_ajuste in AJUSTE_CAMPOS_HORAS.items():
+        crudo = (request.POST.get(campo) or "").strip()
+        if not crudo:
+            continue
+        try:
+            hora = time.fromisoformat(crudo)
+        except ValueError:
+            return _responder_error(f"Hora inválida en {campo.replace('_', ' ')}.")
+        cambios.append((campo, tipo_ajuste, datetime.combine(fecha, hora, tzinfo=tz)))
+    if not cambios:
+        return _responder_error("Captura al menos un horario a corregir.")
+
+    try:
+        with transaction.atomic():
+            for campo, tipo_ajuste, valor in cambios:
+                ajuste = crear_ajuste_asistencia(
+                    empleado,
+                    fecha,
+                    tipo_ajuste,
+                    {campo: valor.isoformat()},
+                    motivo,
+                    request.user,
+                )
+                aprobar_ajuste_asistencia(
+                    ajuste, request.user, comentario="Corrección desde pantalla de asistencias"
+                )
+            programar_sincronizacion_bonos_desde_checador(empleado.id, fecha)
+    except ValidationError as exc:
+        return _responder_error("; ".join(exc.messages))
+
+    success = f"Asistencia de {empleado.nombre} del {fecha.isoformat()} guardada."
+    redirect_url = _redirect_asistencias(request, fragment=f"asistencia-{empleado.id}-{fecha.isoformat()}")
+    if progressive:
+        return JsonResponse(
+            {
+                "ok": True,
+                "toast": {"type": "success", "message": success},
+                "redirect": redirect_url,
+                "reload": True,
+            }
+        )
+    messages.success(request, success)
+    return redirect(redirect_url)

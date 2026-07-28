@@ -1,0 +1,13 @@
+[Unit]
+Description=Catch-up diario Hik-Connect -> ERP (recupera marcajes subidos con retraso)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agente-hikconnect
+# El agente y el catch-up comparten storage_state.json y state.db: no deben correr a la vez.
+ExecStartPre=-/usr/bin/systemctl stop agente-hikconnect
+ExecStart=/opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/catchup.py --horas 72
+ExecStopPost=-/usr/bin/systemctl start agente-hikconnect
+TimeoutStartSec=1800

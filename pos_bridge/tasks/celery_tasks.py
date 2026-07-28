@@ -7,10 +7,12 @@ from celery import shared_task
 from django.core.cache import cache
 from django.core.management import call_command
 from django.db.models import Sum
+from django.utils import timezone
 
 from core.audit import log_event
 from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
+from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
 from pos_bridge.services.realtime_inventory_service import deliver_ecommerce_webhook, run_realtime_inventory_sync
 from pos_bridge.tasks.retry_failed_jobs import retry_failed_jobs
 from pos_bridge.tasks.run_attendance_sync import run_attendance_sync
@@ -289,6 +291,113 @@ def task_product_recipe_sync(
         articulo_codes=articulo_codes,
         include_without_recipe=include_without_recipe,
     )
+
+
+@shared_task(
+    name="pos_bridge.catalog_recipe_sync",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=600,
+    acks_late=True,
+    soft_time_limit=14100,
+    time_limit=14400,
+)
+def task_catalog_recipe_sync(self, *, job_id: int):
+    job = PointSyncJob.objects.select_related("triggered_by").get(id=job_id)
+    if job.status == PointSyncJob.STATUS_SUCCESS:
+        return _serialize_job(job)
+    parameters = dict(job.parameters or {})
+    action = parameters.get("action")
+    branch_hint = parameters.get("branch_hint") or "MATRIZ"
+    include_without_recipe = bool(parameters.get("include_without_recipe"))
+    discovery = None
+
+    job.status = PointSyncJob.STATUS_RUNNING
+    job.attempt_count = int(job.attempt_count or 0) + 1
+    job.error_message = ""
+    job.save(update_fields=["status", "attempt_count", "error_message", "updated_at"])
+
+    service = PointProductRecipeSyncService()
+    try:
+        product_codes = None
+        if action == "SYNC_ONLY_NEW_PRODUCTS":
+            discovery = service.discover_new_product_codes(branch_hint=branch_hint)
+            product_codes = list(discovery.get("new_codes") or [])
+            if not product_codes:
+                summary = {
+                    "products_selected": 0,
+                    "recipes_completed_successfully": 0,
+                    "recipes_with_unresolved_inputs": 0,
+                    "new_products_imported": 0,
+                    "new_preparations_imported": 0,
+                    "unresolved_inputs_count": 0,
+                    "discovery": discovery,
+                }
+                job.status = PointSyncJob.STATUS_SUCCESS
+                job.finished_at = timezone.now()
+                job.result_summary = summary
+                job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])
+                log_event(
+                    job.triggered_by,
+                    "SYNC_POINT_RECIPES",
+                    "pos_bridge.PointSyncJob",
+                    job.id,
+                    {"action": action, "product_codes": [], "summary": summary},
+                )
+                return _serialize_job(job)
+        elif action != "SYNC_ALL_RECIPES":
+            raise ValueError(f"Unsupported catalog recipe sync action: {action}")
+
+        result = service.sync(
+            branch_hint=branch_hint,
+            product_codes=product_codes,
+            include_without_recipe=include_without_recipe,
+            sync_job=job,
+        )
+        snapshot = run_weekly_cost_snapshot(triggered_by=job.triggered_by)
+        summary = dict(result.summary or {})
+        if discovery is not None:
+            summary["discovery"] = discovery
+        summary["weekly_cost_snapshot"] = snapshot
+        job.status = PointSyncJob.STATUS_SUCCESS
+        job.finished_at = timezone.now()
+        job.result_summary = summary
+        job.artifacts = {"raw_export_path": result.raw_export_path}
+        job.save(
+            update_fields=[
+                "status",
+                "finished_at",
+                "result_summary",
+                "artifacts",
+                "updated_at",
+            ]
+        )
+        log_event(
+            job.triggered_by,
+            "SYNC_POINT_RECIPES",
+            "pos_bridge.PointSyncJob",
+            job.id,
+            {
+                "action": action,
+                "product_codes": product_codes or [],
+                "summary": summary,
+                "raw_export_path": result.raw_export_path,
+            },
+        )
+        return _serialize_job(job)
+    except Exception as exc:
+        job.status = PointSyncJob.STATUS_FAILED
+        job.finished_at = timezone.now()
+        job.error_message = str(exc)
+        job.save(update_fields=["status", "finished_at", "error_message", "updated_at"])
+        log_event(
+            job.triggered_by,
+            "SYNC_POINT_RECIPES_FAILED",
+            "pos_bridge.PointSyncJob",
+            job.id,
+            {"action": action, "error": str(exc)},
+        )
+        raise
 
 
 @shared_task(name="pos_bridge.retry_failed_jobs", acks_late=True)

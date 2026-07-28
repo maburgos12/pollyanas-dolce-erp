@@ -73,6 +73,23 @@ class CancelacionProrrateoVentasTests(TestCase):
         bono = self.recalcular_en(bono, date(2026, 7, 25))
         self.assertFalse(bono.cancela_bono)
 
+    def test_nueve_llegadas_tarde_se_convierten_en_falta_y_cancelan(self):
+        bono = self.crear_bono(
+            dias_trabajados=21, dias_asistencia=21, dias_uniforme=21, dias_puntualidad=12
+        )
+        bono = self.recalcular_en(bono, date(2026, 7, 25))
+        self.assertTrue(bono.cancela_bono)
+        self.assertEqual(bono.cancela_motivo, "1 falta (límite 1), incluye 1 por retardos")
+        self.assertEqual(bono.total_a_pagar, Decimal("0.00"))
+
+    def test_ocho_llegadas_tarde_no_llegan_a_falta_y_paga(self):
+        bono = self.crear_bono(
+            dias_trabajados=21, dias_asistencia=21, dias_uniforme=21, dias_puntualidad=13
+        )
+        bono = self.recalcular_en(bono, date(2026, 7, 25))
+        self.assertFalse(bono.cancela_bono)
+        self.assertGreater(bono.total_a_pagar, Decimal("0.00"))
+
     def test_parse_decimal_conserva_valor_actual(self):
         actual = Decimal("300.00")
         self.assertEqual(_parse_decimal("", actual), actual)

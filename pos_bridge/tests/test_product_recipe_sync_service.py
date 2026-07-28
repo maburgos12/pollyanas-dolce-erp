@@ -67,6 +67,30 @@ class PointProductRecipeSyncServiceTests(TestCase):
             activo=True,
         )
 
+    def test_recipe_import_marks_point_product_active_before_first_sale(self):
+        service = PointProductRecipeSyncService()
+
+        point_product = service._upsert_point_product_catalog_signal(
+            {
+                "PK_Producto": "1036",
+                "Codigo": "PZANAMINI",
+                "Nombre": "Pastel Zanahoria Mini",
+                "Familia": "Pastel",
+                "Categoria": "Pastel Mini",
+                "hasReceta": True,
+            }
+        )
+
+        self.assertIsNotNone(point_product)
+        self.assertEqual(point_product.external_id, "1036")
+        self.assertEqual(point_product.sku, "PZANAMINI")
+        self.assertEqual(point_product.name, "Pastel Zanahoria Mini")
+        self.assertEqual(point_product.category, "Pastel Mini")
+        self.assertTrue(point_product.active)
+        self.assertTrue(point_product.metadata["has_recipe"])
+        self.assertTrue(point_product.metadata["recipe_catalog_active"])
+        self.assertEqual(point_product.metadata["source"], "POINT_RECIPE_SYNC")
+
     def test_sync_can_hydrate_selected_codes_not_returned_by_catalog(self):
         PointProduct.objects.create(
             external_id="824",

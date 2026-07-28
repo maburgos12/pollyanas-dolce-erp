@@ -459,6 +459,112 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
 
+    def test_recetas_list_exposes_progressive_point_sync_actions_to_managers(self):
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos", "q": "Pastel"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Incorporar productos nuevos")
+        self.assertContains(response, "Actualizar todas las recetas")
+        self.assertContains(response, reverse("recetas:recetas_sync_new"))
+        self.assertContains(response, reverse("recetas:recetas_sync_all"))
+        self.assertEqual(response.content.decode().count("data-async-action"), 2)
+        self.assertContains(response, 'data-pending-label="Buscando productos…"', html=False)
+        self.assertContains(response, 'data-pending-label="Actualizando recetas…"', html=False)
+        self.assertContains(response, "Point es la fuente de verdad")
+        self.assertContains(response, "vista=productos&amp;q=Pastel")
+
+    def test_recetas_list_hides_point_sync_actions_from_read_only_users(self):
+        read_only_user = get_user_model().objects.create_user(
+            username="lector_recetas_point",
+            password="test12345",
+        )
+        UserModuleAccess.objects.create(
+            user=read_only_user,
+            module="recetas",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.client.force_login(read_only_user)
+
+        response = self.client.get(reverse("recetas:recetas_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Incorporar productos nuevos")
+        self.assertNotContains(response, "Actualizar todas las recetas")
+
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    def test_recetas_sync_new_queues_progressive_background_job(self, delay):
+        response = self.client.post(
+            reverse("recetas:recetas_sync_new"),
+            {"next": f"{reverse('recetas:recetas_list')}?vista=productos"},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["redirect"], f"{reverse('recetas:recetas_list')}?vista=productos")
+        self.assertEqual(payload["toast"]["type"], "info")
+        self.assertIn("búsqueda quedó en cola", payload["toast"]["message"])
+        job = PointSyncJob.objects.get(id=payload["job_id"])
+        self.assertEqual(job.status, PointSyncJob.STATUS_PENDING)
+        self.assertEqual(job.parameters["action"], "SYNC_ONLY_NEW_PRODUCTS")
+        delay.assert_called_once_with(job_id=job.id)
+
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    def test_recetas_sync_all_queues_progressive_background_job(self, delay):
+
+        response = self.client.post(
+            reverse("recetas:recetas_sync_all"),
+            {"next": reverse("recetas:recetas_list")},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["redirect"], reverse("recetas:recetas_list"))
+        self.assertEqual(payload["toast"]["type"], "info")
+        self.assertIn("actualización completa quedó en cola", payload["toast"]["message"])
+        job = PointSyncJob.objects.get(id=payload["job_id"])
+        self.assertEqual(job.status, PointSyncJob.STATUS_PENDING)
+        self.assertEqual(job.parameters["action"], "SYNC_ALL_RECIPES")
+        delay.assert_called_once_with(job_id=job.id)
+
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    def test_recetas_sync_all_rejects_external_next_redirect(self, delay):
+        response = self.client.post(
+            reverse("recetas:recetas_sync_all"),
+            {"next": "https://evil.example/catalog"},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["redirect"], reverse("recetas:recetas_list"))
+        delay.assert_called_once()
+
+    @patch(
+        "recetas.views.recetas.task_catalog_recipe_sync.delay",
+        side_effect=RuntimeError("broker unavailable"),
+    )
+    def test_recetas_sync_all_reports_queue_failure_and_marks_job_failed(self, delay):
+        response = self.client.post(
+            reverse("recetas:recetas_sync_all"),
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["toast"]["persistent"])
+        job = PointSyncJob.objects.latest("id")
+        self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
+        self.assertIn("broker unavailable", job.error_message)
+        delay.assert_called_once_with(job_id=job.id)
+
     def test_recetas_list_shows_latest_point_recipe_import_panel(self):
         job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,
@@ -521,37 +627,15 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
 
-    @patch("recetas.views.recetas.PointProductRecipeSyncService")
-    def test_recetas_sync_new_warns_when_point_detects_blocked_candidates_without_bom(self, service_cls):
-        service = service_cls.return_value
-        service.discover_new_product_codes.return_value = {
-            "workspace": "Matriz",
-            "products_seen": 150,
-            "new_candidates": [],
-            "new_codes": [],
-            "blocked_candidates": [
-                {
-                    "codigo_point": "EXTRA-FRESA-C",
-                    "nombre": "Extra Fresa Chico",
-                    "familia": "Otros postres",
-                    "categoria": "Pastel Chico",
-                    "detection_reason": "POINT_NO_BOM",
-                    "message": "Point no reportó receta/BOM para este código y no puede incorporarse automáticamente.",
-                    "bom_lines": 0,
-                }
-            ],
-            "blocked_codes": ["EXTRA-FRESA-C"],
-            "importable_candidates_count": 0,
-            "blocked_candidates_count": 1,
-            "ignored_candidates_count": 90,
-        }
-
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    def test_recetas_sync_new_traditional_post_confirms_background_queue(self, delay):
         response = self.client.post(reverse("recetas:recetas_sync_new"), follow=True)
 
         self.assertEqual(response.status_code, 200)
         messages = [str(message) for message in response.context["messages"]]
-        self.assertTrue(any("bloqueado" in message.lower() for message in messages))
-        self.assertTrue(any("EXTRA-FRESA-C" in message for message in messages))
+        self.assertTrue(any("búsqueda quedó en cola" in message.lower() for message in messages))
+        job = PointSyncJob.objects.latest("id")
+        delay.assert_called_once_with(job_id=job.id)
 
     def test_recetas_list_quick_view_subinsumos(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "_debug_chain_focus": "1"})
@@ -914,6 +998,34 @@ class RecetasListCatalogFiltersTests(TestCase):
         # Activos: producto del setUp + "active". Archivado: "archived" sin venta.
         self.assertEqual(response.context["recetas_activas_count"], 2)
         self.assertEqual(response.context["recetas_archivadas_count"], 1)
+
+    def test_recetas_list_shows_new_recipe_import_before_first_sale(self):
+        new_product = Receta.objects.create(
+            nombre="Pastel Nuevo Sin Venta QA",
+            hash_contenido="hash-catalogo-new-point-recipe",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Pastel",
+            categoria="Pastel Mini",
+            codigo_point="NEW-POINT-RECIPE-QA",
+        )
+        PointProduct.objects.create(
+            external_id="NEW-POINT-RECIPE-QA-ID",
+            sku="NEW-POINT-RECIPE-QA",
+            name=new_product.nombre,
+            category="Pastel Mini",
+            active=True,
+            metadata={
+                "has_recipe": True,
+                "recipe_catalog_active": True,
+                "source": "POINT_RECIPE_SYNC",
+            },
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"), {"vista": "productos"})
+
+        self.assertEqual(response.status_code, 200)
+        names = [r.nombre for r in response.context["page"].object_list]
+        self.assertIn(new_product.nombre, names)
 
     def test_recetas_list_archivados_tab_shows_without_active_point_product(self):
         active = Receta.objects.create(
