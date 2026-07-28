@@ -1186,6 +1186,21 @@ class CanonicalOmnichannelApiTests(APITestCase):
             }],
         })
 
+    def test_delivery_identity_lookup_rejects_oversized_external_keys(self):
+        url = reverse("api_public_omnichannel_delivery_identities")
+        oversized_source = self.client.get(
+            url,
+            [("external_source", "S" * 41), ("external_id", "ECOMMERCE:PD-42")],
+            **self.auth,
+        )
+        oversized_id = self.client.get(
+            url,
+            [("external_source", "POLLYANAS_ECOMMERCE"), ("external_id", "I" * 121)],
+            **self.auth,
+        )
+        self.assertEqual(oversized_source.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(oversized_id.status_code, status.HTTP_400_BAD_REQUEST)
+
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_point_note_for_api(),

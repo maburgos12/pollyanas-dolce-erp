@@ -913,6 +913,11 @@ def _owned_deliveries(api_client):
     )
 
 
+def _mutable_owned_deliveries(api_client):
+    """Status writes remain limited to deliveries backed by a Point note."""
+    return _owned_deliveries(api_client).filter(pedido_cliente__point_note_id__gt="")
+
+
 def _serialize_delivery_summary(delivery):
     order = delivery.pedido_cliente
     return {
@@ -1086,7 +1091,13 @@ class PublicOmnichannelDeliveryIdentitiesView(APIView):
             for value in request.query_params.getlist("external_id")
             if _normalize_text(value)
         ]
-        if not external_source or not external_ids or len(external_ids) > 100:
+        if (
+            not external_source
+            or len(external_source) > 40
+            or not external_ids
+            or len(external_ids) > 100
+            or any(len(external_id) > 120 for external_id in external_ids)
+        ):
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
             return Response(
                 {"detail": "La consulta de identidades no es válida."},
@@ -1157,7 +1168,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
         try:
             with transaction.atomic():
                 owned = (
-                    _owned_deliveries(api_client)
+                    _mutable_owned_deliveries(api_client)
                     .select_for_update()
                     .filter(pk=solicitud_id)
                     .exists()
