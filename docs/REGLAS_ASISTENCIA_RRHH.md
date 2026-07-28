@@ -1,6 +1,6 @@
 # Reglamento de Asistencia y Automatización — Pollyana's Dolce
 
-**Versión 1.1 · Ratificado por Dirección General el 11-jun-2026 · Consolidado y actualizado el 27-jul-2026**
+**Versión 1.2 · Ratificado por Dirección General el 11-jun-2026 · Actualizado el 27-jul-2026**
 
 Aplica a todo el personal operativo de las 9 sucursales. Fuente técnica: motor de
 reglas del ERP (`rrhh/services_asistencia_reglas.py`). Este documento es la
@@ -42,7 +42,8 @@ actualizarse aquí en el mismo PR.
   retardo conciliado: sin sanción, pero el día no es puntual.
 - **R-06.** Tres retardos en ventana móvil de **15 días** equivalen a **una falta
   por retardos**. Los retardos derivados de tolerancia (R-03) sí cuentan para esta
-  escala. *(Pendiente de ratificar si esta ventana también pasa a 7 días.)*
+  escala. *(Ventana ratificada en 15 días por Dirección General el 27-jul-2026:
+  la reducción a 7 días aplica únicamente a la acumulación de tolerancias, R-03.)*
 
 ## IV. Faltas
 
@@ -124,18 +125,49 @@ Todas las reglas de este documento aplican a los bonos (ratificado el 27-jul-202
 | A-6 | Alerta de horas extra sin autorizar | Diaria |
 | A-7 | Reporte de asistencia con filtros, KPIs por empleado, detalle diario, edición inline y export CSV/XLSX | A demanda de Capital Humano |
 
-## XII. Estado de activación y pendientes de Dirección
+## XII. Estado de activación
 
-- **Activo hoy**: faltas por día sin checada (R-07), escalamiento (R-09 a R-11),
-  comida (R-12), ausencias justificadas, suspensiones, bonos, ediciones y todas
-  las automatizaciones.
-- **Apagado hoy**: puntualidad, tolerancia, retardos, jornada y hora extra
-  (R-01 a R-06, R-13, R-14) — requieren activar el catálogo de turnos con horarios
-  reales por área. La tolerancia ya está configurada en 10 minutos. Mientras los
-  turnos estén inactivos, la puntualidad de los bonos solo refleja faltas por no
-  checar (hallazgo del 27-jul-2026: en julio solo 1 de 1,413 registros diarios de
-  bono marcó "asistió sin puntualidad").
-- **Pendientes de decisión**: (1) día de descanso individual por empleado y
-  tratamiento del domingo; (2) ratificar si llegar >10 min tarde es falta completa
-  (R-04) o debe bajar a retardo; (3) catálogo real de turnos por área antes de
-  encender retardos; (4) si la ventana de R-06 también pasa de 15 a 7 días.
+### Reglas operando hoy
+Faltas por día sin checada (R-07), escalamiento disciplinario (R-09 a R-11),
+comida excedida (R-12), ausencias justificadas (R-15, R-16), suspensiones
+(R-17, R-18), efecto en bonos por faltas (R-19, R-20), ediciones y bitácora
+(R-22, R-23) y todas las automatizaciones de la sección XI.
+
+### Reglas que nunca han operado
+Puntualidad, tolerancia, retardos, jornada incompleta y hora extra automática
+(R-01 a R-06, R-13, R-14). **No fueron desactivadas: nunca llegaron a
+encenderse**, porque dependen de una configuración que quedó pendiente desde que
+el módulo se construyó en junio de 2026.
+
+**Cadena de dependencia (diagnóstico del 27-jul-2026):**
+
+1. El motor solo puede juzgar una llegada si la checada tiene **turno asignado**;
+   sin turno no existe hora de referencia y las reglas de entrada se omiten.
+2. El turno se asigna automáticamente solo si el catálogo tiene **turnos activos**,
+   eligiendo el turno cuya hora de inicio esté más cerca de la hora en que la
+   persona checó (tolerancia de búsqueda: ±90 minutos).
+3. El catálogo nunca se pobló con los turnos reales por área: solo existen dos
+   turnos genéricos (General 8:00–16:00, Logística 9:00–17:00), ambos inactivos.
+4. Resultado medible: de 3,803 checadas registradas entre mayo y julio de 2026,
+   solo 9 tienen turno asignado (0.2%). Las incidencias que dependen del turno
+   —uso de tolerancia, retardo por tolerancia, jornada incompleta y hora extra
+   pendiente— no existieron en la base hasta el 27-jul-2026. Las que no dependen
+   del turno (faltas, comida, avisos, suspensiones) operan sin interrupción desde
+   el 11-jun-2026.
+
+**Defecto de diseño a corregir antes de encender:** hoy el turno se deduce de la
+hora en que la persona checó, no del horario que le corresponde. Con dos turnos
+separados por una hora, quien entra a las 8:00 y llega a las 9:00 sería asignado
+al turno de las 9:00 y quedaría registrado como puntual. El modelo `Empleado` no
+tiene campo de turno ni horario asignado; el turno vive únicamente en cada
+registro de asistencia.
+
+### Pendientes de decisión de Dirección
+1. **Turno por empleado**: crear el horario asignado por persona (o por
+   puesto/área) para que el turno deje de deducirse de la hora de llegada.
+2. **Catálogo real de turnos** por área, con horas y tolerancia correctas.
+3. **Día de descanso individual** por empleado y tratamiento del domingo (hoy
+   el sistema solo excluye domingos y descansos oficiales, lo que genera faltas
+   falsas a quien descansa entre semana).
+4. **R-04**: ratificar si llegar más de 10 minutos tarde sigue siendo falta
+   completa o debe bajar a retardo.
