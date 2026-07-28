@@ -6,6 +6,9 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/template_modules/crm-templates-crm-pedidos.css?v=20260614-ui100-v1">
+{% if domicilios_only %}
+<style>.ops-grid-2.is-single-column{grid-template-columns:minmax(0,1fr)}</style>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -47,7 +50,7 @@
   </section>
   {% endif %}
 
-  <section class="ops-grid-2 {% if domicilios_only %}pd-u-one-column{% endif %}">
+  <section class="ops-grid-2{% if domicilios_only %} is-single-column{% endif %}">
     {% if not domicilios_only %}
     <article class="card">
       <div class="card-header">Nuevo pedido</div>

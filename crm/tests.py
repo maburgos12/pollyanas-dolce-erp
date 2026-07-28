@@ -259,6 +259,11 @@ class PedidoDomicilioDetailTests(TestCase):
             response,
             reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
         )
+        self.assertContains(response, 'class="ops-grid-2 is-single-column"')
+        self.assertContains(
+            response,
+            ".ops-grid-2.is-single-column{grid-template-columns:minmax(0,1fr)}",
+        )
         self.assertNotContains(
             response,
             f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
@@ -278,6 +283,7 @@ class PedidoDomicilioDetailTests(TestCase):
         self.assertFalse(response.context["domicilios_only"])
         self.assertContains(response, self.pedido.folio)
         self.assertContains(response, non_delivery.folio)
+        self.assertNotContains(response, 'class="ops-grid-2 is-single-column"')
         self.assertContains(
             response,
             f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
