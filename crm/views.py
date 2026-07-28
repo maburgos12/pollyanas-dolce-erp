@@ -7,14 +7,19 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Q, Sum
-from django.http import HttpRequest, HttpResponse
+from django.db.models import Count, Prefetch, Q, Sum
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from urllib.parse import urlencode
 
-from core.access import can_manage_crm, can_view_crm
+from core.access import (
+    can_manage_crm,
+    can_manage_submodule,
+    can_view_crm,
+    can_view_submodule,
+)
 from core.audit import log_event
 from core.models import Sucursal
 
@@ -35,6 +40,30 @@ def _module_tabs(active: str) -> list[dict]:
         {"label": "Clientes", "url_name": "crm:clientes", "active": active == "clientes"},
         {"label": "Pedidos", "url_name": "crm:pedidos", "active": active == "pedidos"},
     ]
+
+
+def _can_view_domicilio_detail(user) -> bool:
+    return can_view_crm(user) or can_view_submodule(user, "logistica", "rutas")
+
+
+def _point_snapshot_products(snapshot) -> list[dict]:
+    if not isinstance(snapshot, dict):
+        return []
+    products = []
+    for line in snapshot.get("lines", []):
+        if not isinstance(line, dict):
+            continue
+        products.append(
+            {
+                "codigo": str(line.get("point_code") or ""),
+                "descripcion": str(line.get("description") or ""),
+                "cantidad": line.get("quantity") or "0",
+                "precio_unitario": line.get("unit_price") or "0",
+                "descuento": line.get("discount") or "0",
+                "total": line.get("line_total") or "0",
+            }
+        )
+    return products
 
 
 def _crm_enterprise_chain(
@@ -880,7 +909,16 @@ def clientes(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def pedidos(request: HttpRequest) -> HttpResponse:
-    if not can_view_crm(request.user):
+    domicilios_only = (
+        request.resolver_match is not None
+        and request.resolver_match.url_name == "pedidos_domicilios"
+    )
+    logistics_can_view = domicilios_only and can_view_submodule(
+        request.user,
+        "logistica",
+        "rutas",
+    )
+    if not can_view_crm(request.user) and not logistics_can_view:
         raise PermissionDenied("No tienes permisos para ver CRM")
 
     if request.method == "POST":
@@ -955,6 +993,10 @@ def pedidos(request: HttpRequest) -> HttpResponse:
         sucursal_id = None
 
     pedidos_qs = PedidoCliente.objects.select_related("cliente")
+    if domicilios_only:
+        pedidos_qs = pedidos_qs.filter(
+            solicitudes_domicilio__isnull=False,
+        ).distinct()
     if date_from:
         pedidos_qs = pedidos_qs.filter(created_at__date__gte=date_from)
     if date_to:
@@ -1294,6 +1336,98 @@ def pedido_detail(request: HttpRequest, pedido_id: int) -> HttpResponse:
         ),
     }
     return render(request, "crm/pedido_detail.html", ctx)
+
+
+@login_required
+def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpResponse:
+    """Ficha ERP de solo lectura para un pedido y su único domicilio canónico."""
+    if not _can_view_domicilio_detail(request.user):
+        raise PermissionDenied("No tienes permisos para ver servicios a domicilio")
+
+    from logistica.models import SolicitudDomicilio, SolicitudDomicilioStatusOperation
+
+    operation_qs = SolicitudDomicilioStatusOperation.objects.select_related(
+        "api_client",
+        "repartidor__user",
+    ).order_by("-created_at", "-id")
+    delivery_qs = (
+        SolicitudDomicilio.objects.select_related(
+            "cliente",
+            "direccion_cliente",
+            "repartidor__user",
+            "unidad",
+            "created_by",
+        )
+        .prefetch_related(
+            Prefetch("status_operations", queryset=operation_qs),
+        )
+        .order_by("id")
+    )
+    pedido = get_object_or_404(
+        PedidoCliente.objects.select_related(
+            "cliente",
+            "direccion_entrega",
+            "sucursal_ref",
+            "created_by",
+        ).prefetch_related(
+            Prefetch(
+                "solicitudes_domicilio",
+                queryset=delivery_qs,
+                to_attr="domicilios_canonicos",
+            ),
+        ),
+        pk=pedido_id,
+    )
+    domicilios = pedido.domicilios_canonicos
+    if len(domicilios) != 1:
+        raise Http404("El pedido no tiene un domicilio canónico único.")
+    solicitud = domicilios[0]
+    direccion = solicitud.direccion_cliente or pedido.direccion_entrega
+    map_url = ""
+    if direccion and direccion.latitud is not None and direccion.longitud is not None:
+        map_url = (
+            "https://www.google.com/maps/search/?api=1&query="
+            f"{direccion.latitud},{direccion.longitud}"
+        )
+
+    status_labels = dict(SolicitudDomicilio.ESTATUS_CHOICES)
+    status_operations = [
+        {
+            "created_at": operation.created_at,
+            "requested_status": status_labels.get(
+                operation.requested_status,
+                operation.requested_status,
+            ),
+            "final_status": status_labels.get(
+                operation.final_status,
+                operation.final_status,
+            ),
+            "actor_nombre": operation.actor_nombre,
+            "repartidor": operation.repartidor,
+            "source": operation.api_client.nombre,
+        }
+        for operation in solicitud.status_operations.all()
+    ]
+
+    return render(
+        request,
+        "crm/pedido_domicilio_detail.html",
+        {
+            "module_tabs": _module_tabs("pedidos"),
+            "pedido": pedido,
+            "solicitud": solicitud,
+            "direccion": direccion,
+            "map_url": map_url,
+            "productos": _point_snapshot_products(pedido.point_note_snapshot),
+            "status_operations": status_operations,
+            "can_manage_crm": can_manage_crm(request.user),
+            "can_manage_logistica": can_manage_submodule(
+                request.user,
+                "logistica",
+                "rutas",
+            ),
+        },
+    )
 
 
 @login_required

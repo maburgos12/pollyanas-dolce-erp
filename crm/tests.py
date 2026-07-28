@@ -1,23 +1,34 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from decimal import Decimal
 from threading import Barrier
+from uuid import uuid4
 
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, close_old_connections, transaction
-from django.test import TestCase, TransactionTestCase
+from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.test import RequestFactory, TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
-from core.access import ROLE_VENTAS
+from core.access import ROLE_LOGISTICA, ROLE_VENTAS
 from core.models import Sucursal
+from integraciones.models import PublicApiClient
+from logistica.models import (
+    EntregaEcommerce,
+    Repartidor,
+    SolicitudDomicilio,
+    SolicitudDomicilioStatusOperation,
+    Unidad,
+)
 from pos_bridge.models import PointBranch
 
-from .models import Cliente, PedidoCliente, SeguimientoPedido
+from .models import Cliente, DireccionCliente, PedidoCliente, SeguimientoPedido
 from .services import SucursalResolutionError, resolve_sucursal
 
 
-class CRMViewsTests(TestCase):
+class _CRMViewsTestBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="ventas", password="pass123")
         ventas_group, _ = Group.objects.get_or_create(name=ROLE_VENTAS)
@@ -31,6 +42,203 @@ class CRMViewsTests(TestCase):
             status=PointBranch.STATUS_ACTIVE,
         )
 
+
+class PedidoDomicilioDetailTests(TestCase):
+    def setUp(self):
+        self.ventas = User.objects.create_user(username="ventas-domicilio", password="pass123")
+        ventas_group, _ = Group.objects.get_or_create(name=ROLE_VENTAS)
+        self.ventas.groups.add(ventas_group)
+        self.logistica = User.objects.create_user(username="logistica-domicilio", password="pass123")
+        logistica_group, _ = Group.objects.get_or_create(name=ROLE_LOGISTICA)
+        self.logistica.groups.add(logistica_group)
+        self.sin_acceso = User.objects.create_user(username="sin-acceso", password="pass123")
+        self.sucursal = Sucursal.objects.create(codigo="DOM", nombre="Centro", activa=True)
+        self.cliente = Cliente.objects.create(
+            nombre="María López",
+            telefono="6671234567",
+            email="maria@example.com",
+        )
+        self.direccion = DireccionCliente.objects.create(
+            cliente=self.cliente,
+            alias="Casa",
+            direccion="Av. Central 123",
+            referencias="Portón blanco",
+            latitud=Decimal("25.790466"),
+            longitud=Decimal("-108.985886"),
+        )
+        self.pedido = PedidoCliente.objects.create(
+            cliente=self.cliente,
+            direccion_entrega=self.direccion,
+            descripcion="Pedido Point 18452",
+            sucursal_ref=self.sucursal,
+            canal=PedidoCliente.CANAL_FACEBOOK,
+            monto_estimado=Decimal("565.00"),
+            point_note_id="900001",
+            point_note_folio="18452",
+            point_note_snapshot={
+                "pk_nota": "900001",
+                "lines": [
+                    {
+                        "point_code": "P001",
+                        "description": "Pastel tres leches",
+                        "quantity": "1",
+                        "unit_price": "550.00",
+                        "discount": "10.00",
+                        "line_total": "540.00",
+                    },
+                    {
+                        "point_code": "V001",
+                        "description": "Velas",
+                        "quantity": "1",
+                        "unit_price": "25.00",
+                        "discount": "0.00",
+                        "line_total": "25.00",
+                    },
+                ],
+            },
+            point_note_fetched_at=timezone.now(),
+            point_note_sold_at=timezone.now(),
+        )
+        self.unidad = Unidad.objects.create(
+            codigo="MOTO-01",
+            descripcion="Motocicleta reparto",
+            sucursal=self.sucursal,
+            placa="ABC-123",
+        )
+        self.repartidor_user = User.objects.create_user(
+            username="repartidor-domicilio",
+            first_name="Luis",
+            last_name="Pérez",
+        )
+        self.repartidor = Repartidor.objects.create(
+            user=self.repartidor_user,
+            unidad_asignada=self.unidad,
+            telefono="6677654321",
+            sucursal=self.sucursal,
+        )
+        self.solicitud = SolicitudDomicilio.objects.create(
+            pedido_cliente=self.pedido,
+            cliente=self.cliente,
+            direccion_cliente=self.direccion,
+            cliente_nombre=self.cliente.nombre,
+            cliente_telefono=self.cliente.telefono,
+            direccion=self.direccion.direccion,
+            canal_origen=PedidoCliente.CANAL_FACEBOOK,
+            instrucciones_entrega="Tocar el timbre",
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            created_by=self.ventas,
+        )
+        self.api_client, _ = PublicApiClient.create_with_generated_key(
+            nombre="Centro Operativo",
+            created_by=self.ventas,
+        )
+        SolicitudDomicilioStatusOperation.objects.create(
+            solicitud=self.solicitud,
+            operation_id=uuid4(),
+            api_client=self.api_client,
+            repartidor=self.repartidor,
+            requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+            final_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+            actor_id="call-center-1",
+            actor_nombre="Call center",
+            result_snapshot={"estatus": SolicitudDomicilio.ESTATUS_EN_RUTA},
+        )
+
+    def test_domicilio_detail_uses_single_canonical_order(self):
+        self.client.force_login(self.ventas)
+        response = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["pedido"], self.pedido)
+        self.assertEqual(response.context["solicitud"], self.solicitud)
+        self.assertContains(response, "18452")
+        self.assertContains(response, "Pastel tres leches")
+        self.assertContains(response, "$565.00")
+        self.assertContains(response, self.solicitud.get_estatus_display())
+        self.assertContains(response, "Av. Central 123")
+        self.assertContains(response, "Call center")
+        self.assertNotContains(response, "name=\"point_note")
+        self.assertNotContains(response, "Registrar seguimiento")
+
+    def test_domicilio_detail_allows_logistics_owner_and_rejects_unrelated_role(self):
+        url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
+        self.client.force_login(self.logistica)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+        self.client.force_login(self.sin_acceso)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_domicilio_detail_does_not_leak_existing_order_to_unauthorized_user(self):
+        self.client.force_login(self.sin_acceso)
+        existing = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+        missing = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id + 9999]),
+        )
+        self.assertEqual(existing.status_code, 403)
+        self.assertEqual(missing.status_code, 403)
+
+    def test_domicilio_detail_renders_without_n_plus_one_queries(self):
+        from crm.views import pedido_domicilio_detail
+
+        request = RequestFactory().get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+        request.user = self.ventas
+        with CaptureQueriesContext(connection) as queries:
+            response = pedido_domicilio_detail(request, self.pedido.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(queries), 20)
+
+    def test_domicilio_detail_has_responsive_semantics_and_touch_contract(self):
+        self.client.force_login(self.ventas)
+        response = self.client.get(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+        )
+        self.assertContains(response, 'class="delivery-detail-grid"')
+        self.assertContains(response, "@media (max-width: 767px)")
+        self.assertContains(response, "min-height: 44px")
+        self.assertContains(response, 'aria-label="Estado operativo del domicilio"')
+        self.assertContains(response, 'aria-label="Productos de la nota Point"')
+
+    def test_legacy_ecommerce_page_never_creates_second_delivery(self):
+        self.client.force_login(self.logistica)
+        before = EntregaEcommerce.objects.count()
+        response = self.client.post(
+            reverse("logistica:domicilios_ecommerce"),
+            {
+                "order_id": "999",
+                "order_number": "18452",
+                "cliente_nombre": self.cliente.nombre,
+                "direccion": self.direccion.direccion,
+                "repartidor": str(self.repartidor.id),
+                "unidad_operativa": str(self.unidad.id),
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("crm:pedidos_domicilios"),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(EntregaEcommerce.objects.count(), before)
+        self.assertEqual(
+            SolicitudDomicilio.objects.filter(pedido_cliente=self.pedido).count(),
+            1,
+        )
+        self.assertEqual(
+            self.client.get(reverse("crm:pedidos_domicilios")).status_code,
+            200,
+        )
+
+
+class CRMViewsTests(_CRMViewsTestBase):
     def test_dashboard_view_renders_executive_surface(self):
         cliente = Cliente.objects.create(nombre="Cliente Dashboard")
         pedido = PedidoCliente.objects.create(
