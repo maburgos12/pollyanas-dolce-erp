@@ -82,13 +82,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260728-historial-autor-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v20-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v21-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -231,7 +231,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(app, 'const API_V2 = `${API}/v2`;')
         self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
-        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1')
+        self.assertContains(app, 'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1')
         self.assertContains(app, "detailCache: new Map()")
         self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0}")
         self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
@@ -257,16 +257,37 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(
             app,
-            'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", page: 1',
+            'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1',
         )
         self.assertContains(app, "async function ensureUnidades()")
-        self.assertContains(app, "await Promise.all([ensureSucursales(), ensureUnidades()])")
+        self.assertContains(app, "await Promise.all([ensureSucursales(), ensureUnidades(), ensureCatalogos()])")
         self.assertContains(app, 'unidad=${encodeURIComponent(state.history.unidad)}')
         self.assertContains(app, "setHistoryFilter('unidad',this.value)")
         self.assertContains(app, "Todas las unidades")
         self.assertContains(app, "formatCurrency(item.costo)")
-        self.assertContains(app, ".history-unit-filter{grid-column:1/-1}")
+        self.assertContains(app, ".history-unit-filter,.history-author-filter{grid-column:1/-1}")
         self.assertContains(app, '<label class="history-unit-filter">Unidad')
+
+    def test_pwa_history_exposes_mine_toggle_and_author_filter(self):
+        self.client.force_login(self.mantenimiento)
+
+        app = self.client.get(reverse("mantenimiento:app"))
+
+        self.assertContains(
+            app,
+            'history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1',
+        )
+        self.assertContains(app, 'autor=${encodeURIComponent(state.history.autor)}')
+        self.assertContains(app, "setHistoryAuthor('mio')")
+        self.assertContains(app, "setHistoryAuthor('')")
+        self.assertContains(app, 'aria-pressed="${state.history.autor === "mio"}"')
+        self.assertContains(app, "Mis trabajos")
+        self.assertContains(app, "Todos")
+        self.assertContains(app, "Autor")
+        self.assertContains(app, "Todos los autores")
+        self.assertContains(app, "autores_mantenimiento")
+        self.assertContains(app, "ensureCatalogos()")
+        self.assertContains(app, "Registrado por")
 
     def test_pwa_service_scope_hides_and_disables_irrelevant_fields(self):
         self.client.force_login(self.mantenimiento)
@@ -578,6 +599,21 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertTrue(ReporteFalla.objects.filter(titulo="Fuga en tarja").exists())
         self.assertTrue(OrdenMantenimiento.objects.filter(descripcion="Programar cambio de empaque").exists())
         self.assertTrue(ReporteUnidad.objects.filter(descripcion="Falla reportada desde mantenimiento móvil.").exists())
+
+    def test_mobile_catalog_exposes_authorized_history_authors_not_only_managers(self):
+        self.client.force_login(self.user)
+
+        catalogos = self.client.get("/api/mantenimiento/catalogos/")
+
+        self.assertEqual(catalogos.status_code, 200)
+        self.assertIn("autores_mantenimiento", catalogos.json())
+        self.assertEqual(
+            catalogos.json()["autores_mantenimiento"],
+            [
+                {"id": self.user.id, "nombre": "mantenimiento", "activo": True},
+                {"id": self.reporter.id, "nombre": "reporter", "activo": True},
+            ],
+        )
 
     def test_mobile_fleet_service_does_not_require_branch(self):
         self.client.force_login(self.user)

@@ -164,6 +164,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
         fallas = fallas.none()
     if filters.get("sucursal"): fallas = fallas.filter(sucursal_id=filters["sucursal"])
     if filters.get("activo"): fallas = fallas.filter(activo_relacionado_id=filters["activo"])
+    if filters.get("autor"): fallas = fallas.filter(reportado_por_id=filters["autor"])
     if filters.get("q"):
         fallas = fallas.filter(
             Q(titulo__icontains=filters["q"]) |
@@ -217,6 +218,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("tipo") not in {None, "todo", "orden", "sin_reporte"}: orders = orders.none()
     if filters.get("sucursal"): orders = orders.filter(activo_ref__sucursal_id=filters["sucursal"])
     if filters.get("activo"): orders = orders.filter(activo_ref_id=filters["activo"])
+    if filters.get("autor"): orders = orders.filter(creado_por_id=filters["autor"])
     if filters.get("q"):
         orders = orders.filter(
             Q(folio__icontains=filters["q"]) |
@@ -267,6 +269,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
     if filters.get("tipo") not in {None, "todo", "reporte"}: reports = reports.none()
     if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
     if filters.get("unidad"): reports = reports.filter(unidad_id=filters["unidad"])
+    if filters.get("autor"): reports = reports.filter(repartidor__user_id=filters["autor"])
     if filters.get("q"):
         reports = reports.filter(
             Q(tipo__icontains=filters["q"]) |
@@ -305,6 +308,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
             continue
         if filters.get("sucursal"): queryset = queryset.filter(unidad__sucursal_id=filters["sucursal"])
         if filters.get("unidad"): queryset = queryset.filter(unidad_id=filters["unidad"])
+        if filters.get("autor"): queryset = queryset.filter(registrado_por_id=filters["autor"])
         if filters.get("q"):
             actor_query = (
                 Q(registrado_por__first_name__icontains=filters["q"]) |
