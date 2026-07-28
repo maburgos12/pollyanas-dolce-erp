@@ -74,19 +74,19 @@
       {% if not solo_aprobacion %}
       <div class="panel-heading">
         <h2>Registrar merma de insumo</h2>
-        <p>Solo aparecen insumos recibidos por {{ sucursal.nombre }}. La unidad corresponde a Point.</p>
+        <p>Solo aparecen insumos recibidos por {{ sucursal.nombre }}. La existencia se consulta directamente en Point.</p>
       </div>
       {% if catalogo_insumos_no_disponible %}
       <div class="empty-state" role="alert">
         No pudimos cargar las existencias de Point. Reintenta en unos momentos; no se registró ninguna merma.
       </div>
       {% else %}
-      <form id="merma-form" data-async-action action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
+      <form id="merma-form" data-async-action data-stock-url="{% url 'operacion:mermas_insumos_catalogo_api' %}" action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <label for="codigo_point">Insumo recibido</label>
         <select id="codigo_point" name="codigo_point" required>
           <option value="">Selecciona un insumo</option>
-          {% for insumo in insumos %}<option value="{{ insumo.codigo_point }}" data-unit="{{ insumo.unidad_point }}" data-stock="{{ insumo.existencia }}" {% if draft_mermas.codigo_point == insumo.codigo_point %}selected{% endif %}>{{ insumo.nombre_point }}</option>{% endfor %}
+          {% for insumo in insumos %}<option value="{{ insumo.codigo_point }}" data-unit="{{ insumo.unidad_point }}" {% if draft_mermas.codigo_point == insumo.codigo_point %}selected{% endif %}>{{ insumo.nombre_point }}</option>{% endfor %}
         </select>
         {% if not insumos %}<p class="empty-state">Point no reporta insumos elegibles para esta sucursal. No se mostrará el catálogo general.</p>{% endif %}
         <div class="stock-note" data-stock-note hidden></div>
@@ -100,7 +100,7 @@
         <input id="foto_merma" name="foto_evidencia" type="file" accept="image/*" capture="environment">
         <label for="justificacion_merma">Si no adjuntas foto, explica por qué</label>
         <textarea id="justificacion_merma" name="justificacion_sin_foto" rows="2">{{ draft_mermas.justificacion_sin_foto|default:'' }}</textarea>
-        <button class="primary-action" type="submit" {% if not insumos %}disabled{% endif %}>Enviar a mi jefe</button>
+        <button class="primary-action" type="submit" disabled>Enviar a mi jefe</button>
       </form>
       {% endif %}
       {% endif %}
@@ -124,6 +124,6 @@
     </section>
   </main>
   <div class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260722-insumos-v1" defer></script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260728-point-live-v1" defer></script>
 </body>
 </html>

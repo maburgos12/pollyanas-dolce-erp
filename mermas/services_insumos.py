@@ -1,17 +1,19 @@
 from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal
 from hashlib import sha256
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Subquery
 from django.utils import timezone
 
 from core.access import is_admin_or_dg
 from maestros.models import CostoInsumo, Insumo
 from mermas.models import MermaInsumo, MermaInsumoEvento, OrdenAjustePoint
-from pos_bridge.models import PointInventorySnapshot, PointTransferLine
+from pos_bridge.models import PointBranch, PointTransferLine
+from pos_bridge.services.live_inventory_lookup_service import (
+    PointLiveInventoryLookupError,
+    PointLiveInventoryLookupService,
+)
 from rrhh.services_identidad import empleado_vinculado_usuario
 
 
@@ -23,6 +25,104 @@ class InsumoElegiblePoint:
     existencia: Decimal
     snapshot_capturado_en: object
     ultimo_movimiento_en: object
+
+
+@dataclass(frozen=True)
+class InsumoRecibidoPoint:
+    codigo_point: str
+    nombre_point: str
+    unidad_point: str
+    existencia: Decimal | None = None
+    snapshot_capturado_en: object | None = None
+
+
+def insumos_recibidos_para_sucursal(sucursal):
+    """Catálogo recibido por la sucursal; la existencia se consulta en vivo al elegir."""
+    transfers = (
+        PointTransferLine.objects.filter(
+            erp_destination_branch=sucursal,
+            is_current_snapshot=True,
+            is_received=True,
+            is_cancelled=False,
+            is_insumo=True,
+            received_quantity__gt=0,
+        )
+        .exclude(item_code="")
+        .values("item_code", "item_name", "unit", "received_at", "registered_at")
+        .order_by("item_code", "-received_at", "-registered_at", "-id")
+    )
+    by_code = {}
+    for line in transfers:
+        code = (line["item_code"] or "").strip()
+        unit = (line["unit"] or "").strip().upper()
+        if not code or not unit:
+            continue
+        row = by_code.setdefault(code, {"name": line["item_name"], "units": set()})
+        row["units"].add(unit)
+    result = [
+        InsumoRecibidoPoint(
+            codigo_point=code,
+            nombre_point=data["name"],
+            unidad_point=next(iter(data["units"])),
+        )
+        for code, data in by_code.items()
+        if len(data["units"]) == 1
+    ]
+    return sorted(result, key=lambda item: item.nombre_point.casefold())
+
+
+def consultar_existencia_insumo_point(
+    sucursal,
+    codigo_point,
+    *,
+    live_service=None,
+    insumo_recibido=None,
+):
+    """Resuelve un insumo recibido y consulta su existencia vigente directamente en Point."""
+    code = (codigo_point or "").strip()
+    item = insumo_recibido
+    if item is not None and item.codigo_point != code:
+        item = None
+    if item is None:
+        received = {
+            row.codigo_point: row
+            for row in insumos_recibidos_para_sucursal(sucursal)
+        }
+        item = received.get(code)
+    if item is None:
+        raise ValidationError("El insumo no fue recibido por esta sucursal.")
+    point_branch = (
+        PointBranch.objects.filter(erp_branch=sucursal)
+        .order_by("-last_seen_at", "-id")
+        .first()
+    )
+    if point_branch is None:
+        raise PointLiveInventoryLookupError(
+            "La sucursal no tiene una relación vigente con Point."
+        )
+    service = live_service or PointLiveInventoryLookupService()
+    live_result = service.get_stock(
+        product_codes=[code],
+        sucursal=sucursal,
+        point_branch=point_branch,
+    )
+    if live_result is None:
+        raise PointLiveInventoryLookupError(
+            "La consulta en vivo de existencias de Point no está habilitada."
+        )
+    stock = Decimal(str(live_result.stock_qty))
+    if not stock.is_finite():
+        raise PointLiveInventoryLookupError(
+            "Point devolvió una existencia inválida."
+        )
+    return InsumoElegiblePoint(
+        codigo_point=item.codigo_point,
+        nombre_point=item.nombre_point,
+        unidad_point=item.unidad_point,
+        existencia=stock,
+        snapshot_capturado_en=live_result.captured_at,
+        ultimo_movimiento_en=None,
+    )
 
 
 @transaction.atomic
@@ -112,89 +212,6 @@ def enviar_merma_insumo(*, merma_id, usuario):
         motivo=motivo_evento,
     )
     return merma
-
-
-def insumos_elegibles_para_sucursal(sucursal):
-    """Proyecta el selector desde recepciones y stock Point, sin usar inventario ERP/CEDIS."""
-    transfers = PointTransferLine.objects.filter(
-        erp_destination_branch=sucursal,
-        is_current_snapshot=True,
-        is_received=True,
-        is_cancelled=False,
-        is_insumo=True,
-        received_quantity__gt=0,
-    ).exclude(item_code="").values(
-        "item_code",
-        "item_name",
-        "unit",
-        "received_at",
-        "registered_at",
-    )
-
-    by_code = {}
-    for line in transfers.order_by("item_code", "-received_at", "-registered_at", "-id"):
-        code = (line["item_code"] or "").strip()
-        unit = (line["unit"] or "").strip().upper()
-        if not code or not unit:
-            continue
-        received_at = line["received_at"] or line["registered_at"]
-        row = by_code.setdefault(
-            code,
-            {"name": line["item_name"], "units": set(), "last_movement": received_at},
-        )
-        row["units"].add(unit)
-        if received_at and (not row["last_movement"] or received_at > row["last_movement"]):
-            row["last_movement"] = received_at
-
-    if not by_code:
-        return []
-
-    product_codes = {
-        code
-        for code, data in by_code.items()
-        if len(data["units"]) == 1
-    }
-    latest_snapshot_ids = (
-        PointInventorySnapshot.objects.filter(
-            branch__erp_branch=sucursal,
-            product__sku__in=product_codes,
-        )
-        .order_by("product_id", "-captured_at", "-id")
-        .distinct("product_id")
-        .values("id")
-    )
-    latest_snapshots = {}
-    for snapshot in PointInventorySnapshot.objects.filter(
-        id__in=Subquery(latest_snapshot_ids)
-    ).select_related("product"):
-        key = snapshot.product.sku
-        previous = latest_snapshots.get(key)
-        if previous is None or (snapshot.captured_at, snapshot.id) > (previous.captured_at, previous.id):
-            latest_snapshots[key] = snapshot
-
-    tolerance_date = timezone.localdate() - timedelta(days=7)
-    result = []
-    for code, data in by_code.items():
-        if len(data["units"]) != 1:
-            continue
-        snapshot = latest_snapshots.get(code)
-        if snapshot is None:
-            continue
-        last_movement = data["last_movement"]
-        visible_at_zero = bool(last_movement and timezone.localtime(last_movement).date() >= tolerance_date)
-        if snapshot.stock <= 0 and not visible_at_zero:
-            continue
-        result.append(
-            InsumoElegiblePoint(
-                codigo_point=code,
-                nombre_point=data["name"],
-                unidad_point=next(iter(data["units"])),
-                existencia=snapshot.stock,
-                snapshot_capturado_en=snapshot.captured_at,
-                ultimo_movimiento_en=last_movement,
-            )
-        )
-    return sorted(result, key=lambda item: item.nombre_point.casefold())
 
 
 @transaction.atomic
@@ -310,67 +327,74 @@ def reenviar_merma_aclarada(*, merma_id, usuario, cantidad, comentario, motivo):
     return merma
 
 
-@transaction.atomic
 def simular_orden_ajuste_point(orden_id):
-    """Valida el ajuste completo contra el snapshot Point; nunca escribe en Point."""
-    orden = OrdenAjustePoint.objects.select_for_update().select_related("merma").get(pk=orden_id)
-    if orden.estatus in {OrdenAjustePoint.ESTATUS_SIMULADA, OrdenAjustePoint.ESTATUS_APLICADA}:
-        return orden
-    if orden.estatus != OrdenAjustePoint.ESTATUS_PENDIENTE:
-        return orden
-    orden.intentos += 1
-    aprobada = abs(orden.cantidad).quantize(Decimal("0.001"))
-    raw_key = f"merma-insumo:{orden.merma_id}:{orden.sucursal_id}:{orden.codigo_point}:{orden.unidad_point}:{aprobada}"
-    expected_hash = sha256(f"{raw_key}:-{aprobada}".encode("utf-8")).hexdigest()
-    eligible = {row.codigo_point: row for row in insumos_elegibles_para_sucursal(orden.sucursal)}
-    current_item = eligible.get(orden.codigo_point)
-    review_reason = ""
-    if orden.payload_hash != expected_hash:
-        review_reason = "El hash del payload no coincide con la orden aprobada."
-    elif not current_item or current_item.unidad_point != orden.unidad_point:
-        review_reason = "La unidad o elegibilidad actual de Point ya no coincide con la orden aprobada."
-    candidates = list(
-        PointInventorySnapshot.objects.filter(
-            branch__erp_branch=orden.sucursal, product__sku=orden.codigo_point
-        ).select_related("branch", "product").order_by("branch_id", "-captured_at", "-id")
-    )
-    latest_by_branch = {}
-    for snapshot in candidates:
-        latest_by_branch.setdefault(snapshot.branch_id, snapshot)
-    if review_reason or len(latest_by_branch) != 1:
-        orden.estatus = OrdenAjustePoint.ESTATUS_REQUIERE_REVISION
-        orden.ultimo_error = review_reason or "No existe un mapeo Point único y verificable para la sucursal."
-        orden.merma.estatus = MermaInsumo.ESTATUS_REQUIERE_REVISION
-        orden.merma.save(update_fields=["estatus", "actualizado_en"])
-    else:
-        snapshot = next(iter(latest_by_branch.values()))
-        requerida = aprobada
-        orden.existencia_antes = snapshot.stock
-        if snapshot.stock < requerida:
+    """Valida el ajuste completo contra Point en vivo; nunca escribe en Point."""
+    orden_previa = OrdenAjustePoint.objects.select_related("sucursal").get(pk=orden_id)
+    if orden_previa.estatus != OrdenAjustePoint.ESTATUS_PENDIENTE:
+        return orden_previa
+
+    current_item = None
+    lookup_error = ""
+    try:
+        current_item = consultar_existencia_insumo_point(
+            orden_previa.sucursal,
+            orden_previa.codigo_point,
+        )
+    except (ValidationError, PointLiveInventoryLookupError) as exc:
+        lookup_error = f"No fue posible validar la existencia vigente en Point: {exc}"
+
+    with transaction.atomic():
+        orden = (
+            OrdenAjustePoint.objects.select_for_update()
+            .select_related("merma")
+            .get(pk=orden_id)
+        )
+        if orden.estatus != OrdenAjustePoint.ESTATUS_PENDIENTE:
+            return orden
+        orden.intentos += 1
+        aprobada = abs(orden.cantidad).quantize(Decimal("0.001"))
+        raw_key = f"merma-insumo:{orden.merma_id}:{orden.sucursal_id}:{orden.codigo_point}:{orden.unidad_point}:{aprobada}"
+        expected_hash = sha256(f"{raw_key}:-{aprobada}".encode("utf-8")).hexdigest()
+        review_reason = lookup_error
+        if not review_reason and orden.payload_hash != expected_hash:
+            review_reason = "El hash del payload no coincide con la orden aprobada."
+        elif not review_reason and (
+            not current_item or current_item.unidad_point != orden.unidad_point
+        ):
+            review_reason = "La unidad o elegibilidad actual de Point ya no coincide con la orden aprobada."
+        if review_reason:
             orden.estatus = OrdenAjustePoint.ESTATUS_REQUIERE_REVISION
-            orden.ultimo_error = "Existencia insuficiente; no se permite ajuste parcial."
+            orden.ultimo_error = review_reason
             orden.merma.estatus = MermaInsumo.ESTATUS_REQUIERE_REVISION
             orden.merma.save(update_fields=["estatus", "actualizado_en"])
         else:
-            orden.existencia_despues = snapshot.stock - requerida
-            orden.estatus = OrdenAjustePoint.ESTATUS_SIMULADA
-            orden.ultimo_error = ""
-            orden.evidencia_tecnica = {
-                "modo": "SIMULACION",
-                "snapshot_id": snapshot.id,
-                "capturado_en": snapshot.captured_at.isoformat(),
-                "sin_escritura_point": True,
-            }
-    if orden.merma.estatus == MermaInsumo.ESTATUS_REQUIERE_REVISION:
-        MermaInsumoEvento.objects.create(
-            merma=orden.merma,
-            estado_anterior=MermaInsumo.ESTATUS_APROBADA,
-            estado_nuevo=MermaInsumo.ESTATUS_REQUIERE_REVISION,
-            motivo=orden.ultimo_error,
-            metadata={"orden_id": orden.id, "modo": "SIMULACION"},
-        )
-    orden.save(update_fields=[
-        "estatus", "intentos", "ultimo_error", "existencia_antes", "existencia_despues",
-        "evidencia_tecnica", "actualizado_en",
-    ])
-    return orden
+            requerida = aprobada
+            orden.existencia_antes = current_item.existencia
+            if current_item.existencia < requerida:
+                orden.estatus = OrdenAjustePoint.ESTATUS_REQUIERE_REVISION
+                orden.ultimo_error = "Existencia insuficiente; no se permite ajuste parcial."
+                orden.merma.estatus = MermaInsumo.ESTATUS_REQUIERE_REVISION
+                orden.merma.save(update_fields=["estatus", "actualizado_en"])
+            else:
+                orden.existencia_despues = current_item.existencia - requerida
+                orden.estatus = OrdenAjustePoint.ESTATUS_SIMULADA
+                orden.ultimo_error = ""
+                orden.evidencia_tecnica = {
+                    "modo": "SIMULACION",
+                    "fuente_existencia": "POINT_EN_VIVO",
+                    "capturado_en": current_item.snapshot_capturado_en.isoformat(),
+                    "sin_escritura_point": True,
+                }
+        if orden.merma.estatus == MermaInsumo.ESTATUS_REQUIERE_REVISION:
+            MermaInsumoEvento.objects.create(
+                merma=orden.merma,
+                estado_anterior=MermaInsumo.ESTATUS_APROBADA,
+                estado_nuevo=MermaInsumo.ESTATUS_REQUIERE_REVISION,
+                motivo=orden.ultimo_error,
+                metadata={"orden_id": orden.id, "modo": "SIMULACION"},
+            )
+        orden.save(update_fields=[
+            "estatus", "intentos", "ultimo_error", "existencia_antes", "existencia_despues",
+            "evidencia_tecnica", "actualizado_en",
+        ])
+        return orden

@@ -32,9 +32,11 @@ from mermas.models import MermaInsumo, OrdenAjustePoint
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mantenimiento.services_access import can_access_mantenimiento
 from mermas.services_insumos import (
-    decidir_merma_insumo, enviar_merma_insumo, insumos_elegibles_para_sucursal,
+    consultar_existencia_insumo_point, decidir_merma_insumo, enviar_merma_insumo,
+    insumos_recibidos_para_sucursal,
     reasignar_merma_sin_responsable, reenviar_merma_aclarada, simular_orden_ajuste_point,
 )
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError
 from recetas.models import Receta
 from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from rrhh.models import Empleado
@@ -83,7 +85,7 @@ def _cargar_insumos_sucursal(sucursal):
         with transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute("SET LOCAL statement_timeout = %s", [5000])
-            return insumos_elegibles_para_sucursal(sucursal), False
+            return insumos_recibidos_para_sucursal(sucursal), False
     except OperationalError:
         logger.exception("Timeout al cargar el catálogo local de insumos Point para sucursal=%s", sucursal.pk)
         return [], True
@@ -332,6 +334,34 @@ def mermas_insumos_catalogo_api(request):
     sucursal = _sucursal_operativa_usuario(request.user)
     if not sucursal:
         return JsonResponse({"error": "Tu sesión no tiene una sucursal operativa asignada."}, status=403)
+    codigo_point = (request.GET.get("codigo_point") or "").strip()
+    if codigo_point:
+        try:
+            row = consultar_existencia_insumo_point(sucursal, codigo_point)
+        except ValidationError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        except PointLiveInventoryLookupError:
+            logger.exception(
+                "No fue posible consultar existencia en vivo para sucursal=%s codigo=%s",
+                sucursal.pk,
+                codigo_point,
+            )
+            return JsonResponse(
+                {"error": "No pudimos consultar la existencia vigente en Point. Reintenta."},
+                status=503,
+            )
+        return JsonResponse(
+            {
+                "sucursal": {"id": sucursal.id, "nombre": sucursal.nombre},
+                "insumo": {
+                    "codigo_point": row.codigo_point,
+                    "nombre": row.nombre_point,
+                    "unidad": row.unidad_point,
+                    "existencia": str(row.existencia),
+                    "snapshot_en": row.snapshot_capturado_en.isoformat(),
+                },
+            }
+        )
     rows, no_disponible = _cargar_insumos_sucursal(sucursal)
     if no_disponible:
         return JsonResponse(
@@ -346,8 +376,8 @@ def mermas_insumos_catalogo_api(request):
                     "codigo_point": row.codigo_point,
                     "nombre": row.nombre_point,
                     "unidad": row.unidad_point,
-                    "existencia": str(row.existencia),
-                    "snapshot_en": row.snapshot_capturado_en.isoformat(),
+                    "existencia": None,
+                    "snapshot_en": None,
                 }
                 for row in rows
             ],
@@ -375,12 +405,38 @@ def mermas_insumos_crear_api(request):
             )
         messages.error(request, "No pudimos validar las existencias de Point. No se registró ninguna merma.")
         return redirect(f"{reverse('operacion:sucursal_tools')}?tab=mermas#merma-form")
-    eligible = {row.codigo_point: row for row in rows}
-    row = eligible.get((data.get("codigo_point") or "").strip())
-    if not row:
+    eligible = {item.codigo_point: item for item in rows}
+    codigo_point = (data.get("codigo_point") or "").strip()
+    if codigo_point not in eligible:
         return _respuesta_error(
             request, error="El insumo no está habilitado para esta sucursal.", tab="mermas", anchor="merma-form"
         )
+    try:
+        row = consultar_existencia_insumo_point(
+            sucursal,
+            codigo_point,
+            insumo_recibido=eligible[codigo_point],
+        )
+    except ValidationError as exc:
+        return _respuesta_error(
+            request, error=str(exc), tab="mermas", anchor="merma-form"
+        )
+    except PointLiveInventoryLookupError:
+        logger.exception(
+            "No fue posible revalidar existencia Point para sucursal=%s codigo=%s",
+            sucursal.pk,
+            codigo_point,
+        )
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.content_type == "application/json":
+            return JsonResponse(
+                {"error": "No pudimos validar la existencia vigente en Point. No se registró ninguna merma."},
+                status=503,
+            )
+        messages.error(
+            request,
+            "No pudimos validar la existencia vigente en Point. No se registró ninguna merma.",
+        )
+        return redirect(f"{reverse('operacion:sucursal_tools')}?tab=mermas#merma-form")
     try:
         cantidad = Decimal(str(data.get("cantidad") or ""))
     except (InvalidOperation, ValueError):
