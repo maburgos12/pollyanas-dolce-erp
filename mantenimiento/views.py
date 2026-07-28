@@ -25,7 +25,12 @@ from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, Pl
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mantenimiento.services_access import (
-    authorized_branch_ids, authorized_fallas, authorized_orders, authorized_unit_reports,
+    authorized_branch_ids,
+    authorized_fallas,
+    authorized_orders,
+    authorized_repairs,
+    authorized_unit_reports,
+    authorized_unit_services,
     can_access_mantenimiento,
 )
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
@@ -683,11 +688,44 @@ def catalogos_movil(request):
         Q(id__in=responsable_ids) | Q(id=request.user.id),
         is_active=True,
     ).distinct().order_by("first_name", "last_name", "username")
+    author_ids = {request.user.id}
+    author_ids.update(
+        authorized_fallas(request.user)
+        .exclude(reportado_por_id__isnull=True)
+        .values_list("reportado_por_id", flat=True)
+    )
+    author_ids.update(
+        authorized_orders(request.user)
+        .exclude(creado_por_id__isnull=True)
+        .values_list("creado_por_id", flat=True)
+    )
+    author_ids.update(
+        authorized_unit_reports(request.user)
+        .exclude(repartidor__user_id__isnull=True)
+        .values_list("repartidor__user_id", flat=True)
+    )
+    for queryset in (authorized_repairs(request.user), authorized_unit_services(request.user)):
+        author_ids.update(
+            queryset.exclude(registrado_por_id__isnull=True).values_list("registrado_por_id", flat=True)
+        )
+    autores = get_user_model().objects.filter(id__in=author_ids).order_by(
+        "first_name",
+        "last_name",
+        "username",
+    )
     return Response(
         {
             "responsables_mantenimiento": [
                 {"id": user.id, "nombre": user.get_full_name() or user.username}
                 for user in responsables
+            ],
+            "autores_mantenimiento": [
+                {
+                    "id": user.id,
+                    "nombre": user.get_full_name() or user.username,
+                    "activo": user.is_active,
+                }
+                for user in autores
             ],
             "categorias_falla": [
                 {"id": categoria.id, "nombre": categoria.nombre}
