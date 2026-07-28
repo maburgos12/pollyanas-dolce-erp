@@ -325,15 +325,21 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
             direccion="Calle ligada",
             estatus="PENDIENTE",
         )
+        _, direccion, pedido_asignado = self._pedido_y_direccion(
+            point_note_id="POINT-MIGRATION-ASIGNADO"
+        )
         linked_assigned = SolicitudDomicilio.objects.create(
-            pedido_cliente=pedido,
+            pedido_cliente=pedido_asignado,
             direccion_cliente=direccion,
             cliente_nombre="Ligado asignado",
             direccion="Calle ligada",
             estatus="ASIGNADO",
         )
+        _, _, pedido_sin_gps = self._pedido_y_direccion(
+            point_note_id="POINT-MIGRATION-SIN-GPS"
+        )
         linked_assigned_without_gps = SolicitudDomicilio.objects.create(
-            pedido_cliente=pedido,
+            pedido_cliente=pedido_sin_gps,
             cliente_nombre="Ligado asignado sin GPS",
             direccion="Calle sin GPS",
             estatus="ASIGNADO",
@@ -605,7 +611,7 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(catalog.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(assign.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_asignacion_html_delega_servicio_revision_unidad_y_auditoria(self):
+    def test_ruta_html_legacy_no_asigna_y_redirige_a_bandeja_canonica(self):
         self.client.force_login(self.manager)
         repartidor = self._repartidor("rep_html")
         unidad = Unidad.objects.create(
@@ -626,24 +632,14 @@ class AsignacionDomicilioApiTests(APITestCase):
 
         self.assertRedirects(
             response,
-            reverse("logistica:domicilios_generales"),
+            reverse("crm:pedidos_domicilios"),
             fetch_redirect_response=False,
         )
         self.solicitud.refresh_from_db()
-        self.assertEqual(self.solicitud.repartidor_id, repartidor.id)
-        self.assertEqual(self.solicitud.unidad_id, unidad.id)
-        self.assertEqual(
-            self.solicitud.estatus,
-            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
-        )
-        self.assertEqual(self.solicitud.revision, 1)
-        audit = AuditLog.objects.get(
-            model="logistica.SolicitudDomicilio",
-            object_id=str(self.solicitud.id),
-            action="ASSIGN",
-        )
-        self.assertEqual(audit.user_id, self.manager.id)
-        self.assertEqual(audit.payload["unidad"], unidad.codigo)
+        self.assertIsNone(self.solicitud.repartidor_id)
+        self.assertIsNone(self.solicitud.unidad_id)
+        self.assertEqual(self.solicitud.revision, 0)
+        self.assertEqual(AuditLog.objects.count(), 0)
 
     def test_asignacion_html_no_resetea_terminal(self):
         self.client.force_login(self.manager)
@@ -675,7 +671,7 @@ class AsignacionDomicilioApiTests(APITestCase):
 
         self.assertRedirects(
             response,
-            reverse("logistica:domicilios_generales"),
+            reverse("crm:pedidos_domicilios"),
             fetch_redirect_response=False,
         )
         self.solicitud.refresh_from_db()
@@ -684,7 +680,7 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(self.solicitud.revision, 7)
         self.assertEqual(AuditLog.objects.count(), 0)
 
-    def test_html_no_ofrece_ni_acepta_tecnico_o_baja_rrhh(self):
+    def test_ruta_html_legacy_no_ofrece_catalogos_ni_acepta_asignaciones(self):
         self.client.force_login(self.manager)
         disponible = self._repartidor("rep_html_disponible")
         tecnico = self._repartidor(
@@ -705,13 +701,12 @@ class AsignacionDomicilioApiTests(APITestCase):
         )
 
         page = self.client.get(reverse("logistica:domicilios_generales"))
-
-        repartidor_ids = {
-            item.id for item in page.context["repartidores"]
-        }
-        self.assertIn(disponible.id, repartidor_ids)
-        self.assertNotIn(tecnico.id, repartidor_ids)
-        self.assertNotIn(baja.id, repartidor_ids)
+        self.assertRedirects(
+            page,
+            reverse("crm:pedidos_domicilios"),
+            fetch_redirect_response=False,
+        )
+        self.assertIsNone(page.context)
         rejected = self.client.post(
             reverse("logistica:domicilios_generales"),
             {
@@ -722,6 +717,7 @@ class AsignacionDomicilioApiTests(APITestCase):
             },
         )
         self.assertEqual(rejected.status_code, status.HTTP_302_FOUND)
+        self.assertEqual(rejected.url, reverse("crm:pedidos_domicilios"))
         self.solicitud.refresh_from_db()
         self.assertIsNone(self.solicitud.repartidor_id)
         self.assertEqual(AuditLog.objects.count(), 0)
@@ -847,7 +843,8 @@ class SolicitudDomicilioCanonicalMigrationTests(TransactionTestCase):
         self.new_apps = executor.loader.project_state(self.migrate_to).apps
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate(self.migrate_to)
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 
     def test_forward_mapping_preserves_terminals_and_never_creates_invalid_ready(self):

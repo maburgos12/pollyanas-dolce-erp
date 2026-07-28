@@ -271,7 +271,9 @@
 <main class="delivery-shell">
   <nav class="delivery-breadcrumbs" aria-label="Navegación de domicilios">
     <a class="delivery-link" href="{% url 'crm:pedidos_domicilios' %}">Volver a pedidos</a>
+    {% if can_view_crm %}
     <a class="delivery-link" href="{% url 'crm:pedido_detail' pedido.id %}">Ver pedido comercial</a>
+    {% endif %}
   </nav>
 
   <header class="delivery-hero">

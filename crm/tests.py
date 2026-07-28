@@ -262,7 +262,7 @@ class PedidoDomicilioDetailTests(TestCase):
         self.assertContains(response, 'class="ops-grid-2 is-single-column"')
         self.assertContains(
             response,
-            ".ops-grid-2.is-single-column{grid-template-columns:minmax(0,1fr)}",
+            "crm-templates-crm-pedidos.css?v=20260727-domicilios-v2",
         )
         self.assertNotContains(
             response,
@@ -290,6 +290,32 @@ class PedidoDomicilioDetailTests(TestCase):
         )
         self.assertContains(response, "Nuevo pedido")
 
+    def test_domicilios_inbox_uses_delivery_status_and_point_snapshot_values(self):
+        self.pedido.estatus = PedidoCliente.ESTATUS_CANCELADO
+        self.pedido.monto_estimado = Decimal("999.99")
+        self.pedido.save(update_fields=["estatus", "monto_estimado", "updated_at"])
+        self.client.force_login(self.ventas)
+
+        response = self.client.get(
+            reverse("crm:pedidos_domicilios"),
+            {"estatus": SolicitudDomicilio.ESTATUS_CONFIRMADO},
+        )
+
+        row = response.context["pedidos"][0]
+        self.assertEqual(row.domicilio_canonico.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        self.assertEqual(row.point_snapshot_display["total"], Decimal("565.00"))
+        self.assertContains(response, "Confirmado")
+        self.assertContains(response, "18452")
+        self.assertContains(response, "Centro Point")
+        self.assertContains(response, "$565.00")
+        self.assertNotContains(response, "$999.99")
+
+        excluded = self.client.get(
+            reverse("crm:pedidos_domicilios"),
+            {"estatus": SolicitudDomicilio.ESTATUS_EN_RUTA},
+        )
+        self.assertEqual(list(excluded.context["pedidos"]), [])
+
     def test_domicilio_detail_allows_logistics_owner_and_rejects_unrelated_role(self):
         url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
         self.client.force_login(self.logistica)
@@ -305,11 +331,20 @@ class PedidoDomicilioDetailTests(TestCase):
         logistics_response = self.client.get(url)
         self.assertContains(logistics_response, 'data-operation-owner="centro-operativo-api"')
         self.assertNotContains(logistics_response, reverse("crm:editar_cliente", args=[self.cliente.id]))
+        self.assertNotContains(
+            logistics_response,
+            f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
+        )
+        self.assertNotContains(logistics_response, 'aria-label="Submódulos CRM"')
         self.assertNotContains(logistics_response, "Abrir operación logística")
 
         self.client.force_login(self.ventas)
         crm_response = self.client.get(url)
         self.assertContains(crm_response, reverse("crm:editar_cliente", args=[self.cliente.id]))
+        self.assertContains(
+            crm_response,
+            f'href="{reverse("crm:pedido_detail", args=[self.pedido.id])}"',
+        )
         self.assertNotContains(crm_response, "Abrir operación logística")
 
     def test_domicilio_detail_does_not_leak_existing_order_to_unauthorized_user(self):
@@ -376,6 +411,36 @@ class PedidoDomicilioDetailTests(TestCase):
             self.client.get(reverse("crm:pedidos_domicilios")).status_code,
             200,
         )
+
+    def test_legacy_general_delivery_page_is_read_only_redirect_for_get_and_post(self):
+        self.client.force_login(self.logistica)
+        before = SolicitudDomicilio.objects.count()
+
+        get_response = self.client.get(reverse("logistica:domicilios_generales"))
+        post_response = self.client.post(
+            reverse("logistica:domicilios_generales"),
+            {
+                "accion": "crear",
+                "cliente_nombre": "Duplicado libre",
+                "direccion": "Sin pedido Point",
+                "canal_origen": SolicitudDomicilio.CANAL_TELEFONO,
+            },
+        )
+
+        canonical_url = reverse("crm:pedidos_domicilios")
+        self.assertRedirects(get_response, canonical_url, fetch_redirect_response=False)
+        self.assertRedirects(post_response, canonical_url, fetch_redirect_response=False)
+        self.assertEqual(SolicitudDomicilio.objects.count(), before)
+
+    def test_database_rejects_second_delivery_for_same_order(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SolicitudDomicilio.objects.create(
+                pedido_cliente=self.pedido,
+                cliente=self.cliente,
+                direccion_cliente=self.direccion,
+                cliente_nombre=self.cliente.nombre,
+                direccion=self.direccion.direccion,
+            )
 
 
 class CRMViewsTests(_CRMViewsTestBase):

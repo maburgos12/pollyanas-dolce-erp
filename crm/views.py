@@ -978,6 +978,7 @@ def pedidos(request: HttpRequest) -> HttpResponse:
     )
     if not can_view_crm(request.user) and not logistics_can_view:
         raise PermissionDenied("No tienes permisos para ver CRM")
+    from logistica.models import SolicitudDomicilio
 
     if request.method == "POST":
         if not can_manage_crm(request.user):
@@ -1069,7 +1070,12 @@ def pedidos(request: HttpRequest) -> HttpResponse:
             | Q(sucursal__icontains=q)
         )
     if estatus:
-        pedidos_qs = pedidos_qs.filter(estatus=estatus)
+        if domicilios_only:
+            pedidos_qs = pedidos_qs.filter(
+                solicitudes_domicilio__estatus=estatus,
+            )
+        else:
+            pedidos_qs = pedidos_qs.filter(estatus=estatus)
     if prioridad:
         pedidos_qs = pedidos_qs.filter(prioridad=prioridad)
     if enterprise_focus == "ABIERTOS":
@@ -1122,11 +1128,41 @@ def pedidos(request: HttpRequest) -> HttpResponse:
         default_url=reverse("crm:pedidos"),
     )
 
+    if domicilios_only:
+        delivery_qs = SolicitudDomicilio.objects.select_related(
+            "repartidor__user",
+            "unidad",
+        ).order_by("id")
+        displayed_orders = list(
+            pedidos_qs.prefetch_related(
+                Prefetch(
+                    "solicitudes_domicilio",
+                    queryset=delivery_qs,
+                    to_attr="domicilios_canonicos",
+                )
+            ).order_by("-created_at")[:500]
+        )
+        for displayed_order in displayed_orders:
+            displayed_order.domicilio_canonico = (
+                displayed_order.domicilios_canonicos[0]
+                if displayed_order.domicilios_canonicos
+                else None
+            )
+            displayed_order.point_snapshot_display = _point_snapshot_context(
+                displayed_order
+            )
+    else:
+        displayed_orders = pedidos_qs.order_by("-created_at")[:500]
+
     ctx = {
         "module_tabs": _module_tabs("pedidos"),
         "clientes": Cliente.objects.filter(activo=True).order_by("nombre"),
-        "pedidos": pedidos_qs.order_by("-created_at")[:500],
-        "estatus_choices": PedidoCliente.ESTATUS_CHOICES,
+        "pedidos": displayed_orders,
+        "estatus_choices": (
+            SolicitudDomicilio.ESTATUS_CHOICES
+            if domicilios_only
+            else PedidoCliente.ESTATUS_CHOICES
+        ),
         "prioridad_choices": PedidoCliente.PRIORIDAD_CHOICES,
         "canal_choices": PedidoCliente.CANAL_CHOICES,
         "q": q,
@@ -1480,6 +1516,7 @@ def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpRespons
             "productos": _point_snapshot_products(pedido.point_note_snapshot),
             "point_snapshot": _point_snapshot_context(pedido),
             "status_operations": status_operations,
+            "can_view_crm": can_view_crm(request.user),
             "can_manage_crm": can_manage_crm(request.user),
             "can_manage_logistica": can_manage_submodule(
                 request.user,

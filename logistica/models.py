@@ -1610,6 +1610,10 @@ class SolicitudDomicilioQuerySet(models.QuerySet):
             "ventana_inicio",
             "ventana_fin",
             "legacy_without_point",
+            "duplicado_de",
+            "duplicado_de_id",
+            "pedido_cliente_original",
+            "pedido_cliente_original_id",
         }
     )
 
@@ -1723,6 +1727,22 @@ class SolicitudDomicilio(models.Model):
     instrucciones_entrega = models.CharField(max_length=500, blank=True, default="")
     cancelacion_motivo = models.CharField(max_length=300, blank=True, default="")
     legacy_without_point = models.BooleanField(default=False, editable=False)
+    duplicado_de = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="duplicados_reconciliados",
+        editable=False,
+    )
+    pedido_cliente_original = models.ForeignKey(
+        PedidoCliente,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="solicitudes_domicilio_reconciliadas",
+        editable=False,
+    )
     objects = SolicitudDomicilioQuerySet.as_manager()
     repartidor = models.ForeignKey(
         "Repartidor",
@@ -1759,6 +1779,13 @@ class SolicitudDomicilio(models.Model):
         ordering = ["-created_at"]
         verbose_name = "Solicitud de domicilio"
         verbose_name_plural = "Solicitudes de domicilio"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["pedido_cliente"],
+                condition=models.Q(pedido_cliente__isnull=False),
+                name="logistica_solicitud_pedido_unico",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
