@@ -14,6 +14,7 @@ from logistica.services_domicilio_assignment import (
     get_owned_domicilio_or_404,
     list_repartidores_disponibles_minimal,
     repartidores_disponibles_queryset,
+    unidades_disponibles_queryset,
 )
 from logistica.models import SolicitudDomicilio
 from logistica.services_domicilio_status import (
@@ -29,6 +30,7 @@ class ExternalActorSerializer(serializers.Serializer):
 
 class PublicDomicilioAssignmentSerializer(serializers.Serializer):
     repartidor_id = serializers.IntegerField(min_value=1)
+    unidad_id = serializers.IntegerField(min_value=1)
     actor = ExternalActorSerializer()
 
     def validate_repartidor_id(self, value):
@@ -37,7 +39,9 @@ class PublicDomicilioAssignmentSerializer(serializers.Serializer):
         return value
 
 
-class PublicDomicilioStatusSerializer(PublicDomicilioAssignmentSerializer):
+class PublicDomicilioStatusSerializer(serializers.Serializer):
+    repartidor_id = serializers.IntegerField(min_value=1)
+    actor = ExternalActorSerializer()
     estatus = serializers.ChoiceField(
         choices=[
             SolicitudDomicilio.ESTATUS_EN_RUTA,
@@ -45,6 +49,11 @@ class PublicDomicilioStatusSerializer(PublicDomicilioAssignmentSerializer):
         ]
     )
     operation_id = serializers.UUIDField()
+
+    def validate_repartidor_id(self, value):
+        if isinstance(self.initial_data.get("repartidor_id"), bool):
+            raise serializers.ValidationError("Debe ser un entero positivo.")
+        return value
 
 
 class PublicLogisticaCatalogQuerySerializer(serializers.Serializer):
@@ -128,10 +137,20 @@ class PublicLogisticaDomicilioAsignarView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         actor = serializer.validated_data["actor"]
+        unidad = unidades_disponibles_queryset().filter(
+            pk=serializer.validated_data["unidad_id"],
+        ).first()
+        if unidad is None:
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Unidad no disponible."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             payload = assign_domicilio(
                 solicitud_id=solicitud_id,
                 repartidor_id=serializer.validated_data["repartidor_id"],
+                unidad=unidad,
                 audit_metadata={
                     "api_client": {
                         "id": api_client.id,

@@ -1648,6 +1648,10 @@ class SolicitudDomicilioQuerySet(models.QuerySet):
         if update_conflicts:
             self._reject_operational_fields(update_fields or ())
         for obj in objs:
+            if obj.pk is None and obj.estatus not in SolicitudDomicilio.INITIAL_STATUSES:
+                raise ValidationError(
+                    {"estatus": "Un domicilio nuevo solo puede iniciar pendiente de Point o confirmado."}
+                )
             obj.clean()
         return super().bulk_create(
             objs,
@@ -1694,6 +1698,15 @@ class SolicitudDomicilio(models.Model):
         (ESTATUS_ENTREGADO, "Entregado"),
         (ESTATUS_CANCELADO, "Cancelado"),
     ]
+    INITIAL_STATUSES = frozenset({ESTATUS_PENDIENTE_POINT, ESTATUS_CONFIRMADO})
+    NEXT_STATUS = {
+        ESTATUS_PENDIENTE_POINT: ESTATUS_CONFIRMADO,
+        ESTATUS_CONFIRMADO: ESTATUS_PREPARANDO,
+        ESTATUS_PREPARANDO: ESTATUS_LISTO,
+        ESTATUS_LISTO: ESTATUS_EN_RUTA,
+        ESTATUS_EN_RUTA: ESTATUS_ENTREGADO,
+    }
+    TERMINAL_STATUSES = frozenset({ESTATUS_ENTREGADO, ESTATUS_CANCELADO})
 
     pedido_cliente = models.ForeignKey(
         PedidoCliente,
@@ -1791,6 +1804,10 @@ class SolicitudDomicilio(models.Model):
         return f"{self.cliente_nombre} · {self.get_canal_origen_display()}"
 
     def save(self, *args, **kwargs):
+        if self.pk is None and self.estatus not in self.INITIAL_STATUSES:
+            raise ValidationError(
+                {"estatus": "Un domicilio nuevo solo puede iniciar pendiente de Point o confirmado."}
+            )
         update_fields = kwargs.get("update_fields")
         candidate = self
         if self.pk and update_fields is not None:
@@ -1808,13 +1825,55 @@ class SolicitudDomicilio(models.Model):
     def clean(self):
         super().clean()
         errors = {}
-        if self.legacy_without_point:
-            persisted_as_legacy = (
-                bool(self.pk)
-                and type(self)._base_manager.filter(
+        persisted_status = None
+        if self.pk:
+            persisted_status = (
+                type(self)._base_manager.filter(pk=self.pk)
+                .values_list("estatus", flat=True)
+                .first()
+            )
+        if (
+            persisted_status is not None
+            and self.estatus != persisted_status
+            and not (
+                type(self)._base_manager.filter(
                     pk=self.pk,
                     legacy_without_point=True,
                 ).exists()
+                and not self.legacy_without_point
+                and self.estatus in self.INITIAL_STATUSES
+            )
+            and not (
+                self.estatus == self.ESTATUS_CANCELADO
+                and persisted_status not in self.TERMINAL_STATUSES
+            )
+            and self.NEXT_STATUS.get(persisted_status) != self.estatus
+        ):
+            errors["estatus"] = (
+                f"Transición inválida de {persisted_status} a {self.estatus}."
+            )
+        legacy_terminal = False
+        persisted_legacy = (
+            bool(self.pk)
+            and type(self)._base_manager.filter(
+                pk=self.pk,
+                legacy_without_point=True,
+            ).exists()
+        )
+        if persisted_legacy and not self.legacy_without_point:
+            if (
+                self.estatus != self.ESTATUS_CONFIRMADO
+                or not self.pedido_cliente_id
+                or not self.pedido_cliente.point_note_id
+                or not self.direccion_cliente_id
+            ):
+                errors["legacy_without_point"] = (
+                    "La reconciliación debe volver a Confirmado con pedido Point "
+                    "y dirección canónicos en la misma escritura."
+                )
+        if self.legacy_without_point:
+            persisted_as_legacy = (
+                persisted_legacy
             )
             if not persisted_as_legacy:
                 errors["legacy_without_point"] = (
@@ -1824,7 +1883,7 @@ class SolicitudDomicilio(models.Model):
                 self.ESTATUS_ENTREGADO,
                 self.ESTATUS_CANCELADO,
             }:
-                return
+                legacy_terminal = True
             else:
                 errors["legacy_without_point"] = (
                     "Un domicilio histórico debe permanecer entregado o cancelado "
@@ -1836,7 +1895,7 @@ class SolicitudDomicilio(models.Model):
             self.ESTATUS_EN_RUTA,
             self.ESTATUS_ENTREGADO,
         }
-        if self.estatus in ready_or_later:
+        if self.estatus in ready_or_later and not legacy_terminal:
             if not self.pedido_cliente_id or not self.pedido_cliente.point_note_id:
                 errors["pedido_cliente"] = (
                     "Se requiere un pedido vinculado con una nota de Point antes de marcarlo listo."
@@ -1850,15 +1909,33 @@ class SolicitudDomicilio(models.Model):
                     "Se requiere una dirección con coordenadas GPS antes de marcarlo listo."
                 )
 
-        if self.estatus in {self.ESTATUS_EN_RUTA, self.ESTATUS_ENTREGADO} and not self.repartidor_id:
-            errors["repartidor"] = "Se requiere asignar un repartidor antes de iniciar la ruta."
+        if (
+            self.estatus in {self.ESTATUS_EN_RUTA, self.ESTATUS_ENTREGADO}
+            and not legacy_terminal
+        ):
+            if not self.repartidor_id:
+                errors["repartidor"] = "Se requiere asignar un repartidor antes de iniciar la ruta."
+            elif not self.repartidor.user.is_active:
+                errors["repartidor"] = "El repartidor asignado debe permanecer activo."
+            if not self.unidad_id:
+                errors["unidad"] = "Se requiere asignar una unidad antes de iniciar la ruta."
+            elif not self.unidad.activa:
+                errors["unidad"] = "La unidad asignada debe permanecer activa."
 
-        if self.estatus == self.ESTATUS_ENTREGADO and not self.entregado_en:
+        if (
+            self.estatus == self.ESTATUS_ENTREGADO
+            and not self.entregado_en
+            and not legacy_terminal
+        ):
             errors["entregado_en"] = (
                 "Se requiere la evidencia temporal de entrega antes de marcarlo entregado."
             )
 
-        if self.estatus == self.ESTATUS_CANCELADO and not self.cancelacion_motivo.strip():
+        if (
+            self.estatus == self.ESTATUS_CANCELADO
+            and not self.cancelacion_motivo.strip()
+            and not legacy_terminal
+        ):
             errors["cancelacion_motivo"] = "El motivo de cancelación es obligatorio."
 
         if self.ventana_inicio and self.ventana_fin and self.ventana_fin < self.ventana_inicio:

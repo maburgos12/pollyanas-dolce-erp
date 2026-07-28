@@ -7,7 +7,7 @@ from uuid import uuid4
 from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, connection, transaction
-from django.test import RequestFactory, TestCase, TransactionTestCase
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -209,8 +209,7 @@ class PedidoDomicilioDetailTests(TestCase):
             direccion=self.direccion.direccion,
             repartidor=self.repartidor,
             unidad=self.unidad,
-            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
-            entregado_en=timezone.now(),
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
         with connection.cursor() as cursor:
             cursor.execute(
@@ -226,7 +225,8 @@ class PedidoDomicilioDetailTests(TestCase):
             cursor.execute(
                 """
                 UPDATE logistica_solicituddomicilio
-                SET legacy_without_point = TRUE
+                SET legacy_without_point = TRUE, estatus = 'ENTREGADO',
+                    entregado_en = NOW()
                 WHERE id = %s
                 """,
                 [legacy_delivery.id],
@@ -358,7 +358,7 @@ class PedidoDomicilioDetailTests(TestCase):
             point_note_id="POINT-DELIVERED-TODAY",
             point_note_snapshot={"pk_nota": "POINT-DELIVERED-TODAY", "total": "50.00"},
         )
-        SolicitudDomicilio.objects.create(
+        delivered = SolicitudDomicilio.objects.create(
             pedido_cliente=delivered_order,
             cliente=self.cliente,
             direccion_cliente=self.direccion,
@@ -366,9 +366,20 @@ class PedidoDomicilioDetailTests(TestCase):
             direccion=self.direccion.direccion,
             repartidor=self.repartidor,
             unidad=self.unidad,
-            estatus=SolicitudDomicilio.ESTATUS_ENTREGADO,
-            entregado_en=timezone.now(),
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        for next_status in (
+            SolicitudDomicilio.ESTATUS_PREPARANDO,
+            SolicitudDomicilio.ESTATUS_LISTO,
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+            SolicitudDomicilio.ESTATUS_ENTREGADO,
+        ):
+            delivered.estatus = next_status
+            if next_status == SolicitudDomicilio.ESTATUS_ENTREGADO:
+                delivered.entregado_en = timezone.now()
+                delivered.save(update_fields=["estatus", "entregado_en"])
+            else:
+                delivered.save(update_fields=["estatus"])
         legacy_order = PedidoCliente.objects.create(
             cliente=self.cliente,
             descripcion="Domicilio histórico excluido de métricas",
@@ -489,6 +500,53 @@ class PedidoDomicilioDetailTests(TestCase):
         self.assertContains(response, "min-height: 44px")
         self.assertContains(response, 'aria-label="Estado operativo del domicilio"')
         self.assertContains(response, 'aria-label="Productos de la nota Point"')
+
+    def test_domicilio_detail_post_uses_canonical_assignment_and_transition_services(self):
+        url = reverse("crm:pedido_domicilio_detail", args=[self.pedido.id])
+        self.client.force_login(self.logistica)
+        assigned = self.client.post(
+            url,
+            {
+                "action": "assign",
+                "repartidor_id": self.repartidor.id,
+                "unidad_id": self.unidad.id,
+            },
+        )
+        advanced = self.client.post(
+            url,
+            {
+                "action": "advance",
+                "requested_status": SolicitudDomicilio.ESTATUS_PREPARANDO,
+            },
+        )
+        self.assertRedirects(assigned, url, fetch_redirect_response=False)
+        self.assertRedirects(advanced, url, fetch_redirect_response=False)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_PREPARANDO)
+
+        self.client.force_login(self.ventas)
+        forbidden = self.client.post(
+            url,
+            {
+                "action": "cancel",
+                "cancelacion_motivo": "No autorizado",
+            },
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_domicilio_detail_post_requires_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.logistica)
+        response = csrf_client.post(
+            reverse("crm:pedido_domicilio_detail", args=[self.pedido.id]),
+            {
+                "action": "advance",
+                "requested_status": SolicitudDomicilio.ESTATUS_PREPARANDO,
+            },
+        )
+        self.assertIn(response.status_code, {302, 403})
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
 
     def test_legacy_ecommerce_page_never_creates_second_delivery(self):
         self.client.force_login(self.logistica)

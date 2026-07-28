@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q, Sum
 from django.http import Http404, HttpRequest, HttpResponse
@@ -1528,6 +1528,75 @@ def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpRespons
     if len(domicilios) != 1:
         raise Http404("El pedido no tiene un domicilio canónico único.")
     solicitud = domicilios[0]
+    can_operate_delivery = can_manage_submodule(request.user, "logistica", "rutas")
+    from logistica.services_domicilio_assignment import (
+        DomicilioAssignmentError,
+        assign_domicilio,
+        repartidores_disponibles_queryset,
+        unidades_disponibles_queryset,
+    )
+    from logistica.services_domicilio_status import (
+        DomicilioStatusError,
+        transition_domicilio_status,
+    )
+
+    repartidores_qs = repartidores_disponibles_queryset()
+    unidades_qs = unidades_disponibles_queryset()
+    if pedido.sucursal_ref_id:
+        repartidores_qs = repartidores_qs.filter(sucursal_id=pedido.sucursal_ref_id)
+        unidades_qs = unidades_qs.filter(sucursal_id=pedido.sucursal_ref_id)
+
+    if request.method == "POST":
+        if not can_operate_delivery:
+            raise PermissionDenied("No tienes permisos para operar domicilios")
+        action = (request.POST.get("action") or "").strip()
+        try:
+            if action == "assign":
+                repartidor_id = int(request.POST.get("repartidor_id") or 0)
+                unidad_id = int(request.POST.get("unidad_id") or 0)
+                repartidor = repartidores_qs.filter(pk=repartidor_id).first()
+                unidad = unidades_qs.filter(pk=unidad_id).first()
+                if repartidor is None or unidad is None:
+                    raise DomicilioAssignmentError(
+                        "Selecciona un repartidor y una unidad activos de la sucursal.",
+                        400,
+                    )
+                assign_domicilio(
+                    solicitud_id=solicitud.id,
+                    repartidor_id=repartidor.id,
+                    unidad=unidad,
+                    audit_user=request.user,
+                )
+                messages.success(request, "Repartidor y unidad asignados.")
+            elif action in {"advance", "cancel"}:
+                requested_status = (
+                    SolicitudDomicilio.ESTATUS_CANCELADO
+                    if action == "cancel"
+                    else (request.POST.get("requested_status") or "").strip()
+                )
+                expected = SolicitudDomicilio.NEXT_STATUS.get(solicitud.estatus)
+                if action == "advance" and requested_status != expected:
+                    raise DomicilioStatusError(
+                        f"Transición inválida desde {solicitud.estatus}."
+                    )
+                transition_domicilio_status(
+                    solicitud_id=solicitud.id,
+                    requested_status=requested_status,
+                    cancelacion_motivo=request.POST.get("cancelacion_motivo") or "",
+                    audit_user=request.user,
+                )
+                messages.success(request, "Estado del domicilio actualizado.")
+            else:
+                raise DomicilioStatusError("Acción de domicilio inválida.", 400)
+        except (ValueError, DomicilioAssignmentError, DomicilioStatusError, ValidationError) as exc:
+            detail = (
+                getattr(exc, "detail", None)
+                or "; ".join(getattr(exc, "messages", []))
+                or str(exc)
+            )
+            messages.error(request, detail)
+        return redirect("crm:pedido_domicilio_detail", pedido_id=pedido.id)
+
     direccion = solicitud.direccion_cliente or pedido.direccion_entrega
     map_url = ""
     if direccion and direccion.latitud is not None and direccion.longitud is not None:
@@ -1573,6 +1642,16 @@ def pedido_domicilio_detail(request: HttpRequest, pedido_id: int) -> HttpRespons
                 request.user,
                 "logistica",
                 "rutas",
+            ),
+            "can_operate_delivery": can_operate_delivery,
+            "repartidores_disponibles": repartidores_qs,
+            "unidades_disponibles": unidades_qs,
+            "next_delivery_status": SolicitudDomicilio.NEXT_STATUS.get(
+                solicitud.estatus
+            ),
+            "next_delivery_status_label": status_labels.get(
+                SolicitudDomicilio.NEXT_STATUS.get(solicitud.estatus),
+                "",
             ),
         },
     )

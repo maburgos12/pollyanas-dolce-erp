@@ -1,95 +1,39 @@
-import base64
-import json
-import re
-
 from django.db import migrations, models
 import django.db.models.deletion
 
 
-MARKER_PREFIX = "ROLLBACK_DOMICILIO_0047:"
-MARKER_RE = re.compile(r"\n\[CONCILIACION_DOMICILIO_0047[^\]]*\]\n\[ROLLBACK_DOMICILIO_0047:([A-Za-z0-9_=-]+)\]$")
-
-
-def _encode_state(solicitud):
-    payload = {
-        "pedido_cliente_id": solicitud.pedido_cliente_id,
-        "estatus": solicitud.estatus,
-        "legacy_without_point": solicitud.legacy_without_point,
-        "cancelacion_motivo": solicitud.cancelacion_motivo,
-        "notas": solicitud.notas,
-    }
-    return base64.urlsafe_b64encode(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii")
-
-
-def reconcile_duplicate_deliveries(apps, schema_editor):
+def abort_if_duplicate_deliveries(apps, schema_editor):
     Solicitud = apps.get_model("logistica", "SolicitudDomicilio")
-    duplicate_order_ids = (
+    duplicate_groups = list(
         Solicitud.objects.exclude(pedido_cliente_id=None)
         .values("pedido_cliente_id")
         .annotate(total=models.Count("id"))
         .filter(total__gt=1)
-        .values_list("pedido_cliente_id", flat=True)
+        .order_by("pedido_cliente_id")
+        .values_list("pedido_cliente_id", "total")[:20]
     )
-    for pedido_id in duplicate_order_ids.iterator():
-        solicitudes = list(
-            Solicitud.objects.filter(pedido_cliente_id=pedido_id).order_by("id")
-        )
-        canonical = solicitudes[0]
-        for duplicate in solicitudes[1:]:
-            token = _encode_state(duplicate)
-            marker = (
-                f"\n[CONCILIACION_DOMICILIO_0047 canónico={canonical.id}]"
-                f"\n[{MARKER_PREFIX}{token}]"
-            )
-            updates = {
-                "pedido_cliente_id": None,
-                "pedido_cliente_original_id": pedido_id,
-                "duplicado_de_id": canonical.id,
-                "legacy_without_point": True,
-                "notas": f"{duplicate.notas}{marker}",
-            }
-            if duplicate.estatus not in {"ENTREGADO", "CANCELADO"}:
-                updates["estatus"] = "CANCELADO"
-                updates["cancelacion_motivo"] = (
-                    "Conciliación 0047: domicilio duplicado; "
-                    f"se conserva como histórico del canónico #{canonical.id}."
-                )
-            elif duplicate.estatus == "CANCELADO" and not duplicate.cancelacion_motivo:
-                updates["cancelacion_motivo"] = (
-                    "Conciliación 0047: domicilio duplicado; "
-                    f"se conserva como histórico del canónico #{canonical.id}."
-                )
-            Solicitud._base_manager.filter(pk=duplicate.pk).update(**updates)
-
-
-def restore_duplicate_deliveries(apps, schema_editor):
-    Solicitud = apps.get_model("logistica", "SolicitudDomicilio")
-    for duplicate in Solicitud.objects.exclude(duplicado_de_id=None).iterator():
-        match = MARKER_RE.search(duplicate.notas or "")
-        if not match:
-            continue
-        payload = json.loads(
-            base64.urlsafe_b64decode(match.group(1).encode("ascii")).decode("utf-8")
-        )
-        Solicitud._base_manager.filter(pk=duplicate.pk).update(
-            pedido_cliente_id=payload["pedido_cliente_id"],
-            estatus=payload["estatus"],
-            legacy_without_point=payload["legacy_without_point"],
-            cancelacion_motivo=payload["cancelacion_motivo"],
-            notas=payload["notas"],
-            duplicado_de_id=None,
-            pedido_cliente_original_id=None,
-        )
+    if not duplicate_groups:
+        return
+    total_groups = (
+        Solicitud.objects.exclude(pedido_cliente_id=None)
+        .values("pedido_cliente_id")
+        .annotate(total=models.Count("id"))
+        .filter(total__gt=1)
+        .count()
+    )
+    sample = ", ".join(
+        f"pedido_cliente_id={pedido_id} ({total})"
+        for pedido_id, total in duplicate_groups
+    )
+    raise RuntimeError(
+        "No se puede aplicar logistica.0047: se detectaron "
+        f"{total_groups} pedido(s) con más de un domicilio. "
+        "La migración no elige, cancela ni modifica registros automáticamente. "
+        f"Concilia manualmente y vuelve a ejecutar. Muestra: {sample}"
+    )
 
 
 class Migration(migrations.Migration):
-    # La reversión debe confirmar la restauración de las FK antes de retirar
-    # el campo de trazabilidad; PostgreSQL no permite ALTER con triggers FK
-    # diferidos pendientes dentro de una sola transacción de migración.
-    atomic = False
-
     dependencies = [
         ("logistica", "0046_solicituddomicilio_operacion_canonica"),
     ]
@@ -120,9 +64,8 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(
-            reconcile_duplicate_deliveries,
-            restore_duplicate_deliveries,
-            atomic=True,
+            abort_if_duplicate_deliveries,
+            migrations.RunPython.noop,
         ),
         migrations.AddConstraint(
             model_name="solicituddomicilio",

@@ -16,6 +16,7 @@ from logistica.models import (
     Repartidor,
     SolicitudDomicilio,
     SolicitudDomicilioStatusOperation,
+    Unidad,
 )
 from logistica.services_domicilio_assignment import (
     DomicilioAssignmentError,
@@ -73,11 +74,21 @@ class PublicLogisticaAssignmentApiTests(APITestCase):
 
     def _repartidor(self, username):
         user = User.objects.create_user(username=username, password="pass123")
-        return Repartidor.objects.create(user=user, sucursal=self.sucursal)
+        unidad = Unidad.objects.create(
+            codigo=f"U-{username}",
+            descripcion=f"Unidad {username}",
+            sucursal=self.sucursal,
+        )
+        return Repartidor.objects.create(
+            user=user,
+            sucursal=self.sucursal,
+            unidad_asignada=unidad,
+        )
 
     def _payload(self, repartidor):
         return {
             "repartidor_id": repartidor.id,
+            "unidad_id": repartidor.unidad_asignada_id,
             "actor": {"id": "ops-17", "nombre": "Operaciones"},
         }
 
@@ -414,7 +425,16 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.auth = {"HTTP_X_API_KEY": key}
         sucursal = Sucursal.objects.create(codigo="M2M-EXEC", nombre="M2M Exec")
         user = User.objects.create_user(username="driver_exec", password="x")
-        self.driver = Repartidor.objects.create(user=user, sucursal=sucursal)
+        self.unidad = Unidad.objects.create(
+            codigo="M2M-EXEC-U",
+            descripcion="Unidad ejecución",
+            sucursal=sucursal,
+        )
+        self.driver = Repartidor.objects.create(
+            user=user,
+            sucursal=sucursal,
+            unidad_asignada=self.unidad,
+        )
         self.api_client.repartidores_logistica_autorizados.add(self.driver)
         cliente = Cliente.objects.create(
             nombre="Cliente visible",
@@ -449,8 +469,13 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             direccion=direccion.direccion,
             notas="otra nota interna",
             repartidor=self.driver,
-            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        self.solicitud.save(update_fields=["estatus"])
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        self.solicitud.save(update_fields=["estatus"])
         self.list_url = reverse(
             "api_public_logistica_repartidor_domicilios",
             args=[self.driver.id],
@@ -546,9 +571,11 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         )
         self.assertEqual(foreign.status_code, status.HTTP_404_NOT_FOUND)
 
-        self.solicitud.repartidor = self.driver
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PENDIENTE
-        self.solicitud.save(update_fields=["repartidor", "estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            repartidor=self.driver,
+            estatus=SolicitudDomicilio.ESTATUS_PENDIENTE,
+        )
+        self.solicitud.refresh_from_db()
         invalid = self.client.post(
             self.status_url,
             self.payload("f3a1d1ef-8996-4670-8fe2-094e4a6a1d56"),
@@ -557,8 +584,10 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         )
         self.assertEqual(invalid.status_code, status.HTTP_409_CONFLICT)
 
-        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY
-        self.solicitud.save(update_fields=["estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            estatus=SolicitudDomicilio.ESTATUS_ASIGNADO_LEGACY,
+        )
+        self.solicitud.refresh_from_db()
         legacy_assigned = self.client.post(
             self.status_url,
             self.payload("4a0e139e-b87d-48a5-a3ec-218a8bb63d53"),
@@ -581,7 +610,18 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         self.drivers = []
         for index in range(2):
             user = User.objects.create_user(username=f"race_{index}", password="x")
-            self.drivers.append(Repartidor.objects.create(user=user, sucursal=sucursal))
+            unidad = Unidad.objects.create(
+                codigo=f"RACE-U-{index}",
+                descripcion=f"Race {index}",
+                sucursal=sucursal,
+            )
+            self.drivers.append(
+                Repartidor.objects.create(
+                    user=user,
+                    sucursal=sucursal,
+                    unidad_asignada=unidad,
+                )
+            )
         self.api_client.repartidores_logistica_autorizados.add(*self.drivers)
         cliente = Cliente.objects.create(nombre="Race")
         direccion = DireccionCliente.objects.create(
@@ -604,8 +644,13 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             cliente_nombre="Race",
             direccion="Race",
             repartidor=self.drivers[0],
-            estatus=SolicitudDomicilio.ESTATUS_LISTO,
+            unidad=self.drivers[0].unidad_asignada,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        self.solicitud.save(update_fields=["estatus"])
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        self.solicitud.save(update_fields=["estatus"])
 
     def _status(self, operation_id):
         close_old_connections()
@@ -632,7 +677,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )
 
-    def test_operation_id_distintos_concurrentes_uno_gana_y_otro_409(self):
+    def test_operation_id_distintos_concurrentes_segundo_es_idempotente(self):
         operation_ids = [
             "355aa71e-872b-46df-b476-19105fd3a050",
             "79258634-b608-4b1a-81b1-4d6388a79f0b",
@@ -649,9 +694,12 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
 
         self.assertEqual(
             len([item for item in results if isinstance(item, dict)]),
-            1,
+            2,
         )
-        self.assertEqual(results.count(status.HTTP_409_CONFLICT), 1)
+        self.assertEqual(
+            sorted(item["idempotent"] for item in results),
+            [False, True],
+        )
         self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1

@@ -25,6 +25,26 @@
     gap: .75rem;
     align-items: center;
   }
+  .delivery-form {
+    display: grid;
+    gap: .75rem;
+    width: 100%;
+    padding: .9rem;
+    border: 1px solid var(--delivery-border);
+    border-radius: .75rem;
+    background: var(--delivery-cream);
+  }
+  .delivery-form label { font-weight: 800; }
+  .delivery-form select,
+  .delivery-form input {
+    width: 100%;
+    min-height: 44px;
+    padding: .65rem .75rem;
+    border: 1px solid var(--delivery-border);
+    border-radius: .65rem;
+    background: #fff;
+    color: var(--delivery-ink);
+  }
   .delivery-link,
   .delivery-action {
     min-height: 44px;
@@ -395,10 +415,48 @@
           {% if can_manage_logistica %}
           <div class="delivery-fact" data-operation-owner="centro-operativo-api">
             <dt>Asignación y estados</dt>
-            <dd>Se gestionan en Centro Operativo sobre esta solicitud mediante la API canónica.</dd>
+            <dd>Centro Operativo y esta ficha usan los mismos servicios canónicos.</dd>
           </div>
           {% endif %}
         </div>
+        {% if can_operate_delivery %}
+        <form method="post" class="delivery-form" aria-label="Asignar domicilio">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="assign">
+          <label for="delivery-driver">Repartidor activo</label>
+          <select id="delivery-driver" name="repartidor_id" required>
+            <option value="">Seleccionar...</option>
+            {% for repartidor in repartidores_disponibles %}
+            <option value="{{ repartidor.id }}" {% if solicitud.repartidor_id == repartidor.id %}selected{% endif %}>{{ repartidor }}</option>
+            {% endfor %}
+          </select>
+          <label for="delivery-unit">Unidad activa</label>
+          <select id="delivery-unit" name="unidad_id" required>
+            <option value="">Seleccionar...</option>
+            {% for unidad in unidades_disponibles %}
+            <option value="{{ unidad.id }}" {% if solicitud.unidad_id == unidad.id %}selected{% endif %}>{{ unidad }}</option>
+            {% endfor %}
+          </select>
+          <button class="delivery-action" type="submit">Guardar asignación</button>
+        </form>
+        {% if next_delivery_status %}
+        <form method="post" class="delivery-form" aria-label="Avanzar estado">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="advance">
+          <input type="hidden" name="requested_status" value="{{ next_delivery_status }}">
+          <button class="delivery-action" type="submit">Avanzar a {{ next_delivery_status_label }}</button>
+        </form>
+        {% endif %}
+        {% if solicitud.estatus != "ENTREGADO" and solicitud.estatus != "CANCELADO" %}
+        <form method="post" class="delivery-form" aria-label="Cancelar domicilio">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="cancel">
+          <label for="delivery-cancel-reason">Motivo de cancelación</label>
+          <input id="delivery-cancel-reason" name="cancelacion_motivo" maxlength="300" required>
+          <button class="delivery-action" type="submit">Cancelar domicilio</button>
+        </form>
+        {% endif %}
+        {% endif %}
         {% if not can_manage_crm and not can_manage_logistica %}
         <p class="delivery-muted">Tu rol tiene acceso de consulta.</p>
         {% endif %}
