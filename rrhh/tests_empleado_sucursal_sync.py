@@ -9,8 +9,9 @@ from django.utils import timezone
 from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
 from core.models import Sucursal
 from rrhh.importers import _sucursal_de_empleado
-from rrhh.models import Empleado
+from rrhh.models import AsistenciaEmpleado, Empleado
 from rrhh.services_bonos import sincronizar_bonos_operativos_periodo_actual
+from rrhh.services_hikvision import _resolver_sucursal
 
 
 class EmpleadoSucursalSyncTests(TestCase):
@@ -49,6 +50,46 @@ class EmpleadoSucursalSyncTests(TestCase):
         emp = Empleado.objects.create(nombre="X", area="VENTAS", sucursal="texto que no macha", sucursal_ref=suc)
 
         self.assertEqual(_sucursal_de_empleado(emp), suc)
+
+    def test_resolver_sucursal_checador_usa_fk_y_tolera_texto_desalineado(self):
+        # Caso real 27-jul-2026: texto "Sucursal Crucero" contra codigo=CRUCERO /
+        # nombre="Sucursal Bamoa" no machaba por igualdad exacta y dejaba sucursal NULL.
+        suc = Sucursal.objects.create(codigo="CRUCERO", nombre="Sucursal Bamoa", activa=True)
+        con_fk = Empleado.objects.create(
+            nombre="Con FK", area="VENTAS", sucursal="", sucursal_ref=suc,
+        )
+        sin_fk = Empleado.objects.create(nombre="Sin FK", area="VENTAS", sucursal="Sucursal Crucero")
+
+        self.assertEqual(_resolver_sucursal(con_fk), suc)
+        self.assertEqual(_resolver_sucursal(sin_fk), suc)
+        self.assertIsNone(_resolver_sucursal(Empleado.objects.create(nombre="Vacio", area="VENTAS", sucursal="")))
+
+    def test_backfill_asistencia_solo_rellena_null(self):
+        from datetime import date
+        from importlib import import_module
+
+        from django.apps import apps as app_registry
+
+        backfill_asistencia_sucursal = import_module(
+            "rrhh.migrations.0038_backfill_asistencia_sucursal"
+        ).backfill_asistencia_sucursal
+
+        crucero = Sucursal.objects.create(codigo="CRUCERO", nombre="Sucursal Bamoa", activa=True)
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
+        emp = Empleado.objects.create(
+            nombre="Karely", area="VENTAS", sucursal="Sucursal Crucero", sucursal_ref=crucero,
+        )
+        hueca = AsistenciaEmpleado.objects.create(empleado=emp, fecha=date(2026, 7, 21))
+        ya_asignada = AsistenciaEmpleado.objects.create(
+            empleado=emp, fecha=date(2026, 7, 22), sucursal=matriz,
+        )
+
+        backfill_asistencia_sucursal(app_registry, None)
+
+        hueca.refresh_from_db()
+        ya_asignada.refresh_from_db()
+        self.assertEqual(hueca.sucursal_id, crucero.id)
+        self.assertEqual(ya_asignada.sucursal_id, matriz.id)  # nunca sobreescribe
 
     def test_sucursal_display_prefiere_fk_y_cae_al_texto(self):
         suc = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)

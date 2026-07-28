@@ -9,6 +9,8 @@ from typing import Any
 import requests
 from django.utils import timezone
 
+from core.branch_catalog import resolver_sucursal_por_texto
+
 from .models import AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, ImportacionChecador, Turno
 from .services import generar_horas_extra_automatico
 from .services_asistencia_reglas import evaluar_dia_empleado
@@ -47,20 +49,8 @@ def _parse_hik_time(time_str: str):
 
 
 def _resolver_sucursal(empleado: Empleado):
-    raw = getattr(empleado, "sucursal", None)
-    if not raw:
-        return None
-    if hasattr(raw, "pk"):
-        return raw
-    nombre = str(raw).strip()
-    if not nombre:
-        return None
-    try:
-        from core.models import Sucursal
-
-        return Sucursal.objects.filter(codigo__iexact=nombre).first() or Sucursal.objects.filter(nombre__iexact=nombre).first()
-    except Exception:
-        return None
+    # Vínculo canónico por FK (FASE 2); resolver de texto solo como respaldo.
+    return empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
 
 
 def _detectar_turno(hora_entrada: dtime) -> Turno | None:
