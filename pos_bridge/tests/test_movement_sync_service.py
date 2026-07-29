@@ -487,6 +487,68 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(job.result_summary["inventory_entries_created"], 1)
         self.assertEqual(job.result_summary["skipped_non_storage_branch"], 0)
 
+    def test_modo_snapshot_refresca_lineas_sin_escribir_inventario(self):
+        """Contrato logística/inventario: la ruta se guía por Point (snapshot);
+        el libro de inventario lo escribe después el proceso programado."""
+        insumo = Insumo.objects.create(
+            nombre="Betún snapshot",
+            nombre_point="Betún snapshot",
+            codigo_point="01BS01",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        transfer_line = FakeTransferLine(
+            origin_branch={"external_id": "10", "name": "Produccion Crucero", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="32293",
+            detail_external_id="474445",
+            registered_at=datetime(2026, 3, 20, 8, 0, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 3, 20, 14, 0, tzinfo=timezone.utc),
+            received_at=datetime(2026, 3, 20, 15, 9, tzinfo=timezone.utc),
+            requested_by="Johana López",
+            sent_by="Produccion Crucero",
+            received_by="CEDIS",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="KG",
+            unit_cost=Decimal("86.195541"),
+            requested_quantity=Decimal("15.270"),
+            sent_quantity=Decimal("15.270"),
+            received_quantity=Decimal("15.270"),
+            is_insumo=True,
+            is_received=True,
+            is_cancelled=False,
+            is_finalized=True,
+            raw_payload={"detail": {"Codigo": insumo.codigo_point}},
+            source_hash="transfer-snapshot-1",
+        )
+        service = PointMovementSyncService(transfer_extractor=FakeTransferExtractor([transfer_line]))
+
+        job = service.run_transfer_sync(
+            start_date=date(2026, 3, 20),
+            end_date=date(2026, 3, 20),
+            apply_inventory=False,
+        )
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertIs(job.parameters["apply_inventory"], False)
+        self.assertEqual(PointTransferLine.objects.count(), 1)
+        self.assertFalse(MovimientoInventario.objects.exists())
+        self.assertFalse(ExistenciaInsumo.objects.exists())
+        self.assertEqual(job.result_summary["inventory_entries_created"], 0)
+
+        # El proceso programado (modo completo, default) aplica el inventario
+        # diferido de forma idempotente sobre el mismo snapshot.
+        job_completo = service.run_transfer_sync(start_date=date(2026, 3, 20), end_date=date(2026, 3, 20))
+
+        self.assertEqual(job_completo.status, "SUCCESS")
+        movimiento = MovimientoInventario.objects.get(source_hash="transfer-snapshot-1")
+        self.assertEqual(movimiento.almacen, "CUARTO_FRIO")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO").stock_actual,
+            Decimal("15.270"),
+        )
+
     def test_run_transfer_sync_creates_cedis_entry_for_received_finished_product_into_cedis(self):
         receta = Receta.objects.create(
             nombre="Empanada de Manzana",
