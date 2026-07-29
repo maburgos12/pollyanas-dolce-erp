@@ -1489,8 +1489,20 @@ def _registrar_alerta_recarga_sync(
     metadata = dict(evento.metadata or {})
     metadata["ultima_observacion_en"] = observada_en.isoformat()
     metadata["ultima_observacion_actor_id"] = getattr(actor, "id", None)
+    # Un reintento con el mismo snapshot puede fallar por una causa distinta
+    # (ej. primero timeout, luego error de datos); refrescar la causa evita que
+    # el jefe diagnostique con información vieja.
+    campos = ["metadata"]
+    sync_error_actual = snapshot.get("sync_error")
+    snapshot_registrado = dict(metadata.get("snapshot") or {})
+    if sync_error_actual and snapshot_registrado.get("sync_error") != sync_error_actual:
+        snapshot_registrado["sync_error"] = sync_error_actual
+        metadata["snapshot"] = snapshot_registrado
+    if detalle and evento.descripcion != detalle:
+        evento.descripcion = detalle
+        campos.append("descripcion")
     evento.metadata = metadata
-    evento.save(update_fields=["metadata"])
+    evento.save(update_fields=campos)
     for usuario in _usuarios_diferencia_carga(ruta):
         if not usuario.is_active:
             continue

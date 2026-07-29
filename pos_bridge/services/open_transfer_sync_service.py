@@ -71,7 +71,10 @@ class OpenTransferSyncService:
                     flat=True,
                 )
             )
-            summary = self.movement_service.persist_transfer_lines(sync_job, lines)
+            # Flujo de logística (carga inicial): sólo snapshot, igual que la
+            # recarga. Las líneas abiertas no están recibidas, así que esto no
+            # cambia lo que se escribe hoy; hace explícita la regla de negocio.
+            summary = self.movement_service.persist_transfer_lines(sync_job, lines, apply_inventory=False)
             transfer_ids = {line.transfer_external_id for line in lines if line.transfer_external_id}
             branch_ids = self._requesting_branch_ids(fecha=fecha, transfer_ids=transfer_ids, sync_job=sync_job)
             active_branch_ids = set(sucursales_operativas(fecha).values_list("id", flat=True))

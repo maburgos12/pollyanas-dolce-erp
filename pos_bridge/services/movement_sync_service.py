@@ -639,12 +639,6 @@ class PointMovementSyncService:
                 staged_created += 1
             else:
                 staged_updated += 1
-            if not apply_inventory:
-                # Modo snapshot (logística): la ruta se guía por lo que marca Point,
-                # sin escribir el libro de inventario del ERP. La aplicación contable
-                # corre en los procesos propios de inventario (scheduler/comandos) y
-                # sus fallas no deben poder frenar una recarga de ruta.
-                continue
             line = PointTransferLine.objects.get(source_hash=item.source_hash)
             if not line.is_received:
                 continue
@@ -655,6 +649,12 @@ class PointMovementSyncService:
                 if self._point_inventory_location(destination_branch) is None:
                     skipped_non_storage += 1
                     continue
+                if not apply_inventory:
+                    # Modo snapshot (logística): la ruta se guía por lo que marca
+                    # Point, sin escribir el libro de inventario del ERP. La parte
+                    # contable la aplica el proceso programado de pos_bridge y sus
+                    # fallas no deben poder frenar una recarga de ruta.
+                    continue
                 created_entry = self._upsert_transfer_inventory_movement(line=line)
                 if created_entry:
                     inventory_entries_created += 1
@@ -662,12 +662,17 @@ class PointMovementSyncService:
                     inventory_entries_updated += 1
                 continue
             if (not line.is_insumo) and line.receta is not None:
+                if not apply_inventory:
+                    continue
                 created_entry = self._upsert_transfer_cedis_movement(line=line)
                 if created_entry:
                     cedis_entries_created += 1
                 else:
                     cedis_entries_updated += 1
                 continue
+            # La cola de matching se siembra también en modo snapshot: detectar un
+            # producto Point sin mapear no es contabilidad y no debe esperar al
+            # proceso diario para hacerse visible al equipo.
             unresolved += 1
             self._upsert_pending_match(
                 tipo=PointPendingMatch.TIPO_INSUMO if line.is_insumo else PointPendingMatch.TIPO_PRODUCTO,
