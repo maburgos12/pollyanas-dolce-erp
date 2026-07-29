@@ -1,10 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from unittest.mock import patch
+from uuid import uuid4
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import close_old_connections
 from django.test import TransactionTestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -602,7 +606,21 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             public_api_client=self.api_client,
             payload_snapshot={"token": "no-exponer"},
             point_note_id="POINT-EXEC-1",
-            point_note_snapshot={"pk_nota": "POINT-EXEC-1"},
+            point_note_folio="EXEC-1",
+            point_note_snapshot={
+                "pk_nota": "POINT-EXEC-1",
+                "lines": [
+                    {
+                        "point_code": "PASTEL-1",
+                        "description": "Pastel chocolate",
+                        "quantity": "2",
+                        "unit_price": "350.00",
+                        "discount": "0",
+                        "line_total": "700.00",
+                    }
+                ],
+            },
+            monto_estimado="700.00",
         )
         self.solicitud = SolicitudDomicilio.objects.create(
             pedido_cliente=pedido,
@@ -612,6 +630,7 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             cliente_telefono=cliente.telefono,
             direccion=direccion.direccion,
             notas="otra nota interna",
+            instrucciones_entrega="Llamar al llegar",
             repartidor=self.driver,
             unidad=self.unidad,
             estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
@@ -627,6 +646,9 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.status_url = reverse(
             "api_public_logistica_domicilio_estatus",
             args=[self.solicitud.id],
+        )
+        self.location_url = (
+            f"/api/public/v1/logistica/domicilios/{self.solicitud.id}/ubicacion/"
         )
 
     def payload(self, operation_id="48bf68a2-8642-4fd8-bc25-eaa23a0e5a84"):
@@ -648,9 +670,18 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
                 "id", "estatus", "revision", "cliente_nombre",
                 "cliente_telefono", "direccion", "referencias", "latitud",
                 "longitud", "place_id", "descripcion", "canal",
-                "fecha_compromiso",
+                "fecha_compromiso", "folio", "instrucciones_entrega",
+                "unidad", "productos", "total",
             },
         )
+        self.assertEqual(item["estatus"], "ASIGNADO")
+        self.assertEqual(item["folio"], "EXEC-1")
+        self.assertEqual(item["unidad"]["codigo"], "M2M-EXEC-U")
+        self.assertEqual(
+            item["productos"],
+            [{"codigo": "PASTEL-1", "descripcion": "Pastel chocolate", "cantidad": "2"}],
+        )
+        self.assertEqual(str(item["total"]), "700.00")
         rendered = str(response.data)
         self.assertNotIn("oculto@example.com", rendered)
         self.assertNotIn("secreta", rendered)
@@ -662,6 +693,167 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.solicitud.refresh_from_db()
         terminal = self.client.get(self.list_url, **self.auth)
         self.assertEqual(terminal.data, {"results": []})
+
+    def test_flujo_canonico_rechaza_saltos_doble_cierre_y_exige_motivo_incidencia(self):
+        skipped = self.client.post(
+            self.status_url,
+            {**self.payload(), "estatus": "ENTREGADO"},
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(skipped.status_code, status.HTTP_409_CONFLICT)
+
+        incident_without_reason = self.client.post(
+            self.status_url,
+            {
+                **self.payload(str(uuid4())),
+                "estatus": "INCIDENCIA",
+                "motivo": "   ",
+            },
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(incident_without_reason.status_code, status.HTTP_400_BAD_REQUEST)
+
+        started = self.client.post(
+            self.status_url,
+            self.payload(str(uuid4())),
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(started.status_code, status.HTTP_200_OK)
+        self.assertEqual(started.data["estatus"], "EN_RUTA")
+
+        delivered_payload = {
+            **self.payload(str(uuid4())),
+            "estatus": "ENTREGADO",
+        }
+        delivered = self.client.post(
+            self.status_url,
+            delivered_payload,
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(delivered.status_code, status.HTTP_200_OK)
+        duplicate_close = self.client.post(
+            self.status_url,
+            {**delivered_payload, "operation_id": str(uuid4())},
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(duplicate_close.status_code, status.HTTP_409_CONFLICT)
+
+    def test_incidencia_desde_asignado_es_terminal_y_replay_exacto(self):
+        operation_id = str(uuid4())
+        payload = {
+            **self.payload(operation_id),
+            "estatus": "INCIDENCIA",
+            "motivo": "Cliente no responde; esperar instrucción",
+        }
+        first = self.client.post(
+            self.status_url, payload, format="json", **self.auth
+        )
+        replay = self.client.post(
+            self.status_url, payload, format="json", **self.auth
+        )
+        conflict = self.client.post(
+            self.status_url,
+            {**payload, "motivo": "Dirección incorrecta"},
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["estatus"], "INCIDENCIA")
+        self.assertEqual(first.data, replay.data)
+        self.assertEqual(conflict.status_code, status.HTTP_409_CONFLICT)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(
+            self.solicitud.incidencia_motivo,
+            "Cliente no responde; esperar instrucción",
+        )
+
+    def test_gps_valida_rango_antiguedad_precision_idempotencia_y_propiedad(self):
+        from logistica import models as logistica_models
+
+        self.assertTrue(
+            hasattr(logistica_models, "SolicitudDomicilioLocationOperation")
+        )
+        location_operation_model = (
+            logistica_models.SolicitudDomicilioLocationOperation
+        )
+        now = timezone.now()
+        operation_id = str(uuid4())
+        payload = {
+            "repartidor_id": self.driver.id,
+            "operation_id": operation_id,
+            "latitud": 24.8091,
+            "longitud": -107.394,
+            "accuracy_m": 18.5,
+            "captured_at": now.isoformat(),
+            "actor": {"id": "app-driver", "nombre": "App repartidor"},
+        }
+        first = self.client.post(
+            self.location_url, payload, format="json", **self.auth
+        )
+        replay = self.client.post(
+            self.location_url, payload, format="json", **self.auth
+        )
+        with patch(
+            "logistica.services_domicilio_location.timezone.now",
+            return_value=now + timedelta(minutes=11),
+        ):
+            delayed_replay = self.client.post(
+                self.location_url, payload, format="json", **self.auth
+            )
+        mismatch = self.client.post(
+            self.location_url,
+            {**payload, "latitud": 24.8},
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data, replay.data)
+        self.assertEqual(first.data, delayed_replay.data)
+        self.assertEqual(mismatch.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(location_operation_model.objects.count(), 1)
+        location_audit = AuditLog.objects.get(action="DRIVER_LOCATION")
+        self.assertNotIn("latitud", str(location_audit.payload))
+        self.assertNotIn("longitud", str(location_audit.payload))
+
+        for invalid in (
+            {**payload, "operation_id": str(uuid4()), "latitud": 91},
+            {**payload, "operation_id": str(uuid4()), "longitud": -181},
+            {**payload, "operation_id": str(uuid4()), "accuracy_m": 501},
+            {
+                **payload,
+                "operation_id": str(uuid4()),
+                "captured_at": (now - timedelta(minutes=11)).isoformat(),
+            },
+            {
+                **payload,
+                "operation_id": str(uuid4()),
+                "captured_at": (now + timedelta(minutes=3)).isoformat(),
+            },
+        ):
+            response = self.client.post(
+                self.location_url, invalid, format="json", **self.auth
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        other_user = User.objects.create_user(username="gps_other", password="x")
+        other = Repartidor.objects.create(
+            user=other_user,
+            sucursal=self.driver.sucursal,
+        )
+        foreign = self.client.post(
+            self.location_url,
+            {**payload, "operation_id": str(uuid4()), "repartidor_id": other.id},
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(foreign.status_code, status.HTTP_409_CONFLICT)
 
     def test_operacion_durable_replay_exacto_y_mismatch(self):
         first = self.client.post(
@@ -822,7 +1014,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )
 
-    def test_operation_id_distintos_concurrentes_segundo_es_idempotente(self):
+    def test_operation_id_distintos_concurrentes_segundo_es_rechazado(self):
         operation_ids = [
             "355aa71e-872b-46df-b476-19105fd3a050",
             "79258634-b608-4b1a-81b1-4d6388a79f0b",
@@ -839,13 +1031,10 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
 
         self.assertEqual(
             len([item for item in results if isinstance(item, dict)]),
-            2,
+            1,
         )
-        self.assertEqual(
-            sorted(item["idempotent"] for item in results),
-            [False, True],
-        )
-        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 2)
+        self.assertIn(409, results)
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
         self.assertEqual(
             AuditLog.objects.filter(action="STATUS_CHANGE").count(), 1
         )

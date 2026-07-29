@@ -111,6 +111,7 @@ from .driver_identity_views import (
 )
 from .logistica_public_views import (
     PublicLogisticaDomicilioAsignarView,
+    PublicLogisticaDomicilioLocationView,
     PublicLogisticaDomicilioStatusView,
     PublicLogisticaRepartidorDomiciliosView,
     PublicLogisticaRepartidoresDisponiblesView,
@@ -497,6 +498,11 @@ urlpatterns = [
         "public/v1/logistica/domicilios/<int:solicitud_id>/estatus/",
         PublicLogisticaDomicilioStatusView.as_view(),
         name="api_public_logistica_domicilio_estatus",
+    ),
+    path(
+        "public/v1/logistica/domicilios/<int:solicitud_id>/ubicacion/",
+        PublicLogisticaDomicilioLocationView.as_view(),
+        name="api_public_logistica_domicilio_ubicacion",
     ),
     path("public/v1/pickup-availability/", PublicPickupAvailabilityView.as_view(), name="api_public_pickup_availability"),
     path("public/v1/pickup-reservations/", PublicPickupReservationsView.as_view(), name="api_public_pickup_reservations"),
