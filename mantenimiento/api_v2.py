@@ -94,6 +94,15 @@ def historial_v2(request):
     filters = {name: (request.query_params.get(name) or "todo").lower() for name in HISTORY_ALLOWED}
     if any(value not in HISTORY_ALLOWED[name] for name, value in filters.items()):
         return Response({"error": "Filtro no válido."}, status=400)
+    author_raw = (request.query_params.get("autor") or "").strip().lower()
+    author_id = None
+    if author_raw:
+        if author_raw == "mio":
+            author_id = request.user.pk
+        else:
+            author_id = _positive_int(author_raw, None)
+            if author_id is None:
+                return Response({"error": "Autor no válido."}, status=400)
     page = _positive_int(request.query_params.get("page"), 1)
     page_size = _positive_int(request.query_params.get("page_size"), 25)
     if page is None or page_size is None:
@@ -102,7 +111,8 @@ def historial_v2(request):
     sql_filters = {
         "tipo": filters["tipo"], "estado": filters["estado"],
         "sucursal": request.query_params.get("sucursal"), "activo": request.query_params.get("activo"),
-        "unidad": request.query_params.get("unidad"), "q": (request.query_params.get("q") or "").strip(),
+        "unidad": request.query_params.get("unidad"), "autor": author_id,
+        "q": (request.query_params.get("q") or "").strip(),
     }
     for key in ("sucursal", "activo", "unidad"):
         if sql_filters[key]:

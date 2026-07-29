@@ -20,7 +20,14 @@ from django.urls import resolve, reverse
 from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
-from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from logistica.models import (
+    ReparacionUnidad,
+    Repartidor,
+    ReporteUnidad,
+    ServicioRealizadoUnidad,
+    TipoServicioUnidad,
+    Unidad,
+)
 from mantenimiento.services_access import (
     authorized_fallas,
     authorized_orders,
@@ -904,6 +911,121 @@ class MaintenanceUnifiedHistoryV2Tests(TestCase):
             {row["uid"] for row in payload["results"]},
             {f"falla:{falla.pk}", f"orden:{order.pk}", f"reparacion:{repair.pk}", f"servicio_unidad:{service.pk}"},
         )
+
+    def test_filters_history_by_current_or_selected_author_across_all_sources(self):
+        current_driver = Repartidor.objects.create(
+            user=self.user,
+            sucursal=self.branch,
+        )
+        other_driver = Repartidor.objects.create(
+            user=self.actor,
+            sucursal=self.branch,
+        )
+        own_items = [
+            ReporteFalla.objects.create(
+                sucursal=self.branch,
+                categoria=self.category,
+                titulo="Reporte propio",
+                descripcion="x",
+                reportado_por=self.user,
+            ),
+            OrdenMantenimiento.objects.create(
+                activo_ref=self.asset,
+                descripcion="Orden propia",
+                creado_por=self.user,
+            ),
+            ReporteUnidad.objects.create(
+                unidad=self.unit,
+                tipo="falla",
+                descripcion="Reporte de unidad propio",
+                repartidor=current_driver,
+            ),
+            ReparacionUnidad.objects.create(
+                unidad=self.unit,
+                fecha_ingreso=timezone.localdate(),
+                descripcion_falla="Reparación propia",
+                registrado_por=self.user,
+            ),
+            ServicioRealizadoUnidad.objects.create(
+                unidad=self.unit,
+                tipo_servicio=self.service_type,
+                fecha_servicio=timezone.localdate(),
+                registrado_por=self.user,
+            ),
+        ]
+        other_items = [
+            ReporteFalla.objects.create(
+                sucursal=self.branch,
+                categoria=self.category,
+                titulo="Reporte ajeno",
+                descripcion="x",
+                reportado_por=self.actor,
+            ),
+            OrdenMantenimiento.objects.create(
+                activo_ref=self.asset,
+                descripcion="Orden ajena",
+                creado_por=self.actor,
+            ),
+            ReporteUnidad.objects.create(
+                unidad=self.unit,
+                tipo="falla",
+                descripcion="Reporte de unidad ajeno",
+                repartidor=other_driver,
+            ),
+            ReparacionUnidad.objects.create(
+                unidad=self.unit,
+                fecha_ingreso=timezone.localdate(),
+                descripcion_falla="Reparación ajena",
+                registrado_por=self.actor,
+            ),
+            ServicioRealizadoUnidad.objects.create(
+                unidad=self.unit,
+                tipo_servicio=self.service_type,
+                fecha_servicio=timezone.localdate(),
+                registrado_por=self.actor,
+            ),
+        ]
+
+        mine = self.client.get("/api/mantenimiento/v2/historial/", {
+            "periodo": "todo",
+            "autor": "mio",
+            "page_size": 100,
+        }).json()
+        selected = self.client.get("/api/mantenimiento/v2/historial/", {
+            "periodo": "todo",
+            "autor": self.actor.pk,
+            "page_size": 100,
+        }).json()
+
+        expected_own_uids = {
+            f"falla:{own_items[0].pk}",
+            f"orden:{own_items[1].pk}",
+            f"reporte_unidad:{own_items[2].pk}",
+            f"reparacion:{own_items[3].pk}",
+            f"servicio_unidad:{own_items[4].pk}",
+        }
+        expected_other_uids = {
+            f"falla:{other_items[0].pk}",
+            f"orden:{other_items[1].pk}",
+            f"reporte_unidad:{other_items[2].pk}",
+            f"reparacion:{other_items[3].pk}",
+            f"servicio_unidad:{other_items[4].pk}",
+        }
+        self.assertEqual(mine["pagination"]["total"], 5)
+        self.assertEqual({row["uid"] for row in mine["results"]}, expected_own_uids)
+        self.assertEqual(selected["pagination"]["total"], 5)
+        self.assertEqual({row["uid"] for row in selected["results"]}, expected_other_uids)
+        self.assertTrue(all(row["actor"]["id"] == self.user.pk for row in mine["results"]))
+        self.assertTrue(all(row["actor"]["id"] == self.actor.pk for row in selected["results"]))
+
+    def test_rejects_invalid_history_author_filter(self):
+        response = self.client.get(
+            "/api/mantenimiento/v2/historial/",
+            {"periodo": "todo", "autor": "no-valido"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Autor no válido."})
 
     def test_scope_linked_orders_exclusive_types_and_multi_page_stability(self):
         linked = OrdenMantenimiento.objects.create(

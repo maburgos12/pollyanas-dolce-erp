@@ -168,6 +168,8 @@ class OperacionMermasInsumosApiTests(TestCase):
             pagina,
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
+        self.assertContains(pagina, "data-catalog-status")
+        self.assertContains(pagina, "20260728-catalog-recovery-v2")
         self.assertContains(pagina, "La existencia se consulta directamente en Point")
 
     @patch("operacion.views.consultar_existencia_insumo_point")
