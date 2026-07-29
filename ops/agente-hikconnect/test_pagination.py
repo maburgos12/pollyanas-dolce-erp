@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -45,19 +46,22 @@ class ClienteFalso(HikConnectClient):
         return self.paginas[page_index - 1] if page_index <= len(self.paginas) else []
 
 
-def test_no_corta_por_pagina_desordenada():
-    """El caso real: marcaje viejo en pagina 1, marcaje bueno en pagina 2."""
+def test_conserva_device_time_viejo_por_subida_reciente():
+    """No filtra por deviceTime: la nube pagina por momento de subida."""
     cliente = ClienteFalso([[registro("viejo", 60 * 48)], [registro("reciente", 10)], []])
     encontrados = cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
     guids = {record.record_guid for record in encontrados}
-    assert guids == {"reciente"}, f"debio recuperar el marcaje de la pagina 2, obtuvo {guids}"
+    assert guids == {"viejo", "reciente"}, f"debio conservar ambos marcajes, obtuvo {guids}"
+    assert encontrados.complete is True
+    assert encontrados.next_page == 1
 
 
-def test_corta_tras_paginas_secas():
-    """Sin marcajes en ventana no debe recorrer la nube entera."""
+def test_agotamiento_de_paginas_deja_continuacion_pendiente():
     cliente = ClienteFalso([[registro(f"viejo{i}", 60 * 48)] for i in range(8)])
-    cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
-    assert cliente.ultima_pagina_pedida == 3, f"debio parar en la pagina 3, pidio {cliente.ultima_pagina_pedida}"
+    encontrados = cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
+    assert cliente.ultima_pagina_pedida == 8
+    assert encontrados.complete is False
+    assert encontrados.next_page == 9
 
 
 def test_deduplica_por_guid():
@@ -67,8 +71,60 @@ def test_deduplica_por_guid():
     assert len(encontrados) == 1, f"esperaba 1 registro deduplicado, obtuvo {len(encontrados)}"
 
 
+def test_reanuda_desde_pagina_pendiente():
+    cliente = ClienteFalso(
+        [
+            [registro("pagina-1", 1)],
+            [registro("pagina-2", 2)],
+            [registro("pagina-3", 3)],
+            [],
+        ]
+    )
+    encontrados = cliente.fetch_records_since(
+        start_dt=VENTANA,
+        page_size=100,
+        max_pages=3,
+        start_page=2,
+    )
+    assert {record.record_guid for record in encontrados} == {"pagina-1", "pagina-2", "pagina-3"}
+    assert encontrados.complete is False
+    assert encontrados.next_page == 4
+
+
+def test_registro_cloud_invalido_falla_la_pagina_sin_avanzar():
+    class Response:
+        status = 200
+
+        def json(self):
+            return {
+                "errorCode": 0,
+                "data": {
+                    "recordList": [
+                        {
+                            "recordGuid": "guid-malformado",
+                            "deviceTime": "fecha-invalida",
+                            "personInfo": {"baseInfo": {"personCode": "328"}},
+                        }
+                    ]
+                },
+            }
+
+    cliente = HikConnectClient.__new__(HikConnectClient)
+    cliente.page = SimpleNamespace(
+        request=SimpleNamespace(post=lambda *_args, **_kwargs: Response())
+    )
+    try:
+        cliente.fetch_records_page(7, 100, require_login=False)
+    except RuntimeError as exc:
+        assert "guid-malformado" in str(exc).lower()
+    else:
+        raise AssertionError("un raw invalido no debe descartarse silenciosamente")
+
+
 if __name__ == "__main__":
-    test_no_corta_por_pagina_desordenada()
-    test_corta_tras_paginas_secas()
+    test_conserva_device_time_viejo_por_subida_reciente()
+    test_agotamiento_de_paginas_deja_continuacion_pendiente()
     test_deduplica_por_guid()
-    print("OK: los 3 checks de paginacion pasan")
+    test_reanuda_desde_pagina_pendiente()
+    test_registro_cloud_invalido_falla_la_pagina_sin_avanzar()
+    print("OK: los 5 checks de paginacion pasan")

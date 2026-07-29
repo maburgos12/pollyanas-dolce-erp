@@ -1,13 +1,8 @@
-"""Check minimo del marcado de envio. Correr: .venv/bin/python test_marcado.py
-
-Encierra la fuga que perdio los marcajes de ARLETH (codigo 328) el 28-jul-2026:
-`send_and_mark` marcaba TODO el lote como enviado cuando `procesados > 0`, incluidos
-los eventos que el ERP rechazo por "empleado no encontrado". Como un marcaje enviado
-no se reintenta nunca, al vincular la identidad sus checadas ya no regresaban solas.
-"""
+"""Checks de entrega y clasificacion estable. Correr: python3 test_marcado.py."""
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -16,79 +11,112 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import TIMEZONE
 from hikconnect_client import CloudRecord
 import main
+import state
 
 AHORA = datetime(2026, 7, 28, 8, 0, tzinfo=TIMEZONE)
 
 
-def registro(guid: str, employee_no: str) -> CloudRecord:
+def registro(guid: str, employee_no: str = "328") -> CloudRecord:
     return CloudRecord(
         record_guid=guid,
         employee_no=employee_no,
         name="Prueba",
         department="",
         device_time=AHORA,
-        device_name="",
-        device_serial_no="",
+        device_name="Checador",
+        device_serial_no="hik-01",
         raw={},
     )
 
 
-def marcados_tras_enviar(respuesta: dict, records: list[CloudRecord]) -> list[str]:
-    """Corre send_and_mark contra un ERP simulado y devuelve los guid marcados."""
-    marcados: list[str] = []
-    main.send_events = lambda events: respuesta
-    main.mark_sent = lambda guid, emp, ts: marcados.append(guid)
-    events = [{"employee_no": record.employee_no} for record in records]
-    main.send_and_mark(events, records, dry_run=False)
-    return marcados
+def isolated_db():
+    temp_dir = tempfile.TemporaryDirectory()
+    state.DB_PATH = Path(temp_dir.name) / "state.db"
+    main.DB_PATH = state.DB_PATH if hasattr(main, "DB_PATH") else state.DB_PATH
+    state.init_db()
+    return temp_dir
 
 
-def test_no_marca_lo_que_el_erp_rechazo():
-    """El caso real: 328 rechazada en un lote donde otros si entraron."""
-    records = [registro("guid-ok", "255"), registro("guid-rechazado", "328")]
-    respuesta = {
-        "procesados": 1,
-        "errores": 1,
-        "duplicados": 0,
-        "detalle": [
-            {"employee_no": "255", "fecha": "2026-07-28", "status": "checkIn", "resultado": "creado"},
-            {"employee_no": "328", "resultado": "empleado no encontrado"},
-        ],
-    }
-    marcados = marcados_tras_enviar(respuesta, records)
-    assert marcados == ["guid-ok"], f"debio marcar solo el aceptado, marco {marcados}"
+def test_outbox_existe_antes_del_post_y_ack_cierra():
+    tmp = isolated_db()
+    original_send = main.send_events
+    try:
+        records = [registro("guid-antes-post")]
+        events, selected = main.build_events(records, dry_run=False)
+
+        def fake_send(outgoing):
+            getter = getattr(state, "get_outbox_event", None)
+            assert getter is not None, "el evento no se persistio en un outbox antes del POST"
+            queued = getter("guid-antes-post")
+            assert queued["status"] == "pending"
+            assert queued["payload"] == outgoing[0]
+            return {
+                "contract_version": 2,
+                "batch_id": "fake",
+                "results": [
+                    {"event_id": "guid-antes-post", "outcome": "accepted"},
+                ],
+            }
+
+        main.send_events = fake_send
+        result = main.send_and_mark(events, selected, dry_run=False)
+        assert result["acked"] == 1
+        assert state.get_outbox_event("guid-antes-post")["status"] == "acked"
+    finally:
+        main.send_events = original_send
+        tmp.cleanup()
 
 
-def test_marca_todo_cuando_el_erp_acepta():
-    records = [registro("a", "255"), registro("b", "298")]
-    respuesta = {
-        "procesados": 2,
-        "errores": 0,
-        "duplicados": 0,
-        "detalle": [
-            {"employee_no": "255", "fecha": "2026-07-28", "resultado": "creado"},
-            {"employee_no": "298", "fecha": "2026-07-28", "resultado": "marca duplicada"},
-        ],
-    }
-    marcados = marcados_tras_enviar(respuesta, records)
-    assert marcados == ["a", "b"], f"debio marcar ambos, marco {marcados}"
+def test_timeout_deja_pending_y_clasificacion_inmutable():
+    tmp = isolated_db()
+    original_send = main.send_events
+    try:
+        record = registro("guid-reintento")
+        events, selected = main.build_events([record], dry_run=False)
+        first_kind = events[0]["kind"]
+
+        def timeout(_events):
+            raise TimeoutError("sin conexion")
+
+        main.send_events = timeout
+        result = main.send_and_mark(events, selected, dry_run=False)
+        assert result["errors"] == 1
+        pending = state.get_outbox_event("guid-reintento")
+        assert pending["status"] == "pending"
+        assert pending["attempts"] == 1
+
+        retry_events, _ = main.build_events([record], dry_run=False)
+        assert retry_events[0]["kind"] == first_kind
+        assert state.get_outbox_event("guid-reintento")["payload"]["kind"] == first_kind
+    finally:
+        main.send_events = original_send
+        tmp.cleanup()
 
 
-def test_motivo_de_rechazo_nuevo_tambien_se_reintenta():
-    """Un motivo que el ERP agregue despues debe contar como rechazo, no colarse."""
-    records = [registro("z", "999")]
-    respuesta = {
-        "procesados": 1,
-        "errores": 1,
-        "duplicados": 0,
-        "detalle": [{"employee_no": "999", "resultado": "motivo que el ERP agregue despues"}],
-    }
-    marcados = marcados_tras_enviar(respuesta, records)
-    assert marcados == [], f"un motivo desconocido debe reintentarse, marco {marcados}"
+def test_lote_solo_duplicados_termina_correctamente():
+    tmp = isolated_db()
+    original_send = main.send_events
+    try:
+        records = [registro("a", "255"), registro("b", "298")]
+        events, selected = main.build_events(records, dry_run=False)
+        main.send_events = lambda outgoing: {
+            "contract_version": 2,
+            "batch_id": "fake",
+            "results": [
+                {"event_id": item["event_id"], "outcome": "duplicate"}
+                for item in outgoing
+            ],
+        }
+        result = main.send_and_mark(events, selected, dry_run=False)
+        assert result == {"acked": 2, "pending": 0, "review": 0, "errors": 0}
+        assert state.list_pending_events() == []
+    finally:
+        main.send_events = original_send
+        tmp.cleanup()
 
 
 if __name__ == "__main__":
-    test_no_marca_lo_que_el_erp_rechazo()
-    test_marca_todo_cuando_el_erp_acepta()
-    test_motivo_de_rechazo_nuevo_tambien_se_reintenta()
-    print("OK: los 3 checks de marcado pasan")
+    test_outbox_existe_antes_del_post_y_ack_cierra()
+    test_timeout_deja_pending_y_clasificacion_inmutable()
+    test_lote_solo_duplicados_termina_correctamente()
+    print("OK: los 3 checks de entrega y marcado pasan")

@@ -285,6 +285,105 @@ class EmpleadoIdentidadPendiente(models.Model):
         return f"{self.codigo_externo} · {self.nombre_externo}"
 
 
+class EventoHikCloud(models.Model):
+    """Recibo durable e idempotente de un evento crudo de Hik-Connect."""
+
+    ESTADO_RECIBIDO = "received"
+    ESTADO_ACEPTADO = "accepted"
+    ESTADO_DIFERIDO = "deferred"
+    ESTADO_RECHAZADO = "rejected"
+    ESTADO_CHOICES = [
+        (ESTADO_RECIBIDO, "Recibido"),
+        (ESTADO_ACEPTADO, "Aceptado"),
+        (ESTADO_DIFERIDO, "Diferido"),
+        (ESTADO_RECHAZADO, "Rechazado"),
+    ]
+
+    fuente = models.CharField(max_length=32, db_index=True)
+    event_id = models.CharField(max_length=128)
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField()
+    codigo_externo = models.CharField(max_length=80, db_index=True)
+    ocurrido_en = models.DateTimeField(db_index=True)
+    tipo_evento = models.CharField(max_length=20)
+    device_id = models.CharField(max_length=128, blank=True, default="")
+    empleado = models.ForeignKey(
+        Empleado,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="eventos_hik_cloud",
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADO_CHOICES,
+        default=ESTADO_RECIBIDO,
+        db_index=True,
+    )
+    reason_code = models.CharField(max_length=64, blank=True, default="")
+    retryable = models.BooleanField(default=False)
+    projection_status = models.CharField(max_length=20, default="pending", db_index=True)
+    effects_status = models.CharField(max_length=20, default="pending", db_index=True)
+    projection_version = models.PositiveIntegerField(default=1)
+    effects_version = models.PositiveIntegerField(default=0)
+    intentos = models.PositiveIntegerField(default=1)
+    conflict_count = models.PositiveIntegerField(default=0)
+    last_conflict_hash = models.CharField(max_length=64, blank=True, default="")
+    ultimo_error = models.TextField(blank=True, default="")
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    procesado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["fuente", "event_id"],
+                name="uniq_evento_hik_cloud_fuente_event_id",
+            ),
+        ]
+        ordering = ["creado_en", "id"]
+        verbose_name = "Evento crudo de Hik-Connect"
+        verbose_name_plural = "Eventos crudos de Hik-Connect"
+
+    def __str__(self) -> str:
+        return f"{self.fuente}:{self.event_id}"
+
+
+class EstadoIntegracionHik(models.Model):
+    ESTADO_HEALTHY = "healthy"
+    ESTADO_RECOVERING = "recovering"
+    ESTADO_ACTION_REQUIRED = "action_required"
+    ESTADO_CHOICES = [
+        (ESTADO_HEALTHY, "Al día"),
+        (ESTADO_RECOVERING, "Recuperándose"),
+        (ESTADO_ACTION_REQUIRED, "Requiere acción"),
+    ]
+
+    nombre = models.CharField(max_length=40, unique=True, default="hikconnect_cloud")
+    estado = models.CharField(
+        max_length=24,
+        choices=ESTADO_CHOICES,
+        default=ESTADO_RECOVERING,
+        db_index=True,
+    )
+    ultimo_ciclo_en = models.DateTimeField(null=True, blank=True)
+    ultimo_exito_en = models.DateTimeField(null=True, blank=True)
+    ultima_marca_cloud_en = models.DateTimeField(null=True, blank=True)
+    outbox_pending = models.PositiveIntegerField(default=0)
+    identity_deferred = models.PositiveIntegerField(default=0)
+    failure_count = models.PositiveIntegerField(default=0)
+    incident_key = models.CharField(max_length=128, blank=True, default="")
+    ultimo_error = models.TextField(blank=True, default="")
+    reportado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Estado de integración Hik-Connect"
+        verbose_name_plural = "Estados de integración Hik-Connect"
+
+    def __str__(self) -> str:
+        return f"{self.nombre}: {self.get_estado_display()}"
+
+
 class NominaPeriodo(models.Model):
     TIPO_SEMANAL = "SEMANAL"
     TIPO_QUINCENAL = "QUINCENAL"

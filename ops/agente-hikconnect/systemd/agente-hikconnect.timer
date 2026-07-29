@@ -1,0 +1,11 @@
+[Unit]
+Description=Sincroniza Hik-Connect cada cinco minutos
+
+[Timer]
+OnCalendar=*-*-* *:0/5:00
+Persistent=true
+AccuracySec=15s
+Unit=agente-hikconnect.service
+
+[Install]
+WantedBy=timers.target
