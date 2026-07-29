@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,11 +23,6 @@ log = logging.getLogger("hikconnect_client")
 
 RECORDS_ENDPOINT = f"{HIKCONNECT_API_BASE}/hccacs/v1/event/certificateRecords/search"
 
-# Paginas seguidas sin registros dentro de la ventana antes de dar por terminado
-# el recorrido. Absorbe el desorden entre momento de subida y device_time.
-PAGINAS_SECAS_PARA_CORTAR = 3
-
-
 @dataclass
 class CloudRecord:
     record_guid: str
@@ -39,6 +33,13 @@ class CloudRecord:
     device_name: str
     device_serial_no: str
     raw: dict[str, Any]
+
+
+class DiscoveryRecords(list[CloudRecord]):
+    def __init__(self, records: list[CloudRecord], *, complete: bool, next_page: int):
+        super().__init__(records)
+        self.complete = complete
+        self.next_page = next_page
 
 
 class HikConnectClient:
@@ -118,38 +119,44 @@ class HikConnectClient:
         items = data.get("data", {}).get("recordList", []) or []
         return [_record_from_api(item) for item in items if _record_from_api(item)]
 
-    def fetch_records_since(self, start_dt: datetime, page_size: int, max_pages: int) -> list[CloudRecord]:
-        """Junta los marcajes con device_time >= start_dt recorriendo la nube por paginas.
-
-        La nube pagina por momento de subida, NO por device_time: un marcaje viejo
-        que el checador subio con retraso aparece en las primeras paginas, y uno
-        reciente puede quedar mas atras. Por eso no se puede cortar en la primera
-        pagina cuyo registro mas viejo caiga fuera de la ventana — eso descartaba
-        marcajes buenos de paginas siguientes y los perdia para siempre. Se corta
-        tras varias paginas seguidas sin nada dentro de la ventana.
-        """
+    def fetch_records_since(
+        self,
+        start_dt: datetime,
+        page_size: int,
+        max_pages: int,
+        start_page: int = 1,
+    ) -> DiscoveryRecords:
+        """Recorre la nube por orden de subida, sin filtrar por deviceTime."""
         self.ensure_login()
-        start_dt = _ensure_aware(start_dt)
         por_guid: dict[str, CloudRecord] = {}
-        paginas_secas = 0
-        for page_index in range(1, max_pages + 1):
+        complete = False
+        next_page = max(1, start_page)
+        continuation_start = max(1, start_page)
+        if continuation_start > 1:
+            page_indexes = [1, *range(continuation_start, continuation_start + max(max_pages - 1, 0))]
+        else:
+            page_indexes = list(range(1, 1 + max_pages))
+        for page_index in page_indexes:
             page_records = self.fetch_records_page(page_index=page_index, page_size=page_size, require_login=False)
             if not page_records:
-                break
-            en_ventana = [record for record in page_records if record.device_time >= start_dt]
-            por_guid.update({record.record_guid: record for record in en_ventana})
-            oldest = min(record.device_time for record in page_records)
+                if page_index != 1 or continuation_start == 1:
+                    complete = True
+                    next_page = 1
+                    break
+                continue
+            por_guid.update({record.record_guid: record for record in page_records})
+            if page_index != 1 or continuation_start == 1:
+                next_page = page_index + 1
             log.info(
-                "Hik-Connect pagina %s: %s registros, %s en ventana, oldest=%s",
+                "Hik-Connect pagina %s: %s registros por orden de subida",
                 page_index,
                 len(page_records),
-                len(en_ventana),
-                oldest.isoformat(),
             )
-            paginas_secas = 0 if en_ventana else paginas_secas + 1
-            if paginas_secas >= PAGINAS_SECAS_PARA_CORTAR:
-                break
-        return sorted(por_guid.values(), key=lambda record: record.device_time)
+        return DiscoveryRecords(
+            sorted(por_guid.values(), key=lambda record: record.device_time),
+            complete=complete,
+            next_page=next_page,
+        )
 
 
 def _ensure_aware(dt: datetime) -> datetime:
@@ -188,18 +195,16 @@ def _record_from_api(raw: dict[str, Any]) -> CloudRecord | None:
 
 
 def record_to_erp_event(record: CloudRecord, attendance_status: str) -> dict[str, Any]:
-    serial_no = int(hashlib.sha1(record.record_guid.encode("utf-8")).hexdigest()[:12], 16)
     erp_employee_no = EMPLOYEE_CODE_ALIASES.get(record.employee_no, record.employee_no)
+    kind = {
+        "checkIn": "check_in",
+        "checkOut": "check_out",
+    }.get(attendance_status, attendance_status)
     return {
-        "employee_no": erp_employee_no,
-        "name": record.name,
-        "attendance_status": attendance_status,
-        "time": record.device_time.isoformat(),
-        "serial_no": serial_no,
-        "cloud_record_guid": record.record_guid,
-        "device_name": record.device_name,
-        "device_serial_no": record.device_serial_no,
-        "department": record.department,
-        "hik_employee_no": record.employee_no,
+        "event_id": record.record_guid,
         "source": "hikconnect_cloud",
+        "employee_external_id": erp_employee_no,
+        "occurred_at": record.device_time.isoformat(),
+        "kind": kind,
+        "device_id": record.device_serial_no or record.device_name,
     }

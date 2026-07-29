@@ -6,8 +6,10 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/agente-hikconnect
-# El agente y el catch-up comparten storage_state.json y state.db: no deben correr a la vez.
-ExecStartPre=-/usr/bin/systemctl stop agente-hikconnect
-ExecStart=/opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/catchup.py --horas 72
-ExecStopPost=-/usr/bin/systemctl start agente-hikconnect
+# Sync y catch-up comparten sesion y SQLite; flock los serializa sin parar unidades.
+ExecStart=/usr/bin/flock --nonblock --conflict-exit-code 75 /run/lock/hikconnect-ingesta.lock /opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/catchup.py --horas 72
+SuccessExitStatus=75
 TimeoutStartSec=1800
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal

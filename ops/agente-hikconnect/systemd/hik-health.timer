@@ -1,0 +1,11 @@
+[Unit]
+Description=Reporta salud Hik-Connect cada cinco minutos
+
+[Timer]
+OnCalendar=*-*-* *:2/5:00
+Persistent=true
+AccuracySec=15s
+Unit=hik-health.service
+
+[Install]
+WantedBy=timers.target

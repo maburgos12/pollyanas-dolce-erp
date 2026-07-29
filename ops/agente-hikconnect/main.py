@@ -6,11 +6,27 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from config import LOG_FILE, MAX_PAGES, PAGE_SIZE, SYNC_INTERVAL_SECONDS, TIMEZONE
+from config import EMPLOYEE_CODE_ALIASES, LOG_FILE, MAX_PAGES, PAGE_SIZE, SYNC_INTERVAL_SECONDS, TIMEZONE
 from erp_client import ping_erp, send_events
 from file_importer import load_export_file
 from hikconnect_client import HikConnectClient, record_to_erp_event
-from state import classify_punch, day_state_exists, get_last_sync_time, init_db, mark_sent, set_last_sync_time, was_sent
+from state import (
+    apply_delivery_results,
+    day_state_exists,
+    enqueue_event,
+    get_discovery_page,
+    get_last_sync_time,
+    get_outbox_event,
+    init_db,
+    list_pending_events,
+    mark_delivery_attempt,
+    record_cycle_failure,
+    record_cycle_success,
+    record_delivery_error,
+    set_discovery_page,
+    stable_punch_kind,
+    was_sent,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,11 +45,25 @@ def build_events(records, dry_run: bool) -> tuple[list[dict], list]:
             continue
         if dry_run:
             day_key = (record.employee_no, record.device_time.date().isoformat())
-            status = "checkOut" if day_key in dry_seen_days or day_state_exists(record.employee_no, record.device_time) else "checkIn"
+            status = (
+                "check_out"
+                if day_key in dry_seen_days
+                or day_state_exists(record.employee_no, record.device_time)
+                else "check_in"
+            )
             dry_seen_days.add(day_key)
         else:
-            status = classify_punch(record.employee_no, record.device_time)
-        events.append(record_to_erp_event(record, status))
+            existing = get_outbox_event(record.record_guid)
+            if existing:
+                events.append(existing["payload"])
+                selected_records.append(record)
+                continue
+            employee_no = EMPLOYEE_CODE_ALIASES.get(record.employee_no, record.employee_no)
+            status = stable_punch_kind(employee_no, record.device_time)
+        event = record_to_erp_event(record, status)
+        if not dry_run:
+            enqueue_event(event)
+        events.append(event)
         selected_records.append(record)
         if dry_run:
             log.info(
@@ -47,44 +77,41 @@ def build_events(records, dry_run: bool) -> tuple[list[dict], list]:
     return events, selected_records
 
 
-def empleados_rechazados(result: dict) -> set[str]:
-    """Codigos cuyos eventos el ERP NO ingirio en esta respuesta.
-
-    El detalle del receptor solo trae `employee_no`, sin id por evento, asi que
-    el empleado es la granularidad mas fina disponible. Los rechazos (empleado no
-    encontrado, campos faltantes, fecha invalida) se reconocen porque no llevan
-    `fecha`: nunca llegaron a agruparse en una asistencia.
-
-    Se detectan por la ausencia de `fecha` y no por el texto del motivo, para que
-    un motivo nuevo del ERP tambien cuente como rechazo. El sesgo es deliberado:
-    reintentar de mas es inocuo porque el ERP deduplica, mientras que dar por
-    enviado un marcaje rechazado lo pierde para siempre.
-    """
-    return {
-        str(item.get("employee_no", "")).strip()
-        for item in result.get("detalle") or []
-        if not item.get("fecha")
-    }
-
-
 def send_and_mark(events: list[dict], records: list, dry_run: bool) -> dict:
     if dry_run:
-        return {"procesados": 0, "errores": 0, "duplicados": 0, "dry_run": len(events)}
-    result = send_events(events)
-    if result.get("procesados", 0) > 0:
-        rechazados = empleados_rechazados(result)
-        # events y records van en paralelo desde build_events; se compara contra
-        # el employee_no del evento porque es el que ya trae aplicado el alias.
-        for event, record in zip(events, records):
-            if str(event.get("employee_no", "")).strip() in rechazados:
-                log.warning(
-                    "ERP no acepto el marcaje de %s (%s): no se marca como enviado, se reintenta",
-                    event.get("employee_no"),
-                    record.device_time.isoformat(),
-                )
-                continue
-            mark_sent(record.record_guid, record.employee_no, record.device_time.isoformat())
-    return result
+        return {"acked": 0, "pending": 0, "review": 0, "errors": 0, "dry_run": len(events)}
+
+    for event in events:
+        enqueue_event(event)
+
+    pending = list_pending_events()
+    total = {"acked": 0, "pending": 0, "review": 0, "errors": 0}
+    for start in range(0, len(pending), 100):
+        batch = pending[start : start + 100]
+        event_ids = [item["event_id"] for item in batch]
+        payloads = [item["payload"] for item in batch]
+        mark_delivery_attempt(event_ids)
+        try:
+            response = send_events(payloads)
+            results = response.get("results") if isinstance(response, dict) else None
+            if not isinstance(results, list):
+                raise ValueError("ERP no devolvio results")
+            apply_delivery_results(event_ids, results)
+        except Exception as exc:
+            record_delivery_error(event_ids, str(exc))
+            total["errors"] += len(event_ids)
+            log.error("Lote outbox pendiente tras error ERP: %s", exc)
+            continue
+
+        for result in results:
+            outcome = result.get("outcome")
+            if outcome in {"accepted", "duplicate"}:
+                total["acked"] += 1
+            elif outcome == "deferred":
+                total["pending"] += 1
+            else:
+                total["review"] += 1
+    return total
 
 
 def test_connectivity(headless: bool) -> bool:
@@ -94,7 +121,13 @@ def test_connectivity(headless: bool) -> bool:
         records = client.fetch_records_page(page_index=1, page_size=3, require_login=False)
         log.info("Hik-Connect OK. Registros recientes: %d", len(records))
         for record in records:
-            log.info("%s | %s | %s | %s", record.employee_no, record.name, record.department, record.device_time.isoformat())
+            log.info(
+                "%s | %s | %s | %s",
+                record.employee_no,
+                record.name,
+                record.department,
+                record.device_time.isoformat(),
+            )
 
     log.info("Probando ERP...")
     if not ping_erp():
@@ -107,17 +140,44 @@ def test_connectivity(headless: bool) -> bool:
 def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> dict:
     start_dt = since or get_last_sync_time()
     end_dt = datetime.now(TIMEZONE)
-    log.info("Sincronizando Hik-Connect %s -> %s", start_dt.isoformat(), end_dt.isoformat())
-    with HikConnectClient(headless=headless) as client:
-        records = client.fetch_records_since(start_dt=start_dt, page_size=PAGE_SIZE, max_pages=MAX_PAGES)
-    log.info("Registros cloud encontrados: %d", len(records))
-    events, selected_records = build_events(records, dry_run=dry_run)
-    log.info("Eventos nuevos a enviar: %d", len(events))
-    result = send_and_mark(events, selected_records, dry_run=dry_run)
-    if not dry_run:
-        set_last_sync_time(end_dt)
-    log.info("Resultado ERP: %s", result)
-    return result
+    start_page = 1 if since else get_discovery_page()
+    log.info(
+        "Sincronizando Hik-Connect por orden de subida desde pagina %s (%s -> %s)",
+        start_page,
+        start_dt.isoformat(),
+        end_dt.isoformat(),
+    )
+    try:
+        with HikConnectClient(headless=headless) as client:
+            records = client.fetch_records_since(
+                start_dt=start_dt,
+                page_size=PAGE_SIZE,
+                max_pages=MAX_PAGES,
+                start_page=start_page,
+            )
+        log.info("Registros cloud encontrados: %d", len(records))
+        events, selected_records = build_events(records, dry_run=dry_run)
+        if not dry_run:
+            # Todos los GUID de estas paginas ya quedaron durables antes de mover la continuacion.
+            set_discovery_page(records.next_page)
+        log.info("Eventos nuevos a enviar: %d", len(events))
+        result = send_and_mark(events, selected_records, dry_run=dry_run)
+        if not dry_run and result.get("errors"):
+            raise RuntimeError(f"ERP dejo {result['errors']} evento(s) pendientes")
+        if not dry_run:
+            last_cloud = max((record.device_time for record in records), default=None)
+            record_cycle_success(completed_at=datetime.now(TIMEZONE), last_cloud_record_at=last_cloud)
+        log.info("Resultado ERP: %s", result)
+        return result
+    except Exception as exc:
+        if not dry_run:
+            category = "erp_unreachable" if "ERP" in str(exc) else "hik_cloud"
+            record_cycle_failure(
+                failed_at=datetime.now(TIMEZONE),
+                category=category,
+                error=str(exc),
+            )
+        raise
 
 
 def import_file(path: str, dry_run: bool) -> dict:

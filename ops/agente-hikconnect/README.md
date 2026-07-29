@@ -5,7 +5,7 @@ Agente para sincronizar checadas desde Hik-Connect Cloud hacia el ERP de Pollyan
 Este agente no usa la IP local ni la contraseña local del dispositivo. Inicia sesion en el portal web de Hik-Connect, consulta la API cloud interna que alimenta `Attendance` y manda los eventos al receptor existente del ERP:
 
 ```text
-POST /rrhh/api/asistencia-hik/
+POST /rrhh/api/asistencia-hik/v2/
 ```
 
 ## Fuente
@@ -48,6 +48,7 @@ Editar `.env` con:
 HIKCONNECT_EMAIL=
 HIKCONNECT_PASSWORD=
 ERP_API_KEY=
+ERP_ENDPOINT=/rrhh/api/asistencia-hik/
 ```
 
 Si Hik-Connect trae un ID distinto al codigo maestro de nomina, usar alias:
@@ -70,7 +71,7 @@ Cuando el dry-run se vea correcto:
 
 ```bash
 python main.py --backfill-hours 48
-python main.py
+python main.py --sync-once
 ```
 
 ## Importacion manual de export de Attendance
@@ -101,8 +102,49 @@ Ruta de despliegue: `/opt/agente-hikconnect`. Unidades en `systemd/` de esta car
 # Publicar cambios de esta carpeta al VPS (el .env y la sesion NO se tocan):
 rsync -av --exclude .env --exclude .venv --exclude storage_state.json --exclude '*.db' \
   ops/agente-hikconnect/ root@68.183.165.47:/opt/agente-hikconnect/
-ssh root@68.183.165.47 'systemctl restart agente-hikconnect'
+ssh root@68.183.165.47 \
+  'systemctl daemon-reload && systemctl enable --now agente-hikconnect.timer hik-catchup.timer hik-health.timer'
 ```
+
+### Ejecución y recuperación silenciosa
+
+`agente-hikconnect.timer` ejecuta un ciclo `oneshot` cada cinco minutos. Cada GUID queda primero en
+el outbox SQLite; una caída de red o del ERP deja el evento pendiente para el siguiente ciclo. El
+sync normal y el catch-up usan el mismo `flock`, por lo que nunca escriben simultáneamente
+`storage_state.json` o `state.db`. Cada ejecución tiene timeout y queda visible en journald:
+
+```bash
+systemctl list-timers 'agente-hikconnect*' 'hik-*'
+journalctl -u agente-hikconnect.service -u hik-health.service --since '30 min ago'
+```
+
+`hik-health.timer` inspecciona directamente `state.db`, clasifica el estado como `healthy`,
+`recovering` o `action_required`, y lo reporta a:
+
+```text
+POST /rrhh/api/asistencia-hik/v2/health/
+```
+
+El atraso menor a diez minutos y los reintentos ordinarios permanecen en `recovering`, sin avisos.
+Solo después de agotar cinco intentos y el SLO de diez minutos, o ante un evento terminal en
+revisión, se genera `action_required`. El incidente se guarda en SQLite para avisarlo una sola vez;
+la recuperación lo cierra silenciosamente.
+
+Los avisos externos son opcionales y solo se activan si existen las variables:
+
+```text
+HIK_MAYA_WEBHOOK_URL=
+HIK_ALERT_WHATSAPP_TO=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_USE_TLS=true
+HIK_ALERT_EMAIL_FROM=
+HIK_ALERT_EMAIL_TO=
+```
+
+Sin esas variables, el estado sigue visible en el monitor de RRHH del ERP.
 
 ### Catch-up diario
 
@@ -110,9 +152,8 @@ ssh root@68.183.165.47 'systemctl restart agente-hikconnect'
 Es la red de seguridad: si el sync de 5 minutos deja fuera algun marcaje, el barrido lo recupera esa
 madrugada. El ERP deduplica, asi que correrlo de mas es inocuo.
 
-El job para y rearranca el agente porque ambos comparten `storage_state.json` y `state.db`. Envia en
-lotes de 25 porque `erp_client.send_events` manda todo en un POST con `timeout=20` y revienta con
-volumen.
+El job toma el mismo `flock` que el ciclo normal. Si ya hay otro proceso usando la sesión o SQLite,
+sale sin error operativo y el siguiente ciclo continúa; no detiene ni arranca otros servicios.
 
 Ojo al operar: **toda ingesta de checadas dispara el motor de reglas de asistencia** — el receptor del
 ERP llama `evaluar_dia_empleado` por cada empleado-dia y sincroniza bonos en BORRADOR. No es algo que
@@ -123,9 +164,7 @@ un catch-up ancho es el volumen de dias que se re-evaluan de golpe.
 # Ver que falta sin escribir nada:
 .venv/bin/python catchup.py --horas 72 --dry-run
 # Hueco largo (recupera hacia atras lo que la nube conserve, ~31 dias):
-systemctl stop agente-hikconnect
-.venv/bin/python catchup.py --horas 744 --max-pages 80
-systemctl start agente-hikconnect
+flock /run/lock/hikconnect-ingesta.lock .venv/bin/python catchup.py --horas 744 --max-pages 80
 ```
 
 Despues de un catch-up grande puede hacer falta recalcular reglas y bonos, **pero eso NO se corre por
@@ -150,29 +189,26 @@ original de `fetch_records_since` cortaba en la primera pagina cuyo registro mas
 la ventana, y con eso perdia para siempre los marcajes buenos de las paginas siguientes (jun-jul 2026:
 368 marcajes perdidos en el hueco 29-jun a 3-jul, con faltas falsas que cancelaron bonos).
 
-Hoy se corta tras `PAGINAS_SECAS_PARA_CORTAR` paginas seguidas sin nada en ventana, y se deduplica por
-`record_guid`. El check de regresion falla contra el codigo viejo:
+Hoy el agente recorre la nube por orden de subida sin usar `deviceTime` como filtro. Si el recorrido
+requiere varios ciclos, guarda la página de continuación; aun así vuelve a consultar la página 1 en
+cada ciclo para no retrasar marcajes recién subidos. Todo se deduplica por `record_guid`.
 
 ```bash
 .venv/bin/python test_pagination.py
 ```
 
-### Marcado de envio: solo lo que el ERP acepto
+### Acuse individual: solo se cierra lo confirmado
 
-Un marcaje que se guarda como enviado **no se reintenta nunca**. Antes se marcaba el lote completo
-cuando `procesados > 0`, asi que los eventos que el ERP rechazaba —tipicamente "empleado no
-encontrado", con un alta que todavia no existe en nomina— se daban por entregados y se perdian en
-silencio. Caso real: ARLETH codigo 328, cuyos primeros marcajes del 27-jul-2026 quedaron marcados
-como enviados sin haber entrado al ERP.
+Cada GUID vive en `event_outbox` antes del POST. El ERP responde un resultado por evento:
 
-Hoy `empleados_rechazados()` lee el `detalle` de la respuesta y omite el marcado de esos empleados,
-de modo que el siguiente ciclo los reintenta. Un rechazo se reconoce por la **ausencia de `fecha`** en
-su entrada del detalle, no por el texto del motivo: asi un motivo nuevo del ERP tambien cuenta como
-rechazo. Reintentar de mas es inocuo porque el ERP deduplica; darlo por enviado pierde el marcaje.
+- `accepted` o `duplicate`: se cierra como `acked`;
+- `deferred`: sigue `pending` y se reintenta con el mismo payload;
+- `payload_conflict` o `rejected`: queda `review`, visible para intervención;
+- respuesta parcial, GUID desconocido, timeout o caída: el lote permanece `pending`.
 
-Cuando aparezca un empleado rechazado, revisar `EmpleadoIdentidadPendiente` en el ERP y vincular la
-identidad; a partir de ahi el agente entrega sus checadas solo. Las que se perdieron antes de este
-arreglo hay que recuperarlas con `catchup.py` sobre la ventana correspondiente.
+Una identidad desconocida queda conservada tanto en el outbox como en el ledger ERP. Al vincularla,
+el ERP reproduce el payload durable; el siguiente reintento recibe el acuse final sin depender de que
+la nube todavía conserve el marcaje.
 
 ```bash
 .venv/bin/python test_marcado.py

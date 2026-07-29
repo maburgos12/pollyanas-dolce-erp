@@ -1,15 +1,19 @@
 [Unit]
-Description=Agente Hik-Connect Cloud -> ERP Pollyana's Dolce
+Description=Ciclo Hik-Connect Cloud -> ERP Pollyana's Dolce
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=oneshot
 WorkingDirectory=/opt/agente-hikconnect
 EnvironmentFile=/opt/agente-hikconnect/.env
-ExecStart=/opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/main.py
-Restart=always
-RestartSec=20
-
-[Install]
-WantedBy=multi-user.target
+ExecStart=/usr/bin/flock --nonblock --conflict-exit-code 75 /run/lock/hikconnect-ingesta.lock /opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/main.py --sync-once
+SuccessExitStatus=75
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=240
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal

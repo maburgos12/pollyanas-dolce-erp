@@ -1,0 +1,13 @@
+[Unit]
+Description=Reporta salud de la ingesta Hik-Connect al ERP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agente-hikconnect
+EnvironmentFile=/opt/agente-hikconnect/.env
+ExecStart=/opt/agente-hikconnect/.venv/bin/python /opt/agente-hikconnect/health.py
+TimeoutStartSec=30
+StandardOutput=journal
+StandardError=journal

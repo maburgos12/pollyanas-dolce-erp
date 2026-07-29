@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import uuid4
 
 import requests
 
@@ -34,14 +35,26 @@ def ping_erp() -> bool:
 
 def send_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     if not events:
-        return {"procesados": 0, "errores": 0, "duplicados": 0}
+        return {"contract_version": 2, "batch_id": "", "results": []}
 
-    url = f"{ERP_BASE_URL}{ERP_ENDPOINT}"
+    endpoint = ERP_ENDPOINT.rstrip("/")
+    if not endpoint.endswith("/v2"):
+        endpoint = f"{endpoint}/v2"
+    url = f"{ERP_BASE_URL}{endpoint}/"
+    batch_id = str(uuid4())
     try:
-        response = requests.post(url, json={"eventos": events}, headers=_headers(), timeout=20)
-        if response.status_code == 200:
-            return response.json()
-        log.error("ERP respondio %s: %s", response.status_code, response.text[:500])
+        response = requests.post(
+            url,
+            json={"contract_version": 2, "batch_id": batch_id, "events": events},
+            headers=_headers(),
+            timeout=20,
+        )
     except Exception as exc:
         log.error("Error enviando eventos al ERP: %s", exc)
-    return {"procesados": 0, "errores": len(events), "duplicados": 0}
+        raise
+    if response.status_code != 200:
+        raise RuntimeError(f"ERP respondio {response.status_code}: {response.text[:500]}")
+    body = response.json()
+    if not isinstance(body, dict) or body.get("contract_version") != 2 or not isinstance(body.get("results"), list):
+        raise ValueError("ERP devolvio una respuesta v2 invalida")
+    return body
