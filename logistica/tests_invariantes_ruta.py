@@ -1174,6 +1174,42 @@ class PointFullReloadInvariantTests(LogisticaInvariantFixtures):
 
         self.assertEqual(ctx.exception.sync_job, failed)
 
+    def test_recarga_solo_lee_point_sin_escribir_inventario(self):
+        """La ruta se guía por Point; una falla contable no puede frenarla."""
+        success = self._sync_job(status=PointSyncJob.STATUS_SUCCESS)
+
+        with patch.object(
+            services_carga_ruta.PointMovementSyncService,
+            "run_transfer_sync",
+            return_value=success,
+        ) as mock_sync:
+            services_carga_ruta.sincronizar_checklist_recarga_desde_point(
+                ruta=self.ruta,
+                user=self.user,
+            )
+
+        self.assertEqual(mock_sync.call_count, 2)
+        for llamada in mock_sync.call_args_list:
+            self.assertIs(llamada.kwargs.get("apply_inventory"), False)
+
+    def test_recepcion_solo_lee_point_sin_escribir_inventario(self):
+        success = self._sync_job(status=PointSyncJob.STATUS_SUCCESS)
+        self.ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
+        self.ruta.save(update_fields=["estatus"])
+
+        with patch.object(
+            services_carga_ruta.PointMovementSyncService,
+            "run_transfer_sync",
+            return_value=success,
+        ) as mock_sync:
+            services_carga_ruta.sincronizar_recepcion_desde_point(
+                ruta=self.ruta,
+                user=self.user,
+            )
+
+        self.assertEqual(mock_sync.call_count, 1)
+        self.assertIs(mock_sync.call_args.kwargs.get("apply_inventory"), False)
+
 
 class PointEnviadoInvariantTests(LogisticaInvariantFixtures):
     def test_serializer_no_expone_solicitud_aunque_tenga_cantidad_enviada(self):
@@ -3861,6 +3897,33 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertEqual(self.cedis.estado, ParadaRuta.ESTADO_PENDIENTE)
         self.assertEqual(EventoRuta.objects.filter(ruta=self.ruta, parada=self.cedis, metadata__estado_sync="ERROR_POINT").count(), 1)
         self.assertEqual(Notificacion.objects.filter(usuario=self.manager, objeto_tipo="logistica.EventoRuta").count(), 1)
+
+    @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
+    def test_alerta_error_point_expone_la_causa_real_del_job(self, sync):
+        """La causa vive en el job; la alerta y el 503 deben mostrarla para no
+        tener que diagnosticar entrando al VPS (incidente CUARTO_FRIO)."""
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_FAILED,
+            error_message="Error no controlado en sync de transferencias Point: ['Stock insuficiente en CUARTO_FRIO: saldo resultante -40954.150000.']",
+        )
+        sync.side_effect = PointSyncUnavailableError(
+            "No se pudo completar la recarga de transferencias Point.",
+            sync_job=job,
+        )
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 503, response.content)
+        self.assertIn("Causa:", response.json()["detail"])
+        self.assertIn("CUARTO_FRIO", response.json()["detail"])
+        alerta = EventoRuta.objects.get(
+            ruta=self.ruta,
+            parada=self.cedis,
+            metadata__estado_sync="ERROR_POINT",
+        )
+        self.assertIn("CUARTO_FRIO", alerta.descripcion)
+        self.assertIn("CUARTO_FRIO", alerta.metadata["snapshot"]["sync_error"])
 
     @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_error_point_snapshot_lista_sucursal_planeada_sin_lineas_cacheadas(self, sync):

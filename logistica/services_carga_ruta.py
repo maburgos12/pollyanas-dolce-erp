@@ -870,10 +870,15 @@ def sincronizar_checklist_recarga_desde_point(*, ruta: RutaEntrega, user=None) -
     service = PointMovementSyncService()
     sync_job = None
     for fecha in [ruta.fecha_ruta - timedelta(days=1), ruta.fecha_ruta]:
+        # La ruta se guía por lo que marca Point (snapshot completo); el libro de
+        # inventario del ERP lo escribe el proceso programado de pos_bridge, no la
+        # recarga. Así una falla contable no puede volver a frenar rutas (incidente
+        # CUARTO_FRIO, rutas RUT-202607-0050/0051).
         sync_job = service.run_transfer_sync(
             start_date=fecha,
             end_date=fecha,
             triggered_by=user,
+            apply_inventory=False,
         )
         if sync_job.status != sync_job.STATUS_SUCCESS:
             raise PointSyncUnavailableError(
@@ -1484,8 +1489,20 @@ def _registrar_alerta_recarga_sync(
     metadata = dict(evento.metadata or {})
     metadata["ultima_observacion_en"] = observada_en.isoformat()
     metadata["ultima_observacion_actor_id"] = getattr(actor, "id", None)
+    # Un reintento con el mismo snapshot puede fallar por una causa distinta
+    # (ej. primero timeout, luego error de datos); refrescar la causa evita que
+    # el jefe diagnostique con información vieja.
+    campos = ["metadata"]
+    sync_error_actual = snapshot.get("sync_error")
+    snapshot_registrado = dict(metadata.get("snapshot") or {})
+    if sync_error_actual and snapshot_registrado.get("sync_error") != sync_error_actual:
+        snapshot_registrado["sync_error"] = sync_error_actual
+        metadata["snapshot"] = snapshot_registrado
+    if detalle and evento.descripcion != detalle:
+        evento.descripcion = detalle
+        campos.append("descripcion")
     evento.metadata = metadata
-    evento.save(update_fields=["metadata"])
+    evento.save(update_fields=campos)
     for usuario in _usuarios_diferencia_carga(ruta):
         if not usuario.is_active:
             continue
@@ -1714,13 +1731,21 @@ def _orquestar_recarga_cedis(
         except PointSyncUnavailableError as exc:
             snapshot = _snapshot_siguiente_tramo(ruta, parada, actor=user)
             detalle_error = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            # La causa real vive en el job (error_message); sin esto la alerta sólo
+            # dice "Point no pudo sincronizar" y el diagnóstico exige entrar al VPS.
+            causa_sync = (getattr(getattr(exc, "sync_job", None), "error_message", "") or "").strip()[:300]
+            if causa_sync:
+                detalle_error = f"{detalle_error} Causa: {causa_sync}"
             snapshot["sync_error"] = detalle_error
             _registrar_alerta_recarga_sync(
                 ruta=ruta,
                 parada=parada,
                 estado_sync="ERROR_POINT",
                 snapshot=snapshot,
-                detalle="Point no pudo sincronizar; el jefe fue notificado.",
+                detalle=(
+                    "Point no pudo sincronizar; el jefe fue notificado."
+                    + (f" Causa: {causa_sync}" if causa_sync else "")
+                ),
                 actor=user,
             )
             if autorizar_sin_sync:
@@ -1739,7 +1764,10 @@ def _orquestar_recarga_cedis(
                     ) from exc
             else:
                 raise _error_recarga_con_snapshot(
-                    RecargaCedisPointError("Point no pudo sincronizar; el jefe fue notificado."),
+                    RecargaCedisPointError(
+                        "Point no pudo sincronizar; el jefe fue notificado."
+                        + (f" Causa: {causa_sync}" if causa_sync else "")
+                    ),
                     snapshot,
                 ) from exc
 
@@ -1992,13 +2020,20 @@ def sincronizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_
         raise ValidationError("La recepción Point solo aplica a rutas en seguimiento o completadas.")
 
     if ejecutar_sync:
+        # Igual que la recarga: la recepción sólo necesita el snapshot de Point;
+        # la contabilidad la escribe el proceso programado de pos_bridge.
         sync_job = PointMovementSyncService().run_transfer_sync(
             start_date=ruta.fecha_ruta,
             end_date=ruta.fecha_ruta,
             triggered_by=user,
+            apply_inventory=False,
         )
         if sync_job.status != sync_job.STATUS_SUCCESS:
-            raise ValidationError("No se pudo sincronizar Point para confirmar recepción de transferencias.")
+            causa = (sync_job.error_message or "").strip()[:300]
+            raise ValidationError(
+                "No se pudo sincronizar Point para confirmar recepción de transferencias."
+                + (f" Causa: {causa}" if causa else "")
+            )
 
     return _actualizar_recepcion_desde_point(ruta=ruta, user=user)
 

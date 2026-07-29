@@ -258,7 +258,11 @@ class Command(BaseCommand):
                 "task": "pos_bridge.transfer_sync",
                 "crontab": transfer_cron,
                 "interval": None,
-                "kwargs": json.dumps({"days": 1, "lag_days": 1}),
+                # days=2: la extracción filtra por fecha de registro y una
+                # transferencia se registra el día D-1 y se recibe el día D (el
+                # patrón de la recarga CEDIS). Con days=1 esa línea quedaba fuera
+                # de la ventana para siempre y su inventario nunca se aplicaba.
+                "kwargs": json.dumps({"days": 2, "lag_days": 1}),
                 "enabled": True,
             },
         )
