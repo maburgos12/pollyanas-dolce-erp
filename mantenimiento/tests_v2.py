@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.urls import resolve, reverse
 
-from activos.models import Activo, OrdenMantenimiento, SolicitudFalla
+from activos.models import Activo, EvidenciaOrden, OrdenMantenimiento, SolicitudFalla
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import (
@@ -180,6 +181,162 @@ class MaintenanceHtmlWriteScopeTests(TestCase):
             with self.subTest(path=path):
                 self.assertEqual(resolve(path).func.__name__, "serve_private_maintenance_media")
                 self.assertEqual(self.client.get(path).status_code, 404)
+
+
+class PrivateOperationalMediaAccessTests(TestCase):
+    def setUp(self):
+        self.media_dir = TemporaryDirectory()
+        self.settings_override = override_settings(DEBUG=False, MEDIA_ROOT=self.media_dir.name)
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+        self.addCleanup(self.media_dir.cleanup)
+
+        self.branch = Sucursal.objects.create(codigo="MEDIA", nombre="Media propia")
+        self.other_branch = Sucursal.objects.create(codigo="MEDIA2", nombre="Media ajena")
+        self.category = CategoriaFalla.objects.create(nombre="Media", tipo=CategoriaFalla.TIPO_EQUIPO)
+        self.asset = Activo.objects.create(nombre="Horno media", sucursal=self.branch)
+        self.other_asset = Activo.objects.create(nombre="Horno ajeno", sucursal=self.other_branch)
+        self.unit = Unidad.objects.create(codigo="MEDIA-U", descripcion="Unidad media", sucursal=self.branch)
+
+        users = get_user_model()
+        self.maintenance_user = users.objects.create_user("media-maintenance", password="test")
+        UserProfile.objects.create(user=self.maintenance_user, sucursal=self.branch)
+        UserModuleAccess.objects.create(
+            user=self.maintenance_user,
+            module="mantenimiento.dashboard",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.fallas_user = users.objects.create_user("media-fallas", password="test")
+        UserModuleAccess.objects.create(
+            user=self.fallas_user, module="fallas", access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.inventory_user = users.objects.create_user("media-inventory", password="test")
+        UserModuleAccess.objects.create(
+            user=self.inventory_user, module="inventario", access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.logistics_user = users.objects.create_user("media-logistics", password="test")
+        UserModuleAccess.objects.create(
+            user=self.logistics_user, module="logistica", access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.unrelated_user = users.objects.create_user("media-unrelated", password="test")
+
+        self.report = ReporteFalla.objects.create(
+            sucursal=self.branch,
+            categoria=self.category,
+            titulo="Falla con foto",
+            descripcion="Evidencia protegida",
+            reportado_por=self.maintenance_user,
+        )
+        self.report.foto_evidencia.save(
+            "inicial.jpg", ContentFile(b"\xff\xd8\xffinitial"), save=True,
+        )
+        timeline = BitacoraFalla.objects.create(reporte=self.report, usuario=self.maintenance_user)
+        self.timeline_evidence = EvidenciaSeguimientoFalla.objects.create(
+            bitacora=timeline, subido_por=self.maintenance_user,
+        )
+        self.timeline_evidence.archivo.save(
+            "seguimiento.jpg", ContentFile(b"\xff\xd8\xfftracking"), save=True,
+        )
+
+        self.order = OrdenMantenimiento.objects.create(activo_ref=self.asset)
+        self.order.factura_archivo.save("orden.pdf", ContentFile(b"%PDF-order"), save=True)
+        self.order_evidence = EvidenciaOrden.objects.create(
+            orden=self.order, tipo=EvidenciaOrden.TIPO_FOTO, subido_por=self.maintenance_user,
+        )
+        self.order_evidence.archivo.save(
+            "orden.jpg", ContentFile(b"\xff\xd8\xfforder"), save=True,
+        )
+
+        self.unit_report = ReporteUnidad.objects.create(
+            unidad=self.unit, tipo=ReporteUnidad.TIPO_FALLA, descripcion="Foto de unidad",
+        )
+        self.unit_report.foto.save("unidad.jpg", ContentFile(b"\xff\xd8\xffunit"), save=True)
+        service_type = TipoServicioUnidad.objects.create(nombre="Servicio media")
+        self.unit_service = ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=service_type, fecha_servicio="2026-07-28",
+        )
+        self.unit_service.archivo_factura.save(
+            "servicio.pdf", ContentFile(b"%PDF-service"), save=True,
+        )
+        self.repair = ReparacionUnidad.objects.create(
+            unidad=self.unit, fecha_ingreso="2026-07-28", descripcion_falla="Reparación media",
+        )
+        self.repair.foto_nota.save(
+            "reparacion.jpg", ContentFile(b"\xff\xd8\xffrepair"), save=True,
+        )
+
+        self.paths = {
+            "fallas": [
+                self.report.foto_evidencia.url,
+                self.timeline_evidence.archivo.url,
+            ],
+            "activos": [
+                self.order.factura_archivo.url,
+                self.order_evidence.archivo.url,
+            ],
+            "logistica": [
+                self.unit_report.foto.url,
+                self.unit_service.archivo_factura.url,
+                self.repair.foto_nota.url,
+            ],
+        }
+
+    def assert_paths_status(self, user, expected_by_family):
+        self.client.force_login(user)
+        for family, paths in self.paths.items():
+            for path in paths:
+                with self.subTest(user=user.username, family=family, path=path):
+                    response = self.client.get(path)
+                    self.assertEqual(response.status_code, expected_by_family[family])
+                    if response.status_code == 200:
+                        self.assertEqual(response["Cache-Control"], "private, no-store")
+                        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_each_operational_module_can_load_its_existing_private_media(self):
+        self.assert_paths_status(
+            self.maintenance_user,
+            {"fallas": 200, "activos": 200, "logistica": 200},
+        )
+        self.assert_paths_status(
+            self.fallas_user,
+            {"fallas": 200, "activos": 404, "logistica": 404},
+        )
+        self.assert_paths_status(
+            self.inventory_user,
+            {"fallas": 404, "activos": 200, "logistica": 404},
+        )
+        self.assert_paths_status(
+            self.logistics_user,
+            {"fallas": 404, "activos": 404, "logistica": 200},
+        )
+
+    def test_anonymous_and_unrelated_users_cannot_load_private_media(self):
+        for paths in self.paths.values():
+            for path in paths:
+                with self.subTest(access="anonymous", path=path):
+                    self.client.logout()
+                    self.assertEqual(self.client.get(path).status_code, 404)
+                with self.subTest(access="unrelated", path=path):
+                    self.client.force_login(self.unrelated_user)
+                    self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_branch_limited_maintenance_user_cannot_load_other_branch_media(self):
+        other_report = ReporteFalla.objects.create(
+            sucursal=self.other_branch,
+            categoria=self.category,
+            titulo="Falla ajena",
+            descripcion="No autorizada",
+            reportado_por=self.unrelated_user,
+        )
+        other_report.foto_evidencia.save(
+            "ajena.jpg", ContentFile(b"\xff\xd8\xffother"), save=True,
+        )
+        other_order = OrdenMantenimiento.objects.create(activo_ref=self.other_asset)
+        other_order.factura_archivo.save("ajena.pdf", ContentFile(b"%PDF-other"), save=True)
+
+        self.client.force_login(self.maintenance_user)
+        self.assertEqual(self.client.get(other_report.foto_evidencia.url).status_code, 404)
+        self.assertEqual(self.client.get(other_order.factura_archivo.url).status_code, 404)
 
 
 @override_settings(MEDIA_ROOT="/tmp/mantenimiento-evidence-validation")
