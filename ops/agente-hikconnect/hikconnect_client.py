@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -33,6 +35,20 @@ class CloudRecord:
     device_name: str
     device_serial_no: str
     raw: dict[str, Any]
+
+
+@dataclass
+class InvalidCloudRecord:
+    record_guid: str
+    page_index: int
+    reason: str
+    raw: dict[str, Any]
+
+
+class CloudPage(list[CloudRecord]):
+    def __init__(self, records: list[CloudRecord], invalid_records: list[InvalidCloudRecord]):
+        super().__init__(records)
+        self.invalid_records = invalid_records
 
 
 class DiscoveryRecords(list[CloudRecord]):
@@ -102,7 +118,7 @@ class HikConnectClient:
         except Exception:
             return False
 
-    def fetch_records_page(self, page_index: int, page_size: int, require_login: bool = True) -> list[CloudRecord]:
+    def fetch_records_page(self, page_index: int, page_size: int, require_login: bool = True) -> CloudPage:
         if require_login:
             self.ensure_login()
         assert self.page is not None
@@ -118,16 +134,32 @@ class HikConnectClient:
             raise RuntimeError(f"Hik-Connect API error: {data}")
         items = data.get("data", {}).get("recordList", []) or []
         records = []
+        invalid_records = []
         for item in items:
-            record = _record_from_api(item)
+            record, reason = _record_from_api(item)
             if record is None:
-                guid = str(item.get("recordGuid") or "").strip() if isinstance(item, dict) else ""
-                raise RuntimeError(
-                    f"Hik-Connect devolvio un registro invalido en pagina {page_index}"
-                    + (f" (GUID {guid})" if guid else "")
+                raw = item if isinstance(item, dict) else {"raw_value": repr(item)}
+                guid = str(raw.get("recordGuid") or "").strip()
+                if not guid:
+                    canonical = json.dumps(raw, ensure_ascii=False, sort_keys=True, default=str)
+                    guid = f"invalid:{hashlib.sha256(canonical.encode()).hexdigest()}"
+                invalid_records.append(
+                    InvalidCloudRecord(
+                        record_guid=guid,
+                        page_index=page_index,
+                        reason=reason,
+                        raw=raw,
+                    )
                 )
+                log.warning(
+                    "Registro Hik-Connect aislado para revision: pagina=%s guid=%s razon=%s",
+                    page_index,
+                    guid,
+                    reason,
+                )
+                continue
             records.append(record)
-        return records
+        return CloudPage(records, invalid_records)
 
     def fetch_records_since(
         self,
@@ -135,6 +167,7 @@ class HikConnectClient:
         page_size: int,
         max_pages: int,
         start_page: int = 1,
+        on_invalid_record=None,
     ) -> DiscoveryRecords:
         """Recorre la nube por orden de subida, sin filtrar por deviceTime."""
         self.ensure_login()
@@ -148,11 +181,21 @@ class HikConnectClient:
             page_indexes = list(range(1, 1 + max_pages))
         for page_index in page_indexes:
             page_records = self.fetch_records_page(page_index=page_index, page_size=page_size, require_login=False)
+            invalid_records = getattr(page_records, "invalid_records", [])
+            for invalid_record in invalid_records:
+                if on_invalid_record is None:
+                    raise RuntimeError(
+                        "Hik-Connect devolvio un registro invalido sin journal durable"
+                    )
+                on_invalid_record(invalid_record)
             if not page_records:
-                if page_index != 1 or continuation_start == 1:
+                if not invalid_records and (page_index != 1 or continuation_start == 1):
                     complete = True
                     next_page = 1
                     break
+                if invalid_records:
+                    next_page = page_index + 1
+                    continue
                 continue
             por_guid.update({record.record_guid: record for record in page_records})
             if page_index != 1 or continuation_start == 1:
@@ -175,18 +218,22 @@ def _ensure_aware(dt: datetime) -> datetime:
     return dt.astimezone(TIMEZONE)
 
 
-def _record_from_api(raw: dict[str, Any]) -> CloudRecord | None:
+def _record_from_api(raw: dict[str, Any]) -> tuple[CloudRecord | None, str]:
     base_info = ((raw.get("personInfo") or {}).get("baseInfo") or {})
     employee_no = str(base_info.get("personCode") or "").strip()
     device_time_raw = str(raw.get("deviceTime") or "").strip()
     record_guid = str(raw.get("recordGuid") or "").strip()
-    if not employee_no or not device_time_raw or not record_guid:
-        return None
+    if not record_guid:
+        return None, "missing_record_guid"
+    if not employee_no:
+        return None, "missing_employee_code"
+    if not device_time_raw:
+        return None, "missing_device_time"
     try:
         device_time = datetime.fromisoformat(device_time_raw).astimezone(TIMEZONE)
     except ValueError:
         log.warning("Fecha Hik-Connect invalida: %s", device_time_raw)
-        return None
+        return None, "invalid_device_time"
     name = " ".join(
         part
         for part in [str(base_info.get("firstName") or "").strip(), str(base_info.get("lastName") or "").strip()]
@@ -201,7 +248,7 @@ def _record_from_api(raw: dict[str, Any]) -> CloudRecord | None:
         device_name=str(raw.get("deviceName") or "").strip(),
         device_serial_no=str(raw.get("devSerialNo") or raw.get("deviceSerialNo") or "").strip(),
         raw=raw,
-    )
+    ), ""
 
 
 def record_to_erp_event(record: CloudRecord, attendance_status: str) -> dict[str, Any]:
