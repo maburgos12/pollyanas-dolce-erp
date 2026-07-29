@@ -71,11 +71,20 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="estado">Estado</label>
+        <label for="estado">Estado administrativo</label>
         <select class="input-field" id="estado" name="estado">
           <option value="">Todos</option>
           {% for value, label in estado_choices %}
             <option value="{{ value }}" {% if estado == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="vigencia">Vigencia</label>
+        <select class="input-field" id="vigencia" name="vigencia">
+          <option value="">Todas</option>
+          {% for value, label in vigencia_choices %}
+            <option value="{{ value }}" {% if vigencia == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -93,7 +102,8 @@
           <th>Fin</th>
           <th>Días</th>
           <th>Goce</th>
-          <th>Estado</th>
+          <th>Estado administrativo</th>
+          <th>Vigencia</th>
           <th>Aplicada por</th>
           <th>Motivo</th>
           <th>Acciones</th>
@@ -109,11 +119,12 @@
             <td>{% if suspension.con_goce %}Sí{% else %}No{% endif %}</td>
             <td>
               {% if suspension.estado == "activa" %}
-                <span class="badge bg-warning">Activa</span>
+                <span class="badge bg-warning">Registrada</span>
               {% else %}
                 <span class="badge bg-danger">Cancelada</span>
               {% endif %}
             </td>
+            <td><span class="badge {{ suspension.vigencia_badge_class }}">{{ suspension.vigencia_label }}</span></td>
             <td>{{ suspension.aplicada_por.get_full_name|default:suspension.aplicada_por.username|default:"-" }}</td>
             <td>{{ suspension.motivo }}</td>
             <td>
@@ -136,7 +147,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="9">Sin suspensiones registradas.</td>
+            <td colspan="10">Sin suspensiones registradas.</td>
           </tr>
         {% endfor %}
       </tbody>

@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
@@ -13,6 +14,47 @@ from .models import Empleado, SuspensionEmpleado
 from .services import usuario_jefe_directo_de_empleado
 from .services_asistencia_reglas import evaluar_rango_asistencia
 from .views import _module_tabs
+
+
+VIGENCIA_CHOICES = [
+    ("programada", "Programada"),
+    ("vigente", "Vigente"),
+    ("finalizada", "Finalizada"),
+    ("cancelada", "Cancelada"),
+]
+VIGENCIA_LABELS = dict(VIGENCIA_CHOICES)
+VIGENCIA_BADGE_CLASSES = {
+    "programada": "bg-warning",
+    "vigente": "bg-success",
+    "finalizada": "",
+    "cancelada": "bg-danger",
+}
+
+
+def _vigencia_suspension(suspension: SuspensionEmpleado, hoy):
+    if suspension.estado == SuspensionEmpleado.ESTADO_CANCELADA:
+        return "cancelada"
+    if suspension.fecha_inicio > hoy:
+        return "programada"
+    if suspension.fecha_fin < hoy:
+        return "finalizada"
+    return "vigente"
+
+
+def _filtrar_vigencia(queryset, vigencia: str, hoy):
+    if vigencia == "cancelada":
+        return queryset.filter(estado=SuspensionEmpleado.ESTADO_CANCELADA)
+    if not vigencia:
+        return queryset
+
+    queryset = queryset.exclude(estado=SuspensionEmpleado.ESTADO_CANCELADA)
+    if vigencia == "programada":
+        return queryset.filter(fecha_inicio__gt=hoy)
+    if vigencia == "vigente":
+        return queryset.filter(fecha_inicio__lte=hoy, fecha_fin__gte=hoy)
+    if vigencia == "finalizada":
+        return queryset.filter(fecha_fin__lt=hoy)
+    return queryset
 
 
 def _can_manage_suspension_for_employee(user, empleado: Empleado) -> bool:
@@ -34,11 +76,23 @@ def rrhh_suspensiones(request):
 
     empleado_id = (request.GET.get("empleado") or "").strip()
     estado = (request.GET.get("estado") or "").strip()
+    vigencia = (request.GET.get("vigencia") or "").strip()
+    if vigencia not in VIGENCIA_LABELS:
+        vigencia = ""
+    hoy = timezone.localdate()
     suspensiones = SuspensionEmpleado.objects.select_related("empleado", "aplicada_por").order_by("-fecha_inicio")
     if empleado_id:
         suspensiones = suspensiones.filter(empleado_id=empleado_id)
     if estado in {SuspensionEmpleado.ESTADO_ACTIVA, SuspensionEmpleado.ESTADO_CANCELADA}:
         suspensiones = suspensiones.filter(estado=estado)
+    suspensiones = _filtrar_vigencia(suspensiones, vigencia, hoy)
+
+    suspensiones = list(suspensiones[:500])
+    for suspension in suspensiones:
+        vigencia_registro = _vigencia_suspension(suspension, hoy)
+        suspension.vigencia = vigencia_registro
+        suspension.vigencia_label = VIGENCIA_LABELS[vigencia_registro]
+        suspension.vigencia_badge_class = VIGENCIA_BADGE_CLASSES[vigencia_registro]
 
     empleados = Empleado.objects.filter(activo=True).order_by("nombre", "id")
     return render(
@@ -46,11 +100,13 @@ def rrhh_suspensiones(request):
         "rrhh/suspensiones.html",
         {
             "module_tabs": _module_tabs("suspensiones", request.user),
-            "suspensiones": suspensiones[:500],
+            "suspensiones": suspensiones,
             "empleados": empleados,
             "estado_choices": SuspensionEmpleado.ESTADO_CHOICES,
+            "vigencia_choices": VIGENCIA_CHOICES,
             "empleado_id": empleado_id,
             "estado": estado,
+            "vigencia": vigencia,
             "can_manage_rrhh": can_manage_rrhh(request.user),
         },
     )
