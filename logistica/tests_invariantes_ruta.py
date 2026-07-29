@@ -4176,6 +4176,41 @@ class RecargaCedisInvariantTests(LogisticaInvariantFixtures):
         self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).exists())
         sync.assert_not_called()
 
+    def test_web_cedis_visitada_por_geocerca_sigue_ofreciendo_registrar_recarga(self):
+        """Incidente 29/07: la geocerca marca el CEDIS VISITADA antes de que
+        exista el evento de recarga, y el detalle web escondía el botón justo
+        en ese estado — jefatura no podía registrar la recarga desde el ERP y
+        el ajuste de entregas quedaba bloqueado por el candado del tramo."""
+        RutaCargaChecklist.objects.create(ruta=self.ruta)
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        detail_url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
+        self.client.force_login(self.manager)
+
+        detail = self.client.get(detail_url, secure=True)
+
+        self.assertContains(detail, 'name="action" value="registrar_recarga_cedis"')
+        self.assertContains(detail, f'name="parada_cedis_id" value="{self.cedis.id}"')
+
+    def test_web_cedis_con_recarga_registrada_ya_no_ofrece_el_boton(self):
+        RutaCargaChecklist.objects.create(ruta=self.ruta)
+        self.cedis.estado = ParadaRuta.ESTADO_VISITADA
+        self.cedis.save(update_fields=["estado", "actualizado_en"])
+        EventoRuta.objects.create(
+            ruta=self.ruta,
+            parada=self.cedis,
+            tipo=EventoRuta.TIPO_RECARGA_CEDIS,
+            severidad=EventoRuta.SEVERIDAD_INFO,
+            descripcion="Recarga CEDIS registrada.",
+            metadata={"tipo": "recarga_cedis"},
+        )
+        detail_url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
+        self.client.force_login(self.manager)
+
+        detail = self.client.get(detail_url, secure=True)
+
+        self.assertNotContains(detail, 'name="action" value="registrar_recarga_cedis"')
+
     @patch("logistica.services_carga_ruta.sincronizar_checklist_recarga_desde_point")
     def test_web_error_point_conserva_contexto_y_mensaje_especifico(self, sync):
         sync.side_effect = PointSyncUnavailableError("Point no respondió")

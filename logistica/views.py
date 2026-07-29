@@ -62,6 +62,7 @@ from .services_carga_ruta import (
     ruta_tiene_diferencias_entrega,
     ruta_tiene_entregas_pendientes,
     registrar_recarga_cedis,
+    siguiente_parada_cedis_para_recarga,
     ultima_alerta_recarga_cedis_revisable,
     ruta_tiene_paradas_entregables_pendientes,
     ruta_tiene_movimiento_point_nuevo,
@@ -2955,14 +2956,11 @@ def ruta_detail(request, pk: int):
         and ruta.estatus == RutaEntrega.ESTATUS_PLANEADA
         and checklist_carga.lineas.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).exists()
     )
+    # Misma selección que el servicio de recarga: incluir VISITADA (la
+    # geocerca marca la llegada antes de que exista el evento) es lo que hace
+    # visible el botón de recarga justo cuando se necesita.
     proxima_parada_cedis = (
-        ruta.paradas.select_related("punto")
-        .filter(
-            punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=[ParadaRuta.ESTADO_PENDIENTE, ParadaRuta.ESTADO_OMITIDA],
-        )
-        .order_by("orden", "id")
-        .first()
+        siguiente_parada_cedis_para_recarga(ruta)
         if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA
         else None
     )

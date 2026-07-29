@@ -1645,6 +1645,40 @@ def registrar_recarga_cedis(
 _confirmar_recarga_cedis_atomica = registrar_recarga_cedis
 
 
+def _paradas_cedis_recargables(ruta: RutaEntrega):
+    """Paradas CEDIS que admiten registrar recarga.
+
+    Incluye VISITADA: la geocerca marca la llegada antes de que exista el
+    evento de recarga, y ese es justamente el momento en que hay que poder
+    registrarla. Excluye la parada inicial (orden 1) y las que ya tienen
+    recarga. Única fuente de verdad para el servicio y para el detalle web
+    (`recarga_cedis_disponible`); mantenerlas separadas escondía el botón
+    del ERP cuando el CEDIS ya estaba VISITADA.
+    """
+    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
+    cedis_inicial_id = ruta.paradas.filter(
+        punto__tipo=PuntoLogistico.TIPO_CEDIS,
+        orden=1,
+    ).values_list("id", flat=True).first()
+    return (
+        ruta.paradas.select_related("punto")
+        .filter(
+            punto__tipo=PuntoLogistico.TIPO_CEDIS,
+            estado__in=[
+                ParadaRuta.ESTADO_PENDIENTE,
+                ParadaRuta.ESTADO_OMITIDA,
+                ParadaRuta.ESTADO_VISITADA,
+            ],
+        )
+        .exclude(pk__in=paradas_con_recarga)
+        .exclude(pk=cedis_inicial_id)
+    )
+
+
+def siguiente_parada_cedis_para_recarga(ruta: RutaEntrega) -> ParadaRuta | None:
+    return _paradas_cedis_recargables(ruta).order_by("orden", "id").first()
+
+
 def _validar_parada_recarga_pre_sync(
     *, ruta: RutaEntrega, parada: ParadaRuta | None
 ) -> tuple[RutaEntrega, ParadaRuta | None]:
@@ -1654,41 +1688,12 @@ def _validar_parada_recarga_pre_sync(
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA:
         return ruta, parada
 
-    paradas_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
-    cedis_inicial_id = ruta.paradas.filter(
-        punto__tipo=PuntoLogistico.TIPO_CEDIS,
-        orden=1,
-    ).values_list("id", flat=True).first()
-    estados_candidatos = [
-        ParadaRuta.ESTADO_PENDIENTE,
-        ParadaRuta.ESTADO_OMITIDA,
-        ParadaRuta.ESTADO_VISITADA,
-    ]
-    siguiente = (
-        ruta.paradas.select_related("punto")
-        .filter(
-            punto__tipo=PuntoLogistico.TIPO_CEDIS,
-            estado__in=estados_candidatos,
-        )
-        .exclude(pk__in=paradas_con_recarga)
-        .exclude(pk=cedis_inicial_id)
-        .order_by("orden", "id")
-        .first()
-    )
+    candidatas = _paradas_cedis_recargables(ruta)
+    siguiente = candidatas.order_by("orden", "id").first()
     if parada is None:
         parada = siguiente
     else:
-        parada = (
-            ruta.paradas.select_related("punto")
-            .filter(
-                pk=parada.pk,
-                punto__tipo=PuntoLogistico.TIPO_CEDIS,
-                estado__in=estados_candidatos,
-            )
-            .exclude(pk__in=paradas_con_recarga)
-            .exclude(pk=cedis_inicial_id)
-            .first()
-        )
+        parada = candidatas.filter(pk=parada.pk).first()
     if parada is None:
         raise ValidationError("No hay una parada CEDIS pendiente para registrar la recarga.")
     if siguiente is None or siguiente.id != parada.id:
