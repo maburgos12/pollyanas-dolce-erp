@@ -621,12 +621,7 @@ def _can_use_bitacoras(user) -> bool:
         return True
     if is_mermas_only(user):
         return False
-    return (
-        can_view_module(user, "produccion")
-        or can_view_module(user, "logistica")
-        or can_view_submodule(user, "mermas", "captura")
-        or can_view_submodule(user, "mermas", "recepcion")
-    )
+    return can_view_module(user, "produccion") or can_view_module(user, "logistica")
 
 
 def _can_use_bitacora_type(user, tipo: str) -> bool:

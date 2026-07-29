@@ -73,12 +73,7 @@ def _can_use_bitacoras(user) -> bool:
         return True
     if is_mermas_only(user):
         return False
-    return (
-        can_view_module(user, "produccion")
-        or can_view_module(user, "logistica")
-        or can_view_submodule(user, "mermas", "captura")
-        or can_view_submodule(user, "mermas", "recepcion")
-    )
+    return can_view_module(user, "produccion") or can_view_module(user, "logistica")
 
 
 def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bool = False) -> None:
