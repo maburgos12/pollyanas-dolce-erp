@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Callable
-from urllib.request import Request, urlopen
+
+import requests
 
 
 log = logging.getLogger("hik_health")
@@ -116,16 +117,15 @@ def inspect_health(
 
 
 def _post_json(url: str, payload: dict, headers: dict[str, str], timeout: float) -> dict:
-    request = Request(
+    response = requests.post(
         url,
-        data=json.dumps(payload).encode(),
+        json=payload,
         headers={"Content-Type": "application/json", **headers},
-        method="POST",
+        timeout=timeout,
     )
-    with urlopen(request, timeout=timeout) as response:
-        if response.status != 200:
-            raise RuntimeError(f"POST {url} respondio {response.status}")
-        return json.loads(response.read() or b"{}")
+    if response.status_code != 200:
+        raise RuntimeError(f"POST {url} respondio {response.status_code}")
+    return response.json() if response.content else {}
 
 
 def post_erp_health(
