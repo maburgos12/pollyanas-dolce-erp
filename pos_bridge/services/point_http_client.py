@@ -289,6 +289,46 @@ class PointHttpSessionClient:
             )
         return payload
 
+    def get_insumo_categories(self, *, timeout: int | float | None = None) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/Catalogos/get_insumos",
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+        payload = self._parse_json(response, label="categorías de insumos Point")
+        if not isinstance(payload, list):
+            raise ExtractionError("Point devolvió categorías de insumos con formato inesperado.")
+        return payload
+
+    def get_branch_insumos(
+        self,
+        *,
+        branch_id: int | str,
+        category_id: int | str,
+        timeout: int | float | None = None,
+    ) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/Stock/GetInsumosPA",
+            params={"almacen": branch_id, "categoria": category_id},
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
+        payload = self._parse_json(response, label="existencia oficial de insumos Point")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError as exc:
+                raise ExtractionError(
+                    "Point devolvió una existencia oficial de insumos inválida.",
+                    context={"branch_id": branch_id, "category_id": category_id},
+                ) from exc
+        if not isinstance(payload, list):
+            raise ExtractionError(
+                "Point devolvió una existencia oficial de insumos con formato inesperado.",
+                context={"branch_id": branch_id, "category_id": category_id},
+            )
+        return payload
+
     def get_product_bom(self, product_id: int | str) -> list[dict]:
         response = self._request("GET", "/Catalogos/getBomsByProducts", params={"pkProducto": product_id})
         try:
