@@ -28,6 +28,7 @@ def apply_domicilio_status_transition(
     solicitud: SolicitudDomicilio,
     requested_status: str,
     cancelacion_motivo: str = "",
+    incidencia_motivo: str = "",
 ) -> bool:
     """Única máquina de estados para ERP y API pública.
 
@@ -36,7 +37,21 @@ def apply_domicilio_status_transition(
     """
     if requested_status == solicitud.estatus:
         return False
-    if requested_status == SolicitudDomicilio.ESTATUS_CANCELADO:
+    if requested_status == SolicitudDomicilio.ESTATUS_INCIDENCIA:
+        if solicitud.estatus not in {
+            SolicitudDomicilio.ESTATUS_LISTO,
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+        }:
+            raise DomicilioStatusError(
+                f"Transición inválida desde {solicitud.estatus}."
+            )
+        reason = incidencia_motivo.strip()
+        if not reason:
+            raise DomicilioStatusError(
+                "El motivo de la incidencia es obligatorio.", 400
+            )
+        solicitud.incidencia_motivo = reason
+    elif requested_status == SolicitudDomicilio.ESTATUS_CANCELADO:
         if solicitud.estatus in SolicitudDomicilio.TERMINAL_STATUSES:
             raise DomicilioStatusError(
                 f"Transición inválida desde {solicitud.estatus}."
@@ -53,6 +68,8 @@ def apply_domicilio_status_transition(
     update_fields = ["estatus", "revision"]
     if requested_status == SolicitudDomicilio.ESTATUS_CANCELADO:
         update_fields.append("cancelacion_motivo")
+    if requested_status == SolicitudDomicilio.ESTATUS_INCIDENCIA:
+        update_fields.append("incidencia_motivo")
     if requested_status == SolicitudDomicilio.ESTATUS_ENTREGADO:
         solicitud.entregado_en = timezone.now()
         update_fields.append("entregado_en")
@@ -96,11 +113,14 @@ def transition_domicilio_status(
         }
 
 
-def _same_request(operation, *, api_client, repartidor_id, requested_status, actor):
+def _same_request(
+    operation, *, api_client, repartidor_id, requested_status, actor, reason
+):
     return (
         operation.api_client_id == api_client.id
         and operation.repartidor_id == repartidor_id
         and operation.requested_status == requested_status
+        and operation.reason == reason
         and operation.actor_id == actor["id"]
         and operation.actor_nombre == actor["nombre"]
     )
@@ -114,7 +134,9 @@ def update_domicilio_status(
     requested_status: str,
     operation_id,
     actor: dict[str, str],
+    reason: str = "",
 ) -> dict[str, Any]:
+    reason = reason.strip()
     with transaction.atomic():
         solicitud = (
             SolicitudDomicilio.objects.select_for_update()
@@ -138,6 +160,7 @@ def update_domicilio_status(
                 repartidor_id=repartidor_id,
                 requested_status=requested_status,
                 actor=actor,
+                reason=reason,
             ):
                 raise DomicilioStatusError(
                     "operation_id ya fue usado con otro payload."
@@ -158,30 +181,19 @@ def update_domicilio_status(
             raise DomicilioStatusError("Repartidor no disponible.")
 
         previous_status = solicitud.estatus
+        if requested_status == solicitud.estatus:
+            raise DomicilioStatusError(
+                f"La operación {requested_status} ya fue cerrada."
+            )
         changed = apply_domicilio_status_transition(
             solicitud=solicitud,
             requested_status=requested_status,
+            incidencia_motivo=reason,
         )
         if not changed:
-            snapshot = {
-                "id": solicitud.id,
-                "repartidor_id": repartidor_id,
-                "estatus": solicitud.estatus,
-                "revision": solicitud.revision,
-                "idempotent": True,
-            }
-            SolicitudDomicilioStatusOperation.objects.create(
-                solicitud=solicitud,
-                operation_id=operation_id,
-                api_client=api_client,
-                repartidor_id=repartidor_id,
-                requested_status=requested_status,
-                final_status=solicitud.estatus,
-                actor_id=actor["id"],
-                actor_nombre=actor["nombre"],
-                result_snapshot=snapshot,
+            raise DomicilioStatusError(
+                f"La operación {requested_status} ya fue cerrada."
             )
-            return snapshot
         snapshot = {
             "id": solicitud.id,
             "repartidor_id": repartidor_id,
@@ -196,6 +208,7 @@ def update_domicilio_status(
             repartidor_id=repartidor_id,
             requested_status=requested_status,
             final_status=solicitud.estatus,
+            reason=reason,
             actor_id=actor["id"],
             actor_nombre=actor["nombre"],
             result_snapshot=snapshot,
