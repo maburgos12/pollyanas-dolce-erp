@@ -124,4 +124,4 @@ class TutorialCargaPwaTests(TutorialCargaBaseTests):
         self.assertIn("prefers-reduced-motion", html)
         self.assertIn("confirmarTutorialCarga", html)
         # Versión vigente de la PWA; antes v80-combustible-km-turno.
-        self.assertIn("v81-tramo-carga-recarga", html)
+        self.assertIn("v82-domicilios-ruta-viva", html)
