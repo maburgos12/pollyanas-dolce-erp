@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -116,7 +116,8 @@ def assign_domicilio(
         ):
             raise DomicilioAssignmentError("Repartidor no disponible.", 400)
         repartidor_solicitado = (
-            Repartidor.objects.select_related("unidad_asignada", "sucursal")
+            Repartidor.objects.select_for_update(of=("self",))
+            .select_related("unidad_asignada", "sucursal")
             .filter(pk=repartidor_id)
             .first()
         )
@@ -144,6 +145,7 @@ def assign_domicilio(
                     "repartidor_id": repartidor_id,
                     "estatus": solicitud.estatus,
                     "revision": solicitud.revision,
+                    "sequence": solicitud.route_sequence,
                     "idempotent": True,
                 }
             if solicitud.repartidor_id == repartidor_id:
@@ -176,10 +178,20 @@ def assign_domicilio(
             solicitud.repartidor_id == repartidor_id
             and solicitud.unidad_id == unidad.id
         ):
+            if solicitud.route_sequence is None:
+                max_sequence = (
+                    SolicitudDomicilio.objects.filter(repartidor_id=repartidor_id)
+                    .aggregate(value=Max("route_sequence"))
+                    .get("value")
+                    or 0
+                )
+                solicitud.route_sequence = max_sequence + 1
+                solicitud.save(update_fields=["route_sequence"])
             return {
                 "id": solicitud.id,
                 "repartidor_id": repartidor_id,
                 "estatus": solicitud.estatus,
+                "sequence": solicitud.route_sequence,
                 "idempotent": True,
             }
         anterior_id = solicitud.repartidor_id
@@ -189,9 +201,25 @@ def assign_domicilio(
         )
         solicitud.repartidor = repartidor
         solicitud.unidad = unidad
+        if (
+            anterior_id != repartidor_id
+            or solicitud.route_sequence is None
+        ):
+            max_sequence = (
+                SolicitudDomicilio.objects.filter(repartidor_id=repartidor_id)
+                .aggregate(value=Max("route_sequence"))
+                .get("value")
+                or 0
+            )
+            solicitud.route_sequence = max_sequence + 1
         solicitud.asignado_en = timezone.now()
         solicitud.revision += 1
-        update_fields = ["repartidor", "asignado_en", "revision"]
+        update_fields = [
+            "repartidor",
+            "route_sequence",
+            "asignado_en",
+            "revision",
+        ]
         update_fields.append("unidad")
         solicitud.save(update_fields=update_fields)
         unidad_nueva = unidad if unidad is not None else solicitud.unidad
@@ -199,6 +227,7 @@ def assign_domicilio(
         payload.update({
             "repartidor_anterior_id": anterior_id,
             "repartidor_nuevo_id": repartidor.id,
+            "route_sequence": solicitud.route_sequence,
             "unidad_anterior_id": unidad_anterior_id,
             "unidad_anterior_codigo": unidad_anterior_codigo,
             "unidad_nueva_id": unidad_nueva.id if unidad_nueva else None,
@@ -216,5 +245,6 @@ def assign_domicilio(
             "repartidor_id": repartidor.id,
             "estatus": solicitud.estatus,
             "revision": solicitud.revision,
+            "sequence": solicitud.route_sequence,
             "idempotent": False,
         }

@@ -1770,6 +1770,11 @@ class SolicitudDomicilio(models.Model):
         blank=True,
         related_name="solicitudes_domicilio",
     )
+    route_sequence = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        editable=False,
+    )
     unidad = models.ForeignKey(
         "Unidad",
         on_delete=models.SET_NULL,
@@ -1803,6 +1808,14 @@ class SolicitudDomicilio(models.Model):
                 fields=["pedido_cliente"],
                 condition=models.Q(pedido_cliente__isnull=False),
                 name="logistica_solicitud_pedido_unico",
+            ),
+            models.UniqueConstraint(
+                fields=["repartidor", "route_sequence"],
+                condition=models.Q(
+                    repartidor__isnull=False,
+                    route_sequence__isnull=False,
+                ),
+                name="logistica_domicilio_repartidor_secuencia_unica",
             ),
         ]
 
