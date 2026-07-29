@@ -6530,6 +6530,51 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(evidencia.cantidad_entregada, Decimal("5.000"))
         self.assertEqual(evidencia.metadata["origen"], "point_transfer")
 
+    def test_recepcion_no_roba_transferencias_reclamadas_por_otra_ruta(self):
+        """Incidente RUT-202607-0051: el matching de respaldo (sucursal +
+        producto + cantidad) tomaba una transferencia ya ligada a la línea
+        activa de otra ruta; el constraint rutacarga_point_activa_unica
+        rechazaba el save() y el botón de recepción devolvía 500. La línea
+        debe quedar pendiente de Point, no robar el reclamo ajeno."""
+        _, linea_original, transfer_line = self._crear_linea_carga_con_transferencia_recibida(
+            source_hash="transfer-reclamada-otra-ruta",
+        )
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.save(update_fields=["estatus", "updated_at"])
+        ruta_b = RutaEntrega.objects.create(
+            nombre="Ruta día siguiente",
+            fecha_ruta=timezone.localdate(),
+            estatus=RutaEntrega.ESTATUS_EN_RUTA,
+            repartidor=self.repartidor,
+            unidad_operativa=self.unidad,
+        )
+        parada_b = ParadaRuta.objects.create(ruta=ruta_b, punto=self.parada.punto, orden=1)
+        checklist_b = RutaCargaChecklist.objects.create(
+            ruta=ruta_b,
+            estatus=RutaCargaChecklist.ESTATUS_CONFIRMADA,
+        )
+        linea_b = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist_b,
+            parada=parada_b,
+            source_hash="cedis-reabasto-ruta-b-snick",
+            item_code=transfer_line.item_code,
+            item_name=transfer_line.item_name,
+            unit=transfer_line.unit,
+            cantidad_solicitada=transfer_line.requested_quantity,
+            cantidad_enviada_esperada=transfer_line.sent_quantity,
+            cantidad_cargada=transfer_line.received_quantity,
+            estatus=RutaCargaChecklistLinea.ESTATUS_CARGADA,
+        )
+
+        resumen = sincronizar_recepcion_desde_point(ruta=ruta_b, user=self.user, ejecutar_sync=False)
+
+        linea_original.refresh_from_db()
+        linea_b.refresh_from_db()
+        self.assertEqual(resumen.evidencias_creadas, 0)
+        self.assertEqual(resumen.lineas_pendientes_point, 1)
+        self.assertEqual(linea_original.point_transfer_line_id, transfer_line.id)
+        self.assertIsNone(linea_b.point_transfer_line_id)
+
     def test_sincronizar_recepcion_no_importa_transferencia_point_recibida_post_salida(self):
         transferencia = self._crear_transferencia_point_abierta(source_hash="transfer-post-salida")
         transferencia.is_open = False

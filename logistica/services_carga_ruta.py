@@ -2059,6 +2059,19 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
         )
     }
     point_recibidas = _point_recibidas_por_ruta(ruta)
+    candidatos_ids = {line.id for line in point_lines.values()}
+    for lines in point_recibidas.values():
+        candidatos_ids.update(line.id for line in lines)
+    # Una PointTransferLine sólo puede vivir en UNA línea de checklist activa
+    # (constraint rutacarga_point_activa_unica). El matching de recepción debe
+    # respetar los reclamos existentes: intentar robar la recepción de otra
+    # ruta (misma sucursal/producto/cantidad en la ventana) rompía el save()
+    # con UniqueViolation y el botón de recepción devolvía 500.
+    reclamos = dict(
+        RutaCargaChecklistLinea.objects.filter(point_transfer_line_id__in=candidatos_ids)
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .values_list("point_transfer_line_id", "id")
+    )
 
     evidencias_creadas = 0
     evidencias_existentes = 0
@@ -2071,18 +2084,26 @@ def _actualizar_recepcion_desde_point(*, ruta: RutaEntrega, user=None) -> Recepc
         estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA,
     ).select_related("parada").order_by("parada__orden", "id"):
         point_line = point_lines.get(linea.source_hash)
+        if point_line is not None and reclamos.get(point_line.id, linea.id) != linea.id:
+            point_line = None
         if point_line is not None and linea.point_transfer_line_id != point_line.id:
             linea.point_transfer_line = point_line
             linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+            reclamos[point_line.id] = linea.id
         received_lines = []
         if point_line is not None and point_line.is_received:
             received_lines = [point_line]
         elif linea.parada.punto.sucursal_id:
-            candidates = point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
+            candidates = [
+                candidate
+                for candidate in point_recibidas.get((linea.parada.punto.sucursal_id, _linea_producto_key(linea)), [])
+                if reclamos.get(candidate.id, linea.id) == linea.id
+            ]
             received_lines = _elegir_recepcion_point(linea, candidates)
             if received_lines and linea.point_transfer_line_id != received_lines[0].id:
                 linea.point_transfer_line = received_lines[0]
                 linea.save(update_fields=["point_transfer_line", "actualizado_en"])
+                reclamos[received_lines[0].id] = linea.id
         if not received_lines and point_line is not None:
             if not point_transfer_enviada(point_line):
                 continue
