@@ -18,7 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import PAGE_SIZE, TIMEZONE
 from hikconnect_client import HikConnectClient
 from main import build_events, send_and_mark  # configura logging al importarse
-from state import get_discovery_page, init_db, set_discovery_page
+from state import (
+    get_discovery_page,
+    init_db,
+    quarantine_cloud_record,
+    set_discovery_page,
+)
 
 log = logging.getLogger("catchup")
 
@@ -55,6 +60,7 @@ def main() -> int:
             page_size=PAGE_SIZE,
             max_pages=args.max_pages,
             start_page=start_page,
+            on_invalid_record=quarantine_cloud_record,
         )
     log.info("Registros en la nube dentro de la ventana: %s", len(records))
 
