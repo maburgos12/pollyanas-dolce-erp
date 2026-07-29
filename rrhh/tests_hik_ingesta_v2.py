@@ -415,3 +415,22 @@ class HikIngestaV2Tests(TestCase):
         receipt = self._ledger().objects.get(event_id=event["event_id"])
         self.assertEqual(receipt.effects_status, "completed")
         self.assertEqual(receipt.effects_version, receipt.projection_version)
+
+    def test_punches_derivados_fuera_de_orden_se_reconstruyen_por_cronologia(self):
+        tarde = self._event(
+            event_id="guid-derived-late-first",
+            occurred_at="2026-07-28T17:00:00-07:00",
+            kind="punch",
+        )
+        temprano = self._event(
+            event_id="guid-derived-early-later",
+            occurred_at="2026-07-28T08:00:00-07:00",
+            kind="punch",
+        )
+
+        self.assertEqual(self._single_result(self._post([tarde]))["outcome"], "accepted")
+        self.assertEqual(self._single_result(self._post([temprano]))["outcome"], "accepted")
+
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha="2026-07-28")
+        self.assertEqual(asistencia.entrada.isoformat(), "2026-07-28T15:00:00+00:00")
+        self.assertEqual(asistencia.salida.isoformat(), "2026-07-29T00:00:00+00:00")

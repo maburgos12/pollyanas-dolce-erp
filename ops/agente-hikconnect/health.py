@@ -76,7 +76,8 @@ def inspect_health(
         and oldest_pending < cutoff
         and max_attempts >= RECOVERY_ATTEMPTS
     )
-    exhausted = bool(review) or (
+    cycle_stale = last_cycle is None or last_cycle < cutoff
+    exhausted = bool(review) or cycle_stale or (
         identity_deferred > 0 and pending_exhausted
     ) or (
         (last_success is None or last_success < cutoff)
@@ -256,9 +257,17 @@ def main() -> int:
     parser.add_argument("--slo-minutes", type=int, default=10)
     args = parser.parse_args()
     report = inspect_health(args.db_path, slo_minutes=args.slo_minutes)
-    post_erp_health(report)
+    post_error = None
+    try:
+        post_erp_health(report)
+    except Exception as exc:
+        post_error = exc
+        log.error("No se pudo publicar salud al ERP: %s", exc)
+    # Maya/email no dependen de que el ERP esté disponible.
     notify_if_required(args.db_path, report)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if post_error:
+        raise post_error
     return 0
 
 

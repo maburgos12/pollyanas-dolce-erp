@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -90,9 +91,40 @@ def test_reanuda_desde_pagina_pendiente():
     assert encontrados.next_page == 4
 
 
+def test_registro_cloud_invalido_falla_la_pagina_sin_avanzar():
+    class Response:
+        status = 200
+
+        def json(self):
+            return {
+                "errorCode": 0,
+                "data": {
+                    "recordList": [
+                        {
+                            "recordGuid": "guid-malformado",
+                            "deviceTime": "fecha-invalida",
+                            "personInfo": {"baseInfo": {"personCode": "328"}},
+                        }
+                    ]
+                },
+            }
+
+    cliente = HikConnectClient.__new__(HikConnectClient)
+    cliente.page = SimpleNamespace(
+        request=SimpleNamespace(post=lambda *_args, **_kwargs: Response())
+    )
+    try:
+        cliente.fetch_records_page(7, 100, require_login=False)
+    except RuntimeError as exc:
+        assert "guid-malformado" in str(exc).lower()
+    else:
+        raise AssertionError("un raw invalido no debe descartarse silenciosamente")
+
+
 if __name__ == "__main__":
     test_conserva_device_time_viejo_por_subida_reciente()
     test_agotamiento_de_paginas_deja_continuacion_pendiente()
     test_deduplica_por_guid()
     test_reanuda_desde_pagina_pendiente()
-    print("OK: los 4 checks de paginacion pasan")
+    test_registro_cloud_invalido_falla_la_pagina_sin_avanzar()
+    print("OK: los 5 checks de paginacion pasan")

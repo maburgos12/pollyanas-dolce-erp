@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -232,6 +233,24 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(_RecorderHandler.requests[0][2]["status"], "action_required")
         self.assertEqual(_RecorderHandler.requests[1][0], "/maya")
         self.assertEqual(_RecorderHandler.requests[1][2]["incident_key"], "erp_unreachable")
+
+    def test_erp_caido_no_impide_alerta_externa(self):
+        report = {
+            "status": "action_required",
+            "incident_key": "erp_unreachable",
+            "outbox_pending": 3,
+            "last_error": "timeout ERP",
+        }
+        with (
+            patch.object(health, "inspect_health", return_value=report),
+            patch.object(health, "post_erp_health", side_effect=RuntimeError("ERP caido")),
+            patch.object(health, "notify_if_required") as notify,
+            patch.object(sys, "argv", ["health.py", "--db-path", str(self.db_path)]),
+        ):
+            with self.assertRaises(RuntimeError):
+                health.main()
+
+        notify.assert_called_once_with(str(self.db_path), report)
 
 
 if __name__ == "__main__":

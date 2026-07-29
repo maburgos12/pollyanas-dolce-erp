@@ -21,7 +21,7 @@ from .services_identidad import buscar_empleado_por_codigo, registrar_identidad_
 CONTRACT_VERSION = 2
 SOURCE_HIKCONNECT_CLOUD = "hikconnect_cloud"
 ALLOWED_SOURCES = {SOURCE_HIKCONNECT_CLOUD}
-ALLOWED_KINDS = {"check_in", "check_out"}
+ALLOWED_KINDS = {"check_in", "check_out", "punch"}
 MAX_BATCH_SIZE = 100
 
 
@@ -252,14 +252,19 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
             marca for marca in _marcas_existentes(asistencia)
             if marca.dt not in ledger_times
         ]
-        marcas_ledger = [
-            MarcaHik(
-                dt=item.ocurrido_en,
-                status="checkOut" if item.tipo_evento == "check_out" else "checkIn",
-                serial_no=item.event_id,
+        marcas_ledger = []
+        earliest_existing = min((marca.dt for marca in marcas_previas), default=None)
+        for index, item in enumerate(receipts):
+            if item.tipo_evento == "punch":
+                has_earlier = index > 0 or (
+                    earliest_existing is not None and earliest_existing < item.ocurrido_en
+                )
+                status = "checkOut" if has_earlier else "checkIn"
+            else:
+                status = "checkOut" if item.tipo_evento == "check_out" else "checkIn"
+            marcas_ledger.append(
+                MarcaHik(dt=item.ocurrido_en, status=status, serial_no=item.event_id)
             )
-            for item in receipts
-        ]
         asistencia.entrada = None
         asistencia.salida_comida = None
         asistencia.regreso_comida = None

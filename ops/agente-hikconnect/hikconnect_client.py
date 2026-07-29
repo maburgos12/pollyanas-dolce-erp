@@ -117,7 +117,17 @@ class HikConnectClient:
         if str(data.get("errorCode")) != "0":
             raise RuntimeError(f"Hik-Connect API error: {data}")
         items = data.get("data", {}).get("recordList", []) or []
-        return [_record_from_api(item) for item in items if _record_from_api(item)]
+        records = []
+        for item in items:
+            record = _record_from_api(item)
+            if record is None:
+                guid = str(item.get("recordGuid") or "").strip() if isinstance(item, dict) else ""
+                raise RuntimeError(
+                    f"Hik-Connect devolvio un registro invalido en pagina {page_index}"
+                    + (f" (GUID {guid})" if guid else "")
+                )
+            records.append(record)
+        return records
 
     def fetch_records_since(
         self,
@@ -196,15 +206,13 @@ def _record_from_api(raw: dict[str, Any]) -> CloudRecord | None:
 
 def record_to_erp_event(record: CloudRecord, attendance_status: str) -> dict[str, Any]:
     erp_employee_no = EMPLOYEE_CODE_ALIASES.get(record.employee_no, record.employee_no)
-    kind = {
-        "checkIn": "check_in",
-        "checkOut": "check_out",
-    }.get(attendance_status, attendance_status)
     return {
         "event_id": record.record_guid,
         "source": "hikconnect_cloud",
         "employee_external_id": erp_employee_no,
         "occurred_at": record.device_time.isoformat(),
-        "kind": kind,
+        # La nube no entrega un estado confiable. El ERP reconstruye todos los
+        # punches por cronología del ledger, incluso si llegan fuera de orden.
+        "kind": "punch",
         "device_id": record.device_serial_no or record.device_name,
     }
