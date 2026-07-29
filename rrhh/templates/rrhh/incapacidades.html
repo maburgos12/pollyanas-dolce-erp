@@ -88,11 +88,20 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="estado">Estado</label>
+        <label for="estado">Estado administrativo</label>
         <select class="input-field" id="estado" name="estado">
           <option value="">Todos</option>
           {% for value, label in estado_choices %}
             <option value="{{ value }}" {% if estado == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="vigencia">Vigencia</label>
+        <select class="input-field" id="vigencia" name="vigencia">
+          <option value="">Todas</option>
+          {% for value, label in vigencia_choices %}
+            <option value="{{ value }}" {% if vigencia == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -111,7 +120,8 @@
           <th>Días</th>
           <th>Tipo</th>
           <th>Folio</th>
-          <th>Estado</th>
+          <th>Estado administrativo</th>
+          <th>Vigencia</th>
           <th>Vacaciones cruzadas</th>
           <th>Registró</th>
           <th>Notas</th>
@@ -137,6 +147,7 @@
                   <span class="badge bg-danger">Cancelada</span>
                 {% endif %}
               </td>
+              <td><span class="badge {{ row.vigencia_badge_class }}">{{ row.vigencia_label }}</span></td>
               <td>
                 {% for solicitud in row.vacaciones %}
                   {{ solicitud.folio }} · {{ solicitud.get_estado_display }}<br>
@@ -169,7 +180,7 @@
           {% endwith %}
         {% empty %}
           <tr>
-            <td colspan="{% if can_manage_rrhh %}11{% else %}10{% endif %}">Sin incapacidades registradas.</td>
+            <td colspan="{% if can_manage_rrhh %}12{% else %}11{% endif %}">Sin incapacidades registradas.</td>
           </tr>
         {% endfor %}
       </tbody>

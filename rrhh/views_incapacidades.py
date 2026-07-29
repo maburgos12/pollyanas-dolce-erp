@@ -16,6 +16,47 @@ from .services_asistencia_reglas import evaluar_rango_asistencia
 from .views import _module_tabs
 
 
+VIGENCIA_CHOICES = [
+    ("programada", "Programada"),
+    ("vigente", "Vigente"),
+    ("finalizada", "Finalizada"),
+    ("cancelada", "Cancelada"),
+]
+VIGENCIA_LABELS = dict(VIGENCIA_CHOICES)
+VIGENCIA_BADGE_CLASSES = {
+    "programada": "bg-warning",
+    "vigente": "bg-success",
+    "finalizada": "",
+    "cancelada": "bg-danger",
+}
+
+
+def _vigencia_incapacidad(incapacidad: IncapacidadEmpleado, hoy):
+    if incapacidad.estado == IncapacidadEmpleado.ESTADO_CANCELADA:
+        return "cancelada"
+    if incapacidad.fecha_inicio > hoy:
+        return "programada"
+    if incapacidad.fecha_fin < hoy:
+        return "finalizada"
+    return "vigente"
+
+
+def _filtrar_vigencia(queryset, vigencia: str, hoy):
+    if vigencia == "cancelada":
+        return queryset.filter(estado=IncapacidadEmpleado.ESTADO_CANCELADA)
+    if not vigencia:
+        return queryset
+
+    queryset = queryset.exclude(estado=IncapacidadEmpleado.ESTADO_CANCELADA)
+    if vigencia == "programada":
+        return queryset.filter(fecha_inicio__gt=hoy)
+    if vigencia == "vigente":
+        return queryset.filter(fecha_inicio__lte=hoy, fecha_fin__gte=hoy)
+    if vigencia == "finalizada":
+        return queryset.filter(fecha_fin__lt=hoy)
+    return queryset
+
+
 def _require_manage_rrhh(user):
     if not can_manage_submodule(user, "rrhh", "nomina"):
         raise PermissionDenied("Solo Capital Humano puede capturar incapacidades.")
@@ -28,14 +69,20 @@ def rrhh_incapacidades(request):
 
     empleado_id = (request.GET.get("empleado") or "").strip()
     estado = (request.GET.get("estado") or "").strip()
+    vigencia = (request.GET.get("vigencia") or "").strip()
+    if vigencia not in VIGENCIA_LABELS:
+        vigencia = ""
+    hoy = timezone.localdate()
     incapacidades_qs = IncapacidadEmpleado.objects.select_related("empleado", "registrada_por").order_by("-fecha_inicio", "-id")
     if empleado_id.isdigit():
         incapacidades_qs = incapacidades_qs.filter(empleado_id=int(empleado_id))
     if estado in {choice[0] for choice in IncapacidadEmpleado.ESTADO_CHOICES}:
         incapacidades_qs = incapacidades_qs.filter(estado=estado)
+    incapacidades_qs = _filtrar_vigencia(incapacidades_qs, vigencia, hoy)
 
     rows = []
     for incapacidad in incapacidades_qs[:300]:
+        vigencia_registro = _vigencia_incapacidad(incapacidad, hoy)
         vacaciones = SolicitudVacaciones.objects.filter(
             empleado=incapacidad.empleado,
             estado__in=[
@@ -46,7 +93,15 @@ def rrhh_incapacidades(request):
             fecha_inicio__lte=incapacidad.fecha_fin,
             fecha_fin__gte=incapacidad.fecha_inicio,
         ).order_by("-creado_en", "-id")[:5]
-        rows.append({"incapacidad": incapacidad, "vacaciones": vacaciones})
+        rows.append(
+            {
+                "incapacidad": incapacidad,
+                "vacaciones": vacaciones,
+                "vigencia": vigencia_registro,
+                "vigencia_label": VIGENCIA_LABELS[vigencia_registro],
+                "vigencia_badge_class": VIGENCIA_BADGE_CLASSES[vigencia_registro],
+            }
+        )
 
     empleados = Empleado.objects.filter(activo=True).order_by("nombre", "id")
     return render(
@@ -58,8 +113,10 @@ def rrhh_incapacidades(request):
             "empleados": empleados,
             "tipo_choices": IncapacidadEmpleado.TIPO_CHOICES,
             "estado_choices": IncapacidadEmpleado.ESTADO_CHOICES,
+            "vigencia_choices": VIGENCIA_CHOICES,
             "empleado_id": empleado_id,
             "estado": estado,
+            "vigencia": vigencia,
             "can_manage_rrhh": can_manage_submodule(request.user, "rrhh", "nomina"),
         },
     )
