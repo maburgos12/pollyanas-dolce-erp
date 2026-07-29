@@ -1813,11 +1813,20 @@ class LogisticaRutaCargaChecklistView(_LogisticaBaseView):
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=solo_tramo_actual, excluir_superadas=True)
         data = dict(RutaCargaChecklistSerializer(checklist, context={"request": request}).data)
         if solo_tramo_actual:
+            # En vista como repartidor el contexto se construye con el operador
+            # suplantado, no con el superadmin: `_construir_contexto` exige que el
+            # actor sea del equipo de la ruta. Mismo criterio que ruta activa.
+            contexto_actor = repartidor.user if _is_pwa_preview_request(request) else request.user
             try:
-                contexto = construir_contexto_operativo(ruta=ruta, actor=request.user)
+                contexto = construir_contexto_operativo(ruta=ruta, actor=contexto_actor)
             except ValidationError as exc:
                 data["contexto_operativo"] = None
                 data["contexto_operativo_advertencia"] = "; ".join(exc.messages)
+            except PermissionDenied as exc:
+                # La lectura ya quedó autorizada arriba; sin contexto sólo se pierde
+                # la capacidad de capturar, no el derecho a consultar la carga.
+                data["contexto_operativo"] = None
+                data["contexto_operativo_advertencia"] = str(exc)
             else:
                 data["contexto_operativo"] = contexto_operativo_dict(contexto)
         return Response(data, status=status.HTTP_200_OK)
