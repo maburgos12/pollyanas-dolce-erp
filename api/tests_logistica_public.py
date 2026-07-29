@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from importlib import import_module
 from unittest.mock import patch
 from uuid import uuid4
 
+from django.apps import apps
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db import close_old_connections
@@ -633,6 +635,7 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
             instrucciones_entrega="Llamar al llegar",
             repartidor=self.driver,
             unidad=self.unidad,
+            route_sequence=1,
             estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
@@ -671,9 +674,11 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
                 "cliente_telefono", "direccion", "referencias", "latitud",
                 "longitud", "place_id", "descripcion", "canal",
                 "fecha_compromiso", "folio", "instrucciones_entrega",
-                "unidad", "productos", "total",
+                "unidad", "productos", "total", "sequence", "is_next",
             },
         )
+        self.assertEqual(item["sequence"], 1)
+        self.assertTrue(item["is_next"])
         self.assertEqual(item["estatus"], "ASIGNADO")
         self.assertEqual(item["folio"], "EXEC-1")
         self.assertEqual(item["unidad"]["codigo"], "M2M-EXEC-U")
@@ -693,6 +698,67 @@ class PublicLogisticaDriverExecutionApiTests(APITestCase):
         self.solicitud.refresh_from_db()
         terminal = self.client.get(self.list_url, **self.auth)
         self.assertEqual(terminal.data, {"results": []})
+
+    def test_lista_respeta_secuencia_canonica_y_ventanas_no_el_id(self):
+        cliente = self.solicitud.cliente
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Av. Segunda 456",
+            latitud="24.810000",
+            longitud="-107.395000",
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            descripcion="Segunda parada",
+            canal=PedidoCliente.CANAL_TELEFONO,
+            public_api_client=self.api_client,
+            point_note_id="POINT-EXEC-2",
+            point_note_folio="EXEC-2",
+            point_note_snapshot={"pk_nota": "POINT-EXEC-2", "lines": []},
+            monto_estimado="200.00",
+        )
+        segunda = SolicitudDomicilio.objects.create(
+            pedido_cliente=pedido,
+            cliente=cliente,
+            direccion_cliente=direccion,
+            cliente_nombre="Cliente segunda",
+            cliente_telefono="6671230000",
+            direccion=direccion.direccion,
+            repartidor=self.driver,
+            unidad=self.unidad,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            ventana_inicio=timezone.now() - timedelta(hours=1),
+            ventana_fin=timezone.now(),
+        )
+        segunda.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
+        segunda.save(update_fields=["estatus"])
+        segunda.estatus = SolicitudDomicilio.ESTATUS_LISTO
+        segunda.save(update_fields=["estatus"])
+        SolicitudDomicilio._base_manager.filter(pk=self.solicitud.pk).update(
+            route_sequence=None,
+        )
+        migration = import_module(
+            "logistica.migrations.0049_domicilio_route_sequence"
+        )
+        migration.backfill_route_sequence(apps, None)
+
+        response = self.client.get(self.list_url, **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreater(segunda.id, self.solicitud.id)
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]],
+            [segunda.id, self.solicitud.id],
+        )
+        self.assertEqual(
+            [item["sequence"] for item in response.data["results"]],
+            [1, 2],
+        )
+        self.assertEqual(
+            [item["is_next"] for item in response.data["results"]],
+            [True, False],
+        )
 
     def test_flujo_canonico_rechaza_saltos_doble_cierre_y_exige_motivo_incidencia(self):
         skipped = self.client.post(
@@ -982,6 +1048,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             direccion="Race",
             repartidor=self.drivers[0],
             unidad=self.drivers[0].unidad_asignada,
+            route_sequence=1,
             estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
         self.solicitud.estatus = SolicitudDomicilio.ESTATUS_PREPARANDO
@@ -1099,4 +1166,51 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
                 (self.drivers[1].id, SolicitudDomicilio.ESTATUS_LISTO),
                 (self.drivers[0].id, SolicitudDomicilio.ESTATUS_EN_RUTA),
             },
+        )
+
+    def test_asignaciones_concurrentes_al_mismo_repartidor_no_repiten_secuencia(self):
+        solicitudes = []
+        for index in range(2):
+            cliente = Cliente.objects.create(nombre=f"Secuencia {index}")
+            pedido = PedidoCliente.objects.create(
+                cliente=cliente,
+                descripcion=f"Secuencia {index}",
+                public_api_client=self.api_client,
+                point_note_id=f"POINT-SEQUENCE-{index}",
+                point_note_snapshot={"pk_nota": f"POINT-SEQUENCE-{index}"},
+            )
+            solicitudes.append(
+                SolicitudDomicilio.objects.create(
+                    pedido_cliente=pedido,
+                    cliente_nombre=cliente.nombre,
+                    direccion=f"Calle {index}",
+                )
+            )
+
+        def assign(solicitud_id):
+            close_old_connections()
+            try:
+                return assign_domicilio(
+                    solicitud_id=solicitud_id,
+                    repartidor_id=self.drivers[0].id,
+                    owner_api_client=self.api_client,
+                )
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(assign, [item.id for item in solicitudes]))
+
+        persisted = list(
+            SolicitudDomicilio.objects.filter(
+                pk__in=[item.id for item in solicitudes]
+            ).order_by("route_sequence")
+        )
+        self.assertEqual(
+            [item.route_sequence for item in persisted],
+            [2, 3],
+        )
+        self.assertEqual(
+            len({item.route_sequence for item in persisted}),
+            2,
         )

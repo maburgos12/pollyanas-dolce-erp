@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import F
 from django.http import Http404
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -228,13 +229,15 @@ class PublicLogisticaDomicilioAsignarView(APIView):
         return Response(payload, status=status.HTTP_200_OK)
 
 
-def _serialize_domicilio(solicitud):
+def _serialize_domicilio(solicitud, *, is_next: bool):
     direccion = solicitud.direccion_cliente
     pedido = solicitud.pedido_cliente
     snapshot = pedido.point_note_snapshot or {}
     unit = solicitud.unidad
     return {
         "id": solicitud.id,
+        "sequence": solicitud.route_sequence,
+        "is_next": is_next,
         "estatus": (
             "ASIGNADO"
             if solicitud.estatus == SolicitudDomicilio.ESTATUS_LISTO
@@ -302,9 +305,32 @@ class PublicLogisticaRepartidorDomiciliosView(APIView):
                 ],
             )
             .select_related("pedido_cliente", "direccion_cliente", "unidad")
-            .order_by("id")
+            .order_by(
+                F("route_sequence").asc(nulls_last=True),
+                "id",
+            )
         )
-        payload = {"results": [_serialize_domicilio(item) for item in solicitudes]}
+        solicitudes = list(solicitudes)
+        next_sequence = min(
+            (
+                item.route_sequence
+                for item in solicitudes
+                if item.route_sequence is not None
+            ),
+            default=None,
+        )
+        payload = {
+            "results": [
+                _serialize_domicilio(
+                    item,
+                    is_next=(
+                        next_sequence is not None
+                        and item.route_sequence == next_sequence
+                    ),
+                )
+                for item in solicitudes
+            ]
+        }
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload)
 
