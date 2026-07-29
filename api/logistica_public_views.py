@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import F
 from django.http import Http404
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -20,6 +21,10 @@ from logistica.models import SolicitudDomicilio
 from logistica.services_domicilio_status import (
     DomicilioStatusError,
     update_domicilio_status,
+)
+from logistica.services_domicilio_location import (
+    DomicilioLocationError,
+    record_domicilio_location,
 )
 
 
@@ -46,9 +51,55 @@ class PublicDomicilioStatusSerializer(serializers.Serializer):
         choices=[
             SolicitudDomicilio.ESTATUS_EN_RUTA,
             SolicitudDomicilio.ESTATUS_ENTREGADO,
+            SolicitudDomicilio.ESTATUS_INCIDENCIA,
         ]
     )
     operation_id = serializers.UUIDField()
+    motivo = serializers.CharField(
+        max_length=300,
+        trim_whitespace=True,
+        allow_blank=True,
+        required=False,
+        default="",
+    )
+
+    def validate_repartidor_id(self, value):
+        if isinstance(self.initial_data.get("repartidor_id"), bool):
+            raise serializers.ValidationError("Debe ser un entero positivo.")
+        return value
+
+    def validate(self, attrs):
+        if (
+            attrs["estatus"] == SolicitudDomicilio.ESTATUS_INCIDENCIA
+            and not attrs["motivo"]
+        ):
+            raise serializers.ValidationError(
+                {"motivo": "El motivo de la incidencia es obligatorio."}
+            )
+        if (
+            attrs["estatus"] != SolicitudDomicilio.ESTATUS_INCIDENCIA
+            and attrs["motivo"]
+        ):
+            raise serializers.ValidationError(
+                {"motivo": "El motivo solo aplica a una incidencia."}
+            )
+        return attrs
+
+
+class PublicDomicilioLocationSerializer(serializers.Serializer):
+    repartidor_id = serializers.IntegerField(min_value=1)
+    operation_id = serializers.UUIDField()
+    latitud = serializers.DecimalField(
+        max_digits=9, decimal_places=6, min_value=-90, max_value=90
+    )
+    longitud = serializers.DecimalField(
+        max_digits=10, decimal_places=6, min_value=-180, max_value=180
+    )
+    accuracy_m = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=0, max_value=500
+    )
+    captured_at = serializers.DateTimeField()
+    actor = ExternalActorSerializer()
 
     def validate_repartidor_id(self, value):
         if isinstance(self.initial_data.get("repartidor_id"), bool):
@@ -178,12 +229,20 @@ class PublicLogisticaDomicilioAsignarView(APIView):
         return Response(payload, status=status.HTTP_200_OK)
 
 
-def _serialize_domicilio(solicitud):
+def _serialize_domicilio(solicitud, *, is_next: bool):
     direccion = solicitud.direccion_cliente
     pedido = solicitud.pedido_cliente
+    snapshot = pedido.point_note_snapshot or {}
+    unit = solicitud.unidad
     return {
         "id": solicitud.id,
-        "estatus": solicitud.estatus,
+        "sequence": solicitud.route_sequence,
+        "is_next": is_next,
+        "estatus": (
+            "ASIGNADO"
+            if solicitud.estatus == SolicitudDomicilio.ESTATUS_LISTO
+            else solicitud.estatus
+        ),
         "revision": solicitud.revision,
         "cliente_nombre": solicitud.cliente_nombre,
         "cliente_telefono": solicitud.cliente_telefono,
@@ -195,6 +254,23 @@ def _serialize_domicilio(solicitud):
         "descripcion": pedido.descripcion,
         "canal": pedido.canal,
         "fecha_compromiso": pedido.fecha_compromiso,
+        "folio": pedido.point_note_folio or pedido.folio,
+        "instrucciones_entrega": solicitud.instrucciones_entrega,
+        "unidad": (
+            {"id": unit.id, "codigo": unit.codigo}
+            if unit is not None
+            else None
+        ),
+        "productos": [
+            {
+                "codigo": line.get("point_code", ""),
+                "descripcion": line.get("description", ""),
+                "cantidad": line.get("quantity", "0"),
+            }
+            for line in snapshot.get("lines", [])
+            if isinstance(line, dict)
+        ],
+        "total": pedido.monto_estimado,
     }
 
 
@@ -228,10 +304,33 @@ class PublicLogisticaRepartidorDomiciliosView(APIView):
                     SolicitudDomicilio.ESTATUS_EN_RUTA,
                 ],
             )
-            .select_related("pedido_cliente", "direccion_cliente")
-            .order_by("id")
+            .select_related("pedido_cliente", "direccion_cliente", "unidad")
+            .order_by(
+                F("route_sequence").asc(nulls_last=True),
+                "id",
+            )
         )
-        payload = {"results": [_serialize_domicilio(item) for item in solicitudes]}
+        solicitudes = list(solicitudes)
+        next_sequence = min(
+            (
+                item.route_sequence
+                for item in solicitudes
+                if item.route_sequence is not None
+            ),
+            default=None,
+        )
+        payload = {
+            "results": [
+                _serialize_domicilio(
+                    item,
+                    is_next=(
+                        next_sequence is not None
+                        and item.route_sequence == next_sequence
+                    ),
+                )
+                for item in solicitudes
+            ]
+        }
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload)
 
@@ -259,11 +358,49 @@ class PublicLogisticaDomicilioStatusView(APIView):
                 requested_status=values["estatus"],
                 operation_id=values["operation_id"],
                 actor=values["actor"],
+                reason=values["motivo"],
             )
         except Http404:
             _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
             raise
         except DomicilioStatusError as exc:
+            _log_access(api_client, request, exc.status_code)
+            return Response({"detail": exc.detail}, status=exc.status_code)
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload)
+
+
+class PublicLogisticaDomicilioLocationView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, solicitud_id: int):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_logistica_assignment(api_client, request)
+        if capability_error:
+            return capability_error
+        serializer = PublicDomicilioLocationSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        values = serializer.validated_data
+        try:
+            payload = record_domicilio_location(
+                solicitud_id=solicitud_id,
+                api_client=api_client,
+                repartidor_id=values["repartidor_id"],
+                operation_id=values["operation_id"],
+                latitud=values["latitud"],
+                longitud=values["longitud"],
+                accuracy_m=values["accuracy_m"],
+                captured_at=values["captured_at"],
+                actor=values["actor"],
+            )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+        except DomicilioLocationError as exc:
             _log_access(api_client, request, exc.status_code)
             return Response({"detail": exc.detail}, status=exc.status_code)
         _log_access(api_client, request, status.HTTP_200_OK)

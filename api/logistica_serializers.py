@@ -266,6 +266,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
     recarga_cedis_resuelta = serializers.SerializerMethodField()
     revision_entrega_revisada_por = serializers.IntegerField(source="revision_entrega_revisada_por_id", read_only=True)
     revision_entrega_revisada_por_nombre = serializers.SerializerMethodField()
+    domicilio = serializers.SerializerMethodField()
 
     class Meta:
         model = ParadaRuta
@@ -301,6 +302,7 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
             "revision_entrega_resolucion",
             "distancia_llegada_metros",
             "notas",
+            "domicilio",
         ]
         read_only_fields = fields
 
@@ -350,6 +352,46 @@ class ParadaRutaSerializer(serializers.ModelSerializer):
         if not obj.revision_entrega_revisada_por_id:
             return ""
         return nombre_operativo_usuario(obj.revision_entrega_revisada_por)
+
+    def get_domicilio(self, obj):
+        # La relación inversa debe venir precargada por la vista que necesita
+        # datos de domicilio. Consultarla aquí para cada parada reintroduce un
+        # N+1 en listados de geocercas y otros consumidores del serializador.
+        solicitud = obj._state.fields_cache.get("solicitud_domicilio")
+        if solicitud is None:
+            return None
+        pedido = solicitud._state.fields_cache.get("pedido_cliente")
+        direccion = solicitud._state.fields_cache.get("direccion_cliente")
+        snapshot = pedido.point_note_snapshot if pedido else {}
+        lines = snapshot.get("lines", []) if isinstance(snapshot, dict) else []
+        return {
+            "id": solicitud.id,
+            "cliente_nombre": solicitud.cliente_nombre,
+            "cliente_telefono": solicitud.cliente_telefono,
+            "direccion": solicitud.direccion,
+            "referencias": (
+                direccion.referencias
+                if direccion is not None
+                else solicitud.notas
+            ),
+            "instrucciones_entrega": solicitud.instrucciones_entrega,
+            "canal": solicitud.canal_origen,
+            "canal_display": solicitud.get_canal_origen_display(),
+            "folio_point": pedido.point_note_folio if pedido else "",
+            "pk_nota_point": pedido.point_note_id if pedido else "",
+            "total": f"{pedido.monto_estimado:.2f}" if pedido else "0.00",
+            "estatus": solicitud.estatus,
+            "productos": [
+                {
+                    "codigo": str(line.get("point_code") or ""),
+                    "descripcion": str(line.get("description") or ""),
+                    "cantidad": str(line.get("quantity") or "0"),
+                    "total": str(line.get("line_total") or "0"),
+                }
+                for line in lines
+                if isinstance(line, dict)
+            ],
+        }
 
 
 class UbicacionRutaSerializer(serializers.ModelSerializer):

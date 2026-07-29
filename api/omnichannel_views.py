@@ -391,6 +391,7 @@ def _canonical_payload(data: dict) -> dict:
         "external_source": data["external_source"],
         "external_id": data["external_id"],
         "canal": data["canal"],
+        "instrucciones_entrega": _normalize_text(data.get("instrucciones_entrega", "")),
         "cliente": {
             "nombre": _normalize_text(customer["nombre"]),
             "telefono": _normalize_phone(customer.get("telefono", "")),
@@ -416,7 +417,15 @@ def _canonical_payload(data: dict) -> dict:
 
 
 def _snapshot_matches(order: PedidoCliente, data: dict) -> bool:
-    return order.payload_snapshot == _canonical_payload(data)
+    snapshot = dict(order.payload_snapshot)
+    if "instrucciones_entrega" not in snapshot:
+        # Pre-fix snapshots did not record this field. Recover it only from the
+        # canonical delivery, never by assuming it was blank.
+        delivery = order.solicitudes_domicilio.only("instrucciones_entrega").first()
+        snapshot["instrucciones_entrega"] = _normalize_text(
+            delivery.instrucciones_entrega if delivery else ""
+        )
+    return snapshot == _canonical_payload(data)
 
 
 def _conflict_response(api_client, request, *, detail: str, code: str):
@@ -564,6 +573,12 @@ class PublicOmnichannelOrdersView(APIView):
                     payload = _response_payload(request, order, delivery, created=False)
                     response_status = status.HTTP_200_OK
                 else:
+                    references = _normalize_text(address.referencias)
+                    instructions = _normalize_text(data.get("instrucciones_entrega", ""))
+                    notes = "\n".join(part for part in (
+                        f"Referencias: {references}" if references else "",
+                        f"Instrucciones: {instructions}" if instructions else "",
+                    ) if part)
                     delivery = SolicitudDomicilio.objects.create(
                         pedido_cliente=order,
                         cliente=customer,
@@ -573,7 +588,8 @@ class PublicOmnichannelOrdersView(APIView):
                         direccion=address.direccion,
                         canal_origen=order.canal,
                         canal_detalle=data["external_source"],
-                        notas=address.referencias,
+                        notas=notes,
+                        instrucciones_entrega=instructions,
                     )
                     payload = _response_payload(request, order, delivery, created=True)
                     response_status = status.HTTP_201_CREATED
@@ -900,7 +916,6 @@ def _owned_deliveries(api_client):
     return (
         SolicitudDomicilio.objects.filter(
             pedido_cliente__public_api_client=api_client,
-            pedido_cliente__point_note_id__gt="",
             legacy_without_point=False,
         )
         .select_related(
@@ -910,8 +925,15 @@ def _owned_deliveries(api_client):
             "repartidor",
             "repartidor__user",
             "unidad",
+            "parada_ruta",
+            "parada_ruta__ruta",
         )
     )
+
+
+def _mutable_owned_deliveries(api_client):
+    """Status writes remain limited to deliveries backed by a Point note."""
+    return _owned_deliveries(api_client).filter(pedido_cliente__point_note_id__gt="")
 
 
 def _serialize_delivery_summary(delivery):
@@ -930,6 +952,8 @@ def _serialize_delivery_summary(delivery):
         "direccion": delivery.direccion,
         "repartidor_id": delivery.repartidor_id,
         "created_at": delivery.created_at,
+        "external_source": order.external_source,
+        "external_id": order.external_id,
     }
 
 
@@ -938,6 +962,63 @@ def _serialize_delivery_detail(delivery):
     customer = order.cliente
     address = delivery.direccion_cliente or order.direccion_entrega
     snapshot = order.point_note_snapshot or {}
+    route_tracking = None
+    if delivery.parada_ruta_id:
+        parada = delivery.parada_ruta
+        ruta = parada.ruta
+        locations = list(
+            ruta.ubicaciones.order_by("-timestamp_servidor", "-id")[:100]
+        )
+        latest = locations[0] if locations else None
+        now = timezone.now()
+        freshness_seconds = (
+            max(int((now - latest.timestamp_servidor).total_seconds()), 0)
+            if latest
+            else None
+        )
+        route_tracking = {
+            "id": ruta.id,
+            "folio": ruta.folio,
+            "estatus": ruta.estatus,
+            "fecha_ruta": ruta.fecha_ruta,
+            "hora_inicio_real": ruta.hora_inicio_real,
+            "hora_cierre_real": ruta.hora_cierre_real,
+            "parada": {
+                "id": parada.id,
+                "orden": parada.orden,
+                "estado": parada.estado,
+                "latitud": parada.latitud_geocerca,
+                "longitud": parada.longitud_geocerca,
+            },
+            "programada": {
+                "polyline": ruta.ruta_programada_polyline,
+                "fuente": ruta.ruta_programada_fuente,
+                "distancia_metros": ruta.ruta_programada_distancia_metros,
+                "duracion_segundos": ruta.ruta_programada_duracion_segundos,
+                "actualizada_en": ruta.ruta_programada_actualizada_en,
+            },
+            "ultima_ubicacion": (
+                {
+                    "latitud": latest.latitud,
+                    "longitud": latest.longitud,
+                    "precision_metros": latest.precision_metros,
+                    "velocidad_kmh": latest.velocidad_kmh,
+                    "timestamp_servidor": latest.timestamp_servidor,
+                    "antiguedad_segundos": freshness_seconds,
+                    "es_reciente": freshness_seconds <= 120,
+                }
+                if latest
+                else None
+            ),
+            "recorrido": [
+                {
+                    "latitud": location.latitud,
+                    "longitud": location.longitud,
+                    "timestamp_servidor": location.timestamp_servidor,
+                }
+                for location in reversed(locations)
+            ],
+        }
     return {
         "id": delivery.id,
         "pedido_id": order.id,
@@ -995,6 +1076,7 @@ def _serialize_delivery_detail(delivery):
             if delivery.unidad_id
             else None
         ),
+        "ruta": route_tracking,
         "auditoria": {
             "creado_en": delivery.created_at,
             "creado_por_id": delivery.created_by_id,
@@ -1069,6 +1151,55 @@ class PublicOmnichannelDeliveriesView(APIView):
         return Response(payload)
 
 
+class PublicOmnichannelDeliveryIdentitiesView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        external_source = _normalize_text(request.query_params.get("external_source", ""))
+        external_ids = [
+            _normalize_text(value)
+            for value in request.query_params.getlist("external_id")
+            if _normalize_text(value)
+        ]
+        if (
+            not external_source
+            or len(external_source) > 40
+            or not external_ids
+            or len(external_ids) > 100
+            or any(len(external_id) > 120 for external_id in external_ids)
+        ):
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "La consulta de identidades no es válida."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        identities = list(
+            _owned_deliveries(api_client)
+            .filter(
+                pedido_cliente__external_source=external_source,
+                pedido_cliente__external_id__in=external_ids,
+            )
+            .values("pedido_cliente__external_source", "pedido_cliente__external_id")
+            .distinct()
+        )
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response({
+            "identities": [
+                {
+                    "external_source": item["pedido_cliente__external_source"],
+                    "external_id": item["pedido_cliente__external_id"],
+                }
+                for item in identities
+            ],
+        })
+
+
 class PublicOmnichannelDeliveryDetailView(APIView):
     permission_classes = [AllowAny]
 
@@ -1113,7 +1244,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
         try:
             with transaction.atomic():
                 owned = (
-                    _owned_deliveries(api_client)
+                    _mutable_owned_deliveries(api_client)
                     .select_for_update()
                     .filter(pk=solicitud_id)
                     .exists()
