@@ -3,21 +3,15 @@ from pathlib import Path
 from django.contrib import admin
 from django.conf import settings
 from django.urls import path, include, re_path
-from django.http import Http404
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
 from core import shortcut_views
 from core import views as core_views
+from core.private_operational_media import serve_private_maintenance_media
 from core import superuser_preview
 from orquestacion import chat_views as ai_chat_views
 from rentabilidad import views_rentabilidad
 
-
-def serve_private_maintenance_media(request, path):
-    """Keep legacy local development working without exposing operational evidence in production."""
-    if not settings.DEBUG:
-        raise Http404
-    return static_serve(request, path, document_root=settings.MEDIA_ROOT)
 
 admin.site.site_url = "/dashboard/"
 
