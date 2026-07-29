@@ -668,6 +668,27 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, "Flota")
         self.assertNotContains(response, "Mantenimiento vehicular")
 
+    def test_branch_capture_user_with_mermas_and_fallas_cannot_access_bitacoras(self):
+        user = self._user("lesly.galvez", sucursal=self.sucursal)
+        self._grant(user, "mermas.captura", ACCESS_MANAGE)
+        self._grant(user, "fallas.reportar")
+        self._grant(user, "fallas.mis_reportes")
+        self.client.force_login(user)
+
+        home = self.client.get("/app/")
+        bitacoras = self.client.get("/app/bitacoras/")
+        apertura = self.client.get("/app/bitacoras/apertura/")
+
+        self.assertEqual(home.status_code, 200)
+        self.assertContains(home, "Merma de producto")
+        self.assertContains(home, "Merma de insumo")
+        self.assertContains(home, "Reportar falla")
+        self.assertContains(home, "Mis reportes")
+        self.assertNotContains(home, "Bitácoras")
+        self.assertNotContains(home, "/app/bitacoras/")
+        self.assertEqual(bitacoras.status_code, 403)
+        self.assertEqual(apertura.status_code, 403)
+
     def test_sucursal_user_does_not_get_auditorias_tile(self):
         user = self._user("visitas.colosio", sucursal=self.sucursal)
         self._grant(user, "ventas.visitas_sucursal")
