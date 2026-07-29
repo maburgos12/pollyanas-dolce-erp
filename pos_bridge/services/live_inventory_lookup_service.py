@@ -10,6 +10,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from core.models import Sucursal
+from maestros.models import Insumo
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import PointBranch
 from pos_bridge.services.point_http_client import PointHttpSessionClient
@@ -100,18 +101,36 @@ class PointLiveInventoryLookupService:
                 product_id = _first_present(product, ("PK", "PK_Producto", "id", "Id"))
                 if product_id is None:
                     raise PointLiveInventoryLookupError("Point no devolvió PK para el producto de stock.")
-                stock_rows = client.get_product_stock(product_id, timeout=self.timeout_seconds)
+                if self._is_insumo(product):
+                    branch_row = self._find_official_insumo_stock(
+                        client=client,
+                        product=product,
+                        codes=codes,
+                        point_branch=point_branch,
+                    )
+                else:
+                    stock_rows = client.get_product_stock(product_id, timeout=self.timeout_seconds)
+                    branch_row = self._find_branch_row(
+                        stock_rows=stock_rows,
+                        sucursal=sucursal,
+                        point_branch=point_branch,
+                    )
         except (AuthenticationError, ConfigurationError, ExtractionError, OSError, TimeoutError) as exc:
             raise PointLiveInventoryLookupError(str(exc)) from exc
 
-        branch_row = self._find_branch_row(stock_rows=stock_rows, sucursal=sucursal, point_branch=point_branch)
         captured_at = timezone.now()
         result = PointLiveInventoryResult(
             product_code=str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or codes[0]),
             product_name=str(_first_present(product, ("Nombre", "nombre", "Name", "name")) or ""),
             point_product_id=str(product_id),
-            point_branch_id=str(_first_present(branch_row, ("PK_Sucursal", "pk_sucursal", "SucursalID", "id_sucursal")) or ""),
-            point_branch_name=str(_first_present(branch_row, ("Sucursal", "sucursal", "NombreSucursal", "name")) or ""),
+            point_branch_id=str(
+                _first_present(branch_row, ("PK_Sucursal", "pk_sucursal", "SucursalID", "id_sucursal"))
+                or (point_branch.external_id if point_branch else "")
+            ),
+            point_branch_name=str(
+                _first_present(branch_row, ("Sucursal", "sucursal", "NombreSucursal", "name"))
+                or (point_branch.name if point_branch else "")
+            ),
             stock_qty=_decimal(_first_present(branch_row, ("Cantidad", "cantidad", "Stock", "stock"))),
             captured_at=captured_at,
             raw_payload=branch_row,
@@ -140,6 +159,72 @@ class PointLiveInventoryLookupService:
         if len(fallback_rows) == 1:
             return fallback_rows[0]
         raise PointLiveInventoryLookupError("Point no devolvió un producto exacto para el código solicitado.")
+
+    def _is_insumo(self, product: dict[str, Any]) -> bool:
+        value = product.get("isInsumo")
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "si", "sí"}
+        return bool(value)
+
+    def _find_official_insumo_stock(
+        self,
+        *,
+        client: PointHttpSessionClient,
+        product: dict[str, Any],
+        codes: list[str],
+        point_branch: PointBranch | None,
+    ) -> dict[str, Any]:
+        if point_branch is None or not str(point_branch.external_id or "").strip():
+            raise PointLiveInventoryLookupError(
+                "La sucursal no tiene un identificador Point para consultar existencia de insumos."
+            )
+
+        product_code = str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or codes[0]).strip()
+        normalized_codes = {
+            normalizar_codigo_point(code)
+            for code in (*codes, product_code)
+            if code
+        }
+        insumo = next(
+            (
+                row
+                for row in Insumo.objects.filter(activo=True).exclude(codigo_point="").only("codigo_point", "categoria")
+                if normalizar_codigo_point(row.codigo_point) in normalized_codes
+            ),
+            None,
+        )
+        if insumo is None or not (insumo.categoria or "").strip():
+            raise PointLiveInventoryLookupError(
+                f"El insumo {product_code} no tiene categoría Point configurada en el catálogo ERP."
+            )
+
+        target_category = normalize_text(insumo.categoria)
+        category_id = None
+        for row in client.get_insumo_categories(timeout=self.timeout_seconds):
+            category_name = str(_first_present(row, ("Categoria", "categoria", "Nombre", "nombre")) or "")
+            if normalize_text(category_name) == target_category:
+                category_id = _first_present(
+                    row,
+                    ("PK_Categoria_insumo", "pk_categoria_insumo", "PK", "id", "Id"),
+                )
+                break
+        if category_id is None:
+            raise PointLiveInventoryLookupError(
+                f"Point no devolvió la categoría {insumo.categoria} requerida por el insumo {product_code}."
+            )
+
+        rows = client.get_branch_insumos(
+            branch_id=str(point_branch.external_id).strip(),
+            category_id=category_id,
+            timeout=self.timeout_seconds,
+        )
+        for row in rows:
+            row_code = _first_present(row, ("Codigo", "codigo", "SKU", "sku"))
+            if row_code not in (None, "") and normalizar_codigo_point(str(row_code)) in normalized_codes:
+                return row
+        raise PointLiveInventoryLookupError(
+            f"Point no devolvió existencia oficial del insumo {product_code} para {point_branch.name}."
+        )
 
     def _find_branch_row(
         self,
@@ -170,7 +255,7 @@ class PointLiveInventoryLookupService:
     def _cache_key(self, *, codes: list[str], sucursal: Sucursal, point_branch: PointBranch | None) -> str:
         code_key = ",".join(normalizar_codigo_point(code) for code in codes)
         branch_key = str(point_branch.external_id if point_branch else sucursal.codigo).strip().lower()
-        return f"pos_bridge:pickup_live_point:{code_key}:{branch_key}"
+        return f"pos_bridge:pickup_live_point:v2:{code_key}:{branch_key}"
 
     def _result_to_cache(self, result: PointLiveInventoryResult) -> dict[str, Any]:
         return {

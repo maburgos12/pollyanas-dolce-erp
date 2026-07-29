@@ -86,3 +86,34 @@ class PointHttpSessionClientTests(SimpleTestCase):
 
         self.assertEqual(stock[0]["Cantidad"], 18)
         request.assert_called_once_with("GET", "/Stock/get_productos_existencia", params={"pk": 2}, timeout=2)
+
+    def test_get_insumo_categories_uses_official_stock_catalog(self):
+        client = PointHttpSessionClient(self._settings())
+        response = Mock()
+        response.json.return_value = [{"PK_Categoria_insumo": 12, "Categoria": "FRUTAS"}]
+
+        with patch.object(client, "_request", return_value=response) as request:
+            categories = client.get_insumo_categories(timeout=2)
+
+        self.assertEqual(categories[0]["PK_Categoria_insumo"], 12)
+        request.assert_called_once_with("GET", "/Catalogos/get_insumos", timeout=2)
+
+    def test_get_branch_insumos_parses_double_encoded_official_payload(self):
+        client = PointHttpSessionClient(self._settings())
+        response = Mock()
+        response.json.return_value = (
+            '[{"PK_articulo":17,"Codigo":"017","Nombre":"Fresa Fresca",'
+            '"Cantidad":53.47099999999971,"Unidad":"KG"}]'
+        )
+
+        with patch.object(client, "_request", return_value=response) as request:
+            stock = client.get_branch_insumos(branch_id=2, category_id=12, timeout=2)
+
+        self.assertEqual(stock[0]["Codigo"], "017")
+        self.assertEqual(stock[0]["Cantidad"], 53.47099999999971)
+        request.assert_called_once_with(
+            "GET",
+            "/Stock/GetInsumosPA",
+            params={"almacen": 2, "categoria": 12},
+            timeout=2,
+        )
