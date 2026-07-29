@@ -312,6 +312,52 @@ class PointMovementSyncServiceTests(TestCase):
             "ALMACEN_1",
         )
 
+    def test_point_puede_ajustar_transferencia_aunque_el_saldo_quede_negativo(self):
+        """Regresión: un ajuste de Point con delta negativo no debe abortar el sync.
+
+        CUARTO_FRIO puede no tener stock de apertura (inventario por secciones en
+        construcción). Si Point baja la cantidad de una transferencia ya
+        sincronizada, el delta negativo dejaba el job en FAILED y bloqueaba la
+        recarga CEDIS de las rutas. El flujo automático debe tolerar saldo
+        negativo, igual que el consumo por venta.
+        """
+        insumo = Insumo.objects.create(
+            nombre="Betún transferencia ajustada",
+            codigo_point="TRANS-NEG-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        MovimientoInventario.objects.create(
+            source_hash="transfer-ajuste-negativo",
+            insumo=insumo,
+            almacen="CUARTO_FRIO",
+            tipo=MovimientoInventario.TIPO_ENTRADA,
+            cantidad=Decimal("41"),
+        )
+        line = SimpleNamespace(
+            source_hash="transfer-ajuste-negativo",
+            received_at=datetime(2026, 7, 28, 15, 0, tzinfo=timezone.utc),
+            sent_at=None,
+            registered_at=datetime(2026, 7, 28, 14, 0, tzinfo=timezone.utc),
+            insumo=insumo,
+            insumo_id=insumo.id,
+            received_quantity=Decimal("1"),
+            unit=None,
+            transfer_external_id="TR-NEG-001",
+            destination_branch=SimpleNamespace(name="CEDIS", metadata={}),
+        )
+
+        PointMovementSyncService()._upsert_transfer_inventory_movement(line=line)
+
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO").stock_actual,
+            Decimal("-40"),
+        )
+        self.assertEqual(
+            MovimientoInventario.objects.get(source_hash="transfer-ajuste-negativo").cantidad,
+            Decimal("1"),
+        )
+
     def test_normaliza_almacen_vacio_aunque_la_cantidad_no_cambie(self):
         insumo = Insumo.objects.create(
             nombre="Betún transferencia no-op",

@@ -230,7 +230,11 @@ class PointMovementSyncService:
         return {'movement': None, 'count': max(len(candidates), len(exact)), 'reason': reason}
 
     def _apply_inventory_delta(self, *, insumo: Insumo, delta: Decimal, almacen: str) -> None:
-        aplicar_delta(insumo, almacen, delta)
+        # Flujo automático Point: puede correr antes de la apertura de stock por
+        # ubicación (mismo criterio que el consumo por venta en services_consumo_bom).
+        # Sin esto, un ajuste de Point con delta negativo aborta el job completo y
+        # bloquea la recarga CEDIS de las rutas que dependen de él.
+        aplicar_delta(insumo, almacen, delta, permitir_negativo=True)
 
     def _apply_cedis_delta(self, *, receta, delta: Decimal) -> None:
         inventario, _ = InventarioCedisProducto.objects.get_or_create(receta=receta)
