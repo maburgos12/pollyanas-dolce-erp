@@ -68,6 +68,19 @@ def init_db() -> None:
             )
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cloud_record_quarantine (
+                record_guid TEXT PRIMARY KEY,
+                page_index INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                raw_payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'review',
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def _now_iso() -> str:
@@ -76,6 +89,34 @@ def _now_iso() -> str:
 
 def _payload_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def quarantine_cloud_record(record) -> None:
+    """Conserva una fila cloud no proyectable antes de permitir avanzar página."""
+    now = _now_iso()
+    raw_payload = _payload_json(record.raw)
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            """
+            INSERT INTO cloud_record_quarantine (
+                record_guid, page_index, reason, raw_payload, status,
+                first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, 'review', ?, ?)
+            ON CONFLICT(record_guid) DO UPDATE SET
+                page_index=excluded.page_index,
+                reason=excluded.reason,
+                raw_payload=excluded.raw_payload,
+                last_seen_at=excluded.last_seen_at
+            """,
+            (
+                record.record_guid,
+                record.page_index,
+                record.reason,
+                raw_payload,
+                now,
+                now,
+            ),
+        )
 
 
 def enqueue_event(event: dict[str, Any]) -> bool:

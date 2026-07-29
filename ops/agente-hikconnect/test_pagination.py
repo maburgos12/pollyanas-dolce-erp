@@ -14,7 +14,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import TIMEZONE
-from hikconnect_client import CloudRecord, HikConnectClient
+from hikconnect_client import CloudPage, CloudRecord, HikConnectClient, InvalidCloudRecord
 
 AHORA = datetime(2026, 7, 27, 12, 0, tzinfo=TIMEZONE)
 VENTANA = AHORA - timedelta(hours=1)
@@ -91,7 +91,7 @@ def test_reanuda_desde_pagina_pendiente():
     assert encontrados.next_page == 4
 
 
-def test_registro_cloud_invalido_falla_la_pagina_sin_avanzar():
+def test_registro_cloud_invalido_se_aísla_sin_descartar_la_pagina():
     class Response:
         status = 200
 
@@ -113,12 +113,39 @@ def test_registro_cloud_invalido_falla_la_pagina_sin_avanzar():
     cliente.page = SimpleNamespace(
         request=SimpleNamespace(post=lambda *_args, **_kwargs: Response())
     )
-    try:
-        cliente.fetch_records_page(7, 100, require_login=False)
-    except RuntimeError as exc:
-        assert "guid-malformado" in str(exc).lower()
-    else:
-        raise AssertionError("un raw invalido no debe descartarse silenciosamente")
+    pagina = cliente.fetch_records_page(7, 100, require_login=False)
+    assert isinstance(pagina, CloudPage)
+    assert len(pagina) == 0
+    assert len(pagina.invalid_records) == 1
+    assert pagina.invalid_records[0].record_guid == "guid-malformado"
+    assert pagina.invalid_records[0].reason == "invalid_device_time"
+
+
+def test_registro_aislado_es_durable_antes_de_continuar():
+    invalido = InvalidCloudRecord(
+        record_guid="guid-sin-persona",
+        page_index=1,
+        reason="missing_employee_code",
+        raw={"recordGuid": "guid-sin-persona"},
+    )
+
+    class ClienteConAislado(ClienteFalso):
+        def fetch_records_page(self, page_index, page_size, require_login=True):
+            self.ultima_pagina_pedida = max(self.ultima_pagina_pedida, page_index)
+            if page_index == 1:
+                return CloudPage([registro("valido", 1)], [invalido])
+            return CloudPage([], [])
+
+    journal = []
+    encontrados = ClienteConAislado([]).fetch_records_since(
+        start_dt=VENTANA,
+        page_size=100,
+        max_pages=3,
+        on_invalid_record=journal.append,
+    )
+    assert [item.record_guid for item in journal] == ["guid-sin-persona"]
+    assert [item.record_guid for item in encontrados] == ["valido"]
+    assert encontrados.complete is True
 
 
 if __name__ == "__main__":
@@ -126,5 +153,6 @@ if __name__ == "__main__":
     test_agotamiento_de_paginas_deja_continuacion_pendiente()
     test_deduplica_por_guid()
     test_reanuda_desde_pagina_pendiente()
-    test_registro_cloud_invalido_falla_la_pagina_sin_avanzar()
-    print("OK: los 5 checks de paginacion pasan")
+    test_registro_cloud_invalido_se_aísla_sin_descartar_la_pagina()
+    test_registro_aislado_es_durable_antes_de_continuar()
+    print("OK: los 6 checks de paginacion pasan")

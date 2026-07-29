@@ -63,6 +63,15 @@ class HealthTests(unittest.TestCase):
                     updated_at TEXT NOT NULL,
                     acked_at TEXT
                 );
+                CREATE TABLE cloud_record_quarantine (
+                    record_guid TEXT PRIMARY KEY,
+                    page_index INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    raw_payload TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -151,6 +160,30 @@ class HealthTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "action_required")
         self.assertEqual(report["incident_key"], "identity_unresolved")
+
+    def test_unidentified_cloud_record_is_durable_human_action_without_blocking_cycle(self):
+        self._state(
+            last_cycle_at=_iso(self.now - timedelta(minutes=1)),
+            last_success_at=_iso(self.now - timedelta(minutes=1)),
+            failure_count=0,
+        )
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """
+                INSERT INTO cloud_record_quarantine VALUES (
+                    'guid-sin-persona', 6, 'missing_employee_code', '{}',
+                    'review', ?, ?
+                )
+                """,
+                (_iso(self.now), _iso(self.now)),
+            )
+
+        report = health.inspect_health(self.db_path, now=self.now)
+
+        self.assertEqual(report["status"], "action_required")
+        self.assertEqual(report["cloud_quarantine"], 1)
+        self.assertEqual(report["outbox_pending"], 1)
+        self.assertEqual(report["incident_key"], "cloud_record_unidentified")
 
     def test_action_alert_is_deduplicated_and_recovery_closes_it_silently(self):
         report = {

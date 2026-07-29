@@ -23,6 +23,7 @@ from state import (
     record_cycle_failure,
     record_cycle_success,
     record_delivery_error,
+    quarantine_cloud_record,
     set_discovery_page,
     stable_punch_kind,
     was_sent,
@@ -154,6 +155,7 @@ def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> d
                 page_size=PAGE_SIZE,
                 max_pages=MAX_PAGES,
                 start_page=start_page,
+                on_invalid_record=quarantine_cloud_record,
             )
         log.info("Registros cloud encontrados: %d", len(records))
         events, selected_records = build_events(records, dry_run=dry_run)
