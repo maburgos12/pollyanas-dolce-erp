@@ -114,8 +114,17 @@ def _actualizar_observacion_hik(asistencia: AsistenciaEmpleado, notas: list[str]
     asistencia.observacion = " | ".join([*partes_actuales, *notas])
 
 
-def _aplicar_marcajes(asistencia: AsistenciaEmpleado, marcas_nuevas: list[MarcaHik]) -> tuple[int, str]:
-    marcas, duplicados = _filtrar_marcas_cercanas([*_marcas_existentes(asistencia), *marcas_nuevas])
+def _aplicar_marcajes(
+    asistencia: AsistenciaEmpleado,
+    marcas_nuevas: list[MarcaHik],
+    *,
+    filtrar_cercanas: bool = True,
+) -> tuple[int, str]:
+    todas = [*_marcas_existentes(asistencia), *marcas_nuevas]
+    if filtrar_cercanas:
+        marcas, duplicados = _filtrar_marcas_cercanas(todas)
+    else:
+        marcas, duplicados = todas, 0
     marcas = sorted(marcas, key=lambda item: timezone.localtime(item.dt))
     notas: list[str] = []
 

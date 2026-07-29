@@ -233,6 +233,15 @@ def vincular_identidad_pendiente(
     pendiente.resuelto_por = user
     pendiente.resuelto_en = timezone.now()
     pendiente.save(update_fields=["empleado_sugerido", "estado", "resuelto_por", "resuelto_en", "actualizado_en"])
+    codigo_externo = pendiente.codigo_externo
+    empleado_id = empleado.id
+
+    def _replay_hik_deferred() -> None:
+        from .services_hik_ingesta import replay_deferred_identity
+
+        replay_deferred_identity(codigo_externo, empleado_id)
+
+    transaction.on_commit(_replay_hik_deferred)
     return empleado
 
 

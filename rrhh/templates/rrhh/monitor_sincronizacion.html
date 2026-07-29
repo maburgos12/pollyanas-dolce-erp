@@ -4,7 +4,7 @@
 {% block page_title %}Monitor de sincronización checador{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-monitor-sincronizacion.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-monitor-sincronizacion.css?v=20260729-hik-health-v2">
 {% endblock %}
 
 {% block content %}
@@ -15,6 +15,39 @@
 </section>
 
 <section class="monitor-page">
+  <article class="hik-health hik-health-{% if estado_hik_stale %}action_required{% elif estado_hik %}{{ estado_hik.estado }}{% else %}action_required{% endif %}">
+    <div>
+      <h2 class="hik-health-title">
+        {% if estado_hik_stale %}
+          Sin reporte vigente del agente
+        {% elif estado_hik.estado == "healthy" %}
+          Checadas al día
+        {% elif estado_hik.estado == "recovering" %}
+          Sincronización recuperándose
+        {% else %}
+          Sincronización requiere acción
+        {% endif %}
+      </h2>
+      <p class="hik-health-copy">
+        {% if estado_hik_stale %}
+          El último estado tiene más de 10 minutos. Las checadas guardadas no se eliminan; el agente debe restablecer su reporte.
+        {% elif estado_hik.estado == "recovering" %}
+          El agente conserva la cola y reintenta automáticamente. No requiere intervención mientras permanezca dentro del objetivo de 10 minutos.
+        {% elif estado_hik.estado == "action_required" %}
+          La recuperación automática se agotó. Incidente: {{ estado_hik.incident_key|default:"sin clave" }}.
+        {% else %}
+          Último ciclo confirmado {{ estado_hik.ultimo_ciclo_en|date:"Y-m-d H:i:s" }}.
+        {% endif %}
+      </p>
+    </div>
+    <dl class="hik-health-metrics">
+      <div><dt>Cola por entregar</dt><dd>{{ estado_hik.outbox_pending|default:0 }}</dd></div>
+      <div><dt>Eventos diferidos</dt><dd>{{ hik_deferred }}</dd></div>
+      <div><dt>Identidades pendientes</dt><dd>{{ identidades_hik_pendientes }}</dd></div>
+      <div><dt>Último éxito</dt><dd>{{ estado_hik.ultimo_exito_en|date:"H:i:s"|default:"—" }}</dd></div>
+    </dl>
+  </article>
+
   <div class="monitor-grid">
     <article class="monitor-card">
       <div class="monitor-value">{{ resumen.total_activos }}</div>

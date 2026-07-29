@@ -412,6 +412,20 @@ def monitor_sincronizacion(request):
         .select_related("empleado", "turno", "sucursal")
         .order_by("-creado_en")[:20]
     )
+    from .models import EmpleadoIdentidadPendiente, EstadoIntegracionHik, EventoHikCloud
+
+    estado_hik = EstadoIntegracionHik.objects.filter(nombre="hikconnect_cloud").first()
+    estado_hik_stale = (
+        not estado_hik
+        or estado_hik.reportado_en < timezone.now() - timedelta(minutes=10)
+    )
+    hik_deferred = EventoHikCloud.objects.filter(
+        estado=EventoHikCloud.ESTADO_DIFERIDO
+    ).count()
+    identidades_hik_pendientes = EmpleadoIdentidadPendiente.objects.filter(
+        fuente=EmpleadoIdentidadPendiente.FUENTE_HIKVISION,
+        estado=EmpleadoIdentidadPendiente.ESTADO_PENDIENTE,
+    ).count()
 
     return render(
         request,
@@ -424,6 +438,10 @@ def monitor_sincronizacion(request):
             "asistencias_hoy": asistencias_hoy.order_by("empleado__nombre"),
             "emp_sin_asistencia": emp_sin_asistencia,
             "ultimas_por_api": ultimas_por_api,
+            "estado_hik": estado_hik,
+            "estado_hik_stale": estado_hik_stale,
+            "hik_deferred": hik_deferred,
+            "identidades_hik_pendientes": identidades_hik_pendientes,
             "resumen": {
                 "total_activos": empleados_activos,
                 "con_asistencia_hoy": len(emp_con_asistencia),

@@ -1,5 +1,24 @@
 /* Extracted from rrhh/templates/rrhh/monitor_sincronizacion.html */
 .monitor-page { display: grid; gap: 18px; }
+  .hik-health {
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--rosa);
+    border-radius: 12px;
+    display: flex;
+    gap: 24px;
+    justify-content: space-between;
+    padding: 18px;
+  }
+  .hik-health-healthy { background: #edf8ef; border-color: #acd7b3; }
+  .hik-health-recovering { background: #fff8df; border-color: #e4ca71; }
+  .hik-health-action_required { background: #fff0f0; border-color: #e7a5a5; }
+  .hik-health-title { color: var(--texto); font-family: Nunito, sans-serif; font-size: 18px; margin: 0 0 5px; }
+  .hik-health-copy { color: var(--texto); margin: 0; max-width: 68ch; }
+  .hik-health-metrics { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0; min-width: min(100%, 420px); }
+  .hik-health-metrics div { min-width: 82px; }
+  .hik-health-metrics dt { color: var(--texto-light); font-size: 12px; font-weight: 800; }
+  .hik-health-metrics dd { color: var(--texto); font-size: 17px; font-weight: 900; margin: 2px 0 0; }
   .monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .monitor-card { background: #fff; border: 1px solid var(--rosa); border-radius: 8px; padding: 18px; }
   .monitor-value { color: var(--vino); font-size: 30px; font-weight: 900; line-height: 1; }
@@ -23,6 +42,8 @@
   .badge-point { background: #e8f3ff; color: #23527c; }
   .badge-falta { background: #fde2e2; color: #b42318; }
   @media (max-width: 900px) {
+    .hik-health { align-items: stretch; flex-direction: column; }
+    .hik-health-metrics { min-width: 0; }
     .monitor-grid { grid-template-columns: 1fr; }
     .monitor-table { font-size: 13px; }
   }

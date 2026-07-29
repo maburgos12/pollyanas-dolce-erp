@@ -29,6 +29,8 @@ urlpatterns = [
     path("api/me/", api_views.capital_humano_me, name="capital_humano_me"),
     path("api/mi-perfil/", api_views.mi_perfil, name="rrhh_mi_perfil"),
     path("api/asistencia-hik/", api_receptor.receptor_asistencia_hik, name="rrhh_receptor_hik"),
+    path("api/asistencia-hik/v2/", api_receptor.receptor_asistencia_hik_v2, name="rrhh_receptor_hik_v2"),
+    path("api/asistencia-hik/v2/health/", api_receptor.receptor_salud_hik_v2, name="rrhh_receptor_hik_v2_health"),
     path("", include(router.urls)),
     path("empleados/", views.empleados, name="empleados"),
     path("asignacion-sucursal/", asignacion_sucursal_view, name="rrhh_asignacion_sucursal"),
