@@ -118,6 +118,7 @@ def ruta_es_operativa_hoy(ruta: RutaEntrega, *, hoy=None) -> bool:
 
 
 @transaction.atomic
+@transaction.atomic
 def liberar_ruta_con_turno(
     *,
     ruta: RutaEntrega,
@@ -229,6 +230,15 @@ def liberar_ruta_con_turno(
         raise LiberacionRutaError(blocker)
 
     if ruta.estatus != RutaEntrega.ESTATUS_EN_RUTA or ruta.bitacora_salida_id != bitacora.id:
+        from .services_domicilio_route import (
+            DomicilioRouteSyncError,
+            sync_linked_domicilios_on_route_start,
+        )
+
+        try:
+            sync_linked_domicilios_on_route_start(ruta=ruta, actor=actor)
+        except DomicilioRouteSyncError as exc:
+            raise LiberacionRutaError("; ".join(exc.messages)) from exc
         ruta.estatus = RutaEntrega.ESTATUS_EN_RUTA
         ruta.bitacora_salida = bitacora
         ruta.hora_inicio_real = ruta.hora_inicio_real or bitacora.hora_salida or timezone.now()

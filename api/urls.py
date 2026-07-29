@@ -95,6 +95,7 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicOmnichannelDeliveryIdentitiesView,
     PublicOmnichannelDeliveriesView,
     PublicOmnichannelDeliveryDetailView,
     PublicOmnichannelDeliveryStatusView,
@@ -104,8 +105,13 @@ from .omnichannel_views import (
     PublicOmnichannelPointNotesView,
     PublicOmnichannelPointOrdersView,
 )
+from .driver_identity_views import (
+    PublicDriverIdentityLoginView,
+    PublicDriverIdentityStatusView,
+)
 from .logistica_public_views import (
     PublicLogisticaDomicilioAsignarView,
+    PublicLogisticaDomicilioLocationView,
     PublicLogisticaDomicilioStatusView,
     PublicLogisticaRepartidorDomiciliosView,
     PublicLogisticaRepartidoresDisponiblesView,
@@ -227,6 +233,16 @@ urlpatterns = [
         name="api_ai_gateway_approval_decision",
     ),
     path("auth/token/", ApiTokenAuthView.as_view(), name="api_auth_token"),
+    path(
+        "auth/driver-identity/",
+        PublicDriverIdentityLoginView.as_view(),
+        name="api_public_driver_identity_login",
+    ),
+    path(
+        "auth/driver-identity/<int:erp_user_id>/",
+        PublicDriverIdentityStatusView.as_view(),
+        name="api_public_driver_identity_status",
+    ),
     path("auth/token/rotate/", ApiTokenRotateView.as_view(), name="api_auth_token_rotate"),
     path("auth/token/revoke/", ApiTokenRevokeView.as_view(), name="api_auth_token_revoke"),
     path("auth/me/", ApiAuthMeView.as_view(), name="api_auth_me"),
@@ -483,6 +499,11 @@ urlpatterns = [
         PublicLogisticaDomicilioStatusView.as_view(),
         name="api_public_logistica_domicilio_estatus",
     ),
+    path(
+        "public/v1/logistica/domicilios/<int:solicitud_id>/ubicacion/",
+        PublicLogisticaDomicilioLocationView.as_view(),
+        name="api_public_logistica_domicilio_ubicacion",
+    ),
     path("public/v1/pickup-availability/", PublicPickupAvailabilityView.as_view(), name="api_public_pickup_availability"),
     path("public/v1/pickup-reservations/", PublicPickupReservationsView.as_view(), name="api_public_pickup_reservations"),
     path(
@@ -530,6 +551,11 @@ urlpatterns = [
         "public/v1/omnichannel/deliveries/",
         PublicOmnichannelDeliveriesView.as_view(),
         name="api_public_omnichannel_deliveries",
+    ),
+    path(
+        "public/v1/omnichannel/delivery-identities/",
+        PublicOmnichannelDeliveryIdentitiesView.as_view(),
+        name="api_public_omnichannel_delivery_identities",
     ),
     path(
         "public/v1/omnichannel/deliveries/<int:solicitud_id>/",

@@ -16,6 +16,7 @@ from core.models import Notificacion
 from core.notificaciones import crear_notificaciones
 from logistica.domain_ruta import parada_resuelta_operativamente
 from logistica.models import EventoRuta, ParadaEntregaEvidencia, ParadaRuta, PuntoLogistico, RutaEntrega
+from logistica.services_domicilio_route import sync_linked_domicilio_from_stop_delivery
 from logistica.services_rutas_control import repartidor_participa_en_ruta
 from rrhh.services_identidad import nombre_operativo_usuario
 
@@ -343,6 +344,7 @@ def _validar_confirmacion(*, ruta: RutaEntrega, parada: ParadaRuta, actor, entre
 
 
 @transaction.atomic
+@transaction.atomic
 def confirmar_entrega_parada(
     *,
     ruta,
@@ -434,6 +436,12 @@ def confirmar_entrega_parada(
             "revision_entrega_datos",
             "actualizado_en",
         ]
+    )
+    sync_linked_domicilio_from_stop_delivery(
+        parada=parada,
+        entrega_estado=entrega_estado,
+        motivo=str(motivo).strip(),
+        actor=actor,
     )
 
     tipo_evento = EventoRuta.TIPO_ENTREGA_EXCEPCIONAL if requiere_revision else EventoRuta.TIPO_ENTREGA

@@ -231,6 +231,7 @@ class PuntoLogistico(models.Model):
     TIPO_TALLER = "TALLER"
     TIPO_BANCO = "BANCO"
     TIPO_AUTORIZADO = "AUTORIZADO"
+    TIPO_DOMICILIO = "DOMICILIO"
     TIPO_CHOICES = [
         (TIPO_CEDIS, "CEDIS"),
         (TIPO_SUCURSAL, "Sucursal"),
@@ -238,6 +239,7 @@ class PuntoLogistico(models.Model):
         (TIPO_TALLER, "Taller"),
         (TIPO_BANCO, "Banco"),
         (TIPO_AUTORIZADO, "Punto autorizado"),
+        (TIPO_DOMICILIO, "Domicilio de cliente"),
     ]
 
     sucursal = models.ForeignKey(
@@ -246,6 +248,13 @@ class PuntoLogistico(models.Model):
         null=True,
         blank=True,
         related_name="puntos_logisticos",
+    )
+    direccion_cliente = models.OneToOneField(
+        "crm.DireccionCliente",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="punto_logistico",
     )
     nombre = models.CharField(max_length=160)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_SUCURSAL)
@@ -1607,6 +1616,7 @@ class SolicitudDomicilioQuerySet(models.QuerySet):
             "repartidor_id",
             "entregado_en",
             "cancelacion_motivo",
+            "incidencia_motivo",
             "ventana_inicio",
             "ventana_fin",
             "legacy_without_point",
@@ -1684,6 +1694,7 @@ class SolicitudDomicilio(models.Model):
     ESTATUS_LISTO = "LISTO"
     ESTATUS_EN_RUTA = "EN_RUTA"
     ESTATUS_ENTREGADO = "ENTREGADO"
+    ESTATUS_INCIDENCIA = "INCIDENCIA"
     ESTATUS_CANCELADO = "CANCELADO"
     ESTATUS_ASIGNADO_LEGACY = "ASIGNADO"
     # Alias de lectura temporal; nunca debe usarse para promover una asignación.
@@ -1696,6 +1707,7 @@ class SolicitudDomicilio(models.Model):
         (ESTATUS_LISTO, "Listo"),
         (ESTATUS_EN_RUTA, "En ruta"),
         (ESTATUS_ENTREGADO, "Entregado"),
+        (ESTATUS_INCIDENCIA, "Incidencia"),
         (ESTATUS_CANCELADO, "Cancelado"),
     ]
     INITIAL_STATUSES = frozenset({ESTATUS_PENDIENTE_POINT, ESTATUS_CONFIRMADO})
@@ -1706,7 +1718,9 @@ class SolicitudDomicilio(models.Model):
         ESTATUS_LISTO: ESTATUS_EN_RUTA,
         ESTATUS_EN_RUTA: ESTATUS_ENTREGADO,
     }
-    TERMINAL_STATUSES = frozenset({ESTATUS_ENTREGADO, ESTATUS_CANCELADO})
+    TERMINAL_STATUSES = frozenset(
+        {ESTATUS_ENTREGADO, ESTATUS_INCIDENCIA, ESTATUS_CANCELADO}
+    )
 
     pedido_cliente = models.ForeignKey(
         PedidoCliente,
@@ -1729,6 +1743,14 @@ class SolicitudDomicilio(models.Model):
         blank=True,
         related_name="solicitudes_domicilio",
     )
+    parada_ruta = models.OneToOneField(
+        "ParadaRuta",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="solicitud_domicilio",
+        editable=False,
+    )
     cliente_nombre = models.CharField(max_length=160)
     cliente_telefono = models.CharField(max_length=30, blank=True, default="")
     direccion = models.CharField(max_length=255)
@@ -1739,6 +1761,7 @@ class SolicitudDomicilio(models.Model):
     ventana_fin = models.DateTimeField(null=True, blank=True)
     instrucciones_entrega = models.CharField(max_length=500, blank=True, default="")
     cancelacion_motivo = models.CharField(max_length=300, blank=True, default="")
+    incidencia_motivo = models.CharField(max_length=300, blank=True, default="")
     legacy_without_point = models.BooleanField(default=False, editable=False)
     duplicado_de = models.ForeignKey(
         "self",
@@ -1763,6 +1786,11 @@ class SolicitudDomicilio(models.Model):
         null=True,
         blank=True,
         related_name="solicitudes_domicilio",
+    )
+    route_sequence = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        editable=False,
     )
     unidad = models.ForeignKey(
         "Unidad",
@@ -1797,6 +1825,14 @@ class SolicitudDomicilio(models.Model):
                 fields=["pedido_cliente"],
                 condition=models.Q(pedido_cliente__isnull=False),
                 name="logistica_solicitud_pedido_unico",
+            ),
+            models.UniqueConstraint(
+                fields=["repartidor", "route_sequence"],
+                condition=models.Q(
+                    repartidor__isnull=False,
+                    route_sequence__isnull=False,
+                ),
+                name="logistica_domicilio_repartidor_secuencia_unica",
             ),
         ]
 
@@ -1847,6 +1883,11 @@ class SolicitudDomicilio(models.Model):
                 self.estatus == self.ESTATUS_CANCELADO
                 and persisted_status not in self.TERMINAL_STATUSES
             )
+            and not (
+                self.estatus == self.ESTATUS_INCIDENCIA
+                and persisted_status
+                in {self.ESTATUS_LISTO, self.ESTATUS_EN_RUTA}
+            )
             and self.NEXT_STATUS.get(persisted_status) != self.estatus
         ):
             errors["estatus"] = (
@@ -1894,6 +1935,7 @@ class SolicitudDomicilio(models.Model):
             self.ESTATUS_LISTO,
             self.ESTATUS_EN_RUTA,
             self.ESTATUS_ENTREGADO,
+            self.ESTATUS_INCIDENCIA,
         }
         if (
             self.estatus == self.ESTATUS_CONFIRMADO
@@ -1921,7 +1963,12 @@ class SolicitudDomicilio(models.Model):
                 )
 
         if (
-            self.estatus in {self.ESTATUS_EN_RUTA, self.ESTATUS_ENTREGADO}
+            self.estatus
+            in {
+                self.ESTATUS_EN_RUTA,
+                self.ESTATUS_ENTREGADO,
+                self.ESTATUS_INCIDENCIA,
+            }
             and not legacy_terminal
         ):
             if not self.repartidor_id:
@@ -1948,6 +1995,14 @@ class SolicitudDomicilio(models.Model):
             and not legacy_terminal
         ):
             errors["cancelacion_motivo"] = "El motivo de cancelación es obligatorio."
+        if (
+            self.estatus == self.ESTATUS_INCIDENCIA
+            and not self.incidencia_motivo.strip()
+            and not legacy_terminal
+        ):
+            errors["incidencia_motivo"] = (
+                "El motivo de la incidencia es obligatorio."
+            )
 
         if self.ventana_inicio and self.ventana_fin and self.ventana_fin < self.ventana_inicio:
             errors["ventana_fin"] = "El fin de la ventana no puede ser anterior al inicio."
@@ -1977,6 +2032,7 @@ class SolicitudDomicilioStatusOperation(models.Model):
     )
     requested_status = models.CharField(max_length=20)
     final_status = models.CharField(max_length=20)
+    reason = models.CharField(max_length=300, blank=True, default="")
     actor_id = models.CharField(max_length=64)
     actor_nombre = models.CharField(max_length=120)
     result_snapshot = models.JSONField(default=dict, editable=False)
@@ -1988,5 +2044,58 @@ class SolicitudDomicilioStatusOperation(models.Model):
             models.UniqueConstraint(
                 fields=["solicitud", "operation_id"],
                 name="logistica_status_operation_unica",
+            ),
+        ]
+
+
+class SolicitudDomicilioLocationOperation(models.Model):
+    """Recibo durable e idempotente de GPS enviado por el repartidor."""
+
+    solicitud = models.ForeignKey(
+        SolicitudDomicilio,
+        on_delete=models.CASCADE,
+        related_name="location_operations",
+    )
+    operation_id = models.UUIDField()
+    api_client = models.ForeignKey(
+        "integraciones.PublicApiClient",
+        on_delete=models.PROTECT,
+        related_name="logistica_location_operations",
+    )
+    repartidor = models.ForeignKey(
+        Repartidor,
+        on_delete=models.PROTECT,
+        related_name="domicilio_location_operations",
+    )
+    latitud = models.DecimalField(max_digits=9, decimal_places=6)
+    longitud = models.DecimalField(max_digits=10, decimal_places=6)
+    accuracy_m = models.DecimalField(max_digits=8, decimal_places=2)
+    captured_at = models.DateTimeField()
+    actor_id = models.CharField(max_length=64)
+    actor_nombre = models.CharField(max_length=120)
+    result_snapshot = models.JSONField(default=dict, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-captured_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["solicitud", "operation_id"],
+                name="logistica_location_operation_unica",
+            ),
+            models.CheckConstraint(
+                check=Q(latitud__gte=Decimal("-90"))
+                & Q(latitud__lte=Decimal("90")),
+                name="logistica_location_latitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(longitud__gte=Decimal("-180"))
+                & Q(longitud__lte=Decimal("180")),
+                name="logistica_location_longitud_rango",
+            ),
+            models.CheckConstraint(
+                check=Q(accuracy_m__gte=Decimal("0"))
+                & Q(accuracy_m__lte=Decimal("500")),
+                name="logistica_location_precision_rango",
             ),
         ]

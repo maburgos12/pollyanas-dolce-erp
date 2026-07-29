@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from datetime import timedelta
 from decimal import Decimal
 from threading import Barrier, Thread
@@ -140,6 +141,21 @@ class OmnichannelPublicApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_web_order_persists_references_and_instructions_without_merging_them(self):
+        payload = deepcopy(self.payload)
+        payload["instrucciones_entrega"] = "Llamar al llegar"
+        created = self.client.post(self.url, payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=created.data["solicitud_domicilio_id"])
+        detail = self.client.get(
+            reverse("api_public_omnichannel_delivery_detail", kwargs={"solicitud_id": delivery.id}),
+            **self.auth,
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar al llegar")
+        self.assertEqual(delivery.notas, "Referencias: Portón blanco\nInstrucciones: Llamar al llegar")
+        self.assertEqual(detail.data["direccion"]["referencias"], "Portón blanco")
+        self.assertEqual(detail.data["instrucciones_entrega"], "Llamar al llegar")
+
     def test_coordenadas_invalidas_retornan_400(self):
         self.payload["direccion"]["latitud"] = "91"
         response = self.client.post(self.url, self.payload, format="json", **self.auth)
@@ -180,7 +196,7 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(solicitud.cliente_nombre, "Ana Pérez")
         self.assertEqual(solicitud.cliente_telefono, "6671234567")
         self.assertEqual(solicitud.direccion, "Av. Obregón 123")
-        self.assertEqual(solicitud.notas, "Portón blanco")
+        self.assertEqual(solicitud.notas, "Referencias: Portón blanco")
 
     def test_misma_clave_con_payload_distinto_retorna_409(self):
         first = self.client.post(self.url, self.payload, format="json", **self.auth)
@@ -192,6 +208,58 @@ class OmnichannelPublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["code"], "OMNICHANNEL_IDEMPOTENCY_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
+
+    def test_misma_clave_con_instrucciones_distintas_retorna_409_y_conserva_repartidor(self):
+        self.payload["instrucciones_entrega"] = "Llamar al llegar"
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "No tocar timbre"
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=first.data["solicitud_domicilio_id"])
+        self.assertEqual(second.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar al llegar")
+        self.assertEqual(delivery.notas, "Referencias: Portón blanco\nInstrucciones: Llamar al llegar")
+
+    def test_misma_clave_con_instrucciones_normalizadas_sigue_idempotente(self):
+        self.payload["instrucciones_entrega"] = "  Llamar al llegar  "
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "Llamar al llegar"
+        second = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_snapshot_historico_sin_instrucciones_recupera_valor_del_domicilio(self):
+        self.payload["instrucciones_entrega"] = "Llamar"
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
+        snapshot = deepcopy(order.payload_snapshot)
+        snapshot.pop("instrucciones_entrega")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE crm_pedidocliente SET payload_snapshot = %s WHERE id = %s",
+                [json.dumps(snapshot), order.pk],
+            )
+        same = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.payload["instrucciones_entrega"] = "Distinta"
+        different = self.client.post(self.url, self.payload, format="json", **self.auth)
+        delivery = SolicitudDomicilio.objects.get(pk=first.data["solicitud_domicilio_id"])
+        self.assertEqual(same.status_code, status.HTTP_200_OK)
+        self.assertEqual(different.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(delivery.instrucciones_entrega, "Llamar")
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_snapshot_historico_sin_domicilio_conserva_instrucciones_vacias(self):
+        self.payload["instrucciones_entrega"] = ""
+        first = self.client.post(self.url, self.payload, format="json", **self.auth)
+        order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
+        SolicitudDomicilio.objects.filter(pk=first.data["solicitud_domicilio_id"]).delete()
+        snapshot = deepcopy(order.payload_snapshot)
+        snapshot.pop("instrucciones_entrega")
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE crm_pedidocliente SET payload_snapshot = %s WHERE id = %s", [json.dumps(snapshot), order.pk])
+        retry = self.client.post(self.url, self.payload, format="json", **self.auth)
+        self.assertEqual(retry.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(retry.data["code"], "OMNICHANNEL_ORDER_INCOMPLETE")
 
     def test_snapshot_no_puede_modificarse_despues_de_crear_pedido(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
@@ -1119,6 +1187,87 @@ class CanonicalOmnichannelApiTests(APITestCase):
         self.assertEqual(response.data["page_size"], 1)
         self.assertEqual(response.data["results"][0]["id"], delivery.id)
         self.assertEqual(wrong_branch.data["count"], 0)
+
+    def test_delivery_list_exposes_persisted_external_identity_without_point_note(self):
+        created = self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+                "canal": "WEB",
+                "cliente": {"nombre": "Ana", "telefono": "6671234567", "email": ""},
+                "direccion": {"direccion": "Av. Obregón 123"},
+                "pedido": {"descripcion": "Pastel", "monto_estimado": "565.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        listing = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {"canal": "WEB"},
+            **self.auth,
+        )
+
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual(listing.data["count"], 1)
+        self.assertEqual(
+            listing.data["results"][0]["external_source"],
+            "POLLYANAS_ECOMMERCE",
+        )
+        self.assertEqual(
+            listing.data["results"][0]["external_id"],
+            "ECOMMERCE:PD-TIMEOUT-42",
+        )
+
+    def test_delivery_identity_lookup_confirms_only_owned_external_keys(self):
+        self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+                "canal": "WEB",
+                "cliente": {"nombre": "Ana", "telefono": "6671234567", "email": ""},
+                "direccion": {"direccion": "Av. Obregón 123"},
+                "pedido": {"descripcion": "Pastel", "monto_estimado": "565.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_delivery_identities"),
+            [
+                ("external_source", "POLLYANAS_ECOMMERCE"),
+                ("external_id", "ECOMMERCE:PD-TIMEOUT-42"),
+                ("external_id", "ECOMMERCE:PD-MISSING"),
+            ],
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {
+            "identities": [{
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+            }],
+        })
+
+    def test_delivery_identity_lookup_rejects_oversized_external_keys(self):
+        url = reverse("api_public_omnichannel_delivery_identities")
+        oversized_source = self.client.get(
+            url,
+            [("external_source", "S" * 41), ("external_id", "ECOMMERCE:PD-42")],
+            **self.auth,
+        )
+        oversized_id = self.client.get(
+            url,
+            [("external_source", "POLLYANAS_ECOMMERCE"), ("external_id", "I" * 121)],
+            **self.auth,
+        )
+        self.assertEqual(oversized_source.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(oversized_id.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch(
         "crm.services.point_order_link.PointNoteDetailService.fetch",

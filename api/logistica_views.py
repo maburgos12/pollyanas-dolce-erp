@@ -1637,10 +1637,15 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
-        if not checklist.lineas.exists():
+        tiene_paradas_sucursal = (
+            ruta.paradas.filter(punto__sucursal__isnull=False)
+            .exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS)
+            .exists()
+        )
+        if tiene_paradas_sucursal and not checklist.lineas.exists():
             sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
             checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
-        else:
+        elif tiene_paradas_sucursal:
             pendientes_point = checklist.lineas.filter(
                 estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                 cantidad_solicitada__gt=0,
@@ -1679,7 +1684,18 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                 "contexto_operativo": contexto_operativo,
                 "contexto_operativo_advertencia": contexto_advertencia,
                 "paradas": ParadaRutaSerializer(
-                    ruta.paradas.select_related("ruta", "punto", "punto__sucursal", "entrega_confirmada_por", "entrega_confirmada_por__empleado_rrhh", "revision_entrega_revisada_por", "revision_entrega_revisada_por__empleado_rrhh").order_by("orden", "id"),
+                    ruta.paradas.select_related(
+                        "ruta",
+                        "punto",
+                        "punto__sucursal",
+                        "solicitud_domicilio",
+                        "solicitud_domicilio__direccion_cliente",
+                        "solicitud_domicilio__pedido_cliente",
+                        "entrega_confirmada_por",
+                        "entrega_confirmada_por__empleado_rrhh",
+                        "revision_entrega_revisada_por",
+                        "revision_entrega_revisada_por__empleado_rrhh",
+                    ).order_by("orden", "id"),
                     many=True,
                     context={"_recarga_cedis_parada_ids": recarga_cedis_parada_ids},
                 ).data,
@@ -1732,6 +1748,7 @@ class LogisticaDomiciliosGeneralesAsignadosView(_LogisticaBaseView):
 
         solicitudes = SolicitudDomicilio.objects.filter(
             repartidor=repartidor,
+            parada_ruta__isnull=True,
             estatus__in=[
                 SolicitudDomicilio.ESTATUS_LISTO,
                 SolicitudDomicilio.ESTATUS_EN_RUTA,
