@@ -161,7 +161,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(report["status"], "action_required")
         self.assertEqual(report["incident_key"], "identity_unresolved")
 
-    def test_unidentified_cloud_record_is_durable_human_action_without_blocking_cycle(self):
+    def test_unidentified_cloud_record_is_audited_without_degrading_fresh_delivery(self):
         self._state(
             last_cycle_at=_iso(self.now - timedelta(minutes=1)),
             last_success_at=_iso(self.now - timedelta(minutes=1)),
@@ -180,10 +180,11 @@ class HealthTests(unittest.TestCase):
 
         report = health.inspect_health(self.db_path, now=self.now)
 
-        self.assertEqual(report["status"], "action_required")
+        self.assertEqual(report["status"], "healthy")
         self.assertEqual(report["cloud_quarantine"], 1)
-        self.assertEqual(report["outbox_pending"], 1)
-        self.assertEqual(report["incident_key"], "cloud_record_unidentified")
+        self.assertEqual(report["outbox_pending"], 0)
+        self.assertEqual(report["identity_deferred"], 0)
+        self.assertEqual(report["incident_key"], "")
 
     def test_action_alert_is_deduplicated_and_recovery_closes_it_silently(self):
         report = {

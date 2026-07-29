@@ -69,7 +69,7 @@ def inspect_health(
 
     pending = [row for row in rows if row[0] == "pending"]
     review = [row for row in rows if row[0] == "review"]
-    identity_deferred = sum(row[2] == "identity_unresolved" for row in pending) + cloud_quarantine
+    identity_deferred = sum(row[2] == "identity_unresolved" for row in pending)
     oldest_pending = min((_parse_dt(row[3]) for row in pending), default=None)
     max_attempts = max((int(row[1]) for row in pending), default=0)
     last_cycle = _parse_dt(state.get("last_cycle_at"))
@@ -84,7 +84,7 @@ def inspect_health(
         and max_attempts >= RECOVERY_ATTEMPTS
     )
     cycle_stale = last_cycle is None or last_cycle < cutoff
-    exhausted = bool(review) or cloud_quarantine > 0 or cycle_stale or (
+    exhausted = bool(review) or cycle_stale or (
         identity_deferred > 0 and pending_exhausted
     ) or (
         (last_success is None or last_success < cutoff)
@@ -94,7 +94,7 @@ def inspect_health(
         status = "action_required"
         incident_key = state.get("failure_category", "").strip()
         if not incident_key:
-            incident_key = "cloud_record_unidentified" if cloud_quarantine else "identity_unresolved" if identity_deferred else "outbox_review" if review else "sync_stale"
+            incident_key = "identity_unresolved" if identity_deferred else "outbox_review" if review else "sync_stale"
     elif pending or failure_count or last_success is None or last_success < cutoff:
         status = "recovering"
         incident_key = ""
@@ -107,7 +107,7 @@ def inspect_health(
         "last_cycle_at": last_cycle.isoformat() if last_cycle else None,
         "last_success_at": last_success.isoformat() if last_success else None,
         "last_cloud_record_at": last_cloud.isoformat() if last_cloud else None,
-        "outbox_pending": len(pending) + cloud_quarantine,
+        "outbox_pending": len(pending),
         "identity_deferred": identity_deferred,
         "cloud_quarantine": cloud_quarantine,
         "failure_count": failure_count,
