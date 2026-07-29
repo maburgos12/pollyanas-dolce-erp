@@ -45,7 +45,7 @@ class OmnichannelPublicApiTests(APITestCase):
         self.url = reverse("api_public_omnichannel_orders")
         self.search_url = reverse("api_public_omnichannel_customers")
         self.payload = {
-            "external_source": "ECOMMERCE",
+            "external_source": "POLLYANAS_ECOMMERCE",
             "external_id": "order_123",
             "canal": "WEB",
             "cliente": {
@@ -87,6 +87,12 @@ class OmnichannelPublicApiTests(APITestCase):
         unscoped_auth = {"HTTP_X_API_KEY": unscoped_key}
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         before_counts = (
             Cliente.objects.count(),
             DireccionCliente.objects.count(),
@@ -135,7 +141,7 @@ class OmnichannelPublicApiTests(APITestCase):
     def test_payload_incompleto_retorna_400(self):
         response = self.client.post(
             self.url,
-            {"external_source": "ECOMMERCE"},
+            {"external_source": "POLLYANAS_ECOMMERCE"},
             format="json",
             **self.auth,
         )
@@ -151,6 +157,12 @@ class OmnichannelPublicApiTests(APITestCase):
             **self.auth,
         )
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         self.assertEqual(delivery.instrucciones_entrega, "Llamar al llegar")
         self.assertEqual(delivery.notas, "Referencias: Portón blanco\nInstrucciones: Llamar al llegar")
         self.assertEqual(detail.data["direccion"]["referencias"], "Portón blanco")
@@ -303,6 +315,12 @@ class OmnichannelPublicApiTests(APITestCase):
     def test_pedido_sin_owner_no_permite_inferir_si_snapshot_coincide(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         PedidoCliente.objects.filter(id=created.data["pedido_id"]).update(
             public_api_client=None,
         )
@@ -344,6 +362,12 @@ class OmnichannelPublicApiTests(APITestCase):
     def test_pedido_con_snapshot_coincidente_sin_domicilio_retorna_409_estable(self):
         created = self.client.post(self.url, self.payload, format="json", **self.auth)
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         SolicitudDomicilio.objects.all().delete()
 
         response = self.client.post(self.url, self.payload, format="json", **self.auth)
@@ -630,7 +654,7 @@ class OmnichannelConcurrencyTests(TransactionTestCase):
         public_client.save(update_fields=["capabilities"])
         self.url = reverse("api_public_omnichannel_orders")
         self.payload = {
-            "external_source": "WHATSAPP",
+            "external_source": "POLLYANAS_OPERACIONES",
             "external_id": "wa_race_123",
             "canal": "WHATSAPP",
             "cliente": {
@@ -1210,6 +1234,12 @@ class CanonicalOmnichannelApiTests(APITestCase):
         )
 
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
         self.assertEqual(listing.status_code, status.HTTP_200_OK)
         self.assertEqual(listing.data["count"], 1)
         self.assertEqual(
@@ -1220,6 +1250,305 @@ class CanonicalOmnichannelApiTests(APITestCase):
             listing.data["results"][0]["external_id"],
             "ECOMMERCE:PD-TIMEOUT-42",
         )
+        self.assertEqual(listing.data["results"][0]["folio_point"], "")
+
+        detail = self.client.get(
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={"solicitud_id": created.data["solicitud_domicilio_id"]},
+            ),
+            **self.auth,
+        )
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            detail.data["fuente"],
+            {
+                "tipo": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-TIMEOUT-42",
+                "folio": detail.data["fuente"]["folio"],
+                "sucursal": "",
+                "fecha_consulta": detail.data["fuente"]["fecha_consulta"],
+            },
+        )
+        self.assertTrue(detail.data["fuente"]["folio"])
+        self.assertIsNotNone(detail.data["fuente"]["fecha_consulta"])
+        self.assertNotIn("pk_nota", detail.data["fuente"])
+        self.assertEqual(detail.data["descripcion_pedido"], "Pastel")
+        self.assertEqual(detail.data["productos"], [])
+        self.assertEqual(detail.data["total"], Decimal("565.00"))
+
+    def test_delivery_detail_preserves_operaciones_source_without_inventing_point_lines(self):
+        created = self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_OPERACIONES",
+                "external_id": "1",
+                "canal": "TELEFONO",
+                "cliente": {"nombre": "Luis", "telefono": "6670000000", "email": ""},
+                "direccion": {"direccion": "Calle Centro 10"},
+                "pedido": {
+                    "descripcion": "Nota 4102: pastel tres leches",
+                    "monto_estimado": "720.00",
+                },
+            },
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            SolicitudDomicilio.objects.get(
+                pk=created.data["solicitud_domicilio_id"],
+            ).estatus,
+            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+        )
+
+        detail = self.client.get(
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={"solicitud_id": created.data["solicitud_domicilio_id"]},
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["fuente"]["tipo"], "POLLYANAS_OPERACIONES")
+        self.assertEqual(detail.data["fuente"]["external_id"], "1")
+        self.assertNotIn("pk_nota", detail.data["fuente"])
+        self.assertEqual(
+            detail.data["descripcion_pedido"],
+            "Nota 4102: pastel tres leches",
+        )
+        self.assertEqual(detail.data["productos"], [])
+
+    def test_delivery_contract_hides_unsupported_or_mismatched_sources(self):
+        customer = Cliente.objects.create(nombre="Legacy source")
+        address = DireccionCliente.objects.create(
+            cliente=customer,
+            direccion="Calle legacy",
+        )
+        invalid_orders = (
+            PedidoCliente.objects.create(
+                cliente=customer,
+                direccion_entrega=address,
+                public_api_client=self.api_client,
+                external_source="WHATSAPP",
+                external_id="legacy-1",
+                canal=PedidoCliente.CANAL_WHATSAPP,
+            ),
+            PedidoCliente.objects.create(
+                cliente=customer,
+                direccion_entrega=address,
+                public_api_client=self.api_client,
+                external_source="POLLYANAS_ECOMMERCE",
+                external_id="ECOMMERCE:BAD",
+                canal=PedidoCliente.CANAL_TELEFONO,
+            ),
+            PedidoCliente.objects.create(
+                cliente=customer,
+                direccion_entrega=address,
+                public_api_client=self.api_client,
+                external_source="POLLYANAS_OPERACIONES",
+                external_id="",
+                canal=PedidoCliente.CANAL_TELEFONO,
+            ),
+        )
+        deliveries = [
+            SolicitudDomicilio.objects.create(
+                pedido_cliente=order,
+                direccion_cliente=address,
+                cliente_nombre=customer.nombre,
+                direccion=address.direccion,
+            )
+            for order in invalid_orders
+        ]
+
+        listing = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            **self.auth,
+        )
+
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual(listing.data["results"], [])
+        for delivery in deliveries:
+            detail = self.client.get(
+                reverse(
+                    "api_public_omnichannel_delivery_detail",
+                    kwargs={"solicitud_id": delivery.id},
+                ),
+                **self.auth,
+            )
+            self.assertEqual(detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_web_delivery_requires_explicit_preparation_before_driver_visibility(self):
+        created = self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_ECOMMERCE",
+                "external_id": "ECOMMERCE:PD-READY-1",
+                "canal": "WEB",
+                "cliente": {"nombre": "Ana", "telefono": "6671234567", "email": ""},
+                "direccion": {
+                    "direccion": "Av. Obregón 123",
+                    "latitud": "24.809064",
+                    "longitud": "-107.394011",
+                },
+                "pedido": {"descripcion": "Pastel", "monto_estimado": "565.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+        delivery = SolicitudDomicilio.objects.get(
+            pk=created.data["solicitud_domicilio_id"],
+        )
+        branch = Sucursal.objects.create(codigo="PREP-WEB", nombre="Preparación WEB")
+        driver_user = get_user_model().objects.create_user(
+            username="prep-web-driver",
+            password="unused",
+        )
+        unit = Unidad.objects.create(
+            codigo="PREP-WEB-U",
+            descripcion="Unidad preparación WEB",
+            sucursal=branch,
+        )
+        driver = Repartidor.objects.create(
+            user=driver_user,
+            sucursal=branch,
+            unidad_asignada=unit,
+        )
+        prep_url = reverse(
+            "api_public_omnichannel_delivery_preparation_status",
+            kwargs={"solicitud_id": delivery.id},
+        )
+        denied_without_capability = self.client.patch(
+            prep_url,
+            {
+                "estatus": "PREPARANDO",
+                "operation_id": str(uuid4()),
+                "actor": {"id": "production-1", "nombre": "Produccion"},
+            },
+            format="json",
+            **self.auth,
+        )
+        self.api_client.capabilities = [
+            "OMNICHANNEL",
+            "DOMICILIOS_PREPARATION",
+            "LOGISTICA_ASSIGNMENT",
+        ]
+        self.api_client.save(update_fields=["capabilities"])
+        self.api_client.repartidores_logistica_autorizados.add(driver)
+        driver_url = reverse(
+            "api_public_logistica_repartidor_domicilios",
+            kwargs={"repartidor_id": driver.id},
+        )
+        actor = {"id": "production-1", "nombre": "Produccion"}
+        preparing_operation = str(uuid4())
+        ready_operation = str(uuid4())
+
+        hidden_confirmed = self.client.get(driver_url, **self.auth)
+        preparing = self.client.patch(
+            prep_url,
+            {
+                "estatus": "PREPARANDO",
+                "operation_id": preparing_operation,
+                "actor": actor,
+            },
+            format="json",
+            **self.auth,
+        )
+        hidden_preparing = self.client.get(driver_url, **self.auth)
+        conflict = self.client.patch(
+            prep_url,
+            {
+                "estatus": "LISTO",
+                "operation_id": preparing_operation,
+                "actor": actor,
+            },
+            format="json",
+            **self.auth,
+        )
+        delivery.refresh_from_db()
+        delivery.repartidor = driver
+        delivery.unidad = unit
+        delivery.route_sequence = 1
+        delivery.save(
+            update_fields=["repartidor", "unidad", "route_sequence"],
+        )
+        ready = self.client.patch(
+            prep_url,
+            {
+                "estatus": "LISTO",
+                "operation_id": ready_operation,
+                "actor": actor,
+            },
+            format="json",
+            **self.auth,
+        )
+        replay = self.client.patch(
+            prep_url,
+            {
+                "estatus": "LISTO",
+                "operation_id": ready_operation,
+                "actor": actor,
+            },
+            format="json",
+            **self.auth,
+        )
+        visible_ready = self.client.get(driver_url, **self.auth)
+
+        self.assertEqual(
+            denied_without_capability.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(hidden_confirmed.data["results"], [])
+        self.assertEqual(preparing.status_code, status.HTTP_200_OK)
+        self.assertEqual(preparing.data["estatus"], "PREPARANDO")
+        self.assertEqual(hidden_preparing.data["results"], [])
+        self.assertEqual(conflict.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(ready.status_code, status.HTTP_200_OK)
+        self.assertEqual(ready.data["estatus"], "LISTO")
+        self.assertEqual(replay.data, ready.data)
+        self.assertEqual(len(visible_ready.data["results"]), 1)
+        self.assertEqual(visible_ready.data["results"][0]["estatus"], "ASIGNADO")
+
+    def test_operaciones_without_point_cannot_enter_preparation(self):
+        created = self.client.post(
+            reverse("api_public_omnichannel_orders"),
+            {
+                "external_source": "POLLYANAS_OPERACIONES",
+                "external_id": "CALLCENTER:1",
+                "canal": "TELEFONO",
+                "cliente": {"nombre": "Luis", "telefono": "6670000000", "email": ""},
+                "direccion": {
+                    "direccion": "Calle Centro 10",
+                    "latitud": "24.809064",
+                    "longitud": "-107.394011",
+                },
+                "pedido": {"descripcion": "Pedido provisional", "monto_estimado": "720.00"},
+            },
+            format="json",
+            **self.auth,
+        )
+        self.api_client.capabilities = [
+            "OMNICHANNEL",
+            "DOMICILIOS_PREPARATION",
+        ]
+        self.api_client.save(update_fields=["capabilities"])
+
+        response = self.client.patch(
+            reverse(
+                "api_public_omnichannel_delivery_preparation_status",
+                kwargs={"solicitud_id": created.data["solicitud_domicilio_id"]},
+            ),
+            {
+                "estatus": "PREPARANDO",
+                "operation_id": str(uuid4()),
+                "actor": {"id": "production-1", "nombre": "Produccion"},
+            },
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_delivery_identity_lookup_confirms_only_owned_external_keys(self):
         self.client.post(

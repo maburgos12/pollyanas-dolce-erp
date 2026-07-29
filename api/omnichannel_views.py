@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.omnichannel_serializers import (
+    OmnichannelDeliveryPreparationStatusSerializer,
     OmnichannelDeliveryQuerySerializer,
     OmnichannelDeliveryStatusSerializer,
     OmnichannelCustomerOutputSerializer,
@@ -40,6 +41,7 @@ from crm.models import Cliente, DireccionCliente, PedidoCliente
 from logistica.models import SolicitudDomicilio
 from logistica.services_domicilio_status import (
     DomicilioStatusError,
+    prepare_domicilio_status,
     update_domicilio_status,
 )
 from pos_bridge.services.point_note_detail_service import (
@@ -64,6 +66,7 @@ from pos_bridge.utils.exceptions import (
 
 IDEMPOTENCY_CONFLICT_CODE = "OMNICHANNEL_IDEMPOTENCY_CONFLICT"
 OMNICHANNEL_CAPABILITY = "OMNICHANNEL"
+DOMICILIOS_PREPARATION_CAPABILITY = "DOMICILIOS_PREPARATION"
 POINT_SEARCH_MAX_RESULTS = 20
 POINT_SEARCH_DEFAULT_DAYS = 3
 
@@ -104,6 +107,19 @@ def _authorize_omnichannel(api_client, request):
         {
             "detail": "La API key no tiene autorización omnicanal.",
             "code": "OMNICHANNEL_CAPABILITY_REQUIRED",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _authorize_domicilios_preparation(api_client, request):
+    if api_client.has_capability(DOMICILIOS_PREPARATION_CAPABILITY):
+        return None
+    _log_access(api_client, request, status.HTTP_403_FORBIDDEN)
+    return Response(
+        {
+            "detail": "La API key no tiene autorización para preparar domicilios.",
+            "code": "DOMICILIOS_PREPARATION_CAPABILITY_REQUIRED",
         },
         status=status.HTTP_403_FORBIDDEN,
     )
@@ -588,6 +604,14 @@ class PublicOmnichannelOrdersView(APIView):
                         direccion=address.direccion,
                         canal_origen=order.canal,
                         canal_detalle=data["external_source"],
+                        estatus=(
+                            SolicitudDomicilio.ESTATUS_CONFIRMADO
+                            if (
+                                data["external_source"] == "POLLYANAS_ECOMMERCE"
+                                and data["canal"] == PedidoCliente.CANAL_WEB
+                            )
+                            else SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
+                        ),
                         notas=notes,
                         instrucciones_entrega=instructions,
                     )
@@ -918,6 +942,23 @@ def _owned_deliveries(api_client):
             pedido_cliente__public_api_client=api_client,
             legacy_without_point=False,
         )
+        .filter(
+            (
+                Q(pedido_cliente__external_source="POINT")
+                & Q(pedido_cliente__point_note_id__gt="")
+                & ~Q(pedido_cliente__canal=PedidoCliente.CANAL_WEB)
+            )
+            | (
+                Q(pedido_cliente__external_source="POLLYANAS_ECOMMERCE")
+                & Q(pedido_cliente__external_id__gt="")
+                & Q(pedido_cliente__canal=PedidoCliente.CANAL_WEB)
+            )
+            | (
+                Q(pedido_cliente__external_source="POLLYANAS_OPERACIONES")
+                & Q(pedido_cliente__external_id__gt="")
+                & ~Q(pedido_cliente__canal=PedidoCliente.CANAL_WEB)
+            )
+        )
         .select_related(
             "pedido_cliente",
             "pedido_cliente__cliente",
@@ -930,8 +971,15 @@ def _owned_deliveries(api_client):
 
 
 def _mutable_owned_deliveries(api_client):
-    """Status writes remain limited to deliveries backed by a Point note."""
-    return _owned_deliveries(api_client).filter(pedido_cliente__point_note_id__gt="")
+    """Only Point-backed or trusted paid WEB orders may advance."""
+    return _owned_deliveries(api_client).filter(
+        Q(pedido_cliente__point_note_id__gt="")
+        | (
+            Q(pedido_cliente__external_source="POLLYANAS_ECOMMERCE")
+            & Q(pedido_cliente__external_id__gt="")
+            & Q(pedido_cliente__canal=PedidoCliente.CANAL_WEB)
+        )
+    )
 
 
 def _serialize_delivery_summary(delivery):
@@ -939,7 +987,7 @@ def _serialize_delivery_summary(delivery):
     return {
         "id": delivery.id,
         "pedido_id": order.id,
-        "folio": order.folio,
+        "folio": order.folio or order.external_id,
         "folio_point": order.point_note_folio,
         "canal": order.canal,
         "estatus": delivery.estatus,
@@ -955,6 +1003,29 @@ def _serialize_delivery_summary(delivery):
     }
 
 
+def _serialize_delivery_source(order):
+    if order.external_source == "POINT":
+        return {
+            "tipo": "POINT",
+            "pk_nota": order.point_note_id,
+            "folio": order.point_note_folio,
+            "sucursal": order.sucursal,
+            "fecha_consulta": order.point_note_fetched_at,
+        }
+    if order.external_source not in {
+        "POLLYANAS_ECOMMERCE",
+        "POLLYANAS_OPERACIONES",
+    }:
+        raise ValueError("Fuente omnicanal no soportada.")
+    return {
+        "tipo": order.external_source,
+        "external_id": order.external_id,
+        "folio": order.folio or order.external_id,
+        "sucursal": order.sucursal,
+        "fecha_consulta": order.created_at,
+    }
+
+
 def _serialize_delivery_detail(delivery):
     order = delivery.pedido_cliente
     customer = order.cliente
@@ -963,13 +1034,7 @@ def _serialize_delivery_detail(delivery):
     return {
         "id": delivery.id,
         "pedido_id": order.id,
-        "fuente": {
-            "tipo": "POINT",
-            "pk_nota": order.point_note_id,
-            "folio": order.point_note_folio,
-            "sucursal": order.sucursal,
-            "fecha_consulta": order.point_note_fetched_at,
-        },
+        "fuente": _serialize_delivery_source(order),
         "cliente": {
             "id": customer.id,
             "codigo": customer.codigo,
@@ -997,6 +1062,7 @@ def _serialize_delivery_detail(delivery):
             for line in snapshot.get("lines", [])
             if isinstance(line, dict)
         ],
+        "descripcion_pedido": order.descripcion,
         "total": order.monto_estimado,
         "canal": order.canal,
         "referencia_social": order.social_reference,
@@ -1071,11 +1137,18 @@ class PublicOmnichannelDeliveriesView(APIView):
                 datetime.combine(values["fecha"], datetime.min.time()),
                 timezone.get_current_timezone(),
             )
+            day_end = day_start + timedelta(days=1)
             deliveries = deliveries.filter(
-                pedido_cliente__point_note_sold_at__gte=day_start,
-                pedido_cliente__point_note_sold_at__lt=(
-                    day_start + timedelta(days=1)
-                ),
+                (
+                    Q(pedido_cliente__external_source="POINT")
+                    & Q(pedido_cliente__point_note_sold_at__gte=day_start)
+                    & Q(pedido_cliente__point_note_sold_at__lt=day_end)
+                )
+                | (
+                    ~Q(pedido_cliente__external_source="POINT")
+                    & Q(pedido_cliente__created_at__gte=day_start)
+                    & Q(pedido_cliente__created_at__lt=day_end)
+                )
             )
         deliveries = deliveries.order_by(values["ordering"], "id")
         count = deliveries.count()
@@ -1195,6 +1268,58 @@ class PublicOmnichannelDeliveryStatusView(APIView):
                     solicitud_id=solicitud_id,
                     api_client=api_client,
                     repartidor_id=values["repartidor_id"],
+                    requested_status=values["estatus"],
+                    operation_id=values["operation_id"],
+                    actor=values["actor"],
+                )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+        except DomicilioStatusError as exc:
+            _log_access(api_client, request, exc.status_code)
+            return Response(
+                {"detail": exc.detail, "code": "DOMICILIO_STATUS_CONFLICT"},
+                status=exc.status_code,
+            )
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload)
+
+
+class PublicOmnichannelDeliveryPreparationStatusView(APIView):
+    permission_classes = [AllowAny]
+
+    def patch(self, request, solicitud_id):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        preparation_error = _authorize_domicilios_preparation(
+            api_client, request
+        )
+        if preparation_error:
+            return preparation_error
+        serializer = OmnichannelDeliveryPreparationStatusSerializer(
+            data=request.data
+        )
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        values = serializer.validated_data
+        try:
+            with transaction.atomic():
+                owned = (
+                    _mutable_owned_deliveries(api_client)
+                    .select_for_update()
+                    .filter(pk=solicitud_id)
+                    .exists()
+                )
+                if not owned:
+                    raise Http404
+                payload = prepare_domicilio_status(
+                    solicitud_id=solicitud_id,
+                    api_client=api_client,
                     requested_status=values["estatus"],
                     operation_id=values["operation_id"],
                     actor=values["actor"],

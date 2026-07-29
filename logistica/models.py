@@ -1920,21 +1920,28 @@ class SolicitudDomicilio(models.Model):
             self.ESTATUS_ENTREGADO,
             self.ESTATUS_INCIDENCIA,
         }
+        has_point_source = bool(
+            self.pedido_cliente_id
+            and self.pedido_cliente.point_note_id
+        )
+        has_trusted_web_source = bool(
+            self.pedido_cliente_id
+            and self.pedido_cliente.external_source == "POLLYANAS_ECOMMERCE"
+            and self.pedido_cliente.external_id
+            and self.pedido_cliente.canal == PedidoCliente.CANAL_WEB
+        )
         if (
             self.estatus == self.ESTATUS_CONFIRMADO
             and not legacy_terminal
-            and (
-                not self.pedido_cliente_id
-                or not self.pedido_cliente.point_note_id
-            )
+            and not (has_point_source or has_trusted_web_source)
         ):
             errors["pedido_cliente"] = (
-                "Se requiere un pedido vinculado con una nota de Point antes de confirmar."
+                "Se requiere una nota de Point o un pedido WEB canónico antes de confirmar."
             )
         if self.estatus in ready_or_later and not legacy_terminal:
-            if not self.pedido_cliente_id or not self.pedido_cliente.point_note_id:
+            if not (has_point_source or has_trusted_web_source):
                 errors["pedido_cliente"] = (
-                    "Se requiere un pedido vinculado con una nota de Point antes de marcarlo listo."
+                    "Se requiere una nota de Point o un pedido WEB canónico antes de marcarlo listo."
                 )
             if (
                 not self.direccion_cliente_id
@@ -2012,6 +2019,8 @@ class SolicitudDomicilioStatusOperation(models.Model):
         Repartidor,
         on_delete=models.PROTECT,
         related_name="domicilio_status_operations",
+        null=True,
+        blank=True,
     )
     requested_status = models.CharField(max_length=20)
     final_status = models.CharField(max_length=20)

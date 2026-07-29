@@ -4,11 +4,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
+from django.db.models import F, Q
 from django.http import Http404
 from django.utils import timezone
 
 from core.audit import log_event
 from logistica.models import (
+    Repartidor,
     SolicitudDomicilio,
     SolicitudDomicilioStatusOperation,
 )
@@ -144,6 +146,18 @@ def update_domicilio_status(
                 pk=solicitud_id,
                 pedido_cliente__public_api_client=api_client,
             )
+            .filter(
+                Q(pedido_cliente__point_note_id__gt="")
+                | (
+                    Q(
+                        pedido_cliente__external_source=(
+                            "POLLYANAS_ECOMMERCE"
+                        )
+                    )
+                    & Q(pedido_cliente__external_id__gt="")
+                    & Q(pedido_cliente__canal="WEB")
+                )
+            )
             .first()
         )
         if solicitud is None:
@@ -179,6 +193,35 @@ def update_domicilio_status(
         ).exists()
         if not allowed or not available:
             raise DomicilioStatusError("Repartidor no disponible.")
+        if requested_status == SolicitudDomicilio.ESTATUS_EN_RUTA:
+            Repartidor.objects.select_for_update().get(pk=repartidor_id)
+            another_active = SolicitudDomicilio.objects.filter(
+                repartidor_id=repartidor_id,
+                estatus=SolicitudDomicilio.ESTATUS_EN_RUTA,
+            ).exclude(pk=solicitud.id).exists()
+            if another_active:
+                raise DomicilioStatusError(
+                    "El repartidor ya tiene otro domicilio en ruta."
+                )
+            next_delivery_id = (
+                SolicitudDomicilio.objects.filter(
+                    repartidor_id=repartidor_id,
+                    estatus__in=[
+                        SolicitudDomicilio.ESTATUS_LISTO,
+                        SolicitudDomicilio.ESTATUS_EN_RUTA,
+                    ],
+                )
+                .order_by(
+                    F("route_sequence").asc(nulls_last=True),
+                    "id",
+                )
+                .values_list("id", flat=True)
+                .first()
+            )
+            if next_delivery_id != solicitud.id:
+                raise DomicilioStatusError(
+                    "Debes iniciar primero el siguiente domicilio de la secuencia."
+                )
 
         previous_status = solicitud.estatus
         if requested_status == solicitud.estatus:
@@ -228,6 +271,113 @@ def update_domicilio_status(
                     "nombre": api_client.nombre,
                 },
                 "actor_externo": actor,
+            },
+        )
+        return snapshot
+
+
+def prepare_domicilio_status(
+    *,
+    solicitud_id: int,
+    api_client,
+    requested_status: str,
+    operation_id,
+    actor: dict[str, str],
+) -> dict[str, Any]:
+    """Idempotent production transition, independent from driver assignment."""
+    if requested_status not in {
+        SolicitudDomicilio.ESTATUS_PREPARANDO,
+        SolicitudDomicilio.ESTATUS_LISTO,
+    }:
+        raise DomicilioStatusError(
+            "Producción sólo puede iniciar preparación o marcar listo.",
+            400,
+        )
+    with transaction.atomic():
+        solicitud = (
+            SolicitudDomicilio.objects.select_for_update()
+            .filter(
+                pk=solicitud_id,
+                pedido_cliente__public_api_client=api_client,
+            )
+            .filter(
+                Q(pedido_cliente__point_note_id__gt="")
+                | (
+                    Q(
+                        pedido_cliente__external_source=(
+                            "POLLYANAS_ECOMMERCE"
+                        )
+                    )
+                    & Q(pedido_cliente__external_id__gt="")
+                    & Q(pedido_cliente__canal="WEB")
+                )
+            )
+            .first()
+        )
+        if solicitud is None:
+            raise Http404
+        operation = SolicitudDomicilioStatusOperation.objects.filter(
+            solicitud=solicitud,
+            operation_id=operation_id,
+        ).first()
+        if operation is not None:
+            same_request = (
+                operation.api_client_id == api_client.id
+                and operation.repartidor_id is None
+                and operation.requested_status == requested_status
+                and operation.reason == ""
+                and operation.actor_id == actor["id"]
+                and operation.actor_nombre == actor["nombre"]
+            )
+            if not same_request:
+                raise DomicilioStatusError(
+                    "operation_id ya fue usado con otro payload."
+                )
+            return dict(operation.result_snapshot)
+
+        previous_status = solicitud.estatus
+        if requested_status == solicitud.estatus:
+            raise DomicilioStatusError(
+                f"La operación {requested_status} ya fue cerrada."
+            )
+        apply_domicilio_status_transition(
+            solicitud=solicitud,
+            requested_status=requested_status,
+        )
+        snapshot = {
+            "id": solicitud.id,
+            "repartidor_id": solicitud.repartidor_id,
+            "estatus": solicitud.estatus,
+            "revision": solicitud.revision,
+            "idempotent": False,
+        }
+        SolicitudDomicilioStatusOperation.objects.create(
+            solicitud=solicitud,
+            operation_id=operation_id,
+            api_client=api_client,
+            repartidor=None,
+            requested_status=requested_status,
+            final_status=solicitud.estatus,
+            reason="",
+            actor_id=actor["id"],
+            actor_nombre=actor["nombre"],
+            result_snapshot=snapshot,
+        )
+        log_event(
+            None,
+            "STATUS_CHANGE",
+            "logistica.SolicitudDomicilio",
+            solicitud.id,
+            {
+                "estatus_anterior": previous_status,
+                "estatus_nuevo": solicitud.estatus,
+                "operation_id": str(operation_id),
+                "api_client": {
+                    "id": api_client.id,
+                    "nombre": api_client.nombre,
+                },
+                "actor_externo": actor,
+                "source": "production",
             },
         )
         return snapshot

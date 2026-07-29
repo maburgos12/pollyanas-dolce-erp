@@ -1,11 +1,14 @@
 from decimal import Decimal
 from datetime import timedelta
 from importlib import import_module
+from threading import Barrier, Thread
+from uuid import uuid4
 
 from django.apps import apps
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import connection
+from django.db import close_old_connections, connection
+from django.http import Http404
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 from django.urls import reverse
@@ -26,7 +29,10 @@ from logistica.services_domicilio_assignment import assign_domicilio
 from logistica.services_domicilio_status import (
     DomicilioStatusError,
     apply_domicilio_status_transition,
+    prepare_domicilio_status,
+    update_domicilio_status,
 )
+from integraciones.models import PublicApiClient
 from rrhh.models import Empleado
 
 
@@ -387,6 +393,102 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
         )
         self.assertEqual(cancellable.cancelacion_motivo, "Cliente canceló")
 
+    def test_driver_can_start_only_next_delivery_and_only_one_can_be_en_route(self):
+        api_client, _ = PublicApiClient.create_with_generated_key(
+            nombre="Secuencia conductor",
+        )
+        api_client.capabilities = ["LOGISTICA_ASSIGNMENT"]
+        api_client.save(update_fields=["capabilities"])
+        api_client.repartidores_logistica_autorizados.add(self.repartidor)
+        deliveries = []
+        for sequence in (1, 2):
+            delivery = self._solicitud(
+                estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+                point_note_id=f"POINT-SEQUENCE-{sequence}",
+                repartidor=self.repartidor,
+                unidad=self.unidad,
+                route_sequence=sequence,
+            )
+            delivery.pedido_cliente.public_api_client = api_client
+            delivery.pedido_cliente.save(update_fields=["public_api_client"])
+            delivery.save()
+            apply_domicilio_status_transition(
+                solicitud=delivery,
+                requested_status=SolicitudDomicilio.ESTATUS_PREPARANDO,
+            )
+            apply_domicilio_status_transition(
+                solicitud=delivery,
+                requested_status=SolicitudDomicilio.ESTATUS_LISTO,
+            )
+            deliveries.append(delivery)
+        actor = {"id": "driver-1", "nombre": "Repartidor"}
+
+        with self.assertRaisesRegex(
+            DomicilioStatusError,
+            "siguiente domicilio",
+        ):
+            update_domicilio_status(
+                solicitud_id=deliveries[1].id,
+                api_client=api_client,
+                repartidor_id=self.repartidor.id,
+                requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+                operation_id=uuid4(),
+                actor=actor,
+            )
+
+        started = update_domicilio_status(
+            solicitud_id=deliveries[0].id,
+            api_client=api_client,
+            repartidor_id=self.repartidor.id,
+            requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+            operation_id=uuid4(),
+            actor=actor,
+        )
+        self.assertEqual(started["estatus"], SolicitudDomicilio.ESTATUS_EN_RUTA)
+        with self.assertRaisesRegex(DomicilioStatusError, "otro domicilio en ruta"):
+            update_domicilio_status(
+                solicitud_id=deliveries[1].id,
+                api_client=api_client,
+                repartidor_id=self.repartidor.id,
+                requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+                operation_id=uuid4(),
+                actor=actor,
+            )
+
+    def test_production_service_rejects_operaciones_provisional_without_point(self):
+        api_client, _ = PublicApiClient.create_with_generated_key(
+            nombre="Produccion provisional",
+        )
+        customer, address, order = self._pedido_y_direccion(point_note_id="")
+        order.public_api_client = api_client
+        order.external_source = "POLLYANAS_OPERACIONES"
+        order.external_id = "CALLCENTER:1"
+        order.canal = PedidoCliente.CANAL_TELEFONO
+        order.save(
+            update_fields=[
+                "public_api_client",
+                "external_source",
+                "external_id",
+                "canal",
+            ],
+        )
+        delivery = SolicitudDomicilio.objects.create(
+            pedido_cliente=order,
+            cliente=customer,
+            direccion_cliente=address,
+            cliente_nombre=customer.nombre,
+            direccion=address.direccion,
+        )
+
+        with self.assertRaises(Http404):
+            prepare_domicilio_status(
+                solicitud_id=delivery.id,
+                api_client=api_client,
+                requested_status=SolicitudDomicilio.ESTATUS_PREPARANDO,
+                operation_id=uuid4(),
+                actor={"id": "production-1", "nombre": "Produccion"},
+            )
+
     def test_direct_save_rejects_state_jump_and_advanced_initial_state(self):
         invalid = self._solicitud(estatus=SolicitudDomicilio.ESTATUS_LISTO)
         with self.assertRaises(ValidationError):
@@ -536,6 +638,133 @@ class SolicitudDomicilioOmnicanalTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
+
+
+class DomicilioRouteConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.sucursal = Sucursal.objects.create(
+            codigo="DOM-RACE",
+            nombre="Domicilios concurrencia",
+        )
+        self.user = User.objects.create_user(
+            username="repartidor_race",
+            password="pass123",
+        )
+        self.unidad = Unidad.objects.create(
+            codigo="DOM-RACE-U",
+            descripcion="Unidad concurrencia",
+            sucursal=self.sucursal,
+        )
+        self.repartidor = Repartidor.objects.create(
+            user=self.user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+        )
+        self.api_client, _ = PublicApiClient.create_with_generated_key(
+            nombre="Carrera ruta repartidor",
+        )
+        self.api_client.capabilities = ["LOGISTICA_ASSIGNMENT"]
+        self.api_client.save(update_fields=["capabilities"])
+        self.api_client.repartidores_logistica_autorizados.add(self.repartidor)
+        self.deliveries = [
+            self._ready_delivery(sequence)
+            for sequence in (1, 2)
+        ]
+
+    def _ready_delivery(self, sequence):
+        customer = Cliente.objects.create(
+            nombre=f"Cliente carrera {sequence}",
+            telefono=f"66700000{sequence:02d}",
+        )
+        address = DireccionCliente.objects.create(
+            cliente=customer,
+            alias="Casa",
+            direccion=f"Calle carrera {sequence}",
+            latitud=Decimal("25.790001"),
+            longitud=Decimal("-108.990001"),
+        )
+        order = PedidoCliente.objects.create(
+            cliente=customer,
+            direccion_entrega=address,
+            descripcion=f"Pedido carrera {sequence}",
+            point_note_id=f"POINT-RACE-{sequence}",
+            point_note_snapshot={"pk_nota": f"POINT-RACE-{sequence}"},
+            public_api_client=self.api_client,
+        )
+        delivery = SolicitudDomicilio.objects.create(
+            cliente=customer,
+            direccion_cliente=address,
+            pedido_cliente=order,
+            cliente_nombre=customer.nombre,
+            cliente_telefono=customer.telefono,
+            direccion=address.direccion,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            repartidor=self.repartidor,
+            unidad=self.unidad,
+            route_sequence=sequence,
+        )
+        apply_domicilio_status_transition(
+            solicitud=delivery,
+            requested_status=SolicitudDomicilio.ESTATUS_PREPARANDO,
+        )
+        apply_domicilio_status_transition(
+            solicitud=delivery,
+            requested_status=SolicitudDomicilio.ESTATUS_LISTO,
+        )
+        return delivery
+
+    def test_concurrent_route_start_keeps_only_next_delivery_en_route(self):
+        barrier = Barrier(2)
+        outcomes = []
+
+        def start(delivery_id):
+            close_old_connections()
+            try:
+                barrier.wait(timeout=5)
+                api_client = PublicApiClient.objects.get(pk=self.api_client.pk)
+                result = update_domicilio_status(
+                    solicitud_id=delivery_id,
+                    api_client=api_client,
+                    repartidor_id=self.repartidor.id,
+                    requested_status=SolicitudDomicilio.ESTATUS_EN_RUTA,
+                    operation_id=uuid4(),
+                    actor={"id": "driver-race", "nombre": "Repartidor"},
+                )
+                outcomes.append(("ok", delivery_id, result["estatus"]))
+            except DomicilioStatusError as exc:
+                outcomes.append(("conflict", delivery_id, exc.detail))
+            finally:
+                close_old_connections()
+
+        threads = [
+            Thread(target=start, args=(delivery.id,))
+            for delivery in self.deliveries
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual(
+            SolicitudDomicilio.objects.filter(
+                repartidor=self.repartidor,
+                estatus=SolicitudDomicilio.ESTATUS_EN_RUTA,
+            ).count(),
+            1,
+        )
+        self.deliveries[0].refresh_from_db()
+        self.deliveries[1].refresh_from_db()
+        self.assertEqual(
+            self.deliveries[0].estatus,
+            SolicitudDomicilio.ESTATUS_EN_RUTA,
+        )
+        self.assertEqual(
+            self.deliveries[1].estatus,
+            SolicitudDomicilio.ESTATUS_LISTO,
+        )
+        self.assertEqual([outcome[0] for outcome in outcomes].count("ok"), 1)
 
 
 class AsignacionDomicilioApiTests(APITestCase):

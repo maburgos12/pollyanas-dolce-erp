@@ -55,7 +55,9 @@ class OmnichannelOrderDetailInputSerializer(serializers.Serializer):
 
 
 class OmnichannelOrderInputSerializer(serializers.Serializer):
-    external_source = serializers.CharField(max_length=40)
+    external_source = serializers.ChoiceField(
+        choices=("POLLYANAS_ECOMMERCE", "POLLYANAS_OPERACIONES"),
+    )
     external_id = serializers.CharField(max_length=120)
     canal = serializers.ChoiceField(choices=PedidoCliente.CANAL_CHOICES)
     cliente = OmnichannelCustomerInputSerializer()
@@ -68,6 +70,19 @@ class OmnichannelOrderInputSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Este campo no puede estar vacío.")
         return value
+
+    def validate(self, attrs):
+        source = attrs.get("external_source")
+        channel = attrs.get("canal")
+        if source == "POLLYANAS_ECOMMERCE" and channel != PedidoCliente.CANAL_WEB:
+            raise serializers.ValidationError(
+                {"canal": "La fuente e-commerce requiere canal WEB."},
+            )
+        if source == "POLLYANAS_OPERACIONES" and channel == PedidoCliente.CANAL_WEB:
+            raise serializers.ValidationError(
+                {"canal": "El canal WEB pertenece a la fuente e-commerce."},
+            )
+        return attrs
 
     def validate_external_id(self, value):
         value = value.strip()
@@ -179,6 +194,26 @@ class OmnichannelDeliveryStatusSerializer(serializers.Serializer):
         if isinstance(self.initial_data.get("repartidor_id"), bool):
             raise serializers.ValidationError("Debe ser un entero positivo.")
         return value
+
+    def validate_actor(self, value):
+        if set(value) != {"id", "nombre"}:
+            raise serializers.ValidationError("actor requiere id y nombre.")
+        actor_id = str(value.get("id") or "").strip()
+        name = str(value.get("nombre") or "").strip()
+        if not actor_id or len(actor_id) > 64 or not name or len(name) > 120:
+            raise serializers.ValidationError("actor no es válido.")
+        return {"id": actor_id, "nombre": name}
+
+
+class OmnichannelDeliveryPreparationStatusSerializer(serializers.Serializer):
+    estatus = serializers.ChoiceField(
+        choices=(
+            SolicitudDomicilio.ESTATUS_PREPARANDO,
+            SolicitudDomicilio.ESTATUS_LISTO,
+        ),
+    )
+    operation_id = serializers.UUIDField()
+    actor = serializers.DictField()
 
     def validate_actor(self, value):
         if set(value) != {"id", "nombre"}:
