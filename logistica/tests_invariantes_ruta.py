@@ -4568,16 +4568,25 @@ vm.runInContext(source, context);
 const operation = process.argv[2];
 if (operation === "segment") {
   const stops = [
-    {orden: 1, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true},
+    {orden: 1, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true, recarga_cedis_resuelta: true},
     {orden: 2, punto: {tipo: "SUCURSAL"}, estado: "PENDIENTE", entrega_estado: "PENDIENTE", operativamente_resuelta: true},
-    {orden: 4, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true},
+    {orden: 4, punto: {tipo: "CEDIS"}, estado: "VISITADA", entrega_estado: "NO_APLICA", operativamente_resuelta: true, recarga_cedis_resuelta: true},
     {orden: 5, punto: {tipo: "SUCURSAL"}, estado: "PENDIENTE", entrega_estado: "PENDIENTE", operativamente_resuelta: false}
   ];
   const oldLine = {id: 1, parada_orden: 2, item_name: "Tramo anterior", point_enviada: true};
   const newLine = {id: 2, parada_orden: 5, item_name: "Tramo actual", point_enviada: true};
   const current = vm.runInContext(`segmentoCargaOperativo(${JSON.stringify([oldLine, newLine])}, ${JSON.stringify(stops)})`, context);
   const empty = vm.runInContext(`segmentoCargaOperativo(${JSON.stringify([oldLine])}, ${JSON.stringify(stops)})`, context);
-  process.stdout.write(JSON.stringify({current: current.lineas.map((row) => row.id), empty: empty.lineas.map((row) => row.id)}));
+  // CEDIS de regreso visitado por geocerca pero sin recarga registrada: el tramo NO avanza.
+  const sinRecarga = stops.map((parada) => (
+    parada.orden === 4 ? {...parada, recarga_cedis_resuelta: false} : parada
+  ));
+  const previo = vm.runInContext(`segmentoCargaOperativo(${JSON.stringify([oldLine, newLine])}, ${JSON.stringify(sinRecarga)})`, context);
+  process.stdout.write(JSON.stringify({
+    current: current.lineas.map((row) => row.id),
+    empty: empty.lineas.map((row) => row.id),
+    sin_recarga: previo.lineas.map((row) => row.id)
+  }));
 } else if (operation === "zero") {
   const checklist = {
     estatus: "CONFIRMADA", estatus_display: "Confirmada",
@@ -4787,6 +4796,10 @@ if (operation === "segment") {
 
         self.assertEqual(result["current"], [2])
         self.assertEqual(result["empty"], [])
+        # Sin evento de recarga el tramo sigue siendo el anterior, igual que
+        # `_ordenes_tramo_carga_actual`; de lo contrario la captura se enviaría
+        # con productos que el backend rechaza como "de otro tramo".
+        self.assertEqual(result["sin_recarga"], [1])
 
     def test_journey_libera_ruta_mediante_servicio_y_registra_salida(self):
         self.assertEqual(self.ruta.bitacora_salida_id, self.turno.id)
@@ -5154,8 +5167,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v80-combustible-km-turno")
-        self.assertIn("?v=route-control-v80-combustible-km-turno", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v81-tramo-carga-recarga")
+        self.assertIn("?v=route-control-v81-tramo-carga-recarga", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
