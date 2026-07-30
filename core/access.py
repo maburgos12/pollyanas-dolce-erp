@@ -370,18 +370,26 @@ def is_mermas_only(user: AbstractBaseUser) -> bool:
         return False
     groups = _group_names(user)
     allowed_app_groups = {ROLE_REPARTIDOR.lower(), ROLE_REPARTIDOR}
-    try:
-        from mermas.models import PersonalEnviosSucursal
-
-        if PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists() and groups.issubset(allowed_app_groups):
-            return True
-    except Exception:
-        pass
     active_modules = {
         module
         for module, access in _explicit_access_map(user).items()
         if _normalize_access(access) != ACCESS_NONE
     }
+    has_non_mermas_access = any(
+        module.split(".", 1)[0] != "mermas"
+        for module in active_modules
+    )
+    try:
+        from mermas.models import PersonalEnviosSucursal
+
+        if (
+            PersonalEnviosSucursal.objects.filter(user=user, activo=True).exists()
+            and groups.issubset(allowed_app_groups)
+            and not has_non_mermas_access
+        ):
+            return True
+    except Exception:
+        pass
     return bool(active_modules) and all(module.split(".", 1)[0] == "mermas" for module in active_modules) and groups.issubset(allowed_app_groups)
 
 

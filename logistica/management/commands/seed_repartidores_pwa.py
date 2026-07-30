@@ -27,9 +27,11 @@ class Command(BaseCommand):
             "last_name": "Macías Hernández",
         },
         {
-            "username": "rep.luis.peraza",
+            "username": "luis.peraza",
+            "legacy_username": "rep.luis.peraza",
             "first_name": "Luis Daniel",
             "last_name": "Peraza Montoya",
+            "profile_unlocks": ["lock_logistica"],
         },
         {
             "username": "compras.jorge@pollyanasdolce.com",
@@ -144,6 +146,8 @@ class Command(BaseCommand):
             profile.modo_captura_sucursal = False
             for field in self.LOCK_FIELDS:
                 setattr(profile, field, True)
+            for field in row.get("profile_unlocks", []):
+                setattr(profile, field, False)
             profile.save()
 
             Repartidor.objects.update_or_create(
