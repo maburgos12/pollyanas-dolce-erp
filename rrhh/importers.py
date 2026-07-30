@@ -62,8 +62,11 @@ def _buscar_empleado(row) -> Empleado:
 
 
 def _sucursal_de_empleado(empleado: Empleado):
-    # Preferir el FK canónico (FASE 2); resolver de texto solo como respaldo.
-    return empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
+    # El Excel de Hik-Connect es una exportación del mismo checador físico, así
+    # que aplica idéntico criterio: la sucursal es la del aparato.
+    from rrhh.services_hikvision import _resolver_sucursal
+
+    return _resolver_sucursal(empleado)
 
 
 def importar_excel_hikconnect(archivo, user, fecha_inicio, fecha_fin):

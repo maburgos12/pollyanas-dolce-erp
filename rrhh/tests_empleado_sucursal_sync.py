@@ -45,24 +45,13 @@ class EmpleadoSucursalSyncTests(TestCase):
 
         self.assertEqual(BonoVentasEmpleado.objects.get(empleado=emp).sucursal_id, suc.id)
 
-    def test_sucursal_de_empleado_importer_usa_fk(self):
+    def test_sucursal_de_empleado_importer_sigue_el_criterio_del_checador(self):
+        # El Excel de Hik-Connect exporta el mismo aparato: misma regla.
+        matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Sucursal Matriz", activa=True)
         suc = Sucursal.objects.create(codigo="LEYVA", nombre="Sucursal Leyva", activa=True)
-        emp = Empleado.objects.create(nombre="X", area="VENTAS", sucursal="texto que no macha", sucursal_ref=suc)
+        emp = Empleado.objects.create(nombre="X", area="VENTAS", sucursal="", sucursal_ref=suc)
 
-        self.assertEqual(_sucursal_de_empleado(emp), suc)
-
-    def test_resolver_sucursal_checador_usa_fk_y_tolera_texto_desalineado(self):
-        # Caso real 27-jul-2026: texto "Sucursal Crucero" contra codigo=CRUCERO /
-        # nombre="Sucursal Bamoa" no machaba por igualdad exacta y dejaba sucursal NULL.
-        suc = Sucursal.objects.create(codigo="CRUCERO", nombre="Sucursal Bamoa", activa=True)
-        con_fk = Empleado.objects.create(
-            nombre="Con FK", area="VENTAS", sucursal="", sucursal_ref=suc,
-        )
-        sin_fk = Empleado.objects.create(nombre="Sin FK", area="VENTAS", sucursal="Sucursal Crucero")
-
-        self.assertEqual(_resolver_sucursal(con_fk), suc)
-        self.assertEqual(_resolver_sucursal(sin_fk), suc)
-        self.assertIsNone(_resolver_sucursal(Empleado.objects.create(nombre="Vacio", area="VENTAS", sucursal="")))
+        self.assertEqual(_sucursal_de_empleado(emp), matriz)
 
     def test_backfill_asistencia_solo_rellena_null(self):
         from datetime import date
