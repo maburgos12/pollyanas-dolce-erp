@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.staticfiles import finders
+from django.core.paginator import Paginator
 from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models.functions import Trim
 from django.http import Http404, HttpResponse, JsonResponse
@@ -22,7 +23,14 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from activos.models import Activo
-from core.access import can_manage_module, can_view_module, can_view_submodule, is_admin_or_dg, is_mermas_only
+from core.access import (
+    can_manage_module,
+    can_view_module,
+    can_view_submodule,
+    is_admin_or_dg,
+    is_mermas_only,
+    is_repartidor_only,
+)
 from core.models import Sucursal
 from core.notificaciones import crear_notificacion
 from fallas.models import CategoriaFalla, ReporteFalla
@@ -183,15 +191,27 @@ def sucursal_tools(request):
         solo_aprobacion = True
     if not sucursal and not es_direccion:
         raise PermissionDenied("Tu sesión no tiene una sucursal operativa asignada.")
+    requested_tab = request.GET.get("tab")
+    tab_activa = "mermas" if solo_aprobacion else requested_tab
+    if tab_activa not in {"fallas", "mermas"}:
+        tab_activa = "fallas"
     insumos, catalogo_insumos_no_disponible = (
-        ([], False) if solo_aprobacion else _cargar_insumos_sucursal(sucursal)
+        ([], False) if solo_aprobacion or tab_activa != "mermas" else _cargar_insumos_sucursal(sucursal)
     )
+    fallas_queryset = (
+        ReporteFalla.objects.filter(sucursal=sucursal)
+        .select_related("categoria", "activo_relacionado", "reportado_por")
+        .order_by("-fecha_reporte", "-id")
+        if sucursal and tab_activa == "fallas"
+        else ReporteFalla.objects.none()
+    )
+    fallas_sucursal = Paginator(fallas_queryset, 10).get_page(request.GET.get("fallas_page"))
     return render(
         request,
         "operacion/sucursal_tools.html",
         {
             "sucursal": sucursal,
-            "tab_activa": request.GET.get("tab") or ("mermas" if solo_aprobacion else "fallas"),
+            "tab_activa": tab_activa,
             "activos": Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id"),
             "categorias_equipo": CategoriaFalla.objects.filter(
                 activo=True, tipo=CategoriaFalla.TIPO_EQUIPO
@@ -210,14 +230,14 @@ def sucursal_tools(request):
             "draft_fallas": request.session.pop("operacion_draft_fallas", {}),
             "draft_mermas": request.session.pop("operacion_draft_mermas", {}),
             "mis_mermas": MermaInsumo.objects.filter(reportado_por=request.user).order_by("-creado_en")[:8],
-            "mis_fallas": ReporteFalla.objects.filter(
-                reportado_por=request.user, sucursal=sucursal
-            ).select_related("categoria", "activo_relacionado").order_by("-fecha_reporte")[:8],
+            "fallas_sucursal": fallas_sucursal,
         },
     )
 
 
 def _sucursal_operativa_usuario(user):
+    if is_repartidor_only(user):
+        return None
     profile = getattr(user, "userprofile", None)
     sucursal = getattr(profile, "sucursal", None)
     if not sucursal or not sucursal.esta_operativa():

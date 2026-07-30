@@ -258,6 +258,7 @@ class MermasOnlyMiddleware:
         "/app/sucursal/",
     )
     ALLOWED_PREFIXES = (
+        "/app/api/fallas/",
         "/app/api/mermas-insumos/",
         "/merma/",
         "/mermas/",

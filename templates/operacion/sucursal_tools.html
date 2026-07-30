@@ -5,9 +5,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#8b2252">
-  <title>Captura de sucursal · Pollyana's Dolce</title>
+  <title>{% if tab_activa == 'fallas' %}Fallas{% else %}Merma de insumo{% endif %} · App Operativa</title>
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260722-insumos-v1">
-  <link rel="stylesheet" href="{% static 'operacion/sucursal_tools.css' %}?v=20260722-insumos-v1">
+  <link rel="stylesheet" href="{% static 'operacion/sucursal_tools.css' %}?v=20260730-branch-fallas-v2">
 </head>
 <body class="branch-tools">
   <main class="tools-shell">
@@ -20,15 +20,11 @@
       <span class="session-state">Sesión activa</span>
     </header>
 
-    {% if not solo_aprobacion %}<nav class="tool-tabs" aria-label="Tipo de captura">
-      <button type="button" data-tab-target="fallas" aria-selected="{% if tab_activa != 'mermas' %}true{% else %}false{% endif %}">Reportar falla</button>
-      <button type="button" data-tab-target="mermas" aria-selected="{% if tab_activa == 'mermas' %}true{% else %}false{% endif %}">Merma de insumo</button>
-    </nav>{% endif %}
-
-    <section class="tool-panel" data-tab-panel="fallas" {% if solo_aprobacion or tab_activa == 'mermas' %}hidden{% endif %}>
+    {% if tab_activa == 'fallas' and not solo_aprobacion %}
+    <section class="tool-panel" aria-labelledby="falla-heading">
       <div class="panel-heading">
-        <h2>¿Qué falló?</h2>
-        <p>El reporte llegará directamente al equipo de Mantenimiento.</p>
+        <h2 id="falla-heading">Nuevo reporte de falla</h2>
+        <p>Registra un problema de equipo o instalaciones. El reporte llegará directamente a Mantenimiento.</p>
       </div>
       <form id="falla-form" data-async-action action="{% url 'operacion:fallas_crear_api' %}" method="post" enctype="multipart/form-data">
         {% csrf_token %}
@@ -66,14 +62,45 @@
         <textarea id="justificacion_falla" name="justificacion_sin_foto" rows="2">{{ draft_fallas.justificacion_sin_foto|default:'' }}</textarea>
         <button class="primary-action" type="submit">Enviar a Mantenimiento</button>
       </form>
-      {% if mis_fallas %}<div class="approval-list"><div class="panel-heading"><h2>Mis fallas recientes</h2></div>{% for falla in mis_fallas %}<article class="approval-card"><h3>#{{ falla.id }} · {{ falla.titulo }}</h3><p>{{ falla.get_estatus_display }} · {{ falla.categoria.nombre }}</p></article>{% endfor %}</div>{% endif %}
+      <div class="approval-list" id="historial-fallas">
+        <div class="panel-heading">
+          <h2>Historial de {{ sucursal.nombre }}</h2>
+          <p>Reportes creados por el personal de esta sucursal, sin mezclar información de otras ubicaciones.</p>
+        </div>
+        {% for falla in fallas_sucursal %}
+        <article class="approval-card failure-history-card">
+          <div class="failure-history-head">
+            <h3>#{{ falla.id }} · {{ falla.titulo }}</h3>
+            <span class="status-chip">{{ falla.get_estatus_display }}</span>
+          </div>
+          <p>{{ falla.categoria.nombre }} · Prioridad {{ falla.get_prioridad_display }}</p>
+          <p class="history-meta">
+            Reportó: {{ falla.reportado_por.get_full_name|default:falla.reportado_por.username }}
+            · {{ falla.fecha_reporte|date:"d/m/Y H:i" }}
+          </p>
+        </article>
+        {% empty %}
+        <div class="empty-state">Esta sucursal todavía no tiene reportes de fallas.</div>
+        {% endfor %}
+        {% if fallas_sucursal.paginator.num_pages > 1 %}
+        <nav class="history-pagination" aria-label="Páginas del historial de fallas">
+          {% if fallas_sucursal.has_previous %}
+          <a href="?tab=fallas&amp;fallas_page={{ fallas_sucursal.previous_page_number }}#historial-fallas">Anterior</a>
+          {% endif %}
+          <span>Página {{ fallas_sucursal.number }} de {{ fallas_sucursal.paginator.num_pages }}</span>
+          {% if fallas_sucursal.has_next %}
+          <a href="?tab=fallas&amp;fallas_page={{ fallas_sucursal.next_page_number }}#historial-fallas">Siguiente</a>
+          {% endif %}
+        </nav>
+        {% endif %}
+      </div>
     </section>
-
-    <section class="tool-panel" data-tab-panel="mermas" {% if not solo_aprobacion and tab_activa != 'mermas' %}hidden{% endif %}>
+    {% else %}
+    <section class="tool-panel" aria-labelledby="merma-heading">
       {% if solo_aprobacion and not sucursal %}<div class="panel-heading"><h2>Supervisión de mermas de insumos</h2><p>No hay solicitudes pendientes ni casos sin responsable por atender.</p></div>{% endif %}
       {% if not solo_aprobacion %}
       <div class="panel-heading">
-        <h2>Registrar merma de insumo</h2>
+        <h2 id="merma-heading">Registrar merma de insumo</h2>
         <p>Solo aparecen insumos recibidos por {{ sucursal.nombre }}. La existencia se consulta directamente en Point.</p>
       </div>
       {% if catalogo_insumos_no_disponible %}
@@ -124,11 +151,12 @@
       </div>{% endif %}
       {% if mis_mermas %}<div class="approval-list"><div class="panel-heading"><h2>Mis mermas recientes</h2></div>{% for merma in mis_mermas %}<article class="approval-card" id="merma-{{ merma.id }}"><h3>#{{ merma.id }} · {{ merma.nombre_point }}</h3><p>{{ merma.get_estatus_display }} · {{ merma.cantidad_reportada }} {{ merma.unidad_point }}</p>{% if merma.estatus == 'EN_ACLARACION' %}<form data-async-action data-reset-on-success="false" action="{% url 'operacion:mermas_insumos_reenviar_api' merma.id %}" method="post">{% csrf_token %}<label>Cantidad corregida</label><input name="cantidad" type="number" min="0.001" step="0.001" value="{{ merma.cantidad_reportada }}" required><label>Comentario corregido</label><textarea name="comentario" required>{{ merma.comentario }}</textarea><label>Qué se corrigió</label><textarea name="motivo" required></textarea><button class="primary-action" type="submit">Reenviar a mi jefe</button></form>{% endif %}</article>{% endfor %}</div>{% endif %}
     </section>
+    {% endif %}
   </main>
   <div class="toast" role="status" aria-live="polite" hidden></div>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260730-sales-catalog-live-v5", {
+      navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7", {
         scope: "/app/",
         updateViaCache: "none"
       }).then(function (registration) {
@@ -136,6 +164,6 @@
       }).catch(function () {});
     }
   </script>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260730-sales-catalog-live-v3" defer></script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260730-branch-fallas-v4" defer></script>
 </body>
 </html>
