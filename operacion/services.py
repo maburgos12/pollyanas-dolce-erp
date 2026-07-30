@@ -15,6 +15,7 @@ from core.access import (
     is_repartidor_only,
     primary_role,
 )
+from .services_higiene import puede_capturar_higiene, puede_supervisar_higiene
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,17 @@ def build_operacion_context(user) -> dict:
         scope_label = "Bitácora y evidencias"
         location = getattr(getattr(repartidor, "sucursal", None), "nombre", "Logística móvil")
     else:
+        if puede_capturar_higiene(user) or puede_supervisar_higiene(user):
+            tiles.append(
+                OperacionTile(
+                    key="higiene_diaria",
+                    title="Higiene y limpieza",
+                    detail="Cloro y pH, programa de limpieza, baños e historial diario.",
+                    href="/app/higiene/",
+                    icon="checklist",
+                    area="Sucursal",
+                )
+            )
         if can_view_submodule(user, "mermas", "captura"):
             tiles.append(
                 OperacionTile(

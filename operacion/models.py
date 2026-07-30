@@ -84,3 +84,119 @@ class BitacoraOperativaLinea(models.Model):
             from django.core.exceptions import ValidationError
             raise ValidationError("No se puede editar el corte después de que ha sido sellado.")
         super().save(*args, **kwargs)
+
+
+class RegistroHigiene(models.Model):
+    TIPO_CLORO_PH = "CLORO_PH"
+    TIPO_LIMPIEZA = "LIMPIEZA"
+    TIPO_BANOS = "BANOS"
+    TIPO_CHOICES = [
+        (TIPO_CLORO_PH, "Niveles de cloro y pH"),
+        (TIPO_LIMPIEZA, "Programa de limpieza"),
+        (TIPO_BANOS, "Limpieza de baños"),
+    ]
+    ESTATUS_CERRADO = "CERRADO"
+
+    tipo = models.CharField(max_length=16, choices=TIPO_CHOICES, db_index=True)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        related_name="registros_higiene",
+    )
+    fecha = models.DateField(default=timezone.localdate, db_index=True)
+    clave_instancia = models.CharField(
+        max_length=80,
+        help_text="Identifica la toma, ronda o programa dentro del día.",
+    )
+    hora = models.TimeField(null=True, blank=True)
+    plantilla_version = models.CharField(max_length=20)
+    plantilla_snapshot = models.JSONField(default=dict, blank=True)
+    tipo_bano = models.CharField(max_length=16, blank=True, default="")
+    uso_bano = models.CharField(max_length=16, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    estatus = models.CharField(max_length=16, default=ESTATUS_CERRADO)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="registros_higiene_creados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-fecha", "-hora", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sucursal", "fecha", "tipo", "clave_instancia"],
+                name="operacion_higiene_instancia_diaria_unica",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["sucursal", "fecha", "tipo"]),
+        ]
+        verbose_name = "Registro diario de higiene"
+        verbose_name_plural = "Registros diarios de higiene"
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} · {self.sucursal} · {self.fecha:%Y-%m-%d}"
+
+
+class RespuestaHigiene(models.Model):
+    RESPUESTA_CUMPLE = "CUMPLE"
+    RESPUESTA_NO_CUMPLE = "NO_CUMPLE"
+    RESPUESTA_NA = "NA"
+    RESPUESTA_CHOICES = [
+        (RESPUESTA_CUMPLE, "Cumple"),
+        (RESPUESTA_NO_CUMPLE, "No cumple"),
+        (RESPUESTA_NA, "No aplica"),
+    ]
+
+    registro = models.ForeignKey(
+        RegistroHigiene,
+        on_delete=models.CASCADE,
+        related_name="respuestas",
+    )
+    punto_clave = models.CharField(max_length=100)
+    seccion = models.CharField(max_length=80)
+    punto_revision = models.CharField(max_length=240)
+    orden = models.PositiveSmallIntegerField(default=0)
+    respuesta = models.CharField(max_length=16, choices=RESPUESTA_CHOICES, blank=True, default="")
+    valor_numerico = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    observacion = models.TextField(blank=True, default="")
+    evidencia = models.ImageField(
+        upload_to="operacion/higiene/evidencias/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    corregido_en_momento = models.BooleanField(default=False)
+    requiere_seguimiento = models.BooleanField(default=False)
+    tipo_objetivo = models.CharField(max_length=16, blank=True, default="")
+    activo_relacionado = models.ForeignKey(
+        "activos.Activo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="revisiones_higiene",
+    )
+    area_instalacion = models.CharField(max_length=120, blank=True, default="")
+    reporte_falla = models.OneToOneField(
+        "fallas.ReporteFalla",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="origen_higiene",
+    )
+
+    class Meta:
+        ordering = ["orden", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["registro", "punto_clave"],
+                name="operacion_higiene_respuesta_punto_unica",
+            )
+        ]
+        verbose_name = "Respuesta de higiene"
+        verbose_name_plural = "Respuestas de higiene"
+
+    def __str__(self) -> str:
+        return f"{self.registro} · {self.punto_revision}"
