@@ -170,10 +170,10 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20260730-sales-catalog-live-v3")
+        self.assertContains(pagina, "20260730-branch-fallas-v4")
         self.assertContains(
             pagina,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260730-sales-catalog-live-v5"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7"',
         )
         self.assertContains(pagina, 'updateViaCache: "none"')
         self.assertContains(pagina, "La existencia se consulta directamente en Point")
@@ -383,10 +383,14 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertEqual(first.json()["orden_id"], second.json()["orden_id"])
         self.assertEqual(OrdenAjustePoint.objects.filter(merma=merma).count(), 1)
 
-    def test_pagina_movil_muestra_capturas_y_bandeja_del_jefe(self):
-        response = self.client.get(reverse("operacion:sucursal_tools"))
-        self.assertContains(response, "Enviar a Mantenimiento")
-        self.assertContains(response, "Enviar a mi jefe")
+    def test_pagina_movil_separa_fallas_de_mermas_y_muestra_bandeja_del_jefe(self):
+        fallas = self.client.get(reverse("operacion:sucursal_tools"))
+        self.assertContains(fallas, "Enviar a Mantenimiento")
+        self.assertNotContains(fallas, "Enviar a mi jefe")
+
+        mermas = self.client.get(reverse("operacion:sucursal_tools") + "?tab=mermas")
+        self.assertContains(mermas, "Enviar a mi jefe")
+        self.assertNotContains(mermas, "Enviar a Mantenimiento")
 
         self.client.post(
             reverse("operacion:mermas_insumos_crear_api"),

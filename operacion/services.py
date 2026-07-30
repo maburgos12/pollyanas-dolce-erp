@@ -38,6 +38,13 @@ def _profile(user):
     return getattr(user, "userprofile", None)
 
 
+def _operational_branch(profile):
+    branch = getattr(profile, "sucursal", None)
+    if not branch or not branch.esta_operativa():
+        return None
+    return branch
+
+
 def _repartidor(user):
     try:
         return user.repartidor_logistica
@@ -173,6 +180,7 @@ def _append_logistica_tiles(tiles: list[OperacionTile], user, *, mobile_only: bo
 
 def build_operacion_context(user) -> dict:
     profile = _profile(user)
+    operational_branch = _operational_branch(profile)
     repartidor = _repartidor(user)
     groups = _group_names(user)
     tiles: list[OperacionTile] = []
@@ -238,28 +246,40 @@ def build_operacion_context(user) -> dict:
                     area="CEDIS",
                 )
             )
-        if can_view_submodule(user, "fallas", "reportar"):
+        if operational_branch:
             tiles.append(
                 OperacionTile(
-                    key="fallas_reportar",
-                    title="Reportar falla",
-                    detail="Equipo registrado o instalaciones; llega directo a Mantenimiento.",
+                    key="fallas_sucursal",
+                    title="Fallas de sucursal",
+                    detail="Crea reportes y consulta el historial completo de tu sucursal.",
                     href="/app/sucursal/?tab=fallas",
                     icon="falla",
                     area="Sucursal",
                 )
             )
-        if can_view_submodule(user, "fallas", "mis_reportes"):
-            tiles.append(
-                OperacionTile(
-                    key="fallas_mis_reportes",
-                    title="Mis reportes",
-                    detail="Seguimiento de fallas enviadas por el usuario.",
-                    href="/fallas/app/",
-                    icon="historial",
-                    area="Sucursal",
+        else:
+            if can_view_submodule(user, "fallas", "reportar"):
+                tiles.append(
+                    OperacionTile(
+                        key="fallas_reportar",
+                        title="Reportar falla",
+                        detail="Equipo registrado o instalaciones; llega directo a Mantenimiento.",
+                        href="/app/sucursal/?tab=fallas",
+                        icon="falla",
+                        area="Sucursal",
+                    )
                 )
-            )
+            if can_view_submodule(user, "fallas", "mis_reportes"):
+                tiles.append(
+                    OperacionTile(
+                        key="fallas_mis_reportes",
+                        title="Mis reportes",
+                        detail="Seguimiento de fallas enviadas por el usuario.",
+                        href="/fallas/app/",
+                        icon="historial",
+                        area="Sucursal",
+                    )
+                )
         if can_manage_submodule(user, "ventas", "visitas_sucursal"):
             tiles.append(
                 OperacionTile(

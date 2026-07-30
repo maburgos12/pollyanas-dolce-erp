@@ -277,6 +277,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "/logistica/app/?pantalla=bitacora_salida")
         self.assertNotContains(response, "Registrar merma")
         self.assertNotContains(response, "Reportar falla")
+        self.assertNotContains(response, "Fallas de sucursal")
         self.assertNotContains(response, "pd_logistica_access")
         self.assertEqual(dashboard.status_code, 302)
         self.assertEqual(dashboard["Location"], "/logistica/app/")
@@ -292,7 +293,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260730-higiene-diaria-v6")
+        self.assertContains(response, "20260730-higiene-branch-fallas-v7")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -311,7 +312,10 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
-        self.assertContains(response, 'navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-diaria-v6"')
+        self.assertContains(
+            response,
+            'navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7"',
+        )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
         self.assertContains(response, "Cerrar sesión")
@@ -353,7 +357,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v31-higiene-diaria", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v32-higiene-branch-fallas", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -373,6 +377,8 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Merma de producto")
         self.assertContains(response, "/mermas/app/?modo=captura")
+        self.assertContains(response, "Fallas de sucursal")
+        self.assertContains(response, 'href="/app/sucursal/?tab=fallas"')
         self.assertNotContains(response, "Bitácoras")
         self.assertNotContains(response, "/app/bitacoras/")
         self.assertEqual(dashboard.status_code, 302)
@@ -655,16 +661,16 @@ class OperacionAppTests(TestCase):
     def test_sucursal_user_gets_only_assigned_operational_actions(self):
         user = self._user("sucursal.colosio", sucursal=self.sucursal)
         self._grant(user, "mermas.captura")
-        self._grant(user, "fallas.reportar")
         self.client.force_login(user)
 
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Merma de producto")
-        self.assertContains(response, "Reportar falla")
+        self.assertContains(response, "Fallas de sucursal")
         self.assertContains(response, 'href="/app/sucursal/?tab=fallas"')
         self.assertNotContains(response, 'href="/fallas/reportar/"')
+        self.assertNotContains(response, "Mis reportes")
         self.assertContains(response, "Colosio")
         self.assertNotContains(response, "Flota")
         self.assertNotContains(response, "Mantenimiento vehicular")
@@ -683,8 +689,9 @@ class OperacionAppTests(TestCase):
         self.assertEqual(home.status_code, 200)
         self.assertContains(home, "Merma de producto")
         self.assertContains(home, "Merma de insumo")
-        self.assertContains(home, "Reportar falla")
-        self.assertContains(home, "Mis reportes")
+        self.assertContains(home, "Fallas de sucursal")
+        self.assertContains(home, 'href="/app/sucursal/?tab=fallas"', count=1)
+        self.assertNotContains(home, "Mis reportes")
         self.assertNotContains(home, "Bitácoras")
         self.assertNotContains(home, "/app/bitacoras/")
         self.assertEqual(bitacoras.status_code, 403)
@@ -845,7 +852,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(dashboard.status_code, 302)
         self.assertEqual(dashboard["Location"], "/mermas/app/")
 
-    def test_fallas_mis_reportes_can_be_shown_without_reportar(self):
+    def test_sucursal_con_permiso_historial_usa_acceso_unificado_fallas(self):
         user = self._user("fallas.consulta", sucursal=self.sucursal)
         self._grant(user, "fallas.mis_reportes")
         self.client.force_login(user)
@@ -853,8 +860,9 @@ class OperacionAppTests(TestCase):
         response = self.client.get("/app/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Mis reportes")
-        self.assertNotContains(response, "Reportar falla")
+        self.assertContains(response, "Fallas de sucursal")
+        self.assertContains(response, 'href="/app/sucursal/?tab=fallas"', count=1)
+        self.assertNotContains(response, "Mis reportes")
 
     def test_fallas_branch_user_actions_return_to_unified_app_not_dashboard(self):
         user = self._user("fallas.sucursal", sucursal=self.sucursal)
@@ -915,7 +923,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Merma de producto")
         self.assertContains(response, "Recibir merma")
-        self.assertContains(response, "Reportar falla")
+        self.assertContains(response, "Fallas de sucursal")
         self.assertContains(response, "Auditorías")
         self.assertContains(response, "Mantenimiento")
         self.assertContains(response, "Flota")
@@ -958,6 +966,8 @@ class OperacionAppTests(TestCase):
 
         self.assertEqual(self.client.get("/app/").status_code, 200)
         self.assertEqual(self.client.get("/mermas/app/").status_code, 200)
+        self.assertEqual(self.client.get("/app/sucursal/?tab=fallas").status_code, 200)
+        self.assertEqual(self.client.get("/app/api/fallas/activos/").status_code, 200)
 
         blocked = self.client.get("/fallas/reportar/")
         self.assertEqual(blocked.status_code, 302)
@@ -3163,6 +3173,6 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v31-higiene-diaria", sw_content)
+        self.assertIn("v32-higiene-branch-fallas", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertNotIn("v21-", sw_content)

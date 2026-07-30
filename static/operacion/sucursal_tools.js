@@ -89,11 +89,13 @@
     }
   }
   async function syncSupply() {
+    if (!supply || !mermaForm) return;
     const requestId = ++stockRequest;
     const selected = supply?.selectedOptions[0];
     const unit = selected?.dataset.unit || "";
     const code = selected?.value || "";
-    document.querySelector("[data-unit-label]").textContent = unit ? `(${unit})` : "";
+    const unitLabel = document.querySelector("[data-unit-label]");
+    if (unitLabel) unitLabel.textContent = unit ? `(${unit})` : "";
     const note = document.querySelector("[data-stock-note]");
     const quantity = document.querySelector("#cantidad_merma");
     const submit = mermaForm?.querySelector('button[type="submit"]');
@@ -119,7 +121,7 @@
       if (requestId !== stockRequest) return;
       const stock = payload.insumo?.existencia ?? "";
       const liveUnit = payload.insumo?.unidad || unit;
-      document.querySelector("[data-unit-label]").textContent = liveUnit ? `(${liveUnit})` : "";
+      if (unitLabel) unitLabel.textContent = liveUnit ? `(${liveUnit})` : "";
       if (quantity) quantity.max = stock;
       if (note) note.textContent = `Existencia disponible en Point: ${stock} ${liveUnit}`;
       if (submit) submit.disabled = false;
