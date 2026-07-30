@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#8b2252">
   <title>Higiene y limpieza · Pollyana's Dolce</title>
-  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-v1">
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-visual-v2">
 </head>
 <body class="higiene-body">
   <main class="higiene-shell">
@@ -30,17 +30,23 @@
     {% endif %}
 
     {% if puede_capturar %}
-      <section class="today-block">
+      <section class="today-block" data-capture-overview>
         <div class="section-heading">
-          <p>Captura diaria</p>
+          <p>Revisión paso a paso</p>
           <h2>¿Qué vas a revisar?</h2>
+          <span>Elige una bitácora. Te mostraremos una sola área a la vez para que la captura sea rápida y clara.</span>
         </div>
         <div class="capture-options" role="tablist" aria-label="Bitácoras de higiene">
           {% for tipo, plantilla in plantillas.items %}
             <button type="button" class="capture-option" data-open-panel="{{ tipo }}" role="tab">
-              <span class="option-icon">{% if tipo == 'CLORO_PH' %}◌{% elif tipo == 'BANOS' %}◇{% else %}✓{% endif %}</span>
-              <span><b>{{ plantilla.titulo }}</b><small>{{ plantilla.descripcion }}</small></span>
-              <span aria-hidden="true">›</span>
+              <span class="option-index">0{{ forloop.counter }}</span>
+              <span class="option-icon" aria-hidden="true">{% if tipo == 'CLORO_PH' %}H₂O{% elif tipo == 'BANOS' %}WC{% else %}✓{% endif %}</span>
+              <span class="option-copy">
+                <b>{{ plantilla.titulo }}</b>
+                <small>{{ plantilla.descripcion }}</small>
+                <em>{{ plantilla.puntos|length }} puntos · Plantilla {{ plantilla.version }}</em>
+              </span>
+              <span class="option-action">Comenzar <span aria-hidden="true">→</span></span>
             </button>
           {% endfor %}
         </div>
@@ -52,12 +58,19 @@
             <button type="button" class="text-button" data-close-panel>← Volver</button>
             <span>Plantilla {{ plantilla.version }}</span>
           </div>
-          <div class="section-heading">
-            <p>{{ sucursal.nombre }}</p>
-            <h2>{{ plantilla.titulo }}</h2>
-            <span>{{ plantilla.descripcion }}</span>
-            <strong class="capture-progress" data-progress>0 de {{ plantilla.puntos|length }} revisados</strong>
+          <div class="workflow-hero">
+            <div class="section-heading">
+              <p>{{ sucursal.nombre }} · Revisión de hoy</p>
+              <h2>{{ plantilla.titulo }}</h2>
+              <span>{{ plantilla.descripcion }}</span>
+            </div>
+            <div class="progress-summary" aria-live="polite">
+              <span data-progress>0 de {{ plantilla.puntos|length }} revisados</span>
+              <strong data-progress-percent>0%</strong>
+            </div>
+            <div class="progress-track" aria-hidden="true"><span data-progress-bar></span></div>
           </div>
+          {% regroup plantilla.puntos by seccion as secciones %}
           <form
             data-async-action
             data-higiene-form
@@ -70,7 +83,12 @@
             <input type="hidden" name="clave_instancia" value="{% if tipo == 'CLORO_PH' %}red-principal{% elif tipo == 'LIMPIEZA' %}diaria{% endif %}">
             <input type="hidden" name="respuestas" value="[]">
 
-            <div class="context-grid">
+            <section class="context-card" aria-labelledby="contexto-{{ tipo }}">
+              <div class="context-card-heading">
+                <span aria-hidden="true">01</span>
+                <div><b id="contexto-{{ tipo }}">Datos de la revisión</b><small>Confirma el momento y lugar antes de comenzar.</small></div>
+              </div>
+              <div class="context-grid">
               <label>Hora de revisión<input type="time" name="hora" required></label>
               {% if tipo == 'CLORO_PH' %}
                 <label>Punto de muestreo
@@ -110,14 +128,38 @@
                   </select>
                 </label>
               {% endif %}
-            </div>
+              </div>
+            </section>
 
-            {% regroup plantilla.puntos by seccion as secciones %}
+            <nav class="section-stepper" aria-label="Áreas de la revisión">
+              {% for seccion in secciones %}
+                <button type="button" data-section-step="{{ forloop.counter0 }}" {% if forloop.first %}aria-current="step"{% endif %}>
+                  <span>{{ forloop.counter }}</span>
+                  <b>{{ seccion.grouper }}</b>
+                  <small data-step-state>{% if forloop.first %}En curso{% else %}Pendiente{% endif %}</small>
+                </button>
+              {% endfor %}
+              <button type="button" data-section-step="finish">
+                <span>✓</span>
+                <b>Finalizar</b>
+                <small data-step-state>Pendiente</small>
+              </button>
+            </nav>
+
             {% for seccion in secciones %}
-              <fieldset class="review-section">
+              <fieldset
+                class="review-section"
+                data-review-section
+                data-section-index="{{ forloop.counter0 }}"
+                {% if not forloop.first %}hidden{% endif %}
+              >
                 <legend>
-                  <span>{{ forloop.counter|stringformat:"02d" }}</span>{{ seccion.grouper }}
-                  {% if tipo != 'CLORO_PH' %}<button type="button" data-mark-section>Todo cumple</button>{% endif %}
+                  <span>{{ forloop.counter|stringformat:"02d" }}</span>
+                  <span class="legend-copy">
+                    <b>{{ seccion.grouper }}</b>
+                    <small>{{ seccion.list|length }} puntos por revisar</small>
+                  </span>
+                  {% if tipo != 'CLORO_PH' %}<button type="button" data-mark-section>✓ Marcar todo cumple</button>{% endif %}
                 </legend>
                 <div class="review-list">
                   {% for punto in seccion.list %}
@@ -131,7 +173,7 @@
                     >
                       <div class="point-title">
                         <span>{{ forloop.counter }}</span>
-                        <strong>{{ punto.etiqueta }}</strong>
+                        <div><strong>{{ punto.etiqueta }}</strong><small data-point-state>Sin revisar</small></div>
                       </div>
                       {% if punto.tipo_respuesta == 'NUMERICA' %}
                         <label class="numeric-choice">Valor
@@ -151,8 +193,8 @@
                           <label>¿Qué encontraste?<textarea data-observation rows="2" placeholder="Describe el hallazgo"></textarea></label>
                           <label>Evidencia fotográfica<input type="file" name="evidencia_{{ punto.key }}" accept="image/*" capture="environment"></label>
                           <div class="resolution-choice">
-                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="CORREGIDO"><span>Corregido ahora</span></label>
-                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="SEGUIMIENTO"><span>Enviar a Fallas</span></label>
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="CORREGIDO"><span>✓ Corregido ahora</span></label>
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="SEGUIMIENTO"><span>↗ Enviar a Fallas</span></label>
                           </div>
                           <div class="failure-fields" data-failure-fields hidden>
                             <label>Tipo de falla
@@ -191,10 +233,32 @@
                     </article>
                   {% endfor %}
                 </div>
+                <div class="section-actions">
+                  {% if not forloop.first %}<button type="button" class="secondary-action" data-section-previous>← Área anterior</button>{% endif %}
+                  <span><b data-section-complete>0</b> de {{ seccion.list|length }} listos</span>
+                  <button type="button" class="continue-action" data-section-next>
+                    {% if forloop.last %}Revisar y terminar{% else %}Continuar{% endif %} <span aria-hidden="true">→</span>
+                  </button>
+                </div>
               </fieldset>
             {% endfor %}
-            <label class="notes-field">Notas generales<textarea name="notas" rows="3" placeholder="Opcional"></textarea></label>
-            <button class="save-action" type="submit"><span>Guardar revisión</span><small>Quedará disponible en el historial</small></button>
+
+            <section class="review-finish" data-finish-step hidden>
+              <div class="finish-mark" aria-hidden="true">✓</div>
+              <p>Último paso</p>
+              <h3>Revisa y guarda la bitácora</h3>
+              <span data-finish-message>Completa todos los puntos antes de guardar.</span>
+              <div class="finish-summary">
+                <div><b data-finish-complete>0</b><small>Puntos revisados</small></div>
+                <div><b data-finish-findings>0</b><small>Hallazgos</small></div>
+                <div><b data-finish-failures>0</b><small>Enviados a Fallas</small></div>
+              </div>
+              <label class="notes-field">Notas generales<textarea name="notas" rows="3" placeholder="Agrega una observación general, si hace falta"></textarea></label>
+              <div class="finish-actions">
+                <button type="button" class="secondary-action" data-section-previous>← Volver a revisar</button>
+                <button class="save-action" type="submit"><span>Guardar revisión</span><small>Quedará disponible en el historial</small></button>
+              </div>
+            </section>
           </form>
         </section>
       {% endfor %}
@@ -227,6 +291,6 @@
     </section>
   </main>
   <div class="higiene-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{% static 'operacion/higiene.js' %}?v=20260730-higiene-v1"></script>
+  <script src="{% static 'operacion/higiene.js' %}?v=20260730-higiene-visual-v2"></script>
 </body>
 </html>

@@ -77,6 +77,12 @@ class HigieneDiariaTests(TestCase):
         self.assertContains(captura, "Vitrinas refrigeradas")
         self.assertContains(captura, "Jabón para manos")
         self.assertContains(captura, "Historial de Payán")
+        self.assertContains(captura, 'data-capture-overview')
+        self.assertContains(captura, 'data-section-step')
+        self.assertContains(captura, 'data-section-next')
+        self.assertContains(captura, 'data-progress-bar')
+        self.assertContains(captura, "Revisión paso a paso")
+        self.assertContains(captura, "Continuar")
 
     def test_cloro_y_ph_se_guardan_estructurados_y_sin_duplicar_el_dia(self):
         self.client.force_login(self.operadora)
