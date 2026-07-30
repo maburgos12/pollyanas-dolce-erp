@@ -63,6 +63,15 @@ def _can_manage_mermas(user) -> bool:
     return _explicit_access(user) == ACCESS_MANAGE
 
 
+def _can_capture_any_sucursal(user) -> bool:
+    if _can_manage_mermas(user):
+        return True
+    return (
+        _explicit_access(user, "captura") == ACCESS_MANAGE
+        and get_submodule_access(user, "ventas", "visitas_sucursal") == ACCESS_MANAGE
+    )
+
+
 def _require_dashboard(user):
     if not _can_dashboard(user):
         raise PermissionDenied("No tienes acceso al panel de mermas.")
@@ -343,7 +352,8 @@ def crear_registro(request):
     _require_capture(request.user)
     sucursal_usuario = _sucursal_usuario(request.user)
     sucursales = sucursales_operativas()
-    if sucursal_usuario and not _can_manage_mermas(request.user):
+    can_capture_any_sucursal = _can_capture_any_sucursal(request.user)
+    if sucursal_usuario and not can_capture_any_sucursal:
         sucursales = Sucursal.objects.filter(pk=sucursal_usuario.pk)
 
     if request.method == "POST":
@@ -356,7 +366,7 @@ def crear_registro(request):
                 raise ValidationError("Toma o sube la foto del ticket Point.")
             if not producto_files:
                 raise ValidationError("Toma o sube al menos una foto del producto.")
-            if sucursal_usuario and not _can_manage_mermas(request.user) and sucursal != sucursal_usuario:
+            if sucursal_usuario and not can_capture_any_sucursal and sucursal != sucursal_usuario:
                 raise PermissionDenied("No puedes registrar merma de otra sucursal.")
             with transaction.atomic():
                 registro = MermaRegistro.objects.create(

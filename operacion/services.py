@@ -292,7 +292,7 @@ def build_operacion_context(user) -> dict:
                     area="Operación",
                 )
             )
-        if can_view_module(user, "logistica"):
+        if repartidor or can_view_module(user, "logistica"):
             _append_logistica_tiles(tiles, user)
 
         if _can_receive_mermas(user):

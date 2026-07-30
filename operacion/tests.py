@@ -805,6 +805,32 @@ class OperacionAppTests(TestCase):
         self.assertContains(recepcion, 'href="/logout/"')
         self.assertContains(recepcion, "Salir")
 
+    def test_repartidor_with_reception_and_audits_keeps_all_operational_apps(self):
+        group = Group.objects.create(name=ROLE_REPARTIDOR)
+        user = self._user("luis.peraza", sucursal=self.sucursal)
+        user.groups.add(group)
+        unidad = Unidad.objects.create(codigo="LUIS-01", descripcion="Unidad Luis", sucursal=self.sucursal)
+        Repartidor.objects.create(user=user, sucursal=self.sucursal, unidad_asignada=unidad)
+        PersonalEnviosSucursal.objects.create(user=user, activo=True)
+        self._grant(user, "mermas.captura", ACCESS_MANAGE)
+        self._grant(user, "mermas.recepcion", ACCESS_MANAGE)
+        self._grant(user, "ventas.visitas_sucursal", ACCESS_MANAGE)
+        self.client.force_login(user)
+
+        home = self.client.get("/app/")
+        logistica = self.client.get("/logistica/app/")
+        recepcion = self.client.get("/mermas/app/?modo=recepcion")
+        auditorias = self.client.get("/visitas-sucursal/app/")
+
+        self.assertEqual(home.status_code, 200)
+        self.assertContains(home, "Merma de producto")
+        self.assertContains(home, "Recibir merma")
+        self.assertContains(home, "Auditorías")
+        self.assertContains(home, "Logística móvil")
+        self.assertEqual(logistica.status_code, 200)
+        self.assertEqual(recepcion.status_code, 200)
+        self.assertEqual(auditorias.status_code, 200)
+
     def test_explicit_cedis_manage_access_gets_reception_and_mermas_guardrail(self):
         user = self._user("cedis.manage")
         self._grant(user, "mermas.recepcion", access=ACCESS_MANAGE)

@@ -1,13 +1,22 @@
+from tempfile import TemporaryDirectory
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from core.models import Sucursal
+from core.access import ACCESS_MANAGE
+from core.models import Sucursal, UserModuleAccess, UserProfile
 from mermas.models import MermaRegistro
 
 
 class MermaProductoFormularioTests(TestCase):
     def setUp(self):
+        self.media_dir = TemporaryDirectory()
+        self.addCleanup(self.media_dir.cleanup)
+        self.media_override = override_settings(MEDIA_ROOT=self.media_dir.name)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
         self.user = get_user_model().objects.create_superuser(
             username="merma.producto.ui",
             email="",
@@ -41,3 +50,87 @@ class MermaProductoFormularioTests(TestCase):
 
         self.assertContains(response, '"X-Requested-With": "XMLHttpRequest"')
         self.assertContains(response, "payload.error")
+
+    def _branch_user(self, username, *, audits=False):
+        user = get_user_model().objects.create_user(username=username, password="test")
+        UserProfile.objects.create(user=user, sucursal=self.sucursal)
+        UserModuleAccess.objects.create(
+            user=user,
+            module="mermas.captura",
+            access=ACCESS_MANAGE,
+        )
+        if audits:
+            UserModuleAccess.objects.create(
+                user=user,
+                module="ventas.visitas_sucursal",
+                access=ACCESS_MANAGE,
+            )
+        return user
+
+    def test_captura_manage_with_audits_can_register_product_waste_for_another_branch(self):
+        otra_sucursal = Sucursal.objects.create(
+            codigo="OTRA-UI",
+            nombre="Otra sucursal",
+            activa=True,
+        )
+        user = self._branch_user("luis.peraza", audits=True)
+        self.client.force_login(user)
+
+        form = self.client.get(reverse("mermas:app"), {"modo": "captura"})
+        response = self.client.post(
+            reverse("mermas:app") + "?modo=captura",
+            {
+                "sucursal": otra_sucursal.pk,
+                "ticket_point": "TICKET-123",
+                "producto_texto[]": ["Pastel de prueba"],
+                "receta_id[]": [""],
+                "cantidad[]": ["1"],
+                "ticket_fotos": [
+                    SimpleUploadedFile("ticket.jpg", b"ticket", content_type="image/jpeg"),
+                ],
+                "producto_fotos": [
+                    SimpleUploadedFile("producto.jpg", b"producto", content_type="image/jpeg"),
+                ],
+            },
+        )
+
+        self.assertEqual(
+            set(form.context["sucursales"].values_list("pk", flat=True)),
+            {self.sucursal.pk, otra_sucursal.pk},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MermaRegistro.objects.get().sucursal, otra_sucursal)
+
+    def test_captura_manage_without_audits_remains_restricted_to_own_branch(self):
+        otra_sucursal = Sucursal.objects.create(
+            codigo="RESTRINGIDA-UI",
+            nombre="Sucursal restringida",
+            activa=True,
+        )
+        user = self._branch_user("captura.sucursal")
+        self.client.force_login(user)
+
+        form = self.client.get(reverse("mermas:app"), {"modo": "captura"})
+        response = self.client.post(
+            reverse("mermas:app") + "?modo=captura",
+            {
+                "sucursal": otra_sucursal.pk,
+                "ticket_point": "TICKET-456",
+                "producto_texto[]": ["Pastel de prueba"],
+                "receta_id[]": [""],
+                "cantidad[]": ["1"],
+                "ticket_fotos": [
+                    SimpleUploadedFile("ticket.jpg", b"ticket", content_type="image/jpeg"),
+                ],
+                "producto_fotos": [
+                    SimpleUploadedFile("producto.jpg", b"producto", content_type="image/jpeg"),
+                ],
+            },
+        )
+
+        self.assertEqual(
+            list(form.context["sucursales"].values_list("pk", flat=True)),
+            [self.sucursal.pk],
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MermaRegistro.objects.exists())

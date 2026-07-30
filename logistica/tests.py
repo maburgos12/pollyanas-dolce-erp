@@ -2787,6 +2787,21 @@ class LogisticaSeedRepartidoresTests(TestCase):
         self.assertEqual(repartidor.sucursal, matriz)
         self.assertEqual(repartidor.sucursal.codigo, "MATRIZ")
 
+    def test_seed_repartidores_pwa_renames_luis_without_resetting_password(self):
+        Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
+        user = User.objects.create_user(username="rep.luis.peraza", password="conservada")
+        user_id = user.pk
+        password_hash = user.password
+
+        call_command("seed_repartidores_pwa", stdout=StringIO())
+
+        user.refresh_from_db()
+        self.assertEqual(user.pk, user_id)
+        self.assertEqual(user.username, "luis.peraza")
+        self.assertEqual(user.password, password_hash)
+        self.assertFalse(User.objects.filter(username="rep.luis.peraza").exists())
+        self.assertFalse(user.userprofile.lock_logistica)
+
 
 class LogisticaViewsTests(TestCase):
     def setUp(self):

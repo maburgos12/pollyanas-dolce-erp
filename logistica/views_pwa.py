@@ -12,6 +12,7 @@ from core.access import can_view_module, is_repartidor_only
 def pwa_app(request):
     if not (
         is_repartidor_only(request.user)
+        or hasattr(request.user, "repartidor_logistica")
         or can_view_module(request.user, "logistica")
         or can_view_module(request.user, "mantenimiento")
     ):
