@@ -92,7 +92,12 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260722-insumos-timeout-v4", { scope: "/app/" }).catch(function () {});
+      navigator.serviceWorker.register("/app/sw.js?v=20260730-sales-catalog-live-v5", {
+        scope: "/app/",
+        updateViaCache: "none"
+      }).then(function (registration) {
+        return registration.update();
+      }).catch(function () {});
     }
     (function () {
       var startY = 0;

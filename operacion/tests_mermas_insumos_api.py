@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -169,8 +170,22 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20260728-catalog-recovery-v2")
+        self.assertContains(pagina, "20260730-sales-catalog-live-v3")
+        self.assertContains(
+            pagina,
+            'navigator.serviceWorker.register("/app/sw.js?v=20260730-sales-catalog-live-v5"',
+        )
+        self.assertContains(pagina, 'updateViaCache: "none"')
         self.assertContains(pagina, "La existencia se consulta directamente en Point")
+
+    def test_formulario_reemplaza_catalogo_antiguo_aunque_no_este_vacio(self):
+        root = Path(__file__).resolve().parents[1]
+        javascript = (root / "static/operacion/sucursal_tools.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("supply.options.length > 1", javascript)
+        self.assertIn("supply.replaceChildren(placeholder, fragment)", javascript)
 
     @patch("operacion.views.consultar_existencia_insumo_point")
     def test_catalogo_consulta_existencia_seleccionada_directamente_en_point(self, mock_consultar):

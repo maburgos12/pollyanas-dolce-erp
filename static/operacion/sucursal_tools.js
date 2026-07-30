@@ -41,7 +41,7 @@
   let stockRequest = 0;
   async function recoverSupplyCatalog() {
     const status = document.querySelector("[data-catalog-status]");
-    if (!supply || !mermaForm?.dataset.stockUrl || supply.options.length > 1) {
+    if (!supply || !mermaForm?.dataset.stockUrl) {
       if (status) status.hidden = true;
       return;
     }
@@ -58,6 +58,10 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No fue posible actualizar los insumos.");
       const items = Array.isArray(payload.insumos) ? payload.insumos : [];
+      const selectedCode = supply.value;
+      const placeholder = supply.querySelector('option[value=""]') || document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Selecciona un insumo";
       const fragment = document.createDocumentFragment();
       items.forEach((item) => {
         const option = document.createElement("option");
@@ -66,7 +70,10 @@
         option.textContent = item.nombre;
         fragment.appendChild(option);
       });
-      supply.appendChild(fragment);
+      supply.replaceChildren(placeholder, fragment);
+      if (items.some((item) => item.codigo_point === selectedCode)) {
+        supply.value = selectedCode;
+      }
       if (status) {
         status.hidden = items.length > 0;
         status.textContent = items.length

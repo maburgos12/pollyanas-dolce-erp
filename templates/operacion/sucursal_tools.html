@@ -126,6 +126,16 @@
     </section>
   </main>
   <div class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260728-catalog-recovery-v2" defer></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/app/sw.js?v=20260730-sales-catalog-live-v5", {
+        scope: "/app/",
+        updateViaCache: "none"
+      }).then(function (registration) {
+        return registration.update();
+      }).catch(function () {});
+    }
+  </script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260730-sales-catalog-live-v3" defer></script>
 </body>
 </html>
