@@ -26,6 +26,15 @@ OBS_REVISION_TRES_MARCAJES = "REVISIÓN: 3 marcajes"
 OBS_MARCAJES_EXTRA = "Marcajes extra"
 OBS_TECNICAS_HIK_PREFIXES = ("breakOut@", "breakIn@", "checkIn@", "checkOut@", "overtimeIn@", "overtimeOut@")
 
+# La empresa tiene UN SOLO checador físico y está en Matriz/CEDIS (mismo lugar);
+# el resto de las sucursales checa por Point. Por eso una marca en el aparato
+# prueba presencia física ahí, sin importar la sucursal administrativa del
+# empleado: derivarla del empleado estampaba sucursales vencidas o NULL.
+# Si algún día se instala un segundo checador, mapear por el `serial_no` que ya
+# viene en cada evento en vez de estas constantes.
+CHECADOR_SUCURSAL_CODIGO = "MATRIZ"
+CHECADOR_SITIO_CODIGOS = ("MATRIZ", "CEDIS")
+
 
 @dataclass(frozen=True)
 class MarcaHik:
@@ -49,8 +58,38 @@ def _parse_hik_time(time_str: str):
 
 
 def _resolver_sucursal(empleado: Empleado):
-    # Vínculo canónico por FK (FASE 2); resolver de texto solo como respaldo.
-    return empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
+    """Sucursal donde ocurrió la marca: la del checador, no la del empleado.
+
+    Solo se respeta la asignación del empleado cuando ya es del mismo sitio
+    físico (Matriz/CEDIS comparten aparato y hay que poder distinguirlas).
+    Cualquier otra asignación está vencida o el empleado es rotativo: la marca
+    manda, porque el aparato no se mueve.
+    """
+    from core.models import Sucursal
+
+    asignada = empleado.sucursal_ref or resolver_sucursal_por_texto(empleado.sucursal)
+    if asignada and asignada.codigo in CHECADOR_SITIO_CODIGOS:
+        return asignada
+    if asignada:
+        log.info(
+            "Empleado %s asignado a %s marcó en el checador (Matriz/CEDIS); se registra la sucursal del aparato.",
+            empleado,
+            asignada.codigo,
+        )
+    return Sucursal.objects.filter(codigo=CHECADOR_SUCURSAL_CODIGO).first()
+
+
+def _baja_bloquea_marca(empleado: Empleado, fecha) -> bool:
+    """Un empleado dado de baja ya no debe generar asistencia desde el checador.
+
+    Se conserva el último día trabajado (marcas del día de la baja) y solo se
+    rechaza lo posterior: si su huella sigue dada de alta en el aparato, esas
+    marcas son fantasmas y hay que borrarlo del checador.
+    """
+    if empleado.activo:
+        return False
+    baja = empleado.bajas_rrhh.order_by("-fecha_baja").first()
+    return fecha > baja.fecha_baja if baja else True
 
 
 def _detectar_turno(hora_entrada: dtime) -> Turno | None:
@@ -207,6 +246,7 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
     procesados = 0
     errores = 0
     duplicados = 0
+    descartadas_baja = 0
     detalle = []
     grupos = defaultdict(list)
 
@@ -240,6 +280,18 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
 
         local_dt = timezone.localtime(dt)
         fecha = local_dt.date()
+
+        if _baja_bloquea_marca(empleado, fecha):
+            log.warning(
+                "Marca descartada: %s (codigo=%s) está dado de baja y su huella sigue activa en el checador (%s).",
+                empleado,
+                emp_no,
+                fecha,
+            )
+            detalle.append({"employee_no": emp_no, "resultado": "empleado dado de baja"})
+            descartadas_baja += 1
+            continue
+
         grupos[(empleado.pk, fecha)].append((empleado, ev, MarcaHik(dt=dt, status=status, serial_no=ev.get("serial_no"))))
 
     for (_, fecha), registros in grupos.items():
@@ -289,7 +341,13 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
             )
 
     log.info("Eventos Hikvision: procesados=%d errores=%d duplicados=%d", procesados, errores, duplicados)
-    return {"procesados": procesados, "errores": errores, "duplicados": duplicados, "detalle": detalle}
+    return {
+        "procesados": procesados,
+        "errores": errores,
+        "duplicados": duplicados,
+        "descartadas_baja": descartadas_baja,
+        "detalle": detalle,
+    }
 
 
 def obtener_eventos_isapi(
