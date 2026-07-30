@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -23,14 +24,13 @@ from django.views.decorators.http import require_GET, require_POST
 from activos.models import Activo
 from core.access import can_manage_module, can_view_module, can_view_submodule, is_admin_or_dg, is_mermas_only
 from core.models import Sucursal
-from core.notificaciones import crear_notificacion, crear_notificaciones
-from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
+from core.notificaciones import crear_notificacion
+from fallas.models import CategoriaFalla, ReporteFalla
 from inventario.models import ALMACEN_CHOICES, LoteProduccion
 from maestros.models import Insumo, UnidadMedida
 from maestros.utils.canonical_catalog import canonicalized_active_insumos
 from mermas.models import MermaInsumo, OrdenAjustePoint
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
-from mantenimiento.services_access import can_access_mantenimiento
 from mermas.services_insumos import (
     consultar_existencia_insumo_point, decidir_merma_insumo, enviar_merma_insumo,
     insumos_recibidos_para_sucursal,
@@ -42,8 +42,18 @@ from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from rrhh.models import Empleado
 
 from .bitacoras_config import BITACORA_CONFIG
-from .models import BitacoraOperativa, BitacoraOperativaLinea
+from .higiene_catalog import PLANTILLAS_HIGIENE
+from .models import BitacoraOperativa, BitacoraOperativaLinea, RegistroHigiene
 from .services import build_operacion_context
+from .services_fallas import crear_reporte_falla
+from .services_higiene import (
+    guardar_registro_higiene,
+    puede_capturar_higiene,
+    puede_supervisar_higiene,
+    registros_higiene_autorizados,
+    require_higiene_access,
+    sucursal_higiene_usuario,
+)
 from .services_bitacoras_inventory import (
     registrar_apertura_inicial,
     cerrar_hornos,
@@ -215,13 +225,6 @@ def _sucursal_operativa_usuario(user):
     return sucursal
 
 
-def _usuarios_mantenimiento():
-    return [
-        user for user in get_user_model().objects.filter(is_active=True).prefetch_related("groups", "module_access")
-        if can_access_mantenimiento(user)
-    ]
-
-
 def _usuarios_direccion():
     return [user for user in get_user_model().objects.filter(is_active=True) if is_admin_or_dg(user)]
 
@@ -232,22 +235,6 @@ def _notificar_merma_sin_responsable(merma, actor):
             usuario=usuario, titulo=f"Sin responsable · merma en {merma.sucursal.nombre}",
             mensaje=f"{merma.nombre_point}: requiere asignación de responsable RRHH.",
             actor=actor, objeto_id=merma.pk,
-        )
-
-
-def _notificar_falla_mantenimiento(reporte, actor):
-    usuarios = _usuarios_mantenimiento()
-    crear_notificaciones(
-        usuarios, titulo=f"Nueva falla en {reporte.sucursal.nombre}", mensaje=reporte.titulo,
-        url="/mantenimiento/", actor=actor, objeto_tipo="ReporteFalla", objeto_id=reporte.pk,
-    )
-    emails = sorted({(usuario.email or "").strip() for usuario in usuarios if (usuario.email or "").strip()})
-    if emails:
-        send_mail(
-            subject=f"Nueva falla en {reporte.sucursal.nombre}",
-            message=f"{reporte.titulo}\n\n{reporte.descripcion}\n\nAbrir Mantenimiento: /mantenimiento/",
-            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "") or None,
-            recipient_list=emails, fail_silently=False,
         )
 
 
@@ -290,41 +277,162 @@ def fallas_crear_api(request):
         if not activo:
             return _respuesta_error(request, error="El equipo no pertenece a tu sucursal.", tab="fallas", anchor="falla-form")
 
-    reporte = ReporteFalla(
-        sucursal=sucursal,
-        activo_relacionado=activo,
-        categoria=categoria,
-        tipo_objetivo=tipo,
-        area_instalacion=(data.get("area_instalacion") or "").strip(),
-        titulo=(data.get("titulo") or "").strip(),
-        descripcion=(data.get("descripcion") or "").strip(),
-        prioridad=(data.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA).strip(),
-        foto_evidencia=None,
-        justificacion_sin_foto=(data.get("justificacion_sin_foto") or "").strip(),
-        reportado_por=request.user,
-    )
     try:
         fotos = validate_evidence_files(
             [request.FILES["foto_evidencia"]] if request.FILES.get("foto_evidencia") else [], images_only=True
         )
-        reporte.foto_evidencia = fotos[0] if fotos else None
-        reporte.full_clean()
+        with transaction.atomic():
+            reporte = crear_reporte_falla(
+                sucursal=sucursal,
+                usuario=request.user,
+                categoria=categoria,
+                tipo_objetivo=tipo,
+                activo_relacionado=activo,
+                area_instalacion=(data.get("area_instalacion") or "").strip(),
+                titulo=(data.get("titulo") or "").strip(),
+                descripcion=(data.get("descripcion") or "").strip(),
+                prioridad=(data.get("prioridad") or ReporteFalla.PRIORIDAD_MEDIA).strip(),
+                evidencia=fotos[0] if fotos else None,
+                justificacion_sin_foto=(data.get("justificacion_sin_foto") or "").strip(),
+                comentario_bitacora="Reporte creado desde App Operativa y enviado a Mantenimiento.",
+            )
     except (ValidationError, EvidenceValidationError) as exc:
         if isinstance(exc, EvidenceValidationError):
             return _respuesta_error(request, error=str(exc), tab="fallas", anchor="falla-form")
         return _respuesta_error(
             request, error="Revisa la captura.", tab="fallas", anchor="falla-form", fields=exc.message_dict
         )
-    with transaction.atomic():
-        reporte.save()
-        BitacoraFalla.objects.create(
-            reporte=reporte, usuario=request.user, estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
-            comentario="Reporte creado desde App Operativa y enviado a Mantenimiento.",
-        )
-    _on_commit_seguro(lambda: _notificar_falla_mantenimiento(reporte, request.user))
     return _respuesta_creacion(
         request, payload={"id": reporte.id, "estatus": reporte.estatus, "destino": "Mantenimiento"},
         tab="fallas", anchor="falla-form", mensaje="Reporte enviado a Mantenimiento.",
+    )
+
+
+def _filtrar_historial_higiene(request):
+    queryset = registros_higiene_autorizados(request.user)
+    if puede_supervisar_higiene(request.user):
+        sucursal_id = (request.GET.get("sucursal") or "").strip()
+        if sucursal_id.isdigit():
+            queryset = queryset.filter(sucursal_id=sucursal_id)
+    tipo = (request.GET.get("tipo") or "").strip()
+    if tipo in PLANTILLAS_HIGIENE:
+        queryset = queryset.filter(tipo=tipo)
+    fecha_desde = (request.GET.get("fecha_desde") or "").strip()
+    fecha_hasta = (request.GET.get("fecha_hasta") or "").strip()
+    try:
+        fecha_desde_valida = date.fromisoformat(fecha_desde) if fecha_desde else None
+    except ValueError:
+        fecha_desde_valida = None
+    try:
+        fecha_hasta_valida = date.fromisoformat(fecha_hasta) if fecha_hasta else None
+    except ValueError:
+        fecha_hasta_valida = None
+    if fecha_desde_valida:
+        queryset = queryset.filter(fecha__gte=fecha_desde_valida)
+    if fecha_hasta_valida:
+        queryset = queryset.filter(fecha__lte=fecha_hasta_valida)
+    return queryset
+
+
+@login_required
+@require_GET
+def higiene_home(request):
+    require_higiene_access(request.user)
+    sucursal = sucursal_higiene_usuario(request.user)
+    return render(
+        request,
+        "operacion/higiene_home.html",
+        {
+            "sucursal": sucursal,
+            "puede_capturar": puede_capturar_higiene(request.user),
+            "puede_supervisar": puede_supervisar_higiene(request.user),
+            "plantillas": PLANTILLAS_HIGIENE,
+            "categorias_equipo": CategoriaFalla.objects.filter(
+                activo=True, tipo=CategoriaFalla.TIPO_EQUIPO
+            ),
+            "categorias_instalacion": CategoriaFalla.objects.filter(
+                activo=True, tipo=CategoriaFalla.TIPO_INSTALACION
+            ),
+            "activos": (
+                Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre")
+                if sucursal
+                else Activo.objects.none()
+            ),
+            "registros_recientes": _filtrar_historial_higiene(request)[:5],
+        },
+    )
+
+
+@login_required
+@require_POST
+def higiene_guardar(request):
+    try:
+        respuestas = json.loads(request.POST.get("respuestas") or "[]")
+        registro, creado, reporte_ids = guardar_registro_higiene(
+            user=request.user,
+            tipo=(request.POST.get("tipo") or "").strip(),
+            clave_instancia=(request.POST.get("clave_instancia") or "").strip(),
+            respuestas=respuestas,
+            archivos=request.FILES,
+            hora=(request.POST.get("hora") or "").strip() or None,
+            tipo_bano=request.POST.get("tipo_bano") or "",
+            uso_bano=request.POST.get("uso_bano") or "",
+            notas=request.POST.get("notas") or "",
+        )
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "La captura no contiene respuestas válidas."}, status=400)
+    except ValidationError as exc:
+        fields = getattr(exc, "message_dict", None)
+        return JsonResponse(
+            {"error": "Revisa los puntos señalados.", "fields": fields or {"respuestas": exc.messages}},
+            status=400,
+        )
+    return JsonResponse(
+        {
+            "id": registro.pk,
+            "actualizado": not creado,
+            "reporte_falla_ids": reporte_ids,
+            "mensaje": (
+                "Registro actualizado sin duplicarlo."
+                if not creado
+                else "Revisión guardada correctamente."
+            ),
+        },
+        status=201 if creado else 200,
+    )
+
+
+@login_required
+@require_GET
+def higiene_historial(request):
+    require_higiene_access(request.user)
+    return render(
+        request,
+        "operacion/higiene_historial.html",
+        {
+            "registros": _filtrar_historial_higiene(request),
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre")
+            if puede_supervisar_higiene(request.user)
+            else Sucursal.objects.none(),
+            "puede_supervisar": puede_supervisar_higiene(request.user),
+            "sucursal": sucursal_higiene_usuario(request.user),
+            "tipos": RegistroHigiene.TIPO_CHOICES,
+        },
+    )
+
+
+@login_required
+@require_GET
+def higiene_imprimir(request):
+    require_higiene_access(request.user)
+    return render(
+        request,
+        "operacion/higiene_imprimir.html",
+        {
+            "registros": _filtrar_historial_higiene(request),
+            "generado_en": timezone.localtime(),
+            "filtros": request.GET,
+        },
     )
 
 

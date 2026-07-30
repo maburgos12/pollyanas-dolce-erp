@@ -1,0 +1,58 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Historial de higiene · Pollyana's Dolce</title>
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-v1">
+</head>
+<body class="higiene-body">
+  <main class="higiene-shell history-shell">
+    <header class="higiene-header">
+      <a class="icon-link" href="{% url 'operacion:higiene_home' %}" aria-label="Volver">←</a>
+      <div><p>Higiene y limpieza</p><h1>{% if sucursal %}Historial de {{ sucursal.nombre }}{% else %}Historial comercial{% endif %}</h1></div>
+      <a class="history-link" href="{% url 'operacion:app_home' %}">Inicio</a>
+    </header>
+
+    <form class="history-filters" method="get">
+      {% if puede_supervisar %}
+        <label>Sucursal<select name="sucursal"><option value="">Todas</option>{% for item in sucursales %}<option value="{{ item.id }}" {% if request.GET.sucursal == item.id|stringformat:"s" %}selected{% endif %}>{{ item.nombre }}</option>{% endfor %}</select></label>
+      {% endif %}
+      <label>Bitácora<select name="tipo"><option value="">Todas</option>{% for value, label in tipos %}<option value="{{ value }}" {% if request.GET.tipo == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>Desde<input type="date" name="fecha_desde" value="{{ request.GET.fecha_desde }}"></label>
+      <label>Hasta<input type="date" name="fecha_hasta" value="{{ request.GET.fecha_hasta }}"></label>
+      <button type="submit">Aplicar filtros</button>
+      <a class="print-button" href="{% url 'operacion:higiene_imprimir' %}?{{ request.GET.urlencode }}">Imprimir / PDF</a>
+    </form>
+
+    <section class="history-list">
+      {% for registro in registros %}
+        <article class="history-card" id="registro-{{ registro.id }}">
+          <div class="history-card-head">
+            <div><span>{{ registro.sucursal.nombre }}</span><h2>{{ registro.get_tipo_display }}</h2></div>
+            <div><b>{{ registro.fecha|date:"d/m/Y" }}</b><small>{{ registro.hora|time:"H:i"|default:"Sin hora" }}</small></div>
+          </div>
+          <p class="instance-key">{{ registro.clave_instancia }}{% if registro.tipo_bano %} · {{ registro.tipo_bano }} · {{ registro.uso_bano }}{% endif %}</p>
+          <div class="response-summary">
+            {% for respuesta in registro.respuestas.all %}
+              <div class="response-row {% if respuesta.respuesta == 'NO_CUMPLE' %}is-finding{% endif %}">
+                <span><b>{{ respuesta.punto_revision }}</b><small>{{ respuesta.seccion }}</small></span>
+                <span>
+                  {% if respuesta.valor_numerico != None %}{{ respuesta.valor_numerico }}{% else %}{{ respuesta.get_respuesta_display }}{% endif %}
+                  {% if respuesta.reporte_falla %}<a href="/fallas/app/">Falla #{{ respuesta.reporte_falla.id }} · {{ respuesta.reporte_falla.get_estatus_display }}</a>{% endif %}
+                </span>
+              </div>
+            {% empty %}
+              <p class="empty-state">Registro sin respuestas capturadas.</p>
+            {% endfor %}
+          </div>
+          <footer>Realizó: {{ registro.creado_por.get_full_name|default:registro.creado_por.username }} · Plantilla {{ registro.plantilla_version }}</footer>
+        </article>
+      {% empty %}
+        <div class="empty-state">No hay registros con los filtros seleccionados.</div>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>

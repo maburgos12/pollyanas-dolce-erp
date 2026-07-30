@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Reporte de higiene y limpieza</title>
+  <style>
+    @page{size:letter;margin:14mm}*{box-sizing:border-box}body{margin:0;color:#2f2428;font:11px Arial,sans-serif}header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #8b2252;padding-bottom:8px;margin-bottom:16px}h1{margin:0;color:#8b2252;font:700 23px Georgia,serif}header p{margin:3px 0 0;color:#6f6267}.actions{margin:0 0 14px;text-align:right}.actions button{padding:8px 14px;border:0;border-radius:5px;background:#8b2252;color:#fff}.record{break-inside:avoid;margin:0 0 16px;border:1px solid #d9cfd3;border-radius:7px;overflow:hidden}.record-head{display:flex;justify-content:space-between;background:#f8e8ee;padding:9px 11px}.record-head h2{margin:0;font-size:15px}.record-head p{margin:2px 0 0}.record table{width:100%;border-collapse:collapse}.record th,.record td{padding:6px 8px;border-top:1px solid #e8e0e3;text-align:left;vertical-align:top}.record th{color:#695a60;font-size:9px;text-transform:uppercase}.finding{background:#fff3f5}.failure{color:#8b2252;font-weight:700}.meta{padding:7px 10px;color:#695a60;border-top:1px solid #e8e0e3}@media print{.actions{display:none}}
+  </style>
+</head>
+<body>
+  <div class="actions"><button type="button" onclick="window.print()">Imprimir / guardar PDF</button></div>
+  <header>
+    <div><h1>Reporte de higiene y limpieza</h1><p>Pollyana's Dolce · Evidencia operativa por sucursal</p></div>
+    <p>Generado: {{ generado_en|date:"d/m/Y H:i" }}</p>
+  </header>
+  {% for registro in registros %}
+    <section class="record">
+      <div class="record-head">
+        <div><h2>{{ registro.sucursal.nombre }} · {{ registro.get_tipo_display }}</h2><p>{{ registro.clave_instancia }}</p></div>
+        <div>{{ registro.fecha|date:"d/m/Y" }} · {{ registro.hora|time:"H:i"|default:"Sin hora" }}</div>
+      </div>
+      <table>
+        <thead><tr><th>Área</th><th>Punto revisado</th><th>Resultado</th><th>Observación / seguimiento</th></tr></thead>
+        <tbody>
+          {% for respuesta in registro.respuestas.all %}
+            <tr class="{% if respuesta.respuesta == 'NO_CUMPLE' %}finding{% endif %}">
+              <td>{{ respuesta.seccion }}</td>
+              <td>{{ respuesta.punto_revision }}</td>
+              <td>{% if respuesta.valor_numerico != None %}{{ respuesta.valor_numerico }}{% else %}{{ respuesta.get_respuesta_display }}{% endif %}</td>
+              <td>{{ respuesta.observacion }}{% if respuesta.corregido_en_momento %} · Corregido en el momento{% endif %}{% if respuesta.reporte_falla %}<span class="failure"> · Falla #{{ respuesta.reporte_falla.id }} · {{ respuesta.reporte_falla.get_estatus_display }}</span>{% endif %}</td>
+            </tr>
+          {% empty %}<tr><td colspan="4">Sin respuestas capturadas.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <div class="meta">Realizó: {{ registro.creado_por.get_full_name|default:registro.creado_por.username }} · Plantilla {{ registro.plantilla_version }}</div>
+    </section>
+  {% empty %}<p>No hay registros para imprimir con los filtros seleccionados.</p>{% endfor %}
+  <script>if(new URLSearchParams(location.search).get("auto")==="1"){window.print();}</script>
+</body>
+</html>

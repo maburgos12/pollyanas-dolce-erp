@@ -1,0 +1,232 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#8b2252">
+  <title>Higiene y limpieza · Pollyana's Dolce</title>
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-v1">
+</head>
+<body class="higiene-body">
+  <main class="higiene-shell">
+    <header class="higiene-header">
+      <a class="icon-link" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">←</a>
+      <div>
+        <p>App Operativa</p>
+        <h1>Higiene y limpieza</h1>
+      </div>
+      <a class="history-link" href="{% url 'operacion:higiene_historial' %}">Historial</a>
+    </header>
+
+    {% if sucursal %}
+      <section class="branch-card">
+        <div>
+          <span>Sucursal activa</span>
+          <strong>{{ sucursal.nombre }}</strong>
+        </div>
+        <span class="live-chip">Sesión activa</span>
+      </section>
+    {% endif %}
+
+    {% if puede_capturar %}
+      <section class="today-block">
+        <div class="section-heading">
+          <p>Captura diaria</p>
+          <h2>¿Qué vas a revisar?</h2>
+        </div>
+        <div class="capture-options" role="tablist" aria-label="Bitácoras de higiene">
+          {% for tipo, plantilla in plantillas.items %}
+            <button type="button" class="capture-option" data-open-panel="{{ tipo }}" role="tab">
+              <span class="option-icon">{% if tipo == 'CLORO_PH' %}◌{% elif tipo == 'BANOS' %}◇{% else %}✓{% endif %}</span>
+              <span><b>{{ plantilla.titulo }}</b><small>{{ plantilla.descripcion }}</small></span>
+              <span aria-hidden="true">›</span>
+            </button>
+          {% endfor %}
+        </div>
+      </section>
+
+      {% for tipo, plantilla in plantillas.items %}
+        <section class="capture-panel" data-panel="{{ tipo }}" hidden>
+          <div class="panel-top">
+            <button type="button" class="text-button" data-close-panel>← Volver</button>
+            <span>Plantilla {{ plantilla.version }}</span>
+          </div>
+          <div class="section-heading">
+            <p>{{ sucursal.nombre }}</p>
+            <h2>{{ plantilla.titulo }}</h2>
+            <span>{{ plantilla.descripcion }}</span>
+            <strong class="capture-progress" data-progress>0 de {{ plantilla.puntos|length }} revisados</strong>
+          </div>
+          <form
+            data-async-action
+            data-higiene-form
+            action="{% url 'operacion:higiene_guardar' %}"
+            method="post"
+            enctype="multipart/form-data"
+          >
+            {% csrf_token %}
+            <input type="hidden" name="tipo" value="{{ tipo }}">
+            <input type="hidden" name="clave_instancia" value="{% if tipo == 'CLORO_PH' %}red-principal{% elif tipo == 'LIMPIEZA' %}diaria{% endif %}">
+            <input type="hidden" name="respuestas" value="[]">
+
+            <div class="context-grid">
+              <label>Hora de revisión<input type="time" name="hora" required></label>
+              {% if tipo == 'CLORO_PH' %}
+                <label>Punto de muestreo
+                  <select data-instance-source required>
+                    <option value="red-principal">Red principal</option>
+                    <option value="tarja-produccion">Tarja de producción</option>
+                    <option value="lavamanos">Lavamanos</option>
+                  </select>
+                </label>
+              {% elif tipo == 'BANOS' %}
+                <label>Ronda
+                  <select data-round required>
+                    <option value="ronda-1">Ronda 1</option>
+                    <option value="ronda-2">Ronda 2</option>
+                    <option value="ronda-3">Ronda 3</option>
+                    <option value="ronda-4">Ronda 4</option>
+                  </select>
+                </label>
+                <label>Baño
+                  <select data-bathroom required>
+                    <option value="clientes">Clientes</option>
+                    <option value="personal">Personal</option>
+                    <option value="unico">Único</option>
+                  </select>
+                </label>
+                <label>Tipo
+                  <select name="tipo_bano" required>
+                    <option value="F">Femenino</option>
+                    <option value="M">Masculino</option>
+                    <option value="MIXTO">Mixto</option>
+                  </select>
+                </label>
+                <label>Uso
+                  <select name="uso_bano" required>
+                    <option value="CLIENTES">Clientes</option>
+                    <option value="PERSONAL">Personal</option>
+                  </select>
+                </label>
+              {% endif %}
+            </div>
+
+            {% regroup plantilla.puntos by seccion as secciones %}
+            {% for seccion in secciones %}
+              <fieldset class="review-section">
+                <legend>
+                  <span>{{ forloop.counter|stringformat:"02d" }}</span>{{ seccion.grouper }}
+                  {% if tipo != 'CLORO_PH' %}<button type="button" data-mark-section>Todo cumple</button>{% endif %}
+                </legend>
+                <div class="review-list">
+                  {% for punto in seccion.list %}
+                    <article
+                      class="review-point"
+                      data-review-point
+                      data-key="{{ punto.key }}"
+                      data-kind="{{ punto.tipo_respuesta }}"
+                      data-label="{{ punto.etiqueta }}"
+                      data-section="{{ punto.seccion }}"
+                    >
+                      <div class="point-title">
+                        <span>{{ forloop.counter }}</span>
+                        <strong>{{ punto.etiqueta }}</strong>
+                      </div>
+                      {% if punto.tipo_respuesta == 'NUMERICA' %}
+                        <label class="numeric-choice">Valor
+                          <select data-numeric required>
+                            <option value="">Selecciona</option>
+                            {% for opcion in punto.opciones %}<option value="{{ opcion }}">{{ opcion }}</option>{% endfor %}
+                          </select>
+                        </label>
+                        <p class="range-note">Rango recomendado: {{ punto.rango_recomendado.0 }} a {{ punto.rango_recomendado.1 }}</p>
+                      {% else %}
+                        <div class="status-choices">
+                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="CUMPLE" required><span>✓ Cumple</span></label>
+                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NO_CUMPLE"><span>! No cumple</span></label>
+                          {% if punto.admite_na %}<label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NA"><span>— No aplica</span></label>{% endif %}
+                        </div>
+                        <div class="finding-detail" data-finding-detail hidden>
+                          <label>¿Qué encontraste?<textarea data-observation rows="2" placeholder="Describe el hallazgo"></textarea></label>
+                          <label>Evidencia fotográfica<input type="file" name="evidencia_{{ punto.key }}" accept="image/*" capture="environment"></label>
+                          <div class="resolution-choice">
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="CORREGIDO"><span>Corregido ahora</span></label>
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="SEGUIMIENTO"><span>Enviar a Fallas</span></label>
+                          </div>
+                          <div class="failure-fields" data-failure-fields hidden>
+                            <label>Tipo de falla
+                              <select data-target-type>
+                                <option value="">Selecciona</option>
+                                <option value="INSTALACION">Instalación</option>
+                                <option value="EQUIPO">Equipo registrado</option>
+                              </select>
+                            </label>
+                            <label data-installation-field>Área de instalación<input data-area type="text" value="{{ punto.seccion }}"></label>
+                            <label data-asset-field hidden>Equipo
+                              <select data-asset>
+                                <option value="">Selecciona</option>
+                                {% for activo in activos %}<option value="{{ activo.id }}">{{ activo.nombre }}</option>{% endfor %}
+                              </select>
+                            </label>
+                            <label>Categoría
+                              <select data-category>
+                                <option value="">Selecciona</option>
+                                {% for categoria in categorias_instalacion %}<option data-category-type="INSTALACION" value="{{ categoria.id }}">{{ categoria.nombre }}</option>{% endfor %}
+                                {% for categoria in categorias_equipo %}<option data-category-type="EQUIPO" value="{{ categoria.id }}" hidden>{{ categoria.nombre }}</option>{% endfor %}
+                              </select>
+                            </label>
+                            <label>Prioridad
+                              <select data-priority>
+                                <option value="media">Media</option>
+                                <option value="alta">Alta</option>
+                                <option value="critica">Crítica</option>
+                                <option value="baja">Baja</option>
+                              </select>
+                            </label>
+                            <p class="integration-note">La foto y descripción se enviarán una sola vez al módulo de Fallas.</p>
+                          </div>
+                        </div>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              </fieldset>
+            {% endfor %}
+            <label class="notes-field">Notas generales<textarea name="notas" rows="3" placeholder="Opcional"></textarea></label>
+            <button class="save-action" type="submit"><span>Guardar revisión</span><small>Quedará disponible en el historial</small></button>
+          </form>
+        </section>
+      {% endfor %}
+    {% else %}
+      <section class="supervision-card">
+        <p>Vista de supervisión</p>
+        <h2>Consulta el cumplimiento de todas las sucursales</h2>
+        <a href="{% url 'operacion:higiene_historial' %}">Abrir historial comercial</a>
+      </section>
+    {% endif %}
+
+    <section class="recent-block">
+      <div class="section-heading">
+        <p>Seguimiento</p>
+        <h2>{% if sucursal %}Historial de {{ sucursal.nombre }}{% else %}Actividad reciente{% endif %}</h2>
+      </div>
+      {% if registros_recientes %}
+        {% for registro in registros_recientes %}
+          <a class="recent-row" href="{% url 'operacion:higiene_historial' %}#registro-{{ registro.id }}">
+            <span><b>{{ registro.get_tipo_display }}</b><small>{{ registro.fecha|date:"d/m/Y" }} · {{ registro.clave_instancia }}</small></span>
+            <span>{{ registro.respuestas.count }} puntos ›</span>
+          </a>
+        {% endfor %}
+      {% else %}
+        <a class="recent-row" href="{% url 'operacion:higiene_historial' %}">
+          <span><b>Aún no hay capturas</b><small>Los registros diarios aparecerán aquí.</small></span>
+          <span>Abrir ›</span>
+        </a>
+      {% endif %}
+    </section>
+  </main>
+  <div class="higiene-toast" role="status" aria-live="polite" hidden></div>
+  <script src="{% static 'operacion/higiene.js' %}?v=20260730-higiene-v1"></script>
+</body>
+</html>
