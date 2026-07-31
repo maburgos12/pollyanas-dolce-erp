@@ -1,69 +1,104 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Reportes - Proyectos de Inversión{% endblock %}
-{% block page_title %}Reportes · Proyectos de Inversión{% endblock %}
+{% block title %}Proyectos de inversión{% endblock %}
+{% block page_title %}Dirección · Proyectos de inversión{% endblock %}
 {% block body_class %}page-reportes-inversiones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-portafolio.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-portafolio.css?v=20260731-inv-audit-v2">
 {% endblock %}
 
 {% block content %}
-<div class="inv-shell">
-  <nav class="module-tabs">
-    {% for tab in module_tabs %}
-      <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
+<main class="inv-shell">
+  <nav class="inv-breadcrumbs" aria-label="Ruta de navegación">
+    <span>Dirección</span><span aria-hidden="true">/</span><span aria-current="page">Proyectos de inversión</span>
   </nav>
 
   <header class="inv-header">
     <div>
-      <h1 class="inv-title">Proyectos de Inversión</h1>
-      <p class="inv-copy">Portafolio ejecutivo de aperturas, expansiones y remodelaciones. La vista separa planeación, inversión real, mercado y seguimiento operativo.</p>
+      <p class="inv-eyebrow">Control de capital</p>
+      <h1 class="inv-title">Portafolio de inversión</h1>
+      <p class="inv-copy">Prioriza decisiones con una separación visible entre presupuesto, gasto comprobado y métricas operativas confiables.</p>
     </div>
-    <a class="inv-button" href="{% url 'reportes:inversiones_wizard' %}">Nuevo Proyecto</a>
+    {% if can_manage_investments %}
+      <a class="inv-button" href="{% url 'inversiones:wizard' %}">Crear proyecto</a>
+    {% endif %}
   </header>
 
-  <section class="inv-kpis">
-    <article class="inv-kpi"><div class="inv-label">Total</div><div class="inv-value">{{ resumen.total|intcomma }}</div></article>
-    <article class="inv-kpi"><div class="inv-label">En planeación</div><div class="inv-value">{{ resumen.en_planeacion|intcomma }}</div></article>
-    <article class="inv-kpi"><div class="inv-label">En ejecución</div><div class="inv-value">{{ resumen.en_ejecucion|intcomma }}</div></article>
-    <article class="inv-kpi"><div class="inv-label">En recuperación</div><div class="inv-value">{{ resumen.en_recuperacion|intcomma }}</div></article>
+  <section class="inv-overview" aria-label="Estado del portafolio">
+    <article class="inv-primary-kpi">
+      <span class="inv-label">Portafolio activo</span>
+      <strong>{{ resumen.total|intcomma }} proyecto{{ resumen.total|pluralize }}</strong>
+      <span>{{ resumen.en_planeacion }} en planeación · {{ resumen.en_ejecucion }} en ejecución · {{ resumen.en_recuperacion }} en recuperación</span>
+    </article>
+    <article class="inv-readiness {% if resumen.datos_incompletos %}is-warning{% else %}is-ready{% endif %}">
+      <div>
+        <span class="inv-label">Confiabilidad para decidir</span>
+        <strong>{{ resumen.metricas_confiables }} con métricas completas</strong>
+      </div>
+      <div>
+        <span class="inv-label">Requieren completar datos</span>
+        <strong>{{ resumen.datos_incompletos }}</strong>
+      </div>
+      <p>Una recuperación solo se considera calculable cuando ventas, costo y gasto operativo real están completos.</p>
+    </article>
   </section>
 
-  <section class="inv-grid">
+  <div class="inv-section-heading">
+    <div>
+      <h2>Decisiones pendientes</h2>
+      <p>Ordenadas por inicio más reciente.</p>
+    </div>
+  </div>
+
+  <section class="inv-project-list" aria-label="Proyectos de inversión">
     {% for row in proyectos %}
       {% with p=row.proyecto snap=row.ultimo_snapshot %}
-      <article class="inv-card">
-        <div class="inv-card-head">
-          <div>
-            <h2>{{ p.nombre_proyecto }}</h2>
-            <div class="inv-meta">{{ p.get_tipo_proyecto_display }} · Inicio {{ p.fecha_inicio|date:"Y-m-d" }}</div>
+      <article class="inv-project-card">
+        <div class="inv-project-main">
+          <div class="inv-project-title-row">
+            <div>
+              <span class="inv-status">{{ p.get_estatus_display }}</span>
+              <h3>{{ p.nombre_proyecto }}</h3>
+              <p>{{ p.get_tipo_proyecto_display }} · inicio {{ p.fecha_inicio|date:"d M Y" }}</p>
+            </div>
+            <a class="inv-text-link" href="{% url 'inversiones:detalle' p.pk %}">Abrir expediente <span aria-hidden="true">→</span></a>
           </div>
-          {% if row.score_mercado %}
-            <div class="inv-score {% if row.score_mercado >= 75 %}is-ok{% elif row.score_mercado >= 55 %}is-warn{% else %}is-risk{% endif %}">{{ row.score_mercado }}</div>
+
+          <dl class="inv-financial-strip">
+            <div><dt>Presupuesto</dt><dd>${{ p.monto_inversion_planeado|floatformat:0|intcomma }}</dd><small>{{ row.partidas_planeadas }} partidas planeadas</small></div>
+            <div><dt>Gasto comprobado</dt><dd>${{ row.inversion_real|floatformat:0|intcomma }}</dd><small>No incluye presupuesto</small></div>
+            <div>
+              <dt>Recuperación</dt>
+              {% if row.metricas_completas and snap.porcentaje_recuperado != None %}
+                <dd>{{ snap.porcentaje_recuperado|floatformat:1 }}%</dd><small>${{ snap.recuperacion_acumulada|floatformat:0|intcomma }} verificados</small>
+              {% else %}
+                <dd class="is-unavailable">No calculable</dd><small>Faltan datos operativos</small>
+              {% endif %}
+            </div>
+          </dl>
+        </div>
+
+        <aside class="inv-project-signal {% if row.metricas_completas %}is-ready{% else %}is-warning{% endif %}">
+          <span class="inv-label">Calidad del seguimiento</span>
+          {% if row.metricas_completas %}
+            <strong>Datos completos</strong>
+            <p>{{ row.health_label }} · corte {{ snap.periodo|date:"M Y" }}</p>
+          {% else %}
+            <strong>Completar antes de decidir</strong>
+            <p>{% if snap %}Confianza {{ snap.confidence_score }}% · {{ row.brechas_datos }} brechas{% else %}Sin corte operativo{% endif %}</p>
           {% endif %}
-        </div>
-        <div class="inv-badges">
-          <span class="inv-badge {% if p.estatus == 'EN_RECUPERACION' or p.estatus == 'ACTIVO' %}is-ok{% elif p.estatus == 'PLANEACION' %}is-warn{% endif %}">{{ p.get_estatus_display }}</span>
-          {% if row.tiene_estudio %}<span class="inv-badge is-ok">Mercado {{ row.veredicto_mercado }}</span>{% else %}<span class="inv-badge">Sin estudio IA</span>{% endif %}
-          {% if row.alertas_activas %}<span class="inv-badge is-risk">{{ row.alertas_activas }} alertas</span>{% endif %}
-        </div>
-        <div class="inv-metrics">
-          <div class="inv-metric"><span class="inv-label">Planeado</span><strong>${{ p.monto_inversion_planeado|floatformat:2|intcomma }}</strong></div>
-          <div class="inv-metric"><span class="inv-label">Real</span><strong>${{ p.monto_inversion_real|floatformat:2|intcomma }}</strong></div>
-          <div class="inv-metric"><span class="inv-label">Recuperado</span><strong>{% if snap %}${{ snap.recuperacion_acumulada|default:0|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
-        </div>
-        <div class="inv-meta">
-          {% if snap %}Último mes: {{ snap.periodo|date:"Y-m" }} · ventas ${{ snap.ventas_mensuales|default:0|floatformat:2|intcomma }} · salud {{ snap.health_status }}{% else %}Sin snapshots operativos todavía.{% endif %}
-        </div>
-        <a class="inv-button" href="{% url 'reportes:inversiones_detalle' p.pk %}">Ver detalle</a>
+          {% if row.alertas_activas %}<span class="inv-risk-note">{{ row.alertas_activas }} alerta{{ row.alertas_activas|pluralize }} activa{{ row.alertas_activas|pluralize }}</span>{% endif %}
+        </aside>
       </article>
       {% endwith %}
     {% empty %}
-      <div class="inv-empty">Todavía no hay proyectos de inversión registrados.</div>
+      <section class="inv-empty">
+        <h2>Aún no hay proyectos</h2>
+        <p>Crea el primer presupuesto para iniciar el expediente de inversión.</p>
+      </section>
     {% endfor %}
   </section>
-</div>
+</main>
 {% endblock %}

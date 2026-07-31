@@ -11,11 +11,11 @@
           <p class="inv-copy">{{ market_study.resumen_ejecutivo }}</p>
         </div>
       </div>
-      <form method="post">
+      {% if can_manage_investments %}<form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generar_estudio_mercado">
         <button class="inv-button secondary" type="submit">Regenerar estudio con IA</button>
-      </form>
+      </form>{% endif %}
     </div>
     <div class="inv-grid-2 pd-u-0cf8f93b0e">
       <article class="inv-panel"><h3>Perfil demográfico</h3><p>{{ market_study.perfil_demografico.descripcion }}</p><p class="inv-muted">Población 2km: {{ market_study.perfil_demografico.poblacion_estimada_radio_2km|default:"N/D" }}</p></article>
@@ -32,10 +32,10 @@
   {% else %}
     {% if market_study.error %}<p class="inv-copy">Último intento: {{ market_study.error }}</p>{% endif %}
     <p class="inv-copy">Genera un estudio de mercado con la ubicación capturada en la ficha. Se guardará en metadata del proyecto.</p>
-    <form method="post">
+    {% if can_manage_investments %}<form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="generar_estudio_mercado">
       <button class="inv-button" type="submit">Generar estudio con IA</button>
-    </form>
+    </form>{% else %}<p class="inv-muted">Tu acceso es de solo lectura.</p>{% endif %}
   {% endif %}
 </section>

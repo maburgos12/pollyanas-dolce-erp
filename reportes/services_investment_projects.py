@@ -20,6 +20,7 @@ from reportes.models import (
     ProyectoInversion,
     ProyectoInversionAlerta,
     ProyectoInversionEscenario,
+    ProyectoInversionGasto,
     ProyectoInversionPagoDeuda,
     ProyectoInversionSnapshotMensual,
 )
@@ -158,11 +159,15 @@ def _quantize(value: Decimal | None, pattern: Decimal = TWO_PLACES) -> Decimal |
     return value.quantize(pattern, rounding=ROUND_HALF_UP)
 
 
-def _ratio_from_percent_like(value: Decimal | None) -> Decimal:
+def _ratio_from_percentage_points(value: Decimal | None) -> Decimal:
+    """Convierte un campo etiquetado como porcentaje a razón sin heurísticas."""
+    return _as_decimal(value) / Decimal("100")
+
+
+def _ratio_from_fraction_or_percent(value: Decimal | None) -> Decimal:
+    """Compatibilidad para campos históricos que aceptaron 0.7 o 70 como 70%."""
     raw = _as_decimal(value)
-    if raw > Decimal("1"):
-        return raw / Decimal("100")
-    return raw
+    return raw / Decimal("100") if abs(raw) > Decimal("1") else raw
 
 
 def _percent_value(numerator: Decimal | None, denominator: Decimal | None) -> Decimal | None:
@@ -413,7 +418,7 @@ def _forecast_payback_metrics(
 def _npv_from_cashflows(cashflows: list[Decimal], annual_discount_rate: Decimal) -> Decimal | None:
     if not cashflows:
         return None
-    rate_ratio = _ratio_from_percent_like(annual_discount_rate)
+    rate_ratio = _ratio_from_percentage_points(annual_discount_rate)
     if rate_ratio <= ZERO:
         return None
     monthly_rate = rate_ratio / Decimal("12")
@@ -451,7 +456,7 @@ def _irr_from_cashflows(cashflows: list[Decimal]) -> Decimal | None:
 def _annuity_payment(principal: Decimal, annual_rate: Decimal, months: int) -> Decimal:
     if principal <= ZERO or months <= 0:
         return ZERO
-    monthly_rate = _ratio_from_percent_like(annual_rate) / Decimal("12")
+    monthly_rate = _ratio_from_percentage_points(annual_rate) / Decimal("12")
     if monthly_rate == ZERO:
         return _quantize(principal / Decimal(months))
     numerator = principal * monthly_rate
@@ -728,7 +733,7 @@ class ProyectoInversionRefreshService:
                 "source": "estimated_outside_term",
             }
 
-        monthly_rate = _ratio_from_percent_like(project.tasa_interes_anual) / Decimal("12")
+        monthly_rate = _ratio_from_percentage_points(project.tasa_interes_anual) / Decimal("12")
         payment = _as_decimal(project.pago_mensual_deuda_estimado) or _annuity_payment(
             _as_decimal(project.deuda_asociada),
             _as_decimal(project.tasa_interes_anual),
@@ -758,7 +763,7 @@ class ProyectoInversionRefreshService:
         if free_cashflow is None:
             return None
         strategy = project.recovery_strategy
-        percentage = _ratio_from_percent_like(
+        percentage = _ratio_from_fraction_or_percent(
             project.recovery_percentage or project.porcentaje_utilidad_destinado_a_recuperacion or Decimal("1")
         )
         effective_percentage = Decimal("1")
@@ -835,6 +840,13 @@ class ProyectoInversionRefreshService:
     ) -> None:
         if latest_snapshot is None or not project.auto_cierre_habilitado:
             return
+        sources = latest_snapshot.fuentes or {}
+        if (
+            latest_snapshot.data_source != ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT
+            or int(latest_snapshot.confidence_score or 0) < 100
+            or sources.get("expense_coverage_status") != EXPENSE_COVERAGE_COMPLETE
+        ):
+            return
         if project.estatus in {ProyectoInversion.ESTATUS_CERRADO, ProyectoInversion.ESTATUS_CANCELADO}:
             return
         conditions: list[bool] = []
@@ -878,7 +890,9 @@ class ProyectoInversionRefreshService:
         month_starts = _iter_months(start_day, reference_day)
         actual_debt = self._group_debt_payments(project)
         investment_real = _as_decimal(
-            project.gastos_inversion.aggregate(total=Sum("monto_total")).get("total")
+            project.gastos_inversion.filter(
+                tipo_registro=ProyectoInversionGasto.TIPO_REAL
+            ).aggregate(total=Sum("monto_total")).get("total")
         )
         previous_status = project.estatus
         if project.monto_inversion_real != investment_real:
@@ -895,6 +909,7 @@ class ProyectoInversionRefreshService:
         cashflow_history: list[Decimal] = []
         sales_history: list[Decimal] = []
         snapshot_series: list[dict[str, Decimal | None | date]] = []
+        financial_series_complete = True
 
         for month_index, period in enumerate(month_starts):
             period_end = min(_month_end(period), reference_day)
@@ -909,11 +924,25 @@ class ProyectoInversionRefreshService:
             )
             debt_balance = _as_decimal(debt_payload["balance"])
 
+            is_pre_opening_period = bool(project.fecha_apertura and period < _month_start(project.fecha_apertura))
             sales_total = _as_decimal(sales_payload["sales_total"])
             cogs_total = sales_payload["cogs_total"]
             gross_profit = None if cogs_total is None else sales_total - _as_decimal(cogs_total)
-            total_expenses = _as_decimal(expense_payload["total"])
-            operating_profit = None if gross_profit is None else gross_profit - total_expenses
+            expense_coverage = str(expense_payload["coverage_status"])
+            total_expenses = (
+                None
+                if expense_coverage == EXPENSE_COVERAGE_MISSING
+                else _as_decimal(expense_payload["total"])
+            )
+            if not is_pre_opening_period and (
+                gross_profit is None or total_expenses is None
+            ):
+                financial_series_complete = False
+            operating_profit = (
+                None
+                if gross_profit is None or total_expenses is None
+                else gross_profit - total_expenses
+            )
             debt_service = _quantize(_as_decimal(debt_payload["principal"]) + _as_decimal(debt_payload["interest"])) or ZERO
             operating_cashflow = _quantize(operating_profit)
             free_cashflow = None if operating_profit is None else operating_profit - debt_service
@@ -931,14 +960,26 @@ class ProyectoInversionRefreshService:
             if sales_total > ZERO:
                 sales_history.append(_quantize(sales_total) or ZERO)
             pending_balance = max(investment_real - cumulative_recovery, ZERO)
-            recovery_pct = _percent_value(cumulative_recovery, investment_real)
+            recovery_pct = (
+                _percent_value(cumulative_recovery, investment_real)
+                if financial_series_complete
+                else None
+            )
             roi_monthly = _percent_value(free_cashflow, investment_real)
-            roi_cumulative = _percent_value(benefit_cumulative, investment_real)
+            roi_cumulative = (
+                _percent_value(benefit_cumulative, investment_real)
+                if financial_series_complete
+                else None
+            )
             months_elapsed = Decimal(month_index + 1)
             roi_annualized = None
             if roi_cumulative is not None and months_elapsed > ZERO:
                 roi_annualized = _quantize((roi_cumulative * Decimal("12")) / months_elapsed, FOUR_PLACES)
-            projected_payback = self._projected_payback(investment_real, cumulative_recovery, positive_recovery_months)
+            projected_payback = (
+                self._projected_payback(investment_real, cumulative_recovery, positive_recovery_months)
+                if financial_series_complete
+                else None
+            )
             estimated_month = None
             if projected_payback is not None:
                 projected_whole = int(projected_payback.to_integral_value(rounding=ROUND_HALF_UP))
@@ -951,7 +992,6 @@ class ProyectoInversionRefreshService:
                 data_gaps.append("Costo de venta mensual pendiente para cálculo operativo completo.")
             if _as_decimal(project.deuda_asociada) > ZERO and debt_payload["source"] == "estimated":
                 data_gaps.append("Servicio de deuda estimado; falta captura de pagos reales.")
-            is_pre_opening_period = bool(project.fecha_apertura and period < _month_start(project.fecha_apertura))
             if is_pre_opening_period:
                 data_gaps.append("Periodo previo a apertura; operación aún no aplica.")
             data_source, confidence_score = _derive_data_quality(
@@ -968,7 +1008,16 @@ class ProyectoInversionRefreshService:
                     "sales": _quantize(sales_total),
                 }
             )
-            forecast = self._forecast_payback(project, snapshot_series, pending_balance)
+            forecast = (
+                self._forecast_payback(project, snapshot_series, pending_balance)
+                if financial_series_complete
+                else {
+                    "payback_months": None,
+                    "estimated_date": None,
+                    "window_months": 0,
+                    "average_cashflow": None,
+                }
+            )
             cash_on_cash = self._cash_on_cash(project, cashflow_history)
             health_score, health_status, health_issues = self._health_score(
                 project,
@@ -1294,8 +1343,8 @@ class ProyectoInversionScenarioService:
 
     def compute(self, project: ProyectoInversion, scenario: ProyectoInversionEscenario) -> dict[str, object]:
         avg_sales = _as_decimal(scenario.ventas_promedio_mensuales)
-        gross_margin_ratio = _ratio_from_percent_like(scenario.margen_bruto_pct)
-        monthly_growth = _ratio_from_percent_like(scenario.crecimiento_mensual_pct)
+        gross_margin_ratio = _ratio_from_percentage_points(scenario.margen_bruto_pct)
+        monthly_growth = _ratio_from_percentage_points(scenario.crecimiento_mensual_pct)
         monthly_gross_profit = avg_sales * gross_margin_ratio
         monthly_operating_profit = monthly_gross_profit - _as_decimal(scenario.gastos_operativos_mensuales)
         monthly_debt_service = _as_decimal(project.pago_mensual_deuda_estimado) or _annuity_payment(
@@ -1307,7 +1356,7 @@ class ProyectoInversionScenarioService:
         percentage = scenario.recovery_percentage_override
         if percentage is None:
             percentage = project.recovery_percentage or project.porcentaje_utilidad_destinado_a_recuperacion
-        percentage_ratio = _ratio_from_percent_like(percentage)
+        percentage_ratio = _ratio_from_fraction_or_percent(percentage)
         monthly_net_cashflow = monthly_operating_profit - monthly_debt_service
         recovery_amount = self._scenario_recovery_amount(
             strategy=strategy,
@@ -1356,7 +1405,7 @@ class ProyectoInversionScenarioService:
             "scenario_name": scenario.nombre,
             "scenario_type": scenario.tipo_escenario,
             "monthly_sales": _quantize(avg_sales) or ZERO,
-            "monthly_growth_pct": _quantize(_ratio_from_percent_like(scenario.crecimiento_mensual_pct) * Decimal("100"), FOUR_PLACES) or ZERO,
+            "monthly_growth_pct": _quantize(_ratio_from_percentage_points(scenario.crecimiento_mensual_pct) * Decimal("100"), FOUR_PLACES) or ZERO,
             "gross_margin_pct": _quantize(gross_margin_ratio * Decimal("100"), FOUR_PLACES) or ZERO,
             "monthly_operating_expenses": _quantize(_as_decimal(scenario.gastos_operativos_mensuales)) or ZERO,
             "monthly_operating_cashflow": _quantize(monthly_operating_profit),

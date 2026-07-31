@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Reportes - Nuevo Proyecto de Inversión{% endblock %}
-{% block page_title %}Reportes · Nuevo Proyecto de Inversión{% endblock %}
+{% block title %}Nuevo proyecto de inversión{% endblock %}
+{% block page_title %}Dirección · Proyectos de inversión{% endblock %}
 {% block body_class %}page-reportes-inversiones-wizard{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-wizard.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-wizard.css?v=20260731-inv-audit-v2">
 {% endblock %}
 
 {% block content %}
 <div class="inv-shell">
-  <nav class="module-tabs">
-    {% for tab in module_tabs %}
-      <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
+  <nav class="inv-wizard-breadcrumbs" aria-label="Ruta de navegación">
+    <a href="{% url 'inversiones:portafolio' %}">Proyectos de inversión</a><span aria-hidden="true">/</span><span aria-current="page">Nuevo proyecto</span>
   </nav>
 
   <h1 class="inv-title">Nuevo Proyecto de Inversión</h1>
-  <p class="inv-copy">Captura la ficha, presupuesto por partidas, operación mensual y revisión financiera inicial en un solo flujo.</p>
+  <p class="inv-copy">Crea el presupuesto y los escenarios iniciales. Las partidas de este asistente son planeadas; el gasto real se comprueba después en el expediente.</p>
+
+  <div class="inv-plan-notice"><strong>Planeación, no gasto real.</strong><span>Ninguna partida capturada aquí se contabiliza como inversión ejecutada.</span></div>
 
   <section class="inv-kpis">
     <article class="inv-kpi"><div class="inv-label">Ticket promedio</div><div class="inv-value">${{ benchmark.ticket_promedio|default:0|floatformat:2|intcomma }}</div></article>
@@ -143,6 +143,14 @@
   const escapeAttr = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[char]));
   const stepsTotal = 5;
   const errorBox = document.getElementById("wizardErrors");
+
+  document.querySelectorAll(".inv-field").forEach((field, index) => {
+    const label = field.querySelector("label");
+    const control = field.querySelector("input, select, textarea");
+    if (!label || !control) return;
+    control.id = control.id || `investment-field-${index + 1}`;
+    label.htmlFor = control.id;
+  });
 
   function setErrors(messages) {
     document.querySelectorAll(".is-invalid").forEach((node) => node.classList.remove("is-invalid"));

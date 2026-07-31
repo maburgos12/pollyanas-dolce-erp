@@ -1,28 +1,26 @@
 {% extends "base.html" %}
 {% load static humanize %}
 
-{% block title %}Reportes - {{ project.nombre_proyecto }}{% endblock %}
-{% block page_title %}Reportes · {{ project.nombre_proyecto }}{% endblock %}
+{% block title %}{{ project.nombre_proyecto }} · Inversión{% endblock %}
+{% block page_title %}Dirección · Proyectos de inversión{% endblock %}
 {% block body_class %}page-reportes-inversiones-detalle{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260614-ui100-v1">
-<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260614d">
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260731-inv-audit-v2">
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260731-inv-audit-v2">
 {% endblock %}
 
 {% block content %}
 <div class="investment-shell investment-detail-shell">
-  <nav class="module-tabs investment-module-tabs" aria-label="Reportes">
-    {% for tab in module_tabs %}
-      <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
+  <nav class="inv-detail-breadcrumbs" aria-label="Ruta de navegación">
+    <a href="{% url 'inversiones:portafolio' %}">Proyectos de inversión</a><span aria-hidden="true">/</span><span aria-current="page">{{ project.nombre_proyecto }}</span>
   </nav>
 
   <section class="investment-header investment-detail-header">
     <article class="investment-hero investment-detail-hero">
-      <div class="investment-kicker">Proyecto de inversión</div>
+      <div class="investment-kicker">Expediente de inversión</div>
       <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
-      <p class="investment-copy">Ficha ejecutiva para capturar presupuesto, operación mensual, financiamiento y recuperación sin mezclar supuestos con datos reales.</p>
+      <p class="investment-copy">Presupuesto, comprobación y seguimiento operativo en un solo expediente, con la confiabilidad visible antes de tomar decisiones.</p>
       <div class="investment-meta">
         <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
         <span class="investment-status-pill is-warning">{{ project.get_estatus_display }}</span>
@@ -33,27 +31,41 @@
     <aside class="investment-side investment-detail-actions">
       <div class="investment-panel-head">
         <div>
-          <div class="investment-kicker">Acciones</div>
-          <h2 class="investment-panel-title">Cierre y reportes</h2>
+          <div class="investment-kicker">Control</div>
+          <h2 class="investment-panel-title">Métricas y reportes</h2>
         </div>
       </div>
       <div class="investment-actions">
-        <form method="post">
+        {% if can_manage_investments %}<form method="post" data-async-action>
           {% csrf_token %}
           <input type="hidden" name="action" value="refresh_project">
-          <button class="investment-button is-ghost" type="submit">Actualizar métricas</button>
-        </form>
+          <button class="investment-button is-ghost" type="submit" data-pending-label="Actualizando…">Actualizar métricas</button>
+        </form>{% endif %}
         <details class="inv-dropdown">
           <summary class="investment-button">Reportes</summary>
           <div class="inv-dropdown-menu">
             <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
-            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Legacy resumen XLSX</a>
-            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Legacy resumen PDF</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Resumen XLSX</a>
+            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Resumen PDF</a>
           </div>
         </details>
       </div>
-      <div class="investment-muted">Las proyecciones marcadas como preliminares usan supuestos capturados. El seguimiento operativo se alimenta de snapshots reales cuando la sucursal ya opera.</div>
+      <div class="investment-muted">Actualizar métricas no sustituye la carga de gastos operativos faltantes.</div>
     </aside>
+  </section>
+
+  <section class="inv-data-status {% if metricas_completas %}is-ready{% else %}is-warning{% endif %}" aria-label="Confiabilidad de métricas">
+    <div>
+      <span class="inv-data-status-label">Confiabilidad del corte</span>
+      {% if metricas_completas %}
+        <strong>Completa para seguimiento</strong>
+        <p>Ventas, costo y gasto operativo real están disponibles para {{ ultimo_snapshot.periodo|date:"F Y" }}.</p>
+      {% else %}
+        <strong>Métricas financieras no calculables</strong>
+        <p>{% if ultimo_snapshot %}Confianza {{ ultimo_snapshot.confidence_score }}%. Completa ventas, costo y gasto operativo real antes de usar recuperación, ROI o payback.{% else %}Aún no existe un corte operativo para este proyecto.{% endif %}</p>
+      {% endif %}
+    </div>
+    {% if ultimo_snapshot_fuentes.data_gaps %}<span>{{ ultimo_snapshot_fuentes.data_gaps|length }} brecha{{ ultimo_snapshot_fuentes.data_gaps|length|pluralize }} detectada{{ ultimo_snapshot_fuentes.data_gaps|length|pluralize }}</span>{% endif %}
   </section>
 
   <section class="investment-kpis investment-detail-summary" aria-label="Resumen del proyecto">
@@ -64,18 +76,17 @@
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Inversión real</div>
-      <div class="investment-kpi-value">${{ project.monto_inversion_real|floatformat:0|intcomma }}</div>
-      <div class="investment-kpi-note">Gastos registrados</div>
+      <div class="investment-kpi-value">${{ inversion_real|floatformat:0|intcomma }}</div>
+      <div class="investment-kpi-note">Solo gastos reales comprobados</div>
+    </article>
+    <article class="investment-kpi-card">
+      <div class="investment-kpi-label">Recuperación</div>
+      {% if metricas_completas and ultimo_snapshot.porcentaje_recuperado != None %}<div class="investment-kpi-value">{{ ultimo_snapshot.porcentaje_recuperado|floatformat:1 }}%</div><div class="investment-kpi-note">${{ ultimo_snapshot.recuperacion_acumulada|floatformat:0|intcomma }} verificados</div>{% else %}<div class="investment-kpi-value is-unavailable">N/D</div><div class="investment-kpi-note">Datos operativos incompletos</div>{% endif %}
     </article>
     <article class="investment-kpi-card">
       <div class="investment-kpi-label">Deuda</div>
       <div class="investment-kpi-value">${{ project.deuda_asociada|floatformat:0|intcomma }}</div>
       <div class="investment-kpi-note">Pago mensual ${{ project.pago_mensual_deuda_estimado|floatformat:0|intcomma }}</div>
-    </article>
-    <article class="investment-kpi-card">
-      <div class="investment-kpi-label">Ventas base</div>
-      <div class="investment-kpi-value">${{ supuestos_op.ventas_base|default:0|floatformat:0|intcomma }}</div>
-      <div class="investment-kpi-note">Supuesto mensual</div>
     </article>
   </section>
 

@@ -9,7 +9,7 @@
     </div>
     <p class="investment-muted">Estos campos alimentan la proyección preliminar. Los snapshots reales siguen siendo la fuente para seguimiento operativo.</p>
 
-    <form method="post" class="inv-stacked-form">
+    {% if can_manage_investments %}<form method="post" class="inv-stacked-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="actualizar_supuestos">
 
@@ -52,7 +52,7 @@
       <div class="investment-form-actions">
         <button class="investment-button" type="submit">Guardar supuestos</button>
       </div>
-    </form>
+    </form>{% else %}<p class="inv-muted">Tu acceso es de solo lectura. Los supuestos se muestran en los resultados sin controles de edición.</p>{% endif %}
   </article>
 
   <article class="inv-panel inv-panel--results">

@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Sum
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -19,7 +20,10 @@ from openpyxl import Workbook
 from compras.models import OrdenCompra, RecepcionCompra
 from core.models import Sucursal
 from core.audit import log_event
-from core.access import can_view_reportes
+from core.access import (
+    can_manage_investment_projects,
+    can_view_investment_projects,
+)
 from django.contrib.auth.models import User
 from reportes.models import (
     ProyectoInversion,
@@ -139,8 +143,17 @@ def _choice_value_with_errors(
 
 
 def _require_reportes_access(user) -> None:
-    if not can_view_reportes(user):
+    if not can_view_investment_projects(user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+
+def _require_investment_manage(user) -> None:
+    if not can_manage_investment_projects(user):
+        raise PermissionDenied("Tu acceso a Proyectos de inversión es de solo lectura.")
+
+
+def _wants_json(request: HttpRequest) -> bool:
+    return "application/json" in request.headers.get("Accept", "")
 
 
 def _project_module_tabs(active: str) -> list[dict[str, str | bool]]:
@@ -925,6 +938,17 @@ def _export_project_pdf(context: dict[str, object], report_key: str) -> HttpResp
 @login_required
 def proyectos_inversion(request: HttpRequest) -> HttpResponse:
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
+
+    if request.method == "POST" and request.POST.get("action") == "refresh_all":
+        refresh_service = ProyectoInversionRefreshService()
+        for project in ProyectoInversion.objects.exclude(
+            estatus__in=[ProyectoInversion.ESTATUS_CERRADO, ProyectoInversion.ESTATUS_CANCELADO]
+        ):
+            refresh_service.refresh_project(project, user=request.user)
+        messages.success(request, "Snapshots de proyectos actualizados.")
+        return redirect("reportes:proyectos_inversion")
 
     if request.method == "POST" and request.POST.get("action") == "create_project":
         fecha_inicio = _parse_date(request.POST.get("fecha_inicio"))
@@ -971,12 +995,7 @@ def proyectos_inversion(request: HttpRequest) -> HttpResponse:
         return redirect("reportes:proyecto_inversion_detail", project_id=project.pk)
 
     if request.GET.get("refresh") == "1":
-        refresh_service = ProyectoInversionRefreshService()
-        for project in ProyectoInversion.objects.exclude(
-            estatus__in=[ProyectoInversion.ESTATUS_CERRADO, ProyectoInversion.ESTATUS_CANCELADO]
-        ):
-            refresh_service.refresh_project(project, user=request.user)
-        messages.success(request, "Snapshots de proyectos actualizados.")
+        messages.warning(request, "La actualización de métricas requiere una acción POST explícita.")
         return redirect("reportes:proyectos_inversion")
 
     context = ProyectoInversionDashboardService().build_portfolio_context()
@@ -1021,6 +1040,7 @@ def proyectos_inversion(request: HttpRequest) -> HttpResponse:
                 "official_count": official_data_count,
                 "partial_count": partial_data_count,
             },
+            "can_manage_investments": can_manage_investment_projects(request.user),
         }
     )
     return render(request, "reportes/proyectos_inversion_sucursales.html", context)
@@ -1062,6 +1082,8 @@ def proyectos_inversion_comparativo(request: HttpRequest) -> HttpResponse:
 @login_required
 def proyectos_inversion_calibracion(request: HttpRequest) -> HttpResponse:
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
     filters = _expansion_filter_payload(request)
     calibration_service = ExpansionCalibrationService()
     calibration_result = None
@@ -1155,6 +1177,8 @@ def proyectos_inversion_calibracion(request: HttpRequest) -> HttpResponse:
 @login_required
 def proyectos_inversion_expansion_simulador(request: HttpRequest) -> HttpResponse:
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
 
     forecast_service = ExpansionForecastService()
     decision_service = ExpansionDecisionService()
@@ -1357,15 +1381,13 @@ def proyectos_inversion_expansion(request: HttpRequest) -> HttpResponse:
 @login_required
 def proyecto_inversion_detail(request: HttpRequest, project_id: int) -> HttpResponse:
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
     project = get_object_or_404(
         ProyectoInversion.objects.select_related("sucursal_relacionada", "responsable"),
         pk=project_id,
     )
     refresh_service = ProyectoInversionRefreshService()
-
-    needs_initial_refresh = not project.snapshots_mensuales.exists()
-    if needs_initial_refresh and project.fecha_apertura and project.fecha_apertura <= timezone.localdate():
-        refresh_service.refresh_project(project, user=request.user)
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
@@ -1564,6 +1586,8 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
     from reportes.services_investment_projects import _benchmark_sucursales_activas
 
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
 
     benchmark: dict[str, object] = {}
     bm_error = None
@@ -1725,6 +1749,7 @@ def proyecto_bamoa_wizard(request: HttpRequest) -> HttpResponse:
             for partida in partidas_validas:
                 ProyectoInversionGasto.objects.create(
                     proyecto=project,
+                    tipo_registro=ProyectoInversionGasto.TIPO_PLANEADO,
                     fecha=fecha_inicio,
                     categoria=partida["categoria"],
                     subcategoria=partida["subcategoria"],
@@ -2009,9 +2034,25 @@ def inversiones_portafolio(request: HttpRequest) -> HttpResponse:
     ).prefetch_related("snapshots_mensuales", "alertas").order_by("-fecha_inicio", "-id")
 
     proyectos_enriquecidos = []
+    metricas_confiables = 0
+    datos_incompletos = 0
     for proyecto in proyectos:
         ultimo_snapshot = proyecto.snapshots_mensuales.order_by("-periodo").first()
         market_study = (proyecto.metadata or {}).get("market_study", {})
+        snapshot_sources = (ultimo_snapshot.fuentes or {}) if ultimo_snapshot else {}
+        metricas_completas = bool(
+            ultimo_snapshot
+            and ultimo_snapshot.data_source == ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT
+            and int(ultimo_snapshot.confidence_score or 0) >= 100
+            and snapshot_sources.get("expense_coverage_status") == "COMPLETE"
+        )
+        if metricas_completas:
+            metricas_confiables += 1
+        else:
+            datos_incompletos += 1
+        inversion_real = proyecto.gastos_inversion.filter(
+            tipo_registro=ProyectoInversionGasto.TIPO_REAL
+        ).aggregate(total=Sum("monto_total"))["total"] or Decimal("0")
         proyectos_enriquecidos.append(
             {
                 "proyecto": proyecto,
@@ -2020,6 +2061,17 @@ def inversiones_portafolio(request: HttpRequest) -> HttpResponse:
                 "score_mercado": market_study.get("score_viabilidad"),
                 "veredicto_mercado": market_study.get("veredicto"),
                 "tiene_estudio": bool(market_study and not market_study.get("error")),
+                "metricas_completas": metricas_completas,
+                "inversion_real": inversion_real,
+                "partidas_planeadas": proyecto.gastos_inversion.filter(
+                    tipo_registro=ProyectoInversionGasto.TIPO_PLANEADO
+                ).count(),
+                "brechas_datos": len(snapshot_sources.get("data_gaps") or []),
+                "health_label": {
+                    ProyectoInversionSnapshotMensual.HEALTH_GREEN: "Salud estable",
+                    ProyectoInversionSnapshotMensual.HEALTH_YELLOW: "Requiere atención",
+                    ProyectoInversionSnapshotMensual.HEALTH_RED: "Riesgo alto",
+                }.get(getattr(ultimo_snapshot, "health_status", None), "Sin evaluación"),
             }
         )
 
@@ -2029,6 +2081,8 @@ def inversiones_portafolio(request: HttpRequest) -> HttpResponse:
         "en_ejecucion": proyectos.filter(estatus=ProyectoInversion.ESTATUS_EJECUCION).count(),
         "activos": proyectos.filter(estatus=ProyectoInversion.ESTATUS_ACTIVO).count(),
         "en_recuperacion": proyectos.filter(estatus=ProyectoInversion.ESTATUS_EN_RECUPERACION).count(),
+        "metricas_confiables": metricas_confiables,
+        "datos_incompletos": datos_incompletos,
     }
 
     return render(
@@ -2042,6 +2096,7 @@ def inversiones_portafolio(request: HttpRequest) -> HttpResponse:
             "project_types": ProyectoInversion.TIPO_CHOICES,
             "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
             "responsables": User.objects.filter(is_active=True).order_by("first_name", "username"),
+            "can_manage_investments": can_manage_investment_projects(request.user),
         },
     )
 
@@ -2059,6 +2114,8 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
 
     logger = logging.getLogger(__name__)
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
 
     benchmark = {}
     try:
@@ -2069,7 +2126,13 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
     guamuchil_categorias = {}
     guamuchil_total = Decimal("0")
     try:
-        guamuchil = ProyectoInversion.objects.get(pk=1)
+        guamuchil = (
+            ProyectoInversion.objects.filter(nombre_proyecto__icontains="Guamúchil")
+            .order_by("-fecha_inicio", "-id")
+            .first()
+        )
+        if guamuchil is None:
+            raise ProyectoInversion.DoesNotExist
         for row in guamuchil.gastos_inversion.values("categoria").annotate(total=Sum("monto_total"), n=Count("id")):
             guamuchil_categorias[row["categoria"]] = {
                 "total": float(row["total"] or 0),
@@ -2348,6 +2411,7 @@ def inversiones_wizard(request: HttpRequest) -> HttpResponse:
                 iva = partida["iva"]
                 ProyectoInversionGasto.objects.create(
                     proyecto=project,
+                    tipo_registro=ProyectoInversionGasto.TIPO_PLANEADO,
                     fecha=fecha_inicio,
                     categoria=partida["categoria"],
                     subcategoria=partida["subcategoria"],
@@ -2418,6 +2482,8 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
 
     logger = logging.getLogger(__name__)
     _require_reportes_access(request.user)
+    if request.method == "POST":
+        _require_investment_manage(request.user)
     project = get_object_or_404(
         ProyectoInversion.objects.select_related("sucursal_relacionada", "responsable"),
         pk=project_id,
@@ -2741,17 +2807,54 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
         if action == "refresh_project":
             try:
                 ProyectoInversionRefreshService().refresh_project(project, user=request.user)
-                messages.success(request, "Métricas actualizadas.")
+                if _wants_json(request):
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "redirect": reverse("inversiones:detalle", args=[project.pk]),
+                            "reload": True,
+                            "toast": {
+                                "type": "success",
+                                "message": "Métricas actualizadas con las fuentes disponibles.",
+                            },
+                        }
+                    )
+                messages.success(request, "Métricas actualizadas con las fuentes disponibles.")
             except Exception as exc:
                 logger.warning("refresh_project inversiones_detalle: %s", exc)
+                if _wants_json(request):
+                    return JsonResponse(
+                        {
+                            "ok": False,
+                            "toast": {
+                                "type": "error",
+                                "message": "No se pudieron actualizar las métricas operativas.",
+                                "persistent": True,
+                            },
+                        },
+                        status=422,
+                    )
                 messages.warning(request, "No se pudieron actualizar métricas con datos operativos actuales.")
             return redirect("inversiones:detalle", project_id=project.pk)
 
-    gastos = project.gastos_inversion.order_by("fecha", "categoria", "id")
+    gastos = project.gastos_inversion.filter(
+        tipo_registro=ProyectoInversionGasto.TIPO_REAL
+    ).order_by("fecha", "categoria", "id")
+    partidas_planeadas = project.gastos_inversion.filter(
+        tipo_registro=ProyectoInversionGasto.TIPO_PLANEADO
+    ).order_by("categoria", "id")
     snapshots = project.snapshots_mensuales.order_by("periodo")
     escenarios = project.escenarios.order_by("tipo_escenario", "nombre")
     alertas = project.alertas.filter(activa=True).order_by("-last_detected_at")
     ultimo_snapshot = snapshots.last()
+    ultimo_snapshot_fuentes = (ultimo_snapshot.fuentes or {}) if ultimo_snapshot else {}
+    metricas_completas = bool(
+        ultimo_snapshot
+        and ultimo_snapshot.data_source == ProyectoInversionSnapshotMensual.DATA_SOURCE_FACT
+        and int(ultimo_snapshot.confidence_score or 0) >= 100
+        and ultimo_snapshot_fuentes.get("expense_coverage_status") == "COMPLETE"
+    )
+    inversion_real = gastos.aggregate(total=Sum("monto_total"))["total"] or Decimal("0")
     gastos_por_cat = {
         row["categoria"]: float(row["total"] or 0)
         for row in gastos.values("categoria").annotate(total=Sum("monto_total"))
@@ -2807,12 +2910,16 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             "module_tabs": _project_module_tabs("sucursales"),
             "project": project,
             "gastos": gastos,
+            "partidas_planeadas": partidas_planeadas,
+            "inversion_real": inversion_real,
             "gastos_por_cat": gastos_por_cat,
             "snapshots": snapshots,
             "escenarios": escenarios,
             "escenarios_resumen": escenarios_resumen,
             "alertas": alertas,
             "ultimo_snapshot": ultimo_snapshot,
+            "metricas_completas": metricas_completas,
+            "ultimo_snapshot_fuentes": ultimo_snapshot_fuentes,
             "market_study": market_study,
             "ubicacion": ubicacion,
             "supuestos_op": supuestos_op,
@@ -2824,6 +2931,7 @@ def inversiones_detalle(request: HttpRequest, project_id: int) -> HttpResponse:
             "project_types": ProyectoInversion.TIPO_CHOICES,
             "project_statuses": ProyectoInversion.ESTATUS_CHOICES,
             "categorias_gasto": ProyectoInversionGasto.CATEGORIA_CHOICES,
+            "can_manage_investments": can_manage_investment_projects(request.user),
         },
     )
 
