@@ -4944,7 +4944,7 @@ if (operation === "segment") {
 
         self.assertIn('class="branch-load-button confirmed"', rendered)
         self.assertIn(
-            '<span class="branch-load-check" aria-hidden="true">✓</span>',
+            '<use href="#icon-check"></use>',
             rendered,
         )
         self.assertIn('<span class="branch-load-status">', rendered)
@@ -5265,8 +5265,8 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v82-domicilios-ruta-viva")
-        self.assertIn("?v=route-control-v82-domicilios-ruta-viva", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v84-iconografia-lucide")
+        self.assertIn("?v=route-control-v84-iconografia-lucide", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")

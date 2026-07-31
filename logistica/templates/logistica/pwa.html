@@ -310,21 +310,53 @@
         overflow: visible;
       }
 
-      .app-glyph .soft {
-        fill: rgba(201, 168, 76, .12);
+      .sr-symbols {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
       }
 
-      .app-glyph .stroke,
-      .app-glyph .gold-stroke {
+      .lucide-icon {
+        display: inline-block;
+        width: 1.15em;
+        height: 1.15em;
+        flex: 0 0 auto;
         fill: none;
         stroke: currentColor;
-        stroke-width: 2.2;
+        stroke-width: 2;
         stroke-linecap: round;
         stroke-linejoin: round;
+        vertical-align: -0.18em;
       }
 
-      .app-glyph .gold-fill {
-        fill: currentColor;
+      .app-glyph .lucide-icon {
+        width: 26px;
+        height: 26px;
+      }
+
+      .option-icon {
+        width: 24px;
+        height: 24px;
+        margin-bottom: 6px;
+        color: var(--wine);
+      }
+
+      .section-icon {
+        width: 19px;
+        height: 19px;
+        margin-right: 7px;
+      }
+
+      .status-icon.success { color: var(--success); }
+      .status-icon.warning { color: var(--warning); }
+      .status-icon.danger { color: var(--danger); }
+      .status-icon.info { color: var(--wine); }
+
+      .icon-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
       }
 
       .route-dashboard-card {
@@ -1548,6 +1580,7 @@
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
   </head>
   <body>
+    {% include "operacion/_lucide_sprite.html" %}
     <div id="app"></div>
     <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v63-carga-tramos-consolidada"></script>
     <script>
@@ -1621,38 +1654,39 @@
       };
 
       const tipos = [
-        { icon: "🔧", label: "Falla mecánica", value: "falla" },
-        { icon: "🔄", label: "Mantenimiento", value: "mantenimiento" },
-        { icon: "💥", label: "Accidente", value: "accidente" },
-        { icon: "🔵", label: "Llanta", value: "llanta" },
-        { icon: "⛽", label: "Combustible", value: "otro" },
-        { icon: "📋", label: "Otro", value: "otro" }
+        { icon: "wrench", label: "Falla mecánica", value: "falla" },
+        { icon: "refresh-cw", label: "Mantenimiento", value: "mantenimiento" },
+        { icon: "car-front", label: "Accidente", value: "accidente" },
+        { icon: "circle-dot", label: "Llanta", value: "llanta" },
+        { icon: "fuel", label: "Combustible", value: "otro" },
+        { icon: "checklist", label: "Otro", value: "otro" }
       ];
 
       const severidades = [
-        { icon: "🟢", label: "Informativo", value: "informativo", color: "var(--success)" },
-        { icon: "🟡", label: "Urgente", value: "urgente", color: "var(--warning)" },
-        { icon: "🔴", label: "Crítico", value: "critico", color: "var(--danger)" }
+        { icon: "circle-info", tone: "success", label: "Informativo", value: "informativo", color: "var(--success)" },
+        { icon: "circle-alert", tone: "warning", label: "Urgente", value: "urgente", color: "var(--warning)" },
+        { icon: "octagon-alert", tone: "danger", label: "Crítico", value: "critico", color: "var(--danger)" }
       ];
 
       const nivelesGas = [
-        { icon: "🪫", label: "Vacío", value: "vacio" },
-        { icon: "⛽", label: "1/4", value: "1/4" },
-        { icon: "⛽", label: "1/2", value: "1/2" },
-        { icon: "⛽", label: "3/4", value: "3/4" },
-        { icon: "🔋", label: "Lleno", value: "lleno" }
+        { icon: "battery-low", label: "Vacío", value: "vacio" },
+        { icon: "fuel", label: "1/4", value: "1/4" },
+        { icon: "fuel", label: "1/2", value: "1/2" },
+        { icon: "fuel", label: "3/4", value: "3/4" },
+        { icon: "battery-full", label: "Lleno", value: "lleno" }
       ];
 
       const partesLavado = [
-        { icon: "🚐", label: "Exterior", field: "lavado_exterior" },
-        { icon: "🪑", label: "Interior", field: "lavado_interior" },
-        { icon: "❄️", label: "Caja refrigerada", field: "lavado_caja_refrigerada" }
+        { icon: "flota", label: "Exterior", field: "lavado_exterior" },
+        { icon: "armchair", label: "Interior", field: "lavado_interior" },
+        { icon: "snowflake", label: "Caja refrigerada", field: "lavado_caja_refrigerada" }
       ];
 
       const inspeccionDiariaSecciones = [
         {
           key: "fluidos",
-          title: "🛢️ Fluidos",
+          icon: "container",
+          title: "Fluidos",
           items: [
             ["aceite_ok", "Aceite de motor — dentro del límite"],
             ["refrigerante_ok", "Refrigerante/anticongelante — nivel correcto, sin fugas"],
@@ -1662,7 +1696,8 @@
         },
         {
           key: "llantas",
-          title: "🔵 Llantas",
+          icon: "circle-dot",
+          title: "Llantas",
           items: [
             ["presion_llantas_ok", "Presión — no se ven bajas ni sin aire"],
             ["desgaste_llantas_ok", "Desgaste — sin cortes ni grietas, dibujo visible"]
@@ -1670,7 +1705,8 @@
         },
         {
           key: "luces",
-          title: "💡 Luces y visibilidad",
+          icon: "lightbulb",
+          title: "Luces y visibilidad",
           items: [
             ["luces_ok", "Luces principales — altas, bajas, direccionales, freno, reversa OK"],
             ["escobillas_ok", "Limpiaparabrisas — escobillas en buen estado, limpian bien"]
@@ -1678,7 +1714,8 @@
         },
         {
           key: "electrico",
-          title: "⚡ Sistema eléctrico",
+          icon: "zap",
+          title: "Sistema eléctrico",
           items: [
             ["bateria_ok", "Batería — bien conectada, polos limpios"],
             ["tablero_ok", "Tablero — sin testigos ni luces de alerta"]
@@ -1686,7 +1723,8 @@
         },
         {
           key: "extras",
-          title: "📋 Extras",
+          icon: "checklist",
+          title: "Extras",
           items: [
             ["documentos_ok", "Documentos del vehículo — tarjeta circulación y seguro vigentes"],
             ["licencia_ok", "Licencia de conducir — conductor tiene licencia vigente"],
@@ -1698,7 +1736,8 @@
       const inspeccionSecciones = [
         {
           key: "exterior",
-          title: "🔧 Accesorios Exterior",
+          icon: "wrench",
+          title: "Accesorios exterior",
           items: [
             ["ext_llanta_refaccion", "Llanta de refacción"],
             ["ext_gato", "Gato"],
@@ -1716,7 +1755,8 @@
         },
         {
           key: "interior",
-          title: "🚗 Accesorios Interior",
+          icon: "car-front",
+          title: "Accesorios interior",
           items: [
             ["int_espejos", "Espejos"],
             ["int_encendedor", "Encendedor"],
@@ -1732,7 +1772,8 @@
         },
         {
           key: "niveles",
-          title: "🔋 Niveles",
+          icon: "battery-full",
+          title: "Niveles",
           items: [
             ["niv_aceite", "Aceite"],
             ["niv_frenos", "Frenos"],
@@ -1743,7 +1784,8 @@
         },
         {
           key: "estetica",
-          title: "✨ Estética Interior",
+          icon: "sparkles",
+          title: "Estética interior",
           items: [
             ["est_asientos_delanteros", "Asientos delanteros"],
             ["est_asientos_traseros", "Asientos traseros"],
@@ -1798,7 +1840,7 @@
         return `
           <div class="gps-overlay" role="dialog" aria-modal="true" aria-labelledby="gps-title">
             <section class="gps-card">
-              <div class="gps-icon">📍</div>
+              <div class="gps-icon">${lucideIcon("map-pin")}</div>
               <h2 class="gps-title" id="gps-title">Ubicación requerida</h2>
               <p class="gps-message">${escapeHtml(message)}</p>
               <button class="primary-btn" type="button" onclick="${actionName}()" ${loading ? "disabled" : ""}>
@@ -1978,7 +2020,7 @@
         return `
           <div class="file-picker">
             <input id="${id}" class="file-input" type="file" accept="image/*" capture="environment" onclick="marcarInicioCapturaFoto(this)" onpointerdown="marcarInicioCapturaFoto(this)" onchange="${onChange}">
-            <label class="file-trigger ${loaded ? "loaded" : ""}" for="${id}">${loaded ? "✅ Imagen cargada" : "Tomar foto"}</label>
+            <label class="file-trigger ${loaded ? "loaded" : ""}" for="${id}">${loaded ? `${lucideIcon("circle-check", "status-icon success")} Imagen cargada` : `${lucideIcon("camera")} Tomar foto`}</label>
           </div>
         `;
       }
@@ -2042,16 +2084,76 @@
         return `<div class="license-banner ${licencia.tone}">${escapeHtml(licencia.mensaje)}</div>`;
       }
 
+      function lucideIcon(name, className = "") {
+        const safeName = String(name || "circle").replace(/[^a-z0-9-]/g, "");
+        const safeClass = String(className || "").replace(/[^a-z0-9 _-]/gi, "");
+        return `<svg class="lucide-icon ${safeClass}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#icon-${safeName}"></use></svg>`;
+      }
+
+      const legacyIconMap = {
+        "✅": ["circle-check", "status-icon success"],
+        "⚠️": ["triangle-alert", "status-icon warning"],
+        "⚠": ["triangle-alert", "status-icon warning"],
+        "ℹ️": ["circle-info", "status-icon info"],
+        "ℹ": ["circle-info", "status-icon info"],
+        "📍": ["map-pin", "status-icon info"],
+        "⛽": ["fuel", ""],
+        "🚿": ["shower-head", ""],
+        "🔧": ["wrench", ""],
+        "🔄": ["refresh-cw", ""],
+        "💥": ["car-front", "status-icon danger"],
+        "🔵": ["circle-dot", ""],
+        "📋": ["checklist", ""],
+        "🟢": ["circle-info", "status-icon success"],
+        "🟡": ["circle-alert", "status-icon warning"],
+        "🔴": ["octagon-alert", "status-icon danger"],
+        "🪫": ["battery-low", ""],
+        "🔋": ["battery-full", ""],
+        "🚐": ["flota", ""],
+        "🪑": ["armchair", ""],
+        "❄️": ["snowflake", ""],
+        "🛢️": ["container", ""],
+        "💡": ["lightbulb", ""],
+        "⚡": ["zap", ""],
+        "🚗": ["car-front", ""],
+        "✨": ["sparkles", ""]
+      };
+      const legacyIconPattern = /(✅|⚠️|⚠|ℹ️|ℹ|📍|⛽|🚿|🔧|🔄|💥|🔵|📋|🟢|🟡|🔴|🪫|🔋|🚐|🪑|❄️|🛢️|💡|⚡|🚗|✨)/g;
+
+      function hydrateLegacyIcons(root) {
+        if (!root) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        while (walker.nextNode()) {
+          if (legacyIconPattern.test(walker.currentNode.nodeValue || "")) nodes.push(walker.currentNode);
+          legacyIconPattern.lastIndex = 0;
+        }
+        nodes.forEach((node) => {
+          const fragment = document.createDocumentFragment();
+          String(node.nodeValue || "").split(legacyIconPattern).forEach((part) => {
+            const icon = legacyIconMap[part];
+            if (!icon) {
+              fragment.appendChild(document.createTextNode(part));
+              return;
+            }
+            const holder = document.createElement("span");
+            holder.innerHTML = lucideIcon(icon[0], icon[1]);
+            fragment.appendChild(holder.firstElementChild);
+          });
+          node.replaceWith(fragment);
+        });
+      }
+
       function appGlyph(name) {
         const icons = {
-          reporte: `<svg viewBox="0 0 32 32"><path class="soft" d="M8 10h16v14H8z"/><path class="gold-stroke" d="M13 15h6M16 12v6"/><path class="stroke" d="M10 8h12M11 24l-3 3M21 24l3 3"/></svg>`,
-          historial: `<svg viewBox="0 0 32 32"><path class="soft" d="M10 7h12v18H10z"/><path class="gold-stroke" d="M13 12h6M13 16h6M13 20h4"/><path class="stroke" d="M8 10h2M8 15h2M8 20h2"/></svg>`,
-          inspeccion: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 14 2 2 5-6"/><path class="stroke" d="M12 20h8M13 6h6M13 26h6"/></svg>`,
-          lavado: `<svg viewBox="0 0 32 32"><path class="gold-stroke" d="M11 7c2.2 2.5 3.3 4.7 3.3 6.4a3.3 3.3 0 0 1-6.6 0C7.7 11.7 8.8 9.5 11 7Z"/><path class="soft" d="M21 12c2 2.2 3 4.1 3 5.7a3 3 0 0 1-6 0c0-1.6 1-3.5 3-5.7Z"/><path class="stroke" d="M8 25h17"/></svg>`,
-          bitacora: `<svg viewBox="0 0 32 32"><path class="soft" d="M9 6h14v20H9z"/><path class="gold-stroke" d="m12 13 2 2 4-5M12 21h8"/><path class="stroke" d="M12 17h8M21 6v20"/></svg>`,
-          ruta: `<svg viewBox="0 0 32 32"><path class="soft" d="M16 4c-4.4 0-8 3.5-8 7.8 0 5.8 8 14.2 8 14.2s8-8.4 8-14.2C24 7.5 20.4 4 16 4Z"/><path class="stroke" d="M16 4c-4.4 0-8 3.5-8 7.8 0 5.8 8 14.2 8 14.2s8-8.4 8-14.2C24 7.5 20.4 4 16 4Z"/><circle class="gold-fill" cx="16" cy="12" r="2.8"/><path class="stroke" d="M7 27c3-1.6 6.2-1.6 9 0s6 1.6 9 0"/></svg>`
+          reporte: "reporte",
+          historial: "historial",
+          inspeccion: "inspeccion",
+          lavado: "lavado",
+          bitacora: "bitacora",
+          ruta: "ruta"
         };
-        return `<span class="app-glyph" aria-hidden="true">${icons[name] || icons.reporte}</span>`;
+        return `<span class="app-glyph" aria-hidden="true">${lucideIcon(icons[name] || icons.reporte)}</span>`;
       }
 
       function isMutationMethod(method) {
@@ -2591,7 +2693,7 @@
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <button class="logout app-home-link" type="button" onclick="window.location.href='/app/'" aria-label="Menú principal" title="Menú principal">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+                ${lucideIcon("home")}
               </button>
               <button class="logout" onclick="logout()">Salir</button>
             </div>
@@ -2667,6 +2769,7 @@
         app.classList.add("is-changing");
         window.setTimeout(() => {
           app.innerHTML = html;
+          hydrateLegacyIcons(app);
           app.classList.remove("is-changing");
         }, 120);
       }
@@ -2743,7 +2846,7 @@
         {
           titulo: "Revisa una sucursal a la vez",
           texto: "Selecciona primero la sucursal que vas a cargar. Sus productos aparecerán en orden alfabético y podrás buscarlos.",
-          visual: `<button class="tutorial-demo-branch" type="button">Las Glorias <span style="float:right">›</span></button><button class="tutorial-demo-branch" type="button">Leyva <span style="float:right">›</span></button>`,
+          visual: `<button class="tutorial-demo-branch" type="button">Las Glorias <span style="float:right">${lucideIcon("chevron-right")}</span></button><button class="tutorial-demo-branch" type="button">Leyva <span style="float:right">${lucideIcon("chevron-right")}</span></button>`,
         },
         {
           titulo: "Todas las cantidades son editables",
@@ -2753,7 +2856,7 @@
         {
           titulo: "Confirma toda la sucursal una sola vez",
           texto: "Ya no tienes que confirmar producto por producto. Revisa la lista completa y guarda todos los ajustes con un solo botón.",
-          visual: `<div class="tutorial-demo-row"><span>Sucursal confirmada</span><span style="color:#287244">✓</span></div><button class="primary-btn" type="button" tabindex="-1">Confirmar sucursal</button>`,
+          visual: `<div class="tutorial-demo-row"><span>Sucursal confirmada</span><span style="color:#287244">${lucideIcon("check")}</span></div><button class="primary-btn" type="button" tabindex="-1">Confirmar sucursal</button>`,
         },
         {
           titulo: "Explica únicamente las diferencias",
@@ -2763,7 +2866,7 @@
         {
           titulo: "Listo para salir a ruta",
           texto: "Cuando todas las sucursales del tramo estén guardadas, se habilita Salir a ruta. La bitácora y la revisión de unidad siguen siendo obligatorias.",
-          visual: `<button class="tutorial-demo-branch done" type="button">Las Glorias <span style="float:right">✓</span></button><button class="tutorial-demo-branch done" type="button">Leyva <span style="float:right">✓</span></button><button class="primary-btn" type="button" tabindex="-1">Salir a ruta</button>`,
+          visual: `<button class="tutorial-demo-branch done" type="button">Las Glorias <span style="float:right">${lucideIcon("check")}</span></button><button class="tutorial-demo-branch done" type="button">Leyva <span style="float:right">${lucideIcon("check")}</span></button><button class="primary-btn" type="button" tabindex="-1">Salir a ruta</button>`,
         },
       ];
 
@@ -2930,7 +3033,7 @@
           <section class="fuel-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fuel-alert-title">
             <article class="fuel-modal pending">
               <button class="fuel-close" type="button" onclick="dismissCombustibleAlerta()" aria-label="Cerrar aviso">×</button>
-              <div class="fuel-icon">⛽</div>
+              <div class="fuel-icon">${lucideIcon("fuel")}</div>
               <div class="fuel-label">Registro pendiente</div>
               <h2 id="fuel-alert-title">No registraste carga de combustible</h2>
               <p>Detectamos turno${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} cerrado${Number(alerta.pendientes_count || 0) === 1 ? "" : "s"} donde la unidad salió con poca gasolina y terminó con más gasolina, pero no capturaste litros, importe ni ticket.</p>
@@ -3015,7 +3118,7 @@
         render(shell(`
           ${resumenSemanalCard()}
           ${combustibleAlertaModal()}
-          <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">? Ayuda rápida</button>
+          <button class="dashboard-help" onclick="showScreen('ayuda')" type="button">${lucideIcon("circle-help")} Ayuda rápida</button>
           <p class="muted" style="margin:4px 0 8px;font-weight:800;">Tu turno</p>
           <div class="dash-grid">
             <button class="dash-btn" onclick="showScreen('bitacora_salida')">${appGlyph("bitacora")}<span>Bitácora</span>${turnoBadge}</button>
@@ -3389,7 +3492,7 @@
         if (!rutaData?.ruta?.id) {
           stopRutaAutoTracking();
           return render(shell(`
-            <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+            <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
             <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
             ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
             <section class="card route-card-pwa">
@@ -3418,7 +3521,7 @@
         const progress = routeProgressValue(ruta, paradas);
         state.trackingQueueCount = pendientesOffline;
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Mi ruta</h1>
           ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
           <section class="route-hero">
@@ -3456,13 +3559,13 @@
             ${routeTrackingWarning(rutaData)}
             ${puedeLiberarTramo ? `
               <div class="daily-banner">
-                <span style="font-size:22px;">✅</span> Carga del tramo lista. Inicia la ruta con este turno.
+                ${lucideIcon("circle-check", "status-icon success")} Carga del tramo lista. Inicia la ruta con este turno.
               </div>
               <button class="primary-btn" type="button" onclick="liberarRutaConTurno()">Iniciar ruta con este turno</button>
             ` : ""}
             ${puedeFinalizarRuta ? `
               <div class="daily-banner">
-                <span style="font-size:22px;">✅</span> Ruta al 100%. Finaliza el día para cerrar la ruta.
+                ${lucideIcon("circle-check", "status-icon success")} Ruta al 100%. Finaliza el día para cerrar la ruta.
               </div>
               <button class="primary-btn" type="button" onclick="finalizarRutaDia(${Number(ruta.id)})">Finalizar ruta del día</button>
             ` : ""}
@@ -3505,7 +3608,7 @@
         if (!rutaData?.ruta?.id) return showScreen("ruta_activa");
         const paradas = rutaData.paradas || [];
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('ruta_activa')">← Volver a Mi ruta</button>
+          <button class="secondary-btn" onclick="showScreen('ruta_activa')">${lucideIcon("arrow-left")} Volver a Mi ruta</button>
           <h1 class="screen-title" style="margin-top:16px;">Carga de ruta</h1>
           ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
           ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
@@ -3640,7 +3743,7 @@
           <p class="unit-line">Confirma todos sus productos en una sola captura.</p>
           <div class="branch-load-list">${grupos.map((grupo) => {
             const confirmada = sucursalCargaConfirmada(grupo);
-            return `<button class="branch-load-button${confirmada ? " confirmed" : ""}" type="button" onclick="seleccionarSucursalCarga(${grupo.id})"><strong>${escapeHtml(grupo.nombre)}</strong><span class="branch-load-status">${confirmada ? '<span class="branch-load-check" aria-hidden="true">✓</span>Confirmada' : `${grupo.lineas.length} productos por revisar`}</span><b aria-hidden="true">›</b></button>`;
+            return `<button class="branch-load-button${confirmada ? " confirmed" : ""}" type="button" onclick="seleccionarSucursalCarga(${grupo.id})"><strong>${escapeHtml(grupo.nombre)}</strong><span class="branch-load-status">${confirmada ? `<span class="branch-load-check" aria-hidden="true">${lucideIcon("check")}</span>Confirmada` : `${grupo.lineas.length} productos por revisar`}</span>${lucideIcon("chevron-right")}</button>`;
           }).join("")}</div>
         </section>`;
       }
@@ -3653,7 +3756,7 @@
         const visibles = todas.filter((linea) => !query || normalizarIdentidadCarga(`${linea.item_name} ${linea.item_code}`).includes(query));
         const capturables = todas.filter((linea) => linea.estatus !== "ZERO_EXPECTED");
         return `<section class="card route-card-pwa">
-          <button class="secondary-btn" type="button" onclick="volverResumenCarga()">← Sucursales</button>
+          <button class="secondary-btn" type="button" onclick="volverResumenCarga()">${lucideIcon("arrow-left")} Sucursales</button>
           <h2 style="color:var(--gold-text);">${escapeHtml(nombre)}</h2>
           <p class="muted">La cantidad enviada aparece por defecto. Corrígela solo si la carga física es distinta.</p>
           <div class="load-search"><label for="buscar-carga-sucursal">Buscar producto o código</label><input id="buscar-carga-sucursal" type="search" placeholder="Buscar producto o código" value="${escapeHtml(state.cargaSucursal.busqueda)}" oninput="actualizarBusquedaCarga(this.value)"></div>
@@ -3892,7 +3995,7 @@
 
       function renderAyuda() {
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Ayuda rápida</h1>
           <p class="unit-line">Guía corta para capturar correctamente en la app.</p>
           <div class="help-list">
@@ -4035,11 +4138,11 @@
               </select>
             </div>
             <div class="card-grid">
-              ${tipos.map((tipo) => `
-                <button class="option-card ${draft.tipoLabel === tipo.label ? "selected" : ""}" onclick="selectTipo('${tipo.value}', '${tipo.label}')">
-                  <span>${tipo.icon}</span><br>${tipo.label}
-                </button>
-              `).join("")}
+                ${tipos.map((tipo) => `
+                  <button class="option-card ${draft.tipoLabel === tipo.label ? "selected" : ""}" onclick="selectTipo('${tipo.value}', '${tipo.label}')">
+                  ${lucideIcon(tipo.icon, "option-icon")}<br>${tipo.label}
+                  </button>
+                `).join("")}
             </div>
             ${reportesAbiertosUnidadHtml(draft)}
             <div class="actions">
@@ -4056,7 +4159,7 @@
               <div class="severity-row">
                 ${severidades.map((sev) => `
                   <button class="severity-card ${draft.severidad === sev.value ? "selected" : ""}" style="border-left:5px solid ${sev.color}" onclick="selectSeveridad('${sev.value}')">
-                    ${sev.icon} ${sev.label}
+                    <span class="icon-label">${lucideIcon(sev.icon, `status-icon ${sev.tone}`)} ${sev.label}</span>
                   </button>
                 `).join("")}
               </div>
@@ -4073,7 +4176,7 @@
                 <label for="kilometraje">Kilometraje</label>
                 <input id="kilometraje" type="number" min="0" value="${escapeHtml(draft.kilometraje)}" oninput="state.reporteDraft.kilometraje = this.value">
               </div>
-              <p class="gps-registered">📍 Ubicación registrada</p>
+              <p class="gps-registered">${lucideIcon("map-pin")} Ubicación registrada</p>
               ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
               <div class="actions">
                 <button class="secondary-btn" onclick="prevReporteStep()">Atrás</button>
@@ -4091,7 +4194,7 @@
               <div class="kv"><b>Unidad</b><span>${escapeHtml(getUnidadLabel(draft.unidad))}</span></div>
               <div class="kv"><b>Severidad</b><span>${escapeHtml(draft.severidad)}</span></div>
               <div class="kv"><b>Kilometraje</b><span>${escapeHtml(draft.kilometraje || "-")}</span></div>
-              <div class="kv"><b>Ubicación</b><span>${draft.latitud ? "📍 Ubicación registrada" : "-"}</span></div>
+              <div class="kv"><b>Ubicación</b><span>${draft.latitud ? `${lucideIcon("map-pin")} Ubicación registrada` : "-"}</span></div>
               <div class="kv"><b>Descripción</b><span>${escapeHtml(draft.descripcion)}</span></div>
             </section>
             ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
@@ -4165,7 +4268,7 @@
           state.reporteDraft = null;
           render(shell(`
             <section class="confirm">
-              <div class="confirm-mark">✅</div>
+              <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
               <h1 class="screen-title">Reporte pendiente</h1>
               <p class="unit-line">${escapeHtml(queuedSuccessMessage("Reporte de unidad"))}</p>
               <p class="muted">No cierres sesión. La app lo enviará al recuperar conexión.</p>
@@ -4177,9 +4280,9 @@
         const creado = await response.json();
         render(shell(`
           <section class="confirm">
-            <div class="confirm-mark">✅</div>
+            <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
             <h1 class="screen-title">Reporte enviado</h1>
-            <p class="unit-line">✅ Reporte enviado · ID: ${escapeHtml(creado.id || "-")}</p>
+            <p class="unit-line">${lucideIcon("circle-check", "status-icon success")} Reporte enviado · ID: ${escapeHtml(creado.id || "-")}</p>
             <p class="muted">Compras recibió el ticket y dará seguimiento.</p>
             <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
           </section>
@@ -4198,7 +4301,7 @@
         if (responseQueuedOffline(response)) {
           render(shell(`
             <section class="confirm">
-              <div class="confirm-mark">✅</div>
+              <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
               <h1 class="screen-title">Reafirmación pendiente</h1>
               <p class="unit-line">${escapeHtml(queuedSuccessMessage("Reporte de unidad"))}</p>
               <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
@@ -4209,7 +4312,7 @@
         const data = await response.json();
         render(shell(`
           <section class="confirm">
-            <div class="confirm-mark">✅</div>
+            <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
             <h1 class="screen-title">Reporte reafirmado</h1>
             <p class="unit-line">${escapeHtml(data.mensaje || "Se avisó nuevamente sobre este ticket.")}</p>
             <p class="muted">No se creó un ticket duplicado. El responsable verá que este reporte sigue pendiente.</p>
@@ -4243,7 +4346,7 @@
           `;
         }).join("") : `<div class="empty">Todavía no tienes reportes registrados.</div>`;
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Mis reportes</h1>
           ${cards}
         `));
@@ -4253,7 +4356,7 @@
         const unidad = state.perfil?.unidad || {};
         const servicios = (state.perfil?.ultimosServicios || []).filter((r) => r.estatus === "cerrado");
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Mi unidad</h1>
           <section class="card report-card">
             <div class="kv"><b>Código</b><span>${escapeHtml(unidad.codigo || "-")}</span></div>
@@ -4308,7 +4411,7 @@
           </form>
         `;
         render(shell(`
-          <button class="secondary-btn" onclick="state.editandoBitacora = false; showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="state.editandoBitacora = false; showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Bitácora</h1>
           ${message ? `<p class="success">${escapeHtml(message)}</p>` : ""}
           ${body}
@@ -4413,7 +4516,7 @@
           : "Sin lavados registrados para esta unidad.";
         return `
           <div class="daily-banner ${tone === "warning" ? "warning" : ""}">
-            <span style="font-size:22px;">${estado.lavado_hoy ? "✅" : "🚿"}</span>
+            ${lucideIcon(estado.lavado_hoy ? "circle-check" : "shower-head", estado.lavado_hoy ? "status-icon success" : "")}
             <div>
               <strong>${escapeHtml(estado.unidad_codigo || "")}</strong><br>
               ${texto}
@@ -4429,7 +4532,7 @@
         const ubicacionLista = isGeoReady(draft);
         const isError = message && !message.startsWith("✅");
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Lavado de unidad</h1>
           <p class="unit-line">Selecciona las partes que se lavaron. Puedes marcar más de una.</p>
           ${message ? `<p class="${isError ? "error" : "success"}">${escapeHtml(message)}</p>` : ""}
@@ -4448,7 +4551,7 @@
                 <div class="card-grid">
                   ${partesLavado.map((parte) => `
                     <button type="button" class="option-card ${draft[parte.field] ? "selected" : ""}" onclick="toggleParteLavado('${parte.field}')">
-                      <span>${parte.icon}</span><br>${parte.label}
+                      ${lucideIcon(parte.icon, "option-icon")}<br>${parte.label}
                     </button>
                   `).join("")}
                 </div>
@@ -4464,7 +4567,7 @@
                 ${draft.fotoLavadoPreview ? `
                   <img class="thumb" src="${draft.fotoLavadoPreview}" alt="Vista previa lavado">
                   <div class="photo-actions">
-                    <label class="retake" for="foto_lavado">↻ Volver a tomar</label>
+                    <label class="retake" for="foto_lavado">${lucideIcon("rotate-ccw")} Volver a tomar</label>
                     <button class="keep" type="button" onclick="renderLavadoUnidad()">Usar esta foto</button>
                   </div>
                 ` : ""}
@@ -4474,7 +4577,7 @@
                 <label for="notas_lavado">Notas</label>
                 <textarea id="notas_lavado" rows="3" placeholder="Opcional" oninput="state.lavadoDraft.notas = this.value">${escapeHtml(draft.notas)}</textarea>
               </div>
-              <p class="gps-registered">📍 Ubicación registrada</p>
+              <p class="gps-registered">${lucideIcon("map-pin")} Ubicación registrada</p>
               ${draft.estado?.lavado_hoy && !draft.confirmandoDuplicado ? `
                 <button class="secondary-btn" type="button" onclick="state.lavadoDraft.confirmandoDuplicado = true; renderLavadoUnidad()">Registrar otro lavado de hoy</button>
               ` : `
@@ -4512,7 +4615,7 @@
           state.lavadoDraft = null;
           render(shell(`
             <section class="confirm">
-              <div class="check">✅</div>
+              <div class="check">${lucideIcon("circle-check", "status-icon success")}</div>
               <h1 class="screen-title">Lavado pendiente</h1>
               <p class="unit-line">${escapeHtml(queuedSuccessMessage("Lavado de unidad"))}</p>
               <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
@@ -4524,7 +4627,7 @@
         state.lavadoDraft = null;
         render(shell(`
           <section class="confirm">
-            <div class="check">✅</div>
+            <div class="check">${lucideIcon("circle-check", "status-icon success")}</div>
             <h1 class="screen-title">Lavado registrado</h1>
             <p class="unit-line">${escapeHtml(lavado.unidad_codigo || "")} · ${escapeHtml(lavado.partes_lavadas_display || "")}</p>
             <button class="primary-btn" onclick="showScreen('dashboard')">Volver al inicio</button>
@@ -4543,7 +4646,7 @@
           <div class="card-grid">
             ${nivelesGas.map((nivel) => `
               <button type="button" class="option-card ${current === nivel.value ? "selected" : ""}" onclick="${onSelect}('${nivel.value}')" aria-pressed="${current === nivel.value ? "true" : "false"}">
-                <span>${nivel.icon}</span><br>${current === nivel.value ? "✓ " : ""}${nivel.label}
+                ${lucideIcon(nivel.icon, "option-icon")}<br>${current === nivel.value ? `${lucideIcon("check")} ` : ""}${nivel.label}
               </button>
             `).join("")}
           </div>
@@ -4696,11 +4799,12 @@
         const open = Boolean(draft.inspeccionDiariaExpanded[section.key]);
         return `
           <button id="inspeccion-diaria-toggle-${section.key}" class="section-toggle ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}" type="button" onclick="toggleInspeccionDiariaSection('${section.key}')">
-            <span>${section.title}</span><span>${open ? "Ocultar" : "Ver"}</span>
+            <span class="icon-label">${lucideIcon(section.icon, "section-icon")}${section.title}</span>
+            <span class="icon-label">${open ? "Ocultar" : "Ver"}${lucideIcon(open ? "chevron-up" : "chevron-down")}</span>
           </button>
           ${open ? `
             <section class="daily-section-card ${draft.inspeccionDiariaHighlight === section.key ? "daily-section-highlight" : ""}">
-              <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaSeccionOk('${section.key}')">✓ Marcar sección OK</button>
+              <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaSeccionOk('${section.key}')">${lucideIcon("check")} Marcar sección OK</button>
               ${section.items.map(([field, label]) => {
                 const value = draft.inspeccionDiariaChecks[field];
                 const tone = value === true ? "ok" : value === false ? "fail" : "pending";
@@ -4708,7 +4812,7 @@
                   <div class="check-row ${tone}">
                     <span>${escapeHtml(label)}</span>
                     <div style="display:flex; gap:8px;">
-                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', true)">${value === true ? "✓ " : ""}OK</button>
+                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', true)">${value === true ? `${lucideIcon("check")} ` : ""}OK</button>
                       <button class="chip ${value === false ? "fail" : "pending"}" type="button" onclick="setInspeccionDiariaItem('${field}', false)">${value === false ? "✗ " : ""}FALLA</button>
                     </div>
                   </div>
@@ -4908,7 +5012,7 @@
                 ${draft.cargaFotoTicketPreview ? `
                   <img class="thumb" src="${draft.cargaFotoTicketPreview}" alt="Vista previa ticket combustible">
                   <div class="photo-actions">
-                    <label class="retake" for="foto_carga_combustible">↻ Cambiar foto</label>
+                    <label class="retake" for="foto_carga_combustible">${lucideIcon("rotate-ccw")} Cambiar foto</label>
                     <button class="clear" type="button" onclick="limpiarFotoCargaCombustible()">Quitar foto</button>
                   </div>
                 ` : ""}
@@ -5013,7 +5117,7 @@
                 ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
                 ${yaInspeccionada ? `
                   <div class="daily-banner">
-                    <span style="font-size:22px;">✅</span> Unidad ya inspeccionada hoy por <strong>${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")}</strong> a las <time>${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}</time>. Puedes proceder directamente al inicio de turno.
+                    ${lucideIcon("circle-check", "status-icon success")} Unidad ya inspeccionada hoy por <strong>${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")}</strong> a las <time>${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}</time>. Puedes proceder directamente al inicio de turno.
                   </div>
                 ` : ""}
                 ${draft.inspeccionDiariaAviso ? `<div class="daily-banner warning">${escapeHtml(draft.inspeccionDiariaAviso)}</div>` : ""}
@@ -5022,12 +5126,12 @@
                     <h2 style="color:var(--gold-text); margin-top:0;">Checklist pre-turno</h2>
                     <p class="daily-counter ${pendientesDiarios ? "" : "complete"}">${marcadosDiarios} de ${totalPuntosDiarios} puntos marcados</p>
                     <p class="muted">Marca cada punto como OK o FALLA antes de capturar kilometraje y tablero.</p>
-                    <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">✅ Marcar todos los puntos como OK</button>
+                    <button class="daily-mark-all" type="button" onclick="marcarInspeccionDiariaTodosOk()">${lucideIcon("circle-check")} Marcar todos los puntos como OK</button>
                   </section>
                   ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
                   ${tieneFallasDiarias ? `
                     <div class="field daily-fail-field">
-                      <label for="inspeccion_diaria_observaciones">⚠️ Describe las fallas encontradas</label>
+                      <label for="inspeccion_diaria_observaciones">${lucideIcon("triangle-alert", "status-icon warning")} Describe las fallas encontradas</label>
                       <textarea id="inspeccion_diaria_observaciones" required placeholder="Anota qué falla viste y si la unidad puede salir o debe detenerse." oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
                     </div>
                   ` : ""}
@@ -5049,7 +5153,7 @@
                       ${draft.fotoSalidaPreview ? `<img class="thumb" src="${draft.fotoSalidaPreview}" alt="Vista previa tablero salida">` : ""}
                       ${draft.fotoSalidaError ? `<p class="error">${escapeHtml(draft.fotoSalidaError)}</p>` : ""}
                     </div>
-                    <p class="gps-registered">📍 Ubicación registrada</p>
+                    <p class="gps-registered">${lucideIcon("map-pin")} Ubicación registrada</p>
                     <button class="primary-btn" type="button" onclick="guardarSalida()">Iniciar turno</button>
                   </div>
                 ` : ""}
@@ -5074,7 +5178,7 @@
                 </div>
               ` : cargaListaParaLiberar ? `
                 <div class="daily-banner">
-                  <span style="font-size:22px;">✅</span> Carga revisada para ${escapeHtml(ruta.folio)}.
+                  ${lucideIcon("circle-check", "status-icon success")} Carga revisada para ${escapeHtml(ruta.folio)}.
                 </div>
                 <button class="primary-btn" type="button" onclick="showScreen('ruta_activa')">Ir a Mi ruta para iniciar</button>
               ` : lineasPendientesCarga > 0 ? `
@@ -5103,7 +5207,7 @@
               ${actual.foto_tablero_salida ? `<img class="thumb" src="${escapeHtml(actual.foto_tablero_salida)}" alt="Tablero salida">` : ""}
             </section>
             ${renderCargasCombustibleRuta(actual)}
-            <button class="fuel-route-btn" type="button" onclick="abrirRegistroCombustible()">⛽ ${cargasRuta.length ? "Registrar otra carga de gasolina" : "Registrar gasolina"}</button>
+            <button class="fuel-route-btn" type="button" onclick="abrirRegistroCombustible()">${lucideIcon("fuel")} ${cargasRuta.length ? "Registrar otra carga de gasolina" : "Registrar gasolina"}</button>
             ${draft.registrando_combustible ? renderCombustibleRutaSheet(draft) : ""}
             <form onsubmit="guardarLlegada(event)" novalidate>
               <div class="field">
@@ -5116,7 +5220,7 @@
               </div>
               ${cargasRuta.length ? `
                 <div class="daily-banner">
-                  <span style="font-size:22px;">✅</span> Ya hay ${cargasRuta.length} carga${cargasRuta.length === 1 ? "" : "s"} de gasolina registrada${cargasRuta.length === 1 ? "" : "s"} en este turno. Si cargaste otra vez, usa el botón “Registrar otra carga de gasolina”.
+                  ${lucideIcon("circle-check", "status-icon success")} Ya hay ${cargasRuta.length} carga${cargasRuta.length === 1 ? "" : "s"} de gasolina registrada${cargasRuta.length === 1 ? "" : "s"} en este turno. Si cargaste otra vez, usa el botón “Registrar otra carga de gasolina”.
                 </div>
               ` : `
                 <div class="daily-banner warning">
@@ -5144,7 +5248,7 @@
           `;
         }
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Bitácora del día</h1>
           ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
           ${body}
@@ -5333,7 +5437,8 @@
         const open = Boolean(draft.expanded[section.key]);
         return `
           <button class="section-toggle" type="button" onclick="toggleInspeccionSection('${section.key}')">
-            <span>${section.title}</span><span>${open ? "−" : "+"}</span>
+            <span class="icon-label">${lucideIcon(section.icon, "section-icon")}${section.title}</span>
+            ${lucideIcon(open ? "chevron-up" : "chevron-down")}
           </button>
           ${open ? `
             <section class="card report-card">
@@ -5345,7 +5450,7 @@
                   <div class="check-row ${tone}">
                     <span>${escapeHtml(label)}</span>
                     <div style="display:flex; gap:8px;">
-                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionItem('${field}', true)">${value === true ? "✓ " : ""}OK</button>
+                      <button class="chip ${value === true ? "ok" : "pending"}" type="button" onclick="setInspeccionItem('${field}', true)">${value === true ? `${lucideIcon("check")} ` : ""}OK</button>
                       <button class="chip ${value === false ? "fail" : "pending"}" type="button" onclick="setInspeccionItem('${field}', false)">${value === false ? "✗ " : ""}Falta</button>
                     </div>
                   </div>
@@ -5364,7 +5469,7 @@
         const avisoDiario = draft.inspeccionDiariaCheck?.ya_inspeccionada && !draft.verFormularioCompleto;
         const isError = message && !message.startsWith("✅");
         render(shell(`
-          <button class="secondary-btn" onclick="showScreen('dashboard')">← Volver</button>
+          <button class="secondary-btn" onclick="showScreen('dashboard')">${lucideIcon("arrow-left")} Volver</button>
           <h1 class="screen-title" style="margin-top:16px;">Inspección de unidad</h1>
           <p class="unit-line">Selecciona la unidad que vas a inspeccionar.</p>
           ${message ? `<p class="${isError ? "error" : "success"}">${escapeHtml(message)}</p>` : ""}
@@ -5381,7 +5486,7 @@
                 ${draft.inspeccionDiariaLoading ? `<p class="unit-line">Revisando inspección diaria...</p>` : ""}
                 ${avisoDiario ? `
                   <div class="daily-banner warning">
-                    ℹ️ Esta unidad ya fue revisada por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} el ${escapeHtml(draft.inspeccionDiariaCheck.fecha || "hoy")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}.
+                    ${lucideIcon("circle-info", "status-icon info")} Esta unidad ya fue revisada por ${escapeHtml(draft.inspeccionDiariaCheck.repartidor_nombre || "")} el ${escapeHtml(draft.inspeccionDiariaCheck.fecha || "hoy")} a las ${escapeHtml(draft.inspeccionDiariaCheck.hora || "")}.
                   </div>
                   <p class="muted">¿Detectaste algo nuevo? Registra un reporte independiente. ¿Necesitas repetir la inspección completa de todas formas? Usa la otra opción.</p>
                   <div class="confirm-actions">
@@ -5426,7 +5531,7 @@
                 <label for="observaciones">Observaciones</label>
                 <textarea id="observaciones" oninput="state.inspeccionDraft.observaciones = this.value">${escapeHtml(draft.observaciones)}</textarea>
               </div>
-              <p class="gps-registered">📍 Ubicación registrada</p>
+              <p class="gps-registered">${lucideIcon("map-pin")} Ubicación registrada</p>
               <button class="primary-btn" type="submit" ${ubicacionLista && fotoGolpesLista ? "" : "disabled"}>Enviar inspección</button>
               ` : ""}
             </form>
@@ -5509,7 +5614,7 @@
           state.inspeccionDraft = null;
           render(shell(`
             <section class="confirm">
-              <div class="confirm-mark">✅</div>
+              <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
               <h1 class="screen-title">Inspección pendiente</h1>
               <p class="unit-line">${escapeHtml(queuedSuccessMessage("Inspección de unidad"))}</p>
               <button class="primary-btn" onclick="showScreen('dashboard')">Volver al panel principal</button>
@@ -5520,7 +5625,7 @@
         state.inspeccionDraft = null;
         render(shell(`
           <section class="confirm">
-            <div class="confirm-mark">✅</div>
+            <div class="confirm-mark">${lucideIcon("circle-check", "status-icon success")}</div>
             <h1 class="screen-title">Inspección enviada</h1>
             ${faltantes.length ? `<p class="muted">Faltantes: ${escapeHtml(faltantes.join(", "))}</p>` : `<p class="success">Todos los puntos marcados OK.</p>`}
             <p class="unit-line">¿Hay otra revisión de unidad?</p>
@@ -5534,7 +5639,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v82-domicilios-ruta-viva", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v84-iconografia-lucide", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

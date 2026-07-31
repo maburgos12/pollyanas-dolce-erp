@@ -293,7 +293,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260730-iconografia-lucide-v9")
+        self.assertContains(response, "20260730-iconografia-lucide-v10")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -312,9 +312,11 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "operacion/manifest.webmanifest")
         self.assertContains(response, "operacion/app-icon-192.png")
         self.assertContains(response, "operacion/apple-touch-icon.png")
+        self.assertContains(response, 'id="icon-ruta"')
+        self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260730-iconografia-lucide-v9"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260730-iconografia-lucide-v10"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -357,13 +359,24 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v34-iconografia-lucide", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v35-lucide-compartido", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
         self.assertIn("env(safe-area-inset-top)", css)
         self.assertIn("calc(6px + env(safe-area-inset-top))", css)
         self.assertIn("pointer-events: auto", css)
+
+    def test_operational_app_uses_shared_lucide_sprite(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (root / "templates/operacion/app_home.html").read_text(encoding="utf-8")
+        sprite = (root / "templates/operacion/_lucide_sprite.html").read_text(encoding="utf-8")
+
+        self.assertIn('{% include "operacion/_lucide_sprite.html" %}', template)
+        self.assertIn('id="icon-ruta"', sprite)
+        self.assertIn('id="icon-circle-check"', sprite)
+        self.assertIn('id="icon-map-pin"', sprite)
+        self.assertNotIn('viewBox="0 0 512 512"', template)
 
     def test_mermas_only_user_can_enter_unified_app_without_losing_guardrail(self):
         user = self._user("mermas.colosio", sucursal=self.sucursal)
@@ -753,8 +766,8 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "/logistica/app/?pantalla=mis_reportes")
         self.assertContains(response, "/logistica/app/?pantalla=inspeccion_vehiculo")
         self.assertContains(response, "/logistica/app/?pantalla=ruta_activa")
-        self.assertContains(response, 'class="glyph route-glyph"')
-        self.assertContains(response, 'd="M416 320h-96c-17.6 0-32-14.4')
+        self.assertContains(response, '<use href="#icon-ruta"></use>')
+        self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertNotContains(response, "Logística móvil")
         self.assertNotContains(response, "Registrar merma")
         rutas_tile = next(tile for tile in build_operacion_context(user)["tiles"] if tile["key"] == "logistica_rutas")
@@ -3173,6 +3186,6 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v34-iconografia-lucide", sw_content)
+        self.assertIn("v35-lucide-compartido", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertNotIn("v21-", sw_content)
