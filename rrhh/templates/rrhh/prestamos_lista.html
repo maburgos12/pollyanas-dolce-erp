@@ -4,7 +4,7 @@
 {% block page_title %}Préstamos de personal{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamos-lista.css?v=20260623-status-rows-v3">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-prestamos-lista.css?v=20260730-direccion-action-v4">
 {% endblock %}
 
 {% block content %}
@@ -35,19 +35,34 @@
 
     <div class="loan-row-table">
         {% for prestamo in por_autorizar %}
-          <article class="loan-row-item">
+          <article class="loan-row-item" id="prestamo-{{ prestamo.pk }}">
             <div>
               <a href="{% url 'rrhh:rrhh_prestamo_detalle' prestamo.pk %}"><strong>{{ prestamo.folio }}</strong></a>
               <span>{{ prestamo.empleado.nombre }}</span>
             </div>
             <div>${{ prestamo.importe }}</div>
             <div>{% if prestamo.jefe_directo %}Jefe: {{ prestamo.jefe_directo.get_full_name|default:prestamo.jefe_directo.username }}{% endif %}</div>
-            <div class="loan-row-badges"><span class="loan-badge">Por autorizar</span><span class="loan-badge gold">{{ prestamo.get_estado_display }}</span></div>
-              <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">
+            <div class="loan-row-badges">
+              {% if prestamo.estado == "autorizado" %}
+                <span class="loan-badge">Pendiente de Dirección</span>
+              {% else %}
+                <span class="loan-badge">Pendiente de jefe</span>
+              {% endif %}
+              <span class="loan-badge gold">{{ prestamo.get_estado_display }}</span>
+            </div>
+            {% if prestamo.estado == "autorizado" %}
+              <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_dg' prestamo.pk %}" data-async-action data-reset-on-success="false">
                 {% csrf_token %}
-                <button class="btn btn-primary btn-sm" type="submit">Autorizar</button>
+                <button class="btn btn-primary btn-sm" type="submit" data-pending-label="Aprobando…">Aprobar Dirección</button>
                 <a class="btn btn-secondary btn-sm" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir</a>
               </form>
+            {% else %}
+              <form class="loan-card-actions" method="post" action="{% url 'rrhh:rrhh_prestamo_auth_jefe' prestamo.pk %}">
+                {% csrf_token %}
+                <button class="btn btn-primary btn-sm" type="submit">Autorizar jefe</button>
+                <a class="btn btn-secondary btn-sm" href="{% url 'rrhh:rrhh_prestamo_imprimir' prestamo.pk %}">Imprimir</a>
+              </form>
+            {% endif %}
           </article>
         {% endfor %}
         {% for prestamo in pendientes %}

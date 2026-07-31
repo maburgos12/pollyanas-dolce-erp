@@ -109,6 +109,16 @@ def can_autorizar_prestamo_direccion(user, prestamo: Prestamo | None = None) -> 
     return True
 
 
+def prestamos_por_autorizar_q(user) -> Q:
+    if not user or not user.is_authenticated:
+        return Q(pk__in=[])
+
+    pendientes = Q(estado=Prestamo.ESTADO_SOLICITADO) & prestamos_jefe_q(user)
+    if can_autorizar_prestamo_direccion(user):
+        pendientes |= Q(estado=Prestamo.ESTADO_AUTORIZADO) & ~Q(empleado__usuario_erp=user)
+    return pendientes
+
+
 def aprobar_prestamo_direccion(prestamo: Prestamo, user) -> Prestamo:
     if not can_autorizar_prestamo_direccion(user, prestamo):
         raise PermissionDenied("Solo Dirección puede aprobar préstamos y generar cuotas.")

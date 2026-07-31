@@ -8,8 +8,10 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.http import JsonResponse
 from django.views.decorators.cache import never_cache
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.notificaciones import (
@@ -26,6 +28,7 @@ from .services_prestamos import (
     can_autorizar_prestamo_direccion,
     can_autorizar_prestamo_jefe,
     prestamos_jefe_q,
+    prestamos_por_autorizar_q,
     usuario_equivale_jefe_prestamo,
 )
 from .views import _module_tabs
@@ -43,8 +46,7 @@ def _prestamos_por_autorizar(user):
     if not user or not user.is_authenticated:
         return Prestamo.objects.none()
     return Prestamo.objects.filter(
-        prestamos_jefe_q(user),
-        estado=Prestamo.ESTADO_SOLICITADO,
+        prestamos_por_autorizar_q(user),
     ).select_related("empleado", "jefe_directo", "autorizado_jefe")
 
 
@@ -125,7 +127,9 @@ def prestamos_lista(request):
         base_qs = Prestamo.objects.filter(prestamos_jefe_q(request.user)).select_related("empleado", "jefe_directo", "autorizado_jefe")
     por_autorizar = _prestamos_por_autorizar(request.user)
     activos = base_qs.filter(estado=Prestamo.ESTADO_ACTIVO)
-    pendientes = base_qs.filter(estado__in=[Prestamo.ESTADO_SOLICITADO, Prestamo.ESTADO_AUTORIZADO])
+    pendientes = base_qs.filter(
+        estado__in=[Prestamo.ESTADO_SOLICITADO, Prestamo.ESTADO_AUTORIZADO],
+    ).exclude(pk__in=por_autorizar.values("pk"))
     liquidados = base_qs.filter(estado=Prestamo.ESTADO_LIQUIDADO)
     return render(
         request,
@@ -262,7 +266,17 @@ def prestamo_autorizar_dg(request, pk):
     if request.method == "POST" and prestamo.estado == Prestamo.ESTADO_AUTORIZADO:
         aprobar_prestamo_direccion(prestamo, request.user)
         notificar_prestamo_aprobado(prestamo, actor=request.user)
-        messages.success(request, f"Préstamo {prestamo.folio} aprobado. Cuotas generadas automáticamente.")
+        success_message = f"Préstamo {prestamo.folio} aprobado. Cuotas generadas automáticamente."
+        if "application/json" in request.headers.get("Accept", ""):
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "toast": {"type": "success", "message": success_message},
+                    "redirect": f"{reverse('rrhh:rrhh_prestamos_lista')}#prestamo-{prestamo.pk}",
+                    "reload": True,
+                }
+            )
+        messages.success(request, success_message)
     return redirect("rrhh:rrhh_prestamo_detalle", pk=pk)
 
 

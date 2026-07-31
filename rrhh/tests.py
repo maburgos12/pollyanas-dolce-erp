@@ -1594,6 +1594,38 @@ class CapitalHumanoAPITests(TestCase):
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe_user)
 
+    def test_prestamo_api_direccion_aprueba_desde_pwa(self):
+        director = User.objects.create_user(username="director.prestamo", password="pass123")
+        director.groups.add(Group.objects.get_or_create(name="DG")[0])
+        prestamo = Prestamo.objects.create(
+            empleado=self.empleado,
+            concepto="Apoyo autorizado por jefe",
+            fecha_solicitud=timezone.localdate(),
+            importe=Decimal("1200.00"),
+            num_quincenas=4,
+            descuento_quincenal=Decimal("300.00"),
+            saldo_actual=Decimal("1200.00"),
+            estado=Prestamo.ESTADO_AUTORIZADO,
+            firma_jefe=True,
+            autorizado_jefe=self.user,
+            fecha_auth_jefe=timezone.now(),
+            creado_por=self.user,
+        )
+
+        self.client.force_authenticate(user=director)
+        lista = self.client.get(reverse("rrhh:prestamo-list"), {"mis": "true"})
+
+        self.assertEqual(lista.status_code, 200)
+        self.assertTrue(lista.data[0]["puede_aprobar_direccion"])
+
+        auth = self.client.post(reverse("rrhh:prestamo-aprobar-direccion", args=[prestamo.id]))
+
+        self.assertEqual(auth.status_code, 200)
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_ACTIVO)
+        self.assertEqual(prestamo.autorizado_dg, director)
+        self.assertEqual(PrestamoCuota.objects.filter(prestamo=prestamo).count(), 4)
+
     def test_prestamo_api_bloquea_solicitud_si_hay_saldo_vigente(self):
         Prestamo.objects.create(
             empleado=self.empleado,
@@ -3374,6 +3406,49 @@ class RRHHViewsTests(TestCase):
         prestamo.refresh_from_db()
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, jefe)
+
+    def test_direccion_ve_y_aprueba_prestamo_autorizado_en_su_bandeja(self):
+        from datetime import date
+
+        director = User.objects.create_user(username="director.bandeja", password="pass123")
+        director.groups.add(Group.objects.get_or_create(name="DG")[0])
+        empleado = Empleado.objects.create(nombre="Empleado pendiente Dirección", salario_diario="400.00")
+        prestamo = Prestamo.objects.create(
+            empleado=empleado,
+            concepto="Solicitud lista para Dirección",
+            fecha_solicitud=date(2026, 7, 30),
+            importe=Decimal("1600.00"),
+            num_quincenas=4,
+            descuento_quincenal=Decimal("400.00"),
+            saldo_actual=Decimal("1600.00"),
+            estado=Prestamo.ESTADO_AUTORIZADO,
+            firma_jefe=True,
+            autorizado_jefe=self.user,
+            fecha_auth_jefe=timezone.now(),
+            creado_por=self.user,
+        )
+
+        self.client.force_login(director)
+        response = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["por_autorizar"].count(), 1)
+        self.assertContains(response, prestamo.folio)
+        self.assertContains(response, "Aprobar Dirección")
+        self.assertContains(response, reverse("rrhh:rrhh_prestamo_auth_dg", args=[prestamo.pk]))
+        self.assertContains(response, "data-async-action")
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_prestamo_auth_dg", args=[prestamo.pk]),
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        prestamo.refresh_from_db()
+        self.assertEqual(prestamo.estado, Prestamo.ESTADO_ACTIVO)
+        self.assertEqual(prestamo.autorizado_dg, director)
+        self.assertEqual(PrestamoCuota.objects.filter(prestamo=prestamo).count(), 4)
 
     def test_superuser_autoriza_prestamo_asignado_a_otro_jefe(self):
         from datetime import date
