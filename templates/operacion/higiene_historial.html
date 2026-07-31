@@ -5,12 +5,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Historial de higiene · Pollyana's Dolce</title>
-  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-visual-v2">
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-icons-v3">
 </head>
 <body class="higiene-body">
+  {% include "operacion/_higiene_icons.html" %}
   <main class="higiene-shell history-shell">
     <header class="higiene-header">
-      <a class="icon-link" href="{% url 'operacion:higiene_home' %}" aria-label="Volver">←</a>
+      <a class="icon-link" href="{% url 'operacion:higiene_home' %}" aria-label="Volver">
+        <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-left"></use></svg>
+      </a>
       <div><p>Higiene y limpieza</p><h1>{% if sucursal %}Historial de {{ sucursal.nombre }}{% else %}Historial comercial{% endif %}</h1></div>
       <a class="history-link" href="{% url 'operacion:app_home' %}">Inicio</a>
     </header>
@@ -23,7 +26,10 @@
       <label>Desde<input type="date" name="fecha_desde" value="{{ request.GET.fecha_desde }}"></label>
       <label>Hasta<input type="date" name="fecha_hasta" value="{{ request.GET.fecha_hasta }}"></label>
       <button type="submit">Aplicar filtros</button>
-      <a class="print-button" href="{% url 'operacion:higiene_imprimir' %}?{{ request.GET.urlencode }}">Imprimir / PDF</a>
+      <a class="print-button" href="{% url 'operacion:higiene_imprimir' %}?{{ request.GET.urlencode }}">
+        <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-printer"></use></svg>
+        Imprimir / PDF
+      </a>
     </form>
 
     <section class="history-list">

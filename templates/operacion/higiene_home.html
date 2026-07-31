@@ -6,17 +6,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#8b2252">
   <title>Higiene y limpieza · Pollyana's Dolce</title>
-  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-visual-v2">
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-icons-v3">
 </head>
 <body class="higiene-body">
+  {% include "operacion/_higiene_icons.html" %}
   <main class="higiene-shell">
     <header class="higiene-header">
-      <a class="icon-link" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">←</a>
+      <a class="icon-link" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">
+        <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-left"></use></svg>
+      </a>
       <div>
         <p>App Operativa</p>
         <h1>Higiene y limpieza</h1>
       </div>
-      <a class="history-link" href="{% url 'operacion:higiene_historial' %}">Historial</a>
+      <a class="history-link" href="{% url 'operacion:higiene_historial' %}">
+        <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-history"></use></svg>
+        Historial
+      </a>
     </header>
 
     {% if sucursal %}
@@ -40,13 +46,17 @@
           {% for tipo, plantilla in plantillas.items %}
             <button type="button" class="capture-option" data-open-panel="{{ tipo }}" role="tab">
               <span class="option-index">0{{ forloop.counter }}</span>
-              <span class="option-icon" aria-hidden="true">{% if tipo == 'CLORO_PH' %}H₂O{% elif tipo == 'BANOS' %}WC{% else %}✓{% endif %}</span>
+              <span class="option-icon" aria-hidden="true">
+                <svg class="ui-icon">
+                  <use href="#higiene-icon-{% if tipo == 'CLORO_PH' %}beaker{% elif tipo == 'BANOS' %}toilet{% else %}spray-can{% endif %}"></use>
+                </svg>
+              </span>
               <span class="option-copy">
                 <b>{{ plantilla.titulo }}</b>
                 <small>{{ plantilla.descripcion }}</small>
                 <em>{{ plantilla.puntos|length }} puntos · Plantilla {{ plantilla.version }}</em>
               </span>
-              <span class="option-action">Comenzar <span aria-hidden="true">→</span></span>
+              <span class="option-action">Comenzar <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-right"></use></svg></span>
             </button>
           {% endfor %}
         </div>
@@ -55,7 +65,10 @@
       {% for tipo, plantilla in plantillas.items %}
         <section class="capture-panel" data-panel="{{ tipo }}" hidden>
           <div class="panel-top">
-            <button type="button" class="text-button" data-close-panel>← Volver</button>
+            <button type="button" class="text-button" data-close-panel>
+              <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-left"></use></svg>
+              Volver
+            </button>
             <span>Plantilla {{ plantilla.version }}</span>
           </div>
           <div class="workflow-hero">
@@ -140,7 +153,7 @@
                 </button>
               {% endfor %}
               <button type="button" data-section-step="finish">
-                <span>✓</span>
+                <span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-check"></use></svg></span>
                 <b>Finalizar</b>
                 <small data-step-state>Pendiente</small>
               </button>
@@ -159,7 +172,7 @@
                     <b>{{ seccion.grouper }}</b>
                     <small>{{ seccion.list|length }} puntos por revisar</small>
                   </span>
-                  {% if tipo != 'CLORO_PH' %}<button type="button" data-mark-section>✓ Marcar todo cumple</button>{% endif %}
+                  {% if tipo != 'CLORO_PH' %}<button type="button" data-mark-section><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-check"></use></svg> Marcar todo cumple</button>{% endif %}
                 </legend>
                 <div class="review-list">
                   {% for punto in seccion.list %}
@@ -185,16 +198,16 @@
                         <p class="range-note">Rango recomendado: {{ punto.rango_recomendado.0 }} a {{ punto.rango_recomendado.1 }}</p>
                       {% else %}
                         <div class="status-choices">
-                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="CUMPLE" required><span>✓ Cumple</span></label>
-                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NO_CUMPLE"><span>! No cumple</span></label>
-                          {% if punto.admite_na %}<label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NA"><span>— No aplica</span></label>{% endif %}
+                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="CUMPLE" required><span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-check"></use></svg> Cumple</span></label>
+                          <label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NO_CUMPLE"><span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-alert"></use></svg> No cumple</span></label>
+                          {% if punto.admite_na %}<label><input type="radio" data-status name="{{ tipo }}_{{ punto.key }}" value="NA"><span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-minus"></use></svg> No aplica</span></label>{% endif %}
                         </div>
                         <div class="finding-detail" data-finding-detail hidden>
                           <label>¿Qué encontraste?<textarea data-observation rows="2" placeholder="Describe el hallazgo"></textarea></label>
-                          <label>Evidencia fotográfica<input type="file" name="evidencia_{{ punto.key }}" accept="image/*" capture="environment"></label>
+                          <label><span class="field-label"><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-camera"></use></svg> Evidencia fotográfica</span><input type="file" name="evidencia_{{ punto.key }}" accept="image/*" capture="environment"></label>
                           <div class="resolution-choice">
-                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="CORREGIDO"><span>✓ Corregido ahora</span></label>
-                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="SEGUIMIENTO"><span>↗ Enviar a Fallas</span></label>
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="CORREGIDO"><span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-check"></use></svg> Corregido ahora</span></label>
+                            <label><input type="radio" data-resolution name="resolution_{{ tipo }}_{{ punto.key }}" value="SEGUIMIENTO"><span><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-external"></use></svg> Enviar a Fallas</span></label>
                           </div>
                           <div class="failure-fields" data-failure-fields hidden>
                             <label>Tipo de falla
@@ -234,17 +247,17 @@
                   {% endfor %}
                 </div>
                 <div class="section-actions">
-                  {% if not forloop.first %}<button type="button" class="secondary-action" data-section-previous>← Área anterior</button>{% endif %}
+                  {% if not forloop.first %}<button type="button" class="secondary-action" data-section-previous><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-left"></use></svg> Área anterior</button>{% endif %}
                   <span><b data-section-complete>0</b> de {{ seccion.list|length }} listos</span>
                   <button type="button" class="continue-action" data-section-next>
-                    {% if forloop.last %}Revisar y terminar{% else %}Continuar{% endif %} <span aria-hidden="true">→</span>
+                    {% if forloop.last %}Revisar y terminar{% else %}Continuar{% endif %} <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-right"></use></svg>
                   </button>
                 </div>
               </fieldset>
             {% endfor %}
 
             <section class="review-finish" data-finish-step hidden>
-              <div class="finish-mark" aria-hidden="true">✓</div>
+              <div class="finish-mark" aria-hidden="true"><svg class="ui-icon"><use href="#higiene-icon-check"></use></svg></div>
               <p>Último paso</p>
               <h3>Revisa y guarda la bitácora</h3>
               <span data-finish-message>Completa todos los puntos antes de guardar.</span>
@@ -255,7 +268,7 @@
               </div>
               <label class="notes-field">Notas generales<textarea name="notas" rows="3" placeholder="Agrega una observación general, si hace falta"></textarea></label>
               <div class="finish-actions">
-                <button type="button" class="secondary-action" data-section-previous>← Volver a revisar</button>
+                <button type="button" class="secondary-action" data-section-previous><svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-arrow-left"></use></svg> Volver a revisar</button>
                 <button class="save-action" type="submit"><span>Guardar revisión</span><small>Quedará disponible en el historial</small></button>
               </div>
             </section>
@@ -279,13 +292,13 @@
         {% for registro in registros_recientes %}
           <a class="recent-row" href="{% url 'operacion:higiene_historial' %}#registro-{{ registro.id }}">
             <span><b>{{ registro.get_tipo_display }}</b><small>{{ registro.fecha|date:"d/m/Y" }} · {{ registro.clave_instancia }}</small></span>
-            <span>{{ registro.respuestas.count }} puntos ›</span>
+            <span>{{ registro.respuestas.count }} puntos <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-chevron-right"></use></svg></span>
           </a>
         {% endfor %}
       {% else %}
         <a class="recent-row" href="{% url 'operacion:higiene_historial' %}">
           <span><b>Aún no hay capturas</b><small>Los registros diarios aparecerán aquí.</small></span>
-          <span>Abrir ›</span>
+          <span>Abrir <svg class="ui-icon" aria-hidden="true"><use href="#higiene-icon-chevron-right"></use></svg></span>
         </a>
       {% endif %}
     </section>
