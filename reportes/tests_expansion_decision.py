@@ -270,8 +270,8 @@ class ExpansionDecisionServiceTests(TestCase):
 class ExpansionViewsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="director_exp", password="pass123", first_name="Dirección")
-        lectura_group, _ = Group.objects.get_or_create(name="LECTURA")
-        self.user.groups.add(lectura_group)
+        manager_group, _ = Group.objects.get_or_create(name="DG")
+        self.user.groups.add(manager_group)
         self.client.login(username="director_exp", password="pass123")
         self.sucursal = Sucursal.objects.create(codigo="EXP-VIEW", nombre="Sucursal Vista")
         self.project = ProyectoInversion.objects.create(
