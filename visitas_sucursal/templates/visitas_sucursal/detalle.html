@@ -9,7 +9,8 @@
   <header class="visit-head">
     <div>
       <h1 class="visit-title">{{ visita.sucursal|branch_label }}</h1>
-      <p class="visit-copy">{{ visita.fecha_programada|date:"d/m/Y" }} · {{ visita.get_tipo_display }} · {{ visita.porcentaje_cumplimiento }}% de cumplimiento</p>
+      <p class="visit-copy">{% if visita.fecha_programada %}Programada {{ visita.fecha_programada|date:"d/m/Y" }} · {% else %}Sin fecha programada · {% endif %}{{ visita.get_tipo_display }} · {{ visita.porcentaje_cumplimiento }}% de cumplimiento</p>
+      {% if visita.tipo == "EXTRAORDINARIA" %}<p class="visit-copy">{{ visita.get_motivo_extraordinaria_display }} · {{ visita.detalle_extraordinaria }}</p>{% endif %}
     </div>
     <a class="visit-btn secondary" href="{% url 'visitas_sucursal:lista' %}">Volver</a>
   </header>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -18,19 +19,38 @@ class VisitaSucursal(models.Model):
     ]
 
     ESTATUS_PROGRAMADA = "PROGRAMADA"
+    ESTATUS_BORRADOR = "BORRADOR"
     ESTATUS_REALIZADA = "REALIZADA"
     ESTATUS_CANCELADA = "CANCELADA"
     ESTATUS_CHOICES = [
         (ESTATUS_PROGRAMADA, "Programada"),
+        (ESTATUS_BORRADOR, "Borrador"),
         (ESTATUS_REALIZADA, "Realizada"),
         (ESTATUS_CANCELADA, "Cancelada"),
     ]
 
+    MOTIVO_SEGUIMIENTO_PENDIENTES = "SEGUIMIENTO_PENDIENTES"
+    MOTIVO_QUEJA = "QUEJA"
+    MOTIVO_OTRO = "OTRO"
+    MOTIVO_EXTRAORDINARIA_CHOICES = [
+        (MOTIVO_SEGUIMIENTO_PENDIENTES, "Seguimiento de pendientes"),
+        (MOTIVO_QUEJA, "Queja recibida"),
+        (MOTIVO_OTRO, "Otro"),
+    ]
+
     sucursal = models.ForeignKey("core.Sucursal", on_delete=models.PROTECT, related_name="visitas_comerciales")
-    fecha_programada = models.DateField(default=timezone.localdate, db_index=True)
+    fecha_programada = models.DateField(default=timezone.localdate, null=True, blank=True, db_index=True)
     fecha_real = models.DateField(null=True, blank=True)
     tipo = models.CharField(max_length=16, choices=TIPO_CHOICES, default=TIPO_QUINCENAL)
     estatus = models.CharField(max_length=16, choices=ESTATUS_CHOICES, default=ESTATUS_PROGRAMADA, db_index=True)
+    motivo_extraordinaria = models.CharField(
+        max_length=32,
+        choices=MOTIVO_EXTRAORDINARIA_CHOICES,
+        blank=True,
+        default="",
+    )
+    detalle_extraordinaria = models.TextField(blank=True, default="")
+    clave_idempotencia = models.UUIDField(null=True, blank=True, unique=True, editable=False)
     responsable = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -58,6 +78,7 @@ class VisitaSucursal(models.Model):
     gps_precision_m = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     gps_distancia_sucursal_m = models.PositiveIntegerField(null=True, blank=True)
     gps_dentro_geocerca = models.BooleanField(null=True, blank=True)
+    gps_radio_geocerca_m = models.PositiveIntegerField(null=True, blank=True)
     personal_presente = models.ManyToManyField("rrhh.Empleado", blank=True, related_name="visitas_sucursal_presentes")
     observaciones = models.TextField(blank=True, default="")
     creado_por = models.ForeignKey(
@@ -76,7 +97,30 @@ class VisitaSucursal(models.Model):
         verbose_name_plural = "Visitas a sucursal"
 
     def __str__(self) -> str:
-        return f"{self.sucursal} · {self.fecha_programada:%d/%m/%Y}"
+        if self.fecha_programada:
+            return f"{self.sucursal} · {self.fecha_programada:%d/%m/%Y}"
+        return f"{self.sucursal} · Extraordinaria"
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.tipo == self.TIPO_EXTRAORDINARIA:
+            if self.fecha_programada is not None:
+                errors["fecha_programada"] = "Una auditoría extraordinaria no lleva fecha programada."
+            if not self.motivo_extraordinaria:
+                errors["motivo_extraordinaria"] = "Selecciona la causa de la auditoría extraordinaria."
+            if not self.detalle_extraordinaria.strip():
+                errors["detalle_extraordinaria"] = "Explica el motivo de la auditoría extraordinaria."
+        elif self.fecha_programada is None:
+            errors["fecha_programada"] = "Las visitas programadas requieren fecha programada."
+        if errors:
+            raise ValidationError(errors)
+
+    @property
+    def desviacion_dias(self) -> int | None:
+        if not self.fecha_programada or not self.fecha_real:
+            return None
+        return (self.fecha_real - self.fecha_programada).days
 
     @property
     def porcentaje_cumplimiento(self) -> int:

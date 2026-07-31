@@ -3,13 +3,15 @@ from __future__ import annotations
 import calendar
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from uuid import UUID, uuid4
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -19,11 +21,16 @@ from core.access import can_manage_submodule, can_view_submodule
 from core.models import Sucursal, sucursales_operativas_q
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from logistica.models import PuntoLogistico
-from logistica.services_rutas_control import distancia_metros
 from rrhh.models import Empleado
 
-from .checklist import CHECKLIST_BASE
 from .models import ChecklistVisita, FotoVisita, HallazgoVisita, VisitaSucursal
+from .services import (
+    AuditoriaVisitaError,
+    crear_borrador_extraordinario,
+    crear_checklist_base,
+    ejecutar_auditoria,
+    programaciones_pendientes,
+)
 
 MES_LABELS = [
     "",
@@ -84,11 +91,26 @@ def _parse_decimal(value):
         return None
 
 
+def _wants_progressive_response(request):
+    return "application/json" in request.headers.get("Accept", "")
+
+
+def _action_json(*, ok, message, redirect_url=None, status=200):
+    payload = {
+        "ok": ok,
+        "toast": {
+            "type": "success" if ok else "error",
+            "message": message,
+            "persistent": not ok,
+        },
+    }
+    if redirect_url:
+        payload["redirect"] = redirect_url
+    return JsonResponse(payload, status=status)
+
+
 def _crear_checklist_base(visita):
-    ChecklistVisita.objects.bulk_create(
-        ChecklistVisita(visita=visita, categoria=categoria, titulo=titulo, orden=index)
-        for index, (_key, categoria, titulo) in enumerate(CHECKLIST_BASE, start=1)
-    )
+    crear_checklist_base(visita)
 
 
 def _sucursal_usuario(user):
@@ -189,8 +211,9 @@ def lista_visitas(request):
 
     hoy = timezone.localdate()
     sucursales = list(_sucursales_visitables().order_by("nombre"))
-    visitas_mes = (
+    plan_mes = list(
         _visitas_visitables()
+        .exclude(tipo=VisitaSucursal.TIPO_EXTRAORDINARIA)
         .filter(fecha_programada__range=(first_day, last_day))
         .select_related("sucursal", "responsable", "auditor")
         .annotate(
@@ -206,12 +229,27 @@ def lista_visitas(request):
         )
         .order_by("fecha_programada", "sucursal__nombre", "id")
     )
-    visitas_by_cell = {}
-    for visita in visitas_mes:
-        visitas_by_cell.setdefault((visita.sucursal_id, visita.fecha_programada.day), []).append(visita)
+    ejecuciones_mes = list(
+        _visitas_visitables()
+        .filter(
+            estatus=VisitaSucursal.ESTATUS_REALIZADA,
+            fecha_real__range=(first_day, last_day),
+        )
+        .select_related("sucursal", "responsable", "auditor")
+        .order_by("fecha_real", "sucursal__nombre", "id")
+    )
+    plan_by_cell = {}
+    for visita in plan_mes:
+        plan_by_cell.setdefault((visita.sucursal_id, visita.fecha_programada.day), []).append(visita)
+    ejecuciones_by_cell = {}
+    for visita in ejecuciones_mes:
+        ejecuciones_by_cell.setdefault((visita.sucursal_id, visita.fecha_real.day), []).append(visita)
 
-    total_programadas = visitas_mes.count()
-    total_realizadas = visitas_mes.filter(estatus=VisitaSucursal.ESTATUS_REALIZADA).count()
+    total_programadas = len(plan_mes)
+    total_realizadas = sum(1 for visita in plan_mes if visita.estatus == VisitaSucursal.ESTATUS_REALIZADA)
+    extraordinarias_mes = sum(
+        1 for visita in ejecuciones_mes if visita.tipo == VisitaSucursal.TIPO_EXTRAORDINARIA
+    )
     days = [
         {"day": day, "date": date(first_day.year, first_day.month, day), "is_sunday": date(first_day.year, first_day.month, day).weekday() == 6}
         for day in range(1, last_day.day + 1)
@@ -222,17 +260,38 @@ def lista_visitas(request):
         row_visits = 0
         cells = []
         for day in days:
-            visitas = visitas_by_cell.get((sucursal.id, day["day"]), [])
-            visita = visitas[0] if visitas else None
-            row_visits += len(visitas)
-            cells.append({"day": day, "visita": visita, "count": len(visitas)})
+            planeadas = plan_by_cell.get((sucursal.id, day["day"]), [])
+            ejecutadas = ejecuciones_by_cell.get((sucursal.id, day["day"]), [])
+            visita = planeadas[0] if planeadas else (ejecutadas[0] if ejecutadas else None)
+            row_visits += len(planeadas)
+            cells.append(
+                {
+                    "day": day,
+                    "visita": visita,
+                    "planeadas": planeadas,
+                    "ejecutadas": ejecutadas,
+                    "count": len({item.pk for item in planeadas + ejecutadas}),
+                }
+            )
         weeks = [
             [
                 {
                     "pad": cell_date.month != first_day.month,
                     "date": cell_date,
-                    "visita": (visitas_by_cell.get((sucursal.id, cell_date.day), [None])[0]
-                               if cell_date.month == first_day.month else None),
+                    "planeadas": (
+                        plan_by_cell.get((sucursal.id, cell_date.day), [])
+                        if cell_date.month == first_day.month else []
+                    ),
+                    "ejecutadas": (
+                        ejecuciones_by_cell.get((sucursal.id, cell_date.day), [])
+                        if cell_date.month == first_day.month else []
+                    ),
+                    "visita": (
+                        (plan_by_cell.get((sucursal.id, cell_date.day), [])
+                         or ejecuciones_by_cell.get((sucursal.id, cell_date.day), [])
+                         or [None])[0]
+                        if cell_date.month == first_day.month else None
+                    ),
                     "es_hoy": cell_date == hoy,
                 }
                 for cell_date in week
@@ -252,32 +311,40 @@ def lista_visitas(request):
     vista_movil = request.GET.get("vista") or "dia"
     if vista_movil not in ("dia", "sucursal"):
         vista_movil = "dia"
-    visitas_por_dia = {}
-    for visita in visitas_mes:
-        visitas_por_dia.setdefault(visita.fecha_programada, []).append(visita)
+    actividad_por_dia = {}
+    for visita in plan_mes:
+        actividad_por_dia.setdefault(visita.fecha_programada, {"planeadas": [], "ejecutadas": []})["planeadas"].append(visita)
+    for visita in ejecuciones_mes:
+        actividad_por_dia.setdefault(visita.fecha_real, {"planeadas": [], "ejecutadas": []})["ejecutadas"].append(visita)
     agenda_dias = [
         {
             "fecha": fecha,
-            "visitas": items,
+            "planeadas": items["planeadas"],
+            "ejecutadas": items["ejecutadas"],
+            "visitas": list({visita.pk: visita for visita in items["planeadas"] + items["ejecutadas"]}.values()),
             "es_hoy": fecha == hoy,
-            "vencida": fecha < hoy and any(v.estatus == VisitaSucursal.ESTATUS_PROGRAMADA for v in items),
+            "vencida": fecha < hoy and any(
+                v.estatus == VisitaSucursal.ESTATUS_PROGRAMADA for v in items["planeadas"]
+            ),
         }
-        for fecha, items in sorted(visitas_por_dia.items())
+        for fecha, items in sorted(actividad_por_dia.items())
     ]
 
     daily_estimated = []
     daily_real = []
     for day in days:
-        visitas_dia = [visita for (sucursal_id, cell_day), visitas in visitas_by_cell.items() if cell_day == day["day"] for visita in visitas]
-        daily_estimated.append(round((len(visitas_dia) / total_programadas) * 100) if total_programadas else 0)
+        visitas_planeadas_dia = [
+            visita for (_sucursal_id, cell_day), visitas in plan_by_cell.items()
+            if cell_day == day["day"] for visita in visitas
+        ]
+        visitas_ejecutadas_dia = [
+            visita for (_sucursal_id, cell_day), visitas in ejecuciones_by_cell.items()
+            if cell_day == day["day"] for visita in visitas
+            if visita.tipo != VisitaSucursal.TIPO_EXTRAORDINARIA
+        ]
+        daily_estimated.append(round((len(visitas_planeadas_dia) / total_programadas) * 100) if total_programadas else 0)
         daily_real.append(
-            round(
-                (
-                    sum(1 for visita in visitas_dia if visita.estatus == VisitaSucursal.ESTATUS_REALIZADA)
-                    / total_programadas
-                )
-                * 100
-            )
+            round((len(visitas_ejecutadas_dia) / total_programadas) * 100)
             if total_programadas
             else 0
         )
@@ -291,11 +358,11 @@ def lista_visitas(request):
         "prev_month": _month_shift(first_day, -1),
         "next_month": _month_shift(first_day, 1),
         "can_manage": can_manage,
-        "programadas": _visitas_visitables().filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).count(),
-        "vencidas": _visitas_visitables().filter(
-            estatus=VisitaSucursal.ESTATUS_PROGRAMADA,
-            fecha_programada__lt=hoy,
-        ).count(),
+        "programadas": total_programadas,
+        "vencidas": sum(
+            1 for visita in plan_mes
+            if visita.estatus == VisitaSucursal.ESTATUS_PROGRAMADA and visita.fecha_programada < hoy
+        ),
         "hallazgos_abiertos": HallazgoVisita.objects.filter(
             visita__sucursal__in=_sucursales_visitables(),
             estatus__in=[HallazgoVisita.ESTATUS_ABIERTO, HallazgoVisita.ESTATUS_EN_PROCESO]
@@ -305,6 +372,9 @@ def lista_visitas(request):
         "hoy": hoy,
         "avance_estimado": 100 if total_programadas else 0,
         "avance_real": round((total_realizadas / total_programadas) * 100) if total_programadas else 0,
+        "total_plan_mes": total_programadas,
+        "total_ejecutadas_mes": total_realizadas,
+        "extraordinarias_mes": extraordinarias_mes,
         "daily_estimated": daily_estimated,
         "daily_real": daily_real,
     }
@@ -316,10 +386,17 @@ def nueva_visita(request):
     _require_visitas(request.user, manage=True)
     sucursales = _sucursales_visitables().order_by("nombre")
     users = _active_users()
+    tipo_choices = [
+        choice for choice in VisitaSucursal.TIPO_CHOICES
+        if choice[0] != VisitaSucursal.TIPO_EXTRAORDINARIA
+    ]
+    tipos_programables = {value for value, _label in tipo_choices}
     if request.method == "POST":
         sucursal_id = request.POST.get("sucursal")
         fecha = _parse_date(request.POST.get("fecha_programada"))
         tipo = request.POST.get("tipo") or VisitaSucursal.TIPO_QUINCENAL
+        if tipo not in tipos_programables:
+            tipo = VisitaSucursal.TIPO_QUINCENAL
         sucursal = _sucursales_visitables().filter(pk=sucursal_id).first() if sucursal_id else None
         if not sucursal or not fecha:
             messages.error(request, "Selecciona sucursal y fecha programada.")
@@ -345,7 +422,7 @@ def nueva_visita(request):
         {
             "sucursales": sucursales,
             "users": users,
-            "tipo_choices": VisitaSucursal.TIPO_CHOICES,
+            "tipo_choices": tipo_choices,
             "today": preset_fecha,
             "preset_sucursal": preset_sucursal,
         },
@@ -377,81 +454,106 @@ def app_visitas_sucursal(request):
     if not can_manage:
         preview_read_only = True
 
-    visitas = _visitas_app(request.user, sucursal, can_manage)
     filtro_sucursal = None
     if can_manage:
-        suc_param = request.GET.get("sucursal") or ""
+        suc_param = request.POST.get("sucursal") or request.GET.get("sucursal") or ""
         if suc_param.isdigit():
             filtro_sucursal = _sucursales_visitables().filter(pk=suc_param).first()
-        if filtro_sucursal:
-            visitas = visitas.filter(sucursal=filtro_sucursal)
-    visita_id = request.GET.get("visita")
+
+    if can_manage and filtro_sucursal:
+        pendientes = programaciones_pendientes(filtro_sucursal)
+    else:
+        pendientes = VisitaSucursal.objects.none()
+
+    visitas = _visitas_app(request.user, sucursal, can_manage)
+    if can_manage:
+        visitas = visitas.filter(sucursal=filtro_sucursal) if filtro_sucursal else visitas.none()
+    visita_id = request.POST.get("visita_id") or request.GET.get("visita")
     visita = visitas.filter(pk=visita_id).first() if visita_id else None
-    if not visita:
-        visita = (
-            visitas.filter(estatus=VisitaSucursal.ESTATUS_PROGRAMADA).first()
-            or visitas.filter(fecha_programada=timezone.localdate()).first()
-            or visitas.first()
-        )
+
+    if can_manage and filtro_sucursal and not visita_id:
+        visita = pendientes.first()
+
+    if can_manage and visita_id and not visita:
+        visita = _visitas_visitables().filter(pk=visita_id).first()
+        if visita and filtro_sucursal and visita.sucursal_id != filtro_sucursal.id:
+            visita = None
+    elif not can_manage and not visita:
+        visita = visitas.first()
 
     if request.method == "POST":
         if preview_read_only:
             messages.info(request, "Vista de sucursal: las capturas están bloqueadas.")
             return redirect(request.get_full_path())
         action = request.POST.get("action")
-        if action == "crear":
-            messages.error(request, "No hay visita programada para capturar.")
-            return redirect(request.path)
+        if action == "iniciar_extraordinaria":
+            if not filtro_sucursal:
+                if _wants_progressive_response(request):
+                    return _action_json(ok=False, message="Selecciona la sucursal que vas a auditar.", status=400)
+                messages.error(request, "Selecciona la sucursal que vas a auditar.")
+                return redirect(request.path)
+            try:
+                token = UUID(request.POST.get("clave_idempotencia") or "")
+                visita = crear_borrador_extraordinario(
+                    user=request.user,
+                    sucursal=filtro_sucursal,
+                    motivo=request.POST.get("motivo_extraordinaria") or "",
+                    detalle=request.POST.get("detalle_extraordinaria") or "",
+                    clave_idempotencia=token,
+                )
+            except (AuditoriaVisitaError, ValidationError, ValueError) as exc:
+                error_message = f"No se pudo iniciar la extraordinaria: {exc}"
+                if _wants_progressive_response(request):
+                    return _action_json(ok=False, message=error_message, status=400)
+                messages.error(request, error_message)
+                return redirect(f"{request.path}?sucursal={filtro_sucursal.pk}")
+            success_message = "Auditoría extraordinaria preparada. Captura el checklist y valida tu ubicación."
+            redirect_url = f"{request.path}?sucursal={filtro_sucursal.pk}&visita={visita.pk}"
+            if _wants_progressive_response(request):
+                return _action_json(ok=True, message=success_message, redirect_url=redirect_url)
+            messages.success(request, success_message)
+            return redirect(redirect_url)
 
-        visita = get_object_or_404(visitas, pk=request.POST.get("visita_id"))
-        for item in visita.checklist.all():
-            item.respuesta = request.POST.get(f"respuesta_{item.id}") or item.respuesta
-            item.observaciones = (request.POST.get(f"observaciones_{item.id}") or "").strip()
-            item.save(update_fields=["respuesta", "observaciones"])
-        visita.observaciones = (request.POST.get("observaciones") or "").strip()
-        update_fields = ["observaciones", "actualizado_en"]
-        if can_manage:
-            latitud = _parse_decimal(request.POST.get("gps_latitud"))
-            longitud = _parse_decimal(request.POST.get("gps_longitud"))
-            if latitud is None or longitud is None:
-                messages.error(request, "Activa la ubicación para ejecutar la auditoría.")
-                return redirect(f"{request.path}?visita={visita.pk}")
-            punto = _punto_logistico_sucursal(visita.sucursal)
-            distancia = distancia_metros(latitud, longitud, punto.latitud, punto.longitud) if punto else None
-            dentro_geocerca = distancia <= punto.radio_geocerca_metros if punto and distancia is not None else None
-            if dentro_geocerca is False:
-                messages.error(request, f"GPS fuera de la geocerca de {visita.sucursal.nombre}: {distancia} m.")
-                return redirect(f"{request.path}?visita={visita.pk}")
-            visita.estatus = VisitaSucursal.ESTATUS_REALIZADA
-            visita.fecha_real = timezone.localdate()
-            visita.realizada_por = request.user
-            visita.realizada_en = timezone.now()
-            visita.auditor = visita.auditor or request.user
-            visita.gps_latitud = latitud
-            visita.gps_longitud = longitud
-            visita.gps_precision_m = _parse_decimal(request.POST.get("gps_precision_m"))
-            visita.gps_distancia_sucursal_m = distancia
-            visita.gps_dentro_geocerca = dentro_geocerca
-            update_fields += [
-                "estatus",
-                "fecha_real",
-                "realizada_por",
-                "realizada_en",
-                "auditor",
-                "gps_latitud",
-                "gps_longitud",
-                "gps_precision_m",
-                "gps_distancia_sucursal_m",
-                "gps_dentro_geocerca",
-            ]
-        visita.save(update_fields=update_fields)
-        if can_manage:
-            visita.personal_presente.set(request.POST.getlist("personal_presente"))
-            for foto in request.FILES.getlist("fotos"):
-                FotoVisita.objects.create(visita=visita, foto=foto, creado_por=request.user)
-        message = "Auditoría ejecutada y visita marcada como realizada." if can_manage else "Bitácora guardada."
-        messages.success(request, message)
-        return redirect(f"{request.path}?visita={visita.pk}")
+        visita_base = _visitas_visitables().filter(pk=request.POST.get("visita_id")).first()
+        if not visita_base:
+            if _wants_progressive_response(request):
+                return _action_json(ok=False, message="Selecciona una visita pendiente para ejecutar.", status=400)
+            messages.error(request, "Selecciona una visita pendiente para ejecutar.")
+            return redirect(request.path)
+        filtro_sucursal = filtro_sucursal or visita_base.sucursal
+        respuestas = {
+            item.id: (
+                request.POST.get(f"respuesta_{item.id}") or item.respuesta,
+                request.POST.get(f"observaciones_{item.id}") or "",
+            )
+            for item in visita_base.checklist.all()
+        }
+        try:
+            with transaction.atomic():
+                visita = ejecutar_auditoria(
+                    visita_id=visita_base.pk,
+                    sucursal=filtro_sucursal,
+                    user=request.user,
+                    latitud=_parse_decimal(request.POST.get("gps_latitud")),
+                    longitud=_parse_decimal(request.POST.get("gps_longitud")),
+                    precision_m=_parse_decimal(request.POST.get("gps_precision_m")),
+                    respuestas=respuestas,
+                    observaciones=request.POST.get("observaciones") or "",
+                    personal_ids=request.POST.getlist("personal_presente"),
+                )
+                for foto in request.FILES.getlist("fotos"):
+                    FotoVisita.objects.create(visita=visita, foto=foto, creado_por=request.user)
+        except AuditoriaVisitaError as exc:
+            if _wants_progressive_response(request):
+                return _action_json(ok=False, message=str(exc), status=422)
+            messages.error(request, str(exc))
+            return redirect(f"{request.path}?sucursal={filtro_sucursal.pk}&visita={visita_base.pk}")
+        success_message = "Auditoría ejecutada y ubicación comprobada."
+        redirect_url = f"{request.path}?sucursal={filtro_sucursal.pk}&visita={visita.pk}"
+        if _wants_progressive_response(request):
+            return _action_json(ok=True, message=success_message, redirect_url=redirect_url)
+        messages.success(request, success_message)
+        return redirect(redirect_url)
 
     return render(
         request,
@@ -459,7 +561,8 @@ def app_visitas_sucursal(request):
         {
             "sucursal": sucursal,
             "visita": visita,
-            "visitas": visitas[:12],
+            "visitas": pendientes[:12] if can_manage else visitas[:12],
+            "programaciones_pendientes": pendientes,
             "checklist": visita.checklist.all() if visita else [],
             "empleados_sucursal": _empleados_de_sucursal(visita.sucursal) if visita and can_manage else [],
             "punto_logistico": _punto_logistico_sucursal(visita.sucursal) if visita and can_manage else None,
@@ -470,6 +573,16 @@ def app_visitas_sucursal(request):
             "preview_sucursal": preview_sucursal,
             "filtro_sucursal": filtro_sucursal,
             "sucursales_preview": _sucursales_visitables().order_by("nombre") if is_superuser else [],
+            "sucursales_auditoria": _sucursales_visitables().order_by("nombre") if can_manage else [],
+            "motivo_extraordinaria_choices": VisitaSucursal.MOTIVO_EXTRAORDINARIA_CHOICES,
+            "clave_extraordinaria": uuid4(),
+            "visita_ejecutable": bool(
+                visita
+                and visita.estatus in (
+                    VisitaSucursal.ESTATUS_PROGRAMADA,
+                    VisitaSucursal.ESTATUS_BORRADOR,
+                )
+            ),
             "is_superuser": is_superuser,
         },
     )
@@ -514,7 +627,7 @@ def detalle_visita(request, pk):
             if visita.estatus == VisitaSucursal.ESTATUS_REALIZADA:
                 messages.error(request, "No se puede eliminar una visita ya realizada.")
                 return redirect("visitas_sucursal:detalle", pk=visita.pk)
-            fecha = visita.fecha_programada
+            fecha = visita.fecha_programada or visita.fecha_real or timezone.localdate()
             visita.delete()
             messages.success(request, "Visita eliminada del cronograma.")
             return redirect(f"{reverse('visitas_sucursal:lista')}?anio={fecha.year}&mes={fecha.month}")
