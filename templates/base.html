@@ -935,7 +935,7 @@
         <form id="preview-picker-start-form" method="post" action="{% url 'superuser_preview_start' %}" data-preview-control hidden>
             {% csrf_token %}
             <input id="preview-picker-user-id" type="hidden" name="user_id">
-            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="hidden" name="next" value="{% url 'dashboard' %}">
         </form>
     </dialog>
     {% endif %}

@@ -52,6 +52,15 @@ class SuperuserPreviewTests(TestCase):
         response = self.client.get(reverse("notificaciones"))
         self.assertNotContains(response, "Ver como empleado")
 
+    def test_view_as_control_starts_from_employee_dashboard(self):
+        response = self.client.get(reverse("notificaciones"))
+
+        self.assertContains(
+            response,
+            f'<input type="hidden" name="next" value="{reverse("dashboard")}">',
+            html=True,
+        )
+
     def test_options_only_include_active_linked_personnel(self):
         unlinked = get_user_model().objects.create_user(
             username="sin.empleado",
