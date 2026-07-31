@@ -535,6 +535,18 @@ def can_view_reportes(user: AbstractBaseUser) -> bool:
     return can_view_module(user, "reportes") or can_view_module(user, "direccion")
 
 
+def can_view_investment_projects(user: AbstractBaseUser) -> bool:
+    return can_view_reportes(user) or can_view_submodule(
+        user, "direccion", "proyectos_inversion"
+    )
+
+
+def can_manage_investment_projects(user: AbstractBaseUser) -> bool:
+    return can_manage_module(user, "reportes") or can_manage_submodule(
+        user, "direccion", "proyectos_inversion"
+    )
+
+
 def can_view_rentabilidad(user: AbstractBaseUser) -> bool:
     return can_view_submodule(user, "direccion", "rentabilidad")
 

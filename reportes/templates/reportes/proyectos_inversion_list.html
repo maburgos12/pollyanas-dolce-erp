@@ -30,7 +30,7 @@
     </article>
     <aside class="investment-side">
       <div class="investment-actions">
-        <a class="investment-action-link" href="{% url 'reportes:proyectos_inversion' %}?refresh=1">Actualizar snapshots</a>
+        {% if can_manage_investments %}<form method="post" class="investment-inline-form">{% csrf_token %}<input type="hidden" name="action" value="refresh_all"><button class="investment-action-link" type="submit">Actualizar snapshots</button></form>{% endif %}
         <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_comparativo' %}">Abrir comparativo</a>
         <a class="investment-action-link is-ghost" href="{% url 'reportes:proyectos_inversion_expansion' %}">Abrir expansión</a>
       </div>

@@ -2027,6 +2027,13 @@ class ProyectoInversion(models.Model):
 
 
 class ProyectoInversionGasto(models.Model):
+    TIPO_PLANEADO = "PLANEADO"
+    TIPO_REAL = "REAL"
+    TIPO_REGISTRO_CHOICES = [
+        (TIPO_PLANEADO, "Presupuesto planeado"),
+        (TIPO_REAL, "Gasto real"),
+    ]
+
     CATEGORIA_OBRA_CIVIL = "OBRA_CIVIL"
     CATEGORIA_EQUIPAMIENTO = "EQUIPAMIENTO"
     CATEGORIA_MOBILIARIO = "MOBILIARIO"
@@ -2050,6 +2057,12 @@ class ProyectoInversionGasto(models.Model):
         ProyectoInversion,
         on_delete=models.CASCADE,
         related_name="gastos_inversion",
+    )
+    tipo_registro = models.CharField(
+        max_length=12,
+        choices=TIPO_REGISTRO_CHOICES,
+        default=TIPO_REAL,
+        db_index=True,
     )
     fecha = models.DateField(db_index=True)
     categoria = models.CharField(max_length=30, choices=CATEGORIA_CHOICES, db_index=True)
@@ -2103,6 +2116,7 @@ class ProyectoInversionGasto(models.Model):
         indexes = [
             models.Index(fields=["proyecto", "fecha"], name="rpinvexp_project_date_idx"),
             models.Index(fields=["categoria", "fecha"], name="rpinvexp_cat_date_idx"),
+            models.Index(fields=["proyecto", "tipo_registro"], name="rpinvexp_project_type_idx"),
         ]
 
     def __str__(self) -> str:

@@ -3,16 +3,17 @@
   <h2>Inversión</h2>
   <div class="inv-kpis">
     <div class="inv-kpi"><span class="inv-label">Planeado</span><div class="inv-value">${{ project.monto_inversion_planeado|floatformat:2|intcomma }}</div></div>
-    <div class="inv-kpi"><span class="inv-label">Real</span><div class="inv-value">${{ project.monto_inversion_real|floatformat:2|intcomma }}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Real comprobado</span><div class="inv-value">${{ inversion_real|floatformat:2|intcomma }}</div></div>
     <div class="inv-kpi"><span class="inv-label">Partidas</span><div class="inv-value">{{ gastos.count|intcomma }}</div></div>
     <div class="inv-kpi"><span class="inv-label">Capital aportado</span><div class="inv-value">${{ project.capital_inicial_aportado|floatformat:2|intcomma }}</div></div>
     <div class="inv-kpi"><span class="inv-label">Deuda</span><div class="inv-value">${{ project.deuda_asociada|floatformat:2|intcomma }}</div></div>
-    <div class="inv-kpi"><span class="inv-label">Avance</span><div class="inv-value">{% if project.monto_inversion_planeado %}{% widthratio project.monto_inversion_real project.monto_inversion_planeado 100 %}%{% else %}0%{% endif %}</div></div>
+    <div class="inv-kpi"><span class="inv-label">Avance comprobado</span><div class="inv-value">{% if project.monto_inversion_planeado %}{% widthratio inversion_real project.monto_inversion_planeado 100 %}%{% else %}0%{% endif %}</div></div>
   </div>
 </section>
 
 <section class="inv-panel">
   <h2>Registrar gasto CAPEX</h2>
+  {% if can_manage_investments %}
   <form method="post">
     {% csrf_token %}
     <input type="hidden" name="action" value="add_expense">
@@ -28,6 +29,20 @@
     </div>
     <div class="inv-actions pd-u-0cf8f93b0e"><button class="inv-button" type="submit">Agregar gasto</button></div>
   </form>
+  {% else %}<p class="inv-muted">Solo los responsables con permiso de gestión pueden registrar gasto real.</p>{% endif %}
+</section>
+
+<section class="inv-panel">
+  <h2>Presupuesto planeado</h2>
+  <p class="inv-muted">Estas partidas son supuestos del proyecto y no se suman al gasto real.</p>
+  <div class="investment-table-wrap">
+    <table class="inv-table">
+      <thead><tr><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for partida in partidas_planeadas %}<tr><td>{{ partida.get_categoria_display }}</td><td>{{ partida.descripcion }}</td><td>{{ partida.proveedor_nombre|default:"-" }}</td><td class="num">${{ partida.monto_total|floatformat:2|intcomma }}</td></tr>{% empty %}<tr><td colspan="4">Sin partidas planeadas desglosadas.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="inv-panel">

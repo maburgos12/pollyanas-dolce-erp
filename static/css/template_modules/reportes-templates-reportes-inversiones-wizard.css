@@ -41,3 +41,8 @@
   .inv-note { border:1px solid #bbf7d0; background:var(--inv-ok-bg); color:var(--inv-ok); border-radius:.55rem; padding:.65rem .75rem; margin:.75rem 0; font-weight:800; }
   .inv-help { color:var(--inv-muted); font-size:.82rem; margin:.25rem 0 0; }
   @media (max-width:1000px){ .inv-layout,.inv-form-grid,.inv-kpis,.inv-review-grid{grid-template-columns:1fr;} }
+  .inv-wizard-breadcrumbs { display:flex; gap:.5rem; margin-bottom:1rem; color:var(--inv-muted); font-size:.9rem; }
+  .inv-wizard-breadcrumbs a { color:var(--inv-wine); font-weight:800; text-decoration:none; }
+  .inv-plan-notice { display:flex; align-items:center; gap:.65rem; margin:1rem 0; padding:.75rem 1rem; border:1px solid #ead8a3; border-left:4px solid var(--inv-gold); border-radius:.55rem; background:#fff8e8; color:#684712; }
+  .inv-button, .inv-step-pill { min-height:44px; }
+  @media (max-width:680px){ .inv-shell{padding:1rem .75rem 2rem;} .inv-plan-notice{align-items:flex-start; flex-direction:column;} .inv-table{min-width:760px;} .pd-u-a76a7a79bc{overflow-x:auto;} }

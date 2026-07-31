@@ -26,7 +26,11 @@ from reportes.models import (
     ProyectoInversionPagoDeuda,
     ProyectoInversionSnapshotMensual,
 )
-from reportes.services_investment_projects import ProyectoInversionRefreshService, _benchmark_sucursales_activas
+from reportes.services_investment_projects import (
+    ProyectoInversionRefreshService,
+    ProyectoInversionScenarioService,
+    _benchmark_sucursales_activas,
+)
 from reportes.services_operating_finance import OperatingFinanceBootstrapService
 from ventas.models import VentaAutoritativaPoint
 
@@ -149,11 +153,43 @@ class ProyectoInversionRefreshServiceTests(TestCase):
             ).exists()
         )
 
+    def test_missing_operating_expenses_do_not_create_recovery_or_close_project(self):
+        GastoOperativoMensual.objects.all().delete()
+        self.project.cierre_por_recuperacion_total = True
+        self.project.save(update_fields=["cierre_por_recuperacion_total"])
+
+        ProyectoInversionRefreshService().refresh_project(
+            self.project, until=date(2026, 2, 28)
+        )
+
+        snapshot = self.project.snapshots_mensuales.get(periodo=date(2026, 2, 1))
+        self.assertIsNone(snapshot.gastos_operativos)
+        self.assertIsNone(snapshot.utilidad_operativa)
+        self.assertIsNone(snapshot.flujo_libre)
+        self.assertIsNone(snapshot.porcentaje_recuperado)
+        self.assertEqual(
+            snapshot.fuentes["expense_coverage_status"], "MISSING"
+        )
+        self.project.refresh_from_db()
+        self.assertNotEqual(self.project.estatus, ProyectoInversion.ESTATUS_CERRADO)
+
+    def test_planned_lines_are_excluded_from_actual_investment(self):
+        planned = self.project.gastos_inversion.get(descripcion="Adecuación local")
+        planned.tipo_registro = ProyectoInversionGasto.TIPO_PLANEADO
+        planned.save(update_fields=["tipo_registro"])
+
+        ProyectoInversionRefreshService().refresh_project(
+            self.project, until=date(2026, 2, 28)
+        )
+
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.monto_inversion_real, Decimal("97440.00"))
+
 
 class ProyectoInversionViewsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="lectura_inv", password="pass123", first_name="Dirección")
-        group, _ = Group.objects.get_or_create(name="LECTURA")
+        group, _ = Group.objects.get_or_create(name="DG")
         self.user.groups.add(group)
         self.client.login(username="lectura_inv", password="pass123")
         self.sucursal = Sucursal.objects.create(codigo="CEN-INV", nombre="Centro Inversión")
@@ -222,6 +258,81 @@ class ProyectoInversionViewsTests(TestCase):
             export_response["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+    def test_new_detail_refresh_supports_async_action_contract(self):
+        response = self.client.post(
+            reverse("inversiones:detalle", args=[self.project.pk]),
+            {"action": "refresh_project"},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(
+            response.json()["redirect"],
+            reverse("inversiones:detalle", args=[self.project.pk]),
+        )
+
+    def test_scenario_growth_uses_percentage_points(self):
+        scenario = ProyectoInversionEscenario.objects.create(
+            proyecto=self.project,
+            nombre="Crecimiento explícito",
+            ventas_promedio_mensuales=Decimal("100000"),
+            crecimiento_mensual_pct=Decimal("0.8"),
+            margen_bruto_pct=Decimal("100"),
+            gastos_operativos_mensuales=Decimal("0"),
+            horizonte_meses=2,
+        )
+
+        result = ProyectoInversionScenarioService().compute(self.project, scenario)
+
+        self.assertEqual(Decimal(result["monthly_growth_pct"]), Decimal("0.8000"))
+        self.assertEqual(
+            Decimal(result["projection_rows"][1]["sales"]), Decimal("100800.00")
+        )
+
+
+class ProyectoInversionReadOnlySecurityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="lectura_inv", password="pass123")
+        group, _ = Group.objects.get_or_create(name="LECTURA")
+        self.user.groups.add(group)
+        self.client.login(username="lectura_inv", password="pass123")
+        self.project = ProyectoInversion.objects.create(
+            nombre_proyecto="Proyecto visible no editable",
+            tipo_proyecto=ProyectoInversion.TIPO_APERTURA_SUCURSAL,
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+    def test_read_only_user_can_view_new_portfolio_and_detail(self):
+        portfolio = self.client.get(reverse("inversiones:portafolio"))
+        detail = self.client.get(reverse("inversiones:detalle", args=[self.project.pk]))
+        self.assertEqual(portfolio.status_code, 200)
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotContains(portfolio, "Crear proyecto")
+        self.assertNotContains(detail, "data-async-action")
+        self.assertContains(detail, "Tu acceso es de solo lectura")
+
+    def test_read_only_user_cannot_create_edit_or_refresh(self):
+        create_response = self.client.post(
+            reverse("inversiones:wizard"),
+            {"action": "crear_proyecto"},
+        )
+        edit_response = self.client.post(
+            reverse("inversiones:detalle", args=[self.project.pk]),
+            {"action": "editar_ficha", "nombre_proyecto": "Alterado"},
+        )
+        refresh_response = self.client.post(
+            reverse("inversiones:detalle", args=[self.project.pk]),
+            {"action": "refresh_project"},
+        )
+
+        self.assertEqual(create_response.status_code, 403)
+        self.assertEqual(edit_response.status_code, 403)
+        self.assertEqual(refresh_response.status_code, 403)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.nombre_proyecto, "Proyecto visible no editable")
 
 
 class BamoaWizardV2Tests(TestCase):
@@ -418,6 +529,7 @@ class BamoaWizardV2Tests(TestCase):
         proyecto = ProyectoInversion.objects.get(nombre_proyecto="Apertura Bamoa 2026")
         gasto = proyecto.gastos_inversion.get(descripcion="Remodelación local Bamoa")
         self.assertEqual(gasto.categoria, ProyectoInversionGasto.CATEGORIA_OBRA_CIVIL)
+        self.assertEqual(gasto.tipo_registro, ProyectoInversionGasto.TIPO_PLANEADO)
         self.assertEqual(gasto.proveedor_nombre, "Arquitecta")
         self.assertEqual(gasto.monto_total, Decimal("190000.00"))
 

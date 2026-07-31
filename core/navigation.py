@@ -69,7 +69,7 @@ NAV_GROUPS = [
             ("direccion", "bi", "BI ejecutivo", "/reportes/bi/", ["/reportes/bi/"]),
             ("direccion", "cierre_diario", "Cierre diario", "/reportes/cierre-operativo/", ["/reportes/cierre-operativo/"]),
             ("direccion", "producido_vendido", "Producido vs Vendido", "/reportes/produccion/", ["/reportes/produccion/"]),
-            ("direccion", "proyectos_inversion", "Proyectos inversión", "/reportes/proyectos-inversion/", ["/reportes/proyectos-inversion/", "/reportes/sucursales/"]),
+            ("direccion", "proyectos_inversion", "Proyectos inversión", "/inversiones/", ["/inversiones/"]),
             ("direccion", "rentabilidad", "Rentabilidad", "/rentabilidad/", ["/rentabilidad/"]),
         ],
     },
