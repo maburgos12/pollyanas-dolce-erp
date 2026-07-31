@@ -5,7 +5,7 @@ from rest_framework import serializers
 from core.access import can_view_rrhh
 
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
-from .services_prestamos import can_autorizar_prestamo_jefe
+from .services_prestamos import can_autorizar_prestamo_direccion, can_autorizar_prestamo_jefe
 
 
 class AsistenciaSerializer(serializers.ModelSerializer):
@@ -170,6 +170,7 @@ class PrestamoSerializer(serializers.ModelSerializer):
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
     metodo_pago_display = serializers.CharField(source="get_metodo_pago_display", read_only=True)
     puede_autorizar_jefe = serializers.SerializerMethodField()
+    puede_aprobar_direccion = serializers.SerializerMethodField()
 
     class Meta:
         model = Prestamo
@@ -192,6 +193,7 @@ class PrestamoSerializer(serializers.ModelSerializer):
             "jefe_directo",
             "jefe_directo_nombre",
             "puede_autorizar_jefe",
+            "puede_aprobar_direccion",
             "creado_en",
         ]
         read_only_fields = [
@@ -205,6 +207,7 @@ class PrestamoSerializer(serializers.ModelSerializer):
             "jefe_directo",
             "jefe_directo_nombre",
             "puede_autorizar_jefe",
+            "puede_aprobar_direccion",
             "creado_en",
         ]
         extra_kwargs = {"empleado": {"required": False}}
@@ -227,3 +230,8 @@ class PrestamoSerializer(serializers.ModelSerializer):
     def get_puede_autorizar_jefe(self, obj):
         request = self.context.get("request")
         return can_autorizar_prestamo_jefe(getattr(request, "user", None), obj)
+
+    def get_puede_aprobar_direccion(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return obj.estado == Prestamo.ESTADO_AUTORIZADO and can_autorizar_prestamo_direccion(user, obj)

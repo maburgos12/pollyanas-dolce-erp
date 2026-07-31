@@ -10,6 +10,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Logística / PWA / Tutorial de carga | Confirmar una sola vez la explicación del flujo | Sí, botón bloqueado e idempotencia por repartidor | Si falla, conserva el popup y permite reintentar | `tests_tutorial_carga` | Cubierto |
 | Logística / Revisiones | Validar diferencia, marcar incorrecta o pedir aclaración | Sí, elimina la fila y muestra toast | Redirect a bandeja | `tests_discrepancias` | Cubierto; navegador pendiente |
 | RRHH / Vacaciones | Crear, conciliar, preautorizar, aprobar y rechazar | Sí, toast y redirect seguro | Sí, `#vac-solicitud-<id>` y `#saldo-empleado-<id>` | `CapitalHumanoServiceTests` | Cubierto |
+| RRHH / Préstamos | Aprobar como Dirección en bandeja web y PWA | Sí, bloquea el botón, muestra toast y recarga la bandeja | Sí, `#prestamo-<id>`; detalle tradicional conserva su redirect | `CapitalHumanoAPITests` + `RRHHViewsTests` | Cubierto |
 | RRHH / Resto de pantallas | Aprobar, autorizar, rechazar, cancelar, guardar | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Seguimiento | Resolver, aprobar, entregar a revisión | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Seguimiento / Mi calendario | Editar, completar y eliminar una actividad propia | Sí, conserva el mes y actualiza detalle con toast; confirmación accesible para eliminar | N/A, acción local sobre el calendario | `seguimiento.tests.CalendarioTests` + navegador local | Parcial: solo actividades del calendario |

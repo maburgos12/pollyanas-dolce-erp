@@ -15,6 +15,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.notificaciones import (
     notificar_hora_extra_solicitada,
+    notificar_prestamo_aprobado,
     notificar_prestamo_para_direccion,
     notificar_prestamo_solicitado,
 )
@@ -28,7 +29,11 @@ from .serializers import (
     SolicitudVacacionesSerializer,
 )
 from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
-from .services_prestamos import autorizar_prestamo_jefe, prestamos_jefe_q
+from .services_prestamos import (
+    aprobar_prestamo_direccion,
+    autorizar_prestamo_jefe,
+    prestamos_por_autorizar_q,
+)
 from .services_permisos import resolver_permiso_direccion
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
@@ -91,7 +96,7 @@ class _CapitalHumanoAccessMixin:
             filtro = Q(empleado=empleado) if empleado else Q()
             model = getattr(qs, "model", None)
             if model == Prestamo:
-                filtro |= prestamos_jefe_q(self.request.user)
+                filtro |= prestamos_por_autorizar_q(self.request.user)
             elif model == HoraExtra:
                 filtro |= Q(pk__isnull=False) if self.request.user.is_superuser else Q(jefe_directo=self.request.user)
             elif model == SolicitudVacaciones:
@@ -451,6 +456,13 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         prestamo = self.get_object()
         autorizar_prestamo_jefe(prestamo, request.user)
         notificar_prestamo_para_direccion(prestamo, actor=request.user)
+        return Response(self.get_serializer(prestamo).data)
+
+    @action(detail=True, methods=["post"], url_path="aprobar-direccion")
+    def aprobar_direccion(self, request, pk=None):
+        prestamo = self.get_object()
+        aprobar_prestamo_direccion(prestamo, request.user)
+        notificar_prestamo_aprobado(prestamo, actor=request.user)
         return Response(self.get_serializer(prestamo).data)
 
 
