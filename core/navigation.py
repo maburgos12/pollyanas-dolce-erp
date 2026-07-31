@@ -1,4 +1,9 @@
-from core.access import can_review_seguimiento_global, can_view_reportes, can_view_submodule
+from core.access import (
+    can_manage_module,
+    can_review_seguimiento_global,
+    can_view_reportes,
+    can_view_submodule,
+)
 
 
 def _seguimiento_asignado_submodules(user) -> set[str]:
@@ -39,7 +44,7 @@ def _puede_capturar_presupuesto(user) -> bool:
     """
     if not (user and user.is_authenticated):
         return False
-    if can_view_reportes(user):
+    if can_manage_module(user, "reportes"):
         return True
     from reportes.models import AreaPresupuestoResponsable
 

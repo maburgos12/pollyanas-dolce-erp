@@ -28,6 +28,7 @@ from django.utils import timezone
 from .models import (
     GastoOperativoMensual,
     LineaPresupuestoMensual,
+    ObligacionGasto,
     ReglaFuenteRubro,
 )
 from .services_presupuesto_maestro import normalize_header_text
@@ -248,6 +249,13 @@ class PresupuestoRealConsolidacionService:
             if "gasto" not in indices:
                 indices["gasto"] = self._build_gasto_index(periodo)
             return self._monto_gasto_operativo(regla, indices["gasto"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO:
+            if "obligacion_gasto" not in indices:
+                indices["obligacion_gasto"] = self._build_obligacion_gasto_index(periodo)
+            rubro_id = regla.rubro_id
+            if rubro_id not in indices["obligacion_gasto"]:
+                return (Decimal("0"), False)
+            return (indices["obligacion_gasto"][rubro_id], True)
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA:
             if "nomina" not in indices:
                 indices["nomina"] = self._build_nomina_index(periodo)
@@ -293,10 +301,15 @@ class PresupuestoRealConsolidacionService:
     @staticmethod
     def _build_gasto_index(periodo: date) -> list[dict]:
         """Gasto REAL del mes agrupado por categoría × centro (con su sucursal/tipo)."""
+        rubros_con_fuente_exacta = ReglaFuenteRubro.objects.filter(
+            tipo_fuente=ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO,
+            activa=True,
+        ).values_list("rubro_id", flat=True)
         return list(
             GastoOperativoMensual.objects.filter(
                 periodo=periodo, tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL
             )
+            .exclude(obligacion_gasto__rubro_id__in=rubros_con_fuente_exacta)
             .values(
                 "categoria_gasto_id",
                 "centro_costo_id",
@@ -339,6 +352,16 @@ class PresupuestoRealConsolidacionService:
                 Decimal("0.01")
             )
         return (total, hubo_datos)
+
+    @staticmethod
+    def _build_obligacion_gasto_index(periodo: date) -> dict[int, Decimal]:
+        return {
+            fila["rubro_id"]: fila["monto"] or Decimal("0")
+            for fila in ObligacionGasto.objects.filter(periodo=periodo)
+            .exclude(estado=ObligacionGasto.ESTADO_CANCELADO)
+            .values("rubro_id")
+            .annotate(monto=Sum("monto_reconocido"))
+        }
 
     @staticmethod
     def _build_nomina_index(periodo: date) -> list[dict]:

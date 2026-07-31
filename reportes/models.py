@@ -869,8 +869,8 @@ class LineaPresupuestoMensual(models.Model):
 class AreaPresupuestoResponsable(models.Model):
     """Usuaria responsable de capturar el gasto real de un área del presupuesto.
 
-    Da acceso a la pantalla de captura SOLO para su(s) área(s); los perfiles
-    con acceso al módulo de reportes ven todas las áreas.
+    Da acceso a la pantalla de captura SOLO para su(s) área(s); únicamente los
+    perfiles con gestión del módulo de reportes pueden capturar todas las áreas.
     """
 
     area = models.ForeignKey(
@@ -907,6 +907,7 @@ class ReglaFuenteRubro(models.Model):
     """
 
     FUENTE_GASTO_OPERATIVO = "GASTO_OPERATIVO"
+    FUENTE_OBLIGACION_GASTO = "OBLIGACION_GASTO"
     FUENTE_NOMINA = "NOMINA"
     FUENTE_BONO_PRODUCCION = "BONO_PRODUCCION"
     FUENTE_BONO_VENTAS = "BONO_VENTAS"
@@ -920,6 +921,7 @@ class ReglaFuenteRubro(models.Model):
     FUENTE_MANUAL = "MANUAL"
     FUENTE_CHOICES = [
         (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
+        (FUENTE_OBLIGACION_GASTO, "Obligaciones de gasto por rubro"),
         (FUENTE_NOMINA, "Nómina RRHH"),
         (FUENTE_BONO_PRODUCCION, "Bonos producción"),
         (FUENTE_BONO_VENTAS, "Bonos ventas"),
@@ -2422,3 +2424,277 @@ class ExpansionZoneScore(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ciudad} · {self.zona}"
+
+
+class GastoRecurrente(models.Model):
+    """Identidad estable de un gasto fijo; sus condiciones viven en versiones."""
+
+    area = models.ForeignKey(AreaPresupuesto, on_delete=models.PROTECT, related_name="gastos_recurrentes")
+    rubro = models.ForeignKey(RubroPresupuesto, on_delete=models.PROTECT, related_name="gastos_recurrentes")
+    centro_costo = models.ForeignKey(CentroCosto, on_delete=models.PROTECT, related_name="gastos_recurrentes")
+    categoria_gasto = models.ForeignKey(
+        CategoriaGasto, on_delete=models.PROTECT, related_name="gastos_recurrentes"
+    )
+    concepto = models.CharField(max_length=200)
+    proveedor = models.CharField(max_length=200, blank=True, default="")
+    activo = models.BooleanField(default=True, db_index=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="gastos_recurrentes_creados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["area__orden", "concepto", "id"]
+        verbose_name = "Gasto recurrente"
+        verbose_name_plural = "Gastos recurrentes"
+        indexes = [models.Index(fields=["area", "activo"], name="gasto_rec_area_activo_idx")]
+
+    def __str__(self) -> str:
+        return f"{self.area.nombre} · {self.concepto}"
+
+
+class GastoRecurrenteVersion(models.Model):
+    """Condiciones efectivas de un gasto fijo; una edición agrega una fila."""
+
+    CONDICION_CONTADO = "CONTADO"
+    CONDICION_CREDITO = "CREDITO"
+    CONDICION_CHOICES = [(CONDICION_CONTADO, "Contado"), (CONDICION_CREDITO, "Crédito")]
+
+    CREDITO_UNICO = "UNICO"
+    CREDITO_DIFERIDO = "DIFERIDO"
+    CREDITO_CHOICES = [(CREDITO_UNICO, "Un solo vencimiento"), (CREDITO_DIFERIDO, "Diferido")]
+
+    PLAZO_DIAS = "DIAS"
+    PLAZO_MESES = "MESES"
+    PLAZO_CHOICES = [(PLAZO_DIAS, "Días"), (PLAZO_MESES, "Meses")]
+
+    METODO_EFECTIVO = "EFECTIVO"
+    METODO_TRANSFERENCIA = "TRANSFERENCIA"
+    METODO_TARJETA = "TARJETA"
+    METODO_CHEQUE = "CHEQUE"
+    METODO_OTRO = "OTRO"
+    METODO_CHOICES = [
+        (METODO_EFECTIVO, "Efectivo"),
+        (METODO_TRANSFERENCIA, "Transferencia"),
+        (METODO_TARJETA, "Tarjeta"),
+        (METODO_CHEQUE, "Cheque"),
+        (METODO_OTRO, "Otro"),
+    ]
+
+    gasto_recurrente = models.ForeignKey(
+        GastoRecurrente, on_delete=models.PROTECT, related_name="versiones"
+    )
+    vigencia_inicio = models.DateField(db_index=True)
+    vigencia_fin = models.DateField(null=True, blank=True, db_index=True)
+    monto = models.DecimalField(max_digits=18, decimal_places=2)
+    dia_vencimiento = models.PositiveSmallIntegerField(default=1)
+    condicion_pago = models.CharField(max_length=10, choices=CONDICION_CHOICES, default=CONDICION_CONTADO)
+    metodo_pago_previsto = models.CharField(max_length=20, choices=METODO_CHOICES, blank=True, default="")
+    tipo_credito = models.CharField(max_length=10, choices=CREDITO_CHOICES, blank=True, default="")
+    plazo_cantidad = models.PositiveIntegerField(null=True, blank=True)
+    plazo_unidad = models.CharField(max_length=10, choices=PLAZO_CHOICES, blank=True, default="")
+    numero_parcialidades = models.PositiveSmallIntegerField(default=1)
+    motivo = models.CharField(max_length=300, blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="versiones_gasto_recurrente_creadas",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-vigencia_inicio", "-id"]
+        verbose_name = "Versión de gasto recurrente"
+        verbose_name_plural = "Versiones de gastos recurrentes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["gasto_recurrente", "vigencia_inicio"], name="uniq_gasto_rec_vigencia"
+            ),
+            models.CheckConstraint(
+                check=models.Q(monto__gt=0), name="gasto_rec_version_monto_positivo"
+            ),
+            models.CheckConstraint(
+                check=models.Q(dia_vencimiento__gte=1, dia_vencimiento__lte=31),
+                name="gasto_rec_dia_vencimiento_valido",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.gasto_recurrente.concepto} · desde {self.vigencia_inicio:%Y-%m-%d}"
+
+
+class ObligacionGasto(models.Model):
+    """Gasto reconocido y compromiso de pago, independiente de sus pagos."""
+
+    ORIGEN_VARIABLE = "VARIABLE"
+    ORIGEN_RECURRENTE = "RECURRENTE"
+    ORIGEN_CHOICES = [(ORIGEN_VARIABLE, "Variable"), (ORIGEN_RECURRENTE, "Recurrente")]
+
+    CONDICION_CONTADO = GastoRecurrenteVersion.CONDICION_CONTADO
+    CONDICION_CREDITO = GastoRecurrenteVersion.CONDICION_CREDITO
+    CONDICION_CHOICES = GastoRecurrenteVersion.CONDICION_CHOICES
+    CREDITO_UNICO = GastoRecurrenteVersion.CREDITO_UNICO
+    CREDITO_DIFERIDO = GastoRecurrenteVersion.CREDITO_DIFERIDO
+    CREDITO_CHOICES = GastoRecurrenteVersion.CREDITO_CHOICES
+    PLAZO_DIAS = GastoRecurrenteVersion.PLAZO_DIAS
+    PLAZO_MESES = GastoRecurrenteVersion.PLAZO_MESES
+    PLAZO_CHOICES = GastoRecurrenteVersion.PLAZO_CHOICES
+    METODO_EFECTIVO = GastoRecurrenteVersion.METODO_EFECTIVO
+    METODO_TRANSFERENCIA = GastoRecurrenteVersion.METODO_TRANSFERENCIA
+    METODO_TARJETA = GastoRecurrenteVersion.METODO_TARJETA
+    METODO_CHEQUE = GastoRecurrenteVersion.METODO_CHEQUE
+    METODO_OTRO = GastoRecurrenteVersion.METODO_OTRO
+    METODO_CHOICES = GastoRecurrenteVersion.METODO_CHOICES
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_PARCIAL = "PARCIAL"
+    ESTADO_PAGADO = "PAGADO"
+    ESTADO_CANCELADO = "CANCELADO"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_PARCIAL, "Pago parcial"),
+        (ESTADO_PAGADO, "Pagado"),
+        (ESTADO_CANCELADO, "Cancelado"),
+    ]
+
+    origen = models.CharField(max_length=12, choices=ORIGEN_CHOICES, db_index=True)
+    gasto_recurrente = models.ForeignKey(
+        GastoRecurrente, null=True, blank=True, on_delete=models.PROTECT, related_name="obligaciones"
+    )
+    version_recurrente = models.ForeignKey(
+        GastoRecurrenteVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="obligaciones",
+    )
+    area = models.ForeignKey(AreaPresupuesto, on_delete=models.PROTECT, related_name="obligaciones_gasto")
+    rubro = models.ForeignKey(RubroPresupuesto, on_delete=models.PROTECT, related_name="obligaciones_gasto")
+    centro_costo = models.ForeignKey(CentroCosto, on_delete=models.PROTECT, related_name="obligaciones_gasto")
+    categoria_gasto = models.ForeignKey(
+        CategoriaGasto, on_delete=models.PROTECT, related_name="obligaciones_gasto"
+    )
+    concepto = models.CharField(max_length=200)
+    proveedor = models.CharField(max_length=200, blank=True, default="")
+    periodo = models.DateField(db_index=True)
+    fecha_gasto = models.DateField()
+    fecha_vencimiento = models.DateField(db_index=True)
+    monto_reconocido = models.DecimalField(max_digits=18, decimal_places=2)
+    condicion_pago = models.CharField(max_length=10, choices=CONDICION_CHOICES, default=CONDICION_CONTADO)
+    metodo_pago_previsto = models.CharField(max_length=20, choices=METODO_CHOICES, blank=True, default="")
+    tipo_credito = models.CharField(max_length=10, choices=CREDITO_CHOICES, blank=True, default="")
+    plazo_cantidad = models.PositiveIntegerField(null=True, blank=True)
+    plazo_unidad = models.CharField(max_length=10, choices=PLAZO_CHOICES, blank=True, default="")
+    numero_parcialidades = models.PositiveSmallIntegerField(default=1)
+    estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    gasto_operativo = models.OneToOneField(
+        GastoOperativoMensual,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="obligacion_gasto",
+    )
+    archivo_soporte = models.CharField(max_length=300, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="obligaciones_gasto_creadas",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-periodo", "fecha_vencimiento", "id"]
+        verbose_name = "Obligación de gasto"
+        verbose_name_plural = "Obligaciones de gasto"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["gasto_recurrente", "periodo"],
+                condition=models.Q(gasto_recurrente__isnull=False),
+                name="uniq_obligacion_recurrente_periodo",
+            ),
+            models.CheckConstraint(
+                check=models.Q(monto_reconocido__gt=0), name="obligacion_monto_positivo"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["area", "periodo"], name="obligacion_area_periodo_idx"),
+            models.Index(fields=["estado", "fecha_vencimiento"], name="obligacion_estado_vence_idx"),
+        ]
+
+    @property
+    def total_pagado(self) -> Decimal:
+        total = self.pagos.aggregate(total=models.Sum("monto"))["total"]
+        return total or Decimal("0.00")
+
+    @property
+    def saldo_pendiente(self) -> Decimal:
+        return max(Decimal("0.00"), self.monto_reconocido - self.total_pagado)
+
+    def __str__(self) -> str:
+        return f"{self.periodo:%Y-%m} · {self.concepto} · {self.monto_reconocido}"
+
+
+class ParcialidadObligacionGasto(models.Model):
+    obligacion = models.ForeignKey(ObligacionGasto, on_delete=models.CASCADE, related_name="parcialidades")
+    numero = models.PositiveSmallIntegerField()
+    fecha_vencimiento = models.DateField(db_index=True)
+    monto = models.DecimalField(max_digits=18, decimal_places=2)
+
+    class Meta:
+        ordering = ["numero"]
+        verbose_name = "Parcialidad de obligación"
+        verbose_name_plural = "Parcialidades de obligaciones"
+        constraints = [
+            models.UniqueConstraint(fields=["obligacion", "numero"], name="uniq_obligacion_parcialidad"),
+            models.CheckConstraint(check=models.Q(monto__gt=0), name="parcialidad_monto_positivo"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.obligacion_id} · parcialidad {self.numero}"
+
+
+class PagoObligacionGasto(models.Model):
+    METODO_EFECTIVO = ObligacionGasto.METODO_EFECTIVO
+    METODO_TRANSFERENCIA = ObligacionGasto.METODO_TRANSFERENCIA
+    METODO_TARJETA = ObligacionGasto.METODO_TARJETA
+    METODO_CHEQUE = ObligacionGasto.METODO_CHEQUE
+    METODO_OTRO = ObligacionGasto.METODO_OTRO
+    METODO_CHOICES = ObligacionGasto.METODO_CHOICES
+
+    obligacion = models.ForeignKey(ObligacionGasto, on_delete=models.PROTECT, related_name="pagos")
+    parcialidad = models.ForeignKey(
+        ParcialidadObligacionGasto,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="pagos",
+    )
+    fecha_pago = models.DateField(db_index=True)
+    monto = models.DecimalField(max_digits=18, decimal_places=2)
+    metodo_pago = models.CharField(max_length=20, choices=METODO_CHOICES)
+    referencia = models.CharField(max_length=160, blank=True, default="")
+    notas = models.TextField(blank=True, default="")
+    registrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="pagos_obligacion_registrados",
+    )
+    registrado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-fecha_pago", "-id"]
+        verbose_name = "Pago de obligación"
+        verbose_name_plural = "Pagos de obligaciones"
+        constraints = [models.CheckConstraint(check=models.Q(monto__gt=0), name="pago_obligacion_positivo")]
+
+    def __str__(self) -> str:
+        return f"{self.obligacion_id} · {self.fecha_pago:%Y-%m-%d} · {self.monto}"

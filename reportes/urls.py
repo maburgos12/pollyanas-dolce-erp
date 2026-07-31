@@ -50,6 +50,31 @@ urlpatterns = [
         name="presupuesto_real_captura_guardar",
     ),
     path(
+        "presupuesto-real/gastos/variables/",
+        views_presupuesto_real.presupuesto_gasto_variable_crear,
+        name="presupuesto_gasto_variable_crear",
+    ),
+    path(
+        "presupuesto-real/gastos/recurrentes/",
+        views_presupuesto_real.presupuesto_gasto_recurrente_crear,
+        name="presupuesto_gasto_recurrente_crear",
+    ),
+    path(
+        "presupuesto-real/gastos/recurrentes/<int:recurrente_id>/editar/",
+        views_presupuesto_real.presupuesto_gasto_recurrente_editar,
+        name="presupuesto_gasto_recurrente_editar",
+    ),
+    path(
+        "presupuesto-real/gastos/recurrentes/<int:recurrente_id>/generar/",
+        views_presupuesto_real.presupuesto_gasto_recurrente_generar,
+        name="presupuesto_gasto_recurrente_generar",
+    ),
+    path(
+        "presupuesto-real/obligaciones/<int:obligacion_id>/pagar/",
+        views_presupuesto_real.presupuesto_obligacion_pagar,
+        name="presupuesto_obligacion_pagar",
+    ),
+    path(
         "presupuesto-real/liberar/",
         views_presupuesto_real.presupuesto_real_liberar,
         name="presupuesto_real_liberar",
