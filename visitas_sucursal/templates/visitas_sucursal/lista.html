@@ -21,6 +21,8 @@
 
   <section class="visit-summary-strip" aria-label="Resumen">
     <span><b>{{ programadas|intcomma }}</b> programadas</span>
+    <span><b>{{ total_ejecutadas_mes|intcomma }}</b> cumplidas</span>
+    <span><b>{{ extraordinarias_mes|intcomma }}</b> extraordinarias</span>
     <span><b>{{ vencidas|intcomma }}</b> vencidas</span>
     <span><b>{{ hallazgos_abiertos|intcomma }}</b> hallazgos</span>
   </section>
@@ -47,11 +49,18 @@
               </span>
             </div>
             <div class="visit-mobile-rows">
-              {% for visita in dia.visitas %}
+              {% for visita in dia.planeadas %}
                 <a class="visit-mobile-row" href="{% url 'visitas_sucursal:detalle' visita.id %}">
-                  <span class="visit-dot {% if visita.estatus == 'REALIZADA' %}done{% elif visita.estatus == 'CANCELADA' %}canceled{% else %}planned{% endif %}"></span>
+                  <span class="visit-dot {% if visita.estatus == 'CANCELADA' %}canceled{% else %}planned{% endif %}"></span>
                   <strong>{{ visita.sucursal|branch_label }}</strong>
-                  <span>{% if visita.estatus == "REALIZADA" %}✓ {% endif %}{{ visita.get_estatus_display }}</span>
+                  <span>Programada {{ visita.fecha_programada|date:"d/m" }}</span>
+                </a>
+              {% endfor %}
+              {% for visita in dia.ejecutadas %}
+                <a class="visit-mobile-row" href="{% url 'visitas_sucursal:detalle' visita.id %}">
+                  <span class="visit-dot {% if visita.tipo == 'EXTRAORDINARIA' %}extraordinary{% else %}done{% endif %}"></span>
+                  <strong>{{ visita.sucursal|branch_label }}</strong>
+                  <span>{% if visita.tipo == "EXTRAORDINARIA" %}Extraordinaria ejecutada{% else %}Ejecutada{% endif %} {{ visita.fecha_real|date:"d/m" }}</span>
                 </a>
               {% endfor %}
             </div>
@@ -79,7 +88,7 @@
                     {% if cell.pad %}
                       <span class="visit-mini-day pad"></span>
                     {% elif cell.visita %}
-                      <a class="visit-mini-day {{ cell.visita.estatus|lower }} {% if cell.es_hoy %}is-today{% endif %}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" aria-label="{{ cell.date|date:'d/m' }} · {{ cell.visita.get_estatus_display }}">{{ cell.date.day }}{% if cell.visita.estatus == "REALIZADA" %}<span class="visit-mini-check">✓</span>{% endif %}</a>
+                      <a class="visit-mini-day {{ cell.visita.estatus|lower }} {% if cell.es_hoy %}is-today{% endif %}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" aria-label="{{ cell.date|date:'d/m' }} · {{ cell.visita.get_estatus_display }}">{{ cell.date.day }}{% if cell.ejecutadas %}<span class="visit-mini-check">✓</span>{% endif %}</a>
                     {% elif can_manage %}
                       <a class="visit-mini-day free {% if cell.es_hoy %}is-today{% endif %}" href="{% url 'visitas_sucursal:nueva' %}?sucursal={{ row.sucursal.id }}&fecha={{ cell.date|date:'Y-m-d' }}" aria-label="Programar {{ row.sucursal.nombre }} el {{ cell.date|date:'d/m/Y' }}">{{ cell.date.day }}</a>
                     {% else %}
@@ -116,9 +125,14 @@
               {% for cell in row.cells %}
                 <td class="visit-cell {% if cell.day.is_sunday %}visit-day-off{% endif %}">
                   {% if cell.visita %}
-                    <a class="visit-mark {{ cell.visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' cell.visita.id %}" title="{{ cell.visita.sucursal|branch_label }} · {{ cell.visita.get_estatus_display }}">
-                      {% if cell.visita.estatus == "REALIZADA" %}✓{% elif cell.visita.estatus == "CANCELADA" %}C{% else %}P{% endif %}
-                    </a>
+                    <div class="visit-cell-events">
+                      {% for visita in cell.planeadas %}
+                        <a class="visit-mark {{ visita.estatus|lower }}" href="{% url 'visitas_sucursal:detalle' visita.id %}" title="Programada {{ visita.fecha_programada|date:'d/m' }} · {{ visita.sucursal|branch_label }}">{% if visita.estatus == "CANCELADA" %}C{% else %}P{% endif %}</a>
+                      {% endfor %}
+                      {% for visita in cell.ejecutadas %}
+                        <a class="visit-mark executed {% if visita.tipo == 'EXTRAORDINARIA' %}extraordinary{% endif %}" href="{% url 'visitas_sucursal:detalle' visita.id %}" title="{% if visita.tipo == 'EXTRAORDINARIA' %}Extraordinaria ejecutada{% else %}Ejecutada{% endif %} {{ visita.fecha_real|date:'d/m' }} · {{ visita.sucursal|branch_label }}">{% if visita.tipo == "EXTRAORDINARIA" %}E{% else %}✓{% endif %}</a>
+                      {% endfor %}
+                    </div>
                     {% if cell.count > 1 %}<span class="visit-more">+{{ cell.count|add:"-1" }}</span>{% endif %}
                   {% elif can_manage %}
                     <form method="post" class="visit-cell-form">
@@ -155,6 +169,7 @@
     <div class="visit-legend" aria-label="Leyenda">
       <span><b class="visit-dot planned"></b> P Programada</span>
       <span><b class="visit-dot done"></b> ✓ Realizada</span>
+      <span><b class="visit-dot extraordinary"></b> E Extraordinaria</span>
       <span><b class="visit-dot canceled"></b> C Cancelada</span>
       {% if can_manage %}<span><strong>+</strong> programa</span>{% endif %}
     </div>

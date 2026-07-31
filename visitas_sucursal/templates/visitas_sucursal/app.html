@@ -170,6 +170,23 @@
     .person-option { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
     .person-option input { width: auto; margin-top: 2px; }
     .person-option span { display: block; color: var(--muted); font-size: .78rem; }
+    .selector-panel { padding: 14px; display: grid; gap: 14px; }
+    .selector-panel h2 { margin: 0; font-size: 1.05rem; }
+    .selector-panel p { margin: 4px 0 0; color: var(--muted); font-size: .88rem; }
+    .branch-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+    .pending-list { display: grid; gap: 8px; }
+    .pending-option { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; text-decoration: none; }
+    .pending-option:hover, .pending-option.active { border-color: var(--brand); background: var(--soft); }
+    .pending-option span { color: var(--muted); font-size: .82rem; }
+    .extra-form { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 9px; }
+    .extra-form summary { color: var(--brand-dark); cursor: pointer; font-weight: 850; }
+    .extra-fields { display: grid; gap: 9px; padding-top: 10px; }
+    .field-help { color: var(--muted); font-size: .8rem; }
+    button:disabled { cursor: not-allowed; opacity: .58; }
+    .erp-toast-region { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: grid; gap: 8px; width: min(380px, calc(100vw - 32px)); }
+    .erp-toast { display: flex; justify-content: space-between; gap: 12px; border-left: 5px solid var(--ok); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(43, 23, 34, .16); padding: 12px; font-weight: 750; }
+    .erp-toast--error { border-left-color: #a32945; }
+    .erp-toast__close { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 1.25rem; }
     @media (max-width: 640px) {
       .app-shell { padding: 12px; }
       .topbar { align-items: flex-start; }
@@ -179,6 +196,7 @@
       .check-fields { grid-template-columns: 1fr; }
       .audit-route { grid-template-columns: 1fr; }
       .preview-panel form { grid-template-columns: 1fr; }
+      .branch-form { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -218,16 +236,73 @@
               <option value="sucursal" {% if app_mode == "sucursal" %}selected{% endif %}>Sucursal</option>
             </select>
           </label>
-          <label>Sucursal
+          {% if app_mode == "sucursal" %}<label>Sucursal
             <select name="sucursal" onchange="this.form.submit()">
-              {% if app_mode == "auditor" %}<option value="">Todas</option>{% endif %}
               {% for item in sucursales_preview %}
                 <option value="{{ item.id }}" {% if preview_sucursal and item.id == preview_sucursal.id or filtro_sucursal and item.id == filtro_sucursal.id %}selected{% endif %}>{{ item|branch_label }}</option>
               {% endfor %}
             </select>
-          </label>
+          </label>{% endif %}
           <button class="link-btn" type="submit">Ver</button>
         </form>
+      </section>
+    {% endif %}
+
+    {% if can_manage %}
+      <section class="card selector-panel" aria-labelledby="audit-selector-title">
+        <div>
+          <h2 id="audit-selector-title">1. Selecciona la sucursal</h2>
+          <p>La fecha del plan no bloquea la auditoría. Elige qué visita pendiente estás cumpliendo hoy.</p>
+        </div>
+        <form method="get" class="branch-form">
+          {% if is_superuser %}<input type="hidden" name="modo" value="auditor">{% endif %}
+          <label>Sucursal
+            <select name="sucursal" required>
+              <option value="">Selecciona una sucursal</option>
+              {% for item in sucursales_auditoria %}
+                <option value="{{ item.id }}" {% if filtro_sucursal and item.id == filtro_sucursal.id %}selected{% endif %}>{{ item|branch_label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="link-btn" type="submit">Continuar</button>
+        </form>
+
+        {% if filtro_sucursal %}
+          <div>
+            <h2>2. Elige la visita que estás cumpliendo</h2>
+            <p>La programación queda fija; al terminar se registrará la fecha real de ejecución.</p>
+          </div>
+          <div class="pending-list">
+            {% for item in programaciones_pendientes %}
+              <a class="pending-option {% if visita and visita.id == item.id %}active{% endif %}" href="?sucursal={{ filtro_sucursal.id }}&visita={{ item.id }}{% if is_superuser %}&modo=auditor{% endif %}">
+                <strong>{{ item.fecha_programada|date:"d/m/Y" }}</strong>
+                <span>{{ item.get_tipo_display }} · pendiente</span>
+              </a>
+            {% empty %}
+              <p>No hay visitas programadas pendientes para esta sucursal. Puedes registrar una extraordinaria si existe un motivo operativo.</p>
+            {% endfor %}
+          </div>
+          <details class="extra-form">
+            <summary>Registrar visita extraordinaria</summary>
+            <form method="post" class="extra-fields" data-async-action>
+              {% csrf_token %}
+              <input type="hidden" name="action" value="iniciar_extraordinaria">
+              <input type="hidden" name="sucursal" value="{{ filtro_sucursal.id }}">
+              <input type="hidden" name="clave_idempotencia" value="{{ clave_extraordinaria }}">
+              <label>Motivo
+                <select name="motivo_extraordinaria" required>
+                  <option value="">Selecciona el motivo</option>
+                  {% for value, label in motivo_extraordinaria_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>Detalle
+                <textarea name="detalle_extraordinaria" required placeholder="Describe el pendiente, la queja o el motivo de la visita"></textarea>
+              </label>
+              <span class="field-help">La visita se identificará como extraordinaria y no aumentará el total del plan mensual.</span>
+              <button class="link-btn" type="submit">Preparar extraordinaria</button>
+            </form>
+          </details>
+        {% endif %}
       </section>
     {% endif %}
 
@@ -236,7 +311,7 @@
         <div class="summary-row">
           <div>
             <h2>{% if visita %}{% if can_manage %}Auditoría #{{ visita.id }}{% else %}Bitácora #{{ visita.id }}{% endif %}{% else %}Sin visita asignada{% endif %}</h2>
-            <p>{% if visita %}{{ visita.fecha_programada|date:"d/m/Y" }} · {{ visita.get_tipo_display }}{% else %}No hay visita programada disponible.{% endif %}</p>
+            <p>{% if visita %}{% if visita.fecha_programada %}Programada {{ visita.fecha_programada|date:"d/m/Y" }} · {% endif %}{{ visita.get_tipo_display }}{% else %}Selecciona una sucursal y una visita pendiente.{% endif %}</p>
           </div>
           {% if visita %}<span class="badge">{{ visita.get_estatus_display }}</span>{% endif %}
         </div>
@@ -263,7 +338,7 @@
       <section class="card" aria-label="Visitas recientes">
         <div class="visits-list">
           {% for item in visitas %}
-            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% endif %}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% elif filtro_sucursal %}&sucursal={{ filtro_sucursal.id }}{% endif %}">{{ item.fecha_programada|date:"d/m" }} · {{ item.sucursal|branch_label }} · {{ item.get_estatus_display }}</a>
+            <a class="visit-chip {% if visita and item.id == visita.id %}active{% endif %}" href="?visita={{ item.id }}{% if is_superuser %}&modo={{ app_mode }}{% endif %}{% if preview_sucursal %}&sucursal={{ preview_sucursal.id }}{% elif filtro_sucursal %}&sucursal={{ filtro_sucursal.id }}{% endif %}">{% if item.fecha_programada %}{{ item.fecha_programada|date:"d/m" }} · {% else %}Extra · {% endif %}{{ item.sucursal|branch_label }} · {{ item.get_estatus_display }}</a>
           {% endfor %}
         </div>
         {% if can_manage %}
@@ -273,9 +348,11 @@
     {% endif %}
 
     {% if visita %}
-      <form method="post" class="card" enctype="multipart/form-data" id="audit-form">
+      <form method="post" class="card" enctype="multipart/form-data" id="audit-form" data-async-action>
         {% csrf_token %}
+        <input type="hidden" name="action" value="ejecutar">
         <input type="hidden" name="visita_id" value="{{ visita.id }}">
+        <input type="hidden" name="sucursal" value="{{ visita.sucursal_id }}">
         <input type="hidden" name="gps_latitud" id="gps_latitud">
         <input type="hidden" name="gps_longitud" id="gps_longitud">
         <input type="hidden" name="gps_precision_m" id="gps_precision_m">
@@ -283,7 +360,7 @@
           <section class="gps-box">
             <strong>Ubicación requerida</strong>
             <p>
-              Activa GPS antes de ejecutar la auditoría.
+              Activa GPS antes de ejecutar la auditoría. La precisión debe ser de 100 m o menos.
               {% if punto_logistico %}Se validará contra geocerca logística de {{ punto_logistico.radio_geocerca_metros }} m.{% else %}Esta sucursal aún no tiene geocerca logística vinculada.{% endif %}
             </p>
             <button class="link-btn" type="button" onclick="requestAuditGeo()">Activar GPS</button>
@@ -335,12 +412,13 @@
           {% endif %}
           <textarea name="observaciones" placeholder="Observaciones generales" {% if preview_read_only %}disabled{% endif %}>{{ visita.observaciones }}</textarea>
           <div class="{% if can_manage %}audit-sticky{% endif %}">
-            <button class="primary-btn {% if can_manage %}audit{% endif %}" type="submit" {% if preview_read_only %}disabled{% endif %}>{% if preview_read_only %}Vista bloqueada{% elif can_manage %}Ejecutar auditoría{% else %}Guardar bitácora{% endif %}</button>
+            <button class="primary-btn {% if can_manage %}audit{% endif %}" type="submit" {% if preview_read_only or can_manage and not visita_ejecutable %}disabled{% endif %}>{% if preview_read_only %}Vista bloqueada{% elif can_manage and not visita_ejecutable %}Auditoría ya ejecutada{% elif can_manage %}Ejecutar auditoría{% else %}Guardar bitácora{% endif %}</button>
           </div>
         </div>
       </form>
     {% endif %}
   </main>
+  <div class="erp-toast-region" id="erp-toast-region" aria-live="polite" aria-atomic="false" aria-label="Notificaciones"></div>
   <script>
     function setGpsStatus(text, ready) {
       const node = document.getElementById("gps_status");
@@ -367,10 +445,12 @@
         const needsGps = Boolean(document.getElementById("gps_status"));
         if (needsGps && !document.getElementById("gps_latitud").value) {
           event.preventDefault();
+          event.stopImmediatePropagation();
           requestAuditGeo();
         }
       });
     }
   </script>
+  <script src="{% static 'js/erp_actions.js' %}"></script>
 </body>
 </html>
