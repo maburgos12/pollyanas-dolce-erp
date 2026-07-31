@@ -28,6 +28,25 @@
   display: none !important;
 }
 
+.higiene-icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.ui-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 html {
   background: #f7f1f3;
   scroll-behavior: smooth;
@@ -121,6 +140,9 @@ textarea:focus-visible {
 
 .history-link,
 .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: transparent;
   color: var(--vino);
@@ -228,8 +250,11 @@ textarea:focus-visible {
   border-radius: 13px;
   background: var(--vino-soft);
   color: var(--vino);
-  font-size: 0.78rem;
-  font-weight: 900;
+}
+
+.option-icon .ui-icon {
+  width: 28px;
+  height: 28px;
 }
 
 .option-copy b,
@@ -264,6 +289,11 @@ textarea:focus-visible {
   color: var(--vino);
   font-size: 0.78rem;
   font-weight: 900;
+}
+
+.option-action .ui-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .capture-panel {
@@ -451,6 +481,11 @@ input[type="file"] {
   font-weight: 900;
 }
 
+.section-stepper button > span .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
 .section-stepper b {
   color: var(--texto);
   font-size: 0.76rem;
@@ -528,6 +563,9 @@ input[type="file"] {
 }
 
 .review-section > legend button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
   border: 0;
   border-radius: 9px;
@@ -638,9 +676,11 @@ input[type="file"] {
 
 .status-choices span,
 .resolution-choice span {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 44px;
-  place-items: center;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: #fff;
@@ -649,6 +689,12 @@ input[type="file"] {
   font-weight: 900;
   cursor: pointer;
   transition: border-color 140ms ease-out, background 140ms ease-out, transform 100ms ease-out;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .status-choices input:focus-visible + span,
@@ -731,6 +777,10 @@ input[type="file"] {
 .continue-action,
 .secondary-action,
 .save-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 46px;
   border-radius: 10px;
   padding: 0 15px;
@@ -771,6 +821,11 @@ input[type="file"] {
   color: var(--verde);
   font-size: 1.25rem;
   font-weight: 900;
+}
+
+.finish-mark .ui-icon {
+  width: 25px;
+  height: 25px;
 }
 
 .review-finish h3 {
@@ -877,6 +932,9 @@ input[type="file"] {
 }
 
 .recent-row > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: var(--vino);
   font-size: 0.74rem;
   font-weight: 900;
@@ -935,9 +993,11 @@ input[type="file"] {
 
 .history-filters button,
 .print-button {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 46px;
-  place-items: center;
   border: 0;
   border-radius: 10px;
   background: var(--vino);
@@ -1131,14 +1191,17 @@ input[type="file"] {
   }
 
   .option-action {
+    display: grid;
+    place-items: center;
     width: 30px;
     height: 30px;
     overflow: hidden;
     font-size: 0;
   }
 
-  .option-action span {
-    font-size: 1.05rem;
+  .option-action .ui-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .workflow-hero {
