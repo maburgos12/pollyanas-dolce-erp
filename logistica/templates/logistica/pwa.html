@@ -2516,7 +2516,7 @@
         return remaining.length;
       }
 
-      function stopRutaAutoTracking() {
+      function stopRutaAutoTracking({ stopNative = true } = {}) {
         if (state.routeAutoTrackingTimer) {
           window.clearInterval(state.routeAutoTrackingTimer);
         }
@@ -2525,6 +2525,9 @@
         state.routeAutoTrackingBusy = false;
         state.routeAutoTrackingStatus = "idle";
         releaseRouteWakeLock();
+        if (stopNative && window.PollyanasNative?.stopRouteTracking) {
+          window.PollyanasNative.stopRouteTracking();
+        }
       }
 
       function rutaAutoTrackingActiva(rutaId) {
@@ -2616,6 +2619,10 @@
         stopRutaAutoTracking();
         state.routeAutoTrackingRutaId = rutaId;
         state.routeAutoTrackingStatus = "activo";
+        if (window.PollyanasNative?.startRouteTracking) {
+          window.PollyanasNative.startRouteTracking(String(rutaId));
+          return;
+        }
         requestRouteWakeLock();
         enviarTrackingAutomaticoRuta(rutaId);
         state.routeAutoTrackingTimer = window.setInterval(() => enviarTrackingAutomaticoRuta(rutaId), ROUTE_AUTO_TRACKING_INTERVAL_MS);
@@ -2636,6 +2643,9 @@
         state.token = data.access;
         state.refreshToken = data.refresh || "";
         sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
+        if (window.PollyanasNative?.storeTokens) {
+          window.PollyanasNative.storeTokens(data.access, data.refresh || "");
+        }
       }
 
       async function useDjangoSessionToken() {
@@ -2657,6 +2667,9 @@
         sessionStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
+        if (window.PollyanasNative?.clearSession) {
+          window.PollyanasNative.clearSession();
+        }
         localStorage.removeItem(TRACKING_QUEUE_KEY);
         for (let index = localStorage.length - 1; index >= 0; index -= 1) {
           const key = localStorage.key(index);
@@ -5639,7 +5652,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v84-iconografia-lucide", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v85-android-paridad-lucide", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
@@ -5650,7 +5663,7 @@
             if (state.pantallaActual === "ruta_activa") renderRutaActiva();
           }
         });
-        window.addEventListener("pagehide", () => stopRutaAutoTracking());
+        window.addEventListener("pagehide", () => stopRutaAutoTracking({ stopNative: false }));
         document.addEventListener("keydown", (event) => {
           if (!state.tutorialCarga.abierto) return;
           if (event.key === "Escape") {
