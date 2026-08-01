@@ -108,6 +108,7 @@ ACCESS_SUBMODULES = {
     "logistica": [
         ("dashboard", "Dashboard"),
         ("ejecutivo", "Ejecutivo"),
+        ("indicadores", "Indicadores de abasto"),
         ("tickets", "Tickets"),
         ("flota", "Flota"),
         ("rutas", "Rutas"),
