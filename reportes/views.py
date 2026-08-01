@@ -4484,6 +4484,13 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
         if not can_manage_module(request.user, "reportes"):
             raise PermissionDenied("Solo administración de Reportes puede modificar el presupuesto.")
         action = (request.POST.get("action") or "").strip()
+        if action == "add_rubro":
+            from reportes.views_presupuesto_catalogos import puede_gestionar_catalogos_presupuesto
+
+            if not puede_gestionar_catalogos_presupuesto(request.user):
+                raise PermissionDenied(
+                    "Las altas de rubros corresponden a responsables de Administración y Compras."
+                )
         try:
             if action == "add_rubro":
                 PresupuestoMaestroService().create_rubro_with_empty_year(
@@ -4494,6 +4501,7 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
                     version=selected_version,
                     codigo_cuenta=request.POST.get("codigo_cuenta") or "",
                     sucursal_id=_parse_int(request.POST.get("sucursal_id"), 0) or None,
+                    user=request.user,
                 )
                 messages.success(request, "Concepto agregado al presupuesto maestro.")
             elif action == "import_file":
@@ -4553,7 +4561,11 @@ def presupuesto_maestro(request: HttpRequest) -> HttpResponse:
         "month_options": MONTH_COLUMNS,
         "versions": ["ORIGINAL", "REVISADO"],
         "rubro_types": RubroPresupuesto.TIPO_CHOICES,
+        "can_manage_budget": can_manage_module(request.user, "reportes"),
     }
+    from reportes.views_presupuesto_catalogos import puede_ver_catalogos_presupuesto
+
+    context["can_access_budget_catalog"] = puede_ver_catalogos_presupuesto(request.user)
     return render(request, "reportes/presupuesto_maestro.html", context)
 
 

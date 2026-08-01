@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Catálogos de presupuesto{% endblock %}
+{% block page_title %}Catálogos de presupuesto{% endblock %}
+{% block body_class %}page-presupuesto-catalogos{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/template_modules/reportes-presupuesto-catalogos.css?v=20260801-v1">
+{% endblock %}
+
+{% block content %}
+<main class="pc-shell">
+  <header class="pc-heading">
+    <div>
+      <p class="pc-context">Administración del presupuesto</p>
+      <h1>Un mismo nombre, una misma ruta de gasto</h1>
+      <p class="pc-intro">Consulta qué rubros ya existen, en qué categoría viven y de dónde toma el sistema su importe real. La sucursal se muestra como dimensión separada para evitar nombres como “Agua - Colosio”.</p>
+    </div>
+    <a class="pc-back-link" href="{% url 'reportes:presupuesto_real_captura' %}">Volver a captura</a>
+  </header>
+
+  <section class="pc-responsibility" aria-label="Responsabilidad en presupuesto">
+    <span>Tu alcance</span>
+    <strong>{% for assignment in assigned_areas %}{{ assignment.area.nombre }}{% if not forloop.last %} · {% endif %}{% empty %}Soporte general{% endfor %}</strong>
+    {% if can_manage_catalog %}
+      <p>Puedes crear categorías y rubros. Las altas quedan registradas en auditoría.</p>
+    {% else %}
+      <p>Puedes consultar y reutilizar lo existente. Solicita a Administración cualquier categoría o rubro nuevo.</p>
+    {% endif %}
+  </section>
+
+  <section class="pc-state-strip" aria-label="Resumen de estados de fuente">
+    {% for value, label in source_states %}
+    <div class="pc-state-summary is-{{ value|lower }}">
+      <span class="pc-state-mark" aria-hidden="true"></span>
+      <span>{{ label }}</span>
+      <strong>{% for key, count in state_counts.items %}{% if key == value %}{{ count }}{% endif %}{% endfor %}</strong>
+    </div>
+    {% endfor %}
+  </section>
+
+  <form class="pc-filters" method="get" aria-label="Filtrar catálogo">
+    <div class="pc-field pc-field-search">
+      <label for="catalog-q">Buscar rubro, cuenta, categoría o sucursal</label>
+      <input id="catalog-q" name="q" type="search" value="{{ search_query }}" placeholder="Ej. agua potable, rentas, Colosio">
+    </div>
+    <div class="pc-field">
+      <label for="catalog-area">Área</label>
+      <select id="catalog-area" name="area">
+        <option value="">Todas las áreas</option>
+        {% for area in areas %}<option value="{{ area.codigo }}" {% if selected_area == area.codigo %}selected{% endif %}>{{ area.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="pc-field">
+      <label for="catalog-category">Categoría</label>
+      <select id="catalog-category" name="category">
+        <option value="">Todas las categorías</option>
+        {% for category in catalog_categories %}<option value="{{ category.id }}" {% if selected_category == category.id %}selected{% endif %}>{{ category.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="pc-field">
+      <label for="catalog-source">Estado de fuente</label>
+      <select id="catalog-source" name="source_state">
+        <option value="">Todos los estados</option>
+        {% for value, label in source_states %}<option value="{{ value }}" {% if selected_source_state == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="pc-field">
+      <label for="catalog-status">Estado del rubro</label>
+      <select id="catalog-status" name="status">
+        {% for value, label in record_statuses %}<option value="{{ value }}" {% if selected_record_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="pc-field">
+      <label for="catalog-category-status">Estado de categoría</label>
+      <select id="catalog-category-status" name="category_status">
+        {% for value, label in category_statuses %}<option value="{{ value }}" {% if selected_category_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="pc-field">
+      <label for="catalog-month">Periodo observado</label>
+      <div class="pc-period-fields">
+        <select id="catalog-month" name="month">{% for number, label in month_options %}<option value="{{ number }}" {% if selected_month == number %}selected{% endif %}>{{ label|capfirst }}</option>{% endfor %}</select>
+        <input name="year" type="number" min="2020" max="2035" value="{{ selected_year }}" aria-label="Año">
+      </div>
+    </div>
+    <input type="hidden" name="version" value="{{ selected_version }}">
+    <button class="pc-button" type="submit">Aplicar filtros</button>
+    <a class="pc-clear-link" href="{% url 'reportes:presupuesto_catalogos' %}">Limpiar</a>
+  </form>
+
+  {% if can_manage_catalog %}
+  <section class="pc-actions" id="catalog-actions" aria-labelledby="catalog-actions-title">
+    <div class="pc-actions-heading">
+      <div>
+        <h2 id="catalog-actions-title">Altas controladas</h2>
+        <p>El sistema normaliza la escritura y bloquea equivalentes por área, cuenta y sucursal. No fusiona información histórica.</p>
+      </div>
+    </div>
+    <div class="pc-action-columns">
+      <details class="pc-action-panel" open>
+        <summary>Crear rubro</summary>
+        <form method="post" action="{% url 'reportes:presupuesto_catalogos' %}" data-async-action>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_rubro">
+          <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+          <div class="pc-form-grid">
+            <div class="pc-field"><label for="new-rubro-area">Área</label><select id="new-rubro-area" name="area" required>{% for area in manageable_areas %}<option value="{{ area.codigo }}">{{ area.nombre }}</option>{% endfor %}</select></div>
+            <div class="pc-field"><label for="new-rubro-category">Categoría</label><select id="new-rubro-category" name="categoria_id"><option value="">Sin categoría</option>{% for category in active_categories %}<option value="{{ category.id }}">{{ category.nombre }} · {{ category.codigo }}</option>{% endfor %}</select></div>
+            <div class="pc-field pc-field-wide"><label for="new-rubro-name">Nombre del rubro</label><input id="new-rubro-name" name="concepto" required maxlength="200" placeholder="Ej. Renta del local"></div>
+            <div class="pc-field"><label for="new-rubro-account">Cuenta</label><input id="new-rubro-account" name="codigo_cuenta" maxlength="50" placeholder="Ej. RENTAS"></div>
+            <div class="pc-field"><label for="new-rubro-branch">Sucursal</label><select id="new-rubro-branch" name="sucursal_id"><option value="">Empresa / sin sucursal</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.nombre }} · {{ branch.codigo }}</option>{% endfor %}</select></div>
+            <div class="pc-field"><label for="new-rubro-type">Tipo contable</label><select id="new-rubro-type" name="tipo">{% for value, label in rubro_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="pc-field"><label for="new-rubro-source">Fuente inicial</label><select id="new-rubro-source" name="fuente_mode">{% for value, label in source_modes %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="pc-field"><label for="new-rubro-year">Año a preparar</label><input id="new-rubro-year" name="year" type="number" min="2020" max="2035" value="{{ selected_year }}"></div>
+          </div>
+          <input type="hidden" name="version" value="{{ selected_version }}">
+          <p class="pc-form-note">Las fuentes automáticas especializadas se revisan técnicamente antes de asignarse para evitar doble conteo.</p>
+          <button class="pc-button" type="submit" data-pending-label="Creando rubro…">Crear rubro</button>
+        </form>
+      </details>
+      <details class="pc-action-panel">
+        <summary>Crear categoría</summary>
+        <form method="post" action="{% url 'reportes:presupuesto_catalogos' %}" data-async-action>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_category">
+          <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+          <div class="pc-form-grid">
+            <div class="pc-field"><label for="new-category-code">Código</label><input id="new-category-code" name="codigo" required maxlength="50" placeholder="Ej. RENTAS"></div>
+            <div class="pc-field"><label for="new-category-name">Nombre</label><input id="new-category-name" name="nombre" required maxlength="160" placeholder="Ej. Rentas"></div>
+            <div class="pc-field"><label for="new-category-layer">Capa</label><select id="new-category-layer" name="capa_objetivo">{% for value, label in category_layers %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="pc-field"><label for="new-category-bucket">Grupo financiero</label><select id="new-category-bucket" name="bucket">{% for value, label in category_buckets %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+          </div>
+          <button class="pc-button" type="submit" data-pending-label="Creando categoría…">Crear categoría</button>
+        </form>
+      </details>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="pc-catalog-layout">
+    <div class="pc-rubros" aria-labelledby="rubros-title">
+      <div class="pc-section-heading">
+        <div><h2 id="rubros-title">Rubros del catálogo</h2><p>Jerarquía visible: Área → Categoría → Rubro.</p></div>
+        <strong>{{ catalog_rows|length }} resultados</strong>
+      </div>
+      <div class="pc-table-wrap table-responsive">
+        <table class="pc-table">
+          <thead><tr><th>Área → Categoría → Rubro</th><th>Sucursal</th><th>Cuenta</th><th>Fuente del real</th><th>Estado en el periodo</th></tr></thead>
+          <tbody>
+          {% for row in catalog_rows %}
+            <tr>
+              <td>
+                <span class="pc-hierarchy-area">{{ row.rubro.area.nombre }}</span>
+                <span class="pc-hierarchy-category">{{ row.category_label }}</span>
+                <strong class="pc-rubro-name">{{ row.rubro.concepto }}</strong>
+                <span class="pc-record-status is-{{ row.record_status|lower }}">{{ row.record_status_label }}</span>
+                {% if row.is_duplicate %}<span class="pc-duplicate">Revisar posible duplicado</span>{% endif %}
+              </td>
+              <td>{% if row.rubro.sucursal %}<strong>{{ row.rubro.sucursal.nombre }}</strong><span class="pc-secondary">{{ row.rubro.sucursal.codigo }}</span>{% else %}<span class="pc-secondary">Empresa / no aplica</span>{% endif %}</td>
+              <td><code>{{ row.rubro.codigo_cuenta|default:"Sin cuenta" }}</code></td>
+              <td>{{ row.source_label }}</td>
+              <td><span class="pc-source-status is-{{ row.source_state|lower }}"><span aria-hidden="true"></span>{{ row.source_state_label }}</span></td>
+            </tr>
+          {% empty %}
+            <tr><td class="pc-empty" colspan="5"><strong>No hay rubros con estos filtros.</strong><span>Prueba otra área, categoría o estado de fuente.</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <aside class="pc-category-index" aria-labelledby="categories-title">
+      <div class="pc-section-heading"><div><h2 id="categories-title">Categorías del catálogo</h2><p>Reutiliza una antes de solicitar otra.</p></div><strong>{{ catalog_categories|length }}</strong></div>
+      <ul>
+        {% for category in catalog_categories %}
+        <li>
+          <strong>{{ category.nombre }}</strong>
+          <code>{{ category.codigo }}</code>
+          <span>{{ category.get_capa_objetivo_display }} · {{ category.get_bucket_display }}</span>
+          <span class="pc-category-status {% if category.activo %}is-active{% else %}is-inactive{% endif %}">{% if category.activo %}Activa{% else %}Inactiva{% endif %}</span>
+        </li>
+        {% empty %}<li>No hay categorías con este estado.</li>{% endfor %}
+      </ul>
+    </aside>
+  </section>
+
+  <section class="pc-source-guide" aria-labelledby="source-guide-title">
+    <h2 id="source-guide-title">Cómo leer “automático”</h2>
+    <dl>
+      <div><dt>Automático con datos</dt><dd>Existe una regla y el periodo ya recibió información de su módulo origen.</dd></div>
+      <div><dt>Automático sin datos</dt><dd>La regla existe, pero no hay un resultado automático guardado para el periodo. Puede faltar información o consolidación; no significa que el gasto sea cero.</dd></div>
+      <div><dt>Manual</dt><dd>La persona responsable captura el importe real y puede respaldarlo con el flujo de gastos del área.</dd></div>
+      <div><dt>Sin configurar</dt><dd>El rubro existe, pero todavía no tiene una regla explícita. Administración debe decidir su continuidad.</dd></div>
+    </dl>
+  </section>
+</main>
+{% endblock %}

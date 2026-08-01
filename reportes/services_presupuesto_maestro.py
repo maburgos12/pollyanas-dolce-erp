@@ -1229,28 +1229,31 @@ class PresupuestoMaestroService:
         version: str,
         codigo_cuenta: str = "",
         sucursal_id: int | None = None,
+        user=None,
     ) -> RubroPresupuesto:
-        areas = ensure_master_budget_areas()
-        area = areas[normalize_area_code(area_code)]
-        branch = Sucursal.objects.filter(pk=sucursal_id).first() if sucursal_id else None
-        rubro, _ = RubroPresupuesto.objects.update_or_create(
-            area=area,
-            concepto=concepto.strip(),
-            codigo_cuenta=codigo_cuenta.strip(),
-            sucursal=branch,
-            defaults={
-                "tipo": normalize_rubro_type(tipo, area.codigo),
-                "activo": True,
-                "metadata": {"source": "ui", "actual_key": normalize_actual_key(concepto, codigo_cuenta, area.codigo)},
-            },
+        # Mantiene el contrato histórico, pero toda alta interactiva pasa por
+        # la misma normalización y protección anti-duplicados del catálogo.
+        from reportes.services_presupuesto_catalogos import (
+            SOURCE_UNCONFIGURED,
+            PresupuestoCatalogoService,
         )
-        for period in month_periods(year):
-            LineaPresupuestoMensual.objects.update_or_create(
-                rubro=rubro,
-                periodo=period,
-                version=normalize_version(version),
-                defaults={"monto_presupuesto": Decimal("0"), "metadata": {"source": "ui"}},
-            )
+
+        rubro = PresupuestoCatalogoService().create_rubro(
+            user=user,
+            area_code=area_code,
+            concepto=concepto,
+            tipo=tipo,
+            year=year,
+            version=version,
+            codigo_cuenta=codigo_cuenta,
+            sucursal_id=sucursal_id,
+            fuente_mode=SOURCE_UNCONFIGURED,
+        ).rubro
+        rubro.metadata = {
+            **(rubro.metadata or {}),
+            "actual_key": normalize_actual_key(concepto, codigo_cuenta, rubro.area.codigo),
+        }
+        rubro.save(update_fields=["metadata", "actualizado_en"])
         return rubro
 
     def _tone(self, rubro_type: str, variance: Decimal, pct: Decimal) -> str:
