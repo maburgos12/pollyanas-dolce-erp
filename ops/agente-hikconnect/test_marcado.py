@@ -118,12 +118,12 @@ def test_lote_solo_duplicados_termina_correctamente():
         tmp.cleanup()
 
 
-def test_sync_entrega_marcaje_reciente_aunque_falle_el_catchup_historico():
+def test_sync_ignora_cursor_101_y_entrega_ventanas_por_fecha():
     tmp = isolated_db()
     original_client = main.HikConnectClient
     original_send = main.send_events
 
-    class ClienteConFallaTardia:
+    class ClientePorVentanas:
         def __init__(self, **_kwargs):
             pass
 
@@ -133,20 +133,23 @@ def test_sync_entrega_marcaje_reciente_aunque_falle_el_catchup_historico():
         def __exit__(self, *_args):
             return None
 
-        def fetch_records_since(self, **kwargs):
+        def fetch_records_between(self, **kwargs):
             on_page_records = kwargs.get("on_page_records")
             assert callable(on_page_records), "sync_once debe procesar cada pagina al recibirla"
-            assert kwargs["start_page"] == 97
-            on_page_records(1, [registro("guid-reciente-antes-de-falla")])
-            for page_index in range(97, 101):
-                on_page_records(
-                    page_index,
-                    [registro(f"guid-historico-pagina-{page_index}", employee_no=str(page_index))],
-                )
-            raise RuntimeError("VMS039003 en pagina 101")
+            on_page_records(AHORA.date(), 1, [registro("guid-reciente")])
+            on_page_records(
+                (AHORA - timedelta(days=1)).date(),
+                1,
+                [registro("guid-historico", employee_no="97")],
+            )
+            return DiscoveryRecords(
+                [registro("guid-reciente"), registro("guid-historico", employee_no="97")],
+                complete=True,
+                next_page=1,
+            )
 
     try:
-        main.HikConnectClient = ClienteConFallaTardia
+        main.HikConnectClient = ClientePorVentanas
         main.send_events = lambda outgoing: {
             "contract_version": 2,
             "batch_id": "fake",
@@ -155,19 +158,13 @@ def test_sync_entrega_marcaje_reciente_aunque_falle_el_catchup_historico():
                 for item in outgoing
             ],
         }
-        state.set_discovery_page(97)
+        state.set_discovery_page(101)
+        result = main.sync_once(headless=True, dry_run=False)
 
-        with pytest.raises(RuntimeError, match="VMS039003"):
-            main.sync_once(headless=True, dry_run=False)
-
-        durable = state.get_outbox_event("guid-reciente-antes-de-falla")
-        assert durable is not None
-        assert durable["status"] == "acked"
-        for page_index in range(97, 101):
-            historico = state.get_outbox_event(f"guid-historico-pagina-{page_index}")
-            assert historico is not None
-            assert historico["status"] == "acked"
-        assert state.get_discovery_page() == 101
+        assert result["acked"] == 2
+        assert state.get_outbox_event("guid-reciente")["status"] == "acked"
+        assert state.get_outbox_event("guid-historico")["status"] == "acked"
+        assert state.get_discovery_page() == 1
     finally:
         main.HikConnectClient = original_client
         main.send_events = original_send
@@ -191,11 +188,11 @@ def test_sync_conserva_punch_neutro_aunque_las_paginas_lleguen_al_reves():
         def __exit__(self, *_args):
             return None
 
-        def fetch_records_since(self, **kwargs):
+        def fetch_records_between(self, **kwargs):
             on_page_records = kwargs["on_page_records"]
-            on_page_records(1, [salida])
-            on_page_records(2, [entrada])
-            return DiscoveryRecords([salida, entrada], complete=False, next_page=3)
+            on_page_records(AHORA.date(), 1, [salida])
+            on_page_records(AHORA.date(), 2, [entrada])
+            return DiscoveryRecords([salida, entrada], complete=True, next_page=1)
 
     try:
         main.HikConnectClient = ClienteConPaginasInvertidas
@@ -234,13 +231,13 @@ def test_sync_no_reintenta_un_diferido_en_cada_pagina_del_mismo_ciclo():
         def __exit__(self, *_args):
             return None
 
-        def fetch_records_since(self, **kwargs):
+        def fetch_records_between(self, **kwargs):
             on_page_records = kwargs["on_page_records"]
             primero = registro("guid-diferido")
             segundo = registro("guid-aceptado", employee_no="329")
-            on_page_records(1, [primero])
-            on_page_records(2, [segundo])
-            return DiscoveryRecords([primero, segundo], complete=False, next_page=3)
+            on_page_records(AHORA.date(), 1, [primero])
+            on_page_records(AHORA.date(), 2, [segundo])
+            return DiscoveryRecords([primero, segundo], complete=True, next_page=1)
 
     def fake_send(outgoing):
         ids = [item["event_id"] for item in outgoing]

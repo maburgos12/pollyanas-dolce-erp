@@ -4,11 +4,13 @@ from __future__ import annotations
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state
+from config import TIMEZONE
 
 
 def event(guid: str, kind: str = "check_in") -> dict:
@@ -161,6 +163,19 @@ def test_continuacion_de_descubrimiento_sobrevive_reinicio():
         assert state.get_discovery_page() == 9
         state.set_discovery_page(1)
         assert state.get_discovery_page() == 1
+    finally:
+        tmp.cleanup()
+
+
+def test_cursor_temporal_reabre_el_lookback_para_cargas_tardias():
+    tmp = isolated_db()
+    try:
+        completed_at = datetime(2026, 8, 1, 18, 0, tzinfo=TIMEZONE)
+        state.set_last_sync_time(completed_at)
+
+        assert state.get_last_sync_time() == completed_at - timedelta(
+            hours=state.LOOKBACK_HOURS
+        )
     finally:
         tmp.cleanup()
 

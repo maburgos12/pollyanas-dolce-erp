@@ -1,7 +1,7 @@
 """Catch-up Hik-Connect -> ERP: recupera marcajes que el sync de 5 minutos dejo fuera.
 
-La nube ordena los registros por momento de subida, no por device_time. Este
-barrido continua las paginas pendientes, persiste cada GUID y reenvia el outbox.
+La nube se consulta por ventanas diarias para no depender de una pagina global.
+El barrido persiste cada GUID y reenvia el outbox.
 
 El ERP deduplica por GUID, asi que reintentarlo es seguro.
 """
@@ -19,10 +19,8 @@ from config import PAGE_SIZE, TIMEZONE
 from hikconnect_client import HikConnectClient
 from main import build_events, send_and_mark  # configura logging al importarse
 from state import (
-    get_discovery_page,
     init_db,
     quarantine_cloud_record,
-    set_discovery_page,
 )
 
 log = logging.getLogger("catchup")
@@ -46,27 +44,25 @@ def main() -> int:
 
     init_db()
     desde = datetime.now(TIMEZONE) - timedelta(hours=args.horas)
-    start_page = get_discovery_page()
+    hasta = datetime.now(TIMEZONE)
     log.info(
-        "Catch-up desde pagina %s (referencia=%s, max_pages=%s)",
-        start_page,
+        "Catch-up por fechas (%s -> %s, max_pages=%s)",
         desde.isoformat(),
+        hasta.isoformat(),
         args.max_pages,
     )
 
     with HikConnectClient(headless=True) as client:
-        records = client.fetch_records_since(
+        records = client.fetch_records_between(
             start_dt=desde,
+            end_dt=hasta,
             page_size=PAGE_SIZE,
             max_pages=args.max_pages,
-            start_page=start_page,
             on_invalid_record=quarantine_cloud_record,
         )
     log.info("Registros en la nube dentro de la ventana: %s", len(records))
 
     events, selected = build_events(records, dry_run=args.dry_run)
-    if not args.dry_run:
-        set_discovery_page(records.next_page)
     log.info("Marcajes que faltaban en el ERP: %s", len(events))
 
     if args.dry_run:
@@ -77,6 +73,9 @@ def main() -> int:
     if not events and not any(total.values()):
         log.info("Nada que recuperar.")
     log.info("Resultado: %s", total)
+    if not records.complete:
+        log.error("Catch-up incompleto: aumente --max-pages para cubrir todo el periodo")
+        return 1
     return 1 if total["errors"] else 0
 
 

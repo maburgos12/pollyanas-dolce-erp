@@ -43,15 +43,28 @@ class ClienteFalso(HikConnectClient):
     def ensure_login(self) -> None:
         pass
 
-    def fetch_records_page(self, page_index, page_size, require_login=True):
+    def fetch_records_page(
+        self,
+        page_index,
+        page_size,
+        require_login=True,
+        start_dt=None,
+        end_dt=None,
+    ):
         self.ultima_pagina_pedida = max(self.ultima_pagina_pedida, page_index)
-        return self.paginas[page_index - 1] if page_index <= len(self.paginas) else []
+        records = self.paginas[page_index - 1] if page_index <= len(self.paginas) else []
+        return CloudPage(records, [], total_num=None)
 
 
 def test_conserva_device_time_viejo_por_subida_reciente():
     """No filtra por deviceTime: la nube pagina por momento de subida."""
     cliente = ClienteFalso([[registro("viejo", 60 * 48)], [registro("reciente", 10)], []])
-    encontrados = cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
+    encontrados = cliente.fetch_records_between(
+        start_dt=AHORA,
+        end_dt=AHORA,
+        page_size=100,
+        max_pages=8,
+    )
     guids = {record.record_guid for record in encontrados}
     assert guids == {"viejo", "reciente"}, f"debio conservar ambos marcajes, obtuvo {guids}"
     assert encontrados.complete is True
@@ -60,20 +73,30 @@ def test_conserva_device_time_viejo_por_subida_reciente():
 
 def test_agotamiento_de_paginas_deja_continuacion_pendiente():
     cliente = ClienteFalso([[registro(f"viejo{i}", 60 * 48)] for i in range(8)])
-    encontrados = cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
+    encontrados = cliente.fetch_records_between(
+        start_dt=AHORA,
+        end_dt=AHORA,
+        page_size=100,
+        max_pages=8,
+    )
     assert cliente.ultima_pagina_pedida == 8
     assert encontrados.complete is False
-    assert encontrados.next_page == 9
+    assert encontrados.next_page == 1
 
 
 def test_deduplica_por_guid():
     """La paginacion se recorre mientras entran marcajes nuevos; puede repetir."""
     cliente = ClienteFalso([[registro("a", 5)], [registro("a", 5)], [], []])
-    encontrados = cliente.fetch_records_since(start_dt=VENTANA, page_size=100, max_pages=8)
+    encontrados = cliente.fetch_records_between(
+        start_dt=AHORA,
+        end_dt=AHORA,
+        page_size=100,
+        max_pages=8,
+    )
     assert len(encontrados) == 1, f"esperaba 1 registro deduplicado, obtuvo {len(encontrados)}"
 
 
-def test_reanuda_desde_pagina_pendiente():
+def test_una_ventana_siempre_inicia_en_pagina_uno():
     cliente = ClienteFalso(
         [
             [registro("pagina-1", 1)],
@@ -82,15 +105,15 @@ def test_reanuda_desde_pagina_pendiente():
             [],
         ]
     )
-    encontrados = cliente.fetch_records_since(
-        start_dt=VENTANA,
+    encontrados = cliente.fetch_records_between(
+        start_dt=AHORA,
+        end_dt=AHORA,
         page_size=100,
-        max_pages=3,
-        start_page=2,
+        max_pages=4,
     )
     assert {record.record_guid for record in encontrados} == {"pagina-1", "pagina-2", "pagina-3"}
-    assert encontrados.complete is False
-    assert encontrados.next_page == 4
+    assert encontrados.complete is True
+    assert encontrados.next_page == 1
 
 
 def test_registro_cloud_invalido_se_aísla_sin_descartar_la_pagina():
@@ -132,15 +155,23 @@ def test_registro_aislado_es_durable_antes_de_continuar():
     )
 
     class ClienteConAislado(ClienteFalso):
-        def fetch_records_page(self, page_index, page_size, require_login=True):
+        def fetch_records_page(
+            self,
+            page_index,
+            page_size,
+            require_login=True,
+            start_dt=None,
+            end_dt=None,
+        ):
             self.ultima_pagina_pedida = max(self.ultima_pagina_pedida, page_index)
             if page_index == 1:
-                return CloudPage([registro("valido", 1)], [invalido])
-            return CloudPage([], [])
+                return CloudPage([registro("valido", 1)], [invalido], total_num=1)
+            return CloudPage([], [], total_num=1)
 
     journal = []
-    encontrados = ClienteConAislado([]).fetch_records_since(
-        start_dt=VENTANA,
+    encontrados = ClienteConAislado([]).fetch_records_between(
+        start_dt=AHORA,
+        end_dt=AHORA,
         page_size=100,
         max_pages=3,
         on_invalid_record=journal.append,
@@ -152,18 +183,26 @@ def test_registro_aislado_es_durable_antes_de_continuar():
 
 def test_entrega_pagina_valida_antes_de_consultar_una_pagina_que_falla():
     class ClienteConFallaTardia(ClienteFalso):
-        def fetch_records_page(self, page_index, page_size, require_login=True):
+        def fetch_records_page(
+            self,
+            page_index,
+            page_size,
+            require_login=True,
+            start_dt=None,
+            end_dt=None,
+        ):
             if page_index == 1:
-                return CloudPage([registro("reciente-durable", 1)], [])
+                return CloudPage([registro("reciente-durable", 1)], [], total_num=200)
             raise RuntimeError("VMS039003 en pagina historica")
 
     paginas_entregadas = []
     with pytest.raises(RuntimeError, match="VMS039003"):
-        ClienteConFallaTardia([]).fetch_records_since(
-            start_dt=VENTANA,
+        ClienteConFallaTardia([]).fetch_records_between(
+            start_dt=AHORA,
+            end_dt=AHORA,
             page_size=100,
             max_pages=3,
-            on_page_records=lambda page_index, records: paginas_entregadas.append(
+            on_page_records=lambda _work_date, page_index, records: paginas_entregadas.append(
                 (page_index, [record.record_guid for record in records])
             ),
         )
@@ -175,7 +214,7 @@ if __name__ == "__main__":
     test_conserva_device_time_viejo_por_subida_reciente()
     test_agotamiento_de_paginas_deja_continuacion_pendiente()
     test_deduplica_por_guid()
-    test_reanuda_desde_pagina_pendiente()
+    test_una_ventana_siempre_inicia_en_pagina_uno()
     test_registro_cloud_invalido_se_aísla_sin_descartar_la_pagina()
     test_registro_aislado_es_durable_antes_de_continuar()
     print("OK: los 6 checks de paginacion pasan")

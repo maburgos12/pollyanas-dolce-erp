@@ -14,7 +14,6 @@ from state import (
     apply_delivery_results,
     day_state_exists,
     enqueue_event,
-    get_discovery_page,
     get_last_sync_time,
     get_outbox_event,
     init_db,
@@ -25,6 +24,7 @@ from state import (
     record_delivery_error,
     quarantine_cloud_record,
     set_discovery_page,
+    set_last_sync_time,
     stable_punch_kind,
     was_sent,
 )
@@ -150,10 +150,8 @@ def test_connectivity(headless: bool) -> bool:
 def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> dict:
     start_dt = since or get_last_sync_time()
     end_dt = datetime.now(TIMEZONE)
-    start_page = 1 if since else get_discovery_page()
     log.info(
-        "Sincronizando Hik-Connect por orden de subida desde pagina %s (%s -> %s)",
-        start_page,
+        "Sincronizando Hik-Connect por ventanas de fecha (%s -> %s)",
         start_dt.isoformat(),
         end_dt.isoformat(),
     )
@@ -163,10 +161,11 @@ def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> d
         if dry_run:
             result["dry_run"] = 0
 
-        def process_page(page_index: int, page_records) -> None:
+        def process_page(work_date, page_index: int, page_records) -> None:
             events, selected_records = build_events(page_records, dry_run=dry_run)
             log.info(
-                "Hik-Connect pagina %s: %d registro(s), %d evento(s) nuevo(s)",
+                "Hik-Connect fecha %s pagina %s: %d registro(s), %d evento(s) nuevo(s)",
+                work_date,
                 page_index,
                 len(page_records),
                 len(events),
@@ -181,24 +180,30 @@ def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> d
                 result[key] = result.get(key, 0) + value
             if not dry_run and page_result.get("errors"):
                 raise RuntimeError(
-                    f"ERP dejo {page_result['errors']} evento(s) pendientes en pagina {page_index}"
+                    "ERP dejo "
+                    f"{page_result['errors']} evento(s) pendientes "
+                    f"en fecha {work_date} pagina {page_index}"
                 )
-            if not dry_run and (page_index != 1 or start_page == 1):
-                set_discovery_page(page_index + 1)
 
         with HikConnectClient(headless=headless) as client:
-            records = client.fetch_records_since(
+            records = client.fetch_records_between(
                 start_dt=start_dt,
+                end_dt=end_dt,
                 page_size=PAGE_SIZE,
                 max_pages=MAX_PAGES,
-                start_page=start_page,
                 on_invalid_record=quarantine_cloud_record,
                 on_page_records=process_page,
             )
         log.info("Registros cloud encontrados: %d", len(records))
         if not dry_run:
-            # La pagina vacia confirma fin de recorrido; cada pagina previa ya fue entregada.
-            set_discovery_page(records.next_page)
+            if not records.complete:
+                raise RuntimeError(
+                    "La ventana Hik-Connect excedio MAX_PAGES; "
+                    "los registros recibidos quedaron durables pero falta continuar el periodo"
+                )
+            # Retira el cursor global heredado: cada fecha siempre inicia en pagina 1.
+            set_discovery_page(1)
+            set_last_sync_time(end_dt)
         if not dry_run:
             last_cloud = max((record.device_time for record in records), default=None)
             record_cycle_success(completed_at=datetime.now(TIMEZONE), last_cloud_record_at=last_cloud)

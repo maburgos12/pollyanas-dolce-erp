@@ -22,6 +22,7 @@ Campos usados:
 - `personInfo.baseInfo.firstName` + `lastName`
 - `deviceTime`
 - `deviceName`
+- `cardReaderName` -> serial real del checador (por ejemplo `FN9490470`)
 - `recordGuid`
 
 Como la tabla cloud de acceso no siempre marca entrada/salida, el agente ordena los eventos por empleado y dia:
@@ -181,17 +182,20 @@ evaluar_rango_asistencia(desde, hasta)          # resuelve faltas/avisos/bajas f
 reconciliar_bonos_asistencia_periodo_actual()   # solo BORRADOR; no pisa bono_extra/ajustes
 ```
 
-### Paginacion: por que no se corta en la primera pagina
+### Paginacion acotada por fecha
 
-La nube pagina por **momento de subida**, no por `deviceTime`. Un marcaje viejo que el checador subio
-con retraso aparece en las primeras paginas, y uno reciente puede quedar mas atras. La version
-original de `fetch_records_since` cortaba en la primera pagina cuyo registro mas viejo caia fuera de
-la ventana, y con eso perdia para siempre los marcajes buenos de las paginas siguientes (jun-jul 2026:
-368 marcajes perdidos en el hueco 29-jun a 3-jul, con faltas falsas que cancelaron bonos).
+El portal humano `Access Control -> Search -> Access Record Retrieval` consulta el endpoint con
+`beginTime` y `endTime`. El agente replica ese contrato y divide cualquier rango en ventanas diarias,
+de la fecha mas reciente a la mas antigua. Cada fecha inicia en pagina 1 y `totalNum` determina la
+ultima pagina real.
 
-Hoy el agente recorre la nube por orden de subida sin usar `deviceTime` como filtro. Si el recorrido
-requiere varios ciclos, guarda la página de continuación; aun así vuelve a consultar la página 1 en
-cada ciclo para no retrasar marcajes recién subidos. Todo se deduplica por `record_guid`.
+No existe un cursor global: el valor historico `discovery_page` se restablece a 1. Por eso el limite
+interno de Hik en la pagina 101 no forma parte del recorrido normal. El sync conserva un solapamiento
+de `LOOKBACK_HOURS` para recoger cargas tardias y todo se deduplica por `recordGuid`.
+
+La identidad del dispositivo usa primero el serial legible de `cardReaderName`, no el contador
+numerico `devSerialNo`. Esto permite distinguir el checador nuevo del equipo administrativo cuando
+ambos esten activos, sin mezclar sus eventos.
 
 ```bash
 .venv/bin/python test_pagination.py
