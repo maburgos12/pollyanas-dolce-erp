@@ -78,7 +78,12 @@ def build_events(records, dry_run: bool) -> tuple[list[dict], list]:
     return events, selected_records
 
 
-def send_and_mark(events: list[dict], records: list, dry_run: bool) -> dict:
+def send_and_mark(
+    events: list[dict],
+    records: list,
+    dry_run: bool,
+    attempted_event_ids: set[str] | None = None,
+) -> dict:
     if dry_run:
         return {"acked": 0, "pending": 0, "review": 0, "errors": 0, "dry_run": len(events)}
 
@@ -86,11 +91,15 @@ def send_and_mark(events: list[dict], records: list, dry_run: bool) -> dict:
         enqueue_event(event)
 
     pending = list_pending_events()
+    if attempted_event_ids is not None:
+        pending = [item for item in pending if item["event_id"] not in attempted_event_ids]
     total = {"acked": 0, "pending": 0, "review": 0, "errors": 0}
     for start in range(0, len(pending), 100):
         batch = pending[start : start + 100]
         event_ids = [item["event_id"] for item in batch]
         payloads = [item["payload"] for item in batch]
+        if attempted_event_ids is not None:
+            attempted_event_ids.update(event_ids)
         mark_delivery_attempt(event_ids)
         try:
             response = send_events(payloads)
@@ -149,6 +158,34 @@ def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> d
         end_dt.isoformat(),
     )
     try:
+        result = {"acked": 0, "pending": 0, "review": 0, "errors": 0}
+        attempted_event_ids: set[str] = set()
+        if dry_run:
+            result["dry_run"] = 0
+
+        def process_page(page_index: int, page_records) -> None:
+            events, selected_records = build_events(page_records, dry_run=dry_run)
+            log.info(
+                "Hik-Connect pagina %s: %d registro(s), %d evento(s) nuevo(s)",
+                page_index,
+                len(page_records),
+                len(events),
+            )
+            page_result = send_and_mark(
+                events,
+                selected_records,
+                dry_run=dry_run,
+                attempted_event_ids=attempted_event_ids,
+            )
+            for key, value in page_result.items():
+                result[key] = result.get(key, 0) + value
+            if not dry_run and page_result.get("errors"):
+                raise RuntimeError(
+                    f"ERP dejo {page_result['errors']} evento(s) pendientes en pagina {page_index}"
+                )
+            if not dry_run and (page_index != 1 or start_page == 1):
+                set_discovery_page(page_index + 1)
+
         with HikConnectClient(headless=headless) as client:
             records = client.fetch_records_since(
                 start_dt=start_dt,
@@ -156,16 +193,12 @@ def sync_once(headless: bool, dry_run: bool, since: datetime | None = None) -> d
                 max_pages=MAX_PAGES,
                 start_page=start_page,
                 on_invalid_record=quarantine_cloud_record,
+                on_page_records=process_page,
             )
         log.info("Registros cloud encontrados: %d", len(records))
-        events, selected_records = build_events(records, dry_run=dry_run)
         if not dry_run:
-            # Todos los GUID de estas paginas ya quedaron durables antes de mover la continuacion.
+            # La pagina vacia confirma fin de recorrido; cada pagina previa ya fue entregada.
             set_discovery_page(records.next_page)
-        log.info("Eventos nuevos a enviar: %d", len(events))
-        result = send_and_mark(events, selected_records, dry_run=dry_run)
-        if not dry_run and result.get("errors"):
-            raise RuntimeError(f"ERP dejo {result['errors']} evento(s) pendientes")
         if not dry_run:
             last_cloud = max((record.device_time for record in records), default=None)
             record_cycle_success(completed_at=datetime.now(TIMEZONE), last_cloud_record_at=last_cloud)

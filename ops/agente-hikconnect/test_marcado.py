@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import sys
 import tempfile
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import TIMEZONE
-from hikconnect_client import CloudRecord
+from hikconnect_client import CloudRecord, DiscoveryRecords
 import main
 import state
 
@@ -111,6 +114,160 @@ def test_lote_solo_duplicados_termina_correctamente():
         assert result == {"acked": 2, "pending": 0, "review": 0, "errors": 0}
         assert state.list_pending_events() == []
     finally:
+        main.send_events = original_send
+        tmp.cleanup()
+
+
+def test_sync_entrega_marcaje_reciente_aunque_falle_el_catchup_historico():
+    tmp = isolated_db()
+    original_client = main.HikConnectClient
+    original_send = main.send_events
+
+    class ClienteConFallaTardia:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def fetch_records_since(self, **kwargs):
+            on_page_records = kwargs.get("on_page_records")
+            assert callable(on_page_records), "sync_once debe procesar cada pagina al recibirla"
+            assert kwargs["start_page"] == 97
+            on_page_records(1, [registro("guid-reciente-antes-de-falla")])
+            for page_index in range(97, 101):
+                on_page_records(
+                    page_index,
+                    [registro(f"guid-historico-pagina-{page_index}", employee_no=str(page_index))],
+                )
+            raise RuntimeError("VMS039003 en pagina 101")
+
+    try:
+        main.HikConnectClient = ClienteConFallaTardia
+        main.send_events = lambda outgoing: {
+            "contract_version": 2,
+            "batch_id": "fake",
+            "results": [
+                {"event_id": item["event_id"], "outcome": "accepted"}
+                for item in outgoing
+            ],
+        }
+        state.set_discovery_page(97)
+
+        with pytest.raises(RuntimeError, match="VMS039003"):
+            main.sync_once(headless=True, dry_run=False)
+
+        durable = state.get_outbox_event("guid-reciente-antes-de-falla")
+        assert durable is not None
+        assert durable["status"] == "acked"
+        for page_index in range(97, 101):
+            historico = state.get_outbox_event(f"guid-historico-pagina-{page_index}")
+            assert historico is not None
+            assert historico["status"] == "acked"
+        assert state.get_discovery_page() == 101
+    finally:
+        main.HikConnectClient = original_client
+        main.send_events = original_send
+        tmp.cleanup()
+
+
+def test_sync_conserva_punch_neutro_aunque_las_paginas_lleguen_al_reves():
+    tmp = isolated_db()
+    original_client = main.HikConnectClient
+    original_send = main.send_events
+    salida = replace(registro("guid-salida"), device_time=AHORA + timedelta(hours=9))
+    entrada = replace(registro("guid-entrada"), device_time=AHORA)
+
+    class ClienteConPaginasInvertidas:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def fetch_records_since(self, **kwargs):
+            on_page_records = kwargs["on_page_records"]
+            on_page_records(1, [salida])
+            on_page_records(2, [entrada])
+            return DiscoveryRecords([salida, entrada], complete=False, next_page=3)
+
+    try:
+        main.HikConnectClient = ClienteConPaginasInvertidas
+        main.send_events = lambda outgoing: {
+            "contract_version": 2,
+            "batch_id": "fake",
+            "results": [
+                {"event_id": item["event_id"], "outcome": "accepted"}
+                for item in outgoing
+            ],
+        }
+
+        main.sync_once(headless=True, dry_run=False, since=AHORA)
+
+        assert state.get_outbox_event("guid-entrada")["kind"] == "punch"
+        assert state.get_outbox_event("guid-salida")["kind"] == "punch"
+    finally:
+        main.HikConnectClient = original_client
+        main.send_events = original_send
+        tmp.cleanup()
+
+
+def test_sync_no_reintenta_un_diferido_en_cada_pagina_del_mismo_ciclo():
+    tmp = isolated_db()
+    original_client = main.HikConnectClient
+    original_send = main.send_events
+    llamadas = []
+
+    class ClienteDosPaginas:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def fetch_records_since(self, **kwargs):
+            on_page_records = kwargs["on_page_records"]
+            primero = registro("guid-diferido")
+            segundo = registro("guid-aceptado", employee_no="329")
+            on_page_records(1, [primero])
+            on_page_records(2, [segundo])
+            return DiscoveryRecords([primero, segundo], complete=False, next_page=3)
+
+    def fake_send(outgoing):
+        ids = [item["event_id"] for item in outgoing]
+        llamadas.append(ids)
+        return {
+            "contract_version": 2,
+            "batch_id": "fake",
+            "results": [
+                {
+                    "event_id": event_id,
+                    "outcome": "deferred" if event_id == "guid-diferido" else "accepted",
+                    "reason_code": "identity_unresolved" if event_id == "guid-diferido" else "",
+                }
+                for event_id in ids
+            ],
+        }
+
+    try:
+        main.HikConnectClient = ClienteDosPaginas
+        main.send_events = fake_send
+
+        main.sync_once(headless=True, dry_run=False, since=AHORA)
+
+        assert llamadas == [["guid-diferido"], ["guid-aceptado"]]
+        assert state.get_outbox_event("guid-diferido")["attempts"] == 1
+    finally:
+        main.HikConnectClient = original_client
         main.send_events = original_send
         tmp.cleanup()
 

@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import TIMEZONE
@@ -146,6 +148,27 @@ def test_registro_aislado_es_durable_antes_de_continuar():
     assert [item.record_guid for item in journal] == ["guid-sin-persona"]
     assert [item.record_guid for item in encontrados] == ["valido"]
     assert encontrados.complete is True
+
+
+def test_entrega_pagina_valida_antes_de_consultar_una_pagina_que_falla():
+    class ClienteConFallaTardia(ClienteFalso):
+        def fetch_records_page(self, page_index, page_size, require_login=True):
+            if page_index == 1:
+                return CloudPage([registro("reciente-durable", 1)], [])
+            raise RuntimeError("VMS039003 en pagina historica")
+
+    paginas_entregadas = []
+    with pytest.raises(RuntimeError, match="VMS039003"):
+        ClienteConFallaTardia([]).fetch_records_since(
+            start_dt=VENTANA,
+            page_size=100,
+            max_pages=3,
+            on_page_records=lambda page_index, records: paginas_entregadas.append(
+                (page_index, [record.record_guid for record in records])
+            ),
+        )
+
+    assert paginas_entregadas == [(1, ["reciente-durable"])]
 
 
 if __name__ == "__main__":
