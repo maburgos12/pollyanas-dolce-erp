@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.access import can_view_reportes
+from core.access import can_manage_module, can_view_reportes
 from reportes.models import AreaPresupuesto, LineaPresupuestoMensual, RubroPresupuesto
 from reportes.services_presupuesto_maestro import (
     PresupuestoMaestroService,
@@ -145,7 +145,7 @@ class PresupuestoRubroLineasView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, rubro_id: int):
-        if not _require_reportes(request.user):
+        if not can_manage_module(request.user, "reportes"):
             return Response({"detail": "No tienes permisos para editar presupuesto."}, status=status.HTTP_403_FORBIDDEN)
         rubro = get_object_or_404(RubroPresupuesto, pk=rubro_id)
         version = normalize_version(request.data.get("version"))
@@ -173,7 +173,7 @@ class PresupuestoLineaView(APIView):
     permission_classes = [IsAuthenticated]
 
     def put(self, request, line_id: int):
-        if not _require_reportes(request.user):
+        if not can_manage_module(request.user, "reportes"):
             return Response({"detail": "No tienes permisos para editar presupuesto."}, status=status.HTTP_403_FORBIDDEN)
         amount = money(request.data.get("monto_presupuesto", "0"))
         line = PresupuestoMaestroService().update_line_amount(line_id=line_id, amount=amount)

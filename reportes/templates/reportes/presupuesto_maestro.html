@@ -52,6 +52,7 @@
     <div class="budget-master-actions">
       <button class="budget-master-button" type="submit">Actualizar</button>
       <a class="budget-master-button is-ghost" href="{% url 'reportes:presupuesto_importar_por_area' %}">Importadores anteriores</a>
+      {% if can_access_budget_catalog %}<a class="budget-master-button is-ghost" href="{% url 'reportes:presupuesto_catalogos' %}">Catálogos de presupuesto</a>{% endif %}
     </div>
   </form>
 
@@ -75,6 +76,7 @@
     </article>
   </section>
 
+  {% if can_manage_budget %}
   <form class="budget-master-import" method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <input type="hidden" name="action" value="import_file">
@@ -97,35 +99,7 @@
     <button class="budget-master-button" type="submit">Importar</button>
   </form>
 
-  <form class="budget-master-import" method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="add_rubro">
-    <div class="budget-master-field">
-      <label for="new-area">Área</label>
-      <select id="new-area" name="area" required>
-        {% for area in areas %}
-        <option value="{{ area.codigo }}" {% if selected_area == area.codigo %}selected{% endif %}>{{ area.nombre }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="budget-master-field">
-      <label for="new-concept">Concepto</label>
-      <input id="new-concept" name="concepto" type="text" required>
-    </div>
-    <div class="budget-master-field">
-      <label for="new-type">Tipo</label>
-      <select id="new-type" name="tipo">
-        {% for value, label in rubro_types %}
-        <option value="{{ value }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="budget-master-field">
-      <label for="new-account">Cuenta</label>
-      <input id="new-account" name="codigo_cuenta" type="text">
-    </div>
-    <button class="budget-master-button" type="submit">Agregar concepto</button>
-  </form>
+  {% endif %}
 
   <section class="budget-master-table-wrap">
     <table class="budget-master-table">
@@ -155,7 +129,11 @@
           {% for cell in row.months %}
           <td>
             {% if cell.linea_id %}
+            {% if can_manage_budget %}
             <input class="budget-master-cell" inputmode="decimal" data-line-id="{{ cell.linea_id }}" value="${{ cell.amount|floatformat:2|intcomma }}">
+            {% else %}
+            <span class="budget-master-cell is-readonly">${{ cell.amount|floatformat:2|intcomma }}</span>
+            {% endif %}
             {% else %}
             <input class="budget-master-cell" disabled value="$0.00">
             {% endif %}

@@ -364,6 +364,24 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "initial": "C",
                 }
             )
+        if group["key"] == "mi_trabajo" and user and user.is_authenticated:
+            from reportes.views_presupuesto_catalogos import puede_ver_catalogos_presupuesto
+
+            if puede_ver_catalogos_presupuesto(user):
+                url_catalogos = "/reportes/presupuesto-real/catalogos/"
+                match_len = len(url_catalogos) if current_path.startswith(url_catalogos) else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Catálogos de presupuesto",
+                        "url": url_catalogos,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "reportes",
+                        "submodule": "presupuesto_catalogos",
+                        "initial": "T",
+                    }
+                )
         if group["key"] == "direccion" and user and user.is_authenticated and can_view_reportes(user):
             url_tablero = "/reportes/presupuesto-vs-real/"
             if not _tiene_areas_presupuesto(user):
