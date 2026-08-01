@@ -53,6 +53,16 @@ def _puede_capturar_presupuesto(user) -> bool:
     ).exists()
 
 
+def _tiene_areas_presupuesto(user) -> bool:
+    if not (user and user.is_authenticated and getattr(user, "pk", None)):
+        return False
+    from reportes.models import AreaPresupuestoResponsable
+
+    return AreaPresupuestoResponsable.objects.filter(
+        usuario=user, puede_capturar=True, area__activa=True
+    ).exists()
+
+
 NAV_GROUPS = [
     {
         "key": "mi_trabajo",
@@ -326,6 +336,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     }
                 )
         if group["key"] == "mi_trabajo" and _puede_capturar_presupuesto(user):
+            url_resumen = "/reportes/presupuesto-vs-real/"
+            match_len = len(url_resumen) if current_path.startswith(url_resumen) else 0
+            best_match_len = max(best_match_len, match_len)
+            items.append(
+                {
+                    "label": "Resumen de presupuesto",
+                    "url": url_resumen,
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "reportes",
+                    "submodule": "presupuesto_vs_real_personal",
+                    "initial": "R",
+                }
+            )
             url_captura = "/reportes/presupuesto-real/captura/"
             match_len = len(url_captura) if current_path.startswith(url_captura) else 0
             best_match_len = max(best_match_len, match_len)
@@ -342,19 +366,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
         if group["key"] == "direccion" and user and user.is_authenticated and can_view_reportes(user):
             url_tablero = "/reportes/presupuesto-vs-real/"
-            match_len = len(url_tablero) if current_path.startswith(url_tablero) else 0
-            best_match_len = max(best_match_len, match_len)
-            items.append(
-                {
-                    "label": "Presupuesto vs Real",
-                    "url": url_tablero,
-                    "active": False,
-                    "_match_len": match_len,
-                    "module": "reportes",
-                    "submodule": "presupuesto_vs_real",
-                    "initial": "P",
-                }
-            )
+            if not _tiene_areas_presupuesto(user):
+                match_len = len(url_tablero) if current_path.startswith(url_tablero) else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Presupuesto vs Real",
+                        "url": url_tablero,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "reportes",
+                        "submodule": "presupuesto_vs_real",
+                        "initial": "P",
+                    }
+                )
             url_estado = "/reportes/estado-resultados/"
             match_len = len(url_estado) if current_path.startswith(url_estado) else 0
             best_match_len = max(best_match_len, match_len)

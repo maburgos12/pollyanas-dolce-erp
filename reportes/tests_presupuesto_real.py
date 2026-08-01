@@ -466,6 +466,9 @@ class PresupuestoVsRealViewTests(TestCase):
         User = get_user_model()
         cls.superuser = User.objects.create_superuser("dg_test", "dg@test.mx", "clave-test")
         cls.sin_permiso = User.objects.create_user("sin_permiso", "np@test.mx", "clave-test")
+        cls.responsable = User.objects.create_user("responsable_tablero", "rt@test.mx", "clave-test")
+        cls.responsable_doble = User.objects.create_user("responsable_doble", "rd@test.mx", "clave-test")
+        cls.responsable_nomina = User.objects.create_user("responsable_nomina", "rn@test.mx", "clave-test")
 
         cls.periodo = date(2026, 3, 1)
         cls.area = AreaPresupuesto.objects.create(nombre="Área tablero", codigo="tablero")
@@ -479,6 +482,34 @@ class PresupuestoVsRealViewTests(TestCase):
             monto_real=Decimal("80.00"),
             fuente_real="AUTO:NOMINA",
             metadata={"real_breakdown": [{"tipo_fuente": "NOMINA", "monto": "80.00"}]},
+        )
+        cls.otra_area = AreaPresupuesto.objects.create(nombre="Área ajena", codigo="ajena")
+        otro_rubro = RubroPresupuesto.objects.create(
+            area=cls.otra_area, concepto="Concepto confidencial ajeno", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=otro_rubro,
+            periodo=cls.periodo,
+            monto_presupuesto=Decimal("900.00"),
+            monto_real=Decimal("950.00"),
+        )
+        from reportes.models import AreaPresupuestoResponsable
+
+        AreaPresupuestoResponsable.objects.create(area=cls.area, usuario=cls.responsable)
+        AreaPresupuestoResponsable.objects.create(area=cls.area, usuario=cls.responsable_doble)
+        AreaPresupuestoResponsable.objects.create(area=cls.otra_area, usuario=cls.responsable_doble)
+        area_nomina = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        rubro_nomina = RubroPresupuesto.objects.create(
+            area=area_nomina, concepto="Sueldos", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro_nomina,
+            periodo=cls.periodo,
+            monto_presupuesto=Decimal("300.00"),
+            monto_real=Decimal("280.00"),
+        )
+        AreaPresupuestoResponsable.objects.create(
+            area=area_nomina, usuario=cls.responsable_nomina
         )
 
     def test_requiere_permiso_de_reportes(self):
@@ -495,11 +526,12 @@ class PresupuestoVsRealViewTests(TestCase):
         contenido = response.content.decode()
         self.assertIn("Concepto tablero", contenido)
         self.assertIn("Automático · Nómina", contenido)
-        detalle = response.context["detalle"]
-        self.assertEqual(len(detalle), 1)
-        self.assertEqual(detalle[0]["varianza"], Decimal("-20.00"))
+        detalle = next(
+            row for row in response.context["detalle"] if row["concepto"] == "Concepto tablero"
+        )
+        self.assertEqual(detalle["varianza"], Decimal("-20.00"))
         # Egreso gastando menos que presupuesto = verde
-        self.assertEqual(detalle[0]["tone"], "success")
+        self.assertEqual(detalle["tone"], "success")
 
     def test_export_csv_incluye_encabezados_y_fila(self):
         """El export CSV trae encabezados y la línea del mes."""
@@ -518,6 +550,66 @@ class PresupuestoVsRealViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("spreadsheetml", response["Content-Type"])
         self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_responsable_ve_solo_su_area_aunque_solicite_otra(self):
+        self.client.force_login(self.responsable)
+        response = self.client.get(
+            "/reportes/presupuesto-vs-real/?year=2026&month=3&area=ajena"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["resumen_limitado"])
+        self.assertEqual(response.context["selected_area"], "")
+        self.assertContains(response, "Concepto tablero")
+        self.assertNotContains(response, "Concepto confidencial ajeno")
+        self.assertContains(response, "Resumen de mis áreas")
+        self.assertNotContains(response, "Estado de resultados")
+
+    def test_asignacion_de_area_prevalece_sobre_permiso_general_de_lectura(self):
+        from core.models import UserModuleAccess
+
+        UserModuleAccess.objects.create(
+            user=self.responsable,
+            module="reportes",
+            access=UserModuleAccess.ACCESS_VIEW,
+        )
+        self.client.force_login(self.responsable)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["resumen_limitado"])
+        self.assertNotContains(response, "Concepto confidencial ajeno")
+
+    def test_responsable_de_dos_areas_ve_solo_ambas(self):
+        self.client.force_login(self.responsable_doble)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {fila["codigo"] for fila in response.context["matriz"]},
+            {"tablero", "ajena"},
+        )
+        self.assertContains(response, "Concepto tablero")
+        self.assertContains(response, "Concepto confidencial ajeno")
+
+    def test_responsable_nomina_ve_sus_totales_aunque_sea_area_de_control(self):
+        self.client.force_login(self.responsable_nomina)
+        response = self.client.get("/reportes/presupuesto-vs-real/?year=2026&month=3")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["kpis"]["ppto_egresos"], Decimal("300.00"))
+        self.assertEqual(response.context["kpis"]["real_egresos"], Decimal("280.00"))
+
+    def test_export_responsable_no_filtra_datos_ajenos(self):
+        self.client.force_login(self.responsable)
+        response = self.client.get(
+            "/reportes/presupuesto-vs-real/?year=2026&month=3&area=ajena&export=csv"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cuerpo = response.content.decode()
+        self.assertIn("Concepto tablero", cuerpo)
+        self.assertNotIn("Concepto confidencial ajeno", cuerpo)
 
 
 class PresupuestoRealFixesReviewTests(TestCase):
@@ -1638,11 +1730,13 @@ class NavegacionCapturaTests(TestCase):
         AreaPresupuestoResponsable.objects.create(area=area, usuario=jefa)
         etiquetas_jefa = [i["label"] for g in build_nav_groups(jefa, "/") for i in g["items"]]
         self.assertIn("Captura de presupuesto", etiquetas_jefa)
+        self.assertIn("Resumen de presupuesto", etiquetas_jefa)
         self.assertNotIn("Presupuesto vs Real", etiquetas_jefa)
 
         ajeno = User.objects.create_user("ajeno_nav", "an@test.mx", "x")
         etiquetas_ajeno = [i["label"] for g in build_nav_groups(ajeno, "/") for i in g["items"]]
         self.assertNotIn("Captura de presupuesto", etiquetas_ajeno)
+        self.assertNotIn("Resumen de presupuesto", etiquetas_ajeno)
 
         dg = User.objects.create_superuser("dg_nav", "dn@test.mx", "x")
         etiquetas_dg = [i["label"] for g in build_nav_groups(dg, "/") for i in g["items"]]
