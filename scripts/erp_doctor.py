@@ -920,7 +920,7 @@ def check_investment_project_consistency() -> CheckResult:
     started = time.monotonic()
     try:
         _setup_django()
-        from django.db.models import Count, Sum
+        from django.db.models import Count, Q, Sum
         from reportes.models import ProyectoInversion, ProyectoInversionGasto
     except Exception as exc:  # noqa: BLE001
         return CheckResult(
@@ -935,7 +935,14 @@ def check_investment_project_consistency() -> CheckResult:
 
     details: list[dict[str, object]] = []
     global_status = "OK"
-    projects = ProyectoInversion.objects.all().order_by("id").annotate(detail_total=Sum("gastos_inversion__monto_total"))
+    projects = ProyectoInversion.objects.all().order_by("id").annotate(
+        detail_total=Sum(
+            "gastos_inversion__monto_total",
+            filter=Q(
+                gastos_inversion__tipo_registro=ProyectoInversionGasto.TIPO_REAL
+            ),
+        )
+    )
     for project in projects:
         real = _as_decimal(project.monto_inversion_real)
         detail_total = _as_decimal(project.detail_total)
