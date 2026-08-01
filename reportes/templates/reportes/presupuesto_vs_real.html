@@ -2,7 +2,7 @@
 {% load humanize %}
 
 {% block title %}Reportes - Presupuesto vs Real{% endblock %}
-{% block page_title %}Reportes · Presupuesto vs Real{% endblock %}
+{% block page_title %}{% if resumen_limitado %}Mi presupuesto{% else %}Reportes · Presupuesto vs Real{% endif %}{% endblock %}
 {% block body_class %}page-reportes-presupuesto-vs-real{% endblock %}
 
 {% block extra_css %}
@@ -31,15 +31,15 @@
 </section>
 
 <section class="card">
-  <div class="card-header">Presupuesto vs Real</div>
-  <p class="muted">Comparativo mensual del presupuesto autorizado contra el gasto e ingreso real consolidado desde el ERP (Point, nómina y gastos operativos).</p>
+  <div class="card-header">{% if resumen_limitado %}Resumen de mis áreas{% else %}Presupuesto vs Real{% endif %}</div>
+  <p class="muted">{% if resumen_limitado %}Consulta el presupuesto, el gasto real y los conceptos pendientes únicamente de las áreas que tienes asignadas.{% else %}Comparativo mensual del presupuesto autorizado contra el gasto e ingreso real consolidado desde el ERP (Point, nómina y gastos operativos).{% endif %}</p>
 
   <form method="get" novalidate>
     <div class="form-grid-2">
       <div class="form-group">
         <label for="pvr-area">Área</label>
         <select class="input-field" id="pvr-area" name="area">
-          <option value="">Todas</option>
+          <option value="">{% if resumen_limitado %}Mis áreas{% else %}Todas{% endif %}</option>
           {% for area in areas %}
           <option value="{{ area.codigo }}" {% if selected_area == area.codigo %}selected{% endif %}>{{ area.nombre }}</option>
           {% endfor %}
@@ -70,14 +70,30 @@
       <button class="btn btn-primary" type="submit">Actualizar</button>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=xlsx">Exportar Excel</a>
       <a class="btn btn-secondary" href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ selected_area }}&export=csv">Exportar CSV</a>
-      <a class="btn btn-secondary" href="{% url 'reportes:estado_resultados' %}?year={{ selected_year }}">Estado de resultados</a>
+      {% if not resumen_limitado %}<a class="btn btn-secondary" href="{% url 'reportes:estado_resultados' %}?year={{ selected_year }}">Estado de resultados</a>{% endif %}
+      {% if puede_capturar %}
       <a class="btn btn-secondary" href="{% url 'reportes:presupuesto_real_captura' %}?year={{ selected_year }}&month={{ selected_month }}">Ir a captura</a>
-      <a class="btn btn-secondary" href="{% url 'reportes:cedula_imss_importar' %}">Cédulas IMSS</a>
+      {% endif %}
+      {% if puede_subir_cedulas %}<a class="btn btn-secondary" href="{% url 'reportes:cedula_imss_importar' %}">Cédulas IMSS</a>{% endif %}
     </div>
   </form>
 </section>
 
 <section class="kpi-grid">
+  {% if resumen_limitado %}
+  <div class="kpi-card">
+    <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Gasto real de mis áreas (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number {% if kpis.varianza_egresos > 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.varianza_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-label">Variación contra presupuesto</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
+    <div class="kpi-label">Conceptos con información real</div>
+  </div>
+  {% else %}
   <div class="kpi-card">
     <div class="kpi-number">${{ kpis.real_ingresos|floatformat:0|intcomma }}</div>
     <div class="kpi-label">Ingresos reales · {{ selected_month_name|capfirst }} (ppto ${{ kpis.ppto_ingresos|floatformat:0|intcomma }})</div>
@@ -98,9 +114,12 @@
     <div class="kpi-number">{{ kpis.capturado }} / {{ kpis.capturado|add:kpis.pendiente }}</div>
     <div class="kpi-label">Conceptos con real</div>
   </div>
+  {% endif %}
 </section>
 
-{% if not selected_area %}
+{% if resumen_limitado %}
+<div class="alert alert-info">Esta vista está limitada a tus áreas asignadas. No incluye resultados generales, CAPEX ni información de otras áreas.</div>
+{% elif not selected_area %}
 <div class="alert alert-info">Las áreas <strong>Nómina</strong> y <strong>Resultados (P&amp;L)</strong> se muestran como vistas de control y no se suman a los KPI: los sueldos ya están dentro de cada área, y la venta y costos totales de la empresa ya viven en Ventas y Producción. El <strong>CAPEX</strong> se muestra aparte porque es inversión, no gasto del periodo — no entra a los egresos ni a la diferencia operativa.</div>
 {% endif %}
 {% if kpis.retenidos %}

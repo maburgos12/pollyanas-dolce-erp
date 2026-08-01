@@ -89,10 +89,13 @@ def _fuente_display(fuente_real: str) -> dict[str, str]:
     return {"kind": "pendiente", "label": "Pendiente"}
 
 
-def _cobertura_por_area() -> list[dict[str, object]]:
+def _cobertura_por_area(area_codes: list[str] | None = None) -> list[dict[str, object]]:
     """Rubros activos por área: automatizados, manuales explícitos y sin mapear."""
+    filtros = {"activo": True}
+    if area_codes is not None:
+        filtros["area__codigo__in"] = area_codes
     rubros = (
-        RubroPresupuesto.objects.filter(activo=True)
+        RubroPresupuesto.objects.filter(**filtros)
         .select_related("area")
         .prefetch_related(
             Prefetch("reglas_fuente", queryset=ReglaFuenteRubro.objects.filter(activa=True))
@@ -124,7 +127,30 @@ def _cobertura_por_area() -> list[dict[str, object]]:
     return filas
 
 
-def _build_context(request: HttpRequest) -> dict[str, object]:
+def _areas_resumen_permitidas(user) -> list[str] | None:
+    """Áreas visibles en el resumen; None significa alcance global.
+
+    Una responsabilidad explícita prevalece sobre el permiso de lectura general
+    para que una jefatura vea únicamente lo que le corresponde. Los perfiles con
+    gestión del módulo conservan el tablero completo.
+    """
+    if can_manage_module(user, "reportes"):
+        return None
+    codigos = list(
+        AreaPresupuestoResponsable.objects.filter(
+            usuario=user, puede_capturar=True, area__activa=True
+        )
+        .order_by("area__orden", "area__nombre")
+        .values_list("area__codigo", flat=True)
+    )
+    if codigos:
+        return codigos
+    if can_view_reportes(user):
+        return None
+    raise PermissionDenied("No tienes áreas de presupuesto asignadas.")
+
+
+def _build_context(request: HttpRequest, area_codes: list[str] | None = None) -> dict[str, object]:
     from .views import _reportes_module_tabs  # import tardío: views.py es pesado
 
     hoy = timezone.localdate()
@@ -132,6 +158,8 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
     selected_month = max(1, min(_parse_int(request.GET.get("month"), hoy.month), 12))
     selected_version = normalize_version(request.GET.get("version"))
     selected_area = normalize_area_code(request.GET.get("area") or "")
+    if area_codes is not None and selected_area not in area_codes:
+        selected_area = ""
     periodo = date(selected_year, selected_month, 1)
 
     lineas = (
@@ -141,6 +169,8 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
         .select_related("rubro", "rubro__area", "rubro__sucursal")
         .order_by("rubro__area__orden", "rubro__concepto", "rubro__sucursal__codigo")
     )
+    if area_codes is not None:
+        lineas = lineas.filter(rubro__area__codigo__in=area_codes)
 
     # ---- matriz área × mes -------------------------------------------------
     matriz: dict[str, dict[str, object]] = {}
@@ -216,7 +246,7 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
         "capturado": 0, "pendiente": 0, "retenidos": 0,
     }
     for row in detalle:
-        if not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
+        if area_codes is None and not selected_area and row["area_codigo"] in AREAS_NO_SUMABLES:
             continue
         if row["area_codigo"] == "capex":
             # CAPEX es inversión (se capitaliza y entra al resultado vía
@@ -240,18 +270,40 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
             kpis["pendiente"] += 1
     kpis["dif_real"] = kpis["real_ingresos"] - kpis["real_egresos"]
     kpis["dif_ppto"] = kpis["ppto_ingresos"] - kpis["ppto_egresos"]
+    kpis["varianza_egresos"] = kpis["real_egresos"] - kpis["ppto_egresos"]
 
     # ---- ventas por unidades (regla de dirección: unidades × precio actual) --
     ventas_unidades = None
-    if not selected_area or selected_area == "ventas":
+    puede_ver_ventas = area_codes is None or "ventas" in area_codes
+    if puede_ver_ventas and (not selected_area or selected_area == "ventas"):
         from .services_ventas_unidades import comparativo_ventas_unidades
 
         ventas_unidades = comparativo_ventas_unidades(periodo)
 
+    resumen_limitado = area_codes is not None
+    module_tabs = _reportes_module_tabs("presupuesto_vs_real")
+    if resumen_limitado:
+        module_tabs = [
+            {
+                "key": "presupuesto_vs_real",
+                "url": reverse("reportes:presupuesto_vs_real"),
+                "label": "Resumen",
+                "active": True,
+            },
+            {
+                "key": "presupuesto_real_captura",
+                "url": reverse("reportes:presupuesto_real_captura"),
+                "label": "Captura",
+                "active": False,
+            },
+        ]
+    areas = AreaPresupuesto.objects.filter(activa=True)
+    if area_codes is not None:
+        areas = areas.filter(codigo__in=area_codes)
     return {
-        "module_tabs": _reportes_module_tabs("presupuesto_vs_real"),
+        "module_tabs": module_tabs,
         "ventas_unidades": ventas_unidades,
-        "areas": AreaPresupuesto.objects.filter(activa=True).order_by("orden", "nombre"),
+        "areas": areas.order_by("orden", "nombre"),
         "versions": [v for v, _ in LineaPresupuestoMensual.VERSION_CHOICES],
         "month_options": MONTH_COLUMNS,
         "selected_year": selected_year,
@@ -262,7 +314,13 @@ def _build_context(request: HttpRequest) -> dict[str, object]:
         "matriz": filas_matriz,
         "detalle": detalle,
         "kpis": kpis,
-        "cobertura": _cobertura_por_area(),
+        "cobertura": _cobertura_por_area(area_codes),
+        "resumen_limitado": resumen_limitado,
+        "puede_capturar": can_manage_module(request.user, "reportes")
+        or AreaPresupuestoResponsable.objects.filter(
+            usuario=request.user, puede_capturar=True, area__activa=True
+        ).exists(),
+        "puede_subir_cedulas": _puede_subir_cedulas(request.user),
     }
 
 
@@ -330,10 +388,8 @@ def _export_xlsx(context: dict[str, object]) -> HttpResponse:
 
 @login_required
 def presupuesto_vs_real(request: HttpRequest) -> HttpResponse:
-    if not can_view_reportes(request.user):
-        raise PermissionDenied("No tienes permisos para ver Reportes.")
-
-    context = _build_context(request)
+    area_codes = _areas_resumen_permitidas(request.user)
+    context = _build_context(request, area_codes)
     export = (request.GET.get("export") or "").strip().lower()
     if export == "csv":
         return _export_csv(context)
