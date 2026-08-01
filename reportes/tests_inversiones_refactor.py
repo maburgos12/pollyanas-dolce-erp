@@ -228,6 +228,30 @@ class InversionesRefactorTests(TestCase):
         self.assertContains(response, "Ficha")
         self.assertContains(response, "Apertura Guamúchil 2026")
 
+    def test_detalle_prioriza_confiabilidad_y_brechas_antes_de_controles(self):
+        latest_snapshot = self.guamuchil.snapshots_mensuales.order_by("-periodo").first()
+        latest_snapshot.confidence_score = 40
+        latest_snapshot.fuentes = {
+            "expense_coverage_status": "MISSING",
+            "data_gaps": [
+                "Ventas oficiales del periodo no disponibles.",
+                "Costo de venta mensual pendiente para cálculo operativo completo.",
+                "Gasto operativo mensual sin cobertura suficiente.",
+            ],
+        }
+        latest_snapshot.save(update_fields=["confidence_score", "fuentes"])
+
+        response = self.client.get(reverse("reportes:inversiones_detalle", args=[self.guamuchil.pk]))
+        content = response.content.decode()
+
+        self.assertContains(response, "Sin asignar")
+        self.assertContains(response, "Confianza")
+        self.assertContains(response, "3 brechas por completar")
+        self.assertContains(response, "Ventas oficiales del periodo no disponibles.")
+        self.assertLess(content.index("Confiabilidad del corte"), content.index("Inversión planeada"))
+        self.assertLess(content.index("Inversión planeada"), content.index("Tabs del proyecto"))
+        self.assertLess(content.index("Tabs del proyecto"), content.index("Métricas y reportes"))
+
     def test_detalle_post_editar_ficha(self):
         response = self.client.post(
             reverse("reportes:inversiones_detalle", args=[self.guamuchil.pk]),

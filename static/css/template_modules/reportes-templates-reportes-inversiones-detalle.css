@@ -37,16 +37,43 @@
 
   .inv-detail-breadcrumbs { display:flex; gap:.5rem; margin:0 0 1rem; color:#715f67; font-size:.9rem; }
   .inv-detail-breadcrumbs a { color:var(--inv-wine); font-weight:800; text-decoration:none; }
-  .investment-detail-header { align-items:stretch; }
   .investment-detail-hero { border-left:4px solid var(--inv-wine); }
-  .inv-data-status { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin:1rem 0; padding:1rem 1.15rem; border:1px solid var(--inv-line); border-left-width:4px; border-radius:.6rem; }
+  .inv-owner-status { display:flex; align-items:center; gap:.65rem; margin:.75rem 0; padding:.72rem .9rem; border:1px solid var(--inv-line); border-radius:.6rem; background:#fff; }
+  .inv-owner-status.is-warning { border-color:#ead29a; background:#fff9ec; }
+  .inv-owner-status-label { color:#715f67; font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+  .inv-owner-status > span:last-child { color:#715f67; }
+  .inv-data-status { display:block; margin:1rem 0; padding:1rem 1.15rem; border:1px solid var(--inv-line); border-left-width:4px; border-radius:.6rem; }
   .inv-data-status.is-ready { border-left-color:#27643f; background:#edf7f0; }
   .inv-data-status.is-warning { border-left-color:var(--inv-gold); background:#fff7e6; }
+  .inv-data-status-summary { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
   .inv-data-status-label { display:block; color:#715f67; font-size:.78rem; font-weight:800; }
   .inv-data-status strong { display:block; margin:.15rem 0; font-size:1.05rem; }
   .inv-data-status p { margin:0; color:#715f67; }
+  .inv-confidence-badge { flex:0 0 auto; min-width:7.5rem; padding:.55rem .7rem; border:1px solid rgba(138,85,19,.22); border-radius:.5rem; background:rgba(255,255,255,.7); color:#715f67; font-size:.75rem; text-align:center; }
+  .inv-confidence-badge strong { margin:.05rem 0 0; color:#8a5513; font-size:1.15rem; }
+  .inv-data-gaps { margin-top:.9rem; padding-top:.85rem; border-top:1px solid rgba(138,85,19,.18); }
+  .inv-data-gaps h2 { margin:0 0 .55rem; color:#533c25; font-size:.9rem; }
+  .inv-data-gaps ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.4rem .9rem; margin:0; padding:0; list-style:none; }
+  .inv-data-gaps li { position:relative; padding-left:1rem; color:#715f67; font-size:.84rem; line-height:1.4; }
+  .inv-data-gaps li::before { content:""; position:absolute; top:.48rem; left:.1rem; width:.38rem; height:.38rem; border-radius:50%; background:var(--inv-gold); }
+  .investment-detail-actions { display:flex; flex-direction:row; align-items:center; justify-content:space-between; margin:.75rem 0 1rem; border:1px solid var(--inv-line); background:#fff; }
+  .investment-detail-actions .investment-panel-head { display:flex; align-items:center; gap:1rem; }
+  .investment-detail-actions .investment-panel-title { margin-bottom:0; }
+  .investment-detail-actions .investment-muted { margin:0; max-width:38rem; }
   .investment-kpi-value.is-unavailable { color:#8a5513; }
   .investment-button, .inv-button, .inv-tab { min-height:44px; }
   .inv-input, .inv-select { min-height:44px; }
   .inv-input:focus-visible, .inv-select:focus-visible, .inv-textarea:focus-visible, .investment-button:focus-visible, .inv-button:focus-visible, .inv-tab:focus-visible { outline:3px solid rgba(201,168,76,.5); outline-offset:2px; }
-  @media (max-width:720px){ .inv-data-status{align-items:flex-start; flex-direction:column;} }
+  @media (max-width:840px){
+    .page-reportes-inversiones-detalle .investment-detail-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .investment-detail-actions { align-items:stretch; flex-direction:column; }
+    .investment-detail-actions .investment-panel-head { align-items:flex-start; flex-direction:column; gap:.35rem; }
+  }
+  @media (max-width:720px){
+    .inv-owner-status { align-items:flex-start; flex-wrap:wrap; gap:.25rem .55rem; }
+    .inv-owner-status > span:last-child { flex-basis:100%; }
+    .inv-data-status-summary { flex-direction:column; }
+    .inv-confidence-badge { min-width:0; width:100%; display:flex; align-items:center; justify-content:space-between; text-align:left; }
+    .inv-confidence-badge strong { margin:0; }
+    .inv-data-gaps ul { grid-template-columns:1fr; }
+  }
