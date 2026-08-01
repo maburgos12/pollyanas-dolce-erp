@@ -323,7 +323,7 @@ def get_last_sync_time() -> datetime:
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT value FROM sync_state WHERE key='last_sync'").fetchone()
     if row:
-        return datetime.fromisoformat(row[0])
+        return datetime.fromisoformat(row[0]) - timedelta(hours=LOOKBACK_HOURS)
     return datetime.now(TIMEZONE) - timedelta(hours=LOOKBACK_HOURS)
 
 

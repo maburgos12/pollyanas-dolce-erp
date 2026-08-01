@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from playwright.sync_api import Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -46,9 +47,16 @@ class InvalidCloudRecord:
 
 
 class CloudPage(list[CloudRecord]):
-    def __init__(self, records: list[CloudRecord], invalid_records: list[InvalidCloudRecord]):
+    def __init__(
+        self,
+        records: list[CloudRecord],
+        invalid_records: list[InvalidCloudRecord],
+        *,
+        total_num: int | None = None,
+    ):
         super().__init__(records)
         self.invalid_records = invalid_records
+        self.total_num = total_num
 
 
 class DiscoveryRecords(list[CloudRecord]):
@@ -118,13 +126,40 @@ class HikConnectClient:
         except Exception:
             return False
 
-    def fetch_records_page(self, page_index: int, page_size: int, require_login: bool = True) -> CloudPage:
+    def fetch_records_page(
+        self,
+        page_index: int,
+        page_size: int,
+        require_login: bool = True,
+        start_dt: datetime | None = None,
+        end_dt: datetime | None = None,
+    ) -> CloudPage:
         if require_login:
             self.ensure_login()
         assert self.page is not None
+        search_criteria: dict[str, Any] = {"type": 0}
+        if start_dt is not None and end_dt is not None:
+            search_criteria.update(
+                {
+                    # El portal humano manda limites de fecha con offset +00:00,
+                    # aunque las marcas conserven su deviceTime local.
+                    "beginTime": f"{start_dt.date().isoformat()}T00:00:00+00:00",
+                    "endTime": f"{end_dt.date().isoformat()}T23:59:59+00:00",
+                    "eventTypes": "",
+                    "elementIDs": "",
+                    "searchType": 0,
+                    "cardNumber": "",
+                    "personCondition": {},
+                    "swipeAuthResult": 0,
+                }
+            )
         response = self.page.request.post(
             RECORDS_ENDPOINT,
-            data={"pageIndex": page_index, "pageSize": page_size, "searchCriteria": {"type": 0}},
+            data={
+                "pageIndex": page_index,
+                "pageSize": page_size,
+                "searchCriteria": search_criteria,
+            },
             timeout=20_000,
         )
         if response.status != 200:
@@ -132,7 +167,10 @@ class HikConnectClient:
         data = response.json()
         if str(data.get("errorCode")) != "0":
             raise RuntimeError(f"Hik-Connect API error: {data}")
-        items = data.get("data", {}).get("recordList", []) or []
+        response_data = data.get("data", {}) or {}
+        items = response_data.get("recordList", []) or []
+        total_num_raw = response_data.get("totalNum")
+        total_num = int(total_num_raw) if total_num_raw is not None else None
         records = []
         invalid_records = []
         for item in items:
@@ -159,7 +197,83 @@ class HikConnectClient:
                 )
                 continue
             records.append(record)
-        return CloudPage(records, invalid_records)
+        return CloudPage(records, invalid_records, total_num=total_num)
+
+    def fetch_records_between(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        page_size: int,
+        max_pages: int,
+        on_invalid_record=None,
+        on_page_records=None,
+    ) -> DiscoveryRecords:
+        """Consulta ventanas diarias, de la mas reciente a la mas antigua.
+
+        Cada fecha reinicia en pagina 1 y usa ``totalNum`` para no solicitar
+        paginas inexistentes. De esta forma la sincronizacion reciente se
+        procesa antes que el catch-up y nunca depende de un cursor global.
+        """
+        self.ensure_login()
+        start_dt = _ensure_aware(start_dt)
+        end_dt = _ensure_aware(end_dt)
+        if end_dt < start_dt:
+            raise ValueError("end_dt debe ser posterior a start_dt")
+        if page_size <= 0 or max_pages <= 0:
+            raise ValueError("page_size y max_pages deben ser positivos")
+
+        dates = []
+        current_date = end_dt.date()
+        while current_date >= start_dt.date():
+            dates.append(current_date)
+            current_date -= timedelta(days=1)
+
+        por_guid: dict[str, CloudRecord] = {}
+        pages_used = 0
+        complete = True
+        for work_date in dates:
+            window_start = datetime.combine(work_date, time.min, tzinfo=TIMEZONE)
+            window_end = datetime.combine(work_date, time(23, 59, 59), tzinfo=TIMEZONE)
+            page_index = 1
+            total_pages: int | None = None
+            while True:
+                if pages_used >= max_pages:
+                    complete = False
+                    break
+                page_records = self.fetch_records_page(
+                    page_index=page_index,
+                    page_size=page_size,
+                    require_login=False,
+                    start_dt=window_start,
+                    end_dt=window_end,
+                )
+                pages_used += 1
+                invalid_records = getattr(page_records, "invalid_records", [])
+                for invalid_record in invalid_records:
+                    if on_invalid_record is None:
+                        raise RuntimeError(
+                            "Hik-Connect devolvio un registro invalido sin journal durable"
+                        )
+                    on_invalid_record(invalid_record)
+                if on_page_records is not None and (page_records or invalid_records):
+                    on_page_records(work_date, page_index, page_records)
+                por_guid.update({record.record_guid: record for record in page_records})
+
+                if page_records.total_num is not None:
+                    total_pages = math.ceil(page_records.total_num / page_size)
+                    if page_index >= total_pages:
+                        break
+                elif not page_records and not invalid_records:
+                    break
+                page_index += 1
+            if not complete:
+                break
+
+        return DiscoveryRecords(
+            sorted(por_guid.values(), key=lambda record: record.device_time),
+            complete=complete,
+            next_page=1,
+        )
 
     def fetch_records_since(
         self,
@@ -170,48 +284,27 @@ class HikConnectClient:
         on_invalid_record=None,
         on_page_records=None,
     ) -> DiscoveryRecords:
-        """Recorre la nube por orden de subida, sin filtrar por deviceTime."""
-        self.ensure_login()
-        por_guid: dict[str, CloudRecord] = {}
-        complete = False
-        next_page = max(1, start_page)
-        continuation_start = max(1, start_page)
-        if continuation_start > 1:
-            page_indexes = [1, *range(continuation_start, continuation_start + max(max_pages - 1, 0))]
-        else:
-            page_indexes = list(range(1, 1 + max_pages))
-        for page_index in page_indexes:
-            page_records = self.fetch_records_page(page_index=page_index, page_size=page_size, require_login=False)
-            invalid_records = getattr(page_records, "invalid_records", [])
-            for invalid_record in invalid_records:
-                if on_invalid_record is None:
-                    raise RuntimeError(
-                        "Hik-Connect devolvio un registro invalido sin journal durable"
-                    )
-                on_invalid_record(invalid_record)
-            if on_page_records is not None and (page_records or invalid_records):
-                on_page_records(page_index, page_records)
-            if not page_records:
-                if not invalid_records and (page_index != 1 or continuation_start == 1):
-                    complete = True
-                    next_page = 1
-                    break
-                if invalid_records:
-                    next_page = page_index + 1
-                    continue
-                continue
-            por_guid.update({record.record_guid: record for record in page_records})
-            if page_index != 1 or continuation_start == 1:
-                next_page = page_index + 1
+        """Compatibilidad: delega al recorrido acotado por fechas.
+
+        ``start_page`` se ignora deliberadamente; el cursor global fue retirado.
+        """
+        if start_page != 1:
             log.info(
-                "Hik-Connect pagina %s: %s registros por orden de subida",
-                page_index,
-                len(page_records),
+                "Ignorando cursor global heredado de Hik-Connect: pagina %s",
+                start_page,
             )
-        return DiscoveryRecords(
-            sorted(por_guid.values(), key=lambda record: record.device_time),
-            complete=complete,
-            next_page=next_page,
+        callback = None
+        if on_page_records is not None:
+            callback = lambda _work_date, page_index, records: on_page_records(
+                page_index, records
+            )
+        return self.fetch_records_between(
+            start_dt=start_dt,
+            end_dt=datetime.now(TIMEZONE),
+            page_size=page_size,
+            max_pages=max_pages,
+            on_invalid_record=on_invalid_record,
+            on_page_records=callback,
         )
 
 
@@ -219,6 +312,19 @@ def _ensure_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=TIMEZONE)
     return dt.astimezone(TIMEZONE)
+
+
+def _device_serial_from_api(raw: dict[str, Any]) -> str:
+    explicit = str(raw.get("deviceSerialNo") or "").strip()
+    if explicit:
+        return explicit
+    reader_name = str(raw.get("cardReaderName") or "").strip()
+    for marker in ("-Cardreader", "-Card Reader"):
+        if marker in reader_name:
+            serial = reader_name.split(marker, 1)[0].strip()
+            if serial:
+                return serial
+    return str(raw.get("devSerialNo") or raw.get("deviceId") or "").strip()
 
 
 def _record_from_api(raw: dict[str, Any]) -> tuple[CloudRecord | None, str]:
@@ -249,7 +355,7 @@ def _record_from_api(raw: dict[str, Any]) -> tuple[CloudRecord | None, str]:
         department=str(base_info.get("fullPath") or "").strip(),
         device_time=device_time,
         device_name=str(raw.get("deviceName") or "").strip(),
-        device_serial_no=str(raw.get("devSerialNo") or raw.get("deviceSerialNo") or "").strip(),
+        device_serial_no=_device_serial_from_api(raw),
         raw=raw,
     ), ""
 
