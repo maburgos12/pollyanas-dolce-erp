@@ -357,6 +357,7 @@ class NavigationActiveStateTests(TestCase):
             [
                 "Dashboard",
                 "Ejecutivo",
+                "Indicadores de abasto",
                 "Tickets",
                 "Flota",
                 "Reportes",
@@ -370,6 +371,7 @@ class NavigationActiveStateTests(TestCase):
             ],
         )
         self.assertEqual(self._active_labels("/logistica/rutas/control/"), ["Control rutas"])
+        self.assertEqual(self._active_labels("/logistica/indicadores-abasto/"), ["Indicadores de abasto"])
 
     def test_capital_humano_sidebar_group_defines_horizontal_tabs(self):
         with patch("core.navigation.can_view_submodule", return_value=True):

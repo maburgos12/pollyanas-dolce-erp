@@ -12,7 +12,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -24,6 +24,7 @@ from core.models import Sucursal
 from crm.models import PedidoCliente
 
 from .domain_ruta import point_transfer_enviada
+from .exports_indicadores_abasto import build_indicadores_abasto_xlsx
 from .models import (
     BitacoraSalidaLlegada,
     CargaCombustibleUnidad,
@@ -79,6 +80,7 @@ from .services_rutas_control import (
 from .services_entregas import confirmar_entrega_parada, resolver_alerta_historica, revisar_entrega_excepcional
 from .services_discrepancias import pendientes_vencidos_para_planeacion, resolver_discrepancia
 from .services_tiempos_ruta import resumen_tiempos_ruta
+from .services_indicadores_abasto import build_indicadores_abasto
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -276,6 +278,7 @@ def _module_tabs(active: str, user=None) -> list[dict]:
     tabs = [
         {"key": "dashboard", "label": "Dashboard", "url_name": "logistica:home", "active": active == "dashboard"},
         {"key": "ejecutivo", "label": "Ejecutivo", "url_name": "logistica:dashboard_ejecutivo", "active": active == "ejecutivo"},
+        {"key": "indicadores", "label": "Indicadores de abasto", "url_name": "logistica:indicadores_abasto", "active": active == "indicadores"},
         {"key": "tickets", "label": "Tickets", "url_name": "logistica:tickets_kanban", "active": active == "tickets"},
         {"key": "flota", "label": "Flota", "url_name": "logistica:flota_resumen", "active": active == "flota"},
         {"key": "reportes", "label": "Reportes", "url_name": "logistica:reportes_lista", "active": active == "reportes"},
@@ -3677,3 +3680,82 @@ def domicilios_generales(request):
         ),
     )
     return redirect("crm:pedidos_domicilios")
+
+
+def _indicadores_abasto_filters(request):
+    today = timezone.localdate()
+    fecha_hasta = _parse_date(request.GET.get("fecha_hasta")) or today
+    fecha_desde = _parse_date(request.GET.get("fecha_desde")) or (fecha_hasta - timedelta(days=6))
+    if fecha_desde > fecha_hasta:
+        fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+    if (fecha_hasta - fecha_desde).days > 30:
+        fecha_desde = fecha_hasta - timedelta(days=30)
+    tipo = (request.GET.get("tipo") or "productos").strip().lower()
+    if tipo not in {"productos", "insumos", "todos"}:
+        tipo = "productos"
+    unidad_raw = request.GET.get("unidad")
+    unidad = "PZA" if unidad_raw is None else unidad_raw.strip().upper()
+    estado = (request.GET.get("estado") or "").strip().upper()
+    sucursal_raw = (request.GET.get("sucursal") or "").strip()
+    sucursal_id = int(sucursal_raw) if sucursal_raw.isdigit() else None
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "tipo": tipo,
+        "unidad": unidad,
+        "estado": estado,
+        "sucursal_id": sucursal_id,
+    }
+
+
+def _indicadores_query(filters):
+    values = {
+        "fecha_desde": filters["fecha_desde"].isoformat(),
+        "fecha_hasta": filters["fecha_hasta"].isoformat(),
+        "tipo": filters["tipo"],
+        "unidad": filters["unidad"],
+    }
+    if filters["estado"]:
+        values["estado"] = filters["estado"]
+    if filters["sucursal_id"]:
+        values["sucursal"] = filters["sucursal_id"]
+    return values
+
+
+@login_required
+def indicadores_abasto(request):
+    if not can_view_submodule(request.user, "logistica", "indicadores"):
+        raise PermissionDenied("No tienes permisos para ver indicadores de Logística")
+    filters = _indicadores_abasto_filters(request)
+    report = build_indicadores_abasto(**filters)
+    query = _indicadores_query(filters)
+    page = Paginator(report["rows"], 50).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "logistica/indicadores_abasto.html",
+        {
+            "module_tabs": _module_tabs("indicadores", request.user),
+            "report": report,
+            "detail_page": page,
+            "filters": {**query, "sucursal": str(filters["sucursal_id"] or "")},
+            "sucursales": Sucursal.objects.filter(activa=True).order_by("nombre"),
+            "export_url": reverse("logistica:indicadores_abasto_export") + "?" + urlencode(query),
+            "page_query": urlencode(query),
+        },
+    )
+
+
+@login_required
+def indicadores_abasto_export(request):
+    if not can_view_submodule(request.user, "logistica", "indicadores"):
+        raise PermissionDenied("No tienes permisos para descargar indicadores de Logística")
+    filters = _indicadores_abasto_filters(request)
+    report = build_indicadores_abasto(**filters)
+    content = build_indicadores_abasto_xlsx(report, filters)
+    filename = f'indicadores-abasto-{filters["fecha_desde"]}-{filters["fecha_hasta"]}.xlsx'
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

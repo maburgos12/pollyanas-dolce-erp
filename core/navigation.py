@@ -197,6 +197,7 @@ NAV_GROUPS = [
         "items": [
             ("logistica", "dashboard", "Dashboard", "/logistica/dashboard/", ["/logistica/dashboard/"]),
             ("logistica", "ejecutivo", "Ejecutivo", "/logistica/ejecutivo/", ["/logistica/ejecutivo/"]),
+            ("logistica", "indicadores", "Indicadores de abasto", "/logistica/indicadores-abasto/", ["/logistica/indicadores-abasto/"]),
             ("logistica", "tickets", "Tickets", "/logistica/tickets/", ["/logistica/tickets/"]),
             ("logistica", "flota", "Flota", "/logistica/flota/", ["/logistica/flota/"]),
             ("logistica", "reportes", "Reportes", "/logistica/reportes/", ["/logistica/reportes/"]),
