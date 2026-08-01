@@ -13,7 +13,43 @@
   .prc-fuente.is-pendiente { background:var(--gris-suave); color:var(--texto-light); }
   .prc-monto-input { max-width:160px; }
   .prc-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .prc-intro { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:16px 0; }
+  .prc-intro-item { padding:14px; border:1px solid var(--gris-suave); border-radius:var(--radius-md); background:var(--blanco); }
+  .prc-intro-item strong { display:block; color:var(--vino); margin-bottom:4px; }
+  .prc-actions-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  .prc-action-panel { border:1px solid var(--gris-suave); border-radius:var(--radius-md); padding:18px; }
+  .prc-action-panel h3 { margin:0 0 6px; }
+  .prc-credit-fields { padding:12px; border-left:3px solid var(--dorado); background:var(--gris-suave); }
+  .prc-record { border-top:1px solid var(--gris-suave); padding:14px 0; }
+  .prc-record:first-child { border-top:0; }
+  .prc-record-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+  .prc-badge { display:inline-flex; padding:3px 9px; border-radius:999px; background:var(--rosa); color:var(--vino); font-size:.78rem; font-weight:700; }
+  .prc-help { font-size:.82rem; color:var(--texto-light); }
+  .prc-plazo-input { max-width:110px; }
+  .prc-version-form { margin-top:12px; max-width:760px; }
+  @media (max-width: 820px) {
+    .prc-intro, .prc-actions-grid { grid-template-columns:1fr; }
+  }
 </style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.querySelectorAll('[data-credit-toggle]').forEach(function (select) {
+    var form = select.closest('form');
+    var fields = form && form.querySelector('[data-credit-fields]');
+    if (!fields) return;
+    function syncCreditFields() {
+      var visible = select.value === 'CREDITO';
+      fields.hidden = !visible;
+      fields.querySelectorAll('input, select').forEach(function (control) {
+        control.disabled = !visible;
+      });
+    }
+    select.addEventListener('change', syncCreditFields);
+    syncCreditFields();
+  });
+</script>
 {% endblock %}
 
 {% block content %}
@@ -69,8 +105,132 @@
   </div>
 </section>
 
+<section class="card" id="gastos-area">
+  <div class="card-header">Gastos del área · registro y seguimiento</div>
+  <p class="muted">El gasto se reconoce en el mes en que ocurrió. La obligación y sus pagos se siguen por separado, así el presupuesto no cambia cuando se paga después o en parcialidades.</p>
+  <div class="prc-intro" aria-label="Flujo de gastos">
+    <div class="prc-intro-item"><strong>1 · Registra el gasto</strong><span class="prc-help">Variable si ocurrió una sola vez; fijo si se repite, como una renta.</span></div>
+    <div class="prc-intro-item"><strong>2 · Define el compromiso</strong><span class="prc-help">Contado o crédito, plazo en días o meses y parcialidades cuando sea diferido.</span></div>
+    <div class="prc-intro-item"><strong>3 · Registra cada pago</strong><span class="prc-help">Efectivo, transferencia, tarjeta, cheque u otro; el saldo queda visible.</span></div>
+  </div>
+
+  <div class="prc-actions-grid">
+    <div class="prc-action-panel">
+      <h3>Registrar gasto variable</h3>
+      <p class="prc-help">Para reparaciones, mensajería, compras extraordinarias u otros gastos no repetitivos.</p>
+      <form method="post" action="{% url 'reportes:presupuesto_gasto_variable_crear' %}" data-async-action>
+        {% csrf_token %}
+        <input type="hidden" name="area_id" value="{{ selected_area_obj.id }}">
+        <input type="hidden" name="periodo" value="{{ selected_period_iso }}">
+        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+        <div class="form-grid-2">
+          <div class="form-group"><label for="variable-concepto">Concepto</label><input class="input-field" id="variable-concepto" name="concepto" required maxlength="200"></div>
+          <div class="form-group"><label for="variable-proveedor">Proveedor (opcional)</label><input class="input-field" id="variable-proveedor" name="proveedor" maxlength="200"></div>
+          <div class="form-group"><label for="variable-rubro">Rubro del presupuesto</label><select class="input-field" id="variable-rubro" name="rubro_id" required>{% for rubro in rubros_gasto %}<option value="{{ rubro.id }}">{{ rubro.concepto }}{% if rubro.sucursal %} · {{ rubro.sucursal.codigo }}{% endif %}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="variable-centro">Centro de costo</label><select class="input-field" id="variable-centro" name="centro_costo_id" required>{% for centro in centros_costo %}<option value="{{ centro.id }}">{{ centro.nombre }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="variable-categoria">Categoría</label><select class="input-field" id="variable-categoria" name="categoria_gasto_id" required>{% for categoria in categorias_gasto %}<option value="{{ categoria.id }}">{{ categoria.nombre }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="variable-monto">Monto reconocido</label><input class="input-field" id="variable-monto" name="monto" inputmode="decimal" placeholder="0.00" required></div>
+          <div class="form-group"><label for="variable-fecha">Fecha del gasto</label><input class="input-field" id="variable-fecha" name="fecha_gasto" type="date" value="{{ today_iso }}" required></div>
+          <div class="form-group"><label for="variable-vence">Fecha de vencimiento</label><input class="input-field" id="variable-vence" name="fecha_vencimiento" type="date" value="{{ today_iso }}" required></div>
+          <div class="form-group"><label for="variable-condicion">Condición</label><select class="input-field" id="variable-condicion" name="condicion_pago" data-credit-toggle>{% for value,label in condiciones_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="variable-metodo">Medio previsto</label><select class="input-field" id="variable-metodo" name="metodo_pago_previsto"><option value="">Por definir</option>{% for value,label in metodos_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="prc-credit-fields" data-credit-fields>
+          <div class="form-grid-2">
+            <div class="form-group"><label for="variable-tipo-credito">Tipo de crédito</label><select class="input-field" id="variable-tipo-credito" name="tipo_credito">{% for value,label in tipos_credito %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label for="variable-plazo">Plazo</label><div class="prc-form"><input class="input-field prc-plazo-input" id="variable-plazo" name="plazo_cantidad" type="number" min="1"><select class="input-field" name="plazo_unidad" aria-label="Unidad del plazo">{% for value,label in unidades_plazo %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div></div>
+            <div class="form-group"><label for="variable-parcialidades">Número de parcialidades</label><input class="input-field" id="variable-parcialidades" name="numero_parcialidades" type="number" min="1" value="1"></div>
+          </div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" type="submit" data-pending-label="Registrando…">Registrar gasto y obligación</button></div>
+      </form>
+    </div>
+
+    <div class="prc-action-panel" id="gastos-fijos">
+      <h3>Agregar gasto fijo</h3>
+      <p class="prc-help">Rentas, licencias, servicios y otros compromisos periódicos. Si cambia el monto, se crea una nueva versión y se conserva la anterior.</p>
+      <form method="post" action="{% url 'reportes:presupuesto_gasto_recurrente_crear' %}" data-async-action>
+        {% csrf_token %}
+        <input type="hidden" name="area_id" value="{{ selected_area_obj.id }}">
+        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+        <div class="form-grid-2">
+          <div class="form-group"><label for="fijo-concepto">Concepto fijo</label><input class="input-field" id="fijo-concepto" name="concepto" required maxlength="200"></div>
+          <div class="form-group"><label for="fijo-proveedor">Proveedor (opcional)</label><input class="input-field" id="fijo-proveedor" name="proveedor" maxlength="200"></div>
+          <div class="form-group"><label for="fijo-rubro">Rubro</label><select class="input-field" id="fijo-rubro" name="rubro_id" required>{% for rubro in rubros_gasto %}<option value="{{ rubro.id }}">{{ rubro.concepto }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="fijo-centro">Centro de costo</label><select class="input-field" id="fijo-centro" name="centro_costo_id" required>{% for centro in centros_costo %}<option value="{{ centro.id }}">{{ centro.nombre }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="fijo-categoria">Categoría</label><select class="input-field" id="fijo-categoria" name="categoria_gasto_id" required>{% for categoria in categorias_gasto %}<option value="{{ categoria.id }}">{{ categoria.nombre }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="fijo-monto">Monto vigente</label><input class="input-field" id="fijo-monto" name="monto" inputmode="decimal" required></div>
+          <div class="form-group"><label for="fijo-inicio">Vigente desde</label><input class="input-field" id="fijo-inicio" name="vigencia_inicio" type="date" value="{{ selected_period_iso }}" required></div>
+          <div class="form-group"><label for="fijo-dia">Día de vencimiento</label><input class="input-field" id="fijo-dia" name="dia_vencimiento" type="number" min="1" max="31" value="1" required></div>
+          <div class="form-group"><label for="fijo-condicion">Condición</label><select class="input-field" id="fijo-condicion" name="condicion_pago" data-credit-toggle>{% for value,label in condiciones_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+          <div class="form-group"><label for="fijo-metodo">Medio previsto</label><select class="input-field" id="fijo-metodo" name="metodo_pago_previsto"><option value="">Por definir</option>{% for value,label in metodos_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="prc-credit-fields" data-credit-fields>
+          <div class="form-grid-2">
+            <div class="form-group"><label>Tipo de crédito</label><select class="input-field" name="tipo_credito">{% for value,label in tipos_credito %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Plazo</label><div class="prc-form"><input class="input-field prc-plazo-input" name="plazo_cantidad" type="number" min="1"><select class="input-field" name="plazo_unidad" aria-label="Unidad del plazo">{% for value,label in unidades_plazo %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div></div>
+            <div class="form-group"><label>Parcialidades</label><input class="input-field" name="numero_parcialidades" type="number" min="1" value="1"></div>
+          </div>
+        </div>
+        <div class="form-group"><label for="fijo-motivo">Nota inicial</label><input class="input-field" id="fijo-motivo" name="motivo" maxlength="300" placeholder="Ej. Contrato 2026"></div>
+        <button class="btn btn-primary" type="submit" data-pending-label="Agregando…">Agregar gasto fijo</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="fijos-titulo">
+  <div class="card-header" id="fijos-titulo">Gastos fijos vigentes</div>
+  {% for gasto in gastos_recurrentes %}
+  <article class="prc-record" id="gasto-fijo-{{ gasto.id }}">
+    <div class="prc-record-head">
+      <div><strong>{{ gasto.concepto }}</strong><div class="prc-help">{{ gasto.rubro.concepto }} · {{ gasto.centro_costo.nombre }}{% if gasto.proveedor %} · {{ gasto.proveedor }}{% endif %}</div></div>
+      {% if gasto.version_actual %}<span class="prc-badge">${{ gasto.version_actual.monto|floatformat:2|intcomma }} · {{ gasto.version_actual.get_condicion_pago_display }}</span>{% endif %}
+    </div>
+    {% if gasto.version_actual %}
+    <div class="prc-form" style="margin-top:10px">
+      <form method="post" action="{% url 'reportes:presupuesto_gasto_recurrente_generar' gasto.id %}" data-async-action class="prc-form">
+        {% csrf_token %}<input type="hidden" name="periodo" value="{{ selected_period_iso }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="btn btn-primary btn-sm" type="submit" data-pending-label="Generando…">Generar obligación de {{ selected_month_name }}</button>
+      </form>
+      <details><summary class="btn btn-secondary btn-sm">Modificar desde una fecha</summary>
+        <form method="post" action="{% url 'reportes:presupuesto_gasto_recurrente_editar' gasto.id %}" data-async-action class="prc-version-form">
+          {% csrf_token %}<input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+          <div class="form-grid-2">
+            <div class="form-group"><label>Nueva vigencia</label><input class="input-field" name="vigencia_inicio" type="date" required></div>
+            <div class="form-group"><label>Nuevo monto</label><input class="input-field" name="monto" value="{{ gasto.version_actual.monto|floatformat:2 }}" required></div>
+            <div class="form-group"><label>Día de vencimiento</label><input class="input-field" name="dia_vencimiento" type="number" min="1" max="31" value="{{ gasto.version_actual.dia_vencimiento }}" required></div>
+            <div class="form-group"><label>Condición</label><select class="input-field" name="condicion_pago">{% for value,label in condiciones_pago %}<option value="{{ value }}" {% if value == gasto.version_actual.condicion_pago %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Medio previsto</label><select class="input-field" name="metodo_pago_previsto"><option value="">Por definir</option>{% for value,label in metodos_pago %}<option value="{{ value }}" {% if value == gasto.version_actual.metodo_pago_previsto %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Tipo de crédito</label><select class="input-field" name="tipo_credito"><option value="">No aplica</option>{% for value,label in tipos_credito %}<option value="{{ value }}" {% if value == gasto.version_actual.tipo_credito %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Plazo</label><input class="input-field" name="plazo_cantidad" type="number" min="1" value="{{ gasto.version_actual.plazo_cantidad|default:'' }}"></div>
+            <div class="form-group"><label>Unidad</label><select class="input-field" name="plazo_unidad"><option value="">No aplica</option>{% for value,label in unidades_plazo %}<option value="{{ value }}" {% if value == gasto.version_actual.plazo_unidad %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Parcialidades</label><input class="input-field" name="numero_parcialidades" type="number" min="1" value="{{ gasto.version_actual.numero_parcialidades }}"></div>
+            <div class="form-group"><label>Motivo de la edición</label><input class="input-field" name="motivo" maxlength="300" required placeholder="Obligatorio para conservar la trazabilidad"></div>
+          </div>
+          <button class="btn btn-primary btn-sm" type="submit" data-pending-label="Guardando versión…">Guardar nueva versión</button>
+        </form>
+      </details>
+    </div>
+    <details style="margin-top:10px"><summary class="prc-help">Ver historial de {{ gasto.versiones.count }} versión(es)</summary><ul>{% for version in gasto.versiones.all %}<li>{{ version.vigencia_inicio }} a {{ version.vigencia_fin|default:"vigente" }} · ${{ version.monto|floatformat:2|intcomma }}{% if version.motivo %} · {{ version.motivo }}{% endif %}</li>{% endfor %}</ul></details>
+    {% endif %}
+  </article>
+  {% empty %}<p class="muted">Todavía no hay gastos fijos configurados para esta área.</p>{% endfor %}
+</section>
+
+<section class="card" id="obligaciones-pagos">
+  <div class="card-header">Obligaciones y pagos</div>
+  <p class="muted">Incluye las obligaciones del mes y cualquier saldo pendiente anterior.</p>
+  <div class="table-responsive"><table class="table table-striped"><thead><tr><th>Concepto</th><th>Tipo</th><th>Vence</th><th>Reconocido</th><th>Pagado</th><th>Saldo</th><th>Registrar pago</th></tr></thead><tbody>
+    {% for obligacion in obligaciones %}<tr id="obligacion-{{ obligacion.id }}">
+      <td><strong>{{ obligacion.concepto }}</strong><div class="prc-help">{{ obligacion.get_condicion_pago_display }}{% if obligacion.condicion_pago == 'CREDITO' %} · {{ obligacion.plazo_cantidad }} {{ obligacion.get_plazo_unidad_display|lower }}{% if obligacion.tipo_credito == 'DIFERIDO' %} · {{ obligacion.numero_parcialidades }} parcialidades{% endif %}{% endif %}</div></td>
+      <td>{{ obligacion.get_origen_display }}</td><td>{{ obligacion.fecha_vencimiento }}</td><td>${{ obligacion.monto_reconocido|floatformat:2|intcomma }}</td><td>${{ obligacion.total_pagado_mostrado|floatformat:2|intcomma }}</td><td><strong>${{ obligacion.saldo_mostrado|floatformat:2|intcomma }}</strong><div class="prc-help">{{ obligacion.get_estado_display }}</div></td>
+      <td>{% if obligacion.estado != 'PAGADO' and obligacion.estado != 'CANCELADO' %}<form method="post" action="{% url 'reportes:presupuesto_obligacion_pagar' obligacion.id %}" data-async-action class="prc-form">{% csrf_token %}<input type="hidden" name="return_to" value="{{ request.get_full_path }}"><input class="input-field" name="fecha_pago" type="date" value="{{ today_iso }}" aria-label="Fecha de pago" required><input class="input-field prc-monto-input" name="monto" inputmode="decimal" placeholder="Monto" required><select class="input-field" name="metodo_pago" aria-label="Medio de pago" required>{% for value,label in metodos_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select><input class="input-field" name="referencia" placeholder="Referencia" maxlength="160"><button class="btn btn-primary btn-sm" type="submit" data-pending-label="Registrando…">Registrar</button></form>{% else %}<span class="prc-badge">Liquidada</span>{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="7" class="muted">No hay obligaciones para este mes ni saldos anteriores.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
 <section class="card">
-  <div class="card-header">Conceptos del área</div>
+  <div class="card-header">Avance del presupuesto · conceptos del área</div>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>

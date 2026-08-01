@@ -4096,7 +4096,7 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def gastos_operativos_captura_manual(request: HttpRequest) -> HttpResponse:
-    if not can_view_reportes(request.user):
+    if not can_manage_module(request.user, "reportes"):
         raise PermissionDenied
 
     if request.method == "POST":
@@ -4189,7 +4189,7 @@ def gastos_operativos_captura_manual(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_POST
 def gastos_operativos_manual_delete(request: HttpRequest, gasto_id: int) -> HttpResponse:
-    if not can_view_reportes(request.user):
+    if not can_manage_module(request.user, "reportes"):
         raise PermissionDenied
 
     gasto = get_object_or_404(
@@ -4217,6 +4217,8 @@ def gastos_operativos_manual_delete(request: HttpRequest, gasto_id: int) -> Http
 def gastos_operativos_importar(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
+    if request.method == "POST" and not can_manage_module(request.user, "reportes"):
+        raise PermissionDenied("No tienes permisos para importar gastos.")
 
     automation_service = OperatingExpenseImportAutomationService()
     target_year = 2026

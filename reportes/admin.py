@@ -16,8 +16,13 @@ from reportes.models import (
     ExpansionZoneScore,
     ForecastCalibrationProfile,
     GastoOperativoMensual,
+    GastoRecurrente,
+    GastoRecurrenteVersion,
     InsumoCostoHistoricoMensual,
     OperationsMetricSnapshot,
+    ObligacionGasto,
+    PagoObligacionGasto,
+    ParcialidadObligacionGasto,
     PresupuestoImport,
     PresupuestoLineaMensual,
     PresupuestoResumenMensual,
@@ -104,6 +109,89 @@ class GastoOperativoMensualAdmin(admin.ModelAdmin):
     )
     list_filter = ("periodo", "tipo_dato", "fuente", "es_estimado", "categoria_gasto", "centro_costo")
     search_fields = ("external_key", "comentario", "archivo_soporte", "centro_costo__codigo", "categoria_gasto__codigo")
+
+
+@admin.register(GastoRecurrente)
+class GastoRecurrenteAdmin(admin.ModelAdmin):
+    list_display = ("concepto", "area", "centro_costo", "categoria_gasto", "activo", "actualizado_en")
+    list_filter = ("activo", "area", "categoria_gasto")
+    search_fields = ("concepto", "proveedor", "rubro__concepto")
+    readonly_fields = [field.name for field in GastoRecurrente._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(GastoRecurrenteVersion)
+class GastoRecurrenteVersionAdmin(admin.ModelAdmin):
+    list_display = (
+        "gasto_recurrente",
+        "vigencia_inicio",
+        "vigencia_fin",
+        "monto",
+        "condicion_pago",
+        "creado_por",
+    )
+    list_filter = ("condicion_pago", "tipo_credito", "vigencia_inicio")
+    search_fields = ("gasto_recurrente__concepto", "motivo")
+    readonly_fields = [field.name for field in GastoRecurrenteVersion._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ObligacionGasto)
+class ObligacionGastoAdmin(admin.ModelAdmin):
+    list_display = (
+        "periodo",
+        "concepto",
+        "area",
+        "origen",
+        "monto_reconocido",
+        "fecha_vencimiento",
+        "estado",
+    )
+    list_filter = ("periodo", "area", "origen", "condicion_pago", "estado")
+    search_fields = ("concepto", "proveedor", "rubro__concepto")
+    readonly_fields = [field.name for field in ObligacionGasto._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ParcialidadObligacionGasto)
+class ParcialidadObligacionGastoAdmin(admin.ModelAdmin):
+    list_display = ("obligacion", "numero", "fecha_vencimiento", "monto")
+    readonly_fields = [field.name for field in ParcialidadObligacionGasto._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PagoObligacionGasto)
+class PagoObligacionGastoAdmin(admin.ModelAdmin):
+    list_display = ("fecha_pago", "obligacion", "monto", "metodo_pago", "referencia", "registrado_por")
+    list_filter = ("fecha_pago", "metodo_pago")
+    search_fields = ("obligacion__concepto", "referencia", "notas")
+    readonly_fields = [field.name for field in PagoObligacionGasto._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ProductoCostoOperativoMensual)

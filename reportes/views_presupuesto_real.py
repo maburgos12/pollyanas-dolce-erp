@@ -13,22 +13,34 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
-from django.db.models import Prefetch
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from core.access import can_view_reportes
+from core.access import can_manage_module, can_view_reportes
 
 from .models import (
     AreaPresupuesto,
     AreaPresupuestoResponsable,
+    CategoriaGasto,
+    CentroCosto,
+    GastoRecurrente,
     LineaPresupuestoMensual,
+    ObligacionGasto,
+    PagoObligacionGasto,
     ReglaFuenteRubro,
     RubroPresupuesto,
+)
+from .services_gastos_compromisos import (
+    crear_gasto_recurrente,
+    crear_gasto_variable,
+    editar_gasto_recurrente,
+    generar_obligacion_recurrente,
+    registrar_pago,
 )
 from .services_budget_vs_actual import budget_tone, variance_pct
 from .services_presupuesto_maestro import (
@@ -62,6 +74,7 @@ def _fuente_display(fuente_real: str) -> dict[str, str]:
         fuentes = valor.split(":", 1)[1]
         etiquetas = {
             "GASTO_OPERATIVO": "Gasto operativo",
+            "OBLIGACION_GASTO": "Gastos registrados del área",
             "NOMINA": "Nómina",
             "VENTA_POS": "Ventas Point",
             "BONO_PRODUCCION": "Bonos producción",
@@ -335,8 +348,8 @@ def presupuesto_vs_real(request: HttpRequest) -> HttpResponse:
 
 
 def _areas_capturables(user):
-    """Áreas donde el usuario puede capturar; None = todas (perfil reportes)."""
-    if can_view_reportes(user):
+    """Áreas donde puede capturar; None = todas (gestión de reportes)."""
+    if can_manage_module(user, "reportes"):
         return None
     codigos = list(
         AreaPresupuestoResponsable.objects.filter(
@@ -369,8 +382,6 @@ def _wants_json(request: HttpRequest) -> bool:
 
 
 def _es_admin_presupuesto(user) -> bool:
-    from core.access import can_manage_module
-
     return bool(user and user.is_authenticated and (user.is_superuser or can_manage_module(user, "reportes")))
 
 
@@ -393,6 +404,7 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
     selected_area = normalize_area_code(request.GET.get("area") or "")
     if selected_area not in {a.codigo for a in areas}:
         selected_area = areas[0].codigo if areas else ""
+    selected_area_obj = next((area for area in areas if area.codigo == selected_area), None)
 
     lineas = (
         LineaPresupuestoMensual.objects.filter(
@@ -426,6 +438,51 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             }
         )
 
+    rubros_candidatos = RubroPresupuesto.objects.filter(
+        area__codigo=selected_area,
+        activo=True,
+        tipo__in=[RubroPresupuesto.TIPO_EGRESO, RubroPresupuesto.TIPO_COSTO, RubroPresupuesto.TIPO_CAPEX],
+    ).prefetch_related("reglas_fuente").order_by("concepto", "sucursal__codigo")
+    fuentes_compatibles = {
+        ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+        ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO,
+        ReglaFuenteRubro.FUENTE_MANUAL,
+    }
+    rubros_gasto = [
+        rubro
+        for rubro in rubros_candidatos
+        if all(
+            not regla.activa or regla.tipo_fuente in fuentes_compatibles
+            for regla in rubro.reglas_fuente.all()
+        )
+    ]
+    gastos_recurrentes = list(
+        GastoRecurrente.objects.filter(area__codigo=selected_area, activo=True)
+        .select_related("area", "rubro", "centro_costo", "categoria_gasto")
+        .prefetch_related("versiones")
+        .order_by("concepto")
+    )
+    for recurrente in gastos_recurrentes:
+        recurrente.version_actual = next(
+            (version for version in recurrente.versiones.all() if version.vigencia_fin is None),
+            None,
+        )
+    obligaciones = list(
+        ObligacionGasto.objects.filter(area__codigo=selected_area)
+        .filter(
+            Q(periodo=periodo)
+            | Q(estado__in=[ObligacionGasto.ESTADO_PENDIENTE, ObligacionGasto.ESTADO_PARCIAL])
+        )
+        .select_related("rubro", "centro_costo", "categoria_gasto", "gasto_recurrente")
+        .prefetch_related("pagos", "parcialidades")
+        .order_by("fecha_vencimiento", "concepto")[:50]
+    )
+    for obligacion in obligaciones:
+        obligacion.total_pagado_mostrado = sum(
+            (pago.monto for pago in obligacion.pagos.all()), Decimal("0.00")
+        )
+        obligacion.saldo_mostrado = obligacion.monto_reconocido - obligacion.total_pagado_mostrado
+
     return render(
         request,
         "reportes/presupuesto_real_captura.html",
@@ -433,15 +490,212 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
             "module_tabs": _reportes_module_tabs("presupuesto_vs_real") if can_view_reportes(request.user) else [],
             "areas": areas,
             "selected_area": selected_area,
+            "selected_area_obj": selected_area_obj,
             "selected_year": selected_year,
             "selected_month": selected_month,
             "selected_month_name": dict((m, name) for name, m in MONTH_COLUMNS)[selected_month],
+            "selected_period_iso": periodo.isoformat(),
+            "today_iso": hoy.isoformat(),
             "month_options": MONTH_COLUMNS,
             "filas": filas,
             "completos": completos,
             "total_filas": len(filas),
             "es_admin": es_admin,
+            "rubros_gasto": rubros_gasto,
+            "centros_costo": CentroCosto.objects.filter(activo=True).order_by("tipo", "nombre"),
+            "categorias_gasto": CategoriaGasto.objects.filter(activo=True).order_by("nombre"),
+            "gastos_recurrentes": gastos_recurrentes,
+            "obligaciones": obligaciones,
+            "condiciones_pago": ObligacionGasto.CONDICION_CHOICES,
+            "tipos_credito": ObligacionGasto.CREDITO_CHOICES,
+            "unidades_plazo": ObligacionGasto.PLAZO_CHOICES,
+            "metodos_pago": ObligacionGasto.METODO_CHOICES,
         },
+    )
+
+
+def _fecha_post(request: HttpRequest, campo: str, *, default: date | None = None) -> date:
+    valor = (request.POST.get(campo) or "").strip()
+    if not valor and default is not None:
+        return default
+    try:
+        return date.fromisoformat(valor)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"Captura una fecha válida para {campo.replace('_', ' ')}.") from exc
+
+
+def _entero_post(request: HttpRequest, campo: str, *, default=None):
+    valor = (request.POST.get(campo) or "").strip()
+    if not valor:
+        return default
+    try:
+        return int(valor)
+    except ValueError as exc:
+        raise ValidationError(f"Captura un número válido para {campo.replace('_', ' ')}.") from exc
+
+
+def _respuesta_gasto(request: HttpRequest, ok: bool, mensaje: str, *, status=200, fragmento="gastos-area"):
+    if _wants_json(request):
+        payload = {
+            "ok": ok,
+            "toast": {
+                "type": "success" if ok else "error",
+                "message": mensaje,
+                "persistent": not ok,
+            },
+        }
+        if ok:
+            destino = request.POST.get("return_to") or reverse("reportes:presupuesto_real_captura")
+            if not destino.startswith("/") or destino.startswith("//"):
+                destino = reverse("reportes:presupuesto_real_captura")
+            payload.update({"redirect": f"{destino.split('#', 1)[0]}#{fragmento}", "reload": True})
+        return JsonResponse(payload, status=status)
+    from django.contrib import messages
+
+    (messages.success if ok else messages.error)(request, mensaje)
+    destino = request.POST.get("return_to") or reverse("reportes:presupuesto_real_captura")
+    if not destino.startswith("/") or destino.startswith("//"):
+        destino = reverse("reportes:presupuesto_real_captura")
+    return redirect(f"{destino.split('#', 1)[0]}#{fragmento}")
+
+
+def _error_gasto(request: HttpRequest, exc: ValidationError):
+    mensaje = " ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+    return _respuesta_gasto(request, False, mensaje, status=400)
+
+
+@login_required
+@require_POST
+def presupuesto_gasto_variable_crear(request: HttpRequest) -> HttpResponse:
+    try:
+        fecha_gasto = _fecha_post(request, "fecha_gasto")
+        obligacion = crear_gasto_variable(
+            usuario=request.user,
+            area=get_object_or_404(AreaPresupuesto, pk=_parse_int(request.POST.get("area_id"), 0)),
+            rubro=get_object_or_404(RubroPresupuesto, pk=_parse_int(request.POST.get("rubro_id"), 0)),
+            centro_costo=get_object_or_404(CentroCosto, pk=_parse_int(request.POST.get("centro_costo_id"), 0)),
+            categoria_gasto=get_object_or_404(
+                CategoriaGasto, pk=_parse_int(request.POST.get("categoria_gasto_id"), 0)
+            ),
+            concepto=request.POST.get("concepto") or "",
+            proveedor=request.POST.get("proveedor") or "",
+            periodo=_fecha_post(request, "periodo"),
+            fecha_gasto=fecha_gasto,
+            fecha_vencimiento=_fecha_post(request, "fecha_vencimiento", default=fecha_gasto),
+            monto=request.POST.get("monto"),
+            condicion_pago=request.POST.get("condicion_pago") or ObligacionGasto.CONDICION_CONTADO,
+            metodo_pago_previsto=request.POST.get("metodo_pago_previsto") or "",
+            tipo_credito=request.POST.get("tipo_credito") or "",
+            plazo_cantidad=_entero_post(request, "plazo_cantidad"),
+            plazo_unidad=request.POST.get("plazo_unidad") or "",
+            numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
+            archivo_soporte=request.POST.get("archivo_soporte") or "",
+            notas=request.POST.get("notas") or "",
+        )
+    except ValidationError as exc:
+        return _error_gasto(request, exc)
+    return _respuesta_gasto(
+        request,
+        True,
+        f"Gasto registrado y obligación #{obligacion.pk} creada por ${obligacion.monto_reconocido:,.2f}.",
+    )
+
+
+@login_required
+@require_POST
+def presupuesto_gasto_recurrente_crear(request: HttpRequest) -> HttpResponse:
+    try:
+        recurrente = crear_gasto_recurrente(
+            usuario=request.user,
+            area=get_object_or_404(AreaPresupuesto, pk=_parse_int(request.POST.get("area_id"), 0)),
+            rubro=get_object_or_404(RubroPresupuesto, pk=_parse_int(request.POST.get("rubro_id"), 0)),
+            centro_costo=get_object_or_404(CentroCosto, pk=_parse_int(request.POST.get("centro_costo_id"), 0)),
+            categoria_gasto=get_object_or_404(
+                CategoriaGasto, pk=_parse_int(request.POST.get("categoria_gasto_id"), 0)
+            ),
+            concepto=request.POST.get("concepto") or "",
+            proveedor=request.POST.get("proveedor") or "",
+            vigencia_inicio=_fecha_post(request, "vigencia_inicio"),
+            monto=request.POST.get("monto"),
+            dia_vencimiento=_entero_post(request, "dia_vencimiento", default=1),
+            condicion_pago=request.POST.get("condicion_pago") or ObligacionGasto.CONDICION_CONTADO,
+            metodo_pago_previsto=request.POST.get("metodo_pago_previsto") or "",
+            tipo_credito=request.POST.get("tipo_credito") or "",
+            plazo_cantidad=_entero_post(request, "plazo_cantidad"),
+            plazo_unidad=request.POST.get("plazo_unidad") or "",
+            numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
+            motivo=request.POST.get("motivo") or "",
+        )
+    except ValidationError as exc:
+        return _error_gasto(request, exc)
+    return _respuesta_gasto(request, True, f"Gasto fijo “{recurrente.concepto}” agregado.", fragmento="gastos-fijos")
+
+
+@login_required
+@require_POST
+def presupuesto_gasto_recurrente_editar(request: HttpRequest, recurrente_id: int) -> HttpResponse:
+    recurrente = get_object_or_404(GastoRecurrente.objects.select_related("area", "rubro"), pk=recurrente_id)
+    try:
+        editar_gasto_recurrente(
+            usuario=request.user,
+            recurrente=recurrente,
+            vigencia_inicio=_fecha_post(request, "vigencia_inicio"),
+            monto=request.POST.get("monto"),
+            dia_vencimiento=_entero_post(request, "dia_vencimiento", default=1),
+            condicion_pago=request.POST.get("condicion_pago") or ObligacionGasto.CONDICION_CONTADO,
+            metodo_pago_previsto=request.POST.get("metodo_pago_previsto") or "",
+            tipo_credito=request.POST.get("tipo_credito") or "",
+            plazo_cantidad=_entero_post(request, "plazo_cantidad"),
+            plazo_unidad=request.POST.get("plazo_unidad") or "",
+            numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
+            motivo=request.POST.get("motivo") or "",
+        )
+    except ValidationError as exc:
+        return _error_gasto(request, exc)
+    return _respuesta_gasto(request, True, "Nueva versión guardada; el historial anterior se conserva.", fragmento="gastos-fijos")
+
+
+@login_required
+@require_POST
+def presupuesto_gasto_recurrente_generar(request: HttpRequest, recurrente_id: int) -> HttpResponse:
+    recurrente = get_object_or_404(GastoRecurrente.objects.select_related("area"), pk=recurrente_id)
+    try:
+        obligacion, creada = generar_obligacion_recurrente(
+            usuario=request.user,
+            recurrente=recurrente,
+            periodo=_fecha_post(request, "periodo"),
+        )
+    except ValidationError as exc:
+        return _error_gasto(request, exc)
+    mensaje = (
+        f"Obligación #{obligacion.pk} generada para el periodo."
+        if creada
+        else f"La obligación #{obligacion.pk} ya existía; no se duplicó."
+    )
+    return _respuesta_gasto(request, True, mensaje, fragmento="obligaciones-pagos")
+
+
+@login_required
+@require_POST
+def presupuesto_obligacion_pagar(request: HttpRequest, obligacion_id: int) -> HttpResponse:
+    obligacion = get_object_or_404(ObligacionGasto.objects.select_related("area"), pk=obligacion_id)
+    try:
+        pago = registrar_pago(
+            usuario=request.user,
+            obligacion=obligacion,
+            fecha_pago=_fecha_post(request, "fecha_pago"),
+            monto=request.POST.get("monto"),
+            metodo_pago=request.POST.get("metodo_pago") or "",
+            referencia=request.POST.get("referencia") or "",
+            notas=request.POST.get("notas") or "",
+        )
+    except ValidationError as exc:
+        return _error_gasto(request, exc)
+    return _respuesta_gasto(
+        request,
+        True,
+        f"Pago #{pago.pk} registrado por ${pago.monto:,.2f} mediante {pago.get_metodo_pago_display()}.",
+        fragmento="obligaciones-pagos",
     )
 
 
