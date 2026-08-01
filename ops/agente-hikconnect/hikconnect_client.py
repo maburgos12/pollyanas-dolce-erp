@@ -168,6 +168,7 @@ class HikConnectClient:
         max_pages: int,
         start_page: int = 1,
         on_invalid_record=None,
+        on_page_records=None,
     ) -> DiscoveryRecords:
         """Recorre la nube por orden de subida, sin filtrar por deviceTime."""
         self.ensure_login()
@@ -188,6 +189,8 @@ class HikConnectClient:
                         "Hik-Connect devolvio un registro invalido sin journal durable"
                     )
                 on_invalid_record(invalid_record)
+            if on_page_records is not None and (page_records or invalid_records):
+                on_page_records(page_index, page_records)
             if not page_records:
                 if not invalid_records and (page_index != 1 or continuation_start == 1):
                     complete = True
