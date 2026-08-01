@@ -160,7 +160,10 @@
               <td>{% if row.rubro.sucursal %}<strong>{{ row.rubro.sucursal.nombre }}</strong><span class="pc-secondary">{{ row.rubro.sucursal.codigo }}</span>{% else %}<span class="pc-secondary">Empresa / no aplica</span>{% endif %}</td>
               <td><code>{{ row.rubro.codigo_cuenta|default:"Sin cuenta" }}</code></td>
               <td>{{ row.source_label }}</td>
-              <td><span class="pc-source-status is-{{ row.source_state|lower }}"><span aria-hidden="true"></span>{{ row.source_state_label }}</span></td>
+              <td>
+                <span class="pc-source-status is-{{ row.source_state|lower }}"><span aria-hidden="true"></span>{{ row.source_state_label }}</span>
+                {% if row.source_help %}<span class="pc-secondary">{{ row.source_help }}</span>{% endif %}
+              </td>
             </tr>
           {% empty %}
             <tr><td class="pc-empty" colspan="5"><strong>No hay rubros con estos filtros.</strong><span>Prueba otra área, categoría o estado de fuente.</span></td></tr>
@@ -186,10 +189,11 @@
   </section>
 
   <section class="pc-source-guide" aria-labelledby="source-guide-title">
-    <h2 id="source-guide-title">Cómo leer “automático”</h2>
+    <h2 id="source-guide-title">Cómo se obtiene el importe real</h2>
     <dl>
-      <div><dt>Automático con datos</dt><dd>Existe una regla y el periodo ya recibió información de su módulo origen.</dd></div>
-      <div><dt>Automático sin datos</dt><dd>La regla existe, pero no hay un resultado automático guardado para el periodo. Puede faltar información o consolidación; no significa que el gasto sea cero.</dd></div>
+      <div><dt>Calculado desde gastos registrados</dt><dd>El importe se suma a partir de recibos o gastos capturados por el área. No existe una conexión directa con el proveedor.</dd></div>
+      <div><dt>Actualizado desde otro módulo</dt><dd>El importe llega de una fuente identificada del ERP, como Nómina o ventas de Point.</dd></div>
+      <div><dt>Sin datos desde su fuente</dt><dd>La regla existe, pero el periodo todavía no tiene información. No significa que el gasto sea cero.</dd></div>
       <div><dt>Manual</dt><dd>La persona responsable captura el importe real y puede respaldarlo con el flujo de gastos del área.</dd></div>
       <div><dt>Sin configurar</dt><dd>El rubro existe, pero todavía no tiene una regla explícita. Administración debe decidir su continuidad.</dd></div>
     </dl>

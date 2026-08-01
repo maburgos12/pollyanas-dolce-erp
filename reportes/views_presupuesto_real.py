@@ -64,17 +64,33 @@ def _parse_int(value, default: int) -> int:
         return default
 
 
-def _fuente_display(fuente_real: str) -> dict[str, str]:
+def _fuente_display(
+    fuente_real: str, source_types: tuple[str, ...] = ()
+) -> dict[str, str]:
     """Traduce el namespace de fuente_real a un badge legible."""
     valor = str(fuente_real or "").strip()
     if valor.startswith("MANUAL:"):
         usuario = valor.split(":", 1)[1]
-        return {"kind": "manual", "label": f"Capturado · {usuario}"}
+        return {"kind": "manual", "label": f"Capturado · {usuario}", "capture_help": ""}
+    fuentes = set(source_types)
     if valor.startswith("AUTO:"):
-        fuentes = valor.split(":", 1)[1]
+        fuentes.update(valor.split(":", 1)[1].split("+"))
+    fuentes.discard(ReglaFuenteRubro.FUENTE_MANUAL)
+    fuentes_registradas = {
+        ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+        ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO,
+    }
+    if fuentes and fuentes.issubset(fuentes_registradas):
+        return {
+            "kind": "recorded",
+            "label": "Calculado desde gastos registrados",
+            "capture_help": (
+                "Registra el recibo o gasto en la sección Gastos del área; "
+                "este renglón se actualizará solo."
+            ),
+        }
+    if fuentes:
         etiquetas = {
-            "GASTO_OPERATIVO": "Gasto operativo",
-            "OBLIGACION_GASTO": "Gastos registrados del área",
             "NOMINA": "Nómina",
             "VENTA_POS": "Ventas Point",
             "BONO_PRODUCCION": "Bonos producción",
@@ -82,11 +98,16 @@ def _fuente_display(fuente_real: str) -> dict[str, str]:
             "CONSUMO_MP": "Consumo MP",
             "LEGADO": "Importado",
         }
-        partes = [etiquetas.get(parte, parte) for parte in fuentes.split("+")]
-        return {"kind": "auto", "label": "Automático · " + " + ".join(partes)}
+        partes = [etiquetas.get(parte, parte) for parte in sorted(fuentes)]
+        origen = " + ".join(partes)
+        return {
+            "kind": "auto",
+            "label": "Automático · " + origen,
+            "capture_help": f"Este renglón se actualiza desde {origen}; no lo captures aquí.",
+        }
     if valor:
-        return {"kind": "otro", "label": valor}
-    return {"kind": "pendiente", "label": "Pendiente"}
+        return {"kind": "otro", "label": valor, "capture_help": ""}
+    return {"kind": "pendiente", "label": "Pendiente", "capture_help": ""}
 
 
 def _cobertura_por_area(area_codes: list[str] | None = None) -> list[dict[str, object]]:
@@ -490,7 +511,14 @@ def presupuesto_real_captura(request: HttpRequest) -> HttpResponse:
                 "puede_sobrescribir": es_admin and not capturable,
                 "puede_liberar": es_admin and str(linea.fuente_real or "").startswith("MANUAL:"),
                 "con_real": con_real,
-                "fuente": _fuente_display(linea.fuente_real),
+                "fuente": _fuente_display(
+                    linea.fuente_real,
+                    tuple(
+                        regla.tipo_fuente
+                        for regla in linea.rubro.reglas_fuente.all()
+                        if regla.activa
+                    ),
+                ),
             }
         )
 

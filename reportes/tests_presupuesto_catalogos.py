@@ -571,6 +571,46 @@ class PresupuestoCatalogosServiceTests(TestCase):
             )
             self.assertEqual(len(rows), 8)
 
+    def test_gasto_operativo_explica_que_se_calcula_desde_gastos_registrados(self):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area,
+            concepto="Agua potable",
+            tipo=RubroPresupuesto.TIPO_COSTO,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+        )
+
+        rows = PresupuestoCatalogoService().list_rows(
+            period=date(2026, 7, 1),
+            version="ORIGINAL",
+            area_code=self.area.codigo,
+        )
+
+        row = next(item for item in rows if item["rubro"].id == rubro.id)
+        self.assertEqual(row["source_state"], SOURCE_AUTO_WITHOUT_DATA)
+        self.assertEqual(row["source_state_label"], "Aún no hay gastos registrados")
+        self.assertEqual(
+            row["source_help"],
+            "Registra el recibo o gasto en Captura de gasto real; el importe de este rubro se actualizará solo.",
+        )
+
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro,
+            periodo=date(2026, 7, 1),
+            version="ORIGINAL",
+            monto_real=Decimal("875"),
+            fuente_real="MANUAL:direccion",
+        )
+        manual_row = PresupuestoCatalogoService().list_rows(
+            period=date(2026, 7, 1),
+            version="ORIGINAL",
+            area_code=self.area.codigo,
+        )[0]
+        self.assertEqual(manual_row["source_state_label"], "Manual")
+        self.assertEqual(manual_row["source_help"], "")
+
     def test_rubro_conserva_categoria_historica_inactiva_en_jerarquia(self):
         category = CategoriaGasto.objects.create(
             codigo="HISTORICA",
