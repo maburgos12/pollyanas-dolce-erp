@@ -6,8 +6,8 @@
 {% block body_class %}page-reportes-inversiones-detalle{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260731-inv-audit-v2">
-<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260731-inv-audit-v2">
+<link rel="stylesheet" href="{% static 'css/investment_projects.css' %}?v=20260731-inv-hierarchy-v3">
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-inversiones-detalle.css?v=20260731-inv-hierarchy-v3">
 {% endblock %}
 
 {% block content %}
@@ -16,56 +16,45 @@
     <a href="{% url 'inversiones:portafolio' %}">Proyectos de inversión</a><span aria-hidden="true">/</span><span aria-current="page">{{ project.nombre_proyecto }}</span>
   </nav>
 
-  <section class="investment-header investment-detail-header">
-    <article class="investment-hero investment-detail-hero">
-      <div class="investment-kicker">Expediente de inversión</div>
-      <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
-      <p class="investment-copy">Presupuesto, comprobación y seguimiento operativo en un solo expediente, con la confiabilidad visible antes de tomar decisiones.</p>
-      <div class="investment-meta">
-        <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
-        <span class="investment-status-pill is-warning">{{ project.get_estatus_display }}</span>
-        <span class="investment-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
-        <span class="investment-pill">Responsable {% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}sin asignar{% endif %}</span>
-      </div>
-    </article>
-    <aside class="investment-side investment-detail-actions">
-      <div class="investment-panel-head">
-        <div>
-          <div class="investment-kicker">Control</div>
-          <h2 class="investment-panel-title">Métricas y reportes</h2>
-        </div>
-      </div>
-      <div class="investment-actions">
-        {% if can_manage_investments %}<form method="post" data-async-action>
-          {% csrf_token %}
-          <input type="hidden" name="action" value="refresh_project">
-          <button class="investment-button is-ghost" type="submit" data-pending-label="Actualizando…">Actualizar métricas</button>
-        </form>{% endif %}
-        <details class="inv-dropdown">
-          <summary class="investment-button">Reportes</summary>
-          <div class="inv-dropdown-menu">
-            <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
-            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Resumen XLSX</a>
-            <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Resumen PDF</a>
-          </div>
-        </details>
-      </div>
-      <div class="investment-muted">Actualizar métricas no sustituye la carga de gastos operativos faltantes.</div>
-    </aside>
+  <header class="investment-hero investment-detail-hero">
+    <div class="investment-kicker">Expediente de inversión</div>
+    <h1 class="investment-title">{{ project.nombre_proyecto }}</h1>
+    <p class="investment-copy">Presupuesto, comprobación y seguimiento operativo en un solo expediente, con la confiabilidad visible antes de tomar decisiones.</p>
+    <div class="investment-meta">
+      <span class="investment-pill">{{ project.get_tipo_proyecto_display }}</span>
+      <span class="investment-status-pill is-warning">{{ project.get_estatus_display }}</span>
+      <span class="investment-pill">Apertura {% if project.fecha_apertura %}{{ project.fecha_apertura|date:"Y-m-d" }}{% else %}pendiente{% endif %}</span>
+    </div>
+  </header>
+
+  <section class="inv-owner-status{% if not project.responsable %} is-warning{% endif %}" aria-label="Responsable del proyecto">
+    <span class="inv-owner-status-label">Responsable</span>
+    <strong>{% if project.responsable %}{{ project.responsable.get_full_name|default:project.responsable.username }}{% else %}Sin asignar{% endif %}</strong>
+    {% if not project.responsable %}<span>Falta definir quién dará seguimiento al expediente.</span>{% endif %}
   </section>
 
   <section class="inv-data-status {% if metricas_completas %}is-ready{% else %}is-warning{% endif %}" aria-label="Confiabilidad de métricas">
-    <div>
-      <span class="inv-data-status-label">Confiabilidad del corte</span>
-      {% if metricas_completas %}
-        <strong>Completa para seguimiento</strong>
-        <p>Ventas, costo y gasto operativo real están disponibles para {{ ultimo_snapshot.periodo|date:"F Y" }}.</p>
-      {% else %}
-        <strong>Métricas financieras no calculables</strong>
-        <p>{% if ultimo_snapshot %}Confianza {{ ultimo_snapshot.confidence_score }}%. Completa ventas, costo y gasto operativo real antes de usar recuperación, ROI o payback.{% else %}Aún no existe un corte operativo para este proyecto.{% endif %}</p>
-      {% endif %}
+    <div class="inv-data-status-summary">
+      <div>
+        <span class="inv-data-status-label">Confiabilidad del corte</span>
+        {% if metricas_completas %}
+          <strong>Completa para seguimiento</strong>
+          <p>Ventas, costo y gasto operativo real están disponibles para {{ ultimo_snapshot.periodo|date:"F Y" }}.</p>
+        {% else %}
+          <strong>Métricas financieras no calculables</strong>
+          <p>{% if ultimo_snapshot %}Completa ventas, costo y gasto operativo real antes de usar recuperación, ROI o payback.{% else %}Aún no existe un corte operativo para este proyecto.{% endif %}</p>
+        {% endif %}
+      </div>
+      {% if ultimo_snapshot %}<span class="inv-confidence-badge">Confianza <strong>{{ ultimo_snapshot.confidence_score }}%</strong></span>{% endif %}
     </div>
-    {% if ultimo_snapshot_fuentes.data_gaps %}<span>{{ ultimo_snapshot_fuentes.data_gaps|length }} brecha{{ ultimo_snapshot_fuentes.data_gaps|length|pluralize }} detectada{{ ultimo_snapshot_fuentes.data_gaps|length|pluralize }}</span>{% endif %}
+    {% if ultimo_snapshot_fuentes.data_gaps %}
+    <div class="inv-data-gaps">
+      <h2>{{ ultimo_snapshot_fuentes.data_gaps|length }} brecha{{ ultimo_snapshot_fuentes.data_gaps|length|pluralize }} por completar</h2>
+      <ul>
+        {% for gap in ultimo_snapshot_fuentes.data_gaps %}<li>{{ gap }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
   </section>
 
   <section class="investment-kpis investment-detail-summary" aria-label="Resumen del proyecto">
@@ -97,6 +86,31 @@
     <a class="inv-tab{% if tab_activo == 'finanzas' %} active{% endif %}" href="?tab=finanzas">Finanzas</a>
     <a class="inv-tab{% if tab_activo == 'seguimiento' %} active{% endif %}" href="?tab=seguimiento">Seguimiento</a>
   </nav>
+
+  <aside class="investment-side investment-detail-actions" aria-label="Métricas y reportes">
+    <div class="investment-panel-head">
+      <div>
+        <div class="investment-kicker">Control secundario</div>
+        <h2 class="investment-panel-title">Métricas y reportes</h2>
+      </div>
+      <p class="investment-muted">Actualizar no sustituye la carga de datos operativos faltantes.</p>
+    </div>
+    <div class="investment-actions">
+      {% if can_manage_investments %}<form method="post" data-async-action>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="refresh_project">
+        <button class="investment-button is-ghost" type="submit" data-pending-label="Actualizando…">Actualizar métricas</button>
+      </form>{% endif %}
+      <details class="inv-dropdown">
+        <summary class="investment-button">Reportes</summary>
+        <div class="inv-dropdown-menu">
+          <a href="{% url 'reportes:proyecto_viabilidad_export_excel' project.pk %}">Viabilidad XLSX</a>
+          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=xlsx">Resumen XLSX</a>
+          <a href="{% url 'reportes:proyecto_inversion_detail' project.pk %}?report=summary&export=pdf">Resumen PDF</a>
+        </div>
+      </details>
+    </div>
+  </aside>
 
   {% if tab_activo == "inversion" %}
     {% include "reportes/partials/_inv_tab_inversion.html" %}
