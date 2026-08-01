@@ -2741,10 +2741,15 @@ class MantenimientoUnidadTests(TestCase):
         # El post_save de ReporteUnidad encola una notificación Celery real
         # (broker Redis); se mockea igual que en mantenimiento/tests.py.
         with patch("logistica.signals.notificar_reporte_nuevo.delay"):
-            ReporteUnidad.objects.create(
+            reporte = ReporteUnidad.objects.create(
                 unidad=unidad, tipo="FALLA", severidad="MEDIA", descripcion="Servicio frenos",
-                costo_servicio=Decimal("12287"), fecha_reporte=timezone.now().replace(year=2026, month=7, day=10),
+                costo_servicio=Decimal("12287"),
             )
+        # fecha_reporte usa auto_now_add e ignora valores pasados a create().
+        # Fijarla después evita que el test dependa del mes del calendario.
+        ReporteUnidad.objects.filter(pk=reporte.pk).update(
+            fecha_reporte=timezone.make_aware(datetime(2026, 7, 10, 12, 0))
+        )
         ReglaFuenteRubro.objects.create(
             rubro=rubro, tipo_fuente=ReglaFuenteRubro.FUENTE_MANTENIMIENTO_UNIDAD,
             filtros={"unidad_codigo": "GS-P1"},
