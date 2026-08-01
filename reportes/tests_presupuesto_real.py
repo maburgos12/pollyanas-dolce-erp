@@ -975,6 +975,38 @@ class CapturaPorAreaTests(TestCase):
         self.assertIn("Diesel", conceptos)
         self.assertNotIn("ISR", conceptos)
 
+    def test_gasto_operativo_indica_donde_registrar_el_recibo(self):
+        rubro = RubroPresupuesto.objects.create(
+            area=self.area_logistica,
+            concepto="Agua potable",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+        )
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro,
+            periodo=self.periodo,
+            monto_presupuesto=Decimal("100"),
+        )
+        self.client.force_login(self.jefa_logistica)
+
+        response = self.client.get(f"{self.URL}?year=2026&month=6")
+
+        self.assertEqual(response.status_code, 200)
+        fila = next(
+            item for item in response.context["filas"]
+            if item["linea"].rubro_id == rubro.id
+        )
+        self.assertEqual(fila["fuente"]["label"], "Calculado desde gastos registrados")
+        self.assertEqual(
+            fila["fuente"]["capture_help"],
+            "Registra el recibo o gasto en la sección Gastos del área; este renglón se actualizará solo.",
+        )
+        self.assertContains(response, "Calculado desde gastos registrados")
+        self.assertContains(response, "Registra el recibo o gasto en la sección Gastos del área")
+
     def test_guardar_escribe_manual_con_historial(self):
         self.client.force_login(self.jefa_logistica)
         response = self.client.post(

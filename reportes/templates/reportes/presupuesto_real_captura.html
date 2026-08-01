@@ -9,6 +9,7 @@
 <style>
   .prc-fuente { display:inline-flex; align-items:center; font-size:0.78rem; border-radius:var(--radius-sm); padding:2px 8px; }
   .prc-fuente.is-auto { background:var(--rosa); color:var(--vino); }
+  .prc-fuente.is-recorded { background:var(--gris-suave); color:var(--texto); border:1px solid var(--verde); }
   .prc-fuente.is-manual { background:var(--gris-suave); color:var(--texto); border:1px solid var(--dorado); }
   .prc-fuente.is-pendiente { background:var(--gris-suave); color:var(--texto-light); }
   .prc-monto-input { max-width:160px; }
@@ -64,7 +65,7 @@
 
 <section class="card">
   <div class="card-header">Captura de gasto real · {{ selected_month_name|capfirst }} {{ selected_year }}</div>
-  <p class="muted">Solo se capturan los conceptos que el sistema no llena automáticamente (los automáticos aparecen bloqueados con su fuente). Lo capturado nunca lo pisa el sistema.</p>
+  <p class="muted">Captura aquí los gastos del área. Los conceptos calculados desde esos registros o desde otro módulo aparecen bloqueados y muestran su fuente. Lo capturado nunca lo pisa el sistema.</p>
 
   <form method="get" novalidate>
     <div class="form-grid-2">
@@ -281,9 +282,10 @@
                      placeholder="Motivo (obligatorio)" aria-label="Motivo del ajuste de dirección">
               <button class="btn btn-secondary btn-sm" type="submit" data-pending-label="Guardando…">Sobrescribir</button>
             </form>
-            <p class="muted" style="font-size:0.72rem; margin:4px 0 0;">Automático — al sobrescribir queda como captura de dirección y el motor deja de tocarlo.</p>
+            {% if fila.fuente.capture_help %}<p class="prc-help" style="margin:4px 0 0;">{{ fila.fuente.capture_help }}</p>{% endif %}
+            <p class="muted" style="font-size:0.72rem; margin:4px 0 0;">Si lo sobrescribes, quedará como captura de Dirección y ya no se actualizará desde su fuente.</p>
             {% else %}
-            <span class="muted">Automático — no se captura</span>
+            <span class="prc-help">{{ fila.fuente.capture_help|default:"Este renglón se actualiza desde su fuente; no lo captures aquí." }}</span>
             {% endif %}
           </td>
         </tr>

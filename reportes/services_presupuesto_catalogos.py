@@ -33,10 +33,15 @@ SOURCE_MANUAL = "MANUAL"
 SOURCE_UNCONFIGURED = "SIN_CONFIGURAR"
 
 SOURCE_STATE_LABELS = {
-    SOURCE_AUTO_WITH_DATA: "Automático con datos",
-    SOURCE_AUTO_WITHOUT_DATA: "Automático sin datos",
+    SOURCE_AUTO_WITH_DATA: "Con datos desde su fuente",
+    SOURCE_AUTO_WITHOUT_DATA: "Sin datos desde su fuente",
     SOURCE_MANUAL: "Manual",
     SOURCE_UNCONFIGURED: "Sin configurar",
+}
+
+RECORDED_EXPENSE_SOURCES = {
+    ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+    ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO,
 }
 
 RECORD_STATUS_ACTIVE = "ACTIVOS"
@@ -161,6 +166,33 @@ def source_state_for(rubro: RubroPresupuesto, line: LineaPresupuestoMensual | No
     if line and line.fuente_real == expected_source and not metadata.get("sin_datos_fuente"):
         return SOURCE_AUTO_WITH_DATA
     return SOURCE_AUTO_WITHOUT_DATA
+
+
+def source_presentation_for(
+    rules: list[ReglaFuenteRubro], state: str
+) -> tuple[str, str]:
+    """Explica la fuente con lenguaje operativo, sin insinuar integraciones inexistentes."""
+    automatic_sources = {
+        rule.tipo_fuente
+        for rule in rules
+        if rule.tipo_fuente != ReglaFuenteRubro.FUENTE_MANUAL
+    }
+    if (
+        state in {SOURCE_AUTO_WITH_DATA, SOURCE_AUTO_WITHOUT_DATA}
+        and automatic_sources
+        and automatic_sources.issubset(RECORDED_EXPENSE_SOURCES)
+    ):
+        label = (
+            "Calculado desde gastos registrados"
+            if state == SOURCE_AUTO_WITH_DATA
+            else "Aún no hay gastos registrados"
+        )
+        return (
+            label,
+            "Registra el recibo o gasto en Captura de gasto real; "
+            "el importe de este rubro se actualizará solo.",
+        )
+    return SOURCE_STATE_LABELS[state], ""
 
 
 @dataclass(frozen=True)
@@ -446,6 +478,7 @@ class PresupuestoCatalogoService:
                 sucursal_id=rubro.sucursal_id,
             )
             labels = [rule.get_tipo_fuente_display() for rule in rules]
+            source_state_label, source_help = source_presentation_for(rules, state)
             row = {
                 "rubro": rubro,
                 "category": category,
@@ -453,7 +486,8 @@ class PresupuestoCatalogoService:
                 "category_ids": {item.id for item in rule_categories},
                 "category_label": " · ".join(item.nombre for item in rule_categories) or "Sin categoría",
                 "source_state": state,
-                "source_state_label": SOURCE_STATE_LABELS[state],
+                "source_state_label": source_state_label,
+                "source_help": source_help,
                 "source_labels": labels,
                 "source_label": ", ".join(labels) if labels else "Sin regla asignada",
                 "duplicate_key": duplicate_key,
