@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pos_bridge.selectors.login_selectors import (
+    BLOCKING_MODAL_CONTAINERS,
+    BLOCKING_MODAL_DISMISS_BUTTONS,
     ERROR_BANNERS,
     PASSWORD_INPUTS,
     SUBMIT_BUTTONS,
@@ -22,6 +24,27 @@ class PointLoginPage:
             raise AuthenticationError("Falta POINT_BASE_URL para abrir el portal Point.")
         self.page.goto(self.settings.base_url, wait_until="domcontentloaded")
 
+    def _dismiss_blocking_modal(self) -> bool:
+        modal = find_first(self.page, BLOCKING_MODAL_CONTAINERS, timeout_ms=500)
+        if modal is None:
+            return False
+
+        dismiss_button = find_first(self.page, BLOCKING_MODAL_DISMISS_BUTTONS, timeout_ms=500)
+        if dismiss_button is None:
+            raise AuthenticationError(
+                "Point mostró un aviso que bloquea el login y no se encontró cómo cerrarlo.",
+                context={"modal_selectors": BLOCKING_MODAL_CONTAINERS},
+            )
+        try:
+            dismiss_button.click()
+            modal.wait_for(state="hidden", timeout=self.settings.timeout_ms)
+        except Exception as exc:
+            raise AuthenticationError(
+                "No se pudo cerrar el aviso que bloquea el login de Point.",
+                context={"error": str(exc)},
+            ) from exc
+        return True
+
     def login(self, username: str, password: str) -> None:
         if not username or not password:
             raise AuthenticationError("Faltan POINT_USERNAME y/o POINT_PASSWORD.")
@@ -38,11 +61,18 @@ class PointLoginPage:
             password,
             "input de contraseña Point",
         )
-        click_first(
-            self.page,
-            select_candidates(self.settings.selector_overrides, "login.submit_button", SUBMIT_BUTTONS),
-            "botón de login Point",
+        self._dismiss_blocking_modal()
+        submit_selectors = select_candidates(
+            self.settings.selector_overrides,
+            "login.submit_button",
+            SUBMIT_BUTTONS,
         )
+        try:
+            click_first(self.page, submit_selectors, "botón de login Point")
+        except Exception:
+            if not self._dismiss_blocking_modal():
+                raise
+            click_first(self.page, submit_selectors, "botón de login Point")
         try:
             self.page.wait_for_load_state("networkidle", timeout=self.settings.timeout_ms)
         except Exception:

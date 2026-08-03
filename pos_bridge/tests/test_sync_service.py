@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from pos_bridge.models import PointBranch, PointExtractionLog, PointInventorySnapshot, PointProduct, PointSyncJob
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
@@ -135,3 +136,40 @@ class PointSyncServiceTests(TestCase):
         filtered = extractor._apply_branch_filter(branches, "Crucero")
 
         self.assertEqual(filtered, [{"value": "2", "label": "Crucero"}])
+
+    def test_retry_failed_jobs_only_claims_inventory_once(self):
+        inventory_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_FAILED,
+            attempt_count=1,
+            parameters={"branch_filter": "Centro"},
+            triggered_by=self.user,
+        )
+        PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_FAILED,
+            attempt_count=1,
+            parameters={},
+            triggered_by=self.user,
+        )
+        service = PointSyncService(
+            extractor=FakeExtractor(),
+            inventory_cost_capture_service=FakeInventoryCostCaptureService(),
+        )
+
+        with patch.object(service, "run_inventory_sync") as run_inventory_sync:
+            run_inventory_sync.return_value = SimpleNamespace(id=999)
+            retried = service.retry_failed_jobs(limit=5, max_attempts=3)
+            second_pass = service.retry_failed_jobs(limit=5, max_attempts=3)
+
+        self.assertEqual(retried, [run_inventory_sync.return_value])
+        self.assertEqual(second_pass, [])
+        run_inventory_sync.assert_called_once_with(
+            triggered_by=self.user,
+            branch_filter="Centro",
+            limit_branches=None,
+            attempt_count=2,
+        )
+        inventory_job.refresh_from_db()
+        self.assertTrue(inventory_job.parameters["retry_scheduled"])
+        self.assertIn("retry_scheduled_at", inventory_job.parameters)

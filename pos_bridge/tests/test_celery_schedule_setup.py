@@ -8,6 +8,27 @@ from django.test import TestCase, override_settings
 
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
+    def test_preserves_manual_containment_for_inventory_tasks(self):
+        from django_celery_beat.models import PeriodicTask
+
+        call_command("setup_celery_schedules")
+        names = [
+            "pos_bridge: inventario realtime",
+            "pos_bridge: retry jobs fallidos",
+        ]
+        PeriodicTask.objects.filter(name__in=names).update(enabled=False)
+
+        call_command("setup_celery_schedules")
+
+        self.assertEqual(
+            list(
+                PeriodicTask.objects.filter(name__in=names)
+                .order_by("name")
+                .values_list("enabled", flat=True)
+            ),
+            [False, False],
+        )
+
     def test_registers_expected_periodic_tasks_idempotently(self):
         from django_celery_beat.models import PeriodicTask
 
