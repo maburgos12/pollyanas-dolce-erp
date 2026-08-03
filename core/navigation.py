@@ -48,9 +48,33 @@ def _puede_capturar_presupuesto(user) -> bool:
         return True
     from reportes.models import AreaPresupuestoResponsable
 
-    return AreaPresupuestoResponsable.objects.filter(
+    tiene_area = AreaPresupuestoResponsable.objects.filter(
         usuario=user, puede_capturar=True, area__activa=True
     ).exists()
+    setattr(user, "_tiene_area_presupuesto_activa", tiene_area)
+    return tiene_area
+
+
+def _es_responsable_area_presupuesto(user) -> bool:
+    """Reutiliza la consulta de captura para no encarecer cada render del menú."""
+    if not (user and user.is_authenticated and getattr(user, "pk", None)):
+        return False
+    valor_cacheado = getattr(user, "_tiene_area_presupuesto_activa", None)
+    if valor_cacheado is not None:
+        return valor_cacheado
+
+    # Quien ya dispone de la bandeja general no necesita una entrada personal
+    # duplicada; evitamos además una consulta global para perfiles operativos.
+    if can_view_submodule(user, "compras", "departamentales"):
+        return False
+
+    from reportes.models import AreaPresupuestoResponsable
+
+    tiene_area = AreaPresupuestoResponsable.objects.filter(
+        usuario=user, puede_capturar=True, area__activa=True
+    ).exists()
+    setattr(user, "_tiene_area_presupuesto_activa", tiene_area)
+    return tiene_area
 
 
 def _tiene_areas_presupuesto(user) -> bool:
@@ -174,9 +198,16 @@ NAV_GROUPS = [
             (
                 "compras",
                 "dashboard",
-                "Compras",
+                "Compras de insumos",
                 "/compras/dashboard/",
-                ["/compras/"],
+                ["/compras/dashboard/", "/compras/solicitudes/", "/compras/ordenes/", "/compras/recepciones/"],
+            ),
+            (
+                "compras",
+                "departamentales",
+                "Compras departamentales",
+                "/compras/departamentales/",
+                ["/compras/departamentales/"],
             ),
             (
                 "inventario",
@@ -365,6 +396,21 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 }
             )
         if group["key"] == "mi_trabajo" and user and user.is_authenticated:
+            if _es_responsable_area_presupuesto(user):
+                url_compras_dept = "/compras/departamentales/mis-solicitudes/"
+                match_len = len("/compras/departamentales/") if current_path.startswith("/compras/departamentales/") else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Compras departamentales",
+                        "url": url_compras_dept,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "compras",
+                        "submodule": "departamentales_personal",
+                        "initial": "C",
+                    }
+                )
             from reportes.views_presupuesto_catalogos import puede_ver_catalogos_presupuesto
 
             if puede_ver_catalogos_presupuesto(user):

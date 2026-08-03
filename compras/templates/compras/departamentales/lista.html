@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load static humanize %}
+{% block title %}Compras departamentales{% endblock %}
+{% block page_title %}Compras departamentales{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260803-1">{% endblock %}
+{% block content %}
+<main class="cd-shell">
+  {% include "compras/departamentales/_tabs.html" %}
+  <header class="cd-hero">
+    <div>
+      <span class="cd-eyebrow">Planeación por área</span>
+      <h1>Solicitudes que sí llegan a compra</h1>
+      <p>Concentra las necesidades del mes, agrega compras extraordinarias y sigue cada artículo hasta recibirlo conforme.</p>
+    </div>
+    <a class="cd-button primary" href="{% url 'compras:departamental_nueva' %}">+ Nueva solicitud</a>
+  </header>
+  <section class="cd-notice"><strong>Ciclo mensual:</strong> prepara tu solicitud desde el día 20 y envíala del 20 al 25 para el mes siguiente. Las urgencias pueden capturarse como extraordinarias.</section>
+  <section class="cd-card">
+    <div class="cd-card-head"><div><span class="cd-kicker">Seguimiento</span><h2>Solicitudes de mis áreas</h2></div><span class="cd-count">{{ solicitudes|length }} registros</span></div>
+    <div class="cd-table-wrap table-responsive">
+      <table class="cd-table">
+        <thead><tr><th>Folio</th><th>Área / periodo</th><th>Tipo</th><th>Artículos</th><th>Estado</th><th>Comprador</th><th></th></tr></thead>
+        <tbody>
+          {% for solicitud in solicitudes %}
+          <tr>
+            <td><strong>{{ solicitud.folio }}</strong><small>{{ solicitud.creado_en|date:"d M Y" }}</small></td>
+            <td>{{ solicitud.area.nombre }}<small>{{ solicitud.periodo|date:"F Y" }}</small></td>
+            <td><span class="cd-pill">{{ solicitud.get_tipo_display }}</span></td>
+            <td>{{ solicitud.items.count }}</td>
+            <td><span class="cd-status {{ solicitud.estado|lower }}">{{ solicitud.get_estado_display }}</span></td>
+            <td>{% if solicitud.comprador_asignado %}{{ solicitud.comprador_asignado.get_full_name|default:solicitud.comprador_asignado.username }}{% else %}<span class="cd-muted">Por asignar</span>{% endif %}</td>
+            <td><a class="cd-link" href="{% url 'compras:departamental_detalle' solicitud.pk %}">Ver seguimiento →</a></td>
+          </tr>
+          {% empty %}<tr><td colspan="7"><div class="cd-empty"><strong>Aún no hay solicitudes.</strong><span>Crea la primera y agrega todos los artículos del área.</span></div></td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}

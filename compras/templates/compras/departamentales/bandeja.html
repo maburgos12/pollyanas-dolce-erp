@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load static humanize %}
+{% block title %}Bandeja de Compras{% endblock %}
+{% block page_title %}Bandeja de Compras departamentales{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260803-1">{% endblock %}
+{% block content %}
+<main class="cd-shell">
+  {% include "compras/departamentales/_tabs.html" %}
+  <header class="cd-hero"><div><span class="cd-eyebrow">Cola compartida</span><h1>Bandeja de Compras</h1><p>Cada artículo conserva su contexto, imagen, costo y siguiente acción hasta quedar recibido conforme.</p></div></header>
+  <section class="cd-kpis">
+    <article><span>Artículos activos</span><strong>{{ items|length }}</strong></article>
+    <article><span>Por cotizar</span><strong>{{ items|length }}</strong><small>Revisa la prioridad y fecha requerida</small></article>
+    <article><span>Regla de cierre</span><strong>Recepción conforme</strong><small>No basta con emitir la orden</small></article>
+  </section>
+  <section class="cd-card">
+    <div class="cd-card-head"><div><span class="cd-kicker">Pendientes vivos</span><h2>Artículos que requieren atención</h2></div></div>
+    <div class="cd-table-wrap table-responsive"><table class="cd-table"><thead><tr><th>Artículo</th><th>Solicitud</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Siguiente acción</th><th></th></tr></thead><tbody>
+      {% for item in items %}<tr>
+        <td><div class="cd-product">{% if item.imagen %}<img src="{{ item.imagen.url }}" alt="Referencia de {{ item.descripcion }}">{% else %}<span class="cd-thumb">{{ item.descripcion|slice:":1" }}</span>{% endif %}<div><strong>{{ item.descripcion }}</strong><small>{{ item.cantidad|floatformat:-3 }} {{ item.unidad }}</small></div></div></td>
+        <td>{{ item.solicitud.folio }}<small>{{ item.solicitud.get_tipo_display }}</small></td><td>{{ item.solicitud.area.nombre }}</td>
+        <td><span class="cd-priority {{ item.prioridad|lower }}">{{ item.get_prioridad_display }}</span></td>
+        <td><span class="cd-status">{{ item.get_estado_display }}</span></td><td>{{ item.get_siguiente_responsable_display }}</td>
+        <td><a class="cd-link" href="{% url 'compras:departamental_detalle' item.solicitud_id %}">Atender →</a></td>
+      </tr>{% empty %}<tr><td colspan="7"><div class="cd-empty"><strong>No hay pendientes.</strong><span>Los artículos nuevos aparecerán aquí al enviarse.</span></div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</main>
+{% endblock %}

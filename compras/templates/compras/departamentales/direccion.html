@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load static humanize %}
+{% block title %}Decisiones DG · Compras{% endblock %}
+{% block page_title %}Decisiones de compras{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260803-1">{% endblock %}
+{% block content %}
+<main class="cd-shell">
+  {% include "compras/departamentales/_tabs.html" %}
+  <header class="cd-hero"><div><span class="cd-eyebrow">Dirección General</span><h1>Decisiones por exceso presupuestal</h1><p>Solo aparecen artículos con cotización definitiva que rebasan el disponible proyectado.</p></div></header>
+  <section class="cd-card"><div class="cd-card-head"><div><span class="cd-kicker">Revisión ejecutiva</span><h2>Pendientes de decisión</h2></div><span class="cd-count">{{ items|length }}</span></div>
+    <div class="cd-decision-list">{% for item in items %}<article class="cd-decision">
+      <div class="cd-product">{% if item.imagen %}<img src="{{ item.imagen.url }}" alt="{{ item.descripcion }}">{% else %}<span class="cd-thumb">{{ item.descripcion|slice:":1" }}</span>{% endif %}<div><span class="cd-pill">{{ item.solicitud.area.nombre }}</span><h3>{{ item.descripcion }}</h3><p>{{ item.solicitud.motivo }}</p></div></div>
+      <a class="cd-button primary" href="{% url 'compras:departamental_detalle' item.solicitud_id %}">Revisar decisión</a>
+    </article>{% empty %}<div class="cd-empty"><strong>Sin excesos pendientes.</strong><span>Dirección solo recibe decisiones que requieren su intervención.</span></div>{% endfor %}</div>
+  </section>
+</main>
+{% endblock %}
