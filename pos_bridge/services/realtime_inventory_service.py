@@ -79,13 +79,17 @@ class RealtimeInventoryService:
     def run_sync(self, *, force: bool = False, triggered_by=None) -> list[PointSyncJob]:
         if not force and not self.should_run():
             return []
+        if not self.realtime_branches:
+            logger.info(
+                "Se omite sync realtime de inventario: POS_BRIDGE_REALTIME_BRANCHES no tiene sucursales explícitas."
+            )
+            return []
         if self.has_running_inventory_job():
             logger.info("Se omite sync realtime de inventario porque ya existe un job inventory RUNNING.")
             return []
 
-        branches = self.realtime_branches or [None]
         jobs: list[PointSyncJob] = []
-        for branch in branches:
+        for branch in self.realtime_branches:
             job = self.sync_service.run_inventory_sync(
                 triggered_by=triggered_by,
                 branch_filter=branch,
