@@ -193,3 +193,54 @@ class PointSyncServiceTests(TestCase):
                 extractor.extract()
 
         extractor.auth_service.login.assert_called_once_with(session, branch_hint="MATRIZ")
+
+    def test_unfiltered_inventory_renews_browser_session_for_each_branch(self):
+        extractor = PointInventoryExtractor(
+            bridge_settings=SimpleNamespace(timeout_ms=30000)
+        )
+        extractor.auth_service = Mock()
+        first_session = SimpleNamespace(page=Mock())
+        second_session = SimpleNamespace(page=Mock())
+        branches = [
+            {"value": "1", "label": "MATRIZ"},
+            {"value": "13", "label": "GUAMUCHIL"},
+        ]
+        first_result = Mock()
+        second_result = Mock()
+
+        with (
+            patch("pos_bridge.services.inventory_extractor.PlaywrightBrowserClient"),
+            patch("pos_bridge.services.inventory_extractor.BrowserSessionManager") as manager,
+            patch("pos_bridge.services.inventory_extractor.PointInventoryPage") as inventory_page,
+            patch.object(extractor, "_extract_branch", side_effect=[first_result, second_result]) as extract_branch,
+        ):
+            manager.return_value.__enter__.side_effect = [first_session, second_session]
+            first_page = Mock()
+            first_page.list_branches.return_value = branches
+            second_page = Mock()
+            inventory_page.side_effect = [first_page, second_page]
+
+            result = extractor.extract()
+
+        self.assertEqual(result, [first_result, second_result])
+        self.assertEqual(manager.call_count, 2)
+        self.assertEqual(
+            extractor.auth_service.login.call_args_list,
+            [
+                ((first_session,), {"branch_hint": "MATRIZ"}),
+                ((second_session,), {"branch_hint": "GUAMUCHIL"}),
+            ],
+        )
+        self.assertEqual(extract_branch.call_count, 2)
+
+    def test_extract_branch_rejects_empty_product_rows(self):
+        extractor = PointInventoryExtractor(
+            bridge_settings=SimpleNamespace(timeout_ms=30000)
+        )
+        inventory_page = Mock()
+        inventory_page.select_branch.return_value = {"value": "13", "label": "GUAMUCHIL"}
+        inventory_page.extract_inventory_table.return_value = {"headers": [], "rows": []}
+        extractor._extract_product_rows_by_category = Mock(return_value=([], []))
+
+        with self.assertRaisesMessage(ExtractionError, "cero productos"):
+            extractor._extract_branch(inventory_page, {"value": "13", "label": "GUAMUCHIL"})

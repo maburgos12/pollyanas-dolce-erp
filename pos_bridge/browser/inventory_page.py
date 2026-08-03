@@ -80,7 +80,13 @@ class PointInventoryPage:
                 label: (node.textContent || "").trim()
             }))"""
         )
-        return [option for option in options if option.get("label")]
+        return [
+            option
+            for option in options
+            if option.get("value")
+            and option.get("label")
+            and "SELECCIONE" not in str(option.get("label", "")).upper()
+        ]
 
     def select_branch(self, branch: dict) -> dict:
         branch_locator = find_first(
