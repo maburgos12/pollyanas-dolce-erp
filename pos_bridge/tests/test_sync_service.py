@@ -2,14 +2,14 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pos_bridge.models import PointBranch, PointExtractionLog, PointInventorySnapshot, PointProduct, PointSyncJob
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
 from pos_bridge.services.inventory_extractor import ExtractedBranchInventory
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureResult
 from pos_bridge.services.sync_service import PointSyncService
-from pos_bridge.utils.exceptions import ExtractionError
+from pos_bridge.utils.exceptions import ExtractionError, NavigationError
 
 
 class FakeExtractor:
@@ -173,3 +173,23 @@ class PointSyncServiceTests(TestCase):
         inventory_job.refresh_from_db()
         self.assertTrue(inventory_job.parameters["retry_scheduled"])
         self.assertIn("retry_scheduled_at", inventory_job.parameters)
+
+    def test_unfiltered_inventory_uses_matriz_workspace_context(self):
+        extractor = PointInventoryExtractor(
+            bridge_settings=SimpleNamespace(timeout_ms=30000)
+        )
+        extractor.auth_service = Mock()
+        session = SimpleNamespace(page=Mock())
+
+        with (
+            patch("pos_bridge.services.inventory_extractor.PlaywrightBrowserClient"),
+            patch("pos_bridge.services.inventory_extractor.BrowserSessionManager") as manager,
+            patch("pos_bridge.services.inventory_extractor.PointInventoryPage") as inventory_page,
+        ):
+            manager.return_value.__enter__.return_value = session
+            inventory_page.return_value.open_inventory_module.side_effect = NavigationError("detener prueba")
+
+            with self.assertRaises(NavigationError):
+                extractor.extract()
+
+        extractor.auth_service.login.assert_called_once_with(session, branch_hint="MATRIZ")
