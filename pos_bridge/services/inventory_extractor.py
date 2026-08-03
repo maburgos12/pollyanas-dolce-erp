@@ -60,6 +60,18 @@ class PointInventoryExtractor:
             or branch_filter_norm in str(branch.get("label", "")).lower()
         ]
 
+    def _exclude_non_commercial_branches(self, branches: list[dict]) -> list[dict]:
+        excluded = {
+            str(label).strip().casefold()
+            for label in getattr(self.settings, "sales_excluded_branches", [])
+            if str(label).strip()
+        }
+        return [
+            branch
+            for branch in branches
+            if str(branch.get("label", "")).strip().casefold() not in excluded
+        ]
+
     def _extract_product_rows_by_category(self, inventory_page: PointInventoryPage) -> tuple[list[dict], list[dict]]:
         category_options = inventory_page.list_category_options(kind="products")
         category_options = [
@@ -146,6 +158,11 @@ class PointInventoryExtractor:
                 inventory_page.open_inventory_module()
                 branches = inventory_page.list_branches()
                 branches = self._apply_branch_filter(branches, branch_filter)
+                if not branch_filter:
+                    # El inventario completo concilia tiendas comerciales. CEDIS,
+                    # ALMACEN, PRODUCCION y DEVOLUCIONES tienen flujos operativos
+                    # propios y no deben exigirse como catálogos de venta.
+                    branches = self._exclude_non_commercial_branches(branches)
                 if not branches:
                     fallback_branch = branch_filter or "default"
                     branches = [{"value": fallback_branch, "label": fallback_branch}]
