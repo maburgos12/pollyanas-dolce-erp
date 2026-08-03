@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mockup · Compras departamentales</title>
+  <link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="brand">
+        <img src="../../../static/operacion/pollyanas-logo-transparent.png" alt="Pollyana's Dolce">
+        <div>
+          <strong>Pollyana's Dolce</strong>
+          <span>ERP operativo</span>
+        </div>
+      </div>
+
+      <nav class="main-nav">
+        <a href="#" class="nav-link"><span class="nav-icon">⌂</span>Inicio</a>
+        <a href="#" class="nav-link active"><span class="nav-icon">▣</span>Compras</a>
+        <a href="#" class="nav-link"><span class="nav-icon">▤</span>Presupuesto</a>
+        <a href="#" class="nav-link"><span class="nav-icon">◎</span>Reportes</a>
+      </nav>
+
+      <div class="sidebar-section">
+        <p>Compras</p>
+        <button class="side-action active" data-switch="requester">
+          <span>Solicitud departamental</span>
+        </button>
+        <button class="side-action" data-switch="buyer">
+          <span>Bandeja de Compras</span>
+          <b>12</b>
+        </button>
+        <button class="side-action" data-switch="director">
+          <span>Autorizaciones DG</span>
+          <b class="gold">3</b>
+        </button>
+        <button class="side-action" data-switch="tracking">
+          <span>Seguimiento</span>
+        </button>
+      </div>
+
+      <div class="user-card">
+        <span class="avatar">CC</span>
+        <div><strong>Carolina</strong><small>Responsable · Producción</small></div>
+        <button aria-label="Abrir opciones de usuario">•••</button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="breadcrumbs">Compras <span>/</span> Solicitudes departamentales</div>
+        <div class="topbar-actions">
+          <button class="icon-button" aria-label="Buscar">⌕</button>
+          <button class="icon-button notification" aria-label="Notificaciones">♢<b>4</b></button>
+          <span class="today">3 de agosto de 2026</span>
+        </div>
+      </header>
+
+      <section class="view active" id="view-requester" aria-labelledby="requester-title">
+        <div class="page-heading">
+          <div>
+            <p class="context-label">Nueva solicitud mensual</p>
+            <h1 id="requester-title">Compras de septiembre</h1>
+            <p>Reúne en un solo documento todo lo que tu área necesitará el próximo mes.</p>
+          </div>
+          <div class="heading-actions">
+            <button class="btn secondary">Guardar borrador</button>
+            <button class="btn primary" id="send-request">Enviar a Compras <span>→</span></button>
+          </div>
+        </div>
+
+        <div class="cycle-banner">
+          <div class="cycle-date"><strong>20–25</strong><span>agosto</span></div>
+          <div>
+            <strong>Ventana de planeación abierta</strong>
+            <p>Esta solicitud corresponde a septiembre de 2026. Puedes editarla hasta enviarla.</p>
+          </div>
+          <span class="status-badge success">A tiempo</span>
+        </div>
+
+        <section class="request-meta" aria-label="Información de la solicitud">
+          <label>Área
+            <input value="Producción" disabled>
+          </label>
+          <label>Responsable
+            <input value="Carolina Cayetano" disabled>
+          </label>
+          <label>Tipo de solicitud
+            <select><option>Mensual</option><option>Extraordinaria</option><option>Emergencia</option></select>
+          </label>
+          <label>Mes de compra
+            <select><option>Septiembre 2026</option><option>Octubre 2026</option></select>
+          </label>
+        </section>
+
+        <section class="line-items" aria-labelledby="items-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="items-title">Artículos solicitados</h2>
+              <p>La imagen y el costo estimado son opcionales. Compras confirmará el precio cotizado.</p>
+            </div>
+            <button class="btn add" id="add-item"><span>＋</span> Agregar artículo</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th>Imagen</th>
+                  <th>Artículo y motivo</th>
+                  <th>Cantidad</th>
+                  <th>Se necesita</th>
+                  <th>Prioridad</th>
+                  <th>Costo unitario</th>
+                  <th>Subtotal</th>
+                  <th><span class="sr-only">Acciones</span></th>
+                </tr>
+              </thead>
+              <tbody id="item-rows">
+                <tr class="item-row">
+                  <td>
+                    <button class="photo-thumb rack" aria-label="Cambiar imagen del rack"><span>▥</span><small>Cambiar</small></button>
+                  </td>
+                  <td class="item-copy">
+                    <input aria-label="Artículo" value="Rack de acero inoxidable">
+                    <textarea aria-label="Motivo">Para organizar moldes y liberar la mesa de preparación.</textarea>
+                    <span class="category">Mobiliario y almacenamiento</span>
+                  </td>
+                  <td><div class="qty"><input class="quantity" type="number" value="1" min="1"><select aria-label="Unidad"><option>pieza</option></select></div></td>
+                  <td><input type="date" value="2026-09-10" aria-label="Fecha requerida"></td>
+                  <td><select aria-label="Prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></td>
+                  <td><div class="money-input"><span>$</span><input class="unit-cost" type="number" value="8500" min="0" aria-label="Costo unitario estimado"></div><small class="optional">Estimado</small></td>
+                  <td><strong class="line-total">$8,500</strong></td>
+                  <td><button class="row-menu" aria-label="Opciones del artículo">•••</button></td>
+                </tr>
+                <tr class="item-row">
+                  <td>
+                    <button class="photo-thumb spatula" aria-label="Cambiar imagen de las espátulas"><span>⌁</span><small>Cambiar</small></button>
+                  </td>
+                  <td class="item-copy">
+                    <input aria-label="Artículo" value="Espátulas de silicón reforzadas">
+                    <textarea aria-label="Motivo">Reposición para las estaciones de batido y relleno.</textarea>
+                    <span class="category">Herramientas</span>
+                  </td>
+                  <td><div class="qty"><input class="quantity" type="number" value="12" min="1"><select aria-label="Unidad"><option>piezas</option></select></div></td>
+                  <td><input type="date" value="2026-09-05" aria-label="Fecha requerida"></td>
+                  <td><select aria-label="Prioridad"><option>Alta</option><option>Normal</option><option>Urgente</option></select></td>
+                  <td><div class="money-input"><span>$</span><input class="unit-cost" type="number" value="180" min="0" aria-label="Costo unitario estimado"></div><small class="optional">Estimado</small></td>
+                  <td><strong class="line-total">$2,160</strong></td>
+                  <td><button class="row-menu" aria-label="Opciones del artículo">•••</button></td>
+                </tr>
+                <tr class="item-row">
+                  <td>
+                    <button class="photo-thumb upload" aria-label="Agregar imagen del refrigerador"><span>＋</span><small>Agregar foto</small></button>
+                  </td>
+                  <td class="item-copy">
+                    <input aria-label="Artículo" value="Refrigerador vertical de dos puertas">
+                    <textarea aria-label="Motivo">Capacidad adicional para resguardar rellenos durante temporada alta.</textarea>
+                    <span class="category">Equipo mayor</span>
+                  </td>
+                  <td><div class="qty"><input class="quantity" type="number" value="1" min="1"><select aria-label="Unidad"><option>equipo</option></select></div></td>
+                  <td><input type="date" value="2026-09-20" aria-label="Fecha requerida"></td>
+                  <td><select aria-label="Prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></td>
+                  <td><div class="money-input"><span>$</span><input class="unit-cost" type="number" placeholder="Opcional" min="0" aria-label="Costo unitario estimado"></div><small class="optional">Sin estimar</small></td>
+                  <td><strong class="line-total muted">Por cotizar</strong></td>
+                  <td><button class="row-menu" aria-label="Opciones del artículo">•••</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="request-footer">
+            <label class="general-note">Nota general para Compras
+              <textarea placeholder="Incluye medidas, marcas sugeridas o cualquier detalle que ayude a cotizar…">Favor de priorizar las espátulas. Para el rack, validar medidas antes de ordenar.</textarea>
+            </label>
+            <aside class="estimate-summary">
+              <div><span>3 artículos</span><span>14 unidades</span></div>
+              <p>Total estimado</p>
+              <strong id="grand-total">$10,660</strong>
+              <small>El refrigerador aún está por cotizar.</small>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-buyer" aria-labelledby="buyer-title">
+        <div class="page-heading">
+          <div>
+            <p class="context-label">Bandeja compartida</p>
+            <h1 id="buyer-title">Compras pendientes</h1>
+            <p>Cada artículo conserva responsable, fecha compromiso y siguiente acción.</p>
+          </div>
+          <button class="btn primary">＋ Registrar compra extraordinaria</button>
+        </div>
+
+        <div class="metrics-strip" aria-label="Resumen de pendientes">
+          <button class="metric active"><span>Nuevas</span><strong>12</strong><small>4 sin asignar</small></button>
+          <button class="metric"><span>Cotizando</span><strong>18</strong><small>6 vencen esta semana</small></button>
+          <button class="metric warning"><span>Autorización DG</span><strong>3</strong><small>$48,700 en revisión</small></button>
+          <button class="metric danger"><span>Entregas vencidas</span><strong>5</strong><small>La más antigua: 9 días</small></button>
+          <button class="metric"><span>Por confirmar</span><strong>7</strong><small>Con responsables de área</small></button>
+        </div>
+
+        <div class="filterbar">
+          <label class="search-field"><span>⌕</span><input placeholder="Buscar artículo, folio o área"></label>
+          <select aria-label="Filtrar por área"><option>Todas las áreas</option><option>Producción</option><option>Capital Humano</option><option>Administración</option><option>Ventas</option></select>
+          <select aria-label="Filtrar por comprador"><option>Todos los compradores</option><option>Jorge Pérez</option><option>Sin asignar</option></select>
+          <select aria-label="Filtrar por estado"><option>Estados activos</option><option>Por cotizar</option><option>Ordenado</option><option>Recibido parcialmente</option></select>
+          <button class="btn secondary compact">Más filtros</button>
+        </div>
+
+        <div class="purchase-list">
+          <div class="purchase-head"><span>Artículo</span><span>Área / folio</span><span>Estado</span><span>Siguiente acción</span><span>Compromiso</span><span>Costo</span><span></span></div>
+          <article class="purchase-row">
+            <div class="purchase-item"><span class="mini-photo rack">▥</span><div><strong>Rack de acero inoxidable</strong><small>1 pieza · Prioridad normal</small></div></div>
+            <div><strong>Producción</strong><small>SD-2608-014 · Carolina</small></div>
+            <span class="status-badge info">Por cotizar</span>
+            <div><strong>Asignar comprador</strong><small>Compras</small></div>
+            <div><strong>Hoy</strong><small class="overdue">Sin asignar hace 6 h</small></div>
+            <strong>$8,500 est.</strong>
+            <button class="btn secondary compact">Atender</button>
+          </article>
+          <article class="purchase-row">
+            <div class="purchase-item"><span class="mini-photo fridge">▥</span><div><strong>Refrigerador vertical</strong><small>1 equipo · Equipo mayor</small></div></div>
+            <div><strong>Producción</strong><small>SD-2608-014 · Carolina</small></div>
+            <span class="status-badge warning">Autorización DG</span>
+            <div><strong>Dirección General</strong><small>Cotización seleccionada</small></div>
+            <div><strong>5 ago</strong><small>Faltan 2 días</small></div>
+            <strong>$36,900</strong>
+            <button class="btn secondary compact">Ver detalle</button>
+          </article>
+          <article class="purchase-row">
+            <div class="purchase-item"><span class="mini-photo uniform">♙</span><div><strong>Uniformes administrativos</strong><small>18 juegos · Tallas adjuntas</small></div></div>
+            <div><strong>Administración</strong><small>SD-2607-081 · Yesenia</small></div>
+            <span class="status-badge purple">Recibido parcial</span>
+            <div><strong>Confirmar 6 faltantes</strong><small>Compras · Jorge</small></div>
+            <div><strong>1 ago</strong><small class="overdue">2 días de atraso</small></div>
+            <strong>$12,420</strong>
+            <button class="btn secondary compact">Registrar</button>
+          </article>
+          <article class="purchase-row">
+            <div class="purchase-item"><span class="mini-photo plaque">★</span><div><strong>Placa de reconocimiento</strong><small>1 pieza · Grabado personalizado</small></div></div>
+            <div><strong>Capital Humano</strong><small>SE-2608-022 · Paula</small></div>
+            <span class="status-badge success">Comprado</span>
+            <div><strong>Confirmar recepción</strong><small>Paula Lugo</small></div>
+            <div><strong>4 ago</strong><small>Entrega mañana</small></div>
+            <strong>$1,280</strong>
+            <button class="btn secondary compact">Seguimiento</button>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-director" aria-labelledby="director-title">
+        <div class="page-heading">
+          <div>
+            <p class="context-label">Decisión de Dirección General</p>
+            <h1 id="director-title">Compra fuera de presupuesto</h1>
+            <p>Solicitud SD-2608-014 · Producción · Refrigerador vertical</p>
+          </div>
+          <span class="status-badge warning large">Requiere decisión</span>
+        </div>
+
+        <div class="decision-layout">
+          <section class="purchase-context">
+            <div class="product-hero">
+              <div class="product-photo"><span>▥</span><small>Imagen de referencia</small></div>
+              <div>
+                <span class="category">Equipo mayor</span>
+                <h2>Refrigerador vertical de dos puertas</h2>
+                <p>Capacidad adicional para resguardar rellenos durante temporada alta. Se necesita antes del 20 de septiembre.</p>
+                <dl><div><dt>Cantidad</dt><dd>1 equipo</dd></div><div><dt>Solicita</dt><dd>Carolina · Producción</dd></div><div><dt>Consecuencia de posponer</dt><dd>Limita producción de temporada alta</dd></div></dl>
+              </div>
+            </div>
+
+            <div class="quote-section">
+              <div class="section-heading"><div><h2>Cotizaciones comparadas</h2><p>La recomendación considera precio, entrega, instalación y garantía.</p></div><span class="recommendation">Recomendada: Frío Comercial</span></div>
+              <div class="quotes">
+                <article class="quote selected">
+                  <div><strong>Frío Comercial del Pacífico</strong><span class="status-badge success">Recomendada</span></div>
+                  <dl><div><dt>Precio unitario</dt><dd>$31,810</dd></div><div><dt>IVA</dt><dd>$5,090</dd></div><div><dt>Envío e instalación</dt><dd>Incluidos</dd></div><div><dt>Entrega</dt><dd>12 días</dd></div></dl>
+                  <footer><span>Total</span><strong>$36,900</strong></footer>
+                </article>
+                <article class="quote">
+                  <div><strong>Equipos Gastronómicos MX</strong></div>
+                  <dl><div><dt>Precio unitario</dt><dd>$30,500</dd></div><div><dt>IVA</dt><dd>$4,880</dd></div><div><dt>Envío e instalación</dt><dd>$2,700</dd></div><div><dt>Entrega</dt><dd>25 días</dd></div></dl>
+                  <footer><span>Total</span><strong>$38,080</strong></footer>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <aside class="budget-panel">
+            <div class="budget-title"><span>Impacto presupuestal</span><strong>Septiembre 2026</strong></div>
+            <dl class="budget-lines">
+              <div><dt>Presupuesto del área</dt><dd>$50,000</dd></div>
+              <div><dt>Gastado</dt><dd>− $24,000</dd></div>
+              <div><dt>Compromisos vigentes</dt><dd>− $10,000</dd></div>
+              <div class="available"><dt>Disponible actual</dt><dd>$16,000</dd></div>
+              <div><dt>Esta compra</dt><dd>− $36,900</dd></div>
+              <div class="deficit"><dt>Exceso proyectado</dt><dd>− $20,900</dd></div>
+            </dl>
+            <div class="budget-note"><strong>El precio está 7% debajo del histórico</strong><p>La última compra comparable fue de $39,700 en noviembre de 2025.</p></div>
+            <label>Comentario de la decisión
+              <textarea id="decision-comment" placeholder="Explica condiciones, motivo de aplazamiento o alternativa de financiamiento…"></textarea>
+            </label>
+            <div class="decision-actions">
+              <button class="btn primary" data-decision="Compra autorizada">Autorizar compra</button>
+              <button class="btn finance" data-decision="En evaluación de financiamiento">Evaluar financiamiento</button>
+              <div><button class="btn secondary" data-decision="Compra pospuesta">Posponer</button><button class="btn danger-text" data-decision="Compra rechazada">Rechazar</button></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-tracking" aria-labelledby="tracking-title">
+        <div class="page-heading">
+          <div><p class="context-label">Solicitud SD-2608-014</p><h1 id="tracking-title">Seguimiento de compra</h1><p>Producción · Septiembre 2026 · 2 de 3 artículos atendidos</p></div>
+          <span class="status-badge purple large">Parcialmente atendida</span>
+        </div>
+        <div class="tracking-grid">
+          <section class="tracking-items">
+            <article class="tracking-item complete"><span class="tracking-marker">✓</span><span class="mini-photo spatula">⌁</span><div><strong>Espátulas de silicón</strong><p>12 piezas recibidas conforme por Carolina.</p></div><strong>$2,230</strong></article>
+            <article class="tracking-item active"><span class="tracking-marker">2</span><span class="mini-photo rack">▥</span><div><strong>Rack de acero inoxidable</strong><p>Ordenado · Entrega estimada: 10 de septiembre.</p><span class="status-badge info">Proveedor confirmó</span></div><strong>$8,350</strong></article>
+            <article class="tracking-item"><span class="tracking-marker">3</span><span class="mini-photo fridge">▥</span><div><strong>Refrigerador vertical</strong><p>Esperando decisión de Dirección General.</p><span class="status-badge warning">Excede presupuesto</span></div><strong>$36,900</strong></article>
+          </section>
+          <aside class="timeline">
+            <h2>Historial</h2>
+            <ol>
+              <li class="current"><strong>Cotización enviada a Dirección</strong><span>Hoy · 10:42 · Jorge Pérez</span></li>
+              <li><strong>Frío Comercial seleccionado</strong><span>Hoy · 10:35 · Jorge Pérez</span></li>
+              <li><strong>Rack ordenado</strong><span>1 ago · OC-260801-031</span></li>
+              <li><strong>Solicitud enviada a Compras</strong><span>25 jul · Carolina Cayetano</span></li>
+            </ol>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><span>✓</span><div><strong>Solicitud enviada</strong><p>Compras ya puede asignarla y comenzar a cotizar.</p></div></div>
+  <input type="file" id="photo-input" accept="image/*" hidden>
+  <script src="mockup.js"></script>
+</body>
+</html>
