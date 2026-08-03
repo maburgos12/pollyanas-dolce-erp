@@ -115,6 +115,17 @@ class SatDescargaServiceTests(TestCase):
         self.assertEqual(parsed.tipo_comprobante, "I")
         self.assertEqual(parsed.uso_cfdi, "G03")
 
+    def test_parse_cfdi_xml_ignores_xml_comments_between_cfdi_nodes(self):
+        xml_with_comment = CFDI_XML.replace(
+            b"  <cfdi:Emisor",
+            b"  <!-- comentario valido incluido por el proveedor -->\n  <cfdi:Emisor",
+        )
+
+        parsed = parse_cfdi_xml(xml_with_comment)
+
+        self.assertEqual(parsed.uuid, "550E8400-E29B-41D4-A716-446655440000")
+        self.assertEqual(parsed.total, Decimal("95.00"))
+
     def test_parse_cfdi_xml_extracts_payment_complement_details(self):
         parsed = parse_cfdi_xml(CFDI_PAGO_XML)
 
