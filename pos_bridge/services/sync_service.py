@@ -6,6 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from core.cache_versions import bump_cache_scopes
@@ -562,11 +563,30 @@ class PointSyncService:
             return self.mark_failure(sync_job, wrapped)
 
     def retry_failed_jobs(self, *, limit: int = 5, max_attempts: int | None = None, triggered_by=None) -> list[PointSyncJob]:
-        max_attempts = max_attempts or self.settings.retry_attempts
-        failed_jobs = list(
-            PointSyncJob.objects.filter(status=PointSyncJob.STATUS_FAILED, attempt_count__lt=max_attempts)
-            .order_by("started_at")[:limit]
-        )
+        max_attempts = self.settings.retry_attempts if max_attempts is None else max_attempts
+        with transaction.atomic():
+            failed_jobs = list(
+                PointSyncJob.objects.select_for_update(skip_locked=True)
+                .filter(
+                    Q(parameters__retry_scheduled=False) | Q(parameters__retry_scheduled__isnull=True),
+                    job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+                    status=PointSyncJob.STATUS_FAILED,
+                    attempt_count__lt=max_attempts,
+                )
+                .order_by("started_at")[:limit]
+            )
+            claimed_at = timezone.now().isoformat()
+            for failed_job in failed_jobs:
+                parameters = dict(failed_job.parameters or {})
+                parameters.update(
+                    {
+                        "retry_scheduled": True,
+                        "retry_scheduled_at": claimed_at,
+                    }
+                )
+                failed_job.parameters = parameters
+                failed_job.save(update_fields=["parameters", "updated_at"])
+
         retried_jobs: list[PointSyncJob] = []
         for failed_job in failed_jobs:
             parameters = failed_job.parameters or {}

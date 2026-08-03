@@ -26,6 +26,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
+        def preserve_enabled(name: str, *, default: bool = True) -> bool:
+            current = PeriodicTask.objects.filter(name=name).values_list("enabled", flat=True).first()
+            return default if current is None else current
+
         timezone_name = getattr(settings, "TIME_ZONE", "America/Mazatlan")
 
         sales_cron, _ = CrontabSchedule.objects.get_or_create(
@@ -464,7 +468,7 @@ class Command(BaseCommand):
                 "interval": realtime_interval,
                 "crontab": None,
                 "kwargs": json.dumps({}),
-                "enabled": True,
+                "enabled": preserve_enabled("pos_bridge: inventario realtime"),
             },
         )
 
@@ -513,7 +517,7 @@ class Command(BaseCommand):
                 "interval": retry_interval,
                 "crontab": None,
                 "kwargs": json.dumps({"limit": 3}),
-                "enabled": True,
+                "enabled": preserve_enabled("pos_bridge: retry jobs fallidos"),
             },
         )
 

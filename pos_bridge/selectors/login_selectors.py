@@ -34,3 +34,18 @@ ERROR_BANNERS = [
     ".error",
     "[role='alert']",
 ]
+
+BLOCKING_MODAL_CONTAINERS = [
+    "#satModalContainer",
+]
+
+BLOCKING_MODAL_DISMISS_BUTTONS = [
+    "#satModalContainer .modal-sat-close",
+    "#satModalContainer button:has-text('Omitir')",
+    "#satModalContainer button:has-text('Cerrar')",
+    "#satModalContainer [data-dismiss='modal']",
+    "#satModalContainer [data-bs-dismiss='modal']",
+    "#satModalContainer button.close",
+    "#satModalContainer button[aria-label='Close']",
+    "#satModalContainer .modal-header button",
+]
