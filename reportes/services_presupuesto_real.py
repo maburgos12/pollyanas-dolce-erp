@@ -260,6 +260,10 @@ class PresupuestoRealConsolidacionService:
             if "nomina" not in indices:
                 indices["nomina"] = self._build_nomina_index(periodo)
             return self._monto_nomina(regla, indices["nomina"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO:
+            if "nomina_concepto" not in indices:
+                indices["nomina_concepto"] = self._build_nomina_concepto_index(periodo)
+            return self._monto_nomina_concepto(regla, indices["nomina_concepto"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS:
             if "ventas" not in indices:
                 indices["ventas"] = self._build_ventas_index(periodo)
@@ -402,6 +406,57 @@ class PresupuestoRealConsolidacionService:
             total += fila[campo] or Decimal("0")
             hubo_datos = True
         return (total, hubo_datos)
+
+    @staticmethod
+    def _build_nomina_concepto_index(periodo: date) -> list[dict]:
+        """Conceptos de nómina pagada/cerrada, sin reinterpretar importes."""
+        from rrhh.models import NominaConceptoLinea, NominaPeriodo
+
+        return list(
+            NominaConceptoLinea.objects.filter(
+                linea__periodo__fecha_fin__year=periodo.year,
+                linea__periodo__fecha_fin__month=periodo.month,
+                linea__periodo__estatus__in=[
+                    NominaPeriodo.ESTATUS_CERRADA,
+                    NominaPeriodo.ESTATUS_PAGADA,
+                ],
+            )
+            .values(
+                "tipo",
+                "codigo_concepto",
+                "linea__empleado__departamento",
+                "linea__empleado__sucursal_ref_id",
+            )
+            .annotate(importe=Sum("importe"))
+        )
+
+    def _monto_nomina_concepto(
+        self, regla: ReglaFuenteRubro, concepto_index: list[dict]
+    ) -> tuple[Decimal, bool]:
+        filtros = regla.filtros or {}
+        tipo = str(filtros.get("tipo_concepto") or "").strip().upper()
+        codigos = {str(codigo).strip() for codigo in filtros.get("codigos_concepto", [])}
+        departamentos = {
+            str(departamento).strip().upper()
+            for departamento in filtros.get("departamentos", [])
+        }
+        sucursal = regla.sucursal_efectiva()
+        sucursal_id = sucursal.id if sucursal is not None else None
+
+        total = Decimal("0")
+        hubo_datos = False
+        for fila in concepto_index:
+            if tipo and fila["tipo"] != tipo:
+                continue
+            if codigos and fila["codigo_concepto"] not in codigos:
+                continue
+            if departamentos and fila["linea__empleado__departamento"] not in departamentos:
+                continue
+            if sucursal_id is not None and fila["linea__empleado__sucursal_ref_id"] != sucursal_id:
+                continue
+            total += fila["importe"] or Decimal("0")
+            hubo_datos = True
+        return total, hubo_datos
 
     @staticmethod
     def _build_ventas_index(periodo: date) -> dict:

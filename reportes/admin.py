@@ -323,10 +323,14 @@ class AreaPresupuestoResponsableAdmin(admin.ModelAdmin):
 
 @admin.register(ReglaFuenteRubro)
 class ReglaFuenteRubroAdmin(admin.ModelAdmin):
-    list_display = ("rubro", "tipo_fuente", "categoria_gasto", "centro_costo", "sucursal", "signo", "activa", "origen")
-    list_filter = ("tipo_fuente", "activa", "origen", "rubro__area")
-    search_fields = ("rubro__concepto", "notas", "categoria_gasto__codigo")
+    list_display = (
+        "rubro", "tipo_fuente", "modo_asignacion", "categoria_gasto",
+        "centro_costo", "sucursal", "signo", "activa", "origen",
+    )
+    list_filter = ("tipo_fuente", "modo_asignacion", "activa", "origen", "rubro__area")
+    search_fields = ("rubro__concepto", "notas", "categoria_gasto__codigo", "clave_fuente")
     autocomplete_fields = ("rubro", "categoria_gasto", "centro_costo", "sucursal")
+    readonly_fields = ("clave_fuente",)
 
 
 @admin.register(ProductionExecutionLog)

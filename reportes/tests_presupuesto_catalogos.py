@@ -765,6 +765,12 @@ class PresupuestoCatalogosServiceTests(TestCase):
             capa_objetivo=CategoriaGasto.CAPA_EMPRESA,
             bucket=CategoriaGasto.BUCKET_CORPORATIVO,
         )
+        categoria_sin_datos = CategoriaGasto.objects.create(
+            codigo="SERVICIOS_SIN_DATOS",
+            nombre="Servicios sin datos",
+            capa_objetivo=CategoriaGasto.CAPA_EMPRESA,
+            bucket=CategoriaGasto.BUCKET_CORPORATIVO,
+        )
 
         def rubro(nombre):
             return RubroPresupuesto.objects.create(
@@ -777,11 +783,14 @@ class PresupuestoCatalogosServiceTests(TestCase):
         sin_datos = rubro("Agua potable")
         manual = rubro("Renta")
         sin_configurar = rubro("Papelería")
-        for item in (con_datos, sin_datos):
+        for item, categoria_item in (
+            (con_datos, categoria),
+            (sin_datos, categoria_sin_datos),
+        ):
             ReglaFuenteRubro.objects.create(
                 rubro=item,
                 tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
-                categoria_gasto=categoria,
+                categoria_gasto=categoria_item,
             )
         ReglaFuenteRubro.objects.create(
             rubro=manual, tipo_fuente=ReglaFuenteRubro.FUENTE_MANUAL

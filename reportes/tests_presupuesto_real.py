@@ -4,7 +4,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -26,7 +28,7 @@ from reportes.services_presupuesto_real import (
     PresupuestoRealConsolidacionService,
     migrar_fuentes_legadas,
 )
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
 
 
 class PresupuestoRealConsolidacionTests(TestCase):
@@ -333,7 +335,10 @@ class PresupuestoRealConsolidacionTests(TestCase):
 
         for i in range(12):
             rubro, _ = self.crear_linea(concepto=f"Rubro escala {i}", sucursal=self.sucursal)
-            self.crear_regla_gasto(rubro)
+            self.crear_regla_gasto(
+                rubro,
+                modo_asignacion=ReglaFuenteRubro.MODO_CONTROL,
+            )
         self.crear_gasto("100")
 
         with CaptureQueriesContext(connection) as ctx:
@@ -364,7 +369,10 @@ class PresupuestoRealConsolidacionTests(TestCase):
             concepto="Capex legado", monto_real=Decimal("20"), fuente_real="CAPEX_GUAMUCHIL_CONFIRMADO"
         )
         self.crear_regla_gasto(rubro_auto)
-        self.crear_regla_gasto(rubro_manual)
+        self.crear_regla_gasto(
+            rubro_manual,
+            modo_asignacion=ReglaFuenteRubro.MODO_CONTROL,
+        )
 
         resultado = migrar_fuentes_legadas()
 
@@ -3481,3 +3489,239 @@ class ConciliacionCombustibleTests(TestCase):
         self.assertTrue(_es_monto_redondo(D("17600.00")))
         self.assertFalse(_es_monto_redondo(D("1691.02")))
         self.assertFalse(_es_monto_redondo(D("1250")))  # no múltiplo de 100
+
+
+class FuenteUnicaPresupuestoTests(TestCase):
+    """Una fuente económica no puede alimentar dos rubros sumables."""
+
+    def setUp(self):
+        self.area = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        self.control = AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        self.categoria = CategoriaGasto.objects.create(
+            codigo="COMPARTIDO_TEST",
+            nombre="Compartido",
+            capa_objetivo=CategoriaGasto.CAPA_EMPRESA,
+        )
+        self.rubro_a = RubroPresupuesto.objects.create(
+            area=self.area, concepto="Agua purificada", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        self.rubro_b = RubroPresupuesto.objects.create(
+            area=self.area, concepto="Agua Purificada", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+    def _regla_consumo(self, rubro, **kwargs):
+        return ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"insumo_id": 51, "desde": "2026-06"},
+            **kwargs,
+        )
+
+    def test_rechaza_misma_fuente_canonica_en_dos_rubros(self):
+        primera = self._regla_consumo(self.rubro_a)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._regla_consumo(self.rubro_b)
+
+        self.assertTrue(primera.clave_fuente)
+
+    def test_espejo_control_puede_reutilizar_fuente_sin_sumarse(self):
+        primera = self._regla_consumo(self.rubro_a)
+        rubro_control = RubroPresupuesto.objects.create(
+            area=self.control, concepto="Agua control", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+
+        espejo = self._regla_consumo(
+            rubro_control,
+            modo_asignacion=ReglaFuenteRubro.MODO_CONTROL,
+        )
+
+        self.assertEqual(espejo.clave_fuente, primera.clave_fuente)
+
+    def test_orden_de_listas_no_disfraza_una_fuente_duplicada(self):
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO,
+            filtros={"codigos_concepto": ["19", "20"], "departamentos": ["VENTAS", "RRHH"]},
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=self.rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO,
+                filtros={"departamentos": ["RRHH", "VENTAS"], "codigos_concepto": ["20", "19"]},
+            )
+
+    def test_centro_tipo_compartido_ignora_sucursal_del_rubro(self):
+        sucursal_a = Sucursal.objects.create(codigo="FUA", nombre="Fuente A")
+        sucursal_b = Sucursal.objects.create(codigo="FUB", nombre="Fuente B")
+        self.rubro_a.sucursal = sucursal_a
+        self.rubro_a.save(update_fields=["sucursal"])
+        self.rubro_b.sucursal = sucursal_b
+        self.rubro_b.save(update_fields=["sucursal"])
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=self.categoria,
+            filtros={"centro_tipo": "COMPARTIDO"},
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=self.rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+                categoria_gasto=self.categoria,
+                filtros={"centro_tipo": "COMPARTIDO"},
+            )
+
+    def test_filtros_sin_efecto_y_vigencia_no_disfrazan_duplicado(self):
+        ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+            filtros={"insumo_id": 88, "desde": "2026-01", "comentario": "primera"},
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=self.rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+                filtros={"insumo_id": 88, "desde": "2027-01", "comentario": "otra"},
+            )
+
+    def test_distribucion_comparte_clave_y_no_admite_mas_de_cien_por_ciento(self):
+        primera = ReglaFuenteRubro.objects.create(
+            rubro=self.rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=self.categoria,
+            filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 65},
+            modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+        )
+        segunda = ReglaFuenteRubro(
+            rubro=self.rubro_b,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            categoria_gasto=self.categoria,
+            filtros={"centro_tipo": "COMPARTIDO", "porcentaje": 40},
+            modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "supera 100%"):
+            segunda.full_clean()
+        segunda.filtros["porcentaje"] = 35
+        segunda.full_clean()
+        self.assertEqual(segunda.clave_fuente, primera.clave_fuente)
+
+
+class NominaConceptoPresupuestoTests(TestCase):
+    """Vacaciones y prima se leen del concepto canónico de nómina."""
+
+    def test_consolida_vacaciones_por_codigo_departamento_y_sucursal(self):
+        periodo = date(2026, 7, 1)
+        sucursal = Sucursal.objects.create(codigo="VAC01", nombre="Vacaciones")
+        otra = Sucursal.objects.create(codigo="VAC02", nombre="Otra")
+        area = AreaPresupuesto.objects.create(nombre="Gastos de Venta", codigo="gastos-venta")
+        rubro = RubroPresupuesto.objects.create(
+            area=area,
+            concepto="Vacaciones",
+            tipo=RubroPresupuesto.TIPO_EGRESO,
+            sucursal=sucursal,
+        )
+        linea = LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=periodo)
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO,
+            filtros={
+                "tipo_concepto": "PERCEPCION",
+                "codigos_concepto": ["19"],
+                "departamentos": ["VENTAS"],
+            },
+        )
+        empleado = Empleado.objects.create(
+            codigo="VAC-1", nombre="Venta", departamento=Empleado.DEP_VENTAS, sucursal_ref=sucursal
+        )
+        otro_empleado = Empleado.objects.create(
+            codigo="VAC-2", nombre="Otra venta", departamento=Empleado.DEP_VENTAS, sucursal_ref=otra
+        )
+        nomina = NominaPeriodo.objects.create(
+            folio="VAC-JUL", fecha_inicio=date(2026, 7, 1), fecha_fin=date(2026, 7, 31),
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+        )
+        linea_nomina = NominaLinea.objects.create(periodo=nomina, empleado=empleado)
+        linea_otra = NominaLinea.objects.create(periodo=nomina, empleado=otro_empleado)
+        NominaConceptoLinea.objects.create(
+            linea=linea_nomina, tipo="PERCEPCION", codigo_concepto="19",
+            nombre="Vacaciones a tiempo", importe=Decimal("1250.50"),
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea_nomina, tipo="PERCEPCION", codigo_concepto="20",
+            nombre="Prima de vacaciones", importe=Decimal("999"),
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea_otra, tipo="PERCEPCION", codigo_concepto="19",
+            nombre="Vacaciones a tiempo", importe=Decimal("700"),
+        )
+
+        PresupuestoRealConsolidacionService().consolidar(periodo=periodo)
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("1250.50"))
+        self.assertEqual(linea.fuente_real, "AUTO:NOMINA_CONCEPTO")
+        from reportes.views_presupuesto_real import _fuente_display
+
+        self.assertEqual(
+            _fuente_display(linea.fuente_real)["label"],
+            "Automático · Concepto de nómina",
+        )
+
+
+class CorreccionAguaPurificadaTests(TestCase):
+    """El agua de personal y el ingrediente conservan fuentes distintas."""
+
+    def test_corrige_duplicado_y_preserva_auditoria(self):
+        from reportes.services_presupuesto_fuentes import corregir_agua_purificada
+
+        area = AreaPresupuesto.objects.create(nombre="Producción", codigo="produccion")
+        personal = RubroPresupuesto.objects.create(
+            area=area, concepto="Agua purificada", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        ingrediente = RubroPresupuesto.objects.create(
+            area=area, concepto="Agua Purificada", tipo=RubroPresupuesto.TIPO_EGRESO
+        )
+        ReglaFuenteRubro.objects.bulk_create(
+            [
+                ReglaFuenteRubro(
+                    rubro=rubro,
+                    tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP,
+                    filtros={"insumo_id": 51, "desde": "2026-06"},
+                )
+                for rubro in (personal, ingrediente)
+            ]
+        )
+        for rubro in (personal, ingrediente):
+            LineaPresupuestoMensual.objects.create(
+                rubro=rubro,
+                periodo=date(2026, 7, 1),
+                monto_real=Decimal("1633.67"),
+                fuente_real="AUTO:CONSUMO_MP",
+            )
+
+        resultado = corregir_agua_purificada()
+
+        personal.refresh_from_db()
+        ingrediente.refresh_from_db()
+        linea_personal = personal.lineas_mensuales.get(periodo=date(2026, 7, 1))
+        self.assertEqual(resultado.lineas_corregidas, 1)
+        self.assertEqual(personal.concepto, "Agua purificada para personal")
+        self.assertIsNone(linea_personal.monto_real)
+        self.assertEqual(
+            linea_personal.metadata["correccion_fuente_unica"]["monto_anterior"],
+            "1633.67",
+        )
+        self.assertFalse(
+            personal.reglas_fuente.filter(tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP, activa=True).exists()
+        )
+        self.assertTrue(
+            personal.reglas_fuente.filter(tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO, activa=True).exists()
+        )
+        self.assertTrue(
+            ingrediente.reglas_fuente.filter(tipo_fuente=ReglaFuenteRubro.FUENTE_CONSUMO_MP, activa=True).exists()
+        )
+
+        segunda = corregir_agua_purificada()
+        self.assertEqual(segunda.lineas_corregidas, 0)
