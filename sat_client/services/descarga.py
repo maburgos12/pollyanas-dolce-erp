@@ -81,13 +81,19 @@ def _datetime(value: str | None):
 
 def _child_by_local_name(root: etree._Element, name: str) -> etree._Element | None:
     for child in root.iter():
+        if not isinstance(child.tag, str):
+            continue
         if etree.QName(child).localname == name:
             return child
     return None
 
 
 def _children_by_local_name(root: etree._Element, name: str) -> list[etree._Element]:
-    return [child for child in root.iter() if etree.QName(child).localname == name]
+    return [
+        child
+        for child in root.iter()
+        if isinstance(child.tag, str) and etree.QName(child).localname == name
+    ]
 
 
 def _optional_decimal(value: str | None) -> Decimal | None:

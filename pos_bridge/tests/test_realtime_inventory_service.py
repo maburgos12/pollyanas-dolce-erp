@@ -55,14 +55,14 @@ class RealtimeInventoryServiceTests(SimpleTestCase):
         self.assertEqual(fake_sync.calls[1]["branch_filter"], "COLOSIO")
         self.assertFalse(fake_sync.calls[0]["capture_costs"])
 
-    def test_run_sync_uses_all_branches_when_env_is_empty(self):
+    def test_run_sync_skips_when_realtime_branches_are_not_configured(self):
         fake_sync = FakeSyncService()
         with patch.dict(os.environ, {"POS_BRIDGE_REALTIME_BRANCHES": ""}, clear=False):
             service = RealtimeInventoryService(sync_service=fake_sync)
         with patch.object(service, "has_running_inventory_job", return_value=False):
             jobs = service.run_sync(force=True)
-        self.assertEqual(len(jobs), 1)
-        self.assertIsNone(fake_sync.calls[0]["branch_filter"])
+        self.assertEqual(jobs, [])
+        self.assertEqual(fake_sync.calls, [])
 
     def test_run_sync_skips_if_inventory_job_is_already_running(self):
         fake_sync = FakeSyncService()
@@ -74,7 +74,14 @@ class RealtimeInventoryServiceTests(SimpleTestCase):
 
     def test_run_sync_enqueues_webhook_delivery_when_configured(self):
         fake_sync = FakeSyncService()
-        with patch.dict(os.environ, {"POS_BRIDGE_ECOMMERCE_WEBHOOK_URL": "https://example.com/hook"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "POS_BRIDGE_ECOMMERCE_WEBHOOK_URL": "https://example.com/hook",
+                "POS_BRIDGE_REALTIME_BRANCHES": "MATRIZ",
+            },
+            clear=False,
+        ):
             service = RealtimeInventoryService(sync_service=fake_sync)
         with patch.object(service, "has_running_inventory_job", return_value=False), patch(
             "pos_bridge.tasks.celery_tasks.task_ecommerce_webhook_delivery.delay"

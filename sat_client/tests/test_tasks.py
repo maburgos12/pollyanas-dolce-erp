@@ -37,7 +37,7 @@ class SatTaskPeriodTests(SimpleTestCase):
 class SatTaskRegisteredPeriodTests(TestCase):
     @override_settings(SAT_RFC="AAA010101AAA")
     def test_solicitud_periodo_registrada_detects_existing_request(self):
-        SolicitudDescarga.objects.create(
+        solicitud = SolicitudDescarga.objects.create(
             id_solicitud="abc",
             fecha_inicial=date(2026, 6, 7),
             fecha_final=date(2026, 6, 7),
@@ -45,12 +45,42 @@ class SatTaskRegisteredPeriodTests(TestCase):
             tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
             direccion=SolicitudDescarga.DIRECCION_RECIBIDOS,
             estado=SolicitudDescarga.ESTADO_TERMINADA,
+            numero_cfdis=11,
+        )
+        LogDescargaSat.objects.create(
+            solicitud=solicitud,
+            nivel=LogDescargaSat.NIVEL_INFO,
+            mensaje="Descarga SAT completada para recibidos 2026-06",
+            cfdis_descargados=11,
+            cfdis_nuevos=9,
         )
 
         self.assertTrue(
             _solicitud_periodo_registrada(
                 date(2026, 6, 7),
                 date(2026, 6, 7),
+                SolicitudDescarga.DIRECCION_RECIBIDOS,
+            )
+        )
+
+    @override_settings(SAT_RFC="AAA010101AAA")
+    def test_solicitud_terminada_sin_paquete_importado_no_cuenta_como_registrada(self):
+        SolicitudDescarga.objects.create(
+            id_solicitud="paquete-no-importado",
+            fecha_inicial=date(2026, 6, 8),
+            fecha_final=date(2026, 6, 8),
+            rfc_solicitante="AAA010101AAA",
+            tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
+            direccion=SolicitudDescarga.DIRECCION_RECIBIDOS,
+            estado=SolicitudDescarga.ESTADO_TERMINADA,
+            numero_cfdis=11,
+            ids_paquetes=["paquete-01"],
+        )
+
+        self.assertFalse(
+            _solicitud_periodo_registrada(
+                date(2026, 6, 8),
+                date(2026, 6, 8),
                 SolicitudDescarga.DIRECCION_RECIBIDOS,
             )
         )
@@ -95,7 +125,7 @@ class SatTaskRechazoDefinitivoTests(TestCase):
 
     @override_settings(SAT_RFC="AAA010101AAA")
     def test_solicitud_mensual_cubre_dias_interiores(self):
-        SolicitudDescarga.objects.create(
+        solicitud = SolicitudDescarga.objects.create(
             id_solicitud="backfill-enero",
             fecha_inicial=date(2026, 1, 1),
             fecha_final=date(2026, 1, 31),
@@ -103,6 +133,14 @@ class SatTaskRechazoDefinitivoTests(TestCase):
             tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
             direccion=SolicitudDescarga.DIRECCION_RECIBIDOS,
             estado=SolicitudDescarga.ESTADO_TERMINADA,
+            numero_cfdis=24,
+        )
+        LogDescargaSat.objects.create(
+            solicitud=solicitud,
+            nivel=LogDescargaSat.NIVEL_INFO,
+            mensaje="Descarga SAT completada para recibidos 2026-01",
+            cfdis_descargados=24,
+            cfdis_nuevos=24,
         )
 
         self.assertTrue(
@@ -124,7 +162,7 @@ class SatTaskEnabledFlagTests(TestCase):
     @patch("sat_client.tasks.periodos_diarios_a_descargar", return_value=[(date(2026, 6, 7), date(2026, 6, 7))])
     @patch("sat_client.tasks._procesar_con_split", return_value=[{"solicitud_id": "new", "descargados": 0, "nuevos": 0}])
     def test_task_skips_registered_daily_request(self, procesar, _periodos):
-        SolicitudDescarga.objects.create(
+        solicitud = SolicitudDescarga.objects.create(
             id_solicitud="emitidos-ya",
             fecha_inicial=date(2026, 6, 7),
             fecha_final=date(2026, 6, 7),
@@ -132,6 +170,14 @@ class SatTaskEnabledFlagTests(TestCase):
             tipo_solicitud=SolicitudDescarga.TIPO_CFDI,
             direccion=SolicitudDescarga.DIRECCION_EMITIDOS,
             estado=SolicitudDescarga.ESTADO_TERMINADA,
+            numero_cfdis=3,
+        )
+        LogDescargaSat.objects.create(
+            solicitud=solicitud,
+            nivel=LogDescargaSat.NIVEL_INFO,
+            mensaje="Descarga SAT completada para emitidos 2026-06",
+            cfdis_descargados=3,
+            cfdis_nuevos=3,
         )
 
         result = ejecutar_descarga_sat_nocturna.run()
