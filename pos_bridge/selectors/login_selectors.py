@@ -36,7 +36,7 @@ ERROR_BANNERS = [
 ]
 
 BLOCKING_MODAL_CONTAINERS = [
-    "#satModalContainer",
+    "#satModalContainer .modal-sat-overlay",
 ]
 
 BLOCKING_MODAL_DISMISS_BUTTONS = [

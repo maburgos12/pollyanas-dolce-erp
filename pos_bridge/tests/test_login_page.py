@@ -4,9 +4,13 @@ from unittest.mock import Mock, call, patch
 from django.test import SimpleTestCase
 
 from pos_bridge.browser.login_page import PointLoginPage
+from pos_bridge.selectors.login_selectors import BLOCKING_MODAL_CONTAINERS
 
 
 class PointLoginPageTests(SimpleTestCase):
+    def test_sat_modal_targets_visible_overlay_not_dimensionless_wrapper(self):
+        self.assertIn("#satModalContainer .modal-sat-overlay", BLOCKING_MODAL_CONTAINERS)
+
     def test_login_closes_visible_sat_modal_before_submit(self):
         page = Mock()
         modal = Mock()
