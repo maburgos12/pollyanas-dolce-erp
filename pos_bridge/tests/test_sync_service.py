@@ -137,6 +137,24 @@ class PointSyncServiceTests(TestCase):
 
         self.assertEqual(filtered, [{"value": "2", "label": "Crucero"}])
 
+    def test_full_inventory_excludes_non_commercial_point_locations(self):
+        extractor = PointInventoryExtractor(
+            bridge_settings=SimpleNamespace(
+                sales_excluded_branches=["CEDIS", "ALMACEN", "PRODUCCION CRUCERO", "DEVOLUCIONES"]
+            )
+        )
+        branches = [
+            {"value": "1", "label": "MATRIZ"},
+            {"value": "8", "label": "CEDIS"},
+            {"value": "9", "label": "ALMACEN"},
+            {"value": "10", "label": "PRODUCCION CRUCERO"},
+            {"value": "12", "label": "DEVOLUCIONES"},
+        ]
+
+        filtered = extractor._exclude_non_commercial_branches(branches)
+
+        self.assertEqual(filtered, [{"value": "1", "label": "MATRIZ"}])
+
     def test_retry_failed_jobs_only_claims_inventory_once(self):
         inventory_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
