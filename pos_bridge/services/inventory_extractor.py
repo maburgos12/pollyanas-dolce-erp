@@ -91,10 +91,53 @@ class PointInventoryExtractor:
             audit_rows.append({"category": option["label"], "rows": category_rows})
         return all_rows, audit_rows
 
+    def _extract_branch(self, inventory_page: PointInventoryPage, branch_option: dict) -> ExtractedBranchInventory:
+        selected_branch = inventory_page.select_branch(branch_option)
+        table_payload = inventory_page.extract_inventory_table(kind="products")
+        branch_payload = self.normalizer.normalize_branch_payload(
+            {
+                "external_id": selected_branch["value"],
+                "name": selected_branch["label"],
+                "status": "ACTIVE",
+                "metadata": {},
+            }
+        )
+        normalized_rows, category_audit = self._extract_product_rows_by_category(inventory_page)
+        if not normalized_rows:
+            raise ExtractionError(
+                f"Point devolvió cero productos para la sucursal {selected_branch['label']}; "
+                "se rechaza la extracción para no publicar inventario parcial.",
+                context={"branch": selected_branch, "category_audit": category_audit},
+            )
+        parsed = self.parser.parse_inventory_table(
+            table_payload,
+            branch_external_id=selected_branch["value"],
+            branch_name=selected_branch["label"],
+        )
+        branch_payload["metadata"] = {
+            "detected_columns": parsed["detected_columns"],
+            "product_category_scan": category_audit,
+        }
+        raw_export_path = self._write_raw_export(
+            branch_payload,
+            {
+                "branch": branch_payload,
+                "captured_at": local_now().isoformat(),
+                "table_payload": table_payload,
+                "parsed": parsed,
+            },
+        )
+        return ExtractedBranchInventory(
+            branch=branch_payload,
+            inventory_rows=normalized_rows,
+            captured_at=local_now(),
+            raw_export_path=str(raw_export_path),
+        )
+
     def extract(self, *, branch_filter: str | None = None, limit_branches: int | None = None) -> list[ExtractedBranchInventory]:
-        client = PlaywrightBrowserClient(self.settings)
         session = None
         try:
+            client = PlaywrightBrowserClient(self.settings)
             with BrowserSessionManager(client) as session:
                 # El workspace inicial solo habilita la sesión.
                 # La sucursal objetivo se controla desde el dropdown de inventario.
@@ -110,45 +153,20 @@ class PointInventoryExtractor:
                     branches = branches[:limit_branches]
 
                 extracted: list[ExtractedBranchInventory] = []
-                for branch_option in branches:
-                    selected_branch = inventory_page.select_branch(branch_option)
-                    table_payload = inventory_page.extract_inventory_table(kind="products")
-                    branch_payload = self.normalizer.normalize_branch_payload(
-                        {
-                            "external_id": selected_branch["value"],
-                            "name": selected_branch["label"],
-                            "status": "ACTIVE",
-                            "metadata": {},
-                        }
-                    )
-                    normalized_rows, category_audit = self._extract_product_rows_by_category(inventory_page)
-                    parsed = self.parser.parse_inventory_table(
-                        table_payload,
-                        branch_external_id=selected_branch["value"],
-                        branch_name=selected_branch["label"],
-                    )
-                    branch_payload["metadata"] = {
-                        "detected_columns": parsed["detected_columns"],
-                        "product_category_scan": category_audit,
-                    }
-                    raw_export_path = self._write_raw_export(
-                        branch_payload,
-                        {
-                            "branch": branch_payload,
-                            "captured_at": local_now().isoformat(),
-                            "table_payload": table_payload,
-                            "parsed": parsed,
-                        },
-                    )
-                    extracted.append(
-                        ExtractedBranchInventory(
-                            branch=branch_payload,
-                            inventory_rows=normalized_rows,
-                            captured_at=local_now(),
-                            raw_export_path=str(raw_export_path),
-                        )
-                    )
-                return extracted
+                first_branch, *remaining_branches = branches
+                extracted.append(self._extract_branch(inventory_page, first_branch))
+
+            # Point degrada la respuesta después de recorrer varias sucursales en
+            # una misma sesión. Renovarla por sucursal evita falsos inventarios
+            # vacíos y mantiene aislado cualquier fallo posterior.
+            for branch_option in remaining_branches:
+                client = PlaywrightBrowserClient(self.settings)
+                with BrowserSessionManager(client) as session:
+                    self.auth_service.login(session, branch_hint=branch_option["label"])
+                    inventory_page = PointInventoryPage(session.page, self.settings)
+                    inventory_page.open_inventory_module()
+                    extracted.append(self._extract_branch(inventory_page, branch_option))
+            return extracted
         except PosBridgeError:
             raise
         except Exception as exc:
