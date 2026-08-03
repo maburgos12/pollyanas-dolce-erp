@@ -92,6 +92,7 @@ def _fuente_display(
     if fuentes:
         etiquetas = {
             "NOMINA": "Nómina",
+            "NOMINA_CONCEPTO": "Concepto de nómina",
             "VENTA_POS": "Ventas Point",
             "BONO_PRODUCCION": "Bonos producción",
             "BONO_VENTAS": "Bonos ventas",

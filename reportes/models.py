@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -909,6 +912,7 @@ class ReglaFuenteRubro(models.Model):
     FUENTE_GASTO_OPERATIVO = "GASTO_OPERATIVO"
     FUENTE_OBLIGACION_GASTO = "OBLIGACION_GASTO"
     FUENTE_NOMINA = "NOMINA"
+    FUENTE_NOMINA_CONCEPTO = "NOMINA_CONCEPTO"
     FUENTE_BONO_PRODUCCION = "BONO_PRODUCCION"
     FUENTE_BONO_VENTAS = "BONO_VENTAS"
     FUENTE_VENTA_POS = "VENTA_POS"
@@ -923,6 +927,7 @@ class ReglaFuenteRubro(models.Model):
         (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
         (FUENTE_OBLIGACION_GASTO, "Obligaciones de gasto por rubro"),
         (FUENTE_NOMINA, "Nómina RRHH"),
+        (FUENTE_NOMINA_CONCEPTO, "Concepto de nómina RRHH"),
         (FUENTE_BONO_PRODUCCION, "Bonos producción"),
         (FUENTE_BONO_VENTAS, "Bonos ventas"),
         (FUENTE_VENTA_POS, "Ventas POS Point"),
@@ -940,6 +945,15 @@ class ReglaFuenteRubro(models.Model):
     ORIGEN_CHOICES = [
         (ORIGEN_SEED, "Seed automático"),
         (ORIGEN_ADMIN, "Ajuste manual"),
+    ]
+
+    MODO_CANONICA = "CANONICA"
+    MODO_CONTROL = "CONTROL"
+    MODO_DISTRIBUCION = "DISTRIBUCION"
+    MODO_CHOICES = [
+        (MODO_CANONICA, "Fuente canónica"),
+        (MODO_CONTROL, "Espejo de control (no sumable)"),
+        (MODO_DISTRIBUCION, "Distribución porcentual"),
     ]
 
     rubro = models.ForeignKey(
@@ -983,6 +997,20 @@ class ReglaFuenteRubro(models.Model):
     )
     signo = models.SmallIntegerField(default=1)
     activa = models.BooleanField(default=True)
+    modo_asignacion = models.CharField(
+        max_length=20,
+        choices=MODO_CHOICES,
+        default=MODO_CANONICA,
+        db_index=True,
+    )
+    clave_fuente = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+        help_text="Huella estable del origen económico para impedir doble conteo.",
+    )
     origen = models.CharField(max_length=10, choices=ORIGEN_CHOICES, default=ORIGEN_ADMIN, db_index=True)
     notas = models.CharField(max_length=200, blank=True, default="")
     creado_en = models.DateTimeField(default=timezone.now)
@@ -999,7 +1027,15 @@ class ReglaFuenteRubro(models.Model):
             models.CheckConstraint(
                 check=models.Q(signo__in=(1, -1)),
                 name="regla_fuente_rubro_signo_valido",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["clave_fuente"],
+                condition=(
+                    models.Q(activa=True, modo_asignacion="CANONICA")
+                    & ~models.Q(clave_fuente="")
+                ),
+                name="uniq_fuente_canonica_presupuesto",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -1007,6 +1043,161 @@ class ReglaFuenteRubro(models.Model):
 
     def sucursal_efectiva(self):
         return self.sucursal or self.rubro.sucursal
+
+    def calcular_clave_fuente(self) -> str:
+        if not self.activa or self.tipo_fuente == self.FUENTE_MANUAL:
+            return ""
+        filtros = dict(self.filtros or {})
+        filtros.pop("porcentaje", None)
+        filtros.pop("desde", None)
+        filtros_identidad = {
+            self.FUENTE_GASTO_OPERATIVO: {"centro_tipo"},
+            self.FUENTE_OBLIGACION_GASTO: set(),
+            self.FUENTE_NOMINA: {"campo_monto", "departamento"},
+            self.FUENTE_NOMINA_CONCEPTO: {
+                "tipo_concepto", "codigos_concepto", "departamentos"
+            },
+            self.FUENTE_BONO_PRODUCCION: {"campo_monto"},
+            self.FUENTE_BONO_VENTAS: {"campo_monto"},
+            self.FUENTE_VENTA_POS: {
+                "campo_monto", "categoria_pos", "productos_pos", "producto_pos",
+                "clasificacion_catalogo", "excluir_clasificados", "total_empresa",
+            },
+            self.FUENTE_CONSUMO_MP: {"insumo_id", "total_empresa"},
+            self.FUENTE_MANTENIMIENTO_UNIDAD: {"unidad_codigo"},
+            self.FUENTE_COMBUSTIBLE_UNIDAD: {"unidades"},
+            self.FUENTE_MANTENIMIENTO_EQUIPO: {
+                "sucursal_codigo", "por_sucursal", "ubicaciones_produccion"
+            },
+            self.FUENTE_COSTO_REVENTA: set(),
+            self.FUENTE_MERMA_PRODUCTO: set(),
+        }
+        permitidos = filtros_identidad.get(self.tipo_fuente, set(filtros))
+        filtros = {clave: valor for clave, valor in filtros.items() if clave in permitidos}
+        if self.tipo_fuente == self.FUENTE_GASTO_OPERATIVO and not self.categoria_gasto_id:
+            return ""
+        if self.tipo_fuente == self.FUENTE_CONSUMO_MP and not (
+            filtros.get("insumo_id") or filtros.get("total_empresa")
+        ):
+            return ""
+        if self.tipo_fuente == self.FUENTE_VENTA_POS and not (
+            filtros.get("categoria_pos")
+            or filtros.get("productos_pos")
+            or filtros.get("producto_pos")
+            or filtros.get("clasificacion_catalogo")
+            or filtros.get("excluir_clasificados")
+            or filtros.get("total_empresa")
+        ):
+            return ""
+        if self.tipo_fuente == self.FUENTE_MANTENIMIENTO_UNIDAD and not filtros.get(
+            "unidad_codigo"
+        ):
+            return ""
+        if self.tipo_fuente == self.FUENTE_COMBUSTIBLE_UNIDAD and not filtros.get("unidades"):
+            return ""
+        if self.tipo_fuente == self.FUENTE_MANTENIMIENTO_EQUIPO and not (
+            filtros.get("sucursal_codigo")
+            or filtros.get("por_sucursal")
+            or filtros.get("ubicaciones_produccion")
+        ):
+            return ""
+
+        def normalizar(valor):
+            if isinstance(valor, dict):
+                return {clave: normalizar(valor[clave]) for clave in sorted(valor)}
+            if isinstance(valor, list):
+                elementos = [normalizar(elemento) for elemento in valor]
+                return sorted(
+                    elementos,
+                    key=lambda elemento: json.dumps(elemento, sort_keys=True, default=str),
+                )
+            return valor
+
+        sucursal_id = getattr(self.sucursal_efectiva(), "id", None)
+        if self.tipo_fuente == self.FUENTE_GASTO_OPERATIVO and (
+            self.centro_costo_id or filtros.get("centro_tipo")
+        ):
+            sucursal_id = None
+        if self.centro_costo_id:
+            filtros.pop("centro_tipo", None)
+        if self.tipo_fuente in {
+            self.FUENTE_CONSUMO_MP,
+            self.FUENTE_MERMA_PRODUCTO,
+            self.FUENTE_COSTO_REVENTA,
+        }:
+            sucursal_id = None
+        if self.tipo_fuente == self.FUENTE_VENTA_POS and (
+            filtros.get("total_empresa")
+            or filtros.get("clasificacion_catalogo")
+            or filtros.get("excluir_clasificados")
+        ):
+            sucursal_id = None
+        if self.tipo_fuente == self.FUENTE_MANTENIMIENTO_EQUIPO and (
+            filtros.get("sucursal_codigo") or filtros.get("ubicaciones_produccion")
+        ):
+            sucursal_id = None
+        payload = {
+            "tipo_fuente": self.tipo_fuente,
+            "categoria_gasto_id": self.categoria_gasto_id,
+            "centro_costo_id": self.centro_costo_id,
+            "sucursal_id": sucursal_id,
+            "filtros": normalizar(filtros),
+        }
+        if self.tipo_fuente == self.FUENTE_OBLIGACION_GASTO:
+            payload["rubro_id"] = self.rubro_id
+        serializado = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
+
+    def clean(self):
+        super().clean()
+        if (
+            self.modo_asignacion == self.MODO_CANONICA
+            and (self.filtros or {}).get("porcentaje") is not None
+        ):
+            self.modo_asignacion = self.MODO_DISTRIBUCION
+        elif (
+            self.modo_asignacion == self.MODO_CANONICA
+            and self.rubro.area.codigo in {"nomina", "resultados"}
+        ):
+            self.modo_asignacion = self.MODO_CONTROL
+        self.clave_fuente = self.calcular_clave_fuente()
+        if self.modo_asignacion != self.MODO_DISTRIBUCION or not self.activa:
+            return
+        try:
+            porcentaje = Decimal(str((self.filtros or {}).get("porcentaje")))
+        except (TypeError, ValueError, ArithmeticError):
+            raise ValidationError({"filtros": "Una distribución requiere porcentaje numérico."})
+        if porcentaje <= 0 or porcentaje > 100:
+            raise ValidationError({"filtros": "El porcentaje debe ser mayor a 0 y máximo 100%."})
+        total = porcentaje
+        existentes = type(self).objects.filter(
+            activa=True,
+            modo_asignacion=self.MODO_DISTRIBUCION,
+            clave_fuente=self.clave_fuente,
+        ).exclude(pk=self.pk)
+        for filtros in existentes.values_list("filtros", flat=True):
+            total += Decimal(str((filtros or {}).get("porcentaje", 0)))
+        if total > 100:
+            raise ValidationError({"filtros": f"La distribución de esta fuente supera 100% ({total}%)."})
+
+    def save(self, *args, **kwargs):
+        if (
+            self.modo_asignacion == self.MODO_CANONICA
+            and (self.filtros or {}).get("porcentaje") is not None
+        ):
+            self.modo_asignacion = self.MODO_DISTRIBUCION
+        elif (
+            self.modo_asignacion == self.MODO_CANONICA
+            and self.rubro.area.codigo in {"nomina", "resultados"}
+        ):
+            self.modo_asignacion = self.MODO_CONTROL
+        self.clave_fuente = self.calcular_clave_fuente()
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                "modo_asignacion",
+                "clave_fuente",
+            }
+        return super().save(*args, **kwargs)
 
 
 class FactVentaDiaria(models.Model):

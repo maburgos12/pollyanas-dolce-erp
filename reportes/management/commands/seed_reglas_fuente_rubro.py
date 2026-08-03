@@ -20,6 +20,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 
 from reportes.models import CategoriaGasto, ReglaFuenteRubro, RubroPresupuesto
 from reportes.services_presupuesto_maestro import normalize_header_text
@@ -248,6 +249,17 @@ class Command(BaseCommand):
             ).values_list("rubro_id", flat=True)
         )
         with transaction.atomic():
+            # Retirar primero reglas SEED obsoletas evita que una fuente que
+            # cambió de rubro choque temporalmente con su asignación anterior.
+            obsoletas_qs = ReglaFuenteRubro.objects.filter(
+                origen=ReglaFuenteRubro.ORIGEN_SEED
+            ).exclude(rubro_id__in=planes.keys()).exclude(rubro_id__in=rubros_con_admin)
+            if options["sin_ventas"]:
+                obsoletas_qs = obsoletas_qs.exclude(rubro__area__codigo="ventas")
+            obsoletas = obsoletas_qs.count()
+            if not dry_run and obsoletas:
+                obsoletas_qs.delete()
+
             for rubro_id, reglas in planes.items():
                 if rubro_id in rubros_con_admin:
                     omitidos_admin += 1
@@ -265,15 +277,6 @@ class Command(BaseCommand):
             # Reconciliación: reglas SEED de rubros que salieron del mapeo se
             # eliminan para que la base converja al estado declarado en el CSV.
             # No toca reglas ADMIN ni rubros con regla ADMIN (ahí manda admin).
-            obsoletas_qs = ReglaFuenteRubro.objects.filter(
-                origen=ReglaFuenteRubro.ORIGEN_SEED
-            ).exclude(rubro_id__in=planes.keys()).exclude(rubro_id__in=rubros_con_admin)
-            if options["sin_ventas"]:
-                # Corrida parcial: las reglas de Ventas las administra la corrida completa.
-                obsoletas_qs = obsoletas_qs.exclude(rubro__area__codigo="ventas")
-            obsoletas = obsoletas_qs.count()
-            if not dry_run and obsoletas:
-                obsoletas_qs.delete()
             if dry_run:
                 transaction.set_rollback(True)
 
@@ -469,6 +472,10 @@ class Command(BaseCommand):
         rubros = (
             RubroPresupuesto.objects.filter(area__codigo="produccion", activo=True)
             .exclude(id__in=excluidos)
+            .filter(
+                Q(metadata__no_auto_consumo_mp__isnull=True)
+                | Q(metadata__no_auto_consumo_mp=False)
+            )
             .order_by("concepto")
         )
         propuestas = []  # [rubro, score, insumo_id, nombre]
