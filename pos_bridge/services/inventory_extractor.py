@@ -98,7 +98,7 @@ class PointInventoryExtractor:
             with BrowserSessionManager(client) as session:
                 # El workspace inicial solo habilita la sesión.
                 # La sucursal objetivo se controla desde el dropdown de inventario.
-                self.auth_service.login(session, branch_hint=branch_filter)
+                self.auth_service.login(session, branch_hint=branch_filter or "MATRIZ")
                 inventory_page = PointInventoryPage(session.page, self.settings)
                 inventory_page.open_inventory_module()
                 branches = inventory_page.list_branches()
