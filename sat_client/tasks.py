@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db.models import F
 from django.utils import timezone
 
 from sat_client.models import CfdiDescargado, LogDescargaSat, SolicitudDescarga
@@ -65,7 +66,6 @@ def _solicitud_periodo_registrada(fecha_inicial: date, fecha_final: date, direcc
             estado__in=[
                 SolicitudDescarga.ESTADO_ACEPTADA,
                 SolicitudDescarga.ESTADO_EN_PROCESO,
-                SolicitudDescarga.ESTADO_TERMINADA,
             ]
         )
         .exclude(id_solicitud="")
@@ -73,6 +73,18 @@ def _solicitud_periodo_registrada(fecha_inicial: date, fecha_final: date, direcc
         .exists()
     )
     if activa:
+        return True
+    terminada_importada = (
+        base.filter(
+            estado=SolicitudDescarga.ESTADO_TERMINADA,
+            logs__nivel=LogDescargaSat.NIVEL_INFO,
+            logs__cfdis_descargados__gte=F("numero_cfdis"),
+        )
+        .exclude(id_solicitud="")
+        .exclude(id_solicitud__isnull=True)
+        .exists()
+    )
+    if terminada_importada:
         return True
     return base.filter(
         estado=SolicitudDescarga.ESTADO_RECHAZADA,
