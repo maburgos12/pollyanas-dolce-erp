@@ -1,0 +1,5 @@
+<nav class="cd-tabs" aria-label="Compras departamentales">
+  {% if puede_solicitar %}<a href="{% url 'compras:departamental_mis_solicitudes' %}" class="{% if vista == 'area' %}active{% endif %}">Mis solicitudes</a>{% endif %}
+  {% if es_compras %}<a href="{% url 'compras:departamental_bandeja' %}" class="{% if vista == 'compras' %}active{% endif %}">Bandeja de Compras</a>{% endif %}
+  {% if es_direccion %}<a href="{% url 'compras:departamental_direccion' %}" class="{% if vista == 'direccion' %}active{% endif %}">Decisiones DG</a>{% endif %}
+</nav>

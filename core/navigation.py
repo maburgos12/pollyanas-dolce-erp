@@ -174,9 +174,16 @@ NAV_GROUPS = [
             (
                 "compras",
                 "dashboard",
-                "Compras",
+                "Compras de insumos",
                 "/compras/dashboard/",
-                ["/compras/"],
+                ["/compras/dashboard/", "/compras/solicitudes/", "/compras/ordenes/", "/compras/recepciones/"],
+            ),
+            (
+                "compras",
+                "departamentales",
+                "Compras departamentales",
+                "/compras/departamentales/",
+                ["/compras/departamentales/"],
             ),
             (
                 "inventario",
@@ -365,6 +372,25 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 }
             )
         if group["key"] == "mi_trabajo" and user and user.is_authenticated:
+            from reportes.models import AreaPresupuestoResponsable
+
+            if getattr(user, "pk", None) and AreaPresupuestoResponsable.objects.filter(
+                usuario=user, puede_capturar=True, area__activa=True
+            ).exists():
+                url_compras_dept = "/compras/departamentales/mis-solicitudes/"
+                match_len = len("/compras/departamentales/") if current_path.startswith("/compras/departamentales/") else 0
+                best_match_len = max(best_match_len, match_len)
+                items.append(
+                    {
+                        "label": "Compras departamentales",
+                        "url": url_compras_dept,
+                        "active": False,
+                        "_match_len": match_len,
+                        "module": "compras",
+                        "submodule": "departamentales_personal",
+                        "initial": "C",
+                    }
+                )
             from reportes.views_presupuesto_catalogos import puede_ver_catalogos_presupuesto
 
             if puede_ver_catalogos_presupuesto(user):

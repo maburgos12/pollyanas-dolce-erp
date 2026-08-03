@@ -6,7 +6,7 @@ from django.http import Http404
 from django.views.static import serve as static_serve
 
 from activos.models import EvidenciaOrden, OrdenMantenimiento
-from core.access import can_view_inventario, can_view_logistica, can_view_submodule
+from core.access import can_view_compras, can_view_inventario, can_view_logistica, can_view_submodule
 from fallas.models import EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
 from mantenimiento.services_access import (
@@ -89,6 +89,20 @@ def _can_access_operational_media(user, path):
         return _can_access_activos_media(user, path)
     if path.startswith(("logistica/reportes/", "servicios_unidad/", "reparaciones_unidad/")):
         return _can_access_logistica_media(user, path)
+    if path.startswith(("compras/departamentales/", "compras/cotizaciones/")):
+        from compras.models import CotizacionCompraDepartamental, ItemCompraDepartamental
+        from reportes.models import AreaPresupuestoResponsable
+
+        if can_view_compras(user):
+            return True
+        item_ids = ItemCompraDepartamental.objects.filter(imagen=path).values("pk")
+        if path.startswith("compras/cotizaciones/"):
+            item_ids = CotizacionCompraDepartamental.objects.filter(documento=path).values("item_id")
+        return AreaPresupuestoResponsable.objects.filter(
+            usuario=user,
+            puede_capturar=True,
+            area__solicitudes_compra_departamentales__items__in=item_ids,
+        ).exists()
     return False
 
 

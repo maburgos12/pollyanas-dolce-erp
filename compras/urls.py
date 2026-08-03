@@ -1,10 +1,23 @@
 from django.urls import path
 
 from . import views
+from . import views_departamentales
 
 app_name = "compras"
 
 urlpatterns = [
+    path("departamentales/", views_departamentales.departamental_inicio, name="departamental_inicio"),
+    path("departamentales/mis-solicitudes/", views_departamentales.departamental_mis_solicitudes, name="departamental_mis_solicitudes"),
+    path("departamentales/nueva/", views_departamentales.departamental_nueva, name="departamental_nueva"),
+    path("departamentales/bandeja/", views_departamentales.departamental_bandeja, name="departamental_bandeja"),
+    path("departamentales/direccion/", views_departamentales.departamental_direccion, name="departamental_direccion"),
+    path("departamentales/<int:pk>/", views_departamentales.departamental_detalle, name="departamental_detalle"),
+    path("departamentales/<int:pk>/asignar/", views_departamentales.departamental_asignar, name="departamental_asignar"),
+    path("departamentales/<int:pk>/generar-ordenes/", views_departamentales.departamental_generar_ordenes, name="departamental_generar_ordenes"),
+    path("departamentales/items/<int:item_pk>/cotizar/", views_departamentales.departamental_cotizar, name="departamental_cotizar"),
+    path("departamentales/items/<int:item_pk>/decidir/", views_departamentales.departamental_decidir, name="departamental_decidir"),
+    path("departamentales/items/<int:item_pk>/recibir/", views_departamentales.departamental_recibir, name="departamental_recibir"),
+    path("departamentales/items/<int:item_pk>/confirmar/", views_departamentales.departamental_confirmar, name="departamental_confirmar"),
     path("", views.dashboard, name="home"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("solicitudes/", views.solicitudes, name="solicitudes"),

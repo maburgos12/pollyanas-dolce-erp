@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Nueva solicitud departamental{% endblock %}
+{% block page_title %}Nueva solicitud departamental{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260803-1">{% endblock %}
+{% block content %}
+<main class="cd-shell cd-form-shell">
+  <a class="cd-back" href="{% url 'compras:departamental_mis_solicitudes' %}">← Volver a solicitudes</a>
+  <header class="cd-hero compact"><div><span class="cd-eyebrow">Nueva solicitud</span><h1>¿Qué necesita tu área?</h1><p>Incluye varios artículos en una sola solicitud. El costo estimado y la imagen son opcionales.</p></div></header>
+  <form method="post" enctype="multipart/form-data" class="cd-form" data-async-action>
+    {% csrf_token %}
+    <section class="cd-card">
+      <div class="cd-card-head"><div><span class="cd-step">01</span><h2>Datos generales</h2></div></div>
+      <div class="cd-grid three">
+        <label>Área<select name="area" required>{% for area in areas %}<option value="{{ area.pk }}">{{ area.nombre }}</option>{% endfor %}</select></label>
+        <label>Tipo<select name="tipo" id="cd-tipo" required>{% for value,label in tipos %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Mes de planeación<input type="month" name="periodo" required></label>
+      </div>
+      <label>Motivo general<textarea name="motivo" rows="2" placeholder="Ej. Herramientas y reconocimientos requeridos por el área"></textarea></label>
+      <label id="cd-extra" hidden>Justificación extraordinaria o de emergencia<textarea name="justificacion_extraordinaria" rows="2" placeholder="Explica por qué no puede esperar al siguiente ciclo"></textarea></label>
+    </section>
+    <section class="cd-card">
+      <div class="cd-card-head"><div><span class="cd-step">02</span><h2>Artículos solicitados</h2><p>La compra y la recepción se seguirán por renglón.</p></div><button type="button" class="cd-button ghost" id="cd-add">+ Agregar artículo</button></div>
+      <div id="cd-items">
+        <article class="cd-item-form" data-index="0">
+          <div class="cd-item-number">Artículo 1</div>
+          <div class="cd-grid item-main">
+            <label class="photo">Imagen opcional<input type="file" name="imagen_0" accept="image/*"><span>Subir foto o tomarla con cámara</span></label>
+            <div class="cd-grid two grow">
+              <label class="wide">Descripción<input name="descripcion" required placeholder="Ej. Rack metálico de 5 niveles"></label>
+              <label>Categoría<input name="categoria" placeholder="Herramientas, papelería, equipo…"></label>
+              <label>Cantidad<input name="cantidad" type="number" min="0.001" step="0.001" value="1" required></label>
+              <label>Unidad<input name="unidad" value="pieza" required></label>
+              <label>Costo unitario estimado <span>opcional</span><input name="costo_unitario_estimado" type="number" min="0" step="0.01" placeholder="$0.00"></label>
+              <label>Fecha requerida<input name="fecha_requerida" type="date"></label>
+              <label>Prioridad<select name="prioridad"><option value="NORMAL">Normal</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></select></label>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+    <div class="cd-actions"><button class="cd-button ghost" name="accion" value="borrador">Guardar borrador</button><button class="cd-button primary" name="accion" value="enviar">Enviar a Compras</button></div>
+  </form>
+</main>
+{% endblock %}
+{% block extra_js %}
+<script>
+(() => {
+  const type = document.querySelector('#cd-tipo');
+  const extra = document.querySelector('#cd-extra');
+  const syncType = () => { const required = type.value !== 'MENSUAL'; extra.hidden = !required; extra.querySelector('textarea').required = required; };
+  type.addEventListener('change', syncType); syncType();
+  document.querySelector('#cd-add').addEventListener('click', () => {
+    const wrap = document.querySelector('#cd-items');
+    const clone = wrap.querySelector('.cd-item-form').cloneNode(true);
+    const index = wrap.children.length;
+    clone.dataset.index = index;
+    clone.querySelector('.cd-item-number').textContent = `Artículo ${index + 1}`;
+    clone.querySelectorAll('input').forEach(input => { if (input.type !== 'file' && input.name !== 'cantidad' && input.name !== 'unidad') input.value = ''; if (input.name === 'cantidad') input.value = '1'; if (input.name === 'unidad') input.value = 'pieza'; });
+    const file = clone.querySelector('input[type=file]'); file.name = `imagen_${index}`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'cd-remove'; remove.textContent = 'Quitar'; remove.addEventListener('click', () => clone.remove()); clone.prepend(remove);
+    wrap.appendChild(clone);
+  });
+})();
+</script>
+{% endblock %}
