@@ -25,6 +25,10 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.alert_service import PointAlertService
+from pos_bridge.services.inventory_baseline import (
+    latest_point_almacen_baseline_run,
+    point_transfer_origin_exit_hash,
+)
 from pos_bridge.services.movement_matching_service import PointMovementMatchingService
 from pos_bridge.services.production_entry_extractor import PointProductionEntryExtractor
 from pos_bridge.services.transfer_extractor import PointTransferExtractor
@@ -69,6 +73,8 @@ class PointMovementSyncService:
         self.matcher = matcher or PointMovementMatchingService()
         self.logger = get_pos_bridge_logger()
         self.alert_service = PointAlertService()
+        self._point_almacen_baseline_loaded = False
+        self._point_almacen_baseline = None
 
     def _resolve_erp_branch(self, branch_payload: dict):
         external_id = str(branch_payload.get("external_id") or "").strip()
@@ -171,12 +177,14 @@ class PointMovementSyncService:
         for code, label in ALMACEN_CHOICES:
             normalized_locations[normalize_text(code.replace("_", " "))] = code
             normalized_locations[normalize_text(label)] = code
+        # Point usa estos nombres operativos sin el sufijo interno del ERP.
+        normalized_locations[normalize_text("ALMACEN")] = "ALMACEN_1"
+        normalized_locations[normalize_text("ALMACEN PRINCIPAL")] = "ALMACEN_1"
+        normalized_locations[normalize_text("CEDIS")] = "CUARTO_FRIO"
         for candidate in candidates:
             location = normalized_locations.get(normalize_text(str(candidate or "").replace("_", " ")))
             if location:
                 return location
-        if normalize_text(branch.name) == "cedis":
-            return "CUARTO_FRIO"
         return None
 
     def _find_matching_bitacora_movement(
@@ -408,6 +416,70 @@ class PointMovementSyncService:
         existing.save(update_fields=["fecha", "tipo", "insumo", "almacen", "cantidad", "referencia"])
         return False
 
+    def _point_almacen_baseline_run(self):
+        if not self._point_almacen_baseline_loaded:
+            self._point_almacen_baseline = latest_point_almacen_baseline_run()
+            self._point_almacen_baseline_loaded = True
+        return self._point_almacen_baseline
+
+    @transaction.atomic
+    def _upsert_transfer_origin_inventory_movement(self, *, line: PointTransferLine) -> bool | None:
+        baseline_run = self._point_almacen_baseline_run()
+        cutover_at = getattr(baseline_run, "finished_at", None)
+        sent_at = line.sent_at or line.registered_at
+        origin_almacen = self._point_inventory_location(line.origin_branch)
+        if not cutover_at or not sent_at or sent_at <= cutover_at or origin_almacen != "ALMACEN_1":
+            return None
+
+        cantidad_erp, _nota = cantidad_en_unidad_erp(
+            Decimal(str(line.sent_quantity or 0)), line.unit, line.insumo
+        )
+        source_hash = point_transfer_origin_exit_hash(line.source_hash)
+        existing = MovimientoInventario.objects.select_for_update().filter(source_hash=source_hash).first()
+        defaults = {
+            "fecha": sent_at,
+            "tipo": MovimientoInventario.TIPO_SALIDA,
+            "insumo": line.insumo,
+            "almacen": "ALMACEN_1",
+            "cantidad": cantidad_erp,
+            "referencia": f"POINT-TRANSFER:{line.transfer_external_id}:SALIDA",
+            "trazabilidad": {
+                "source": "POINT_TRANSFER_ORIGIN_EXIT",
+                "point_source_hash": line.source_hash,
+                "baseline_run_id": baseline_run.id,
+                "cutover_at": cutover_at.isoformat(),
+            },
+        }
+        if existing is None:
+            MovimientoInventario.objects.create(source_hash=source_hash, **defaults)
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                almacen="ALMACEN_1",
+                delta=-cantidad_erp,
+            )
+            return True
+
+        new_qty = cantidad_erp
+        old_qty = Decimal(str(existing.cantidad or 0))
+        old_almacen = existing.almacen or "ALMACEN_1"
+        if existing.insumo_id == line.insumo_id and old_qty == new_qty and old_almacen == "ALMACEN_1":
+            return False
+        if existing.insumo_id == line.insumo_id and old_almacen == "ALMACEN_1":
+            self._apply_inventory_delta(
+                insumo=line.insumo,
+                almacen="ALMACEN_1",
+                delta=-(new_qty - old_qty),
+            )
+        else:
+            self._apply_inventory_delta(insumo=existing.insumo, almacen=old_almacen, delta=old_qty)
+            self._apply_inventory_delta(insumo=line.insumo, almacen="ALMACEN_1", delta=-new_qty)
+        for field, value in defaults.items():
+            setattr(existing, field, value)
+        existing.save(
+            update_fields=["fecha", "tipo", "insumo", "almacen", "cantidad", "referencia", "trazabilidad"]
+        )
+        return False
+
     def _upsert_transfer_cedis_movement(self, *, line: PointTransferLine) -> bool:
         movement_at = line.received_at or line.sent_at or line.registered_at
         defaults = {
@@ -588,6 +660,8 @@ class PointMovementSyncService:
         staged_updated = 0
         inventory_entries_created = 0
         inventory_entries_updated = 0
+        inventory_exits_created = 0
+        inventory_exits_updated = 0
         cedis_entries_created = 0
         cedis_entries_updated = 0
         skipped_non_storage = 0
@@ -660,6 +734,11 @@ class PointMovementSyncService:
                     inventory_entries_created += 1
                 else:
                     inventory_entries_updated += 1
+                origin_exit_created = self._upsert_transfer_origin_inventory_movement(line=line)
+                if origin_exit_created is True:
+                    inventory_exits_created += 1
+                elif origin_exit_created is False:
+                    inventory_exits_updated += 1
                 continue
             if (not line.is_insumo) and line.receta is not None:
                 if not apply_inventory:
@@ -698,6 +777,8 @@ class PointMovementSyncService:
             "transfer_lines_updated": staged_updated,
             "inventory_entries_created": inventory_entries_created,
             "inventory_entries_updated": inventory_entries_updated,
+            "inventory_exits_created": inventory_exits_created,
+            "inventory_exits_updated": inventory_exits_updated,
             "cedis_entries_created": cedis_entries_created,
             "cedis_entries_updated": cedis_entries_updated,
             "skipped_non_storage_branch": skipped_non_storage,
