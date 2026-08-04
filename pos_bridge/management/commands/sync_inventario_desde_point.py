@@ -108,6 +108,7 @@ class Command(BaseCommand):
 
             insumo = resolved.insumo
             stock_point, nota_conversion = _cantidad_en_unidad_erp(row.quantity, row.unit, insumo)
+            stock_point = Decimal(str(stock_point))
             if nota_conversion.startswith("UNIDAD INCOMPATIBLE"):
                 blockers.append(
                     {
@@ -120,10 +121,24 @@ class Command(BaseCommand):
                     }
                 )
                 continue
+            if stock_point < 0:
+                blockers.append(
+                    {
+                        "reason": "SALDO_POINT_NEGATIVO",
+                        "point_code": row.point_code,
+                        "point_name": row.point_name,
+                        "point_quantity": str(row.quantity),
+                        "point_unit": row.unit,
+                        "insumo_id": insumo.id,
+                        "insumo_name": insumo.nombre,
+                        "stock_erp_convertido": str(stock_point),
+                    }
+                )
+                continue
 
             candidate = {
                 "insumo": insumo,
-                "stock_point": Decimal(str(stock_point)),
+                "stock_point": stock_point,
                 "point_code": row.point_code,
                 "point_name": row.point_name,
                 "point_unit": row.unit,
