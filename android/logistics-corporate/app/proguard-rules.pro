@@ -1,0 +1,2 @@
+-keep class androidx.room.** { *; }
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
