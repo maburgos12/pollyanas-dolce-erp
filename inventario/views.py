@@ -77,6 +77,8 @@ from .models import (
     InventarioConfig,
     LineaConteoFisico,
     MovimientoInventario,
+    UBICACION_ALMACEN,
+    UBICACION_CEDIS,
 )
 from .services_conteo_fisico import ConteoFisicoError, ConteoFisicoService, parse_conteo_period
 from .services_existencias import aplicar_delta, establecer_stock, get_or_create_existencia, stock_ubicacion
@@ -105,7 +107,11 @@ def _insumo_display_name(insumo: Insumo | None) -> str:
     return getattr(insumo, "display_name", "") or getattr(insumo, "nombre", "")
 
 
-def _inventory_canonical_context(limit: int = 200) -> dict[str, object]:
+def _inventory_canonical_context(
+    limit: int = 200,
+    *,
+    almacen: str = UBICACION_ALMACEN,
+) -> dict[str, object]:
     canonical_rows, member_to_row, canonical_by_member_id, _ = canonical_catalog_maps(limit=limit)
     member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
     usage_maps = usage_maps_for_insumo_ids(member_ids)
@@ -113,7 +119,7 @@ def _inventory_canonical_context(limit: int = 200) -> dict[str, object]:
         row["insumo_id"]: row["stock_actual"]
         for row in ExistenciaInsumo.objects.filter(
             insumo_id__in=member_ids,
-            almacen="ALMACEN_1",
+            almacen=almacen,
         ).values("insumo_id", "stock_actual")
     }
     return {
@@ -170,6 +176,7 @@ def _canonicalized_insumo_stock_options(
 def _canonicalized_existencias_rows(
     limit: int = 200,
     *,
+    almacen: str = UBICACION_ALMACEN,
     canonical_rows: list[dict] | None = None,
     usage_maps: dict[str, object] | None = None,
 ) -> list[SimpleNamespace]:
@@ -180,7 +187,7 @@ def _canonicalized_existencias_rows(
         existencia.insumo_id: existencia
         for existencia in ExistenciaInsumo.objects.filter(
             insumo_id__in=member_ids,
-            almacen="ALMACEN_1",
+            almacen=almacen,
         ).select_related("insumo", "insumo__unidad_base")
     }
     rows: list[SimpleNamespace] = []
@@ -5027,6 +5034,29 @@ def existencias(request: HttpRequest) -> HttpResponse:
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Inventario.")
 
+    ledger_options = {
+        "almacen": {
+            "code": UBICACION_ALMACEN,
+            "label": "ALMACÉN",
+            "description": "Stock real de compras y resguardo",
+        },
+        "cedis": {
+            "code": UBICACION_CEDIS,
+            "label": "CEDIS",
+            "description": "Stock disponible para producción",
+        },
+    }
+    selected_ubicacion = (
+        request.POST.get("ubicacion") if request.method == "POST" else request.GET.get("ubicacion")
+    ) or "almacen"
+    if selected_ubicacion not in ledger_options:
+        selected_ubicacion = "almacen"
+    selected_ledger = ledger_options[selected_ubicacion]
+    selected_almacen = selected_ledger["code"]
+    redirect_url = reverse("inventario:existencias")
+    if selected_ubicacion != "almacen":
+        redirect_url = f"{redirect_url}?{urlencode({'ubicacion': selected_ubicacion})}"
+
     if request.method == "POST":
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para editar existencias.")
@@ -5035,7 +5065,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
             max_diff_pct = _to_decimal(request.POST.get("reorder_max_diff_pct"), "10")
             if max_diff_pct < 0:
                 messages.error(request, "El umbral máximo de desviación no puede ser negativo.")
-                return redirect("inventario:existencias")
+                return redirect(redirect_url)
             config = InventarioConfig.get_solo()
             config.reorder_max_diff_pct = max_diff_pct
             config.save(update_fields=["reorder_max_diff_pct", "updated_at"])
@@ -5043,11 +5073,11 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 request,
                 f"Configuración guardada: umbral máximo manual en punto de reorden = {max_diff_pct}%.",
             )
-            return redirect("inventario:existencias")
+            return redirect(redirect_url)
 
         insumo = canonical_insumo_by_id(request.POST.get("insumo_id"))
         if insumo:
-            existencia = get_or_create_existencia(insumo, "ALMACEN_1")
+            existencia = get_or_create_existencia(insumo, selected_almacen)
             prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
             prev_minimo = existencia.stock_minimo
@@ -5083,7 +5113,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                                 f"Recomendado: {reorden_recomendado}."
                             ),
                         )
-                        return redirect("inventario:existencias")
+                        return redirect(redirect_url)
             else:
                 new_reorden = reorden_recomendado
                 reorden_auto = True
@@ -5097,7 +5127,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 or new_consumo < 0
             ):
                 messages.error(request, "Los indicadores de inventario no pueden ser negativos.")
-                return redirect("inventario:existencias")
+                return redirect(redirect_url)
 
             existencia = establecer_stock(existencia.insumo, existencia.almacen, new_stock)
             existencia.punto_reorden = new_reorden
@@ -5140,6 +5170,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 existencia.id,
                 {
                     "insumo_id": existencia.insumo_id,
+                    "almacen": existencia.almacen,
                     "from_stock": str(prev_stock),
                     "to_stock": str(existencia.stock_actual),
                     "from_reorden": str(prev_reorden),
@@ -5156,12 +5187,13 @@ def existencias(request: HttpRequest) -> HttpResponse:
                     "to_consumo_diario_promedio": str(existencia.consumo_diario_promedio),
                 },
             )
-        return redirect("inventario:existencias")
+        return redirect(redirect_url)
 
     selected_q = (request.GET.get("q") or "").strip()
-    inventory_ctx = _inventory_canonical_context(limit=200)
+    inventory_ctx = _inventory_canonical_context(limit=200, almacen=selected_almacen)
     existencias_rows = _canonicalized_existencias_rows(
         limit=200,
+        almacen=selected_almacen,
         canonical_rows=inventory_ctx["canonical_rows"],
         usage_maps=inventory_ctx["usage_maps"],
     )
@@ -5199,6 +5231,11 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "insumos": [row["canonical"] for row in inventory_ctx["canonical_rows"]],
         "can_manage_inventario": can_manage_inventario(request.user),
         "selected_q": selected_q,
+        "selected_ubicacion": selected_ubicacion,
+        "selected_ubicacion_code": selected_almacen,
+        "selected_ubicacion_label": selected_ledger["label"],
+        "selected_ubicacion_description": selected_ledger["description"],
+        "ledger_options": ledger_options,
         "reorder_formula_mode": formula_mode,
         "reorder_max_diff_pct": _inventario_reorder_max_diff_pct(),
         "formula_excel_legacy": FORMULA_EXCEL_LEGACY,

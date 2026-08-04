@@ -555,6 +555,144 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(first_job.result_summary["inventory_exits_created"], 1)
         self.assertEqual(second_job.result_summary["inventory_exits_created"], 0)
 
+    def test_transferencia_enviada_descuenta_almacen_antes_de_recibirse_en_cedis(self):
+        insumo = Insumo.objects.create(
+            nombre="Insumo en tránsito",
+            nombre_point="Insumo en tránsito",
+            codigo_point="TRANSITO-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("20"),
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            message="POINT_ALMACEN_BASELINE|branch=ALMACEN",
+        )
+        transfer_line = FakeTransferLine(
+            origin_branch={"external_id": "9", "name": "ALMACEN", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="TRANSITO-TR-1",
+            detail_external_id="TRANSITO-DET-1",
+            registered_at=datetime(2026, 8, 4, 14, 5, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 8, 4, 14, 10, tzinfo=timezone.utc),
+            received_at=None,
+            requested_by="Producción",
+            sent_by="Almacén",
+            received_by="",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("1"),
+            requested_quantity=Decimal("5"),
+            sent_quantity=Decimal("5"),
+            received_quantity=Decimal("0"),
+            is_insumo=True,
+            is_received=False,
+            is_cancelled=False,
+            is_finalized=False,
+            is_open=True,
+            raw_payload={"detail": {"Codigo": insumo.codigo_point}},
+            source_hash="transito-transfer-1",
+        )
+
+        job = PointMovementSyncService(
+            transfer_extractor=FakeTransferExtractor([transfer_line])
+        ).run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("15"),
+        )
+        self.assertFalse(
+            ExistenciaInsumo.objects.filter(insumo=insumo, almacen="CUARTO_FRIO").exists()
+        )
+        salida = MovimientoInventario.objects.get(insumo=insumo)
+        self.assertEqual(salida.tipo, MovimientoInventario.TIPO_SALIDA)
+        self.assertEqual(salida.almacen, "ALMACEN_1")
+        self.assertEqual(job.result_summary["inventory_exits_created"], 1)
+        self.assertEqual(job.result_summary["inventory_entries_created"], 0)
+
+    def test_transferencia_cancelada_reintegra_almacen_sin_crear_entrada_cedis(self):
+        insumo = Insumo.objects.create(
+            nombre="Insumo tránsito cancelado",
+            nombre_point="Insumo tránsito cancelado",
+            codigo_point="CANCEL-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("20"),
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            message="POINT_ALMACEN_BASELINE|branch=ALMACEN",
+        )
+        sent_line = FakeTransferLine(
+            origin_branch={"external_id": "9", "name": "ALMACEN", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="CANCEL-TR-1",
+            detail_external_id="CANCEL-DET-1",
+            registered_at=datetime(2026, 8, 4, 14, 5, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 8, 4, 14, 10, tzinfo=timezone.utc),
+            received_at=None,
+            requested_by="Producción",
+            sent_by="Almacén",
+            received_by="",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("1"),
+            requested_quantity=Decimal("5"),
+            sent_quantity=Decimal("5"),
+            received_quantity=Decimal("0"),
+            is_insumo=True,
+            is_received=False,
+            is_cancelled=False,
+            is_finalized=False,
+            is_open=True,
+            raw_payload={"detail": {"Codigo": insumo.codigo_point}},
+            source_hash="cancel-transfer-1",
+        )
+        service = PointMovementSyncService(transfer_extractor=FakeTransferExtractor([sent_line]))
+        service.run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+
+        service.transfer_extractor = FakeTransferExtractor(
+            [replace(sent_line, is_cancelled=True, is_open=False)]
+        )
+        second_job = service.run_transfer_sync(
+            start_date=date(2026, 8, 4),
+            end_date=date(2026, 8, 4),
+        )
+        service.run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+
+        self.assertEqual(second_job.status, "SUCCESS")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("20"),
+        )
+        self.assertFalse(
+            ExistenciaInsumo.objects.filter(insumo=insumo, almacen="CUARTO_FRIO").exists()
+        )
+        movimientos = MovimientoInventario.objects.filter(insumo=insumo)
+        self.assertEqual(movimientos.filter(tipo=MovimientoInventario.TIPO_SALIDA).count(), 1)
+        reintegro = movimientos.get(tipo=MovimientoInventario.TIPO_ENTRADA)
+        self.assertEqual(reintegro.almacen, "ALMACEN_1")
+        self.assertEqual(reintegro.cantidad, Decimal("5"))
+        self.assertEqual(reintegro.trazabilidad["source"], "POINT_TRANSFER_CANCELLED_RETURN")
+
     def test_transferencia_almacen_cedis_anterior_al_corte_no_debita_historico(self):
         insumo = Insumo.objects.create(
             nombre="Insumo histórico protegido",

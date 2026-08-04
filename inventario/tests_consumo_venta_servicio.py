@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from inventario.models import MovimientoInventario
+from inventario.models import ExistenciaInsumo, MovimientoInventario
 from inventario.services_auditoria_insumos import ConsumoInsumoAuditService
 from inventario.services_consumo_bom import ConsumoInsumoAutoService
 from maestros.models import Insumo, UnidadMedida
@@ -53,6 +53,35 @@ class ConsumoVentaServicioTests(TestCase):
         self.assertEqual(movs.count(), 2)
         self.assertEqual(sum(m.cantidad for m in movs), Decimal("50"))
         self.assertTrue(all(m.referencia.startswith("VENTA-SERV-") for m in movs))
+
+    def test_consumo_bom_descuenta_cedis_sin_tocar_almacen(self):
+        ExistenciaInsumo.objects.create(
+            insumo=self.plato,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("100"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=self.plato,
+            almacen="CUARTO_FRIO",
+            stock_actual=Decimal("80"),
+        )
+        VentaHistorica.objects.create(
+            receta=self.rebanada,
+            fecha=date(2026, 6, 5),
+            cantidad=Decimal("40"),
+        )
+
+        ConsumoInsumoAutoService().generar_consumos_produccion(
+            date(2026, 6, 1),
+            date(2026, 6, 30),
+        )
+
+        almacen = ExistenciaInsumo.objects.get(insumo=self.plato, almacen="ALMACEN_1")
+        cedis = ExistenciaInsumo.objects.get(insumo=self.plato, almacen="CUARTO_FRIO")
+        movimiento = MovimientoInventario.objects.get(insumo=self.plato)
+        self.assertEqual(almacen.stock_actual, Decimal("100"))
+        self.assertEqual(cedis.stock_actual, Decimal("40"))
+        self.assertEqual(movimiento.almacen, "CUARTO_FRIO")
 
     def test_receta_con_produccion_point_queda_fuera(self):
         VentaHistorica.objects.create(

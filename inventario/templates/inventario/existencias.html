@@ -15,8 +15,30 @@
 
 <div class="module-shell">
 
+  <section class="card card-animate" aria-labelledby="ledger-heading">
+    <div class="section-header">
+      <div>
+        <h2 id="ledger-heading">Libro de inventario</h2>
+        <p class="muted">Consulta cada ubicación por separado. Los saldos de ALMACÉN y CEDIS nunca se suman ni se compensan.</p>
+      </div>
+    </div>
+    <nav class="module-tabs" aria-label="Ubicación del inventario">
+      <a class="module-tab{% if selected_ubicacion == 'almacen' %} active{% endif %}"
+         href="?ubicacion=almacen{% if selected_q %}&amp;q={{ selected_q|urlencode }}{% endif %}"
+         {% if selected_ubicacion == 'almacen' %}aria-current="page"{% endif %}>
+        ALMACÉN · Compras y resguardo
+      </a>
+      <a class="module-tab{% if selected_ubicacion == 'cedis' %} active{% endif %}"
+         href="?ubicacion=cedis{% if selected_q %}&amp;q={{ selected_q|urlencode }}{% endif %}"
+         {% if selected_ubicacion == 'cedis' %}aria-current="page"{% endif %}>
+        CEDIS · Producción
+      </a>
+    </nav>
+    <p class="muted"><strong>{{ selected_ubicacion_label }}:</strong> {{ selected_ubicacion_description }}.</p>
+  </section>
+
   <section class="card card-animate">
-    {% include "components/section_header.html" with title="Actualizar Existencia" %}
+    {% include "components/section_header.html" with title="Actualizar existencia · "|add:selected_ubicacion_label %}
     <p class="muted">
       Fórmula activa de punto de reorden:
       {% if reorder_formula_mode == formula_excel_legacy %}
@@ -30,6 +52,7 @@
     <form method="post" class="form-grid-auto pd-u-a82d7062cc">
       {% csrf_token %}
       <input type="hidden" name="action" value="update_reorder_config">
+      <input type="hidden" name="ubicacion" value="{{ selected_ubicacion }}">
       <input class="input-field" type="number" step="0.01" min="0" name="reorder_max_diff_pct"
              value="{{ reorder_max_diff_pct }}" placeholder="Umbral máximo manual (%)">
       <button class="btn btn-secondary" type="submit">Guardar umbral de validación</button>
@@ -37,6 +60,7 @@
     <hr class="section-sep">
     <form method="post" class="form-grid-auto">
       {% csrf_token %}
+      <input type="hidden" name="ubicacion" value="{{ selected_ubicacion }}">
       <select class="input-field" name="insumo_id" required>
         <option value="">Insumo</option>
         {% for i in insumos %}<option value="{{ i.id }}">{{ i.display_name }}</option>{% endfor %}
@@ -56,7 +80,7 @@
   </section>
 
   <section class="card card-animate">
-    {% include "components/section_header.html" with title="Stock por Insumo" action_url="/inventario/existencias/?export=xlsx" action_label="Exportar" %}
+    {% include "components/section_header.html" with title="Stock por Insumo · "|add:selected_ubicacion_label action_url="/inventario/existencias/?export=xlsx&ubicacion="|add:selected_ubicacion action_label="Exportar" %}
     <div class="table-responsive">
       <table class="table table-striped">
         <thead>
