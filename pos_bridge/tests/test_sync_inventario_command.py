@@ -116,6 +116,61 @@ class SyncInventarioDesdePointCommandTests(TestCase):
 
     @patch("pos_bridge.management.commands.sync_inventario_desde_point.PointRecipeIdentityService")
     @patch("pos_bridge.management.commands.sync_inventario_desde_point.PointInventoryCostCaptureService")
+    def test_corte_bloquea_saldo_point_negativo_y_aplica_los_validos(self, capture_class, identity_class):
+        unidad, _ = UnidadMedida.objects.get_or_create(
+            codigo="kg",
+            defaults={"nombre": "Kilogramo", "tipo": UnidadMedida.TIPO_MASA},
+        )
+        insumo_valido = Insumo.objects.create(nombre="Insumo Point válido", unidad_base=unidad, activo=True)
+        insumo_negativo = Insumo.objects.create(nombre="Insumo Point negativo", unidad_base=unidad, activo=True)
+        ExistenciaInsumo.objects.create(
+            insumo=insumo_valido,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("2"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo_negativo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("9"),
+        )
+        capture_class.return_value.capture_all_rows.return_value = [
+            SimpleNamespace(
+                point_code="VALIDO-1",
+                point_name=insumo_valido.nombre,
+                quantity=Decimal("5"),
+                unit="kg",
+                kind="supply",
+            ),
+            SimpleNamespace(
+                point_code="NEGATIVO-1",
+                point_name=insumo_negativo.nombre,
+                quantity=Decimal("-2"),
+                unit="kg",
+                kind="supply",
+            ),
+        ]
+        identity_class.return_value.resolve_insumo.side_effect = [
+            SimpleNamespace(insumo=insumo_valido, method="POINT_CODE", score=100.0),
+            SimpleNamespace(insumo=insumo_negativo, method="POINT_CODE", score=100.0),
+        ]
+
+        call_command("sync_inventario_desde_point", "--apply")
+
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo_valido, almacen="ALMACEN_1").stock_actual,
+            Decimal("5"),
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo_negativo, almacen="ALMACEN_1").stock_actual,
+            Decimal("9"),
+        )
+        run = AlmacenSyncRun.objects.get(message__startswith="POINT_ALMACEN_BASELINE|")
+        self.assertEqual(run.matched, 1)
+        self.assertEqual(run.unmatched, 1)
+        self.assertEqual(run.pending_preview[0]["reason"], "SALDO_POINT_NEGATIVO")
+
+    @patch("pos_bridge.management.commands.sync_inventario_desde_point.PointRecipeIdentityService")
+    @patch("pos_bridge.management.commands.sync_inventario_desde_point.PointInventoryCostCaptureService")
     def test_corte_aborta_si_dos_filas_del_mismo_insumo_tienen_saldos_distintos(
         self,
         capture_class,
