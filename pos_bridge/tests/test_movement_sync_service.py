@@ -9,7 +9,7 @@ from django.test import TestCase
 
 from control.models import MermaPOS
 from core.models import Sucursal
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, PointPendingMatch, UnidadMedida
 from pos_bridge.models import PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
@@ -486,6 +486,134 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(existencia.stock_actual, Decimal("15.270"))
         self.assertEqual(job.result_summary["inventory_entries_created"], 1)
         self.assertEqual(job.result_summary["skipped_non_storage_branch"], 0)
+
+    def test_transferencia_almacen_cedis_posterior_al_corte_crea_doble_partida_idempotente(self):
+        insumo = Insumo.objects.create(
+            nombre="Insumo doble partida",
+            nombre_point="Insumo doble partida",
+            codigo_point="DOBLE-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("20"),
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            message="POINT_ALMACEN_BASELINE|branch=ALMACEN",
+        )
+        transfer_line = FakeTransferLine(
+            origin_branch={"external_id": "9", "name": "ALMACEN", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="DOBLE-TR-1",
+            detail_external_id="DOBLE-DET-1",
+            registered_at=datetime(2026, 8, 4, 14, 5, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 8, 4, 14, 10, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 4, 14, 20, tzinfo=timezone.utc),
+            requested_by="Producción",
+            sent_by="Almacén",
+            received_by="CEDIS",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("1"),
+            requested_quantity=Decimal("5"),
+            sent_quantity=Decimal("5"),
+            received_quantity=Decimal("5"),
+            is_insumo=True,
+            is_received=True,
+            is_cancelled=False,
+            is_finalized=True,
+            raw_payload={"detail": {"Codigo": insumo.codigo_point}},
+            source_hash="doble-transfer-1",
+        )
+        service = PointMovementSyncService(transfer_extractor=FakeTransferExtractor([transfer_line]))
+
+        first_job = service.run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+        second_job = service.run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+
+        self.assertEqual(first_job.status, "SUCCESS")
+        self.assertEqual(second_job.status, "SUCCESS")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("15"),
+        )
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="CUARTO_FRIO").stock_actual,
+            Decimal("5"),
+        )
+        movimientos = MovimientoInventario.objects.filter(insumo=insumo)
+        self.assertEqual(movimientos.filter(tipo=MovimientoInventario.TIPO_ENTRADA).count(), 1)
+        salida = movimientos.get(tipo=MovimientoInventario.TIPO_SALIDA)
+        self.assertEqual(salida.almacen, "ALMACEN_1")
+        self.assertEqual(salida.cantidad, Decimal("5"))
+        self.assertEqual(first_job.result_summary["inventory_exits_created"], 1)
+        self.assertEqual(second_job.result_summary["inventory_exits_created"], 0)
+
+    def test_transferencia_almacen_cedis_anterior_al_corte_no_debita_historico(self):
+        insumo = Insumo.objects.create(
+            nombre="Insumo histórico protegido",
+            nombre_point="Insumo histórico protegido",
+            codigo_point="HIST-001",
+            unidad_base=self.unit,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("20"),
+        )
+        AlmacenSyncRun.objects.create(
+            source=AlmacenSyncRun.SOURCE_MANUAL,
+            status=AlmacenSyncRun.STATUS_OK,
+            started_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 8, 4, 14, 0, tzinfo=timezone.utc),
+            message="POINT_ALMACEN_BASELINE|branch=ALMACEN",
+        )
+        transfer_line = FakeTransferLine(
+            origin_branch={"external_id": "9", "name": "ALMACEN", "status": "ACTIVE", "metadata": {}},
+            destination_branch={"external_id": "8", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            transfer_external_id="HIST-TR-1",
+            detail_external_id="HIST-DET-1",
+            registered_at=datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 8, 4, 12, 10, tzinfo=timezone.utc),
+            received_at=datetime(2026, 8, 4, 12, 20, tzinfo=timezone.utc),
+            requested_by="Producción",
+            sent_by="Almacén",
+            received_by="CEDIS",
+            item_name=insumo.nombre,
+            item_code=insumo.codigo_point,
+            unit="PZA",
+            unit_cost=Decimal("1"),
+            requested_quantity=Decimal("5"),
+            sent_quantity=Decimal("5"),
+            received_quantity=Decimal("5"),
+            is_insumo=True,
+            is_received=True,
+            is_cancelled=False,
+            is_finalized=True,
+            raw_payload={"detail": {"Codigo": insumo.codigo_point}},
+            source_hash="historical-transfer-1",
+        )
+
+        job = PointMovementSyncService(
+            transfer_extractor=FakeTransferExtractor([transfer_line])
+        ).run_transfer_sync(start_date=date(2026, 8, 4), end_date=date(2026, 8, 4))
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(
+            ExistenciaInsumo.objects.get(insumo=insumo, almacen="ALMACEN_1").stock_actual,
+            Decimal("20"),
+        )
+        self.assertFalse(
+            MovimientoInventario.objects.filter(insumo=insumo, tipo=MovimientoInventario.TIPO_SALIDA).exists()
+        )
+        self.assertEqual(job.result_summary["inventory_exits_created"], 0)
 
     def test_modo_snapshot_refresca_lineas_sin_escribir_inventario(self):
         """Contrato logística/inventario: la ruta se guía por Point (snapshot);
