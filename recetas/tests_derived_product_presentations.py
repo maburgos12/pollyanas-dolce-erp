@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from core.models import Sucursal
 from control.models import MermaPOS
-from inventario.models import ExistenciaInsumo
+from inventario.models import UBICACION_CEDIS, ExistenciaInsumo
 from inventario.models import MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.models import (
@@ -210,7 +210,11 @@ class DerivedProductPresentationCostingTests(TestCase):
         )
 
     def test_plan_explosion_adds_parent_product_requirement_for_derived_recipe(self):
-        ExistenciaInsumo.objects.create(insumo=self.packaging, stock_actual=Decimal("20"))
+        ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen=UBICACION_CEDIS,
+            stock_actual=Decimal("20"),
+        )
         InventarioCedisProducto.objects.create(
             receta=self.parent,
             stock_actual=Decimal("1"),
@@ -236,7 +240,11 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(explosion["alertas_capacidad"], 1)
 
     def test_mrp_form_shows_parent_product_requirement_for_derived_recipe(self):
-        ExistenciaInsumo.objects.create(insumo=self.packaging, stock_actual=Decimal("20"))
+        ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen=UBICACION_CEDIS,
+            stock_actual=Decimal("20"),
+        )
         InventarioCedisProducto.objects.create(
             receta=self.parent,
             stock_actual=Decimal("0"),
@@ -260,7 +268,11 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertContains(response, self.parent.nombre)
 
     def test_plan_consumption_apply_creates_idempotent_ledger_movements(self):
-        packaging_ex = ExistenciaInsumo.objects.create(insumo=self.packaging, stock_actual=Decimal("20"))
+        packaging_ex = ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen=UBICACION_CEDIS,
+            stock_actual=Decimal("20"),
+        )
         parent_inventory = InventarioCedisProducto.objects.create(
             receta=self.parent,
             stock_actual=Decimal("3"),
@@ -294,8 +306,54 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(second_stats["insumos_skipped"], 1)
         self.assertEqual(second_stats["productos_skipped"], 1)
 
+    def test_plan_consumption_descuenta_cedis_sin_compensar_almacen(self):
+        almacen = ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("100"),
+        )
+        cedis = ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen="CUARTO_FRIO",
+            stock_actual=Decimal("20"),
+        )
+        InventarioCedisProducto.objects.create(
+            receta=self.parent,
+            stock_actual=Decimal("3"),
+            stock_reservado=Decimal("0"),
+        )
+        plan = PlanProduccion.objects.create(
+            nombre="Plan con libros separados",
+            fecha_produccion=date(2026, 3, 19),
+        )
+        PlanProduccionItem.objects.create(
+            plan=plan,
+            receta=self.derived,
+            cantidad=Decimal("12"),
+        )
+
+        explosion = _plan_explosion(plan)
+        packaging_row = next(row for row in explosion["insumos"] if row["insumo_id"] == self.packaging.id)
+        self.assertEqual(packaging_row["stock_actual"], Decimal("20"))
+
+        _apply_plan_consumption(plan, self.user)
+
+        almacen.refresh_from_db()
+        cedis.refresh_from_db()
+        movimiento = MovimientoInventario.objects.get(
+            insumo=self.packaging,
+            referencia=f"PLAN-PROD:{plan.id}",
+        )
+        self.assertEqual(almacen.stock_actual, Decimal("100"))
+        self.assertEqual(cedis.stock_actual, Decimal("8"))
+        self.assertEqual(movimiento.almacen, "CUARTO_FRIO")
+
     def test_plan_detail_shows_simulation_and_applied_consumption_status(self):
-        ExistenciaInsumo.objects.create(insumo=self.packaging, stock_actual=Decimal("20"))
+        ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen=UBICACION_CEDIS,
+            stock_actual=Decimal("20"),
+        )
         InventarioCedisProducto.objects.create(
             receta=self.parent,
             stock_actual=Decimal("3"),
@@ -323,7 +381,11 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertContains(response_after, "Aplicado")
 
     def test_plan_close_marks_formal_closed_state(self):
-        ExistenciaInsumo.objects.create(insumo=self.packaging, stock_actual=Decimal("20"))
+        ExistenciaInsumo.objects.create(
+            insumo=self.packaging,
+            almacen=UBICACION_CEDIS,
+            stock_actual=Decimal("20"),
+        )
         InventarioCedisProducto.objects.create(
             receta=self.parent,
             stock_actual=Decimal("3"),

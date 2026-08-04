@@ -1007,6 +1007,88 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Nombre Point Operativo")
 
+    def test_existencias_separa_almacen_y_cedis_sin_sumarlos(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-ledger-separado",
+            nombre="Kilogramo libros separados",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Azúcar mascabado libros separados",
+            categoria="Materia prima",
+            unidad_base=unidad,
+            activo=True,
+            codigo_point="LEDGER-SEP-001",
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("125"),
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="CUARTO_FRIO",
+            stock_actual=Decimal("18"),
+        )
+
+        response_almacen = self.client.get(reverse("inventario:existencias"))
+        response_cedis = self.client.get(reverse("inventario:existencias"), {"ubicacion": "cedis"})
+
+        almacen_row = next(row for row in response_almacen.context["existencias"] if row.insumo.id == insumo.id)
+        cedis_row = next(row for row in response_cedis.context["existencias"] if row.insumo.id == insumo.id)
+        self.assertEqual(response_almacen.context["selected_ubicacion"], "almacen")
+        self.assertEqual(response_cedis.context["selected_ubicacion"], "cedis")
+        self.assertEqual(almacen_row.stock_actual, Decimal("125"))
+        self.assertEqual(cedis_row.stock_actual, Decimal("18"))
+        self.assertContains(response_almacen, "Stock real de compras y resguardo")
+        self.assertContains(response_cedis, "Stock disponible para producción")
+
+    def test_actualizar_existencia_cedis_no_modifica_almacen(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-update-cds",
+            nombre="Kilogramo ajuste CEDIS",
+            tipo=UnidadMedida.TIPO_MASA,
+            factor_to_base=Decimal("1000"),
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo ajuste separado",
+            categoria="Materia prima",
+            unidad_base=unidad,
+            activo=True,
+            codigo_point="UPDATE-CDS-001",
+        )
+        almacen = ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_actual=Decimal("90"),
+        )
+        cedis = ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="CUARTO_FRIO",
+            stock_actual=Decimal("10"),
+        )
+
+        response = self.client.post(
+            reverse("inventario:existencias"),
+            {
+                "ubicacion": "cedis",
+                "insumo_id": str(insumo.id),
+                "stock_actual": "14",
+                "stock_minimo": "2",
+                "stock_maximo": "20",
+                "inventario_promedio": "12",
+                "dias_llegada_pedido": "1",
+                "consumo_diario_promedio": "3",
+            },
+        )
+
+        almacen.refresh_from_db()
+        cedis.refresh_from_db()
+        self.assertRedirects(response, f"{reverse('inventario:existencias')}?ubicacion=cedis")
+        self.assertEqual(almacen.stock_actual, Decimal("90"))
+        self.assertEqual(cedis.stock_actual, Decimal("14"))
+
     def test_existencias_aggregates_duplicate_variants_into_one_canonical_row(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Existencias Canon", activo=True)
         unidad = UnidadMedida.objects.create(

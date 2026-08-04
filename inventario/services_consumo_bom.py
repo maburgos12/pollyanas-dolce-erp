@@ -13,7 +13,7 @@ from maestros.models import Insumo
 from pos_bridge.models import PointProductionLine
 from recetas.models import LineaReceta, Receta, VentaHistorica
 
-from .models import ExistenciaInsumo, MovimientoInventario
+from .models import UBICACION_CEDIS, ExistenciaInsumo, MovimientoInventario
 from .services_auditoria_insumos import DECIMAL_ZERO, ConsumoInsumoAuditService, parse_period, period_bounds
 from .services_existencias import aplicar_delta
 
@@ -344,8 +344,17 @@ class ConsumoInsumoAutoService:
         }
         existing = MovimientoInventario.objects.filter(source_hash=item.source_hash).first()
         if existing is None:
-            MovimientoInventario.objects.create(source_hash=item.source_hash, **defaults)
-            self._apply_stock_delta(item.insumo, -item.cantidad, created_automatically=True)
+            MovimientoInventario.objects.create(
+                source_hash=item.source_hash,
+                almacen=UBICACION_CEDIS,
+                **defaults,
+            )
+            self._apply_stock_delta(
+                item.insumo,
+                UBICACION_CEDIS,
+                -item.cantidad,
+                created_automatically=True,
+            )
             return True, False
 
         old_qty = Decimal(str(existing.cantidad or 0))
@@ -358,19 +367,32 @@ class ConsumoInsumoAutoService:
         )
         if not changed:
             return False, False
+        ledger_location = existing.almacen or UBICACION_CEDIS
         if existing.insumo_id == item.insumo.id:
-            self._apply_stock_delta(item.insumo, -(new_qty - old_qty))
+            self._apply_stock_delta(item.insumo, ledger_location, -(new_qty - old_qty))
         else:
-            self._apply_stock_delta(existing.insumo, old_qty)
-            self._apply_stock_delta(item.insumo, -new_qty, created_automatically=True)
+            self._apply_stock_delta(existing.insumo, ledger_location, old_qty)
+            self._apply_stock_delta(
+                item.insumo,
+                ledger_location,
+                -new_qty,
+                created_automatically=True,
+            )
         for field, value in defaults.items():
             setattr(existing, field, value)
         existing.save(update_fields=["fecha", "tipo", "insumo", "cantidad", "referencia"])
         return False, True
 
-    def _apply_stock_delta(self, insumo: Insumo, delta: Decimal, *, created_automatically: bool = False) -> None:
-        created = not ExistenciaInsumo.objects.filter(insumo=insumo, almacen="ALMACEN_1").exists()
-        existencia = aplicar_delta(insumo, "ALMACEN_1", delta, permitir_negativo=True)
+    def _apply_stock_delta(
+        self,
+        insumo: Insumo,
+        almacen: str,
+        delta: Decimal,
+        *,
+        created_automatically: bool = False,
+    ) -> None:
+        created = not ExistenciaInsumo.objects.filter(insumo=insumo, almacen=almacen).exists()
+        existencia = aplicar_delta(insumo, almacen, delta, permitir_negativo=True)
         if created or created_automatically:
             trace = dict(existencia.trazabilidad_stock or {})
             trace["creado_automaticamente"] = True

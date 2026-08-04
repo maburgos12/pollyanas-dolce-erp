@@ -37,7 +37,7 @@ from core.access import can_manage_compras, can_view_recetas, is_branch_capture_
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal, sucursales_operativas
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import UBICACION_CEDIS, ExistenciaInsumo, MovimientoInventario
 from inventario.services_existencias import aplicar_delta
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.config import load_point_bridge_settings
@@ -3737,7 +3737,7 @@ def _reabasto_branch_supply_rows(
 
     existencia_map = {
         int(item.insumo_id): item
-        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen="ALMACEN_1").select_related("insumo")
+        for item in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen=UBICACION_CEDIS).select_related("insumo")
     }
 
     rows: list[dict[str, object]] = []
@@ -4459,7 +4459,7 @@ def _plan_branch_supply_rows(
 
     existencia_map = {
         int(existencia.insumo_id): existencia
-        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen="ALMACEN_1").select_related("insumo")
+        for existencia in ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids, almacen=UBICACION_CEDIS).select_related("insumo")
     }
 
     rows: list[dict[str, object]] = []
@@ -9476,11 +9476,12 @@ def _apply_plan_consumption(plan: PlanProduccion, acted_by) -> dict[str, int]:
             movimiento = MovimientoInventario.objects.create(
                 tipo=MovimientoInventario.TIPO_CONSUMO,
                 insumo=insumo_canonical,
+                almacen=UBICACION_CEDIS,
                 cantidad=cantidad,
                 referencia=referencia,
                 source_hash=source_hash,
             )
-            aplicar_delta(insumo_canonical, "ALMACEN_1", -cantidad)
+            aplicar_delta(insumo_canonical, UBICACION_CEDIS, -cantidad)
             log_event(
                 acted_by,
                 "CREATE",
@@ -9678,7 +9679,7 @@ def _plan_explosion(plan: PlanProduccion) -> Dict[str, Any]:
         e.insumo_id: Decimal(str(e.stock_actual or 0))
         for e in ExistenciaInsumo.objects.filter(
             insumo_id__in=list(insumos_map.keys()),
-            almacen="ALMACEN_1",
+            almacen=UBICACION_CEDIS,
         )
     }
     alertas_capacidad = 0
@@ -9973,7 +9974,7 @@ def _periodo_mrp_resumen(
         e.insumo_id: Decimal(str(e.stock_actual or 0))
         for e in ExistenciaInsumo.objects.filter(
             insumo_id__in=list(insumos_map.keys()),
-            almacen="ALMACEN_1",
+            almacen=UBICACION_CEDIS,
         )
     }
 

@@ -22,3 +22,7 @@ def latest_point_almacen_baseline_run() -> AlmacenSyncRun | None:
 
 def point_transfer_origin_exit_hash(source_hash: str) -> str:
     return hashlib.sha256(f"{source_hash}|ALMACEN_ORIGIN_EXIT".encode()).hexdigest()
+
+
+def point_transfer_cancelled_return_hash(source_hash: str) -> str:
+    return hashlib.sha256(f"{source_hash}|ALMACEN_CANCELLED_RETURN".encode()).hexdigest()
