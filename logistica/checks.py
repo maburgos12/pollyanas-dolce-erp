@@ -139,7 +139,7 @@ REQUIRED_TEMPLATE_MARKERS = {
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
-    "pollyanas-logistica-pwa-v80-combustible-km-turno": "cache versionado de la PWA",
+    "pollyanas-logistica-pwa-v81-android-corporativa": "cache versionado de la PWA",
     'event.request.mode === "navigate"': "estrategia network-first para navegacion",
     'url.pathname === "/logistica/app/"': "estrategia network-first para el app shell",
 }

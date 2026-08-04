@@ -5154,8 +5154,17 @@ if (operation === "segment") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v79-entrega-administrativa")
-        self.assertIn("?v=route-control-v79-entrega-administrativa", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v81-android-corporativa")
+        self.assertIn("?v=route-control-v81-android-corporativa", html)
+
+    def test_pwa_expone_puente_android_solo_como_mejora_progresiva(self):
+        html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
+
+        self.assertIn("window.PollyanasNative?.storeTokens", html)
+        self.assertIn("window.PollyanasNative?.startRouteTracking", html)
+        self.assertIn("window.PollyanasNative?.stopRouteTracking", html)
+        self.assertIn("window.PollyanasNative?.clearSession", html)
+        self.assertIn("window.setInterval(() => enviarTrackingAutomaticoRuta", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")

@@ -1605,7 +1605,7 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
             set(REQUIRED_TEMPLATE_MARKERS),
             {"route-control-v80-combustible-km-turno"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v80-combustible-km-turno", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v81-android-corporativa", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5110,7 +5110,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("logistica:pwa_sw", pwa_html)
         self.assertIn("?v=route-control-v80-combustible-km-turno", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v80-combustible-km-turno", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v81-android-corporativa", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5255,7 +5255,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v80-combustible-km-turno", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v81-android-corporativa", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

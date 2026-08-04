@@ -1494,7 +1494,7 @@
   </head>
   <body>
     <div id="app"></div>
-    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v63-carga-tramos-consolidada"></script>
+    <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v81-android-corporativa"></script>
     <script>
       const API = "/api/logistica";
       const PHOTO_MAX_AGE_MS = 5 * 60 * 1000;
@@ -2368,6 +2368,9 @@
         state.routeAutoTrackingBusy = false;
         state.routeAutoTrackingStatus = "idle";
         releaseRouteWakeLock();
+        if (window.PollyanasNative?.stopRouteTracking) {
+          window.PollyanasNative.stopRouteTracking();
+        }
       }
 
       function rutaAutoTrackingActiva(rutaId) {
@@ -2459,6 +2462,10 @@
         stopRutaAutoTracking();
         state.routeAutoTrackingRutaId = rutaId;
         state.routeAutoTrackingStatus = "activo";
+        if (window.PollyanasNative?.startRouteTracking) {
+          window.PollyanasNative.startRouteTracking(String(rutaId));
+          return;
+        }
         requestRouteWakeLock();
         enviarTrackingAutomaticoRuta(rutaId);
         state.routeAutoTrackingTimer = window.setInterval(() => enviarTrackingAutomaticoRuta(rutaId), ROUTE_AUTO_TRACKING_INTERVAL_MS);
@@ -2479,6 +2486,9 @@
         state.token = data.access;
         state.refreshToken = data.refresh || "";
         sessionStorage.setItem(ACCESS_TOKEN_KEY, data.access);
+        if (window.PollyanasNative?.storeTokens) {
+          window.PollyanasNative.storeTokens(data.access, data.refresh || "");
+        }
       }
 
       async function useDjangoSessionToken() {
@@ -2500,6 +2510,9 @@
         sessionStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
+        if (window.PollyanasNative?.clearSession) {
+          window.PollyanasNative.clearSession();
+        }
         localStorage.removeItem(TRACKING_QUEUE_KEY);
         for (let index = localStorage.length - 1; index >= 0; index -= 1) {
           const key = localStorage.key(index);

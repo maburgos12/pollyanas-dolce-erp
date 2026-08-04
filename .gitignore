@@ -61,6 +61,13 @@ htmlcov/
 # Build artifacts
 build/
 dist/
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
 
 # Archive de proceso de desarrollo
 _archive/
