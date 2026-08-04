@@ -80,6 +80,11 @@ def _normalize_text(value: str) -> str:
     return (value or "").strip()
 
 
+def _point_folio_without_report_prefix(value: str) -> str:
+    raw = _normalize_text(str(value or ""))
+    return re.sub(r"^nota(?:\s+|[:#-]\s*)", "", raw, flags=re.IGNORECASE).strip()
+
+
 def _lock_external_key(external_source: str, external_id: str) -> None:
     if connection.vendor != "postgresql":
         raise RuntimeError("La API omnicanal requiere PostgreSQL")
@@ -254,15 +259,16 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
             "Point devolvió una estructura inválida al buscar notas.",
         )
 
-    expected_folio = _normalize_text(folio).casefold()
+    expected_folio = _point_folio_without_report_prefix(folio).casefold()
     expected_branch = normalize_text(sucursal)
     candidates = []
     for row in payload:
         if not isinstance(row, dict):
             continue
         row_folio = str(row.get("FOLIO") or row.get("Folio") or "").strip()
+        canonical_folio = _point_folio_without_report_prefix(row_folio)
         row_branch = str(row.get("SUCURSAL") or row.get("Sucursal") or "").strip()
-        if row_folio.casefold() != expected_folio:
+        if canonical_folio.casefold() != expected_folio:
             continue
         if normalize_text(row_branch) != expected_branch:
             continue
@@ -277,7 +283,7 @@ def _fetch_point_note_candidates(*, folio, sucursal, fecha=None):
         candidates.append(
             {
                 "pk_nota": pk_nota,
-                "folio": row_folio,
+                "folio": canonical_folio,
                 "sucursal": row_branch,
                 "fecha": day.isoformat(),
                 "hora": str(row.get("HORA") or row.get("Hora") or "").strip(),

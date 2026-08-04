@@ -908,6 +908,48 @@ class CanonicalOmnichannelApiTests(APITestCase):
         session.close.assert_called_once()
 
     @patch("api.omnichannel_views.PointTicketThresholdService")
+    def test_note_search_accepts_visible_ticket_folio_when_report_prefixes_nota(self, service_type):
+        session = MagicMock()
+        session.get.return_value.json.return_value = [
+            {
+                "PK_NOTA": "886602",
+                "FOLIO": "NOTA 15607",
+                "SUCURSAL": "Matriz",
+                "DIA": "03/08/2026",
+                "HORA": "10:48",
+                "MONTO": "493.84",
+                "FACTURADO": False,
+                "CANAL_VENTA": "Mostrador",
+                "TIPO": "Contado",
+            },
+        ]
+        service = service_type.return_value
+        service.NOTES_BY_PLAZA_PATH = "/Report/NotasByPlaza"
+        service.settings = SimpleNamespace(
+            base_url="https://point.test",
+            timeout_ms=30000,
+        )
+        service._build_params.return_value = {"fi": "1", "ff": "2"}
+        service.http_session_service.create.return_value = SimpleNamespace(
+            session=session,
+        )
+
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {
+                "folio": "15607",
+                "sucursal": "Matriz",
+                "fecha": "2026-08-03",
+            },
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["pk_nota"], "886602")
+        self.assertEqual(response.data["results"][0]["folio"], "15607")
+
+    @patch("api.omnichannel_views.PointTicketThresholdService")
     def test_note_search_without_date_uses_small_default_window(self, service_type):
         session = MagicMock()
         session.get.return_value.json.return_value = []
