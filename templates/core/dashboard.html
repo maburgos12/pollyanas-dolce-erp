@@ -15,6 +15,11 @@
         <div class="executive-eyebrow">Dirección general</div>
         <div class="dashboard-hero-title">Pulso operativo del día</div>
         <div class="dashboard-hero-subtitle">Corte comercial confirmado por Point, presión operativa y riesgos que sí requieren decisión hoy.</div>
+        {% if puede_gestionar_compras_departamentales %}
+        <div class="executive-inline-actions">
+            <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm" data-departmental-purchases-shortcut="dashboard">Compras departamentales</a>
+        </div>
+        {% endif %}
     </div>
     <div class="dashboard-hero-badges">
         {% if daily_sales_snapshot %}
@@ -964,6 +969,9 @@
                     </div>
                 </div>
                 <div class="executive-inline-actions executive-inline-actions-wrap">
+                    {% if puede_gestionar_compras_departamentales %}
+                    <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm">Compras departamentales</a>
+                    {% endif %}
                     {% if can_view_maestros %}
                     <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary btn-sm">Insumos</a>
                     <a href="{% url 'maestros:proveedor_list' %}" class="btn btn-secondary btn-sm">Proveedores</a>

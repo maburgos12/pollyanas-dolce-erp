@@ -4,9 +4,12 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.template.loader import render_to_string
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
+from core.access import can_manage_compras
+from core.navigation import build_nav_groups
 from core.models import UserModuleAccess
 from core.private_operational_media import _can_access_operational_media
 
@@ -207,7 +210,7 @@ class ComprasDepartamentalesViewTests(TestCase):
         user_model = get_user_model()
         self.responsable = user_model.objects.create_user("paula", password="test")
         self.ajena = user_model.objects.create_user("otra", password="test")
-        self.comprador = user_model.objects.create_user("jorge", password="test")
+        self.comprador = user_model.objects.create_user("comprador", password="test")
         self.dg = user_model.objects.create_user("direccion", password="test")
         self.area = AreaPresupuesto.objects.create(nombre="Capital Humano", codigo="capital-humano")
         self.otra_area = AreaPresupuesto.objects.create(nombre="Administración", codigo="administracion")
@@ -276,6 +279,53 @@ class ComprasDepartamentalesViewTests(TestCase):
         self.assertContains(response, "Refrigerador")
         self.assertContains(response, "Bandeja de Compras")
         self.assertNotContains(response, "Materia prima")
+
+    def test_responsable_de_administracion_gestiona_bandeja_sin_compras_de_insumos(self):
+        self.assertFalse(can_manage_compras(self.ajena))
+        self.client.force_login(self.ajena)
+
+        response = self.client.get(reverse("compras:departamental_bandeja"))
+        inicio = self.client.get(reverse("compras:departamental_inicio"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertRedirects(
+            inicio,
+            reverse("compras:departamental_bandeja"),
+            fetch_redirect_response=False,
+        )
+
+    def test_compras_departamentales_aparece_en_administracion_y_no_en_operacion(self):
+        grupos = build_nav_groups(self.ajena, "/dashboard/")
+        administracion = next(group for group in grupos if group["key"] == "administracion")
+        operacion = next((group for group in grupos if group["key"] == "operacion"), {"items": []})
+        mi_trabajo = next(group for group in grupos if group["key"] == "mi_trabajo")
+
+        self.assertIn("Compras departamentales", [item["label"] for item in administracion["items"]])
+        self.assertNotIn("Compras departamentales", [item["label"] for item in operacion["items"]])
+        self.assertNotIn("Compras departamentales", [item["label"] for item in mi_trabajo["items"]])
+
+    def test_responsable_de_otra_area_conserva_acceso_personal_sin_bandeja_admin(self):
+        grupos = build_nav_groups(self.responsable, "/dashboard/")
+        mi_trabajo = next(group for group in grupos if group["key"] == "mi_trabajo")
+        administracion = next((group for group in grupos if group["key"] == "administracion"), {"items": []})
+
+        self.assertIn("Compras departamentales", [item["label"] for item in mi_trabajo["items"]])
+        self.assertNotIn("Compras departamentales", [item["label"] for item in administracion["items"]])
+
+    def test_dashboard_normal_y_ejecutivo_muestran_acceso_departamental(self):
+        contexto = {"puede_gestionar_compras_departamentales": True}
+        request = RequestFactory().get("/dashboard/")
+        request.user = self.ajena
+
+        dashboard = render_to_string("core/dashboard.html", contexto, request=request)
+        ejecutivo = render_to_string("core/dashboard_executive.html", contexto, request=request)
+
+        self.assertIn(reverse("compras:departamental_inicio"), dashboard)
+        self.assertIn("Compras departamentales", dashboard)
+        self.assertIn('data-departmental-purchases-shortcut="dashboard"', dashboard)
+        self.assertIn(reverse("compras:departamental_inicio"), ejecutivo)
+        self.assertIn("Compras departamentales", ejecutivo)
+        self.assertIn('data-departmental-purchases-shortcut="executive"', ejecutivo)
 
     def test_seguimiento_muestra_siguiente_responsable_y_no_convierte_diferencia_en_falla(self):
         solicitud = SolicitudCompraDepartamental.objects.create(
@@ -361,7 +411,7 @@ class ComprasDepartamentalesViewTests(TestCase):
                 self.comprador, "compras/departamentales/2026/09/rack.jpg"
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             _can_access_operational_media(
                 self.ajena, "compras/departamentales/2026/09/rack.jpg"
             )

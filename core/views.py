@@ -24,6 +24,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
+from compras.access_departamentales import puede_gestionar_compras_departamentales
 from core.access import (
     ROLE_ADMIN,
     ROLE_DG,
@@ -2845,6 +2846,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "can_view_recetas": can_view_recetas(u),
             "can_view_compras": can_view_compras(u),
             "can_manage_compras": can_manage_compras(u),
+            "puede_gestionar_compras_departamentales": puede_gestionar_compras_departamentales(u),
             "can_view_crm": can_view_crm(u),
             "can_manage_crm": can_manage_crm(u),
             "can_view_logistica": can_view_logistica(u),
