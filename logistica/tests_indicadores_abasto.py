@@ -154,6 +154,14 @@ class IndicadoresAbastoServiceTests(TestCase):
             abierta=True,
         )
         self._transferencia(
+            suffix="PENDIENTE-CEDIS",
+            solicitado="6",
+            enviado="0",
+            enviada=False,
+            recibida=False,
+            abierta=True,
+        )
+        self._transferencia(
             suffix="VIEJA",
             solicitado="99",
             enviado="99",
@@ -180,20 +188,28 @@ class IndicadoresAbastoServiceTests(TestCase):
 
         self.assertIn("rows", reporte)
         self.assertIn("totals", reporte)
-        self.assertEqual(len(reporte["rows"]), 3)
-        self.assertEqual(reporte["totals"]["solicitado"], Decimal("19"))
+        self.assertEqual(len(reporte["rows"]), 4)
+        self.assertEqual(reporte["totals"]["solicitado"], Decimal("25"))
         self.assertEqual(reporte["totals"]["enviado"], Decimal("12"))
         self.assertEqual(reporte["totals"]["recibido"], Decimal("7"))
-        self.assertEqual(reporte["totals"]["pendientes"], 1)
+        self.assertEqual(reporte["totals"]["pendientes"], 2)
+        self.assertEqual(reporte["totals"]["solicitado_evaluado"], Decimal("15"))
+        self.assertEqual(reporte["totals"]["enviado_evaluado"], Decimal("8"))
+        self.assertEqual(reporte["totals"]["recibido_evaluado"], Decimal("7"))
         self.assertEqual(reporte["totals"]["brecha_abasto"], Decimal("7"))
         self.assertEqual(reporte["totals"]["brecha_entrega"], Decimal("1"))
-        self.assertEqual(reporte["totals"]["porcentaje_abasto"], Decimal("63.2"))
+        self.assertEqual(reporte["totals"]["porcentaje_abasto"], Decimal("53.3"))
         self.assertEqual(reporte["totals"]["porcentaje_entrega"], Decimal("87.5"))
         self.assertEqual(reporte["totals"]["porcentaje_total_evaluado"], Decimal("46.7"))
+        self.assertEqual(reporte["totals"]["pendientes_envio_lineas"], 1)
+        self.assertEqual(reporte["totals"]["pendientes_envio_solicitado"], Decimal("6"))
+        self.assertEqual(reporte["totals"]["pendientes_recepcion_lineas"], 1)
+        self.assertEqual(reporte["totals"]["pendientes_recepcion_enviado"], Decimal("4"))
         estados = {row["transfer_external_id"]: row["estado"] for row in reporte["rows"]}
         self.assertEqual(estados["TR-MIXTA"], "BRECHA_MIXTA")
         self.assertEqual(estados["TR-CERO"], "NO_SURTIDO")
-        self.assertEqual(estados["TR-PENDIENTE"], "PENDIENTE")
+        self.assertEqual(estados["TR-PENDIENTE"], "PENDIENTE_RECEPCION")
+        self.assertEqual(estados["TR-PENDIENTE-CEDIS"], "PENDIENTE_ENVIO")
         fila_mixta = next(row for row in reporte["rows"] if row["transfer_external_id"] == "TR-MIXTA")
         self.assertEqual(fila_mixta["cargado"], Decimal("8"))
         self.assertEqual(fila_mixta["ruta_folio"], "RUT-IND-001")
@@ -205,6 +221,10 @@ class IndicadoresAbastoServiceTests(TestCase):
         self.assertEqual(reporte["por_ruta"][0]["etiqueta"], "RUT-IND-001 · CEDIS - Plaza Nío")
         self.assertEqual(reporte["por_ruta"][0]["responsable"], "Luis Repartidor")
         self.assertEqual(reporte["por_ruta"][0]["cargado"], Decimal("8"))
+        self.assertEqual(reporte["por_ruta"][0]["brecha_carga"], Decimal("0"))
+        self.assertEqual(reporte["por_ruta"][0]["brecha_ruta"], Decimal("1"))
+        self.assertEqual(reporte["por_ruta"][0]["porcentaje_carga"], Decimal("100.0"))
+        self.assertEqual(reporte["por_ruta"][0]["porcentaje_ruta"], Decimal("87.5"))
         workbook = load_workbook(
             BytesIO(
                 build_indicadores_abasto_xlsx(
@@ -215,6 +235,38 @@ class IndicadoresAbastoServiceTests(TestCase):
             read_only=True,
         )
         self.assertEqual(workbook["Por producto"]["B2"].value, "Pastel de prueba")
+
+    def test_sobrantes_se_reportan_sin_compensar_faltantes(self):
+        self._transferencia(
+            suffix="FALTANTE",
+            solicitado="10",
+            enviado="8",
+            recibido="8",
+            recibida=True,
+        )
+        self._transferencia(
+            suffix="SOBRANTE",
+            solicitado="3",
+            enviado="10",
+            recibido="10",
+            recibida=True,
+        )
+
+        reporte = build_indicadores_abasto(
+            fecha_desde=self.FECHA,
+            fecha_hasta=self.FECHA,
+            tipo="productos",
+            unidad="PZA",
+        )
+
+        self.assertEqual(reporte["totals"]["solicitado_evaluado"], Decimal("13"))
+        self.assertEqual(reporte["totals"]["enviado_evaluado"], Decimal("11"))
+        self.assertEqual(reporte["totals"]["recibido_evaluado"], Decimal("11"))
+        self.assertEqual(reporte["totals"]["brecha_abasto"], Decimal("2"))
+        self.assertEqual(reporte["totals"]["sobrante_envio"], Decimal("7"))
+        self.assertEqual(reporte["totals"]["sobrante_recepcion"], Decimal("0"))
+        self.assertEqual(reporte["totals"]["porcentaje_abasto"], Decimal("84.6"))
+        self.assertEqual(reporte["totals"]["porcentaje_total_evaluado"], Decimal("84.6"))
 
     def test_reporta_unidades_por_separado_cuando_no_hay_filtro(self):
         self._transferencia(
@@ -289,6 +341,10 @@ class IndicadoresAbastoViewsTests(TestCase):
         self.assertContains(response, "Recibido")
         self.assertContains(response, "Descargar Excel")
         self.assertContains(response, "Dónde se queda el producto")
+        self.assertContains(response, "Solo transferencias cerradas")
+        self.assertContains(response, "Pendiente de envío CEDIS")
+        self.assertContains(response, "Pendiente de recepción sucursal")
+        self.assertContains(response, "Cumplimiento final solicitado–recibido")
 
     def test_url_directa_rechaza_usuario_sin_acceso_a_logistica(self):
         outsider = User.objects.create_user(username="sin.logistica", password="pass123")
@@ -314,6 +370,11 @@ class IndicadoresAbastoViewsTests(TestCase):
         headers = [cell.value for cell in next(workbook["Detalle"].iter_rows())]
         self.assertIn("Cargado", headers)
         self.assertIn("Estado / causa", headers)
+        self.assertIn("Responsable del siguiente paso", headers)
+        summary_labels = [row[0].value for row in workbook["Resumen"].iter_rows(min_row=2)]
+        self.assertIn("Solicitado evaluado", summary_labels)
+        self.assertIn("Pendiente de envío CEDIS", summary_labels)
+        self.assertIn("Pendiente de recepción sucursal", summary_labels)
 
     def test_navegacion_horizontal_incluye_indicadores(self):
         response = self.client.get(reverse("logistica:home"))

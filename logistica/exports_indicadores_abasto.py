@@ -54,24 +54,32 @@ def build_indicadores_abasto_xlsx(report, filters):
         for unit in report["por_unidad"]:
             summary_rows.extend(
                 [
-                    [f'Solicitado · {unit["unidad"]}', unit["solicitado"], unit["unidad"]],
-                    [f'Enviado · {unit["unidad"]}', unit["enviado"], unit["unidad"]],
-                    [f'Recibido · {unit["unidad"]}', unit["recibido"], unit["unidad"]],
+                    [f'Solicitado evaluado · {unit["unidad"]}', unit["solicitado_evaluado"], unit["unidad"]],
+                    [f'Enviado evaluado · {unit["unidad"]}', unit["enviado_evaluado"], unit["unidad"]],
+                    [f'Recibido evaluado · {unit["unidad"]}', unit["recibido_evaluado"], unit["unidad"]],
                     [f'Cumplimiento total · {unit["unidad"]}', unit["porcentaje_total_evaluado"], "% evaluado"],
+                    [f'Pendiente de envío CEDIS · {unit["unidad"]}', unit["pendientes_envio_lineas"], "líneas abiertas"],
+                    [f'Pendiente de recepción sucursal · {unit["unidad"]}', unit["pendientes_recepcion_lineas"], "líneas abiertas"],
                 ]
             )
     else:
         summary_rows.extend(
             [
-                ["Solicitado", totals["solicitado"], filters.get("unidad") or (report["unidades"][0] if report["unidades"] else "")],
-                ["Enviado", totals["enviado"], filters.get("unidad") or (report["unidades"][0] if report["unidades"] else "")],
-                ["Recibido", totals["recibido"], filters.get("unidad") or (report["unidades"][0] if report["unidades"] else "")],
-                ["Cumplimiento de abasto", totals["porcentaje_abasto"], "% Solicitado→Enviado"],
-                ["Cumplimiento de entrega", totals["porcentaje_entrega"], "% Cargado/Enviado→Recibido"],
-                ["Cumplimiento total evaluado", totals["porcentaje_total_evaluado"], "% Solicitado→Recibido"],
+                ["Solicitado evaluado", totals["solicitado_evaluado"], "Solo transferencias cerradas"],
+                ["Enviado evaluado", totals["enviado_evaluado"], "Limitado a lo solicitado; sin compensar sobrantes"],
+                ["Recibido evaluado", totals["recibido_evaluado"], "Limitado a lo enviado y solicitado"],
+                ["Cumplimiento de envío CEDIS", totals["porcentaje_abasto"], "Enviado evaluado / solicitado evaluado"],
+                ["Cumplimiento de recepción sucursal", totals["porcentaje_entrega"], "Recibido evaluado / enviado evaluado"],
+                ["Cumplimiento final solicitado–recibido", totals["porcentaje_total_evaluado"], "Recibido evaluado / solicitado evaluado"],
+                ["Brecha confirmada CEDIS", totals["brecha_abasto"], "Solicitado evaluado - enviado evaluado"],
+                ["Brecha confirmada de entrega", totals["brecha_entrega"], "Enviado evaluado - recibido evaluado"],
+                ["Pendiente de envío CEDIS", totals["pendientes_envio_lineas"], f'{totals["pendientes_envio_solicitado"]} solicitado en líneas abiertas'],
+                ["Pendiente de recepción sucursal", totals["pendientes_recepcion_lineas"], f'{totals["pendientes_recepcion_enviado"]} enviado en líneas abiertas'],
+                ["Sobrante enviado", totals["sobrante_envio"], "Se reporta aparte; no compensa faltantes"],
+                ["Sobrante recibido", totals["sobrante_recepcion"], "Se reporta aparte; no compensa faltantes"],
             ]
         )
-    summary_rows.append(["Líneas pendientes", totals["pendientes"], "No se cuentan como incumplidas"])
+    summary_rows.append(["Líneas abiertas fuera del cálculo", totals["pendientes"], "No se cuentan como incumplidas ni como brecha confirmada"])
     _sheet(
         workbook,
         "Resumen",
@@ -79,29 +87,35 @@ def build_indicadores_abasto_xlsx(report, filters):
         summary_rows,
     )
     group_headers = [
-        "Clave", "Nombre", "Unidad", "Solicitado", "Enviado", "Recibido",
-        "Brecha abasto", "Brecha entrega", "% abasto", "% entrega", "% total evaluado", "Pendientes",
+        "Clave", "Nombre", "Unidad", "Solicitado evaluado", "Enviado evaluado", "Recibido evaluado",
+        "Brecha CEDIS confirmada", "Brecha entrega confirmada", "Brecha de carga", "Brecha de ruta",
+        "% envío CEDIS", "% recepción sucursal",
+        "% final solicitado-recibido", "Pendientes envío CEDIS", "Pendientes recepción sucursal",
     ]
     def group_values(group):
         return [
-            group["clave"], group["etiqueta"], group["unidad"], group["solicitado"], group["enviado"],
-            group["recibido"], group["brecha_abasto"], group["brecha_entrega"], group["porcentaje_abasto"],
-            group["porcentaje_entrega"], group["porcentaje_total_evaluado"], group["pendientes"],
+            group["clave"], group["etiqueta"], group["unidad"], group["solicitado_evaluado"], group["enviado_evaluado"],
+            group["recibido_evaluado"], group["brecha_abasto"], group["brecha_entrega"], group["brecha_carga"],
+            group["brecha_ruta"], group["porcentaje_abasto"],
+            group["porcentaje_entrega"], group["porcentaje_total_evaluado"], group["pendientes_envio_lineas"],
+            group["pendientes_recepcion_lineas"],
         ]
     _sheet(workbook, "Por sucursal", group_headers, [group_values(row) for row in report["por_sucursal"]])
     _sheet(workbook, "Por día", group_headers, [group_values(row) for row in report["por_dia"]])
     _sheet(workbook, "Por producto", group_headers, [group_values(row) for row in report["por_producto"]])
     detail_headers = [
         "Fecha", "Sucursal", "Código", "Producto / insumo", "Unidad", "Solicitado", "Enviado", "Cargado",
-        "Recibido", "Brecha abasto", "Brecha entrega", "Ruta", "Repartidor", "Estado / causa", "Pendiente",
+        "Recibido", "Brecha CEDIS confirmada", "Brecha entrega confirmada", "Brecha de carga", "Brecha de ruta",
+        "Ruta", "Repartidor", "Estado / causa",
+        "Responsable del siguiente paso", "Pendiente",
         "Transferencia Point", "Detalle Point", "Enviado por", "Recibido por", "Recibido en",
     ]
     detail_rows = [
         [
             row["fecha"], row["sucursal"], row["item_code"], row["item_name"], row["unidad"],
             row["solicitado"], row["enviado"], row["cargado"], row["recibido"], row["brecha_abasto"],
-            row["brecha_entrega"], row["ruta_folio"], row["repartidor"], row["estado"],
-            "Sí" if row["pendiente"] else "No", row["transfer_external_id"], row["detail_external_id"],
+            row["brecha_entrega"], row["brecha_carga"], row["brecha_ruta"], row["ruta_folio"], row["repartidor"], row["estado"],
+            row["responsable_siguiente_paso"], "Sí" if row["pendiente"] else "No", row["transfer_external_id"], row["detail_external_id"],
             row["sent_by"], row["received_by"], row["received_at"],
         ]
         for row in report["rows"]

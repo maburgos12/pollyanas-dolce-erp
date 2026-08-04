@@ -6,7 +6,7 @@
 {% block body_class %}page-logistica-indicadores{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/logistica_indicadores_abasto.css' %}?v=20260731-v1">
+<link rel="stylesheet" href="{% static 'css/logistica_indicadores_abasto.css' %}?v=20260804-v2">
 {% endblock %}
 
 {% block content %}
@@ -50,7 +50,9 @@
     <label>Estado
       <select name="estado">
         <option value="">Todos</option>
-        <option value="PENDIENTE" {% if filters.estado == 'PENDIENTE' %}selected{% endif %}>Pendiente</option>
+        <option value="PENDIENTE" {% if filters.estado == 'PENDIENTE' %}selected{% endif %}>Todos los pendientes</option>
+        <option value="PENDIENTE_ENVIO" {% if filters.estado == 'PENDIENTE_ENVIO' %}selected{% endif %}>Pendiente de envío CEDIS</option>
+        <option value="PENDIENTE_RECEPCION" {% if filters.estado == 'PENDIENTE_RECEPCION' %}selected{% endif %}>Pendiente de recepción sucursal</option>
         <option value="NO_SURTIDO" {% if filters.estado == 'NO_SURTIDO' %}selected{% endif %}>No surtido</option>
         <option value="BRECHA_ABASTO" {% if filters.estado == 'BRECHA_ABASTO' %}selected{% endif %}>Brecha de abasto</option>
         <option value="DIFERENCIA_CARGA" {% if filters.estado == 'DIFERENCIA_CARGA' %}selected{% endif %}>Diferencia de carga</option>
@@ -72,35 +74,40 @@
       <div><span class="supply-eyebrow">Lectura ejecutiva</span><h2 id="flow-title">Dónde se queda el producto</h2></div>
       <span class="supply-period">{{ filters.fecha_desde }} — {{ filters.fecha_hasta }} · {{ filters.unidad }}</span>
     </div>
+    <div class="supply-scope"><strong>Solo transferencias cerradas</strong><span>{{ report.totals.lineas_evaluadas }} líneas evaluadas · {{ report.totals.pendientes }} abiertas fuera del cálculo</span></div>
     <div class="supply-flow-grid">
-      <article class="flow-stage"><span>01 · Sucursal solicita</span><strong>{{ report.totals.solicitado|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }}</small></article>
-      <div class="flow-connector"><strong>{{ report.totals.porcentaje_abasto|default_if_none:'N/A' }}{% if report.totals.porcentaje_abasto != None %}%{% endif %}</strong><span>Abasto CEDIS</span></div>
-      <article class="flow-stage"><span>02 · CEDIS envía</span><strong>{{ report.totals.enviado|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }}</small></article>
-      <div class="flow-connector"><strong>{{ report.totals.porcentaje_entrega|default_if_none:'N/A' }}{% if report.totals.porcentaje_entrega != None %}%{% endif %}</strong><span>Entrega física</span></div>
-      <article class="flow-stage"><span>03 · Sucursal recibe</span><strong>{{ report.totals.recibido|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }}</small></article>
+      <article class="flow-stage"><span>01 · Solicitado evaluado</span><strong>{{ report.totals.solicitado_evaluado|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }}</small></article>
+      <div class="flow-connector"><strong>{{ report.totals.porcentaje_abasto|default_if_none:'N/A' }}{% if report.totals.porcentaje_abasto != None %}%{% endif %}</strong><span>Cumplimiento de envío CEDIS</span><small>{{ report.totals.enviado_evaluado|floatformat:1 }} / {{ report.totals.solicitado_evaluado|floatformat:1 }}</small></div>
+      <article class="flow-stage"><span>02 · Enviado evaluado</span><strong>{{ report.totals.enviado_evaluado|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }} · limitado a lo solicitado</small></article>
+      <div class="flow-connector"><strong>{{ report.totals.porcentaje_entrega|default_if_none:'N/A' }}{% if report.totals.porcentaje_entrega != None %}%{% endif %}</strong><span>Recepción en sucursal</span><small>{{ report.totals.recibido_evaluado|floatformat:1 }} / {{ report.totals.enviado_evaluado|floatformat:1 }}</small></div>
+      <article class="flow-stage"><span>03 · Recibido evaluado</span><strong>{{ report.totals.recibido_evaluado|floatformat:1|intcomma }}</strong><small>{{ filters.unidad }} · limitado a lo enviado</small></article>
     </div>
   </section>
 
   {% if report.por_ruta %}
   <section class="supply-panel">
-    <div class="supply-section-head"><div><span class="supply-eyebrow">Reparto</span><h2>Cumplimiento por ruta y responsable</h2></div><span>Solo movimientos ligados a checklist</span></div>
-    <div class="supply-table-wrap table-responsive"><table><thead><tr><th>Ruta</th><th>Responsable</th><th>Unidad</th><th>Solicitado</th><th>Enviado</th><th>Cargado</th><th>Recibido</th><th>Entrega</th><th>Brecha</th></tr></thead><tbody>
-      {% for row in report.por_ruta %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.responsable|default:'Sin asignar' }}</td><td>{{ row.unidad }}</td><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.cargado|floatformat:1 }}</td><td>{{ row.recibido|floatformat:1 }}</td><td>{{ row.porcentaje_entrega|default_if_none:'N/A' }}{% if row.porcentaje_entrega != None %}%{% endif %}</td><td>{{ row.brecha_entrega|floatformat:1 }}</td></tr>{% endfor %}
+    <div class="supply-section-head"><div><span class="supply-eyebrow">Reparto</span><h2>Carga y entrega por ruta</h2></div><span>Diagnóstico físico con checklist</span></div>
+    <div class="supply-table-wrap table-responsive"><table class="route-diagnostic-table"><thead><tr><th>Ruta</th><th>Responsable</th><th>Unidad</th><th>Enviado</th><th>Cargado</th><th>Recibido</th><th>% cargado</th><th>% recibido de carga</th><th>Faltó cargar</th><th>Faltó entregar</th></tr></thead><tbody>
+      {% for row in report.por_ruta %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.responsable|default:'Sin asignar' }}</td><td>{{ row.unidad }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.cargado|floatformat:1 }}</td><td>{{ row.recibido_evaluado|floatformat:1 }}</td><td>{{ row.porcentaje_carga|default_if_none:'N/A' }}{% if row.porcentaje_carga != None %}%{% endif %}</td><td>{{ row.porcentaje_ruta|default_if_none:'N/A' }}{% if row.porcentaje_ruta != None %}%{% endif %}</td><td>{{ row.brecha_carga|floatformat:1 }}</td><td>{{ row.brecha_ruta|floatformat:1 }}</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
   {% endif %}
 
   <section class="supply-kpis" aria-label="Indicadores principales">
-    <article><span>Cumplimiento total evaluado</span><strong>{{ report.totals.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if report.totals.porcentaje_total_evaluado != None %}%{% endif %}</strong><small>Solicitado → recibido, solo líneas cerradas</small></article>
-    <article class="warning"><span>Brecha de abasto</span><strong>{{ report.totals.brecha_abasto|floatformat:1|intcomma }}</strong><small>Solicitado y no enviado por CEDIS</small></article>
-    <article class="danger"><span>Brecha de entrega</span><strong>{{ report.totals.brecha_entrega|floatformat:1|intcomma }}</strong><small>Enviado y no recibido en sucursal</small></article>
-    <article class="neutral"><span>Pendientes</span><strong>{{ report.totals.pendientes|intcomma }}</strong><small>No penalizan hasta cerrar la transferencia</small></article>
+    <article><span>Cumplimiento final solicitado–recibido</span><strong>{{ report.totals.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if report.totals.porcentaje_total_evaluado != None %}%{% endif %}</strong><small>{{ report.totals.recibido_evaluado|floatformat:1 }} recibido / {{ report.totals.solicitado_evaluado|floatformat:1 }} solicitado</small></article>
+    <article class="warning"><span>Brecha confirmada CEDIS</span><strong>{{ report.totals.brecha_abasto|floatformat:1|intcomma }}</strong><small>Faltó enviar en transferencias cerradas</small></article>
+    <article class="danger"><span>Brecha confirmada de entrega</span><strong>{{ report.totals.brecha_entrega|floatformat:1|intcomma }}</strong><small>Se envió pero no se recibió, en líneas cerradas</small></article>
+    <article class="neutral"><span>Sobrantes separados</span><strong>{{ report.totals.sobrante_envio|floatformat:1|intcomma }}</strong><small>Envío adicional; nunca compensa un faltante</small></article>
+  </section>
+  <section class="supply-actions" aria-label="Pendientes por responsable">
+    <article><div><span class="supply-eyebrow">Acción CEDIS</span><h3>Pendiente de envío CEDIS</h3><p>Solicitudes abiertas que todavía no muestran cantidad enviada.</p></div><strong>{{ report.totals.pendientes_envio_lineas }}</strong><small>{{ report.totals.pendientes_envio_solicitado|floatformat:1 }} {{ filters.unidad }} solicitadas</small></article>
+    <article><div><span class="supply-eyebrow">Acción sucursal</span><h3>Pendiente de recepción sucursal</h3><p>Transferencias abiertas con envío, pero sin recepción confirmada.</p></div><strong>{{ report.totals.pendientes_recepcion_lineas }}</strong><small>{{ report.totals.pendientes_recepcion_enviado|floatformat:1 }} {{ filters.unidad }} enviadas</small></article>
   </section>
   {% else %}
   <section class="supply-panel">
     <div class="supply-section-head"><div><span class="supply-eyebrow">Lectura ejecutiva</span><h2>Resultado separado por unidad</h2></div></div>
-    <div class="supply-table-wrap table-responsive"><table><thead><tr><th>Unidad</th><th>Solicitado</th><th>Enviado</th><th>Recibido</th><th>Abasto</th><th>Entrega</th><th>Total evaluado</th><th>Pendientes</th></tr></thead><tbody>
-      {% for row in report.por_unidad %}<tr><th>{{ row.unidad }}</th><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.recibido|floatformat:1 }}</td><td>{{ row.porcentaje_abasto|default_if_none:'N/A' }}{% if row.porcentaje_abasto != None %}%{% endif %}</td><td>{{ row.porcentaje_entrega|default_if_none:'N/A' }}{% if row.porcentaje_entrega != None %}%{% endif %}</td><td><strong>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</strong></td><td>{{ row.pendientes }}</td></tr>{% endfor %}
+    <div class="supply-table-wrap table-responsive"><table><thead><tr><th>Unidad</th><th>Solicitado evaluado</th><th>Enviado evaluado</th><th>Recibido evaluado</th><th>Envío CEDIS</th><th>Recepción</th><th>Final</th><th>Abiertas</th></tr></thead><tbody>
+      {% for row in report.por_unidad %}<tr><th>{{ row.unidad }}</th><td>{{ row.solicitado_evaluado|floatformat:1 }}</td><td>{{ row.enviado_evaluado|floatformat:1 }}</td><td>{{ row.recibido_evaluado|floatformat:1 }}</td><td>{{ row.porcentaje_abasto|default_if_none:'N/A' }}{% if row.porcentaje_abasto != None %}%{% endif %}</td><td>{{ row.porcentaje_entrega|default_if_none:'N/A' }}{% if row.porcentaje_entrega != None %}%{% endif %}</td><td><strong>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</strong></td><td>{{ row.pendientes }}</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
   {% endif %}
@@ -109,10 +116,10 @@
     <div class="supply-section-head"><div><span class="supply-eyebrow">Comparativo</span><h2>Cumplimiento por sucursal</h2></div><span>{{ report.totals.lineas }} líneas visibles</span></div>
     <div class="supply-table-wrap table-responsive">
       <table>
-        <thead><tr><th>Sucursal</th><th>Unidad</th><th>Solicitado</th><th>Enviado</th><th>Recibido</th><th>Abasto</th><th>Entrega</th><th>Total evaluado</th><th>Pendientes</th></tr></thead>
+        <thead><tr><th>Sucursal</th><th>Unidad</th><th>Solicitado eval.</th><th>Enviado eval.</th><th>Recibido eval.</th><th>Envío CEDIS</th><th>Recepción</th><th>Final</th><th>Abiertas</th></tr></thead>
         <tbody>
           {% for row in report.por_sucursal %}
-          <tr><th>{{ row.etiqueta }}</th><td>{{ row.unidad|default:'Varias' }}</td><td>{{ row.solicitado|floatformat:1|intcomma }}</td><td>{{ row.enviado|floatformat:1|intcomma }}</td><td>{{ row.recibido|floatformat:1|intcomma }}</td><td>{{ row.porcentaje_abasto|default_if_none:'N/A' }}{% if row.porcentaje_abasto != None %}%{% endif %}</td><td>{{ row.porcentaje_entrega|default_if_none:'N/A' }}{% if row.porcentaje_entrega != None %}%{% endif %}</td><td><strong>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</strong></td><td>{{ row.pendientes }}</td></tr>
+          <tr><th>{{ row.etiqueta }}</th><td>{{ row.unidad|default:'Varias' }}</td><td>{{ row.solicitado_evaluado|floatformat:1|intcomma }}</td><td>{{ row.enviado_evaluado|floatformat:1|intcomma }}</td><td>{{ row.recibido_evaluado|floatformat:1|intcomma }}</td><td>{{ row.porcentaje_abasto|default_if_none:'N/A' }}{% if row.porcentaje_abasto != None %}%{% endif %}</td><td>{{ row.porcentaje_entrega|default_if_none:'N/A' }}{% if row.porcentaje_entrega != None %}%{% endif %}</td><td><strong>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</strong></td><td>{{ row.pendientes }}</td></tr>
           {% empty %}<tr><td colspan="9" class="empty">No hay transferencias Point para los filtros seleccionados.</td></tr>{% endfor %}
         </tbody>
       </table>
@@ -123,13 +130,13 @@
     <section class="supply-panel">
       <div class="supply-section-head"><div><span class="supply-eyebrow">Tendencia</span><h2>Resultado por día</h2></div></div>
       <div class="supply-table-wrap table-responsive compact"><table><thead><tr><th>Día</th><th>Sol.</th><th>Env.</th><th>Rec.</th><th>Total</th></tr></thead><tbody>
-        {% for row in report.por_dia %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.recibido|floatformat:1 }}</td><td>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="empty">Sin datos</td></tr>{% endfor %}
+        {% for row in report.por_dia %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.solicitado_evaluado|floatformat:1 }}</td><td>{{ row.enviado_evaluado|floatformat:1 }}</td><td>{{ row.recibido_evaluado|floatformat:1 }}</td><td>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="empty">Sin datos</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
     <section class="supply-panel">
       <div class="supply-section-head"><div><span class="supply-eyebrow">Productos</span><h2>Mayor brecha de abasto</h2></div></div>
       <div class="supply-table-wrap table-responsive compact"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Solicitado</th><th>Brecha</th><th>Total</th></tr></thead><tbody>
-        {% for row in report.por_producto|dictsortreversed:'brecha_abasto'|slice:':8' %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.unidad }}</td><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.brecha_abasto|floatformat:1 }}</td><td>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="empty">Sin datos</td></tr>{% endfor %}
+        {% for row in report.por_producto|dictsortreversed:'brecha_abasto'|slice:':8' %}<tr><th>{{ row.etiqueta }}</th><td>{{ row.unidad }}</td><td>{{ row.solicitado_evaluado|floatformat:1 }}</td><td>{{ row.brecha_abasto|floatformat:1 }}</td><td>{{ row.porcentaje_total_evaluado|default_if_none:'N/A' }}{% if row.porcentaje_total_evaluado != None %}%{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="empty">Sin datos</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
   </div>
@@ -138,7 +145,7 @@
     <div class="supply-section-head"><div><span class="supply-eyebrow">Auditoría</span><h2>Detalle solicitado vs enviado vs recibido</h2></div><span>Página {{ detail_page.number }} de {{ detail_page.paginator.num_pages }}</span></div>
     <div class="supply-table-wrap table-responsive">
       <table class="detail-table"><thead><tr><th>Fecha</th><th>Sucursal</th><th>Producto</th><th>Sol.</th><th>Env.</th><th>Carg.</th><th>Rec.</th><th>Ruta</th><th>Responsable</th><th>Estado / causa</th></tr></thead><tbody>
-        {% for row in detail_page %}<tr><td>{{ row.fecha }}</td><td>{{ row.sucursal }}</td><td><strong>{{ row.item_name }}</strong><small>{{ row.item_code }} · {{ row.unidad }}</small></td><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.cargado|default_if_none:'—' }}</td><td>{{ row.recibido|default_if_none:'Pendiente' }}</td><td>{{ row.ruta_folio|default:'Sin ruta' }}</td><td>{{ row.repartidor|default:'Sin asignar' }}</td><td><span class="state state-{{ row.estado|lower }}">{{ row.estado }}</span></td></tr>{% empty %}<tr><td colspan="10" class="empty">No hay detalle para mostrar.</td></tr>{% endfor %}
+        {% for row in detail_page %}<tr><td>{{ row.fecha }}</td><td>{{ row.sucursal }}</td><td><strong>{{ row.item_name }}</strong><small>{{ row.item_code }} · {{ row.unidad }}</small></td><td>{{ row.solicitado|floatformat:1 }}</td><td>{{ row.enviado|floatformat:1 }}</td><td>{{ row.cargado|default_if_none:'—' }}</td><td>{{ row.recibido|default_if_none:'Pendiente' }}</td><td>{{ row.ruta_folio|default:'Sin ruta' }}</td><td>{{ row.responsable_siguiente_paso|default:row.repartidor|default:'—' }}</td><td><span class="state state-{{ row.estado|lower }}">{{ row.estado }}</span></td></tr>{% empty %}<tr><td colspan="10" class="empty">No hay detalle para mostrar.</td></tr>{% endfor %}
       </tbody></table>
     </div>
     {% if detail_page.has_other_pages %}<nav class="supply-pagination" aria-label="Paginación del detalle">
@@ -149,7 +156,7 @@
   </section>
 
   <aside class="supply-method">
-    <strong>Cómo leerlo:</strong> Abasto compara solicitado contra enviado; entrega compara lo cargado —o enviado si no existe checklist— contra lo recibido. Los sobrantes no compensan faltantes y los pendientes se muestran aparte hasta que Point cierre la transferencia.
+    <strong>Cómo leerlo:</strong> El embudo principal usa la misma población: solo transferencias cerradas. Enviado nunca supera solicitado y recibido nunca supera enviado para calcular porcentajes; cualquier sobrante se muestra aparte. Las líneas abiertas se separan por quién debe actuar y no forman brechas confirmadas.
   </aside>
 </div>
 {% endblock %}

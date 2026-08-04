@@ -61,28 +61,41 @@ def _row_from_transfer(transfer: PointTransferLine) -> dict:
         received = ZERO
         evaluated = True
 
-    supply_gap = max(requested - sent, ZERO)
-    downstream_gap = max(sent - received, ZERO) if evaluated and received is not None else ZERO
+    usable_sent = min(sent, requested) if evaluated else ZERO
+    usable_received = min(received or ZERO, usable_sent) if evaluated else ZERO
+    supply_gap = max(requested - usable_sent, ZERO) if evaluated else ZERO
+    downstream_gap = max(usable_sent - usable_received, ZERO) if evaluated else ZERO
     load_gap = max(sent - loaded, ZERO) if loaded is not None else ZERO
     delivery_reference = loaded if loaded is not None else sent
     route_gap = max(delivery_reference - received, ZERO) if evaluated and received is not None else ZERO
 
-    if not evaluated:
-        state = "PENDIENTE"
+    if not evaluated and sent > ZERO:
+        state = "PENDIENTE_RECEPCION"
+        next_owner = "Sucursal"
+    elif not evaluated:
+        state = "PENDIENTE_ENVIO"
+        next_owner = "CEDIS"
     elif supply_gap > ZERO and downstream_gap > ZERO:
         state = "BRECHA_MIXTA"
+        next_owner = "CEDIS y Logística"
     elif sent == ZERO and requested > ZERO:
         state = "NO_SURTIDO"
+        next_owner = "CEDIS"
     elif load_gap > ZERO:
         state = "DIFERENCIA_CARGA"
+        next_owner = "Logística"
     elif route_gap > ZERO:
         state = "DIFERENCIA_ENTREGA"
+        next_owner = "Logística / sucursal"
     elif supply_gap > ZERO:
         state = "BRECHA_ABASTO"
+        next_owner = "CEDIS"
     elif received is not None and (sent > requested or received > sent):
         state = "SOBRANTE"
+        next_owner = "Revisar captura"
     else:
         state = "COMPLETO"
+        next_owner = ""
 
     route = linea.checklist.ruta if linea else None
     branch = transfer.erp_destination_branch or transfer.destination_branch.erp_branch
@@ -103,11 +116,16 @@ def _row_from_transfer(transfer: PointTransferLine) -> dict:
         "recibido": received,
         "evaluado": evaluated,
         "pendiente": not evaluated,
+        "enviado_evaluado": usable_sent,
+        "recibido_evaluado": usable_received,
         "brecha_abasto": supply_gap,
         "brecha_entrega": downstream_gap,
+        "sobrante_envio": max(sent - requested, ZERO) if evaluated else ZERO,
+        "sobrante_recepcion": max((received or ZERO) - sent, ZERO) if evaluated else ZERO,
         "brecha_carga": load_gap,
         "brecha_ruta": route_gap,
         "estado": state,
+        "responsable_siguiente_paso": next_owner,
         "ruta_id": route.id if route else None,
         "ruta_folio": route.folio if route else "",
         "ruta_nombre": route.nombre if route else "",
@@ -122,28 +140,23 @@ def _totals(rows: list[dict]) -> dict:
     requested = sum((row["solicitado"] for row in rows), ZERO)
     sent = sum((row["enviado"] for row in rows), ZERO)
     received = sum((row["recibido"] for row in rows if row["recibido"] is not None), ZERO)
-    supply_gap = sum((row["brecha_abasto"] for row in rows), ZERO)
-    downstream_gap = sum((row["brecha_entrega"] for row in rows), ZERO)
     loaded_rows = [row for row in rows if row["cargado"] is not None]
     loaded = sum((row["cargado"] for row in loaded_rows), ZERO)
+    evaluated_loaded_rows = [row for row in loaded_rows if row["evaluado"]]
+    load_denominator = sum((row["enviado"] for row in loaded_rows), ZERO)
+    load_numerator = sum((min(row["cargado"], row["enviado"]) for row in loaded_rows), ZERO)
+    route_denominator = sum((row["cargado"] for row in evaluated_loaded_rows), ZERO)
+    route_numerator = sum(
+        (min(row["recibido"] or ZERO, row["cargado"]) for row in evaluated_loaded_rows),
+        ZERO,
+    )
 
-    abasto_rows = [row for row in rows if point_row_has_supply_result(row)]
-    supply_denominator = sum((row["solicitado"] for row in abasto_rows), ZERO)
-    supply_numerator = sum((min(row["enviado"], row["solicitado"]) for row in abasto_rows), ZERO)
     evaluated_rows = [row for row in rows if row["evaluado"]]
-    delivery_denominator = sum(
-        ((row["cargado"] if row["cargado"] is not None else row["enviado"]) for row in evaluated_rows),
-        ZERO,
-    )
-    delivery_numerator = sum(
-        (
-            min(row["recibido"] or ZERO, row["cargado"] if row["cargado"] is not None else row["enviado"])
-            for row in evaluated_rows
-        ),
-        ZERO,
-    )
-    total_denominator = sum((row["solicitado"] for row in evaluated_rows), ZERO)
-    total_numerator = sum((min(row["recibido"] or ZERO, row["solicitado"]) for row in evaluated_rows), ZERO)
+    pending_shipping_rows = [row for row in rows if not row["evaluado"] and row["enviado"] <= ZERO]
+    pending_receipt_rows = [row for row in rows if not row["evaluado"] and row["enviado"] > ZERO]
+    requested_evaluated = sum((row["solicitado"] for row in evaluated_rows), ZERO)
+    sent_evaluated = sum((row["enviado_evaluado"] for row in evaluated_rows), ZERO)
+    received_evaluated = sum((row["recibido_evaluado"] for row in evaluated_rows), ZERO)
     return {
         "solicitado": requested,
         "enviado": sent,
@@ -153,16 +166,25 @@ def _totals(rows: list[dict]) -> dict:
         "pendientes": sum(1 for row in rows if row["pendiente"]),
         "lineas": len(rows),
         "lineas_evaluadas": len(evaluated_rows),
-        "brecha_abasto": supply_gap,
-        "brecha_entrega": downstream_gap,
-        "porcentaje_abasto": _percentage(supply_numerator, supply_denominator),
-        "porcentaje_entrega": _percentage(delivery_numerator, delivery_denominator),
-        "porcentaje_total_evaluado": _percentage(total_numerator, total_denominator),
+        "solicitado_evaluado": requested_evaluated,
+        "enviado_evaluado": sent_evaluated,
+        "recibido_evaluado": received_evaluated,
+        "brecha_abasto": sum((row["brecha_abasto"] for row in evaluated_rows), ZERO),
+        "brecha_entrega": sum((row["brecha_entrega"] for row in evaluated_rows), ZERO),
+        "brecha_carga": sum((row["brecha_carga"] for row in loaded_rows), ZERO),
+        "brecha_ruta": sum((row["brecha_ruta"] for row in evaluated_loaded_rows), ZERO),
+        "sobrante_envio": sum((row["sobrante_envio"] for row in evaluated_rows), ZERO),
+        "sobrante_recepcion": sum((row["sobrante_recepcion"] for row in evaluated_rows), ZERO),
+        "pendientes_envio_lineas": len(pending_shipping_rows),
+        "pendientes_envio_solicitado": sum((row["solicitado"] for row in pending_shipping_rows), ZERO),
+        "pendientes_recepcion_lineas": len(pending_receipt_rows),
+        "pendientes_recepcion_enviado": sum((row["enviado"] for row in pending_receipt_rows), ZERO),
+        "porcentaje_abasto": _percentage(sent_evaluated, requested_evaluated),
+        "porcentaje_entrega": _percentage(received_evaluated, sent_evaluated),
+        "porcentaje_total_evaluado": _percentage(received_evaluated, requested_evaluated),
+        "porcentaje_carga": _percentage(load_numerator, load_denominator),
+        "porcentaje_ruta": _percentage(route_numerator, route_denominator),
     }
-
-
-def point_row_has_supply_result(row: dict) -> bool:
-    return row["evaluado"] or row["enviado"] > ZERO
 
 
 def _group_rows(rows: list[dict], key_builder, label_builder) -> list[dict]:
@@ -222,7 +244,9 @@ def build_indicadores_abasto(*, fecha_desde, fecha_hasta, tipo="productos", unid
     rows = [_row_from_transfer(transfer) for transfer in queryset]
     if normalized_unit:
         rows = [row for row in rows if row["unidad"] == normalized_unit]
-    if estado:
+    if estado == "PENDIENTE":
+        rows = [row for row in rows if row["pendiente"]]
+    elif estado:
         rows = [row for row in rows if row["estado"] == estado]
     units = sorted({row["unidad"] for row in rows})
     route_rows = [row for row in rows if row["ruta_id"]]
