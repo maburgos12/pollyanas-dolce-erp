@@ -691,6 +691,7 @@ class PresupuestoRealConsolidacionService:
 
         from activos.models import OrdenMantenimiento
         from fallas.models import ReporteFalla
+        from mantenimiento.models import ServicioMantenimiento
 
         inicio = date(periodo.year, periodo.month, 1)
         siguiente = date(periodo.year + (periodo.month == 12), 1 if periodo.month == 12 else periodo.month + 1, 1)
@@ -745,6 +746,44 @@ class PresupuestoRealConsolidacionService:
                 fila["activo_relacionado__ubicacion"] or "",
             )
             acumulado[clave] = acumulado.get(clave, Decimal("0")) + (fila["monto"] or Decimal("0"))
+
+        servicios = ServicioMantenimiento.objects.filter(
+            fecha_servicio__gte=inicio,
+            fecha_servicio__lt=siguiente,
+            costo_total__gt=0,
+        ).select_related("sucursal_cargo").prefetch_related(
+            "detalles__activo__sucursal", "detalles__unidad__sucursal", "detalles__sucursal",
+        )
+        for servicio in servicios:
+            detalles = list(servicio.detalles.all())
+            if servicio.metodo_distribucion == ServicioMantenimiento.DISTRIBUCION_SIN_DESGLOSE:
+                ubicaciones = set()
+                for detalle in detalles:
+                    if detalle.activo_id:
+                        ubicaciones.add(detalle.activo.ubicacion or detalle.activo.categoria or "EQUIPO")
+                    elif detalle.unidad_id:
+                        ubicaciones.add("FLOTA")
+                    else:
+                        ubicaciones.add(detalle.instalacion_categoria or "INSTALACIONES")
+                clave = (
+                    servicio.sucursal_cargo.codigo if servicio.sucursal_cargo_id else "",
+                    " / ".join(sorted(ubicaciones)) or "MANTENIMIENTO GENERAL",
+                )
+                acumulado[clave] = acumulado.get(clave, Decimal("0")) + servicio.costo_total
+                continue
+
+            for detalle in detalles:
+                if not detalle.costo_asignado:
+                    continue
+                branch = detalle.sucursal_efectiva
+                if detalle.activo_id:
+                    ubicacion = detalle.activo.ubicacion or detalle.activo.categoria or "EQUIPO"
+                elif detalle.unidad_id:
+                    ubicacion = "FLOTA"
+                else:
+                    ubicacion = detalle.instalacion_categoria or "INSTALACIONES"
+                clave = (branch.codigo if branch else "", ubicacion)
+                acumulado[clave] = acumulado.get(clave, Decimal("0")) + detalle.costo_asignado
 
         return [
             {

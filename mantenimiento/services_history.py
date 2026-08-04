@@ -10,9 +10,10 @@ from activos.models import OrdenMantenimiento
 from fallas.models import BitacoraFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
 from mantenimiento.services_access import (
-    authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
+    authorized_fallas, authorized_grouped_services, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services,
 )
+from mantenimiento.models import DetalleServicioMantenimiento
 
 
 MAZATLAN = ZoneInfo("America/Mazatlan")
@@ -263,6 +264,59 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
                 cost=((item["costo_repuestos"] or 0) + (item["costo_mano_obra"] or 0) + (item["costo_otros"] or 0)) if include_costs else None,
             ))
 
+    grouped_details = DetalleServicioMantenimiento.objects.filter(
+        servicio__in=authorized_grouped_services(user)
+    ).select_related(
+        "servicio", "servicio__creado_por", "activo", "activo__sucursal",
+        "unidad", "unidad__sucursal", "sucursal",
+    )
+    if filters.get("tipo") not in {None, "todo", "servicio_general"}:
+        grouped_details = grouped_details.none()
+    if filters.get("sucursal"):
+        branch_id = filters["sucursal"]
+        grouped_details = grouped_details.filter(
+            Q(activo__sucursal_id=branch_id) | Q(unidad__sucursal_id=branch_id) | Q(sucursal_id=branch_id)
+        )
+    if filters.get("activo"):
+        grouped_details = grouped_details.filter(activo_id=filters["activo"])
+    if filters.get("unidad"):
+        grouped_details = grouped_details.filter(unidad_id=filters["unidad"])
+    if filters.get("q"):
+        grouped_details = grouped_details.filter(
+            Q(servicio__folio__icontains=filters["q"])
+            | Q(servicio__descripcion_general__icontains=filters["q"])
+            | Q(trabajo_realizado__icontains=filters["q"])
+            | Q(activo__nombre__icontains=filters["q"])
+            | Q(unidad__codigo__icontains=filters["q"])
+            | Q(instalacion_categoria__icontains=filters["q"])
+        )
+    if filters.get("estado") not in {None, "todo", "cerrado"}:
+        grouped_details = grouped_details.none()
+    if start:
+        grouped_details = grouped_details.filter(servicio__fecha_servicio__gte=start.date())
+    grouped_details = grouped_details.filter(servicio__fecha_servicio__lt=end.date())
+    total += grouped_details.count()
+    for detail in grouped_details.order_by("-servicio__fecha_servicio", "-id")[:candidate_limit]:
+        service = detail.servicio
+        branch = detail.sucursal_efectiva
+        rows.append(_history_payload(
+            uid=f"servicio_general:{detail.pk}", event=service.fecha_servicio,
+            kind="servicio_general", state="cerrado",
+            branch_id=branch.pk if branch else None, branch=branch.nombre if branch else "",
+            subject_id=detail.activo_id or detail.unidad_id,
+            subject=detail.objetivo_nombre,
+            actor=_history_actor(
+                service.creado_por_id,
+                service.creado_por.get_full_name() if service.creado_por else "",
+                service.creado_por.get_username() if service.creado_por else "",
+            ),
+            origin="servicio_general", title=service.folio,
+            description=detail.trabajo_realizado,
+            asset_id=detail.activo_id, unit_id=detail.unidad_id, direct=True,
+            invoice=_invoice("servicio_general_factura", service.pk, service.documento, service.numero_documento),
+            cost=(detail.costo_asignado if include_costs else None),
+        ))
+
     reports = authorized_unit_reports(user)
     if filters.get("tipo") not in {None, "todo", "reporte"}: reports = reports.none()
     if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
@@ -465,6 +519,36 @@ def item_detail(user, kind, pk):
                                 for item in row.evidencias.all()],
             } for row in report.bitacora.all()],
         }
+
+    if kind == "servicio_general":
+        obj = DetalleServicioMantenimiento.objects.select_related(
+            "servicio", "servicio__creado_por", "activo", "activo__sucursal",
+            "unidad", "unidad__sucursal", "sucursal",
+        ).filter(servicio__in=authorized_grouped_services(user), pk=pk).first()
+        if obj is None:
+            raise Http404
+        branch = obj.sucursal_efectiva
+        detail = {
+            "id": obj.pk,
+            "titulo": obj.servicio.folio,
+            "descripcion": obj.trabajo_realizado,
+            "descripcion_general": obj.servicio.descripcion_general,
+            "estado": "cerrado",
+            "sucursal": {"id": branch.pk, "nombre": branch.nombre} if branch else None,
+            "objetivo": {"tipo": obj.tipo_objetivo, "id": obj.activo_id or obj.unidad_id, "nombre": obj.objetivo_nombre},
+            "fechas": {"servicio": _iso(obj.servicio.fecha_servicio), "proxima": _iso(obj.proxima_revision)},
+            "actor": _person(obj.servicio.creado_por),
+            "proveedor": obj.servicio.proveedor_nombre,
+            "factura": _evidence_payload("servicio_general_factura", obj.servicio_id, obj.servicio.documento),
+            "costo": None,
+            "costo_documento": None,
+            "metodo_distribucion": obj.servicio.metodo_distribucion,
+        }
+        from mantenimiento.services_access import can_view_costs
+        if can_view_costs(user):
+            detail["costo"] = str(obj.costo_asignado) if obj.costo_asignado is not None else None
+            detail["costo_documento"] = str(obj.servicio.costo_total)
+        return {"schema_version": 2, "uid": f"servicio_general:{obj.pk}", "tipo": kind, "detalle": detail}
 
     definitions = {
         "orden": (authorized_orders, ("activo_ref", "activo_ref__sucursal")),

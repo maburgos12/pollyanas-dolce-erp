@@ -83,6 +83,7 @@
   .mant-drawer{position:fixed;inset:0;z-index:1300;display:none;background:rgba(31,18,26,.46)}
   .mant-drawer.is-open{display:flex;justify-content:flex-end}
   .mant-drawer-panel{width:min(560px,100%);height:100%;background:#fff;box-shadow:-16px 0 45px rgba(0,0,0,.18);padding:22px;overflow-y:auto}
+  .mant-service-drawer-panel{width:min(760px,100%)}
   .mant-drawer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #f0e1e8;padding-bottom:14px;margin-bottom:16px}
   .mant-drawer-head h2{margin:0;color:#42292e;font-size:24px}
   .mant-drawer-head p{margin:5px 0 0;color:#6f6170}
@@ -162,6 +163,15 @@
   .mant-mode-btn.is-active.is-first{border-right-color:color-mix(in srgb, var(--pd-surface) 20%, transparent)}
   .mant-mode-help{margin-bottom:14px;background:var(--pd-wine-soft);border-radius:8px;padding:8px 10px}
   .mant-service-realizado{display:contents}
+  .mant-service-scopes{grid-column:1/-1;display:grid;gap:12px;padding:14px;border-radius:12px;background:var(--pd-wine-soft);border:1px solid color-mix(in srgb,var(--pd-wine) 18%,transparent)}
+  .mant-service-scopes[hidden]{display:none}
+  .mant-service-scopes-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .mant-service-scopes-head strong{display:block;color:var(--pd-wine);font-size:14px}
+  .mant-service-scopes-head p{max-width:62ch;margin:4px 0 0;color:#5f4d56;font-size:12px;line-height:1.45}
+  .mant-service-scopes-list{display:grid;gap:10px}
+  .mant-service-scope{display:grid;gap:10px;padding:12px;border-radius:10px;background:#fff}
+  .mant-service-scope-head{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#513744}
+  .mant-service-scope-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .mant-provider-active{display:none}
   .mant-provider-check{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#513744;cursor:pointer}
-  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts{grid-template-columns:1fr}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}
+  @media(max-width:760px){.mant-origin-tabs{display:grid}.mant-origin-tab{justify-content:space-between}.mant-form-grid,.mant-asset-create-grid,.mant-board-tools,.mant-drawer-evidence,.mant-drawer-facts,.mant-service-scope-grid{grid-template-columns:1fr}.mant-service-scopes-head{display:grid}.mant-fleet-grid{grid-template-columns:1fr}.mant-drawer-photo{width:100%;max-height:280px;aspect-ratio:16/10}.mant-ticket-main{grid-template-columns:64px minmax(0,1fr)}.mant-ticket-photo,.mant-ticket-photo-empty{width:64px}}

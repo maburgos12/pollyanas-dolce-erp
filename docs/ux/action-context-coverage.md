@@ -17,6 +17,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Compras | Solicitudes, órdenes y demás acciones de recepciones | No inventariado por pantalla | No | No | Pendiente etapa 2 |
 | Inventario / Ajustes | Aprobar y aplicar ajuste pendiente | Sí, toast y redirect seguro | Sí, `#ajuste-<id>` | `InventarioAjustesApprovalTests` + `ERPActionContractTests` | Parcial: solo aprobación/aplicación |
 | Inventario, recetas, bonos, mantenimiento y activos | Demás guardados y cambios de estado | No inventariado por pantalla | No | No | Pendiente etapa 3 |
+| Mantenimiento / Servicio sin orden previa | Registrar una factura o nota con uno o varios equipos, unidades o trabajos de instalación | Sí, conserva el formulario ante error y vuelve a Seguimiento con toast | Sí, redirect a `#tab-seguimiento` y Django Messages | `GroupedMaintenanceServiceTests` + navegador local | Cubierto |
 | App Operativa / Sucursal | Reportar falla, registrar merma, aprobar, aclarar, rechazar, reenviar y reasignar | Sí, bloquea el botón y muestra toast | Sí, conserva datos y vuelve al registro/formulario estable | `operacion.tests_fallas_api` + `operacion.tests_mermas_insumos_api` | Automatizado; navegador local pendiente por política del entorno |
 | Resto del ERP | Acciones mutantes restantes | No inventariado por pantalla | No | No | Pendiente etapa 4 |
 

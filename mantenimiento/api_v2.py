@@ -6,7 +6,7 @@ from rest_framework.response import Response
 
 from fallas.models import EvidenciaSeguimientoFalla
 from mantenimiento.services_access import (
-    authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
+    authorized_fallas, authorized_grouped_services, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services, can_view_costs,
 )
 from mantenimiento.services_history import inbox_rows, item_detail, unified_history_rows
@@ -21,7 +21,7 @@ ALLOWED = {
 }
 
 HISTORY_ALLOWED = {
-    "tipo": {"todo", "reporte", "orden", "reparacion", "servicio_unidad", "sin_reporte"},
+    "tipo": {"todo", "reporte", "orden", "reparacion", "servicio_unidad", "servicio_general", "sin_reporte"},
     "estado": {"todo", "abierto", "en_proceso", "cerrado", "cancelado"},
     "periodo": {"semana", "mes", "30d", "90d", "todo"},
 }
@@ -155,6 +155,7 @@ def _authorized_file(user, kind, pk):
         "reparacion_factura": (authorized_repairs, "archivo_factura"),
         "reparacion_foto": (authorized_repairs, "foto_nota"),
         "servicio_unidad_factura": (authorized_unit_services, "archivo_factura"),
+        "servicio_general_factura": (authorized_grouped_services, "documento"),
     }
     if kind not in definitions:
         return None, ""

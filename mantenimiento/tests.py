@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260722-servicios-multiples-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -212,7 +212,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
         self.assertContains(response, 'reportMaintenanceInitFailure')
         self.assertContains(response, 'class="mant-money-prefix"')
-        self.assertContains(response, 'v=20260721-mantenimiento-pruebas-v3')
+        self.assertContains(response, 'v=20260722-servicios-multiples-v1')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
 
     def test_pwa_shows_order_traceability_fields(self):

@@ -1,15 +1,16 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+import json
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
-from django.http import Http404, HttpResponse
+from django.db.models import Prefetch, Q, Sum
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
@@ -22,7 +23,8 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
-from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
+from mantenimiento.models import SolicitudCancelacion, ProveedorServicio, ServicioMantenimiento
+from mantenimiento.services_grouped import create_grouped_service
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mantenimiento.services_access import (
     authorized_branch_ids, authorized_fallas, authorized_orders, authorized_unit_reports,
@@ -95,6 +97,25 @@ def _require_mantenimiento(user):
         return
     if not _can_access_mantenimiento(user):
         raise PermissionDenied("No tienes permisos para ver Mantenimiento.")
+
+
+def _wants_progressive_response(request) -> bool:
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def _service_form_error(request, message, *, status=400):
+    if _wants_progressive_response(request):
+        return JsonResponse(
+            {"ok": False, "toast": {"type": "error", "message": message, "persistent": True}},
+            status=status,
+        )
+    from django.contrib import messages as msg
+
+    msg.error(request, message)
+    return redirect("mantenimiento:dashboard")
 
 
 def _require_write_mantenimiento(user):
@@ -478,6 +499,9 @@ def _dashboard_summary(items):
     costo_30d = sum(
         (item.get("costo_real") or item.get("costo_estimado") or Decimal("0")) for item in items
     )
+    costo_30d += ServicioMantenimiento.objects.filter(
+        fecha_servicio__gte=timezone.localdate() - timedelta(days=30),
+    ).aggregate(total=Sum("costo_total"))["total"] or Decimal("0")
     dias_list = [item["dias_abierto"] for item in items if item.get("dias_abierto", 0) > 0]
     tiempo_promedio = round(sum(dias_list) / len(dias_list), 1) if dias_list else 0
     sin_asignar = sum(1 for item in items if not item.get("asignado"))
@@ -1537,9 +1561,7 @@ def crear_servicio_mantenimiento(request):
     if modo == "pendiente" and not fecha_objetivo:
         errores.append("Indica la fecha objetivo del servicio pendiente.")
     if errores:
-        for error in errores:
-            msg.error(request, error)
-        return redirect("mantenimiento:dashboard")
+        return _service_form_error(request, " ".join(errores))
 
     proveedor_nombre = (request.POST.get("proveedor_servicio") or "").strip()
     responsable = (request.POST.get("responsable") or "").strip() or proveedor_nombre
@@ -1549,8 +1571,69 @@ def crear_servicio_mantenimiento(request):
 
     factura_archivo = request.FILES.get("factura_archivo")
     if factura_archivo and factura_archivo.size > 30 * 1024 * 1024:
-        msg.error(request, "El archivo supera el límite de 30 MB.")
-        return redirect("mantenimiento:dashboard")
+        return _service_form_error(request, "El archivo supera el límite de 30 MB.")
+    if factura_archivo:
+        try:
+            factura_archivo = validate_evidence_files([factura_archivo])[0]
+        except EvidenceValidationError as exc:
+            return _service_form_error(request, str(exc))
+
+    if modo == "realizado":
+        raw_details = (request.POST.get("detalles_json") or "").strip()
+        if raw_details:
+            try:
+                details = json.loads(raw_details)
+            except json.JSONDecodeError:
+                return _service_form_error(request, "No pudimos leer los equipos e instalaciones incluidos.")
+            if not isinstance(details, list):
+                return _service_form_error(request, "El alcance del servicio no tiene un formato válido.")
+        else:
+            detail = {
+                "tipo_objetivo": {
+                    "activo": "ACTIVO", "unidad": "UNIDAD", "instalacion": "INSTALACION",
+                }[alcance],
+                "activo_id": activo_id,
+                "unidad_id": unidad_id,
+                "sucursal_id": sucursal_id,
+                "instalacion_categoria": instalacion_categoria if alcance == "instalacion" else "",
+                "trabajo_realizado": nota_trabajo or descripcion,
+                "costo_asignado": None,
+            }
+            details = [detail]
+
+        try:
+            servicio, created = create_grouped_service(
+                payload={
+                    "fecha_servicio": fecha_objetivo,
+                    "proveedor_nombre": proveedor_nombre,
+                    "sucursal_cargo_id": request.POST.get("sucursal_cargo_id"),
+                    "responsable": responsable,
+                    "numero_documento": request.POST.get("numero_documento"),
+                    "documento": factura_archivo,
+                    "descripcion_general": descripcion,
+                    "costo_total": costo_total,
+                    "metodo_distribucion": request.POST.get("metodo_distribucion")
+                    or ServicioMantenimiento.DISTRIBUCION_SIN_DESGLOSE,
+                },
+                details=details,
+                user=request.user,
+                allowed_branch_ids=authorized_branch_ids(request.user),
+            )
+        except ValidationError as exc:
+            return _service_form_error(request, " ".join(exc.messages))
+        redirect_url = f"{redirect('mantenimiento:dashboard').url}#tab-seguimiento"
+        if created:
+            message = f"Servicio {servicio.folio} registrado una sola vez con {servicio.detalles.count()} alcance(s)."
+            toast_type = "success"
+        else:
+            message = f"El servicio {servicio.folio} ya estaba registrado; no se duplicó."
+            toast_type = "info"
+        if _wants_progressive_response(request):
+            return JsonResponse(
+                {"ok": True, "toast": {"type": toast_type, "message": message}, "redirect": redirect_url}
+            )
+        getattr(msg, toast_type)(request, message)
+        return redirect(redirect_url)
 
     if alcance == "unidad":
         unidades = Unidad.objects.filter(activa=True)

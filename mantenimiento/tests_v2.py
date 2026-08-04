@@ -31,6 +31,7 @@ from mantenimiento.services_access import (
 )
 from mantenimiento.services_history import canonical_status, period_bounds
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
+from mantenimiento.models import ServicioMantenimiento
 
 
 class EvidenceValidationTests(SimpleTestCase):
@@ -124,6 +125,7 @@ class MaintenanceHtmlWriteScopeTests(TestCase):
         self.client.force_login(self.writer)
         initial_orders = OrdenMantenimiento.objects.count()
         initial_services = ServicioRealizadoUnidad.objects.count()
+        initial_grouped = ServicioMantenimiento.objects.count()
         response = self.client.post(
             "/mantenimiento/servicios/crear/",
             {
@@ -133,6 +135,7 @@ class MaintenanceHtmlWriteScopeTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(OrdenMantenimiento.objects.count(), initial_orders)
+        self.assertEqual(ServicioMantenimiento.objects.count(), initial_grouped)
 
         response = self.client.post(
             "/mantenimiento/servicios/crear/",
@@ -141,8 +144,9 @@ class MaintenanceHtmlWriteScopeTests(TestCase):
                 "unidad_id": self.other_unit.pk, "descripcion": "No crear",
             },
         )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(ServicioRealizadoUnidad.objects.count(), initial_services)
+        self.assertEqual(ServicioMantenimiento.objects.count(), initial_grouped)
 
     @override_settings(DEBUG=False)
     def test_sensitive_legacy_media_routes_are_blocked_in_production(self):

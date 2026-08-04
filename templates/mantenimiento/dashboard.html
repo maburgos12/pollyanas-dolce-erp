@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260721-mantenimiento-pruebas-v3">
+<link rel="stylesheet" href="/static/css/template_modules/templates-mantenimiento-dashboard.css?v=20260722-servicios-multiples-v1">
 {% endblock %}
 
 {% block content %}
@@ -463,7 +463,7 @@
 
 <!-- Modal servicio sin orden / pendiente puntual -->
 <div class="mant-drawer" id="modalOrdenServicio" role="dialog" aria-modal="true" aria-labelledby="modalOrdenServicioTitulo">
-  <aside class="mant-drawer-panel">
+  <aside class="mant-drawer-panel mant-service-drawer-panel">
     <div class="mant-drawer-head">
       <div>
         <h2 id="modalOrdenServicioTitulo">Servicio de mantenimiento</h2>
@@ -471,9 +471,10 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-orden-servicio>Cerrar</button>
     </div>
-    <form class="mant-form" id="ordenServicioForm" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data" novalidate>
+    <form class="mant-form" id="ordenServicioForm" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data" novalidate data-async-action>
       {% csrf_token %}
       <input type="hidden" name="modo_servicio" id="ordenServicioModo" value="realizado">
+      <input type="hidden" name="detalles_json" id="ordenServicioDetallesJson" value="">
       <div class="mant-form-grid">
         <label class="mant-field full">Aplica a
           <select class="mant-input" name="alcance" id="ordenServicioAlcance">
@@ -554,8 +555,29 @@
         <label class="mant-field" data-realizado-only>Costos / importe final
           <input class="mant-input" name="costo_total" id="ordenServicioCosto" type="number" min="0" step="0.01" placeholder="0.00">
         </label>
+        <label class="mant-field" data-realizado-only>Factura, nota o remisión
+          <input class="mant-input" name="numero_documento" id="ordenServicioNumeroDocumento" maxlength="80" placeholder="Folio del documento">
+        </label>
         <label class="mant-field" data-realizado-only>Factura / remisión
           <input class="mant-input" name="factura_archivo" id="ordenServicioFactura" type="file" accept=".pdf,image/*" style="padding:8px">
+        </label>
+        <label class="mant-field" data-realizado-only>Distribución del costo
+          <select class="mant-input" name="metodo_distribucion" id="ordenServicioDistribucion">
+            <option value="SIN_DESGLOSE">Sin desglose por equipo</option>
+            <option value="DESGLOSE_REAL">Desglose indicado por el proveedor</option>
+            <option value="PRORRATEO">Prorrateo administrativo</option>
+          </select>
+        </label>
+        <label class="mant-field" data-realizado-only>Centro de costo <span class="pd-optional">(solo si abarca varias sucursales)</span>
+          <select class="mant-input" name="sucursal_cargo_id" id="ordenServicioSucursalCargo">
+            <option value="">Se determina por los alcances</option>
+            {% for sucursal in sucursales_list %}
+              <option value="{{ sucursal.id }}">{{ sucursal.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="mant-field" data-realizado-only id="ordenServicioCostoPrimerField" hidden>Costo asignado al primer alcance
+          <input class="mant-input" id="ordenServicioCostoPrimer" type="number" min="0" step="0.01" placeholder="0.00">
         </label>
         <label class="mant-field full">Nota de trabajo
           <textarea class="mant-input" name="nota_trabajo" id="ordenServicioNota" placeholder="Resultado, refacciones, condiciones o seguimiento acordado"></textarea>
@@ -564,9 +586,19 @@
           <input type="checkbox" name="cerrar_servicio" id="ordenServicioCerrar" value="1" checked>
           Cerrar servicio al guardar
         </label>
+        <section class="mant-service-scopes full" id="ordenServicioAlcances" data-realizado-only>
+          <div class="mant-service-scopes-head">
+            <div>
+              <strong>Otros equipos o instalaciones incluidos</strong>
+              <p>La factura se guardará una sola vez. Cada renglón aparecerá en el historial de su equipo o sucursal.</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" type="button" id="ordenServicioAgregarAlcance">Agregar otro alcance</button>
+          </div>
+          <div id="ordenServicioAlcancesLista" class="mant-service-scopes-list"></div>
+        </section>
       </div>
       <div class="mant-form-error" id="ordenServicioError" role="alert" tabindex="-1" hidden></div>
-      <button class="btn btn-primary" type="submit" id="ordenServicioSubmit" style="background:#8B2252;border-color:#8B2252;">Guardar servicio</button>
+      <button class="btn btn-primary" type="submit" id="ordenServicioSubmit" data-pending-label="Guardando…" style="background:#8B2252;border-color:#8B2252;">Guardar servicio</button>
     </form>
   </aside>
 </div>
@@ -1207,10 +1239,18 @@ function requireElements(scope, elementMap) {
   const form = document.getElementById("ordenServicioForm");
   const error = document.getElementById("ordenServicioError");
   const submit = document.getElementById("ordenServicioSubmit");
+  const detailsJson = document.getElementById("ordenServicioDetallesJson");
+  const scopesSection = document.getElementById("ordenServicioAlcances");
+  const scopesList = document.getElementById("ordenServicioAlcancesLista");
+  const addScope = document.getElementById("ordenServicioAgregarAlcance");
+  const distribution = document.getElementById("ordenServicioDistribucion");
+  const firstCostField = document.getElementById("ordenServicioCostoPrimerField");
+  const firstCost = document.getElementById("ordenServicioCostoPrimer");
   if (!requireElements("orden-servicio", {
     modal, btnRealizado, btnPendiente, modoInput, titulo, subtitulo, fechaLabel, fecha,
     tipo, origen, alcance, sucursal, sucursalField, activo, instalacion, unidad,
     activoField, instalacionField, unidadField, cierreBlock, cerrar, form, error, submit,
+    detailsJson, scopesSection, scopesList, addScope, distribution, firstCostField, firstCost,
   })) return;
   const realizadoOnly = modal.querySelectorAll("[data-realizado-only]");
   const activoOnly = modal.querySelectorAll("[data-activo-only]");
@@ -1244,8 +1284,150 @@ function requireElements(scope, elementMap) {
     document.getElementById("ordenServicioCosto").value = "";
     document.getElementById("ordenServicioFactura").value = "";
     document.getElementById("ordenServicioNota").value = "";
+    document.getElementById("ordenServicioNumeroDocumento").value = "";
+    document.getElementById("ordenServicioSucursalCargo").value = "";
+    distribution.value = "SIN_DESGLOSE";
+    firstCost.value = "";
+    scopesList.replaceChildren();
+    syncDistribution();
     setSelectValue(document.getElementById("ordenServicioPrioridad"), "MEDIA");
     filtrarPorSucursal();
+  }
+
+  function cloneOptions(source, target) {
+    Array.from(source.options).forEach((option) => {
+      const copy = option.cloneNode(true);
+      copy.hidden = false;
+      copy.disabled = false;
+      copy.selected = false;
+      target.append(copy);
+    });
+    if (target.options.length) target.options[0].selected = true;
+  }
+
+  function syncDistribution() {
+    const distributed = distribution.value !== "SIN_DESGLOSE";
+    firstCostField.hidden = !distributed;
+    firstCost.disabled = !distributed;
+    scopesList.querySelectorAll('[data-role="cost"]').forEach((input) => {
+      input.closest("label").hidden = !distributed;
+      input.disabled = !distributed;
+      if (!distributed) input.value = "";
+    });
+  }
+
+  function addScopeRow() {
+    const row = document.createElement("article");
+    row.className = "mant-service-scope";
+    row.innerHTML = `
+      <div class="mant-service-scope-head">
+        <strong>Alcance adicional</strong>
+        <button type="button" class="btn btn-secondary btn-sm" data-remove-scope>Quitar</button>
+      </div>
+      <div class="mant-service-scope-grid">
+        <label class="mant-field">Aplica a
+          <select class="mant-input" data-role="kind">
+            <option value="ACTIVO">Equipo / activo</option>
+            <option value="INSTALACION">Trabajo en instalaciones</option>
+            <option value="UNIDAD">Unidad logística</option>
+          </select>
+        </label>
+        <label class="mant-field" data-field="branch">Sucursal
+          <select class="mant-input" data-role="branch"></select>
+        </label>
+        <label class="mant-field full" data-field="asset">Equipo / activo
+          <select class="mant-input" data-role="asset"></select>
+        </label>
+        <label class="mant-field full" data-field="unit" hidden>Unidad logística
+          <select class="mant-input" data-role="unit"></select>
+        </label>
+        <label class="mant-field" data-field="category" hidden>Tipo de instalación
+          <select class="mant-input" data-role="category"></select>
+        </label>
+        <label class="mant-field" data-field="location" hidden>Ubicación dentro de la sucursal
+          <input class="mant-input" data-role="location" maxlength="160" placeholder="Ej. área de hornos">
+        </label>
+        <label class="mant-field full">Trabajo realizado
+          <textarea class="mant-input" data-role="work" required placeholder="Describe qué se hizo específicamente en este alcance"></textarea>
+        </label>
+        <label class="mant-field" data-field="cost" hidden>Costo asignado
+          <input class="mant-input" data-role="cost" type="number" min="0" step="0.01" placeholder="0.00">
+        </label>
+      </div>`;
+    const branchSelect = row.querySelector('[data-role="branch"]');
+    const assetSelect = row.querySelector('[data-role="asset"]');
+    const unitSelect = row.querySelector('[data-role="unit"]');
+    const categorySelect = row.querySelector('[data-role="category"]');
+    cloneOptions(sucursal, branchSelect);
+    cloneOptions(activo, assetSelect);
+    cloneOptions(unidad, unitSelect);
+    cloneOptions(instalacion, categorySelect);
+
+    function filterAssets() {
+      const branchId = branchSelect.value;
+      Array.from(assetSelect.options).forEach((option, index) => {
+        if (!index) return;
+        const visible = Boolean(branchId) && option.dataset.sucursal === branchId
+          && !instalacionCategorias.has(option.dataset.categoria || "");
+        option.hidden = !visible;
+        option.disabled = !visible;
+        if (!visible && option.selected) option.selected = false;
+      });
+      if (!assetSelect.value && assetSelect.options.length) assetSelect.options[0].selected = true;
+    }
+
+    function syncKind() {
+      const kind = row.querySelector('[data-role="kind"]').value;
+      row.querySelector('[data-field="branch"]').hidden = kind === "UNIDAD";
+      row.querySelector('[data-field="asset"]').hidden = kind !== "ACTIVO";
+      row.querySelector('[data-field="unit"]').hidden = kind !== "UNIDAD";
+      row.querySelector('[data-field="category"]').hidden = kind !== "INSTALACION";
+      row.querySelector('[data-field="location"]').hidden = kind !== "INSTALACION";
+      branchSelect.required = kind !== "UNIDAD";
+      assetSelect.required = kind === "ACTIVO";
+      unitSelect.required = kind === "UNIDAD";
+      categorySelect.required = kind === "INSTALACION";
+      filterAssets();
+    }
+    row.querySelector('[data-role="kind"]').addEventListener("change", syncKind);
+    branchSelect.addEventListener("change", filterAssets);
+    row.querySelector("[data-remove-scope]").addEventListener("click", () => row.remove());
+    scopesList.append(row);
+    syncKind();
+    syncDistribution();
+    row.querySelector('[data-role="kind"]').focus();
+  }
+
+  function collectDetails() {
+    const kind = alcance.value === "unidad" || alcance.value === "flota"
+      ? "UNIDAD" : alcance.value === "instalacion" ? "INSTALACION" : "ACTIVO";
+    const note = document.getElementById("ordenServicioNota").value.trim();
+    const description = document.getElementById("ordenServicioDescripcion").value.trim();
+    const details = [{
+      tipo_objetivo: kind,
+      activo_id: kind === "ACTIVO" ? activo.value : null,
+      unidad_id: kind === "UNIDAD" ? unidad.value : null,
+      sucursal_id: kind === "INSTALACION" ? sucursal.value : null,
+      instalacion_categoria: kind === "INSTALACION" ? instalacion.value : "",
+      trabajo_realizado: note || description,
+      costo_asignado: distribution.value === "SIN_DESGLOSE" ? null : firstCost.value,
+      costo_estimado: distribution.value === "PRORRATEO",
+    }];
+    scopesList.querySelectorAll(".mant-service-scope").forEach((row) => {
+      const detailKind = row.querySelector('[data-role="kind"]').value;
+      details.push({
+        tipo_objetivo: detailKind,
+        activo_id: detailKind === "ACTIVO" ? row.querySelector('[data-role="asset"]').value : null,
+        unidad_id: detailKind === "UNIDAD" ? row.querySelector('[data-role="unit"]').value : null,
+        sucursal_id: detailKind === "INSTALACION" ? row.querySelector('[data-role="branch"]').value : null,
+        instalacion_categoria: detailKind === "INSTALACION" ? row.querySelector('[data-role="category"]').value : "",
+        ubicacion: detailKind === "INSTALACION" ? row.querySelector('[data-role="location"]').value.trim() : "",
+        trabajo_realizado: row.querySelector('[data-role="work"]').value.trim(),
+        costo_asignado: distribution.value === "SIN_DESGLOSE" ? null : row.querySelector('[data-role="cost"]').value,
+        costo_estimado: distribution.value === "PRORRATEO",
+      });
+    });
+    return details;
   }
 
   function filtrarOpciones(select, emptyText, predicate) {
@@ -1384,6 +1566,8 @@ function requireElements(scope, elementMap) {
 
   alcance.addEventListener("change", () => setAlcance(alcance.value));
   sucursal.addEventListener("change", filtrarPorSucursal);
+  addScope.addEventListener("click", addScopeRow);
+  distribution.addEventListener("change", syncDistribution);
   form.addEventListener("submit", (event) => {
     error.hidden = true;
     error.textContent = "";
@@ -1415,8 +1599,12 @@ function requireElements(scope, elementMap) {
       return;
     }
 
-    submit.disabled = true;
-    submit.textContent = "Guardando…";
+    if (modoInput.value === "realizado") {
+      detailsJson.value = JSON.stringify(collectDetails());
+    } else {
+      detailsJson.value = "";
+    }
+
   });
   document.addEventListener("click", (event) => {
     if (event.target.closest("#btnServicioRealizado")) open("realizado");

@@ -1,5 +1,7 @@
 """Object-level access policy shared by Mantenimiento v2 queries."""
 
+from django.db.models import Q
+
 from activos.models import OrdenMantenimiento
 from core.access import (
     can_manage_module,
@@ -10,6 +12,7 @@ from core.access import (
 )
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad
+from mantenimiento.models import ServicioMantenimiento
 
 
 MAINTENANCE_GROUPS = {"dg", "mantenimiento"}
@@ -87,6 +90,18 @@ def authorized_repairs(user):
 
 def authorized_unit_services(user):
     return _authorized_queryset(user, ServicioRealizadoUnidad.objects.vigentes(), "unidad__sucursal_id")
+
+
+def authorized_grouped_services(user):
+    branch_ids = authorized_branch_ids(user)
+    queryset = ServicioMantenimiento.objects.all()
+    if branch_ids is None:
+        return queryset
+    return queryset.filter(
+        Q(detalles__activo__sucursal_id__in=branch_ids)
+        | Q(detalles__unidad__sucursal_id__in=branch_ids)
+        | Q(detalles__sucursal_id__in=branch_ids)
+    ).distinct()
 
 
 def can_view_costs(user):

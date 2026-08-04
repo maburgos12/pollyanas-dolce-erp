@@ -2198,7 +2198,7 @@
         return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
           <div class="history-filters" aria-label="Filtros de historial">
             <label>Periodo<select onchange="setHistoryFilter('periodo',this.value)">${[["30d","30 días"],["semana","Semana"],["mes","Mes"],["90d","90 días"],["todo","Todo"]].map(([v,l])=>`<option value="${v}" ${state.history.periodo===v?"selected":""}>${l}</option>`).join("")}</select></label>
-            <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
+            <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios de unidad"],["servicio_general","Servicios generales"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Estado<select onchange="setHistoryFilter('estado',this.value)">${[["todo","Todos"],["abierto","Abierto"],["en_proceso","En proceso"],["cerrado","Cerrado"],["cancelado","Cancelado"]].map(([v,l])=>`<option value="${v}" ${state.history.estado===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Sucursal<select onchange="setHistoryFilter('sucursal',this.value)"><option value="">Todas</option>${branchOptions}</select></label>
             <label class="history-unit-filter">Unidad<select onchange="setHistoryFilter('unidad',this.value)"><option value="">Todas las unidades</option>${unitOptions}</select></label>
@@ -2369,7 +2369,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260721-flota-fecha-v4", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260722-servicios-multiples-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {
