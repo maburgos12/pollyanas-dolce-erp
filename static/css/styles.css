@@ -1867,6 +1867,55 @@ tr.log-overdue td {
   line-height: 1.15;
 }
 
+.point-sync-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 4px 0 18px;
+  padding: 16px 0;
+  border-top: 1px solid rgba(139, 34, 82, 0.16);
+  border-bottom: 1px solid rgba(139, 34, 82, 0.16);
+}
+
+.point-sync-copy {
+  display: grid;
+  gap: 4px;
+  max-width: 68ch;
+}
+
+.point-sync-copy h3 {
+  margin: 0;
+  color: var(--texto);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.point-sync-copy p {
+  margin: 0;
+  color: var(--texto-light);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.point-sync-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.point-sync-actions form {
+  margin: 0;
+}
+
+.point-sync-actions .btn {
+  min-height: var(--control-height);
+  margin: 0;
+  white-space: nowrap;
+}
+
 .form-grid-auto {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -5357,6 +5406,20 @@ body.ui-compact .recipe-detail-shell .recipe-main-submit {
 
   .recipes-filters {
     grid-template-columns: 1fr;
+  }
+
+  .point-sync-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .point-sync-actions {
+    justify-content: flex-start;
+  }
+
+  .point-sync-actions form,
+  .point-sync-actions .btn {
+    width: 100%;
   }
 
   .form-grid-2 {

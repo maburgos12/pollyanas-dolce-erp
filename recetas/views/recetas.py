@@ -24,6 +24,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
@@ -52,6 +53,7 @@ from pos_bridge.models import (
     PointProductCategory,
 )
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
+from pos_bridge.tasks import task_catalog_recipe_sync
 from maestros.utils.canonical_catalog import (
     canonical_insumo,
     canonical_insumo_by_id,
@@ -5401,32 +5403,109 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _point_sync_next_url(request: HttpRequest) -> str:
+    fallback = reverse("recetas:recetas_list")
+    candidate = (request.POST.get("next") or "").strip()
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return fallback
+
+
+def _wants_progressive_response(request: HttpRequest) -> bool:
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def _point_sync_response(
+    request: HttpRequest,
+    *,
+    next_url: str,
+    toast_type: str,
+    message: str,
+    ok: bool = True,
+    status: int = 200,
+    extra_payload: dict[str, Any] | None = None,
+) -> HttpResponse:
+    if _wants_progressive_response(request):
+        toast = {"type": toast_type, "message": message}
+        if not ok:
+            toast["persistent"] = True
+        return JsonResponse(
+            {
+                "ok": ok,
+                "toast": toast,
+                **({"redirect": next_url} if ok else {}),
+                **(extra_payload or {}),
+            },
+            status=status,
+        )
+    getattr(messages, toast_type)(request, message)
+    return redirect(next_url)
+
+
+def _queue_catalog_recipe_sync(request: HttpRequest, *, action_label: str) -> PointSyncJob:
+    job = PointSyncJob.objects.create(
+        job_type=PointSyncJob.JOB_TYPE_RECIPES,
+        status=PointSyncJob.STATUS_PENDING,
+        parameters={
+            "action": action_label,
+            "branch_hint": "MATRIZ",
+            "include_without_recipe": False,
+        },
+        triggered_by=request.user,
+    )
+    try:
+        task_catalog_recipe_sync.delay(job_id=job.id)
+    except Exception as exc:
+        job.status = PointSyncJob.STATUS_FAILED
+        job.finished_at = timezone.now()
+        job.error_message = f"No se pudo encolar el trabajo: {exc}"
+        job.save(update_fields=["status", "finished_at", "error_message", "updated_at"])
+        raise
+    request.session["recetas_last_point_sync_job_id"] = job.id
+    log_event(
+        request.user,
+        "QUEUE_POINT_RECIPES_SYNC",
+        "pos_bridge.PointSyncJob",
+        job.id,
+        {"action": action_label},
+    )
+    return job
+
+
 @login_required
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def recetas_sync_all(request: HttpRequest) -> HttpResponse:
-    next_url = request.POST.get("next") or reverse("recetas:recetas_list")
+    next_url = _point_sync_next_url(request)
     try:
-        job, summary = _run_point_recipe_sync_action(request, action_label="SYNC_ALL_RECIPES")
-        snapshot = _snapshot_costeo_after_sync()
-        messages.success(
+        job = _queue_catalog_recipe_sync(request, action_label="SYNC_ALL_RECIPES")
+        return _point_sync_response(
             request,
-            (
-                f"{_format_point_recipe_sync_message(summary)} "
-                f"{summary.get('lineas_created', 0)} líneas materializadas. "
-                f"Corte semanal {snapshot['week_start']} recalculado."
+            next_url=next_url,
+            toast_type="info",
+            message=(
+                "La actualización completa quedó en cola. Puedes seguir usando el ERP; "
+                "el estado aparecerá en este catálogo cuando termine."
             ),
-        )
-        log_event(
-            request.user,
-            "SNAPSHOT_WEEKLY_COST",
-            "recetas.RecetaCostoSemanal",
-            None,
-            {"source": "SYNC_ALL_RECIPES", "job_id": job.id, "snapshot": snapshot},
+            status=202,
+            extra_payload={"job_id": job.id},
         )
     except Exception as exc:
-        messages.error(request, f"No se pudo actualizar recetas desde Point: {exc}")
-    return redirect(next_url)
+        return _point_sync_response(
+            request,
+            next_url=next_url,
+            toast_type="error",
+            message=f"No se pudo actualizar recetas desde Point: {exc}",
+            ok=False,
+            status=502,
+        )
 
 
 @login_required
@@ -5471,44 +5550,29 @@ def recetas_sync_group(request: HttpRequest) -> HttpResponse:
 @permission_required("recetas.change_receta", raise_exception=True)
 @require_POST
 def recetas_sync_new(request: HttpRequest) -> HttpResponse:
-    next_url = request.POST.get("next") or reverse("recetas:recetas_list")
-    service = PointProductRecipeSyncService()
+    next_url = _point_sync_next_url(request)
     try:
-        discovery = service.discover_new_product_codes(branch_hint="MATRIZ")
-        new_codes = discovery.get("new_codes") or []
-        blocked_candidates_count = int(discovery.get("blocked_candidates_count") or 0)
-        if not new_codes:
-            if blocked_candidates_count:
-                messages.warning(request, _format_point_recipe_discovery_blocked_message(discovery))
-            else:
-                messages.info(request, "Point no reportó productos nuevos con receta pendientes de incorporar.")
-            return redirect(next_url)
-        job, summary = _run_point_recipe_sync_action(
+        job = _queue_catalog_recipe_sync(request, action_label="SYNC_ONLY_NEW_PRODUCTS")
+        return _point_sync_response(
             request,
-            action_label="SYNC_ONLY_NEW_PRODUCTS",
-            product_codes=list(new_codes),
-        )
-        receta_ids = list(Receta.objects.filter(codigo_point__in=new_codes).values_list("id", flat=True))
-        snapshot = _snapshot_costeo_after_sync(receta_ids=receta_ids)
-        messages.success(
-            request,
-            (
-                f"{_format_point_recipe_sync_message(summary, new_codes_count=len(new_codes))} "
-                f"Snapshot semanal actualizado."
+            next_url=next_url,
+            toast_type="info",
+            message=(
+                "La búsqueda quedó en cola. Point incorporará automáticamente los productos "
+                "nuevos que tengan receta/BOM."
             ),
-        )
-        if blocked_candidates_count:
-            messages.warning(request, _format_point_recipe_discovery_blocked_message(discovery))
-        log_event(
-            request.user,
-            "SYNC_ONLY_NEW_PRODUCTS",
-            "pos_bridge.PointSyncJob",
-            job.id,
-            {"discovery": discovery, "snapshot": snapshot},
+            status=202,
+            extra_payload={"job_id": job.id},
         )
     except Exception as exc:
-        messages.error(request, f"No se pudo incorporar productos nuevos desde Point: {exc}")
-    return redirect(next_url)
+        return _point_sync_response(
+            request,
+            next_url=next_url,
+            toast_type="error",
+            message=f"No se pudo incorporar productos nuevos desde Point: {exc}",
+            ok=False,
+            status=502,
+        )
 
 
 @login_required
