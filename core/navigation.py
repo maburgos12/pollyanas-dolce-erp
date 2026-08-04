@@ -48,9 +48,13 @@ def _puede_capturar_presupuesto(user) -> bool:
         return True
     from reportes.models import AreaPresupuestoResponsable
 
-    tiene_area = AreaPresupuestoResponsable.objects.filter(
-        usuario=user, puede_capturar=True, area__activa=True
-    ).exists()
+    codigos_area = set(
+        AreaPresupuestoResponsable.objects.filter(
+            usuario=user, puede_capturar=True, area__activa=True
+        ).values_list("area__codigo", flat=True)
+    )
+    setattr(user, "_areas_presupuesto_codigos", codigos_area)
+    tiene_area = bool(codigos_area)
     setattr(user, "_tiene_area_presupuesto_activa", tiene_area)
     return tiene_area
 
@@ -59,20 +63,26 @@ def _es_responsable_area_presupuesto(user) -> bool:
     """Reutiliza la consulta de captura para no encarecer cada render del menú."""
     if not (user and user.is_authenticated and getattr(user, "pk", None)):
         return False
+    # Quien ya dispone de la bandeja administrativa no necesita una entrada
+    # personal duplicada.
+    from compras.access_departamentales import puede_gestionar_compras_departamentales
+
+    if puede_gestionar_compras_departamentales(user):
+        return False
+
     valor_cacheado = getattr(user, "_tiene_area_presupuesto_activa", None)
     if valor_cacheado is not None:
         return valor_cacheado
 
-    # Quien ya dispone de la bandeja general no necesita una entrada personal
-    # duplicada; evitamos además una consulta global para perfiles operativos.
-    if can_view_submodule(user, "compras", "departamentales"):
-        return False
-
     from reportes.models import AreaPresupuestoResponsable
 
-    tiene_area = AreaPresupuestoResponsable.objects.filter(
-        usuario=user, puede_capturar=True, area__activa=True
-    ).exists()
+    codigos_area = set(
+        AreaPresupuestoResponsable.objects.filter(
+            usuario=user, puede_capturar=True, area__activa=True
+        ).values_list("area__codigo", flat=True)
+    )
+    setattr(user, "_areas_presupuesto_codigos", codigos_area)
+    tiene_area = bool(codigos_area)
     setattr(user, "_tiene_area_presupuesto_activa", tiene_area)
     return tiene_area
 
@@ -203,13 +213,6 @@ NAV_GROUPS = [
                 ["/compras/dashboard/", "/compras/solicitudes/", "/compras/ordenes/", "/compras/recepciones/"],
             ),
             (
-                "compras",
-                "departamentales",
-                "Compras departamentales",
-                "/compras/departamentales/",
-                ["/compras/departamentales/"],
-            ),
-            (
                 "inventario",
                 "dashboard",
                 "Inventario",
@@ -278,6 +281,13 @@ NAV_GROUPS = [
         "key": "administracion",
         "label": "Administración",
         "items": [
+            (
+                "compras",
+                "departamentales",
+                "Compras departamentales",
+                "/compras/departamentales/",
+                ["/compras/departamentales/"],
+            ),
             ("activos", "dashboard", "Activos", "/activos/dashboard/", ["/activos/dashboard/"]),
             ("activos", "seguimiento", "Bandeja Compras", "/activos/seguimiento/", ["/activos/seguimiento/"]),
             ("activos", "catalogo", "Catálogo activos", "/activos/activos/", ["/activos/activos/"]),
@@ -327,7 +337,16 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
-            if not (can_view_submodule(user, module, submodule) or tiene_acceso_personal):
+            tiene_acceso_departamental = False
+            if module == "compras" and submodule == "departamentales":
+                from compras.access_departamentales import puede_gestionar_compras_departamentales
+
+                tiene_acceso_departamental = puede_gestionar_compras_departamentales(user)
+            if not (
+                can_view_submodule(user, module, submodule)
+                or tiene_acceso_personal
+                or tiene_acceso_departamental
+            ):
                 continue
             if es_revisor_seguimiento and module == "seguimiento" and submodule in rutas_panel_dg:
                 url = rutas_panel_dg[submodule]

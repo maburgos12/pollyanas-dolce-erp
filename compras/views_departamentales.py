@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from core.access import ROLE_DG, can_manage_compras, has_any_role
+from core.access import ROLE_DG, has_any_role
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto
 
@@ -23,6 +23,7 @@ from .models import (
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
 )
+from .access_departamentales import puede_gestionar_compras_departamentales
 from .services_departamentales import (
     confirmar_recepcion_departamental,
     decidir_exceso,
@@ -50,7 +51,7 @@ def _es_direccion(user):
 
 def _puede_ver_solicitud(user, solicitud):
     return (
-        can_manage_compras(user)
+        puede_gestionar_compras_departamentales(user)
         or _es_direccion(user)
         or AreaPresupuestoResponsable.objects.filter(
             area=solicitud.area, usuario=user, puede_capturar=True
@@ -92,7 +93,7 @@ def _error_nueva(request, message, areas):
 
 @login_required
 def departamental_inicio(request):
-    if can_manage_compras(request.user):
+    if puede_gestionar_compras_departamentales(request.user):
         return redirect("compras:departamental_bandeja")
     if _es_direccion(request.user):
         return redirect("compras:departamental_direccion")
@@ -102,7 +103,7 @@ def departamental_inicio(request):
 @login_required
 def departamental_mis_solicitudes(request):
     areas = _areas_usuario(request.user)
-    if not areas.exists() and not can_manage_compras(request.user):
+    if not areas.exists() and not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied("No tienes un área asignada para solicitudes departamentales.")
     solicitudes = (
         SolicitudCompraDepartamental.objects.filter(area__in=areas)
@@ -117,7 +118,7 @@ def departamental_mis_solicitudes(request):
             "areas": areas,
             "vista": "area",
             "puede_solicitar": areas.exists(),
-            "es_compras": can_manage_compras(request.user),
+            "es_compras": puede_gestionar_compras_departamentales(request.user),
             "es_direccion": _es_direccion(request.user),
         },
     )
@@ -126,7 +127,7 @@ def departamental_mis_solicitudes(request):
 @login_required
 def departamental_nueva(request):
     areas = _areas_usuario(request.user)
-    if not areas.exists() and not can_manage_compras(request.user):
+    if not areas.exists() and not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied("No tienes un área asignada para solicitar compras.")
     if request.method == "GET":
         return render(
@@ -136,7 +137,7 @@ def departamental_nueva(request):
         )
 
     area = get_object_or_404(AreaPresupuesto, pk=request.POST.get("area"), activa=True)
-    if not can_manage_compras(request.user) and not areas.filter(pk=area.pk).exists():
+    if not puede_gestionar_compras_departamentales(request.user) and not areas.filter(pk=area.pk).exists():
         raise PermissionDenied("Solo puedes solicitar compras para tu área asignada.")
     try:
         periodo = date.fromisoformat(f"{request.POST.get('periodo')}-01")
@@ -208,7 +209,7 @@ def departamental_nueva(request):
             item.save()
     return _respuesta_accion(
         request,
-        message=f"Solicitud {solicitud.folio} {'enviada a Compras' if accion == 'enviar' else 'guardada como borrador'}.",
+        message=f"Solicitud {solicitud.folio} {'enviada a Administración' if accion == 'enviar' else 'guardada como borrador'}.",
         redirect_url=reverse("compras:departamental_detalle", args=[solicitud.pk]),
     )
 
@@ -249,7 +250,7 @@ def departamental_detalle(request, pk):
             "solicitud": solicitud,
             "rubros": rubros,
             "proveedores": proveedores,
-            "es_compras": can_manage_compras(request.user),
+            "es_compras": puede_gestionar_compras_departamentales(request.user),
             "es_direccion": _es_direccion(request.user),
             "total_solicitado": total_solicitado,
             "total_cotizado": total_cotizado,
@@ -261,8 +262,8 @@ def departamental_detalle(request, pk):
 
 @login_required
 def departamental_bandeja(request):
-    if not can_manage_compras(request.user):
-        raise PermissionDenied("La bandeja compartida corresponde al equipo de Compras.")
+    if not puede_gestionar_compras_departamentales(request.user):
+        raise PermissionDenied("La bandeja compartida corresponde a Administración.")
     items = ItemCompraDepartamental.objects.select_related(
         "solicitud__area", "solicitud__solicitante", "solicitud__comprador_asignado"
     ).exclude(estado__in=[ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME, ItemCompraDepartamental.ESTADO_RECHAZADO, ItemCompraDepartamental.ESTADO_CANCELADO])
@@ -293,7 +294,7 @@ def departamental_direccion(request):
             "items": items,
             "vista": "direccion",
             "puede_solicitar": _areas_usuario(request.user).exists(),
-            "es_compras": can_manage_compras(request.user),
+            "es_compras": puede_gestionar_compras_departamentales(request.user),
             "es_direccion": True,
         },
     )
@@ -302,7 +303,7 @@ def departamental_direccion(request):
 @login_required
 @require_POST
 def departamental_asignar(request, pk):
-    if not can_manage_compras(request.user):
+    if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     solicitud = get_object_or_404(SolicitudCompraDepartamental, pk=pk)
     solicitud.comprador_asignado = request.user
@@ -318,7 +319,7 @@ def departamental_asignar(request, pk):
 @login_required
 @require_POST
 def departamental_cotizar(request, item_pk):
-    if not can_manage_compras(request.user):
+    if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     item = get_object_or_404(ItemCompraDepartamental.objects.select_related("solicitud"), pk=item_pk)
     cotizacion = CotizacionCompraDepartamental.objects.create(
@@ -355,7 +356,7 @@ def departamental_decidir(request, item_pk):
 @login_required
 @require_POST
 def departamental_generar_ordenes(request, pk):
-    if not can_manage_compras(request.user):
+    if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     solicitud = get_object_or_404(SolicitudCompraDepartamental, pk=pk)
     items = list(solicitud.items.filter(estado=ItemCompraDepartamental.ESTADO_AUTORIZADO))
@@ -368,7 +369,7 @@ def departamental_generar_ordenes(request, pk):
 @login_required
 @require_POST
 def departamental_recibir(request, item_pk):
-    if not can_manage_compras(request.user):
+    if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     item = get_object_or_404(ItemCompraDepartamental, pk=item_pk)
     linea = item.linea_orden
