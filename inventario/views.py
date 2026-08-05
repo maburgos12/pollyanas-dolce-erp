@@ -82,6 +82,7 @@ from .models import (
 )
 from .services_conteo_fisico import ConteoFisicoError, ConteoFisicoService, parse_conteo_period
 from .services_existencias import aplicar_delta, establecer_stock, get_or_create_existencia, stock_ubicacion
+from .units import from_presentation_quantity, presentation_quantity
 
 
 SOURCE_TO_FILENAME = {
@@ -212,6 +213,14 @@ def _canonicalized_existencias_rows(
             consumo_diario_promedio=consumo_diario_promedio,
             formula=formula_mode,
         )
+        stock_actual_display, display_unit = presentation_quantity(stock_actual, insumo.unidad_base)
+        stock_minimo_display, _ = presentation_quantity(stock_minimo, insumo.unidad_base)
+        stock_maximo_display, _ = presentation_quantity(stock_maximo, insumo.unidad_base)
+        punto_reorden_display, _ = presentation_quantity(punto_reorden, insumo.unidad_base)
+        inventario_promedio_display, _ = presentation_quantity(inventario_promedio, insumo.unidad_base)
+        consumo_diario_display, _ = presentation_quantity(consumo_diario_promedio, insumo.unidad_base)
+        recomendado_display, _ = presentation_quantity(recomendado, insumo.unidad_base)
+        diferencia_display, _ = presentation_quantity(punto_reorden - recomendado, insumo.unidad_base)
         enterprise_profile = getattr(insumo, "enterprise_profile", enterprise_readiness_profile(insumo))
         movement_count = sum(int(usage_maps["movement_counts"].get(member_id, 0)) for member_id in row["member_ids"])
         adjustment_count = sum(int(usage_maps["adjustment_counts"].get(member_id, 0)) for member_id in row["member_ids"])
@@ -253,6 +262,15 @@ def _canonicalized_existencias_rows(
                 consumo_diario_promedio=consumo_diario_promedio,
                 punto_reorden_recomendado=recomendado,
                 punto_reorden_diferencia=punto_reorden - recomendado,
+                display_unit=display_unit,
+                stock_actual_display=stock_actual_display,
+                stock_minimo_display=stock_minimo_display,
+                stock_maximo_display=stock_maximo_display,
+                punto_reorden_display=punto_reorden_display,
+                inventario_promedio_display=inventario_promedio_display,
+                consumo_diario_promedio_display=consumo_diario_display,
+                punto_reorden_recomendado_display=recomendado_display,
+                punto_reorden_diferencia_display=diferencia_display,
                 canonical_variant_count=row["variant_count"],
                 enterprise_profile=enterprise_profile,
                 enterprise_status=enterprise_profile["readiness_label"],
@@ -5085,12 +5103,22 @@ def existencias(request: HttpRequest) -> HttpResponse:
             prev_inv_prom = existencia.inventario_promedio
             prev_dias = existencia.dias_llegada_pedido
             prev_consumo = existencia.consumo_diario_promedio
-            new_stock = _to_decimal(request.POST.get("stock_actual"), "0")
-            new_minimo = _to_decimal(request.POST.get("stock_minimo"), "0")
-            new_maximo = _to_decimal(request.POST.get("stock_maximo"), "0")
-            new_inv_prom = _to_decimal(request.POST.get("inventario_promedio"), "0")
+            new_stock = from_presentation_quantity(
+                _to_decimal(request.POST.get("stock_actual"), "0"), insumo.unidad_base
+            )
+            new_minimo = from_presentation_quantity(
+                _to_decimal(request.POST.get("stock_minimo"), "0"), insumo.unidad_base
+            )
+            new_maximo = from_presentation_quantity(
+                _to_decimal(request.POST.get("stock_maximo"), "0"), insumo.unidad_base
+            )
+            new_inv_prom = from_presentation_quantity(
+                _to_decimal(request.POST.get("inventario_promedio"), "0"), insumo.unidad_base
+            )
             new_dias = int(_to_decimal(request.POST.get("dias_llegada_pedido"), "0"))
-            new_consumo = _to_decimal(request.POST.get("consumo_diario_promedio"), "0")
+            new_consumo = from_presentation_quantity(
+                _to_decimal(request.POST.get("consumo_diario_promedio"), "0"), insumo.unidad_base
+            )
             reorden_recomendado = calcular_punto_reorden(
                 stock_minimo=new_minimo,
                 dias_llegada_pedido=new_dias,
@@ -5099,7 +5127,9 @@ def existencias(request: HttpRequest) -> HttpResponse:
             )
             reorden_raw = (request.POST.get("punto_reorden") or "").strip()
             if reorden_raw:
-                new_reorden = _to_decimal(reorden_raw, "0")
+                new_reorden = from_presentation_quantity(
+                    _to_decimal(reorden_raw, "0"), insumo.unidad_base
+                )
                 reorden_auto = False
                 max_diff_pct = _inventario_reorder_max_diff_pct()
                 if reorden_recomendado > 0 and max_diff_pct >= 0:
@@ -5159,9 +5189,13 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 ]
             )
             if reorden_auto:
+                reorden_display, reorden_unit = presentation_quantity(new_reorden, insumo.unidad_base)
                 messages.info(
                     request,
-                    f"Punto de reorden calculado automáticamente: {new_reorden} (según fórmula activa).",
+                    (
+                        "Punto de reorden calculado automáticamente: "
+                        f"{reorden_display:.3f} {reorden_unit} (según fórmula activa)."
+                    ),
                 )
             log_event(
                 request.user,
