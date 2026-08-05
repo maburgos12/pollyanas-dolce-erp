@@ -58,20 +58,25 @@
       <button class="btn btn-secondary" type="submit">Guardar umbral de validación</button>
     </form>
     <hr class="section-sep">
+    <p class="muted">
+      Las cantidades se muestran y capturan en <strong>kg</strong> para insumos cuya base es g,
+      y en <strong>L</strong> para los que tienen base ml. El ERP conserva g/ml internamente para
+      no alterar recetas, compras ni producción.
+    </p>
     <form method="post" class="form-grid-auto">
       {% csrf_token %}
       <input type="hidden" name="ubicacion" value="{{ selected_ubicacion }}">
       <select class="input-field" name="insumo_id" required>
         <option value="">Insumo</option>
-        {% for i in insumos %}<option value="{{ i.id }}">{{ i.display_name }}</option>{% endfor %}
+        {% for i in insumos %}<option value="{{ i.id }}">{{ i.display_name }}{% if i.unidad_base.codigo == 'g' %} · kg{% elif i.unidad_base.codigo == 'ml' %} · L{% elif i.unidad_base %} · {{ i.unidad_base.codigo }}{% endif %}</option>{% endfor %}
       </select>
-      <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual" required>
-      <input class="input-field" type="number" step="0.001" name="stock_minimo" placeholder="Stock mínimo" value="0">
-      <input class="input-field" type="number" step="0.001" name="stock_maximo" placeholder="Stock máximo" value="0">
-      <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden (opcional, vacío = auto)">
-      <input class="input-field" type="number" step="0.001" name="inventario_promedio" placeholder="Inventario promedio" value="0">
+      <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual (kg/L/unidad)" required>
+      <input class="input-field" type="number" step="0.001" name="stock_minimo" placeholder="Stock mínimo (kg/L/unidad)" value="0">
+      <input class="input-field" type="number" step="0.001" name="stock_maximo" placeholder="Stock máximo (kg/L/unidad)" value="0">
+      <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden (kg/L/unidad; vacío = auto)">
+      <input class="input-field" type="number" step="0.001" name="inventario_promedio" placeholder="Inventario promedio (kg/L/unidad)" value="0">
       <input class="input-field" type="number" step="1" min="0" name="dias_llegada_pedido" placeholder="Días llegada pedido" value="0">
-      <input class="input-field" type="number" step="0.001" name="consumo_diario_promedio" placeholder="Consumo diario promedio" value="0">
+      <input class="input-field" type="number" step="0.001" name="consumo_diario_promedio" placeholder="Consumo diario (kg/L/unidad)" value="0">
       <button class="btn btn-primary" type="submit">Guardar existencia</button>
     </form>
     {% else %}
@@ -103,16 +108,16 @@
           {% for e in existencias %}
           <tr>
             <td>{{ e.insumo.display_name }}</td>
-            <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
-            <td class="text-end">{{ e.stock_actual }}</td>
-            <td class="text-end">{{ e.stock_minimo }}</td>
-            <td class="text-end">{{ e.stock_maximo }}</td>
-            <td class="text-end">{{ e.punto_reorden }}</td>
-            <td class="text-end">{{ e.inventario_promedio }}</td>
+            <td>{{ e.display_unit }}</td>
+            <td class="text-end">{{ e.stock_actual_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.stock_minimo_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.stock_maximo_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.punto_reorden_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.inventario_promedio_display|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ e.dias_llegada_pedido }}</td>
-            <td class="text-end">{{ e.consumo_diario_promedio }}</td>
-            <td class="text-end">{{ e.punto_reorden_recomendado|floatformat:3 }}</td>
-            <td class="text-end">{{ e.punto_reorden_diferencia|floatformat:3 }}</td>
+            <td class="text-end">{{ e.consumo_diario_promedio_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.punto_reorden_recomendado_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.punto_reorden_diferencia_display|floatformat:3|intcomma }}</td>
             <td>
               {% if e.stock_actual < e.punto_reorden %}
                 <span class="badge bg-danger">Bajo mínimo</span>
