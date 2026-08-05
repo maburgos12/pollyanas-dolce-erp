@@ -124,7 +124,7 @@ class PointInventoryReconciliationTests(TestCase):
             unidad_base=self.gram,
         )
         self.almacen_branch, _ = Sucursal.objects.update_or_create(
-            codigo="ALMACEN", defaults={"nombre": "Almacen", "activa": True}
+            codigo="ALMACEN", defaults={"nombre": "Almacen", "activa": False}
         )
         self.cedis_branch, _ = Sucursal.objects.update_or_create(
             codigo="CEDIS", defaults={"nombre": "CEDIS", "activa": True}
@@ -146,6 +146,7 @@ class PointInventoryReconciliationTests(TestCase):
         )
 
     def test_preview_uses_separate_numeric_point_branches(self):
+        self.assertFalse(self.almacen_branch.activa)  # Es ubicación logística, no sucursal comercial.
         live = _FakeLiveInventoryService()
 
         results = reconcile_insumo_from_point(insumo=self.insumo, apply=False, live_service=live)

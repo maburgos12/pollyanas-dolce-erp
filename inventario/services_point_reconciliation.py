@@ -73,9 +73,11 @@ def _point_unit(raw_payload: dict) -> str:
 
 
 def _capture_ledger(*, insumo, ledger: str, sucursal_code: str, point_name: str, live_service):
-    sucursal = Sucursal.objects.filter(codigo=sucursal_code, activa=True).first()
+    # ALMACEN es una ubicación logística, no una sucursal comercial; por eso
+    # puede estar inactiva para ventas y aun así ser el contexto correcto de Point.
+    sucursal = Sucursal.objects.filter(codigo=sucursal_code).first()
     if sucursal is None:
-        raise ValidationError(f"No existe la sucursal ERP activa {sucursal_code}.")
+        raise ValidationError(f"No existe la ubicación ERP {sucursal_code}.")
     point_branch = _official_numeric_point_branch(point_name)
     result = live_service.get_stock(
         product_codes=[insumo.codigo_point],
