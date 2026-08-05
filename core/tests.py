@@ -17,6 +17,8 @@ from unittest.mock import MagicMock, patch
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra
 from control.models import MermaPOS
 from core.access import (
+    ACCESS_MODULES,
+    ACCESS_SUBMODULES,
     ROLE_ADMIN,
     ROLE_BONOS_PRODUCCION_CAPTURA,
     ROLE_COMPRAS,
@@ -33,7 +35,7 @@ from core.access import (
 from core.branch_catalog import eligible_operational_branch_qs
 from core.cache_versions import bump_cache_scopes
 from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddleware
-from core.models import Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
+from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
 from core.hallmark_ui_audit import new_issues_against_baseline, scan_hallmark_ui
@@ -1882,6 +1884,92 @@ class UsersAccessTests(TestCase):
         self.assertIn("users_executive_radar_rows", response.context)
         self.assertIn("erp_command_center", response.context)
         self.assertIn("completion", response.context["users_trunk_chain_rows"][0])
+
+    def test_access_catalog_covers_every_module_and_submodule(self):
+        expected_keys = {module for module, _label in ACCESS_MODULES}
+        expected_keys.update(
+            f"{module}.{submodule}"
+            for module, submodules in ACCESS_SUBMODULES.items()
+            for submodule, _label in submodules
+        )
+
+        self.assertEqual(
+            {module for module, _label in UserModuleAccess.MODULOS},
+            expected_keys,
+        )
+
+    def test_permissions_modal_groups_submodules_under_their_module(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("users_access"))
+
+        self.assertEqual(response.status_code, 200)
+        compras_row = next(
+            row
+            for row in response.context["users"]
+            if row["username"] == self.compras.username
+        )
+        compras_access = next(
+            row
+            for row in compras_row["module_access_rows"]
+            if row["module"] == "compras"
+        )
+        self.assertEqual(compras_access["input_name"], "access_compras")
+        self.assertEqual(
+            [row["key"] for row in compras_access["submodules"]],
+            [
+                "compras.dashboard",
+                "compras.solicitudes",
+                "compras.ordenes",
+                "compras.recepciones",
+            ],
+        )
+        self.assertContains(response, "Pestaña personalizada", count=0)
+        self.assertContains(response, "Hereda del módulo o rol")
+
+    def test_permissions_update_persists_granular_submodule_access(self):
+        superuser = get_user_model().objects.create_superuser(
+            username="dg_permissions",
+            email="dg_permissions@example.com",
+            password="test12345",
+        )
+        self.client.force_login(superuser)
+
+        response = self.client.post(
+            reverse("usuario_permisos_update", args=[self.compras.id]),
+            {
+                "access_compras": UserModuleAccess.ACCESS_NONE,
+                "access_compras.dashboard": UserModuleAccess.ACCESS_VIEW,
+                "access_compras.solicitudes": UserModuleAccess.ACCESS_MANAGE,
+                "access_compras.ordenes": UserModuleAccess.ACCESS_MANAGE,
+                "access_compras.recepciones": UserModuleAccess.ACCESS_VIEW,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            dict(
+                UserModuleAccess.objects.filter(
+                    user=self.compras,
+                    module__startswith="compras",
+                ).values_list("module", "access")
+            ),
+            {
+                "compras": UserModuleAccess.ACCESS_NONE,
+                "compras.dashboard": UserModuleAccess.ACCESS_VIEW,
+                "compras.solicitudes": UserModuleAccess.ACCESS_MANAGE,
+                "compras.ordenes": UserModuleAccess.ACCESS_MANAGE,
+                "compras.recepciones": UserModuleAccess.ACCESS_VIEW,
+            },
+        )
+        audit = AuditLog.objects.filter(
+            model="core.UserModuleAccess",
+            object_id=str(self.compras.id),
+        ).latest("timestamp")
+        self.assertEqual(
+            audit.payload["access"]["compras.solicitudes"],
+            UserModuleAccess.ACCESS_MANAGE,
+        )
 
     def test_non_admin_cannot_open_users_access_page(self):
         self.client.force_login(self.compras)

@@ -3,6 +3,9 @@ from django.db.models import Q
 from django.conf import settings
 from django.utils import timezone
 
+from core.access_catalog import USER_MODULE_ACCESS_CHOICES
+
+
 class Sucursal(models.Model):
     codigo = models.CharField(max_length=20, unique=True)
     nombre = models.CharField(max_length=120)
@@ -70,40 +73,7 @@ class UserModuleAccess(models.Model):
     ACCESS_VIEW = "view"
     ACCESS_MANAGE = "manage"
 
-    MODULOS = [
-        ("logistica", "Logística"),
-        ("mantenimiento", "Mantenimiento"),
-        ("seguimiento", "Seguimiento personal"),
-        ("seguimiento.calendario", "Seguimiento - Calendario"),
-        ("fallas", "Fallas / Mantenimiento"),
-        ("mermas", "Mermas"),
-        ("mermas.captura", "Mermas - App sucursal"),
-        ("mermas.recepcion", "Mermas - Recepción CEDIS"),
-        ("mermas.dashboard", "Mermas - Panel ERP"),
-        ("compras", "Compras"),
-        ("ventas", "Ventas"),
-        ("ventas.visitas_sucursal", "Ventas - Visitas a sucursal"),
-        ("reportes", "Reportes"),
-        ("produccion", "Producción"),
-        ("rrhh", "RRHH"),
-        ("rrhh.dashboard", "RRHH - Indicadores"),
-        ("rrhh.organizacion", "RRHH - Organización"),
-        ("rrhh.empleados", "RRHH - Empleados"),
-        ("rrhh.permisos", "RRHH - Permisos"),
-        ("rrhh.vacaciones", "RRHH - Vacaciones"),
-        ("rrhh.horas_extra", "RRHH - Horas extra"),
-        ("rrhh.asistencias", "RRHH - Asistencias"),
-        ("rrhh.importar_checador", "RRHH - Checador"),
-        ("rrhh.vacantes", "RRHH - Vacantes"),
-        ("rrhh.prestamos", "RRHH - Préstamos"),
-        ("rrhh.nomina", "RRHH - Nómina"),
-        ("rrhh.asignacion_sucursal", "RRHH - Asignación sucursal"),
-        ("inventario", "Inventario"),
-        ("recetas", "Recetas"),
-        ("crm", "CRM"),
-        ("auditoria", "Auditoría"),
-        ("maestros", "Maestros"),
-    ]
+    MODULOS = USER_MODULE_ACCESS_CHOICES
 
     ACCESS_CHOICES = [
         (ACCESS_NONE, "Sin acceso"),

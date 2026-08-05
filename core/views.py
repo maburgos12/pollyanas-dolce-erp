@@ -26,6 +26,8 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from compras.access_departamentales import puede_gestionar_compras_departamentales
 from core.access import (
+    ACCESS_MODULES,
+    ACCESS_SUBMODULES,
     ROLE_ADMIN,
     ROLE_DG,
     ROLE_ORDER,
@@ -50,6 +52,7 @@ from core.access import (
     can_view_reportes,
     can_view_orquestacion,
     get_module_access,
+    get_submodule_access,
     is_branch_capture_only,
 )
 from core.cache_versions import get_or_set_versioned_cache
@@ -320,18 +323,34 @@ def _module_access_rows(user) -> list[dict]:
         item.module: item.access
         for item in getattr(user, "module_access", []).all()
     }
-    rows = []
-    for module, label in UserModuleAccess.MODULOS:
-        access = explicit_access.get(module) or get_module_access(user, module)
+
+    def access_presentation(access: str) -> tuple[str, str]:
         if access == UserModuleAccess.ACCESS_MANAGE:
-            badge_label = "Gestiona"
-            badge_tone = "manage"
-        elif access == UserModuleAccess.ACCESS_VIEW:
-            badge_label = "Solo ve"
-            badge_tone = "view"
-        else:
-            badge_label = "Sin acceso"
-            badge_tone = "none"
+            return "Gestiona", "manage"
+        if access == UserModuleAccess.ACCESS_VIEW:
+            return "Solo ve", "view"
+        return "Sin acceso", "none"
+
+    rows = []
+    for module, label in ACCESS_MODULES:
+        access = explicit_access.get(module) or get_module_access(user, module)
+        badge_label, badge_tone = access_presentation(access)
+        submodules = []
+        for submodule, submodule_label in ACCESS_SUBMODULES.get(module, []):
+            key = f"{module}.{submodule}"
+            submodule_access = get_submodule_access(user, module, submodule)
+            submodule_badge_label, submodule_badge_tone = access_presentation(submodule_access)
+            submodules.append(
+                {
+                    "key": key,
+                    "label": submodule_label,
+                    "access": submodule_access,
+                    "badge_label": submodule_badge_label,
+                    "badge_tone": submodule_badge_tone,
+                    "is_explicit": key in explicit_access,
+                    "input_name": f"access_{key}",
+                }
+            )
         rows.append(
             {
                 "module": module,
@@ -340,6 +359,8 @@ def _module_access_rows(user) -> list[dict]:
                 "badge_label": badge_label,
                 "badge_tone": badge_tone,
                 "is_explicit": module in explicit_access,
+                "input_name": f"access_{module}",
+                "submodules": submodules,
             }
         )
     return rows
@@ -4235,6 +4256,7 @@ def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
     user_model = get_user_model()
     target_user = get_object_or_404(user_model, pk=user_id)
     modulos = [module for module, _label in UserModuleAccess.MODULOS]
+    applied_access = {}
 
     for module in modulos:
         access_value = request.POST.get(f"access_{module}", UserModuleAccess.ACCESS_NONE)
@@ -4244,6 +4266,7 @@ def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
             UserModuleAccess.ACCESS_MANAGE,
         }:
             access_value = UserModuleAccess.ACCESS_NONE
+        applied_access[module] = access_value
         UserModuleAccess.objects.update_or_create(
             user=target_user,
             module=module,
@@ -4261,6 +4284,7 @@ def usuario_permisos_update(request: HttpRequest, user_id: int) -> HttpResponse:
         {
             "username": target_user.username,
             "modules": modulos,
+            "access": applied_access,
         },
     )
     messages.success(
