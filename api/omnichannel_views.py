@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 import requests
@@ -16,6 +17,7 @@ from django.http import Http404
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,6 +27,7 @@ from api.omnichannel_serializers import (
     OmnichannelDeliveryStatusSerializer,
     OmnichannelCustomerOutputSerializer,
     OmnichannelOrderInputSerializer,
+    PendingPointOrderSerializer,
     PointLinkedOrderSerializer,
     PointNoteSearchSerializer,
 )
@@ -33,7 +36,11 @@ from api.logistica_public_views import _authorize_logistica_assignment
 from crm.services.point_order_link import (
     LinkPointOrderCommand,
     LinkPointOrderResult,
+    POINT_PENDING_EXTERNAL_SOURCE,
+    canonical_point_ticket_folio,
     link_point_note,
+    point_link_fingerprint,
+    point_pending_external_id,
     verify_point_link_fingerprint,
 )
 from crm.models import Cliente, DireccionCliente, PedidoCliente
@@ -328,6 +335,63 @@ def _consume_point_search_limit(api_client):
         cache.set(key, 1, timeout=90)
         current = 1
     return current <= limit
+
+
+def _pending_capture_snapshot(command: LinkPointOrderCommand) -> dict:
+    return {
+        "channel": command.channel,
+        "social_reference": command.social_reference,
+        "customer_name": command.customer_name,
+        "customer_phone": command.customer_phone,
+        "customer_email": command.customer_email,
+        "address": command.address,
+        "references": command.references,
+        "latitude": str(command.latitude) if command.latitude is not None else None,
+        "longitude": str(command.longitude) if command.longitude is not None else None,
+        "place_id": command.place_id,
+        "delivery_window_start": (
+            command.delivery_window_start.isoformat()
+            if command.delivery_window_start is not None
+            else None
+        ),
+        "delivery_window_end": (
+            command.delivery_window_end.isoformat()
+            if command.delivery_window_end is not None
+            else None
+        ),
+        "instructions": command.instructions,
+    }
+
+
+def _pending_command_from_snapshot(*, pk_nota: str, pending: dict):
+    capture = pending.get("capture")
+    if not isinstance(capture, dict):
+        raise ValueError("missing pending capture")
+
+    def optional_decimal(value):
+        return Decimal(str(value)) if value is not None else None
+
+    def optional_datetime(value):
+        return datetime.fromisoformat(str(value)) if value is not None else None
+
+    return LinkPointOrderCommand(
+        pk_nota=pk_nota,
+        channel=str(capture["channel"]),
+        customer_name=str(capture["customer_name"]),
+        customer_phone=str(capture.get("customer_phone", "")),
+        customer_email=str(capture.get("customer_email", "")),
+        address=str(capture["address"]),
+        references=str(capture.get("references", "")),
+        latitude=optional_decimal(capture.get("latitude")),
+        longitude=optional_decimal(capture.get("longitude")),
+        place_id=str(capture.get("place_id", "")),
+        social_reference=str(capture.get("social_reference", "")),
+        delivery_window_start=optional_datetime(
+            capture.get("delivery_window_start"),
+        ),
+        delivery_window_end=optional_datetime(capture.get("delivery_window_end")),
+        instructions=str(capture.get("instructions", "")),
+    )
 
 
 def _find_customer(data: dict) -> Cliente | None:
@@ -734,8 +798,406 @@ class PublicOmnichannelPointNotesView(APIView):
                 request,
                 _coerce_point_error(exc),
             )
+        requested_date = serializer.validated_data.get("fecha")
+        pending_point = not results and (
+            requested_date is None or requested_date == timezone.localdate()
+        )
+        payload = {
+            "count": len(results),
+            "results": results,
+            "sync_status": (
+                "READY" if results else "PENDING_POINT" if pending_point else "NOT_FOUND"
+            ),
+            "checked_at": timezone.now().isoformat(),
+            "retry_after_seconds": 15 if pending_point else None,
+        }
         _log_access(api_client, request, status.HTTP_200_OK)
-        return Response({"count": len(results), "results": results})
+        return Response(payload)
+
+
+class PublicOmnichannelPendingPointOrdersView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        if not api_client.created_by_id or not api_client.created_by.is_active:
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "La API key no tiene un usuario auditor activo.",
+                    "code": "OMNICHANNEL_AUDIT_ACTOR_REQUIRED",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = PendingPointOrderSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        customer_data = data["cliente"]
+        address_data = data["direccion"]
+        command = LinkPointOrderCommand(
+            pk_nota="PENDING",
+            channel=data["canal"],
+            customer_name=customer_data["nombre"],
+            customer_phone=customer_data.get("telefono", ""),
+            customer_email=customer_data.get("email", ""),
+            address=address_data["direccion"],
+            references=address_data.get("referencias", ""),
+            latitude=address_data.get("latitud"),
+            longitude=address_data.get("longitud"),
+            place_id=address_data.get("place_id", ""),
+            social_reference=data.get("social_reference", ""),
+            delivery_window_start=data.get("ventana_inicio"),
+            delivery_window_end=data.get("ventana_fin"),
+            instructions=data.get("instrucciones_entrega", ""),
+        )
+        external_id = point_pending_external_id(
+            folio=data["folio"],
+            branch=data["sucursal"],
+            sale_date=data["fecha"],
+        )
+        fingerprint = point_link_fingerprint(command)
+        local_tz = timezone.get_current_timezone()
+        sold_from = timezone.make_aware(
+            datetime.combine(data["fecha"], datetime.min.time()),
+            local_tz,
+        )
+        sold_to = sold_from + timedelta(days=1)
+        canonical_folio = canonical_point_ticket_folio(data["folio"])
+        folio_pattern = (
+            rf"^\s*(?:nota(?:\s+|[:#-]\s*))?"
+            rf"{re.escape(canonical_folio)}\s*$"
+        )
+
+        try:
+            with transaction.atomic():
+                _lock_external_key(POINT_PENDING_EXTERNAL_SOURCE, external_id)
+                linked_candidates = list(
+                    PedidoCliente.objects.select_for_update()
+                    .filter(
+                        external_source="POINT",
+                        point_note_folio__iregex=folio_pattern,
+                        point_note_sold_at__gte=sold_from,
+                        point_note_sold_at__lt=sold_to,
+                    )
+                )
+                matching_linked_orders = [
+                    candidate
+                    for candidate in linked_candidates
+                    if point_pending_external_id(
+                            folio=candidate.point_note_folio,
+                            branch=candidate.sucursal,
+                            sale_date=data["fecha"],
+                        ) == external_id
+                ]
+                if len(matching_linked_orders) > 1:
+                    raise ValidationError(
+                        {"point": "Hay más de un pedido Point con esa identidad."},
+                    )
+                linked_order = (
+                    matching_linked_orders[0] if matching_linked_orders else None
+                )
+                order = linked_order or (
+                    PedidoCliente.objects.select_for_update()
+                    .filter(
+                        Q(
+                            external_source=POINT_PENDING_EXTERNAL_SOURCE,
+                            external_id=external_id,
+                        )
+                        | Q(payload_snapshot__point_pending__external_id=external_id)
+                    )
+                    .first()
+                )
+                created = order is None
+                if created and data["fecha"] != timezone.localdate():
+                    raise DRFValidationError(
+                        {
+                            "fecha": (
+                                "Sólo puede guardarse pendiente un ticket de "
+                                "la fecha actual."
+                            ),
+                        },
+                    )
+                if order is not None:
+                    delivery = (
+                        SolicitudDomicilio.objects.select_for_update()
+                        .filter(pedido_cliente=order)
+                        .first()
+                    )
+                    if (
+                        delivery is None
+                        or order.public_api_client_id != api_client.id
+                        or (
+                            linked_order is not None
+                            and not verify_point_link_fingerprint(
+                                command,
+                                order.point_link_fingerprint,
+                            )
+                        )
+                        or (
+                            linked_order is None
+                            and (
+                                not verify_point_link_fingerprint(
+                                    command,
+                                    _pending_point_snapshot(order).get(
+                                        "capture_fingerprint",
+                                        "",
+                                    ),
+                                )
+                            )
+                        )
+                    ):
+                        raise ValidationError(
+                            {"point": "La captura pendiente ya existe con otros datos."},
+                        )
+                else:
+                    customer = _get_or_create_customer(customer_data)
+                    address = _get_or_create_address(customer, address_data)
+                    with transaction.atomic():
+                        _lock_pedido_folio()
+                        order = PedidoCliente.objects.create(
+                            cliente=customer,
+                            direccion_entrega=address,
+                            external_source=POINT_PENDING_EXTERNAL_SOURCE,
+                            external_id=external_id,
+                            payload_snapshot={
+                                "point_pending": {
+                                    "external_id": external_id,
+                                    "folio": data["folio"],
+                                    "sucursal": data["sucursal"],
+                                    "fecha": data["fecha"].isoformat(),
+                                    "capture_fingerprint": fingerprint,
+                                    "capture": _pending_capture_snapshot(command),
+                                },
+                            },
+                            tracking_token=uuid4(),
+                            public_api_client=api_client,
+                            social_reference=_normalize_text(
+                                data.get("social_reference", ""),
+                            ),
+                            canal=data["canal"],
+                            descripcion=(
+                                f"Nota Point {data['folio']} pendiente de sincronización"
+                            )[:250],
+                            fecha_compromiso=(
+                                timezone.localtime(data["ventana_fin"]).date()
+                                if data.get("ventana_fin") is not None
+                                else None
+                            ),
+                            monto_estimado=0,
+                            sucursal=data["sucursal"],
+                            created_by=api_client.created_by,
+                        )
+                    delivery = SolicitudDomicilio.objects.create(
+                        pedido_cliente=order,
+                        cliente=customer,
+                        direccion_cliente=address,
+                        cliente_nombre=customer.nombre,
+                        cliente_telefono=customer.telefono,
+                        direccion=address.direccion,
+                        canal_origen=data["canal"],
+                        canal_detalle=(
+                            _normalize_text(data.get("social_reference", ""))[:60]
+                            if data["canal"] == PedidoCliente.CANAL_OTRO
+                            else data["canal"]
+                        ),
+                        notas=_normalize_text(address_data.get("referencias", "")),
+                        ventana_inicio=data.get("ventana_inicio"),
+                        ventana_fin=data.get("ventana_fin"),
+                        instrucciones_entrega=_normalize_text(
+                            data.get("instrucciones_entrega", ""),
+                        ),
+                        estatus=SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
+                        created_by=api_client.created_by,
+                    )
+        except DRFValidationError:
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            raise
+        except ValidationError:
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "La captura pendiente ya existe con otros datos.",
+                    "code": "POINT_PENDING_CONFLICT",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        _log_access(api_client, request, response_status)
+        return Response(
+            {
+                "pedido_id": order.id,
+                "solicitud_domicilio_id": delivery.id,
+                "cliente_id": order.cliente_id,
+                "direccion_id": order.direccion_entrega_id,
+                "estatus": delivery.estatus,
+                "created": created,
+            },
+            status=response_status,
+        )
+
+
+class PublicOmnichannelPendingPointReconcileView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, solicitud_id):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        if not _consume_point_search_limit(api_client):
+            _log_access(api_client, request, status.HTTP_429_TOO_MANY_REQUESTS)
+            return Response(
+                {
+                    "detail": "Límite de búsquedas Point por minuto excedido.",
+                    "code": "POINT_SEARCH_RATE_LIMITED",
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        delivery = _owned_deliveries(api_client).filter(pk=solicitud_id).first()
+        if delivery is None:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise Http404
+        order = delivery.pedido_cliente
+        pending = _pending_point_snapshot(order)
+        if (
+            order.external_source == "POINT"
+            and delivery.estatus != SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
+            and pending
+        ):
+            _log_access(api_client, request, status.HTTP_200_OK)
+            return Response(
+                {
+                    "sync_status": "READY",
+                    "pedido_id": order.id,
+                    "solicitud_domicilio_id": delivery.id,
+                    "estatus": delivery.estatus,
+                    "checked_at": timezone.now().isoformat(),
+                    "retry_after_seconds": None,
+                },
+                status=status.HTTP_200_OK,
+            )
+        if (
+            order.external_source != POINT_PENDING_EXTERNAL_SOURCE
+            or delivery.estatus != SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
+            or not pending
+        ):
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise Http404
+
+        try:
+            sale_date = date.fromisoformat(str(pending.get("fecha", "")))
+            candidates = _fetch_point_note_candidates(
+                folio=str(pending.get("folio", "")),
+                sucursal=str(pending.get("sucursal", "")),
+                fecha=sale_date,
+            )
+        except (
+            PointNoteNotFoundError,
+            PointNoteUnavailableError,
+            PointNoteContractError,
+            PointNoteIntegrityError,
+        ) as exc:
+            return _point_error_response(api_client, request, exc)
+        except (PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(
+                api_client,
+                request,
+                _coerce_point_error(exc),
+            )
+        except (TypeError, ValueError):
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "La captura pendiente no conserva una consulta Point válida.",
+                    "code": "POINT_PENDING_INVALID",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        checked_at = timezone.now().isoformat()
+        if not candidates:
+            _log_access(api_client, request, status.HTTP_202_ACCEPTED)
+            return Response(
+                {
+                    "sync_status": "PENDING_POINT",
+                    "pedido_id": order.id,
+                    "solicitud_domicilio_id": delivery.id,
+                    "estatus": delivery.estatus,
+                    "checked_at": checked_at,
+                    "retry_after_seconds": 15,
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+        if len(candidates) != 1:
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "Point devolvió más de una nota; selecciona la nota exacta.",
+                    "code": "POINT_PENDING_AMBIGUOUS",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            with transaction.atomic():
+                command = _pending_command_from_snapshot(
+                    pk_nota=str(candidates[0]["pk_nota"]),
+                    pending=pending,
+                )
+                result = link_point_note(
+                    command=command,
+                    actor=api_client.created_by,
+                )
+                if result.order.id != order.id or result.delivery.id != delivery.id:
+                    raise ValidationError(
+                        {"point": "La nota Point ya pertenece a otro pedido."},
+                    )
+        except (
+            PointNoteNotFoundError,
+            PointNoteUnavailableError,
+            PointNoteContractError,
+            PointNoteIntegrityError,
+        ) as exc:
+            return _point_error_response(api_client, request, exc)
+        except (PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(
+                api_client,
+                request,
+                _coerce_point_error(exc),
+            )
+        except (KeyError, TypeError, ValueError, ValidationError):
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "No fue posible conciliar la captura pendiente con Point.",
+                    "code": "POINT_PENDING_CONFLICT",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(
+            {
+                "sync_status": "READY",
+                "pedido_id": result.order.id,
+                "solicitud_domicilio_id": result.delivery.id,
+                "estatus": result.delivery.estatus,
+                "checked_at": checked_at,
+                "retry_after_seconds": None,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PublicOmnichannelPointNoteDetailView(APIView):
@@ -942,13 +1404,20 @@ def _mutable_owned_deliveries(api_client):
     return _owned_deliveries(api_client).filter(pedido_cliente__point_note_id__gt="")
 
 
+def _pending_point_snapshot(order):
+    snapshot = order.payload_snapshot if isinstance(order.payload_snapshot, dict) else {}
+    pending = snapshot.get("point_pending", {})
+    return pending if isinstance(pending, dict) else {}
+
+
 def _serialize_delivery_summary(delivery):
     order = delivery.pedido_cliente
+    pending = _pending_point_snapshot(order)
     return {
         "id": delivery.id,
         "pedido_id": order.id,
         "folio": order.folio,
-        "folio_point": order.point_note_folio,
+        "folio_point": order.point_note_folio or pending.get("folio") or "",
         "canal": order.canal,
         "estatus": delivery.estatus,
         "ventana_inicio": delivery.ventana_inicio,
@@ -960,6 +1429,25 @@ def _serialize_delivery_summary(delivery):
         "created_at": delivery.created_at,
         "external_source": order.external_source,
         "external_id": order.external_id,
+    }
+
+
+def _serialize_delivery_source(order):
+    if order.external_source == "POINT":
+        return {
+            "tipo": "POINT",
+            "pk_nota": order.point_note_id,
+            "folio": order.point_note_folio,
+            "sucursal": order.sucursal,
+            "fecha_consulta": order.point_note_fetched_at,
+        }
+    pending = _pending_point_snapshot(order)
+    return {
+        "tipo": order.external_source,
+        "external_id": order.external_id,
+        "folio": pending.get("folio") or order.folio,
+        "sucursal": pending.get("sucursal") or order.sucursal,
+        "fecha_consulta": order.updated_at,
     }
 
 
@@ -1028,13 +1516,7 @@ def _serialize_delivery_detail(delivery):
     return {
         "id": delivery.id,
         "pedido_id": order.id,
-        "fuente": {
-            "tipo": "POINT",
-            "pk_nota": order.point_note_id,
-            "folio": order.point_note_folio,
-            "sucursal": order.sucursal,
-            "fecha_consulta": order.point_note_fetched_at,
-        },
+        "fuente": _serialize_delivery_source(order),
         "cliente": {
             "id": customer.id,
             "codigo": customer.codigo,
@@ -1062,6 +1544,7 @@ def _serialize_delivery_detail(delivery):
             for line in snapshot.get("lines", [])
             if isinstance(line, dict)
         ],
+        "descripcion_pedido": order.descripcion,
         "total": order.monto_estimado,
         "canal": order.canal,
         "referencia_social": order.social_reference,

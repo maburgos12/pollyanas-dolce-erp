@@ -18,6 +18,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
+from crm.services.point_order_link import point_pending_external_id
 from core.models import Sucursal
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from logistica.models import Repartidor, SolicitudDomicilio, Unidad
@@ -744,11 +745,15 @@ class OmnichannelConcurrencyTests(TransactionTestCase):
         )
 
 
-def _point_note_for_api(pk_nota="900001"):
+def _point_note_for_api(
+    pk_nota="900001",
+    branch_name="Matriz",
+    folio="18452",
+):
     return PointNote(
         pk_nota=pk_nota,
-        folio="18452",
-        branch_name="Matriz",
+        folio=folio,
+        branch_name=branch_name,
         sold_at=timezone.now(),
         total=Decimal("565.00"),
         invoiced=False,
@@ -803,6 +808,18 @@ class CanonicalOmnichannelApiTests(APITestCase):
             "ventana_fin": (timezone.now() + timedelta(hours=2)).isoformat(),
             "instrucciones_entrega": "Tocar el timbre",
         }
+        self.pending_point_payload = {
+            key: value
+            for key, value in self.point_payload.items()
+            if key != "pk_nota"
+        }
+        self.pending_point_payload.update(
+            {
+                "folio": "18452",
+                "sucursal": "Matriz",
+                "fecha": timezone.localdate().isoformat(),
+            }
+        )
 
     @patch(
         "api.omnichannel_views._fetch_point_note_candidates",
@@ -837,6 +854,148 @@ class CanonicalOmnichannelApiTests(APITestCase):
             },
         )
         fetch.assert_called_once()
+
+    @patch("api.omnichannel_views._fetch_point_note_candidates", return_value=[])
+    def test_same_day_empty_point_search_reports_pending_sync_not_not_found(self, _fetch):
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {
+                "folio": "15616",
+                "sucursal": "Matriz",
+                "fecha": timezone.localdate().isoformat(),
+            },
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["sync_status"], "PENDING_POINT")
+        self.assertEqual(response.data["retry_after_seconds"], 15)
+        self.assertIn("checked_at", response.data)
+
+    @patch("api.omnichannel_views._fetch_point_note_candidates", return_value=[])
+    def test_future_empty_point_search_is_not_classified_as_pending(self, _fetch):
+        response = self.client.get(
+            reverse("api_public_omnichannel_point_notes"),
+            {
+                "folio": "15616",
+                "sucursal": "Matriz",
+                "fecha": (timezone.localdate() + timedelta(days=1)).isoformat(),
+            },
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["sync_status"], "NOT_FOUND")
+        self.assertIsNone(response.data["retry_after_seconds"])
+
+    def test_pending_point_identity_does_not_truncate_distinct_long_folios(self):
+        common = "9" * 79
+        first = point_pending_external_id(
+            folio=f"{common}1",
+            branch="Sucursal " + "muy-larga-" * 8,
+            sale_date=timezone.localdate(),
+        )
+        second = point_pending_external_id(
+            folio=f"{common}2",
+            branch="Sucursal " + "muy-larga-" * 8,
+            sale_date=timezone.localdate(),
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(len(first), 120)
+        self.assertLessEqual(len(second), 120)
+
+    def test_pending_point_identity_does_not_truncate_distinct_long_branches(self):
+        common = "Sucursal " + "nombre-muy-largo-" * 4
+        first = point_pending_external_id(
+            folio="15616",
+            branch=f"{common}matriz",
+            sale_date=timezone.localdate(),
+        )
+        second = point_pending_external_id(
+            folio="15616",
+            branch=f"{common}centro",
+            sale_date=timezone.localdate(),
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(len(first), 120)
+        self.assertLessEqual(len(second), 120)
+
+    def test_pending_point_capture_rejects_noncanonical_ticket_identity(self):
+        invalid_folio = deepcopy(self.pending_point_payload)
+        invalid_folio["folio"] = "NOTA"
+        invalid_branch = deepcopy(self.pending_point_payload)
+        invalid_branch["sucursal"] = "!!!"
+
+        folio_response = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            invalid_folio,
+            format="json",
+            **self.auth,
+        )
+        branch_response = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            invalid_branch,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(folio_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("folio", folio_response.data)
+        self.assertEqual(branch_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("sucursal", branch_response.data)
+        self.assertEqual(PedidoCliente.objects.count(), 0)
+
+    def test_pending_point_capture_rejects_a_date_other_than_today(self):
+        historical = deepcopy(self.pending_point_payload)
+        historical["fecha"] = (timezone.localdate() - timedelta(days=1)).isoformat()
+
+        response = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            historical,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("fecha", response.data)
+        self.assertEqual(PedidoCliente.objects.count(), 0)
+        self.assertTrue(
+            PublicApiAccessLog.objects.filter(
+                client=self.api_client,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                method="POST",
+            ).exists(),
+        )
+
+    def test_pending_point_capture_allows_historical_idempotent_replay(self):
+        historical = deepcopy(self.pending_point_payload)
+        historical_date = timezone.localdate() - timedelta(days=1)
+        historical["fecha"] = historical_date.isoformat()
+        with patch(
+            "api.omnichannel_views.timezone.localdate",
+            return_value=historical_date,
+        ):
+            first = self.client.post(
+                reverse("api_public_omnichannel_pending_point_orders"),
+                historical,
+                format="json",
+                **self.auth,
+            )
+
+        replay = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            historical,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(replay.status_code, status.HTTP_200_OK)
+        self.assertEqual(replay.data["pedido_id"], first.data["pedido_id"])
+        self.assertEqual(PedidoCliente.objects.count(), 1)
 
     def test_note_search_rejects_unbounded_or_oversized_queries(self):
         missing = self.client.get(
@@ -1091,6 +1250,404 @@ class CanonicalOmnichannelApiTests(APITestCase):
         )
         order = PedidoCliente.objects.get(pk=first.data["pedido_id"])
         self.assertEqual(order.public_api_client_id, self.api_client.id)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_pending_point_capture_reconciles_into_same_canonical_order(self, _fetch):
+        pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+        pending_replay = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(pending.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(pending.data["estatus"], "PENDIENTE_POINT")
+        self.assertEqual(pending_replay.status_code, status.HTTP_200_OK)
+        self.assertEqual(pending_replay.data["pedido_id"], pending.data["pedido_id"])
+
+        listing = self.client.get(
+            reverse("api_public_omnichannel_deliveries"),
+            {"canal": "FACEBOOK", "page_size": 10},
+            **self.auth,
+        )
+        detail = self.client.get(
+            reverse(
+                "api_public_omnichannel_delivery_detail",
+                kwargs={
+                    "solicitud_id": pending.data["solicitud_domicilio_id"],
+                },
+            ),
+            **self.auth,
+        )
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertEqual(listing.data["count"], 1)
+        self.assertEqual(
+            listing.data["results"][0]["external_source"],
+            "POINT_PENDING",
+        )
+        self.assertEqual(
+            listing.data["results"][0]["estatus"],
+            "PENDIENTE_POINT",
+        )
+        self.assertEqual(listing.data["results"][0]["folio_point"], "18452")
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data["fuente"]["tipo"], "POINT_PENDING")
+        self.assertEqual(detail.data["fuente"]["folio"], "18452")
+        self.assertEqual(detail.data["productos"], [])
+        self.assertIn("18452", detail.data["descripcion_pedido"])
+        self.assertEqual(detail.data["total"], Decimal("0"))
+
+        reconciled = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(reconciled.status_code, status.HTTP_200_OK)
+        self.assertEqual(reconciled.data["pedido_id"], pending.data["pedido_id"])
+        self.assertEqual(
+            reconciled.data["solicitud_domicilio_id"],
+            pending.data["solicitud_domicilio_id"],
+        )
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+        order = PedidoCliente.objects.get(pk=pending.data["pedido_id"])
+        delivery = SolicitudDomicilio.objects.get(
+            pk=pending.data["solicitud_domicilio_id"],
+        )
+        self.assertEqual(order.external_source, "POINT")
+        self.assertEqual(order.point_note_id, "900001")
+        self.assertEqual(delivery.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+
+        reconciled_replay = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(reconciled_replay.status_code, status.HTTP_200_OK)
+        self.assertEqual(reconciled_replay.data["pedido_id"], pending.data["pedido_id"])
+        self.assertEqual(reconciled_replay.data["estatus"], "CONFIRMADO")
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    def test_late_pending_capture_reuses_already_linked_point_order(self, _fetch):
+        linked = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        late_pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(linked.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(late_pending.status_code, status.HTTP_200_OK)
+        self.assertEqual(late_pending.data["pedido_id"], linked.data["pedido_id"])
+        self.assertEqual(
+            late_pending.data["solicitud_domicilio_id"],
+            linked.data["solicitud_domicilio_id"],
+        )
+        self.assertEqual(late_pending.data["estatus"], "CONFIRMADO")
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(branch_name="Culiacán  Centro"),
+    )
+    def test_late_pending_capture_normalizes_branch_before_reusing_point_order(
+        self,
+        _fetch,
+    ):
+        linked = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        pending_payload = deepcopy(self.pending_point_payload)
+        pending_payload["sucursal"] = "Culiacan Centro"
+
+        late_pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            pending_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(linked.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(late_pending.status_code, status.HTTP_200_OK)
+        self.assertEqual(late_pending.data["pedido_id"], linked.data["pedido_id"])
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(folio="NOTA 18452"),
+    )
+    def test_late_pending_capture_normalizes_folio_before_reusing_point_order(
+        self,
+        _fetch,
+    ):
+        linked = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        late_pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(linked.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(late_pending.status_code, status.HTTP_200_OK)
+        self.assertEqual(late_pending.data["pedido_id"], linked.data["pedido_id"])
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        side_effect=[
+            _point_note_for_api(pk_nota="900001"),
+            _point_note_for_api(pk_nota="900002"),
+        ],
+    )
+    def test_late_pending_capture_fails_closed_for_ambiguous_point_identity(
+        self,
+        _fetch,
+    ):
+        first = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            self.point_payload,
+            format="json",
+            **self.auth,
+        )
+        second_payload = deepcopy(self.point_payload)
+        second_payload["pk_nota"] = "900002"
+        second = self.client.post(
+            reverse("api_public_omnichannel_point_orders"),
+            second_payload,
+            format="json",
+            **self.auth,
+        )
+
+        late_pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(late_pending.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(late_pending.data["code"], "POINT_PENDING_CONFLICT")
+        self.assertEqual(PedidoCliente.objects.count(), 2)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 2)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_point_note_for_api(),
+    )
+    @patch(
+        "api.omnichannel_views._fetch_point_note_candidates",
+        return_value=[
+            {
+                "pk_nota": "900001",
+                "folio": "18452",
+                "sucursal": "Matriz",
+                "fecha": timezone.localdate().isoformat(),
+                "hora": "12:06",
+                "total": "565.00",
+                "facturado": False,
+                "canal_point": "Mostrador",
+                "tipo_pago": "Contado",
+            },
+        ],
+    )
+    def test_pending_point_delivery_can_retry_sync_without_recapturing(
+        self,
+        _candidates,
+        _fetch,
+    ):
+        existing_customer = Cliente.objects.create(
+            nombre="Nombre anterior",
+            telefono="6671234567",
+            email="ana@example.com",
+        )
+        DireccionCliente.objects.create(
+            cliente=existing_customer,
+            direccion="Av. Obregón 123",
+            referencias="Referencia anterior",
+            latitud=Decimal("24.700000"),
+            longitud=Decimal("-107.300000"),
+            place_id="place-anterior",
+        )
+        pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        reconciled = self.client.post(
+            reverse(
+                "api_public_omnichannel_pending_point_reconcile",
+                kwargs={
+                    "solicitud_id": pending.data["solicitud_domicilio_id"],
+                },
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(reconciled.status_code, status.HTTP_200_OK)
+        self.assertEqual(reconciled.data["sync_status"], "READY")
+        self.assertEqual(reconciled.data["pedido_id"], pending.data["pedido_id"])
+        self.assertEqual(reconciled.data["estatus"], "CONFIRMADO")
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=PointNote(
+            pk_nota="900001",
+            folio="99999",
+            branch_name="Sucursal distinta",
+            sold_at=timezone.now(),
+            total=Decimal("565.00"),
+            invoiced=False,
+            payment_type="CONTADO",
+            point_channel="Mostrador",
+            lines=(),
+            source_endpoint="/Clientes/get_detalle_nota/",
+            customer_external_id="POINT-CUSTOMER-1",
+        ),
+    )
+    @patch(
+        "api.omnichannel_views._fetch_point_note_candidates",
+        return_value=[
+            {
+                "pk_nota": "900001",
+                "folio": "18452",
+                "sucursal": "Matriz",
+                "fecha": timezone.localdate().isoformat(),
+                "hora": "12:06",
+                "total": "565.00",
+                "facturado": False,
+                "canal_point": "Mostrador",
+                "tipo_pago": "Contado",
+            },
+        ],
+    )
+    def test_pending_retry_rolls_back_when_point_detail_disagrees_with_candidate(
+        self,
+        _candidates,
+        _fetch,
+    ):
+        pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        response = self.client.post(
+            reverse(
+                "api_public_omnichannel_pending_point_reconcile",
+                kwargs={
+                    "solicitud_id": pending.data["solicitud_domicilio_id"],
+                },
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["code"], "POINT_PENDING_CONFLICT")
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+        order = PedidoCliente.objects.get(pk=pending.data["pedido_id"])
+        delivery = SolicitudDomicilio.objects.get(
+            pk=pending.data["solicitud_domicilio_id"],
+        )
+        self.assertEqual(order.external_source, "POINT_PENDING")
+        self.assertEqual(delivery.estatus, "PENDIENTE_POINT")
+
+    @patch("api.omnichannel_views._fetch_point_note_candidates", return_value=[])
+    def test_pending_point_delivery_retry_reports_still_pending(self, _candidates):
+        pending = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        response = self.client.post(
+            reverse(
+                "api_public_omnichannel_pending_point_reconcile",
+                kwargs={
+                    "solicitud_id": pending.data["solicitud_domicilio_id"],
+                },
+            ),
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(response.data["sync_status"], "PENDING_POINT")
+        self.assertEqual(response.data["retry_after_seconds"], 15)
+        delivery = SolicitudDomicilio.objects.get(
+            pk=pending.data["solicitud_domicilio_id"],
+        )
+        self.assertEqual(delivery.estatus, "PENDIENTE_POINT")
+
+    def test_pending_point_identity_is_not_recreated_by_another_api_client(self):
+        other_client, other_key = PublicApiClient.create_with_generated_key(
+            nombre="Otro centro operativo",
+            created_by=self.actor,
+        )
+        other_client.capabilities = ["OMNICHANNEL"]
+        other_client.save(update_fields=["capabilities"])
+        first = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            **self.auth,
+        )
+
+        second = self.client.post(
+            reverse("api_public_omnichannel_pending_point_orders"),
+            self.pending_point_payload,
+            format="json",
+            HTTP_X_API_KEY=other_key,
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(second.data["code"], "POINT_PENDING_CONFLICT")
         self.assertEqual(PedidoCliente.objects.count(), 1)
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
 
