@@ -103,6 +103,8 @@ from .omnichannel_views import (
     PublicOmnichannelOrdersView,
     PublicOmnichannelPointNoteDetailView,
     PublicOmnichannelPointNotesView,
+    PublicOmnichannelPendingPointReconcileView,
+    PublicOmnichannelPendingPointOrdersView,
     PublicOmnichannelPointOrdersView,
 )
 from .driver_identity_views import (
@@ -546,6 +548,16 @@ urlpatterns = [
         "public/v1/omnichannel/point-orders/",
         PublicOmnichannelPointOrdersView.as_view(),
         name="api_public_omnichannel_point_orders",
+    ),
+    path(
+        "public/v1/omnichannel/pending-point-orders/",
+        PublicOmnichannelPendingPointOrdersView.as_view(),
+        name="api_public_omnichannel_pending_point_orders",
+    ),
+    path(
+        "public/v1/omnichannel/pending-point-orders/<int:solicitud_id>/reconcile/",
+        PublicOmnichannelPendingPointReconcileView.as_view(),
+        name="api_public_omnichannel_pending_point_reconcile",
     ),
     path(
         "public/v1/omnichannel/deliveries/",

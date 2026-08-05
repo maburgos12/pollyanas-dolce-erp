@@ -22,7 +22,10 @@ from logistica.models import (
     SolicitudDomicilio,
     Unidad,
 )
-from logistica.services_domicilio_assignment import assign_domicilio
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+)
 from logistica.services_domicilio_status import (
     DomicilioStatusError,
     apply_domicilio_status_transition,
@@ -621,24 +624,37 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertEqual(EntregaEcommerce.objects.count(), 0)
         self.assertEqual(Notificacion.objects.count(), 0)
 
-    def test_asignar_repartidor_no_promueve_pendiente_point_a_listo(self):
+    def test_asignar_repartidor_bloquea_pendiente_point(self):
         repartidor = self._repartidor("rep_sin_point")
-
-        result = assign_domicilio(
-            solicitud_id=self.solicitud.id,
-            repartidor_id=repartidor.id,
-            audit_user=self.manager,
+        cliente = Cliente.objects.create(
+            nombre="Cliente pendiente Point",
+            telefono="6671234567",
         )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            external_source="POINT_PENDING",
+            external_id="POINT-PENDING:test",
+            descripcion="Nota Point pendiente",
+        )
+        self.solicitud.pedido_cliente = pedido
+        self.solicitud.save(update_fields=["pedido_cliente"])
+
+        with self.assertRaises(DomicilioAssignmentError) as raised:
+            assign_domicilio(
+                solicitud_id=self.solicitud.id,
+                repartidor_id=repartidor.id,
+                audit_user=self.manager,
+            )
 
         self.solicitud.refresh_from_db()
+        self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(
             self.solicitud.estatus,
             SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
         )
-        self.assertEqual(
-            result["estatus"],
-            SolicitudDomicilio.ESTATUS_PENDIENTE_POINT,
-        )
+        self.assertIsNone(self.solicitud.repartidor_id)
+        self.assertIsNone(self.solicitud.unidad_id)
+        self.assertIsNone(self.solicitud.parada_ruta_id)
 
     def test_repeticion_idempotente_conserva_estado_terminal_sin_efectos(self):
         repartidor = self._repartidor("rep_entregado")

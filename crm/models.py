@@ -379,6 +379,76 @@ class PedidoCliente(models.Model):
         self.point_note_fetched_at = persisted.point_note_fetched_at
         self.updated_at = persisted.updated_at
 
+    def reconcile_pending_point_provenance(
+        self,
+        *,
+        point_note_id,
+        point_note_folio,
+        point_note_snapshot,
+        point_note_fetched_at,
+        point_note_sold_at,
+        point_link_fingerprint,
+    ) -> None:
+        if self._state.adding:
+            raise ValidationError(
+                {"point_note_id": "La conciliación Point requiere un pedido guardado."},
+            )
+        with transaction.atomic():
+            persisted = PedidoCliente.objects.select_for_update().get(pk=self.pk)
+            if persisted.external_source != "POINT_PENDING":
+                raise ValidationError(
+                    {"point_note_id": "Solo una captura pendiente puede conciliarse."},
+                )
+            point_fields = (
+                "point_note_id",
+                "point_note_folio",
+                "point_note_snapshot",
+                "point_note_fetched_at",
+                "point_note_sold_at",
+                "point_link_fingerprint",
+            )
+            if any(bool(getattr(persisted, field_name)) for field_name in point_fields):
+                raise ValidationError(
+                    {"point_note_id": "La captura pendiente ya fue conciliada."},
+                )
+
+            persisted.external_source = "POINT"
+            persisted.external_id = str(point_note_id or "").strip()
+            persisted.point_note_id = point_note_id
+            persisted.point_note_folio = point_note_folio
+            persisted.point_note_snapshot = point_note_snapshot
+            persisted.point_note_fetched_at = point_note_fetched_at
+            persisted.point_note_sold_at = point_note_sold_at
+            persisted.point_link_fingerprint = point_link_fingerprint
+            persisted._validate_point_note_identity()
+            models.Model.save(
+                persisted,
+                update_fields=[
+                    "external_source",
+                    "external_id",
+                    "point_note_id",
+                    "point_note_folio",
+                    "point_note_snapshot",
+                    "point_note_fetched_at",
+                    "point_note_sold_at",
+                    "point_link_fingerprint",
+                    "updated_at",
+                ],
+            )
+
+        for field_name in (
+            "external_source",
+            "external_id",
+            "point_note_id",
+            "point_note_folio",
+            "point_note_snapshot",
+            "point_note_fetched_at",
+            "point_note_sold_at",
+            "point_link_fingerprint",
+            "updated_at",
+        ):
+            setattr(self, field_name, getattr(persisted, field_name))
+
     def save(self, *args, **kwargs):
         forbidden_point_backfill_kwargs = {
             "_allow_point_note_backfill",

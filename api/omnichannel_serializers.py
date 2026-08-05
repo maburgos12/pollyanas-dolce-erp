@@ -1,8 +1,10 @@
 from decimal import Decimal
 
+from django.utils.text import slugify
 from rest_framework import serializers
 
 from crm.models import PedidoCliente
+from crm.services.point_order_link import canonical_point_ticket_folio
 from logistica.models import SolicitudDomicilio
 
 
@@ -137,6 +139,24 @@ class PointLinkedOrderSerializer(serializers.Serializer):
                 {"social_reference": "El canal Otro requiere una descripción."},
             )
         return attrs
+
+
+class PendingPointOrderSerializer(PointLinkedOrderSerializer):
+    pk_nota = None
+    folio = serializers.CharField(max_length=80, trim_whitespace=True)
+    sucursal = serializers.CharField(max_length=120, trim_whitespace=True)
+    fecha = serializers.DateField()
+
+    def validate_folio(self, value):
+        if not canonical_point_ticket_folio(value):
+            raise serializers.ValidationError("Captura el folio numérico del ticket.")
+        return value
+
+    def validate_sucursal(self, value):
+        if not slugify(value):
+            raise serializers.ValidationError("Selecciona una sucursal válida.")
+        return value
+
 
 
 class OmnichannelDeliveryQuerySerializer(serializers.Serializer):

@@ -334,12 +334,24 @@ def assign_domicilio(
     unidad=None,
 ) -> dict[str, Any]:
     with transaction.atomic():
-        solicitudes = SolicitudDomicilio.objects.select_for_update()
+        solicitudes = (
+            SolicitudDomicilio.objects.select_for_update(of=("self",))
+            .select_related("pedido_cliente")
+        )
         if owner_api_client is not None:
             solicitudes = solicitudes.filter(
                 pedido_cliente__public_api_client=owner_api_client,
             )
         solicitud = get_object_or_404(solicitudes, pk=solicitud_id)
+        if (
+            solicitud.estatus == SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
+            and solicitud.pedido_cliente_id is not None
+            and solicitud.pedido_cliente.external_source == "POINT_PENDING"
+        ):
+            raise DomicilioAssignmentError(
+                "Primero concilia productos y total con Point.",
+                409,
+            )
         if (
             owner_api_client is not None
             and not owner_api_client.repartidores_logistica_autorizados.filter(

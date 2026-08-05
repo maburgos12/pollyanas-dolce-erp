@@ -5,7 +5,7 @@ import hmac
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone as dt_timezone
+from datetime import date, datetime, timezone as dt_timezone
 from decimal import Decimal
 
 from django.conf import settings
@@ -14,6 +14,7 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, connection, transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
+from django.utils.text import slugify
 
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from logistica.models import SolicitudDomicilio
@@ -46,6 +47,32 @@ class LinkPointOrderResult:
     order: PedidoCliente
     delivery: SolicitudDomicilio
     created: bool
+
+
+POINT_PENDING_EXTERNAL_SOURCE = "POINT_PENDING"
+
+
+def canonical_point_ticket_folio(folio: str) -> str:
+    return re.sub(
+        r"^nota(?:(?:\s+|[:#-]\s*)|$)",
+        "",
+        _text(str(folio or "")),
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def point_pending_external_id(*, folio: str, branch: str, sale_date: date) -> str:
+    canonical_folio = canonical_point_ticket_folio(folio)
+    canonical_branch = slugify(_text(branch))
+    if not canonical_folio or not canonical_branch:
+        raise ValidationError(
+            {"point": "Folio y sucursal son obligatorios para esperar la nota Point."},
+        )
+    identity_material = (
+        f"{sale_date.isoformat()}\0{canonical_branch}\0{canonical_folio.casefold()}"
+    )
+    digest = hashlib.sha256(identity_material.encode("utf-8")).hexdigest()
+    return f"POINT-PENDING:{sale_date.isoformat()}:{canonical_branch[:32]}:{digest[:32]}"
 
 
 def _text(value: str) -> str:
@@ -515,6 +542,79 @@ def _create_delivery(
     )
 
 
+def _reconcile_pending_delivery(
+    *,
+    order: PedidoCliente,
+    note: PointNote,
+    command: LinkPointOrderCommand,
+    fingerprint: str,
+) -> LinkPointOrderResult:
+    pending_snapshot = (
+        order.payload_snapshot.get("point_pending", {})
+        if isinstance(order.payload_snapshot, dict)
+        else {}
+    )
+    pending_fingerprint = (
+        pending_snapshot.get("capture_fingerprint", "")
+        if isinstance(pending_snapshot, dict)
+        else ""
+    )
+    if not pending_fingerprint or not verify_point_link_fingerprint(
+        command, pending_fingerprint,
+    ):
+        raise ValidationError(
+            {"pedido": "La captura pendiente de Point tiene datos distintos."},
+        )
+    delivery = _delivery_for_existing(order)
+    if delivery is None:
+        raise ValidationError(
+            {"pedido": "La captura pendiente no tiene domicilio canónico."},
+        )
+    if delivery.estatus != SolicitudDomicilio.ESTATUS_PENDIENTE_POINT:
+        raise ValidationError(
+            {"pedido": "La captura pendiente ya avanzó y no puede conciliarse."},
+        )
+
+    order.reconcile_pending_point_provenance(
+        point_note_id=note.pk_nota,
+        point_note_folio=note.folio,
+        point_note_snapshot=_note_snapshot(note),
+        point_note_fetched_at=timezone.now(),
+        point_note_sold_at=note.sold_at,
+        point_link_fingerprint=fingerprint,
+    )
+    order.social_reference = _text(command.social_reference)
+    order.canal = command.channel
+    order.descripcion = _description(note)
+    order.fecha_compromiso = (
+        timezone.localtime(command.delivery_window_end).date()
+        if command.delivery_window_end is not None
+        else None
+    )
+    order.monto_estimado = note.total
+    order.sucursal = note.branch_name
+    order.save(
+        update_fields=[
+            "social_reference",
+            "canal",
+            "descripcion",
+            "fecha_compromiso",
+            "monto_estimado",
+            "sucursal",
+            "updated_at",
+        ],
+    )
+    delivery.canal_origen = command.channel
+    delivery.canal_detalle = (
+        _text(command.social_reference)[:60]
+        if command.channel == PedidoCliente.CANAL_OTRO
+        else command.channel
+    )
+    delivery.estatus = SolicitudDomicilio.ESTATUS_CONFIRMADO
+    delivery.save(update_fields=["canal_origen", "canal_detalle", "estatus"])
+    return LinkPointOrderResult(order=order, delivery=delivery, created=False)
+
+
 def link_point_note(
     *,
     command: LinkPointOrderCommand,
@@ -581,6 +681,34 @@ def link_point_note(
                 order=existing,
                 delivery=delivery,
                 created=False,
+            )
+
+        sold_at = note.sold_at
+        sale_date = (
+            timezone.localtime(sold_at).date()
+            if timezone.is_aware(sold_at)
+            else sold_at.date()
+        )
+        pending_external_id = point_pending_external_id(
+            folio=note.folio,
+            branch=note.branch_name,
+            sale_date=sale_date,
+        )
+        _lock_key(POINT_PENDING_EXTERNAL_SOURCE, pending_external_id)
+        pending_order = (
+            PedidoCliente.objects.select_for_update()
+            .filter(
+                external_source=POINT_PENDING_EXTERNAL_SOURCE,
+                external_id=pending_external_id,
+            )
+            .first()
+        )
+        if pending_order is not None:
+            return _reconcile_pending_delivery(
+                order=pending_order,
+                note=note,
+                command=command,
+                fingerprint=fingerprint,
             )
 
         customer = _find_or_create_customer(command)
