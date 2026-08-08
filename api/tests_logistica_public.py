@@ -1172,8 +1172,15 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
         solicitudes = []
         for index in range(2):
             cliente = Cliente.objects.create(nombre=f"Secuencia {index}")
+            direccion = DireccionCliente.objects.create(
+                cliente=cliente,
+                direccion=f"Calle {index}",
+                latitud="24.809100",
+                longitud="-107.394000",
+            )
             pedido = PedidoCliente.objects.create(
                 cliente=cliente,
+                direccion_entrega=direccion,
                 descripcion=f"Secuencia {index}",
                 public_api_client=self.api_client,
                 point_note_id=f"POINT-SEQUENCE-{index}",
@@ -1182,6 +1189,7 @@ class PublicLogisticaExecutionConcurrencyTests(TransactionTestCase):
             solicitudes.append(
                 SolicitudDomicilio.objects.create(
                     pedido_cliente=pedido,
+                    direccion_cliente=direccion,
                     cliente_nombre=cliente.nombre,
                     direccion=f"Calle {index}",
                 )
