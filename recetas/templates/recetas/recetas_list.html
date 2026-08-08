@@ -62,7 +62,7 @@
         >
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button class="btn btn-primary" type="submit" data-pending-label="Buscando productos…">
+          <button class="btn btn-primary" type="submit" data-pending-label="Buscando productos…" {% if point_recipe_sync_panel.is_active %}disabled aria-describedby="pointSyncActiveStatus"{% endif %}>
             Incorporar productos nuevos
           </button>
         </form>
@@ -75,12 +75,42 @@
         >
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button class="btn btn-secondary" type="submit" data-pending-label="Actualizando recetas…">
+          <button class="btn btn-secondary" type="submit" data-pending-label="Actualizando recetas…" {% if point_recipe_sync_panel.is_active %}disabled aria-describedby="pointSyncActiveStatus"{% endif %}>
             Actualizar todas las recetas
           </button>
         </form>
       </div>
     </section>
+    {% if point_recipe_sync_panel %}
+    <section
+      class="point-sync-status point-sync-status--{{ point_recipe_sync_panel.stage_tone }}"
+      id="pointSyncActiveStatus"
+      aria-live="polite"
+      data-point-sync-active="{% if point_recipe_sync_panel.is_active %}true{% else %}false{% endif %}"
+    >
+      <div class="point-sync-status__main">
+        <div class="point-sync-status__heading">
+          <strong>{{ point_recipe_sync_panel.stage_label }}</strong>
+          <span class="point-sync-status__badge">{{ point_recipe_sync_panel.job_status_label }}</span>
+        </div>
+        <p>{{ point_recipe_sync_panel.stage_detail }}</p>
+        <small>
+          Trabajo #{{ point_recipe_sync_panel.job_id }}
+          {% if point_recipe_sync_panel.started_at %} · Inició {{ point_recipe_sync_panel.started_at|date:"d/m/Y H:i" }}{% endif %}
+          {% if point_recipe_sync_panel.finished_at %} · Terminó {{ point_recipe_sync_panel.finished_at|date:"d/m/Y H:i" }}{% endif %}
+        </small>
+      </div>
+      {% if point_recipe_sync_panel.job_status == "SUCCESS" %}
+      <dl class="point-sync-status__summary">
+        <div><dt>Productos procesados</dt><dd>{{ point_recipe_sync_panel.summary.products_selected|default:0 }}</dd></div>
+        <div><dt>Recetas completas</dt><dd>{{ point_recipe_sync_panel.summary.recipes_completed_successfully|default:0 }}</dd></div>
+        <div><dt>Insumos pendientes</dt><dd>{{ point_recipe_sync_panel.summary.unresolved_inputs_count|default:0 }}</dd></div>
+      </dl>
+      {% elif point_recipe_sync_panel.error_message %}
+      <p class="point-sync-status__error">{{ point_recipe_sync_panel.error_message }}</p>
+      {% endif %}
+    </section>
+    {% endif %}
     {% endif %}
 
     <div class="module-tabs mb-3">
@@ -260,6 +290,28 @@
 
 {% block extra_js %}
 {{ block.super }}
+<script>
+  (() => {
+    const savedScroll = Number(sessionStorage.getItem("recetasPointSyncScrollY"));
+    if (Number.isFinite(savedScroll) && savedScroll > 0) {
+      sessionStorage.removeItem("recetasPointSyncScrollY");
+      window.scrollTo({ top: savedScroll, behavior: "auto" });
+    }
+
+    const syncPanel = document.querySelector("[data-point-sync-active='true']");
+    if (!syncPanel) return;
+    const refreshWhenIdle = () => {
+      const editing = document.querySelector("input:focus, select:focus, textarea:focus");
+      if (document.hidden || editing) {
+        window.setTimeout(refreshWhenIdle, 15000);
+        return;
+      }
+      sessionStorage.setItem("recetasPointSyncScrollY", String(window.scrollY));
+      window.location.reload();
+    };
+    window.setTimeout(refreshWhenIdle, 15000);
+  })();
+</script>
 <script>
   (() => {
     const modal = document.getElementById("recipeCompositionModal");
