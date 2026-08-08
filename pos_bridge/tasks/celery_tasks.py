@@ -327,10 +327,28 @@ def task_catalog_recipe_sync(self, *, job_id: int):
     include_without_recipe = bool(parameters.get("include_without_recipe"))
     discovery = None
 
+    initial_stage = "DISCOVERING" if action == "SYNC_ONLY_NEW_PRODUCTS" else "IMPORTING"
+    initial_detail = (
+        "Revisando el catálogo de Point para detectar productos nuevos con receta/BOM."
+        if action == "SYNC_ONLY_NEW_PRODUCTS"
+        else "Descargando y materializando las recetas/BOM vigentes de Point."
+    )
+    parameters["progress"] = {"stage": initial_stage, "detail": initial_detail}
+    job.parameters = parameters
     job.status = PointSyncJob.STATUS_RUNNING
+    job.started_at = job.started_at or timezone.now()
     job.attempt_count = int(job.attempt_count or 0) + 1
     job.error_message = ""
-    job.save(update_fields=["status", "attempt_count", "error_message", "updated_at"])
+    job.save(
+        update_fields=[
+            "parameters",
+            "status",
+            "started_at",
+            "attempt_count",
+            "error_message",
+            "updated_at",
+        ]
+    )
 
     service = PointProductRecipeSyncService()
     try:
@@ -348,10 +366,23 @@ def task_catalog_recipe_sync(self, *, job_id: int):
                     "unresolved_inputs_count": 0,
                     "discovery": discovery,
                 }
+                parameters["progress"] = {
+                    "stage": "COMPLETED",
+                    "detail": "La revisión terminó; Point no reportó productos nuevos importables.",
+                }
+                job.parameters = parameters
                 job.status = PointSyncJob.STATUS_SUCCESS
                 job.finished_at = timezone.now()
                 job.result_summary = summary
-                job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])
+                job.save(
+                    update_fields=[
+                        "parameters",
+                        "status",
+                        "finished_at",
+                        "result_summary",
+                        "updated_at",
+                    ]
+                )
                 log_event(
                     job.triggered_by,
                     "SYNC_POINT_RECIPES",
@@ -360,6 +391,13 @@ def task_catalog_recipe_sync(self, *, job_id: int):
                     {"action": action, "product_codes": [], "summary": summary},
                 )
                 return _serialize_job(job)
+            parameters["progress"] = {
+                "stage": "IMPORTING",
+                "detail": f"Importando receta/BOM de {len(product_codes)} producto(s) nuevo(s).",
+                "products_found": len(product_codes),
+            }
+            job.parameters = parameters
+            job.save(update_fields=["parameters", "updated_at"])
         elif action != "SYNC_ALL_RECIPES":
             raise ValueError(f"Unsupported catalog recipe sync action: {action}")
 
@@ -369,11 +407,24 @@ def task_catalog_recipe_sync(self, *, job_id: int):
             include_without_recipe=include_without_recipe,
             sync_job=job,
         )
+        parameters["progress"] = {
+            "stage": "COSTING",
+            "detail": "Las recetas ya se incorporaron; recalculando el corte semanal de costos.",
+            "products_processed": int((result.summary or {}).get("products_selected") or 0),
+        }
+        job.parameters = parameters
+        job.save(update_fields=["parameters", "updated_at"])
         snapshot = run_weekly_cost_snapshot(triggered_by=job.triggered_by)
         summary = dict(result.summary or {})
         if discovery is not None:
             summary["discovery"] = discovery
         summary["weekly_cost_snapshot"] = snapshot
+        parameters["progress"] = {
+            "stage": "COMPLETED",
+            "detail": "Catálogo, recetas/BOM y corte semanal de costos actualizados.",
+            "products_processed": int(summary.get("products_selected") or 0),
+        }
+        job.parameters = parameters
         job.status = PointSyncJob.STATUS_SUCCESS
         job.finished_at = timezone.now()
         job.result_summary = summary
@@ -381,6 +432,7 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         job.save(
             update_fields=[
                 "status",
+                "parameters",
                 "finished_at",
                 "result_summary",
                 "artifacts",
@@ -401,10 +453,15 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         )
         return _serialize_job(job)
     except Exception as exc:
+        parameters["progress"] = {
+            "stage": "FAILED",
+            "detail": "La actualización se detuvo; revisa el error antes de volver a intentarlo.",
+        }
+        job.parameters = parameters
         job.status = PointSyncJob.STATUS_FAILED
         job.finished_at = timezone.now()
         job.error_message = str(exc)
-        job.save(update_fields=["status", "finished_at", "error_message", "updated_at"])
+        job.save(update_fields=["parameters", "status", "finished_at", "error_message", "updated_at"])
         log_event(
             job.triggered_by,
             "SYNC_POINT_RECIPES_FAILED",

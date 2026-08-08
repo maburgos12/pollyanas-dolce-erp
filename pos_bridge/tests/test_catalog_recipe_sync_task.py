@@ -24,11 +24,22 @@ class CatalogRecipeSyncTaskTests(TestCase):
             parameters={"action": "SYNC_ALL_RECIPES", "branch_hint": "MATRIZ"},
             triggered_by=self.user,
         )
-        service_cls.return_value.sync.return_value = SimpleNamespace(
-            summary={"products_selected": 12, "recipes_completed_successfully": 11},
-            raw_export_path="/tmp/point-recipes.json",
-        )
-        weekly_snapshot.return_value = {"week_start": "2026-07-27", "total_items": 12}
+        def sync_with_progress(**kwargs):
+            job.refresh_from_db()
+            self.assertEqual(job.parameters["progress"]["stage"], "IMPORTING")
+            self.assertIsNotNone(job.started_at)
+            return SimpleNamespace(
+                summary={"products_selected": 12, "recipes_completed_successfully": 11},
+                raw_export_path="/tmp/point-recipes.json",
+            )
+
+        def snapshot_with_progress(**kwargs):
+            job.refresh_from_db()
+            self.assertEqual(job.parameters["progress"]["stage"], "COSTING")
+            return {"week_start": "2026-07-27", "total_items": 12}
+
+        service_cls.return_value.sync.side_effect = sync_with_progress
+        weekly_snapshot.side_effect = snapshot_with_progress
 
         payload = task_catalog_recipe_sync(job_id=job.id)
 
@@ -37,6 +48,7 @@ class CatalogRecipeSyncTaskTests(TestCase):
         self.assertEqual(job.result_summary["products_selected"], 12)
         self.assertEqual(job.result_summary["weekly_cost_snapshot"]["total_items"], 12)
         self.assertEqual(job.artifacts["raw_export_path"], "/tmp/point-recipes.json")
+        self.assertEqual(job.parameters["progress"]["stage"], "COMPLETED")
         service_cls.return_value.sync.assert_called_once_with(
             branch_hint="MATRIZ",
             product_codes=None,
@@ -55,10 +67,12 @@ class CatalogRecipeSyncTaskTests(TestCase):
             parameters={"action": "SYNC_ONLY_NEW_PRODUCTS", "branch_hint": "MATRIZ"},
             triggered_by=self.user,
         )
-        service_cls.return_value.discover_new_product_codes.return_value = {
-            "new_codes": [],
-            "blocked_candidates_count": 0,
-        }
+        def discovery_with_progress(**kwargs):
+            job.refresh_from_db()
+            self.assertEqual(job.parameters["progress"]["stage"], "DISCOVERING")
+            return {"new_codes": [], "blocked_candidates_count": 0}
+
+        service_cls.return_value.discover_new_product_codes.side_effect = discovery_with_progress
 
         payload = task_catalog_recipe_sync(job_id=job.id)
 
@@ -67,6 +81,7 @@ class CatalogRecipeSyncTaskTests(TestCase):
         self.assertEqual(job.result_summary["products_selected"], 0)
         self.assertEqual(job.result_summary["new_products_imported"], 0)
         self.assertEqual(job.result_summary["discovery"]["new_codes"], [])
+        self.assertEqual(job.parameters["progress"]["stage"], "COMPLETED")
         service_cls.return_value.sync.assert_not_called()
         weekly_snapshot.assert_not_called()
         self.assertEqual(payload["status"], PointSyncJob.STATUS_SUCCESS)
@@ -136,3 +151,4 @@ class CatalogRecipeSyncTaskTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
         self.assertIn("Point timeout", job.error_message)
+        self.assertEqual(job.parameters["progress"]["stage"], "FAILED")

@@ -603,9 +603,11 @@ class RecetasListCatalogFiltersTests(TestCase):
         response = self.client.get(reverse("recetas:recetas_list"))
 
         self.assertEqual(response.status_code, 200)
-        # El rediseño de mayo dejó el panel como dato de contexto (el template
-        # actual ya no lo pinta); validamos el payload completo del panel.
         self.assertIn("point_recipe_sync_panel", response.context)
+        self.assertContains(response, "Actualización terminada")
+        self.assertContains(response, "Productos procesados")
+        self.assertContains(response, "Recetas completas")
+        self.assertContains(response, 'data-point-sync-active="false"', html=False)
         panel = response.context["point_recipe_sync_panel"]
         self.assertEqual(panel["job_id"], job.id)
         self.assertEqual(panel["job_status"], PointSyncJob.STATUS_SUCCESS)
@@ -619,6 +621,40 @@ class RecetasListCatalogFiltersTests(TestCase):
             [{"codigo_point": "PREP-001", "nombre": "Betún Base Point"}],
         )
         self.assertEqual(panel["summary"]["new_preparations_imported"], 1)
+
+    def test_recetas_list_prioritizes_running_job_and_shows_live_stage(self):
+        running_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_RUNNING,
+            parameters={
+                "action": "SYNC_ONLY_NEW_PRODUCTS",
+                "progress": {
+                    "stage": "DISCOVERING",
+                    "detail": "Revisando 1,500 productos en Point.",
+                },
+            },
+            triggered_by=self.user,
+        )
+        pending_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_PENDING,
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"},
+            triggered_by=self.user,
+        )
+        session = self.client.session
+        session["recetas_last_point_sync_job_id"] = pending_job.id
+        session.save()
+
+        response = self.client.get(reverse("recetas:recetas_list"))
+
+        self.assertEqual(response.status_code, 200)
+        panel = response.context["point_recipe_sync_panel"]
+        self.assertEqual(panel["job_id"], running_job.id)
+        self.assertEqual(panel["stage"], "DISCOVERING")
+        self.assertContains(response, "Revisando catálogo Point")
+        self.assertContains(response, "Revisando 1,500 productos en Point.")
+        self.assertContains(response, 'data-point-sync-active="true"', html=False)
+        self.assertContains(response, "disabled", count=2)
 
     def test_recetas_list_filters_by_tipo(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"tipo": Receta.TIPO_PRODUCTO_FINAL})

@@ -381,22 +381,68 @@ def _format_point_recipe_discovery_blocked_message(discovery: dict[str, Any]) ->
 
 
 def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
-    job_qs = PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_RECIPES)
+    job_qs = PointSyncJob.objects.filter(
+        Q(parameters__mode__isnull=True) | ~Q(parameters__mode="recipe_gap_audit"),
+        job_type=PointSyncJob.JOB_TYPE_RECIPES,
+    )
     preferred_job_id = request.session.get("recetas_last_point_sync_job_id")
-    job = None
-    if preferred_job_id:
-        candidate = job_qs.filter(id=preferred_job_id).first()
-        if candidate is not None and (candidate.parameters or {}).get("mode") != "recipe_gap_audit":
-            job = candidate
+    job = (
+        job_qs.filter(
+            triggered_by=request.user,
+            status=PointSyncJob.STATUS_RUNNING,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if job is None and preferred_job_id:
+        job = job_qs.filter(id=preferred_job_id).first()
     if job is None:
-        for candidate in job_qs:
-            if (candidate.parameters or {}).get("mode") != "recipe_gap_audit":
-                job = candidate
-                break
+        job = job_qs.order_by("-created_at", "-id").first()
     if job is None:
         return None
 
     summary = job.result_summary or {}
+    parameters = job.parameters or {}
+    progress = parameters.get("progress") or {}
+    fallback_stage = {
+        PointSyncJob.STATUS_PENDING: "QUEUED",
+        PointSyncJob.STATUS_RUNNING: "PROCESSING",
+        PointSyncJob.STATUS_SUCCESS: "COMPLETED",
+        PointSyncJob.STATUS_FAILED: "FAILED",
+    }.get(job.status, "PROCESSING")
+    stage = progress.get("stage") or fallback_stage
+    stage_map = {
+        "QUEUED": ("En cola", "Esperando turno en el procesador de Point.", "info"),
+        "DISCOVERING": (
+            "Revisando catálogo Point",
+            "Buscando productos nuevos y comprobando cuáles tienen receta/BOM.",
+            "info",
+        ),
+        "IMPORTING": (
+            "Incorporando productos y BOM",
+            "Creando o actualizando productos, recetas, preparaciones e insumos internos.",
+            "info",
+        ),
+        "COSTING": (
+            "Recalculando costos",
+            "Las recetas ya se incorporaron; se está actualizando el corte semanal.",
+            "info",
+        ),
+        "PROCESSING": (
+            "Procesando en Point",
+            "El trabajo está activo; esta ejecución todavía no reporta una etapa más detallada.",
+            "info",
+        ),
+        "COMPLETED": ("Actualización terminada", "Point y el ERP quedaron sincronizados.", "success"),
+        "FAILED": ("Actualización detenida", "El trabajo terminó con un error.", "danger"),
+    }
+    stage_label, stage_detail, stage_tone = stage_map.get(stage, stage_map["PROCESSING"])
+    job_status_label = {
+        PointSyncJob.STATUS_PENDING: "En cola",
+        PointSyncJob.STATUS_RUNNING: "En proceso",
+        PointSyncJob.STATUS_SUCCESS: "Terminado",
+        PointSyncJob.STATUS_FAILED: "Con error",
+    }.get(job.status, job.get_status_display())
     imported_products = list(summary.get("imported_products_status") or [])
     status_label_map = {
         "SUCCESS_COMPLETE": ("Completo", "success"),
@@ -417,9 +463,16 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
     return {
         "job_id": job.id,
         "job_status": job.status,
-        "job_status_label": job.get_status_display(),
+        "job_status_label": job_status_label,
+        "is_active": job.status in {PointSyncJob.STATUS_PENDING, PointSyncJob.STATUS_RUNNING},
+        "stage": stage,
+        "stage_label": stage_label,
+        "stage_detail": progress.get("detail") or stage_detail,
+        "stage_tone": stage_tone,
+        "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
+        "error_message": job.error_message,
         "summary": summary,
         "products": decorated_products,
         "products_more_count": max(0, len(imported_products) - len(decorated_products)),
