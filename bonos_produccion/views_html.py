@@ -263,16 +263,21 @@ def bonos_produccion_dashboard(request):
 @never_cache
 @ensure_csrf_cookie
 def bonos_produccion_pwa(request):
-    if not (is_bonos_produccion_capture_only(request.user) or can_view_submodule(request.user, "produccion", "bonos")):
+    operador_solicitudes = is_bonos_produccion_capture_only(request.user)
+    if not (operador_solicitudes or can_view_submodule(request.user, "produccion", "bonos")):
         return redirect("/seguimiento/" if can_view_module(request.user, "seguimiento") else "/dashboard/")
     force_capture = (request.GET.get("captura") or "").strip().lower() in {"1", "true", "si", "sí"}
     user_agent = (request.headers.get("User-Agent") or "").lower()
     is_mobile = any(token in user_agent for token in ("iphone", "ipad", "android", "mobile"))
-    if is_bonos_produccion_capture_only(request.user):
+    if operador_solicitudes:
         force_capture = True
     if not force_capture and not is_mobile:
         return redirect("bonos_produccion:bonos-produccion-dashboard")
-    return render(request, "bonos_produccion/index.html")
+    return render(
+        request,
+        "bonos_produccion/index.html",
+        {"operador_solicitudes": operador_solicitudes},
+    )
 
 
 def _static_file_path(relative_path: str) -> str:

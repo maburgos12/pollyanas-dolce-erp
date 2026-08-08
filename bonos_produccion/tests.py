@@ -494,7 +494,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn("const FORCE_CAPTURE=", content)
         self.assertIn("const initialTab=", content)
         self.assertIn("React.useState(initialTab)", content)
-        self.assertIn("React.useState(FORCE_CAPTURE?AREA_TODAS:'HORNOS')", content)
+        self.assertIn("React.useState(OPERADOR_SOLICITUDES||FORCE_CAPTURE?AREA_TODAS:'HORNOS')", content)
         self.assertIn("includeAll:true", content)
         self.assertIn("r.redirected", content)
         self.assertNotIn("pointer-events:none", content)
@@ -552,7 +552,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v21-cancelacion-visible", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v22-operadoras-solicitudes", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 

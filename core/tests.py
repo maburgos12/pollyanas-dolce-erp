@@ -726,14 +726,18 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         dashboard = self.client.get("/dashboard/")
         admin_panel = self.client.get("/bonos-produccion/dashboard/")
         app = self.client.get("/bonos-produccion/app/")
-        api = self.client.get("/api/bonos-produccion/periodos/")
+        periodos_api = self.client.get("/api/bonos-produccion/periodos/")
+        permisos_api = self.client.get("/api/bonos-produccion/permisos/")
+        prestamos_api = self.client.get("/api/bonos-produccion/prestamos/")
 
         self.assertEqual(dashboard.status_code, 302)
         self.assertEqual(dashboard["Location"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(admin_panel.status_code, 302)
         self.assertEqual(admin_panel["Location"], "/bonos-produccion/app/?captura=1")
         self.assertEqual(app.status_code, 200)
-        self.assertEqual(api.status_code, 200)
+        self.assertEqual(periodos_api.status_code, 403)
+        self.assertEqual(permisos_api.status_code, 200)
+        self.assertEqual(prestamos_api.status_code, 200)
 
     def test_operational_leads_keep_monthly_bonus_submodule_access(self):
         produccion = get_user_model().objects.create_user(username="test.carolina.bonos.access")
