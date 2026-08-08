@@ -286,6 +286,12 @@ class PointDeliveryNoteService:
         return int(local.timestamp() * 1000)
 
     def _rows(self, payload: Any, *, label: str, allow_empty: bool) -> list[dict[str, Any]]:
+        if isinstance(payload, dict):
+            if payload.get("hasError") is not False or "data" not in payload:
+                raise PointDeliveryContractError(
+                    f"Point devolvió una estructura inválida en {label}.",
+                )
+            payload = payload["data"]
         if payload == [] and allow_empty:
             return []
         if (

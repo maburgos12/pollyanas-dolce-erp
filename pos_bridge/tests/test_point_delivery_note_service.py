@@ -141,7 +141,7 @@ class PointDeliveryNoteServiceTests(SimpleTestCase):
             "Correo": "cliente@example.test",
         }]
         service, session, http, detail = self._service(
-            [tray, delivery_customer, catalog],
+            [{"hasError": False, "data": tray}, delivery_customer, catalog],
         )
 
         result = service.fetch_range(
@@ -298,6 +298,19 @@ class PointDeliveryNoteServiceTests(SimpleTestCase):
         self.assertEqual(len(result), 0)
         self.assertEqual(len(result.failures), 1)
         self.assertEqual(result.failures[0].error_code, "POINT_CONTRACT")
+        self.assertTrue(session.closed)
+
+    def test_fetch_range_rejects_error_delivery_tray_envelope(self):
+        service, session, _http, _detail = self._service(
+            [{"hasError": True, "data": []}],
+        )
+
+        with self.assertRaises(PointDeliveryContractError):
+            service.fetch_range(
+                start_date=date(2026, 8, 5),
+                end_date=date(2026, 8, 5),
+            )
+
         self.assertTrue(session.closed)
 
     def test_fetch_range_classifies_point_http_failure_and_closes_session(self):
