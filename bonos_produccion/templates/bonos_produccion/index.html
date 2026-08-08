@@ -17,9 +17,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-index.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-index.css?v=20260808-operadoras-v1">
 </head>
-<body>
+<body data-operadora-solicitudes="{{ operador_solicitudes|yesno:'true,false' }}">
 <div id="root"></div>
 <script>
 const h=React.createElement;
@@ -29,6 +29,7 @@ const AREA_TODAS='TODAS';
 const AREAS=['HORNOS','PRODUCCION','ARMADO','LOGISTICA','CRUCERO'];
 const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Embetunado',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
 const FORCE_CAPTURE=new URLSearchParams(window.location.search).get('captura')==='1';
+const OPERADOR_SOLICITUDES={{ operador_solicitudes|yesno:'true,false' }};
 function api(path,opts={}){
   const csrfMatch=document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
   const headers={'Content-Type':'application/json','X-CSRFToken':csrfMatch?decodeURIComponent(csrfMatch[1]):'',...(opts.headers||{})};
@@ -80,7 +81,7 @@ function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaT
   const filtered=q?items.filter(b=>normalizeText([b.empleado_nombre,b.area,b.sucursal_nombre,b.puesto].join(' ')).includes(q)):items;
   return h('div',{className:'employee-picker'},
     h('div',{className:'employee-search-wrap'},
-      h('input',{className:'employee-search',value:query,onChange:e=>setQuery(e.target.value),placeholder:placeholder||'Buscar empleado por nombre...',autoComplete:'off'}),
+      h('input',{className:'employee-search',value:query,onChange:e=>setQuery(e.target.value),placeholder:placeholder||'Buscar empleado por nombre...',autoComplete:'off','aria-label':placeholder||'Buscar empleado por nombre'}),
       h('span',{className:'employee-count'},`${filtered.length}/${items.length}`)
     ),
     h('div',{className:'employee-list'},
@@ -267,19 +268,20 @@ function ProduccionCollaboratorPage({bono,periodoLabel}){
 function statusTxt(ok){return ok?'Pasa':'No pasa';}
 function App(){
   const queryTab=new URLSearchParams(window.location.search).get('tab');
-  const initialTab=['config','captura','permisos','horas_extra','resumen','ajustes','revision'].includes(queryTab)?queryTab:(FORCE_CAPTURE?'captura':'config');
+  const tabsPermitidos=OPERADOR_SOLICITUDES?['permisos','prestamos']:['config','captura','permisos','horas_extra','resumen','ajustes','revision'];
+  const initialTab=tabsPermitidos.includes(queryTab)?queryTab:(OPERADOR_SOLICITUDES?'permisos':(FORCE_CAPTURE?'captura':'config'));
   const [tab,setTab]=React.useState(initialTab);
   const [mes,setMes]=React.useState(TODAY.getMonth()+1);
   const [anio,setAnio]=React.useState(TODAY.getFullYear());
   const [periodo,setPeriodo]=React.useState(null);
   const [bonos,setBonos]=React.useState([]);
-  const [area,setArea]=React.useState(FORCE_CAPTURE?AREA_TODAS:'HORNOS');
+  const [area,setArea]=React.useState(OPERADOR_SOLICITUDES||FORCE_CAPTURE?AREA_TODAS:'HORNOS');
   const [selectedBono,setSelectedBono]=React.useState(null);
   const [registros,setRegistros]=React.useState([]);
   const [status,setStatus]=React.useState('');
   const [statusType,setStatusType]=React.useState('ok');
   const [loading,setLoading]=React.useState(false);
-  React.useEffect(()=>{cargarTodo();},[mes,anio]);
+  React.useEffect(()=>{if(!OPERADOR_SOLICITUDES)cargarTodo();},[mes,anio]);
   React.useEffect(()=>{if(selectedBono)cargarRegistros(selectedBono.id);else setRegistros([]);},[selectedBono?.id]);
   function cargarTodo(){
     setLoading(true);
@@ -323,27 +325,27 @@ function App(){
   const bonosArea=area===AREA_TODAS?bonos:bonos.filter(b=>b.area===area);
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
-  const showBonusContext=!['permisos','horas_extra'].includes(tab);
+  const showBonusContext=!OPERADOR_SOLICITUDES&&!['permisos','prestamos','horas_extra'].includes(tab);
   function selectTab(nextTab){
     setTab(nextTab);
-    if(area===AREA_TODAS&&!['captura','permisos','horas_extra','revision'].includes(nextTab))setArea('HORNOS');
+    if(area===AREA_TODAS&&!['captura','permisos','prestamos','horas_extra','revision'].includes(nextTab))setArea('HORNOS');
   }
   return h('div',null,
     h('header',{className:'hdr'},
       h('div',{className:'hdr-brand'},
         h('div',{className:'hdr-icon'},h(IconFactory)),
-        h('div',null,h('div',{className:'hdr-title'},"Bonos de Produccion"),h('div',{className:'hdr-sub'},"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
+        h('div',null,h('div',{className:'hdr-title'},OPERADOR_SOLICITUDES?'Solicitudes de Produccion':'Bonos de Produccion'),h('div',{className:'hdr-sub'},OPERADOR_SOLICITUDES?"Pollyana's Dolce · Permisos y prestamos":"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
       ),
         h('div',{className:'hdr-controls'},
-        h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
-        h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),className:'year-input',title:'Año'}),
-        h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar'),
+        !OPERADOR_SOLICITUDES&&h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
+        !OPERADOR_SOLICITUDES&&h('input',{type:'number',value:anio,onChange:e=>setAnio(+e.target.value),className:'year-input',title:'Año'}),
+        !OPERADOR_SOLICITUDES&&h('button',{className:'btn btn-wine',onClick:cargarTodo},loading?'Cargando…':'Actualizar'),
         h('a',{className:'btn btn-ghost btn-logout',href:'/logout/',title:'Cerrar sesión del ERP'},'Cerrar sesión')
       )
     ),
-    status&&h('div',{className:`status-bar ${statusType}`},status),
+    status&&h('div',{className:`status-bar ${statusType}`,role:'status','aria-live':'polite'},status),
     h('div',{className:'tabs-wrap'},
-      [['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']].map(([id,lbl])=>
+      (OPERADOR_SOLICITUDES?[['permisos','Permisos'],['prestamos','Prestamos']]:[['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']]).map(([id,lbl])=>
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>selectTab(id)},lbl))
     ),
     h('main',null,
@@ -362,7 +364,8 @@ function App(){
       ),
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
       tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
-      tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus}),
+      tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes:OPERADOR_SOLICITUDES}),
+      tab==='prestamos'&&OPERADOR_SOLICITUDES&&h(PrestamosTab,{showStatus}),
       tab==='horas_extra'&&h(HorasExtraTab,{area,setArea,mes,anio,showStatus}),
       tab==='resumen'&&h(ResumenTab,{bonos,area,setArea,mes,anio}),
       tab==='ajustes'&&h(AjustesTab,{bonosArea,area,setArea,actualizarBono}),
@@ -387,7 +390,106 @@ function ConfigTab({bonos,area,setArea}){
     )
   );
 }
-function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
+function PrestamosTab({showStatus}){
+  const [empleados,setEmpleados]=React.useState([]);
+  const [prestamos,setPrestamos]=React.useState([]);
+  const [selected,setSelected]=React.useState(null);
+  const [concepto,setConcepto]=React.useState('');
+  const [metodo,setMetodo]=React.useState('transferencia');
+  const [importe,setImporte]=React.useState('');
+  const [quincenas,setQuincenas]=React.useState('4');
+  const [fechaDeposito,setFechaDeposito]=React.useState(new Date().toISOString().slice(0,10));
+  const [loading,setLoading]=React.useState(true);
+  const [submitting,setSubmitting]=React.useState(false);
+  const [lastPrestamo,setLastPrestamo]=React.useState(null);
+  React.useEffect(()=>{cargarPrestamos();},[]);
+  React.useEffect(()=>{if(!selected&&empleados.length)setSelected(empleados[0]);},[empleados.length,selected?.id]);
+  function cargarPrestamos(){
+    setLoading(true);
+    Promise.all([
+      api('/api/bonos-produccion/permisos/?area=TODAS'),
+      api('/api/bonos-produccion/prestamos/'),
+    ]).then(([catalogo,lista])=>{
+      setEmpleados(catalogo.empleados||[]);
+      setPrestamos(Array.isArray(lista)?lista:(lista.results||[]));
+    }).catch(err=>showStatus(err.message,'err')).finally(()=>setLoading(false));
+  }
+  function submitPrestamo(){
+    if(submitting)return;
+    if(!selected){showStatus('Selecciona un empleado.','err');return;}
+    if(!concepto.trim()){showStatus('Captura el concepto del prestamo.','err');return;}
+    if(!Number(importe)||Number(importe)<=0){showStatus('Captura un importe mayor a cero.','err');return;}
+    if(!Number.isInteger(Number(quincenas))||Number(quincenas)<=0){showStatus('Captura al menos una quincena.','err');return;}
+    setSubmitting(true);
+    api('/api/bonos-produccion/prestamos/',{method:'POST',body:JSON.stringify({
+      empleado:selected.id,
+      concepto:concepto.trim(),
+      metodo_pago:metodo,
+      importe,
+      num_quincenas:Number(quincenas),
+      fecha_deposito:fechaDeposito||null,
+    })}).then(prestamo=>{
+      setLastPrestamo(prestamo);
+      setConcepto('');
+      setImporte('');
+      setQuincenas('4');
+      showStatus(`Prestamo ${prestamo.folio} enviado a Carolina`,'ok');
+      cargarPrestamos();
+    }).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
+  }
+  function estadoPrestamo(p){
+    return {solicitado:'Solicitado',autorizado:'Autorizado por Carolina',activo:'Aprobado por Direccion',liquidado:'Liquidado',rechazado:'Rechazado',cancelado:'Cancelado'}[p.estado]||p.estado_display||p.estado;
+  }
+  function estadoClase(p){
+    if(p.estado==='rechazado'||p.estado==='cancelado')return'bad';
+    if(p.estado==='activo'||p.estado==='liquidado')return'ok';
+    return'pending';
+  }
+  return h('div',{className:'perm-layout'},
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Nueva solicitud de prestamo')),
+      h('div',{className:'card-body'},
+        h('div',{className:'preview-note'},'Carolina revisa primero la solicitud. Direccion General conserva la aprobacion final.'),
+        lastPrestamo&&h('div',{className:'print-success',role:'status','aria-live':'polite'},
+          h('div',{className:'print-success-title'},`Prestamo ${lastPrestamo.folio} registrado`),
+          h('div',{className:'print-success-text'},`${lastPrestamo.empleado_nombre} · ${money(lastPrestamo.importe)} · ${estadoPrestamo(lastPrestamo)}`)
+        ),
+        h('div',{className:'spacer-sm'}),
+        h(EmployeeSearchList,{items:empleados,selected,onSelect:setSelected,placeholder:'Buscar personal de Produccion...',metaText:e=>e.puesto||e.sucursal_nombre||'Produccion'}),
+        h('div',{className:'div'}),
+        h('div',{className:'form-grid'},
+          h('div',{className:'field'},h('label',{htmlFor:'prestamo-concepto'},'Concepto'),h('textarea',{id:'prestamo-concepto',className:'form-control',rows:3,value:concepto,onChange:e=>setConcepto(e.target.value),placeholder:'Motivo o destino del prestamo'})),
+          h('div',{className:'field'},h('label',{htmlFor:'prestamo-metodo'},'Metodo de pago'),h('select',{id:'prestamo-metodo',className:'form-control',value:metodo,onChange:e=>setMetodo(e.target.value)},
+            h('option',{value:'transferencia'},'Transferencia electronica'),
+            h('option',{value:'cheque'},'Cheque'),
+            h('option',{value:'efectivo'},'Efectivo')
+          )),
+          h('div',{className:'grid-2'},
+            h('div',{className:'field'},h('label',{htmlFor:'prestamo-importe'},'Importe'),h('input',{id:'prestamo-importe',className:'form-control',type:'number',min:'0.01',step:'0.01',inputMode:'decimal',value:importe,onChange:e=>setImporte(e.target.value),placeholder:'0.00'})),
+            h('div',{className:'field'},h('label',{htmlFor:'prestamo-quincenas'},'Quincenas'),h('input',{id:'prestamo-quincenas',className:'form-control',type:'number',min:'1',step:'1',inputMode:'numeric',value:quincenas,onChange:e=>setQuincenas(e.target.value)}))
+          ),
+          h('div',{className:'field'},h('label',{htmlFor:'prestamo-fecha'},'Fecha propuesta de deposito'),h('input',{id:'prestamo-fecha',className:'form-control',type:'date',value:fechaDeposito,onChange:e=>setFechaDeposito(e.target.value)})),
+          h('button',{className:'btn btn-wine',type:'button',disabled:submitting,onClick:submitPrestamo},submitting?'Enviando...':'Enviar solicitud')
+        )
+      )
+    ),
+    h('div',{className:'card'},
+      h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Solicitudes visibles'),h('span',{className:'card-hdr-meta'},`${prestamos.length} registros`)),
+      h('div',{className:'card-body'},
+        loading?h('div',{className:'empty'},'Cargando solicitudes...'):
+        prestamos.length?h('div',{className:'permission-list'},prestamos.map(p=>h('div',{key:p.id,className:'permission-item'},
+          h('div',{className:'permission-top'},
+            h('div',null,h('div',{className:'permission-title'},p.empleado_nombre),h('div',{className:'permission-meta'},`${p.folio} · ${p.num_quincenas} quincenas`)),
+            h('span',{className:`badge ${estadoClase(p)}`},estadoPrestamo(p))
+          ),
+          h('div',{className:'permission-reason'},p.concepto),
+          h('div',{className:'permission-meta'},`${money(p.importe)} · Descuento ${money(p.descuento_quincenal)} por quincena`)
+        ))):h('div',{className:'empty'},'Todavia no hay solicitudes capturadas por ti ni prestamos propios.')
+      )
+    )
+  );
+}
+function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes=false}){
   const [empleados,setEmpleados]=React.useState([]);
   const [permisos,setPermisos]=React.useState([]);
   const [selected,setSelected]=React.useState(null);
@@ -398,6 +500,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
   const [hasta,setHasta]=React.useState('14:30');
   const [motivo,setMotivo]=React.useState('');
   const [loading,setLoading]=React.useState(false);
+  const [submitting,setSubmitting]=React.useState(false);
   const [previewPermiso,setPreviewPermiso]=React.useState(null);
   const [lastPermiso,setLastPermiso]=React.useState(null);
   const [editPermiso,setEditPermiso]=React.useState(null);
@@ -430,10 +533,12 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     return'pending';
   }
   function submitPermiso(){
+    if(submitting)return;
     if(!selected){showStatus('Selecciona un empleado.','err');return;}
     if(!motivo.trim()){showStatus('Captura el motivo del permiso.','err');return;}
     if(tipo==='permiso_hora'&&(!desde||!hasta)){showStatus('Captura hora desde y hasta para permiso parcial.','err');return;}
     const areaPermiso=selected.area&&selected.area!==AREA_TODAS?selected.area:area;
+    setSubmitting(true);
     api('/api/bonos-produccion/permisos/',{method:'POST',body:JSON.stringify({
       empleado:selected.id,
       mes,
@@ -444,7 +549,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
       fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
-    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err'));
+    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
   }
   function imprimirPermiso(p){
     setPreviewPermiso(p);
@@ -511,8 +616,8 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
     return `${fechaTxt} · ${p.tipo==='permiso_dia'?'Todo el dia':`${horaIni} - ${horaFin}`}`;
   }
   return h('div',null,
-    h(AreaChips,{area,setArea,includeAll:true}),
-    h('div',{className:'metrics'},
+    !operadorSolicitudes&&h(AreaChips,{area,setArea,includeAll:true}),
+    !operadorSolicitudes&&h('div',{className:'metrics'},
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Pendientes jefe'),h('div',{className:'val wine'},pendientes)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Autorizados'),h('div',{className:'val'},preaut)),
       h('div',{className:'metric-card'},h('div',{className:'lbl'},'Sin goce'),h('div',{className:'val gold'},sinGoce))
@@ -549,12 +654,12 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus}){
               [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
             )),
             h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:motivo,onChange:e=>setMotivo(e.target.value),placeholder:'Motivo del permiso...'})),
-            h('button',{className:'btn btn-wine',onClick:submitPermiso},'Enviar a autorizacion')
+            h('button',{className:'btn btn-wine',type:'button',disabled:submitting,onClick:submitPermiso},submitting?'Enviando...':'Enviar a autorizacion')
           )
         )
       ),
       h('div',{className:'card'},
-        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},'Permisos de mi equipo'),h(AreaPill,{area})),
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},operadorSolicitudes?'Mis permisos':'Permisos de mi equipo'),!operadorSolicitudes&&h(AreaPill,{area})),
         h('div',{className:'card-body'},
           loading?h('div',{className:'empty'},'Cargando permisos...'):
           permisos.length?h('div',{className:'permission-list'},

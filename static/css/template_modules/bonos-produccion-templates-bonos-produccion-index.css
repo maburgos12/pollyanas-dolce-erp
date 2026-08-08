@@ -18,6 +18,7 @@ body{background:var(--bg);color:var(--ink);font-family:Nunito,sans-serif;font-si
 .hdr-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .hdr-controls input[type=number]{width:60px;padding:6px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;font-size:13px;color:var(--ink);background:var(--bg);text-align:center}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:opacity .15s,background .15s}
+.btn:disabled{opacity:.62;cursor:wait}
 .btn-wine{background:var(--wine);color:#fff}.btn-wine:hover{opacity:.88}
 .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}.btn-ghost:hover{background:var(--line)}
 .btn-logout{color:var(--bad);border-color:rgba(153,27,27,.24);text-decoration:none;background:#fff}

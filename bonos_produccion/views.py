@@ -47,6 +47,17 @@ class CanAccessBonosProduccion(BasePermission):
         )
 
 
+class CanAccessAdministracionBonosProduccion(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and not is_bonos_produccion_capture_only(user)
+            and can_view_submodule(user, "produccion", "bonos")
+        )
+
+
 def _empleado_de_usuario(user) -> Empleado | None:
     if not user or not user.is_authenticated:
         return None
@@ -72,7 +83,7 @@ def _empleado_de_usuario(user) -> Empleado | None:
 class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     queryset = ConfigBonoPeriodo.objects.all()
     serializer_class = ConfigBonoPeriodoSerializer
-    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+    permission_classes = [IsAuthenticated, CanAccessAdministracionBonosProduccion]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -135,7 +146,7 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
 class BonoProduccionViewSet(viewsets.ModelViewSet):
     queryset = BonoProduccionEmpleado.objects.select_related("empleado", "periodo").prefetch_related("registros")
     serializer_class = BonoProduccionSerializer
-    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+    permission_classes = [IsAuthenticated, CanAccessAdministracionBonosProduccion]
 
     def get_queryset(self):
         qs = bonos_produccion_elegibles_queryset(super().get_queryset())
@@ -205,7 +216,7 @@ class BonoProduccionViewSet(viewsets.ModelViewSet):
 class RegistroDiarioViewSet(viewsets.ModelViewSet):
     queryset = RegistroDiarioProduccion.objects.select_related("bono__empleado", "bono__periodo")
     serializer_class = RegistroDiarioSerializer
-    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+    permission_classes = [IsAuthenticated, CanAccessAdministracionBonosProduccion]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -538,7 +549,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
 
 class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosProduccionEquipoViewSet):
-    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
+    permission_classes = [IsAuthenticated, CanAccessAdministracionBonosProduccion]
 
     def empleados_queryset(self):
         return PermisosProduccionEquipoViewSet.empleados_queryset(self)

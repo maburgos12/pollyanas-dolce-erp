@@ -147,6 +147,18 @@ class OperadoraCatalogoPermisosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["permisos"], [])
 
+    def test_operadora_no_accede_a_bonos_configuracion_registros_ni_horas_extra(self):
+        rutas = (
+            "/api/bonos-produccion/periodos/",
+            "/api/bonos-produccion/bonos/",
+            "/api/bonos-produccion/registros-diarios/",
+            "/api/bonos-produccion/horas-extra/",
+        )
+
+        for ruta in rutas:
+            with self.subTest(ruta=ruta):
+                self.assertEqual(self.client.get(ruta).status_code, 403)
+
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class OperadoraPrestamosApiTests(TestCase):
@@ -320,3 +332,34 @@ class OperadoraPrestamosApiTests(TestCase):
             self.client.post(f"/api/bonos-produccion/prestamos/{prestamo_id}/autorizar-jefe/").status_code,
             404,
         )
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class OperadoraPwaTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        users = get_user_model().objects
+        cls.operadora = users.create_user(username="operadora.pwa", password="test12345")
+        grupo = Group.objects.create(name=ROLE_BONOS_PRODUCCION_CAPTURA)
+        cls.operadora.groups.add(grupo)
+        cls.admin = users.create_superuser(username="admin.pwa", password="test12345", email="admin@example.com")
+
+    def test_pwa_marca_operadora_y_contiene_formulario_de_prestamos(self):
+        self.client.force_login(self.operadora)
+
+        response = self.client.get("/bonos-produccion/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-operadora-solicitudes="true"')
+        self.assertContains(response, "const OPERADOR_SOLICITUDES=true")
+        self.assertContains(response, "function PrestamosTab")
+        self.assertContains(response, "/api/bonos-produccion/prestamos/")
+
+    def test_pwa_administrativa_no_se_marca_como_operadora_acotada(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get("/bonos-produccion/app/?captura=1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-operadora-solicitudes="false"')
+        self.assertContains(response, "const OPERADOR_SOLICITUDES=false")
