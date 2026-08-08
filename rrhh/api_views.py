@@ -17,7 +17,6 @@ from core.notificaciones import (
     notificar_hora_extra_solicitada,
     notificar_prestamo_aprobado,
     notificar_prestamo_para_direccion,
-    notificar_prestamo_solicitado,
 )
 from recetas.utils.normalizacion import normalizar_nombre
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
@@ -32,6 +31,7 @@ from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_emplead
 from .services_prestamos import (
     aprobar_prestamo_direccion,
     autorizar_prestamo_jefe,
+    crear_solicitud_prestamo,
     prestamos_por_autorizar_q,
 )
 from .services_permisos import resolver_permiso_direccion
@@ -418,38 +418,16 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
             raise PermissionDenied("No puedes solicitar préstamos para otro empleado.")
 
-        deuda = Prestamo.objects.filter(
+        serializer.instance = crear_solicitud_prestamo(
             empleado=empleado,
-            estado__in=[
-                Prestamo.ESTADO_SOLICITADO,
-                Prestamo.ESTADO_AUTORIZADO,
-                Prestamo.ESTADO_APROBADO,
-                Prestamo.ESTADO_ACTIVO,
-            ],
-            saldo_actual__gt=0,
-        ).first()
-        if deuda:
-            raise ValidationError(
-                {
-                    "empleado": (
-                        f"Aún tienes un préstamo vigente: {deuda.folio} · saldo ${deuda.saldo_actual}."
-                    )
-                }
-            )
-
-        importe = serializer.validated_data["importe"]
-        quincenas = serializer.validated_data["num_quincenas"]
-        descuento = (importe / Decimal(str(quincenas))).quantize(Decimal("0.01"))
-        prestamo = serializer.save(
-            empleado=empleado,
-            fecha_solicitud=timezone.localdate(),
-            descuento_quincenal=descuento,
-            saldo_actual=importe,
-            estado=Prestamo.ESTADO_SOLICITADO,
-            jefe_directo=usuario_jefe_directo_de_empleado(empleado),
-            creado_por=self.request.user,
+            actor=self.request.user,
+            concepto=serializer.validated_data["concepto"],
+            metodo_pago=serializer.validated_data["metodo_pago"],
+            importe=serializer.validated_data["importe"],
+            num_quincenas=serializer.validated_data["num_quincenas"],
+            fecha_deposito=serializer.validated_data.get("fecha_deposito"),
+            require_active_manager=False,
         )
-        notificar_prestamo_solicitado(prestamo, actor=self.request.user)
 
     @action(detail=True, methods=["post"], url_path="autorizar-jefe")
     def autorizar_jefe(self, request, pk=None):

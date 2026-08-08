@@ -5,12 +5,94 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
+from core.notificaciones import notificar_prestamo_solicitado
 
-from .models import Prestamo, PrestamoCuota
+from .models import Empleado, Prestamo, PrestamoCuota
+from .services import usuario_jefe_directo_de_empleado
+
+
+@transaction.atomic
+def crear_solicitud_prestamo(
+    *,
+    empleado: Empleado,
+    actor,
+    concepto: str,
+    metodo_pago: str,
+    importe,
+    num_quincenas,
+    fecha_deposito: date | None = None,
+    require_active_manager: bool = True,
+) -> Prestamo:
+    """Crea una solicitud sin permitir que el cliente controle autorizaciones."""
+    empleado = (
+        Empleado.objects.select_for_update(of=("self",))
+        .select_related("jefe_directo__usuario_erp")
+        .get(pk=empleado.pk)
+    )
+    concepto = (concepto or "").strip()
+    if not concepto:
+        raise ValidationError({"concepto": "El concepto es obligatorio."})
+    if metodo_pago not in dict(Prestamo.METODO_CHOICES):
+        raise ValidationError({"metodo_pago": "Selecciona un metodo de pago valido."})
+
+    try:
+        importe = Decimal(str(importe))
+    except (TypeError, ValueError, ArithmeticError):
+        raise ValidationError({"importe": "El importe debe ser numerico."}) from None
+    if importe <= 0:
+        raise ValidationError({"importe": "El importe debe ser mayor a cero."})
+
+    try:
+        num_quincenas = int(num_quincenas)
+    except (TypeError, ValueError):
+        raise ValidationError({"num_quincenas": "Indica un numero de quincenas valido."}) from None
+    if num_quincenas <= 0:
+        raise ValidationError({"num_quincenas": "Indica al menos una quincena."})
+
+    jefe_directo = usuario_jefe_directo_de_empleado(empleado)
+    if require_active_manager and (not jefe_directo or not jefe_directo.is_active):
+        raise ValidationError(
+            {"empleado": "El empleado no tiene una jefa directa activa con usuario ERP."}
+        )
+
+    deuda = Prestamo.objects.filter(
+        empleado=empleado,
+        estado__in=[
+            Prestamo.ESTADO_SOLICITADO,
+            Prestamo.ESTADO_AUTORIZADO,
+            Prestamo.ESTADO_APROBADO,
+            Prestamo.ESTADO_ACTIVO,
+        ],
+        saldo_actual__gt=0,
+    ).first()
+    if deuda:
+        raise ValidationError(
+            {"empleado": f"Aun tiene un prestamo vigente: {deuda.folio} · saldo ${deuda.saldo_actual}."}
+        )
+
+    descuento = (importe / Decimal(str(num_quincenas))).quantize(Decimal("0.01"))
+    prestamo = Prestamo.objects.create(
+        empleado=empleado,
+        concepto=concepto,
+        metodo_pago=metodo_pago,
+        fecha_solicitud=timezone.localdate(),
+        fecha_deposito=fecha_deposito,
+        importe=importe,
+        num_quincenas=num_quincenas,
+        descuento_quincenal=descuento,
+        saldo_actual=importe,
+        estado=Prestamo.ESTADO_SOLICITADO,
+        jefe_directo=jefe_directo,
+        creado_por=actor,
+    )
+    notificar_prestamo_solicitado(prestamo, actor=actor)
+    return prestamo
 
 
 def _siguiente_quincena(f: date) -> date:
