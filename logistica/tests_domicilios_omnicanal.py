@@ -656,6 +656,97 @@ class AsignacionDomicilioApiTests(APITestCase):
         self.assertIsNone(self.solicitud.unidad_id)
         self.assertIsNone(self.solicitud.parada_ruta_id)
 
+    def test_asignar_repartidor_bloquea_canal_por_confirmar(self):
+        repartidor = self._repartidor("rep_canal_pendiente")
+        cliente = Cliente.objects.create(
+            nombre="Cliente canal pendiente",
+            telefono="6671234567",
+        )
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Calle Canal 1",
+            latitud=Decimal("25.790001"),
+            longitud=Decimal("-108.990001"),
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            external_source="POINT",
+            external_id="900099",
+            point_note_id="900099",
+            point_note_snapshot={"pk_nota": "900099"},
+            canal="POR_CONFIRMAR",
+            descripcion="Nota Point automática",
+        )
+        self.solicitud.pedido_cliente = pedido
+        self.solicitud.cliente = cliente
+        self.solicitud.direccion_cliente = direccion
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CONFIRMADO
+        self.solicitud.save(
+            update_fields=[
+                "pedido_cliente",
+                "cliente",
+                "direccion_cliente",
+                "estatus",
+            ],
+        )
+
+        with self.assertRaises(DomicilioAssignmentError) as raised:
+            assign_domicilio(
+                solicitud_id=self.solicitud.id,
+                repartidor_id=repartidor.id,
+                audit_user=self.manager,
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.solicitud.refresh_from_db()
+        self.assertIsNone(self.solicitud.repartidor_id)
+        self.assertIsNone(self.solicitud.unidad_id)
+
+    def test_asignar_repartidor_bloquea_direccion_sin_gps(self):
+        repartidor = self._repartidor("rep_sin_gps")
+        cliente = Cliente.objects.create(
+            nombre="Cliente sin GPS",
+            telefono="6671234567",
+        )
+        direccion = DireccionCliente.objects.create(
+            cliente=cliente,
+            direccion="Calle sin coordenadas 1",
+        )
+        pedido = PedidoCliente.objects.create(
+            cliente=cliente,
+            direccion_entrega=direccion,
+            external_source="POINT",
+            external_id="900199",
+            point_note_id="900199",
+            point_note_snapshot={"pk_nota": "900199"},
+            canal=PedidoCliente.CANAL_TELEFONO,
+            descripcion="Nota Point sin GPS",
+        )
+        self.solicitud.pedido_cliente = pedido
+        self.solicitud.cliente = cliente
+        self.solicitud.direccion_cliente = direccion
+        self.solicitud.estatus = SolicitudDomicilio.ESTATUS_CONFIRMADO
+        self.solicitud.save(
+            update_fields=[
+                "pedido_cliente",
+                "cliente",
+                "direccion_cliente",
+                "estatus",
+            ],
+        )
+
+        with self.assertRaises(DomicilioAssignmentError) as raised:
+            assign_domicilio(
+                solicitud_id=self.solicitud.id,
+                repartidor_id=repartidor.id,
+                audit_user=self.manager,
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.solicitud.refresh_from_db()
+        self.assertIsNone(self.solicitud.repartidor_id)
+
     def test_repeticion_idempotente_conserva_estado_terminal_sin_efectos(self):
         repartidor = self._repartidor("rep_entregado")
         reemplazo = self._repartidor("rep_reemplazo_terminal")
@@ -892,15 +983,18 @@ class AsignacionDomicilioApiTests(APITestCase):
 
 
 class SolicitudDomicilioCanonicalMigrationTests(TransactionTestCase):
-    migrate_from = [
-        ("crm", "0007_pedidocliente_point_note_fetched_at_and_more"),
-        ("logistica", "0045_alter_solicituddomicilio_canal_origen"),
-    ]
-    migrate_to = [("logistica", "0046_solicituddomicilio_operacion_canonica")]
+    logistica_from = ("logistica", "0045_alter_solicituddomicilio_canal_origen")
+    logistica_to = ("logistica", "0046_solicituddomicilio_operacion_canonica")
 
     def setUp(self):
         super().setUp()
         executor = MigrationExecutor(connection)
+        # Esta prueba retrocede únicamente Logística. CRM se mantiene en su
+        # leaf actual para que el modelo histórico coincida con el esquema
+        # físico aunque CRM agregue campos después de la migración 0046.
+        crm_targets = executor.loader.graph.leaf_nodes("crm")
+        self.migrate_from = [*crm_targets, self.logistica_from]
+        self.migrate_to = [*crm_targets, self.logistica_to]
         executor.migrate(self.migrate_from)
         old_apps = executor.loader.project_state(self.migrate_from).apps
 

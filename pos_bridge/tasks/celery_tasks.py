@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from celery import shared_task
+from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
 from django.db.models import Sum
@@ -28,6 +29,20 @@ from pos_bridge.tasks.run_weekly_cost_snapshot import run_weekly_cost_snapshot
 from reportes.analytics_service import refresh_dashboard_full_materialized_view
 from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
 from reportes.models import AnalyticAuditLog, FactVentaDiaria
+
+
+@shared_task(name="pos_bridge.delivery_note_sync", acks_late=True)
+def delivery_note_sync(*, lookback_days: int = 7):
+    if not bool(getattr(settings, "POINT_DELIVERY_SYNC_ENABLED", False)):
+        return {
+            "status": "NEVER_RUN",
+            "counts": {"seen": 0, "created": 0, "existing": 0, "failed": 0},
+            "error_code": "SYNC_DISABLED",
+            "job_id": None,
+        }
+    from crm.services.point_delivery_auto_sync import PointDeliveryAutoSyncService
+
+    return PointDeliveryAutoSyncService().run(lookback_days=lookback_days)
 
 BI_FORCE_REFRESH_LOCK_KEY = "reportes:bi-force-refresh-lock"
 INTEGRATIONS_ANALYTICS_REFRESH_LOCK_KEY = "integraciones:analytics-refresh-lock"

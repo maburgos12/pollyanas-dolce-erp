@@ -336,7 +336,7 @@ def assign_domicilio(
     with transaction.atomic():
         solicitudes = (
             SolicitudDomicilio.objects.select_for_update(of=("self",))
-            .select_related("pedido_cliente")
+            .select_related("pedido_cliente", "direccion_cliente")
         )
         if owner_api_client is not None:
             solicitudes = solicitudes.filter(
@@ -350,6 +350,27 @@ def assign_domicilio(
         ):
             raise DomicilioAssignmentError(
                 "Primero concilia productos y total con Point.",
+                409,
+            )
+        if (
+            solicitud.pedido_cliente_id is not None
+            and solicitud.pedido_cliente.canal == "POR_CONFIRMAR"
+        ):
+            raise DomicilioAssignmentError(
+                "Primero confirma el canal de origen del domicilio.",
+                409,
+            )
+        if (
+            solicitud.pedido_cliente_id is not None
+            and solicitud.pedido_cliente.point_note_id
+            and (
+                solicitud.direccion_cliente_id is None
+                or solicitud.direccion_cliente.latitud is None
+                or solicitud.direccion_cliente.longitud is None
+            )
+        ):
+            raise DomicilioAssignmentError(
+                "Primero completa la ubicación GPS del domicilio.",
                 409,
             )
         if (

@@ -22,11 +22,16 @@ from crm.services.point_order_link import point_pending_external_id
 from core.models import Sucursal
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from logistica.models import Repartidor, SolicitudDomicilio, Unidad
+from logistica.services_domicilio_assignment import (
+    DomicilioAssignmentError,
+    assign_domicilio,
+)
 from pos_bridge.services.point_note_detail_service import (
     PointNote,
     PointNoteLine,
     PointNoteUnavailableError,
 )
+from pos_bridge.models import PointSyncJob
 from pos_bridge.utils.exceptions import (
     AuthenticationError,
     ConfigurationError,
@@ -2190,3 +2195,346 @@ class CanonicalOmnichannelApiTests(APITestCase):
                     **self.auth,
                 )
                 self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class PointDeliverySyncApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.actor = get_user_model().objects.create_user(
+            username="delivery-intake-api",
+            password="unused",
+        )
+        self.api_client, raw_key = PublicApiClient.create_with_generated_key(
+            nombre="Centro Operativo Intake",
+            created_by=self.actor,
+        )
+        self.api_client.capabilities = [PublicApiClient.CAPABILITY_OMNICHANNEL]
+        self.api_client.save(update_fields=["capabilities"])
+        self.auth = {"HTTP_X_API_KEY": raw_key}
+        self.customer = Cliente.objects.create(nombre="Cliente Intake")
+        self.address = DireccionCliente.objects.create(
+            cliente=self.customer,
+            direccion="Calle Intake 10",
+        )
+        self.order = PedidoCliente.objects.create(
+            cliente=self.customer,
+            direccion_entrega=self.address,
+            external_source="POINT",
+            external_id="POINT-INTAKE-1",
+            point_note_id="POINT-INTAKE-1",
+            point_note_folio="19001",
+            point_note_snapshot={"pk_nota": "POINT-INTAKE-1", "lines": []},
+            canal=PedidoCliente.CANAL_POR_CONFIRMAR,
+            descripcion="Pedido automático",
+            public_api_client=self.api_client,
+            created_by=self.actor,
+        )
+        self.delivery = SolicitudDomicilio.objects.create(
+            pedido_cliente=self.order,
+            cliente=self.customer,
+            direccion_cliente=self.address,
+            cliente_nombre=self.customer.nombre,
+            direccion=self.address.direccion,
+            canal_origen=PedidoCliente.CANAL_POR_CONFIRMAR,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+            created_by=self.actor,
+        )
+        self.health_url = reverse("api_public_omnichannel_point_delivery_sync_health")
+        self.intake_url = reverse(
+            "api_public_omnichannel_delivery_intake",
+            kwargs={"solicitud_id": self.delivery.id},
+        )
+
+    def test_health_before_first_run_has_stable_never_run_contract(self):
+        response = self.client.get(self.health_url, **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "NEVER_RUN")
+        self.assertIsNone(response.data["last_attempt_at"])
+        self.assertIsNone(response.data["last_success_at"])
+        self.assertIsNone(response.data["age_seconds"])
+        self.assertEqual(response.data["interval_seconds"], 60)
+        self.assertEqual(
+            response.data["counts"],
+            {"seen": 0, "created": 0, "existing": 0, "failed": 0},
+        )
+        self.assertIsNone(response.data["error_code"])
+        self.assertFalse(response.data["is_stale"])
+        self.assertGreaterEqual(response.data["stale_after_seconds"], 120)
+        self.assertIn("checked_at", response.data)
+
+    def test_health_reports_latest_job_and_age_from_latest_success(self):
+        success_finished = timezone.now() - timedelta(seconds=360)
+        success = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_DELIVERIES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={"seen": 3, "created": 2, "existing": 1, "failed": 0},
+        )
+        PointSyncJob.objects.filter(pk=success.pk).update(finished_at=success_finished)
+        latest = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_DELIVERIES,
+            status=PointSyncJob.STATUS_FAILED,
+            error_message="POINT_AUTHENTICATION",
+            result_summary={"seen": 0, "created": 0, "existing": 0, "failed": 0},
+        )
+
+        response = self.client.get(self.health_url, **self.auth)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], PointSyncJob.STATUS_FAILED)
+        self.assertEqual(response.data["last_attempt_at"], latest.started_at.isoformat().replace("+00:00", "Z"))
+        self.assertIsNotNone(response.data["last_success_at"])
+        self.assertGreaterEqual(response.data["age_seconds"], 359)
+        self.assertTrue(response.data["is_stale"])
+        self.assertEqual(response.data["error_code"], "POINT_AUTHENTICATION")
+
+    def test_intake_completes_pending_channel_contact_and_gps_atomically(self):
+        payload = {
+            "canal": "FACEBOOK",
+            "social_reference": "thread-19001",
+            "telefono": "687 123 4567",
+            "email": "cliente@example.com",
+            "latitud": "25.790001",
+            "longitud": "-108.990001",
+            "place_id": "place-intake",
+        }
+
+        response = self.client.patch(
+            self.intake_url,
+            payload,
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["canal"], "FACEBOOK")
+        self.assertEqual(response.data["referencia_social"], "thread-19001")
+        self.order.refresh_from_db()
+        self.customer.refresh_from_db()
+        self.address.refresh_from_db()
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.order.canal, "FACEBOOK")
+        self.assertEqual(self.delivery.canal_origen, "FACEBOOK")
+        self.assertEqual(self.customer.telefono, "6871234567")
+        self.assertEqual(self.customer.email, "cliente@example.com")
+        self.assertEqual(self.address.latitud, Decimal("25.790001"))
+        self.assertEqual(self.address.longitud, Decimal("-108.990001"))
+        self.assertEqual(self.address.place_id, "place-intake")
+
+        replay = self.client.patch(
+            self.intake_url,
+            payload,
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(replay.status_code, status.HTTP_200_OK)
+
+    def test_intake_rejects_conflicting_replay_and_manual_only_channels(self):
+        accepted = self.client.patch(
+            self.intake_url,
+            {"canal": "TELEFONO", "telefono": "6871234567"},
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_200_OK)
+
+        conflict = self.client.patch(
+            self.intake_url,
+            {"canal": "INSTAGRAM", "social_reference": "otro-thread"},
+            format="json",
+            **self.auth,
+        )
+        self.assertEqual(conflict.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(conflict.data["code"], "DELIVERY_INTAKE_CONFLICT")
+
+        for invalid_channel in ("WEB", "POR_CONFIRMAR"):
+            with self.subTest(channel=invalid_channel):
+                fresh = PedidoCliente.objects.create(
+                    cliente=self.customer,
+                    direccion_entrega=self.address,
+                    external_source="POINT",
+                    external_id=f"POINT-{invalid_channel}",
+                    point_note_id=f"POINT-{invalid_channel}",
+                    point_note_snapshot={"pk_nota": f"POINT-{invalid_channel}"},
+                    canal=PedidoCliente.CANAL_POR_CONFIRMAR,
+                    descripcion="Otro intake",
+                    public_api_client=self.api_client,
+                )
+                delivery = SolicitudDomicilio.objects.create(
+                    pedido_cliente=fresh,
+                    cliente=self.customer,
+                    direccion_cliente=self.address,
+                    cliente_nombre=self.customer.nombre,
+                    direccion=self.address.direccion,
+                    canal_origen=PedidoCliente.CANAL_POR_CONFIRMAR,
+                    estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+                )
+                response = self.client.patch(
+                    reverse(
+                        "api_public_omnichannel_delivery_intake",
+                        kwargs={"solicitud_id": delivery.id},
+                    ),
+                    {"canal": invalid_channel},
+                    format="json",
+                    **self.auth,
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_intake_rejects_overwrite_and_requires_complete_gps_pair(self):
+        self.customer.telefono = "6870000000"
+        self.customer.save(update_fields=["telefono", "updated_at"])
+
+        overwrite = self.client.patch(
+            self.intake_url,
+            {"canal": "TELEFONO", "telefono": "6871111111"},
+            format="json",
+            **self.auth,
+        )
+        gps_partial = self.client.patch(
+            self.intake_url,
+            {"canal": "TELEFONO", "latitud": "25.790001"},
+            format="json",
+            **self.auth,
+        )
+
+        self.assertEqual(overwrite.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(gps_partial.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_intake_isolated_by_public_api_client(self):
+        other_actor = get_user_model().objects.create_user(
+            username="delivery-intake-other",
+            password="unused",
+        )
+        _other, other_key = PublicApiClient.create_with_generated_key(
+            nombre="Otro Centro",
+            created_by=other_actor,
+        )
+        _other.capabilities = [PublicApiClient.CAPABILITY_OMNICHANNEL]
+        _other.save(update_fields=["capabilities"])
+
+        response = self.client.patch(
+            self.intake_url,
+            {"canal": "TELEFONO"},
+            format="json",
+            HTTP_X_API_KEY=other_key,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class PointDeliveryIntakeAssignmentRaceTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.actor = get_user_model().objects.create_user(
+            username="delivery-race-api",
+            password="unused",
+        )
+        self.api_client, self.raw_key = PublicApiClient.create_with_generated_key(
+            nombre="Centro Operativo Race",
+            created_by=self.actor,
+        )
+        self.api_client.capabilities = [PublicApiClient.CAPABILITY_OMNICHANNEL]
+        self.api_client.save(update_fields=["capabilities"])
+        branch = Sucursal.objects.create(codigo="RACE", nombre="Race")
+        driver_user = get_user_model().objects.create_user(
+            username="delivery-race-driver",
+            password="unused",
+        )
+        unit = Unidad.objects.create(
+            codigo="RACE-U",
+            descripcion="Unidad race",
+            sucursal=branch,
+        )
+        self.driver = Repartidor.objects.create(
+            user=driver_user,
+            sucursal=branch,
+            unidad_asignada=unit,
+        )
+        customer = Cliente.objects.create(nombre="Cliente Race")
+        address = DireccionCliente.objects.create(
+            cliente=customer,
+            direccion="Calle Race 1",
+        )
+        order = PedidoCliente.objects.create(
+            cliente=customer,
+            direccion_entrega=address,
+            external_source="POINT",
+            external_id="POINT-RACE",
+            point_note_id="POINT-RACE",
+            point_note_snapshot={"pk_nota": "POINT-RACE"},
+            canal=PedidoCliente.CANAL_POR_CONFIRMAR,
+            descripcion="Race",
+            public_api_client=self.api_client,
+        )
+        self.delivery = SolicitudDomicilio.objects.create(
+            pedido_cliente=order,
+            cliente=customer,
+            direccion_cliente=address,
+            cliente_nombre=customer.nombre,
+            direccion=address.direccion,
+            canal_origen=PedidoCliente.CANAL_POR_CONFIRMAR,
+            estatus=SolicitudDomicilio.ESTATUS_CONFIRMADO,
+        )
+
+    def test_concurrent_intake_and_assignment_never_assigns_pending_channel(self):
+        barrier = Barrier(2)
+        outcomes = []
+
+        def intake_worker():
+            close_old_connections()
+            try:
+                client = APIClient()
+                barrier.wait(timeout=5)
+                response = client.patch(
+                    reverse(
+                        "api_public_omnichannel_delivery_intake",
+                        kwargs={"solicitud_id": self.delivery.id},
+                    ),
+                    {
+                        "canal": "TELEFONO",
+                        "latitud": "25.790001",
+                        "longitud": "-108.990001",
+                    },
+                    format="json",
+                    HTTP_X_API_KEY=self.raw_key,
+                )
+                outcomes.append(("intake", response.status_code))
+            finally:
+                close_old_connections()
+
+        def assignment_worker():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=5)
+                try:
+                    assign_domicilio(
+                        solicitud_id=self.delivery.id,
+                        repartidor_id=self.driver.id,
+                        audit_user=self.actor,
+                    )
+                except DomicilioAssignmentError as exc:
+                    outcomes.append(("assignment", exc.status_code))
+                else:
+                    outcomes.append(("assignment", 200))
+            finally:
+                close_old_connections()
+
+        threads = [Thread(target=intake_worker), Thread(target=assignment_worker)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.delivery.refresh_from_db()
+        order = PedidoCliente.objects.get(pk=self.delivery.pedido_cliente_id)
+        address = DireccionCliente.objects.get(pk=self.delivery.direccion_cliente_id)
+        self.assertFalse(
+            self.delivery.repartidor_id
+            and order.canal == PedidoCliente.CANAL_POR_CONFIRMAR,
+        )
+        if self.delivery.repartidor_id:
+            self.assertEqual(order.canal, PedidoCliente.CANAL_TELEFONO)
+            self.assertIsNotNone(address.latitud)
+            self.assertIsNotNone(address.longitud)
+        self.assertEqual(sorted(name for name, _status in outcomes), ["assignment", "intake"])

@@ -111,6 +111,27 @@ class Command(BaseCommand):
             },
         )
 
+        delivery_interval, _ = IntervalSchedule.objects.get_or_create(
+            every=60,
+            period=IntervalSchedule.SECONDS,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: domicilios Point automatico",
+            defaults={
+                "task": "pos_bridge.delivery_note_sync",
+                "interval": delivery_interval,
+                "crontab": None,
+                "kwargs": json.dumps({
+                    "lookback_days": int(
+                        getattr(settings, "POINT_DELIVERY_SYNC_LOOKBACK_DAYS", 7),
+                    ),
+                }),
+                "enabled": bool(
+                    getattr(settings, "POINT_DELIVERY_SYNC_ENABLED", False),
+                ),
+            },
+        )
+
         intraday_profitability_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="10",
             hour="8-22",
