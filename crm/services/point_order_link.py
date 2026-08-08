@@ -40,6 +40,7 @@ class LinkPointOrderCommand:
     delivery_window_start: datetime | None
     delivery_window_end: datetime | None
     instructions: str
+    point_customer_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,12 @@ def verify_point_link_fingerprint(
     return matched
 
 
-def _validate_command(command: LinkPointOrderCommand, actor) -> None:
+def _validate_command(
+    command: LinkPointOrderCommand,
+    actor,
+    *,
+    allow_pending_channel: bool = False,
+) -> None:
     errors: dict[str, str] = {}
     if not getattr(actor, "pk", None) or not getattr(actor, "is_active", False):
         errors["actor"] = "Se requiere un usuario activo para auditar la vinculación."
@@ -238,12 +244,19 @@ def _validate_command(command: LinkPointOrderCommand, actor) -> None:
         errors["pk_nota"] = "La nota Point excede la longitud permitida."
     if command.channel not in dict(PedidoCliente.CANAL_CHOICES):
         errors["channel"] = "El canal no es válido."
+    elif (
+        command.channel == PedidoCliente.CANAL_POR_CONFIRMAR
+        and not allow_pending_channel
+    ):
+        errors["channel"] = "El canal por confirmar es de uso interno."
     if command.channel == PedidoCliente.CANAL_OTRO and not _text(command.social_reference):
         errors["social_reference"] = "El canal Otro requiere una descripción."
     if not _text(command.customer_name):
         errors["customer_name"] = "El nombre del cliente es obligatorio."
     elif len(_text(command.customer_name)) > 180:
         errors["customer_name"] = "El nombre excede la longitud permitida."
+    if len(_text(command.point_customer_id)) > 120:
+        errors["point_customer_id"] = "El identificador de cliente Point excede la longitud permitida."
     if len(_phone(command.customer_phone)) > 40:
         errors["customer_phone"] = "El teléfono excede la longitud permitida."
     normalized_email = _email(command.customer_email)
@@ -331,13 +344,34 @@ def _lock_key(namespace: str, value: str) -> None:
 def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
     normalized_phone = _phone(command.customer_phone)
     normalized_email = _email(command.customer_email)
+    point_customer_id = _text(command.point_customer_id)
     identity_keys = []
+    if point_customer_id:
+        identity_keys.append(f"point:{point_customer_id}")
     if normalized_phone:
         identity_keys.append(f"phone:{normalized_phone}")
     if normalized_email:
         identity_keys.append(f"email:{normalized_email}")
     for identity_key in sorted(identity_keys):
         _lock_key("crm-customer-identity", identity_key)
+
+    if point_customer_id:
+        customer = (
+            Cliente.objects.select_for_update()
+            .filter(point_customer_id=point_customer_id)
+            .first()
+        )
+        if customer:
+            updates = []
+            if normalized_phone and not _phone(customer.telefono):
+                customer.telefono = normalized_phone
+                updates.append("telefono")
+            if normalized_email and not _email(customer.email):
+                customer.email = normalized_email
+                updates.append("email")
+            if updates:
+                customer.save(update_fields=[*updates, "updated_at"])
+            return customer
 
     if normalized_phone:
         customer = (
@@ -349,7 +383,17 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
             .first()
         )
         if customer:
-            return customer
+            if (
+                point_customer_id
+                and customer.point_customer_id
+                and customer.point_customer_id != point_customer_id
+            ):
+                customer = None
+            else:
+                if point_customer_id and not customer.point_customer_id:
+                    customer.point_customer_id = point_customer_id
+                    customer.save(update_fields=["point_customer_id", "updated_at"])
+                return customer
 
     if normalized_email:
         customer = (
@@ -359,20 +403,33 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
             .first()
         )
         if customer:
-            persisted_phone = _phone(customer.telefono)
-            if normalized_phone and persisted_phone and persisted_phone != normalized_phone:
-                raise ValidationError(
-                    {
-                        "customer": (
-                            "El correo coincide con otro cliente que tiene un "
-                            "teléfono diferente; seleccione el cliente explícitamente."
-                        )
-                    },
-                )
-            if normalized_phone and not persisted_phone:
-                customer.telefono = normalized_phone
-                customer.save(update_fields=["telefono", "updated_at"])
-            return customer
+            if (
+                point_customer_id
+                and customer.point_customer_id
+                and customer.point_customer_id != point_customer_id
+            ):
+                customer = None
+            else:
+                persisted_phone = _phone(customer.telefono)
+                if normalized_phone and persisted_phone and persisted_phone != normalized_phone:
+                    raise ValidationError(
+                        {
+                            "customer": (
+                                "El correo coincide con otro cliente que tiene un "
+                                "teléfono diferente; seleccione el cliente explícitamente."
+                            )
+                        },
+                    )
+                updates = []
+                if normalized_phone and not persisted_phone:
+                    customer.telefono = normalized_phone
+                    updates.append("telefono")
+                if point_customer_id and not customer.point_customer_id:
+                    customer.point_customer_id = point_customer_id
+                    updates.append("point_customer_id")
+                if updates:
+                    customer.save(update_fields=[*updates, "updated_at"])
+                return customer
 
     # Cliente.save() derives ``codigo`` from the current global maximum. This
     # lock serializes that legacy allocation even for unrelated identities.
@@ -384,6 +441,7 @@ def _find_or_create_customer(command: LinkPointOrderCommand) -> Cliente:
                     nombre=_text(command.customer_name),
                     telefono=normalized_phone,
                     email=normalized_email,
+                    point_customer_id=point_customer_id,
                 )
         except IntegrityError as exc:
             cause = getattr(exc, "__cause__", None)
@@ -513,6 +571,29 @@ def _delivery_for_existing(order: PedidoCliente) -> SolicitudDomicilio | None:
     return deliveries[0] if deliveries else None
 
 
+def _bind_point_customer_id(*, customer_id: int, point_customer_id: str) -> None:
+    point_id = _text(point_customer_id)
+    if not point_id:
+        return
+    _lock_key("crm-customer-identity", f"point:{point_id}")
+    customer = Cliente.objects.select_for_update().get(pk=customer_id)
+    if customer.point_customer_id and customer.point_customer_id != point_id:
+        raise ValidationError(
+            {"customer": "El cliente ya está ligado a otra identidad Point."},
+        )
+    if (
+        Cliente.objects.filter(point_customer_id=point_id)
+        .exclude(pk=customer.pk)
+        .exists()
+    ):
+        raise ValidationError(
+            {"customer": "La identidad Point ya pertenece a otro cliente."},
+        )
+    if not customer.point_customer_id:
+        customer.point_customer_id = point_id
+        customer.save(update_fields=["point_customer_id", "updated_at"])
+
+
 def _create_delivery(
     *,
     order: PedidoCliente,
@@ -575,6 +656,11 @@ def _reconcile_pending_delivery(
             {"pedido": "La captura pendiente ya avanzó y no puede conciliarse."},
         )
 
+    _bind_point_customer_id(
+        customer_id=order.cliente_id,
+        point_customer_id=command.point_customer_id,
+    )
+
     order.reconcile_pending_point_provenance(
         point_note_id=note.pk_nota,
         point_note_folio=note.folio,
@@ -620,6 +706,7 @@ def link_point_note(
     command: LinkPointOrderCommand,
     actor,
     point_service: PointNoteDetailService | None = None,
+    allow_pending_channel: bool = False,
 ) -> LinkPointOrderResult:
     """Create the canonical ERP order for one server-fetched Point note.
 
@@ -628,7 +715,11 @@ def link_point_note(
     ``PedidoCliente.point_note_id`` remains the final integrity boundary.
     """
 
-    _validate_command(command, actor)
+    _validate_command(
+        command,
+        actor,
+        allow_pending_channel=allow_pending_channel,
+    )
     fingerprint = point_link_fingerprint(command)
     note = (point_service or PointNoteDetailService()).fetch(
         pk_nota=_text(command.pk_nota),
@@ -662,6 +753,10 @@ def link_point_note(
                 raise ValidationError(
                     {"pedido": "La nota Point ya existe con otra captura."},
                 )
+            _bind_point_customer_id(
+                customer_id=existing.cliente_id,
+                point_customer_id=command.point_customer_id,
+            )
             delivery = _delivery_for_existing(existing)
             if delivery is None:
                 customer = existing.cliente

@@ -119,6 +119,7 @@ class PointHttpSessionService:
         branch_external_id: str | None,
         branch_display_name: str | None,
         current_account_id: str | None,
+        strict_branch: bool = False,
     ) -> tuple[str, str | None]:
         if not accounts:
             raise AuthenticationError("Point no devolvió cuentas accesibles para el usuario configurado.")
@@ -138,8 +139,18 @@ class PointHttpSessionService:
                 workspace_name_token = normalize_text(workspace_name)
                 if branch_token and workspace_branch_id == branch_token:
                     return account["ACC_ID"], workspace_name or None
-                if branch_name_token and workspace_name_token and branch_name_token == workspace_name_token:
+                if (
+                    (not strict_branch or not branch_token)
+                    and branch_name_token
+                    and workspace_name_token
+                    and branch_name_token == workspace_name_token
+                ):
                     return account["ACC_ID"], workspace_name or None
+
+        if strict_branch and (branch_token or branch_name_token):
+            raise ConfigurationError(
+                "La sucursal solicitada no corresponde a ningún workspace de Point.",
+            )
 
         if current_account_id:
             for account in accounts:
@@ -198,6 +209,7 @@ class PointHttpSessionService:
         *,
         branch_external_id: str | None = None,
         branch_display_name: str | None = None,
+        strict_branch: bool = False,
     ) -> PointAuthenticatedSession:
         session = requests.Session()
         try:
@@ -210,6 +222,7 @@ class PointHttpSessionService:
                 branch_external_id=branch_external_id,
                 branch_display_name=branch_display_name,
                 current_account_id=current_account_id,
+                strict_branch=strict_branch,
             )
             self._select_account(
                 session=session,

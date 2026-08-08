@@ -23,6 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.omnichannel_serializers import (
+    OmnichannelDeliveryIntakeSerializer,
     OmnichannelDeliveryQuerySerializer,
     OmnichannelDeliveryStatusSerializer,
     OmnichannelCustomerOutputSerializer,
@@ -33,6 +34,7 @@ from api.omnichannel_serializers import (
 )
 from api.public_views import _auth_public_client, _log_access
 from api.logistica_public_views import _authorize_logistica_assignment
+from core.audit import log_event
 from crm.services.point_order_link import (
     LinkPointOrderCommand,
     LinkPointOrderResult,
@@ -60,6 +62,7 @@ from pos_bridge.services.point_note_detail_service import (
 from pos_bridge.services.point_ticket_threshold_service import (
     PointTicketThresholdService,
 )
+from pos_bridge.models import PointSyncJob
 from pos_bridge.utils.helpers import normalize_text
 from pos_bridge.utils.exceptions import (
     AuthenticationError,
@@ -1710,6 +1713,263 @@ class PublicOmnichannelDeliveryDetailView(APIView):
             raise Http404
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(_serialize_delivery_detail(delivery))
+
+
+class PublicOmnichannelPointDeliverySyncHealthView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+
+        now = timezone.now()
+        jobs = PointSyncJob.objects.filter(
+            job_type=PointSyncJob.JOB_TYPE_DELIVERIES,
+        )
+        latest = jobs.order_by("-started_at", "-id").first()
+        latest_success = (
+            jobs.filter(status=PointSyncJob.STATUS_SUCCESS)
+            .order_by("-finished_at", "-started_at", "-id")
+            .first()
+        )
+        last_success_at = (
+            (latest_success.finished_at or latest_success.started_at)
+            if latest_success
+            else None
+        )
+        age_seconds = (
+            max(int((now - last_success_at).total_seconds()), 0)
+            if last_success_at
+            else None
+        )
+        stale_after_seconds = int(
+            getattr(settings, "POINT_DELIVERY_SYNC_STALE_SECONDS", 300),
+        )
+        counts = {"seen": 0, "created": 0, "existing": 0, "failed": 0}
+        if latest and isinstance(latest.result_summary, dict):
+            for key in counts:
+                try:
+                    counts[key] = max(int(latest.result_summary.get(key, 0)), 0)
+                except (TypeError, ValueError):
+                    counts[key] = 0
+        payload = {
+            "status": latest.status if latest else "NEVER_RUN",
+            "last_attempt_at": self._iso(latest.started_at if latest else None),
+            "last_success_at": self._iso(last_success_at),
+            "checked_at": self._iso(now),
+            "age_seconds": age_seconds,
+            "interval_seconds": 60,
+            "counts": counts,
+            "error_code": (latest.error_message or None) if latest else None,
+            "is_stale": bool(
+                latest
+                and (age_seconds is None or age_seconds > stale_after_seconds)
+            ),
+            "stale_after_seconds": stale_after_seconds,
+        }
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(payload)
+
+    @staticmethod
+    def _iso(value):
+        return value.isoformat().replace("+00:00", "Z") if value else None
+
+
+class PublicOmnichannelDeliveryIntakeView(APIView):
+    permission_classes = [AllowAny]
+
+    def patch(self, request, solicitud_id):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        capability_error = _authorize_omnichannel(api_client, request)
+        if capability_error:
+            return capability_error
+        serializer = OmnichannelDeliveryIntakeSerializer(data=request.data)
+        if not serializer.is_valid():
+            _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        values = serializer.validated_data
+        try:
+            with transaction.atomic():
+                delivery = (
+                    _owned_deliveries(api_client)
+                    .select_for_update(of=("self",))
+                    .filter(pk=solicitud_id)
+                    .first()
+                )
+                if not delivery:
+                    raise Http404
+                order = PedidoCliente.objects.select_for_update().get(
+                    pk=delivery.pedido_cliente_id,
+                    public_api_client=api_client,
+                )
+                customer = Cliente.objects.select_for_update().get(
+                    pk=order.cliente_id,
+                )
+                address = None
+                address_id = delivery.direccion_cliente_id or order.direccion_entrega_id
+                if address_id:
+                    address = DireccionCliente.objects.select_for_update().get(
+                        pk=address_id,
+                    )
+
+                conflicts = self._conflicts(
+                    order=order,
+                    customer=customer,
+                    address=address,
+                    values=values,
+                )
+                if conflicts:
+                    raise ValidationError({"intake": ", ".join(conflicts)})
+
+                changed = self._apply(
+                    order=order,
+                    delivery=delivery,
+                    customer=customer,
+                    address=address,
+                    values=values,
+                )
+                if changed:
+                    log_event(
+                        api_client.created_by,
+                        "UPDATE",
+                        "logistica.SolicitudDomicilio",
+                        str(delivery.id),
+                        payload={
+                            "action": "POINT_DELIVERY_INTAKE",
+                            "channel": order.canal,
+                            "revision": delivery.revision,
+                            "completed_fields": sorted(changed),
+                        },
+                    )
+        except Http404:
+            _log_access(api_client, request, status.HTTP_404_NOT_FOUND)
+            raise
+        except ValidationError:
+            _log_access(api_client, request, status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "detail": "La captura ya contiene datos distintos.",
+                    "code": "DELIVERY_INTAKE_CONFLICT",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        refreshed = (
+            _owned_deliveries(api_client)
+            .prefetch_related("status_operations")
+            .get(pk=solicitud_id)
+        )
+        _log_access(api_client, request, status.HTTP_200_OK)
+        return Response(_serialize_delivery_detail(refreshed))
+
+    @staticmethod
+    def _conflicts(*, order, customer, address, values):
+        conflicts = []
+        incoming_channel = values["canal"]
+        if (
+            order.canal != PedidoCliente.CANAL_POR_CONFIRMAR
+            and order.canal != incoming_channel
+        ):
+            conflicts.append("canal")
+
+        if "social_reference" in values:
+            incoming = _normalize_text(values["social_reference"])
+            if order.social_reference and order.social_reference != incoming:
+                conflicts.append("referencia_social")
+        if "telefono" in values:
+            incoming = _normalize_phone(values["telefono"])
+            current = _normalize_phone(customer.telefono)
+            if current and current != incoming:
+                conflicts.append("telefono")
+        if "email" in values:
+            incoming = _normalize_email(values["email"])
+            current = _normalize_email(customer.email)
+            if current and current != incoming:
+                conflicts.append("email")
+        if "latitud" in values:
+            if address is None:
+                conflicts.append("direccion")
+            elif (
+                (address.latitud is not None or address.longitud is not None)
+                and (
+                    address.latitud != values["latitud"]
+                    or address.longitud != values["longitud"]
+                )
+            ):
+                conflicts.append("gps")
+        if "place_id" in values and address is not None:
+            incoming = _normalize_text(values["place_id"])
+            if address.place_id and address.place_id != incoming:
+                conflicts.append("place_id")
+        return conflicts
+
+    @staticmethod
+    def _apply(*, order, delivery, customer, address, values):
+        changed = set()
+        order_fields = []
+        delivery_fields = []
+        customer_fields = []
+        address_fields = []
+
+        if order.canal == PedidoCliente.CANAL_POR_CONFIRMAR:
+            order.canal = values["canal"]
+            order_fields.append("canal")
+            delivery.canal_origen = values["canal"]
+            delivery_fields.append("canal_origen")
+            changed.add("canal")
+        if "social_reference" in values:
+            social_reference = _normalize_text(values["social_reference"])
+            if order.social_reference != social_reference:
+                order.social_reference = social_reference
+                order_fields.append("social_reference")
+                changed.add("social_reference")
+        expected_detail = (
+            _normalize_text(values.get("social_reference", ""))[:60]
+            if values["canal"] == PedidoCliente.CANAL_OTRO
+            else values["canal"]
+        )
+        if delivery.canal_detalle != expected_detail:
+            delivery.canal_detalle = expected_detail
+            delivery_fields.append("canal_detalle")
+
+        if "telefono" in values and not _normalize_phone(customer.telefono):
+            customer.telefono = _normalize_phone(values["telefono"])
+            customer_fields.append("telefono")
+            delivery.cliente_telefono = customer.telefono
+            delivery_fields.append("cliente_telefono")
+            changed.add("telefono")
+        if "email" in values and not _normalize_email(customer.email):
+            customer.email = _normalize_email(values["email"])
+            customer_fields.append("email")
+            changed.add("email")
+        if address is not None and "latitud" in values and address.latitud is None:
+            address.latitud = values["latitud"]
+            address.longitud = values["longitud"]
+            address_fields.extend(["latitud", "longitud"])
+            changed.add("gps")
+        if address is not None and "place_id" in values and not address.place_id:
+            address.place_id = _normalize_text(values["place_id"])
+            address_fields.append("place_id")
+            changed.add("place_id")
+
+        if order_fields:
+            order.save(update_fields=[*set(order_fields), "updated_at"])
+        if customer_fields:
+            customer.save(update_fields=[*set(customer_fields), "updated_at"])
+        if address_fields:
+            address.save(update_fields=[*set(address_fields), "updated_at"])
+        if delivery_fields or changed:
+            delivery.revision += 1
+            delivery_fields.append("revision")
+            delivery.save(update_fields=list(set(delivery_fields)))
+        return changed
 
 
 class PublicOmnichannelDeliveryStatusView(APIView):

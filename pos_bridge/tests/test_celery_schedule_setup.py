@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -8,6 +9,17 @@ from django.test import TestCase, override_settings
 
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
+    @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
+    @patch("crm.services.point_delivery_auto_sync.PointDeliveryAutoSyncService.run")
+    def test_delivery_task_is_fail_closed_when_feature_flag_is_off(self, run):
+        from pos_bridge.tasks.celery_tasks import delivery_note_sync
+
+        result = delivery_note_sync(lookback_days=7)
+
+        self.assertEqual(result["status"], "NEVER_RUN")
+        self.assertEqual(result["error_code"], "SYNC_DISABLED")
+        run.assert_not_called()
+
     def test_preserves_manual_containment_for_inventory_tasks(self):
         from django_celery_beat.models import PeriodicTask
 
@@ -51,6 +63,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "sat: descarga cfdi nocturna",
                 "pos_bridge: ventas intradia actual",
                 "pos_bridge: asistencias Point intradia",
+                "pos_bridge: domicilios Point automatico",
                 "rentabilidad: recalculo intradia periodo actual",
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
@@ -89,7 +102,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 40)
+        self.assertEqual(PeriodicTask.objects.count(), 41)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -116,6 +129,11 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(intraday_profitability.crontab.minute, "10")
         realtime = PeriodicTask.objects.get(name="pos_bridge: inventario realtime")
         self.assertEqual(realtime.interval.every, 5)
+        deliveries = PeriodicTask.objects.get(name="pos_bridge: domicilios Point automatico")
+        self.assertEqual(deliveries.task, "pos_bridge.delivery_note_sync")
+        self.assertEqual(deliveries.interval.every, 60)
+        self.assertEqual(deliveries.interval.period, "seconds")
+        self.assertFalse(deliveries.enabled)
         gps_perdido = PeriodicTask.objects.get(name="logistica: detectar GPS perdido rutas activas")
         self.assertEqual(gps_perdido.task, "logistica.tasks.detectar_gps_perdido_rutas")
         self.assertEqual(gps_perdido.interval.every, 5)
@@ -244,3 +262,26 @@ class SetupCelerySchedulesCommandTests(TestCase):
         investment_refresh = PeriodicTask.objects.get(name="reportes: refresh snapshots inversion")
         self.assertEqual(investment_refresh.crontab.hour, "4")
         self.assertEqual(investment_refresh.crontab.minute, "25")
+
+    @override_settings(POINT_DELIVERY_SYNC_ENABLED=True)
+    def test_delivery_schedule_only_enables_with_explicit_feature_flag(self):
+        from django_celery_beat.models import PeriodicTask
+
+        call_command("setup_celery_schedules")
+
+        task = PeriodicTask.objects.get(name="pos_bridge: domicilios Point automatico")
+        self.assertTrue(task.enabled)
+
+    @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
+    def test_delivery_schedule_forces_disabled_when_feature_flag_is_off(self):
+        from django_celery_beat.models import PeriodicTask
+
+        call_command("setup_celery_schedules")
+        PeriodicTask.objects.filter(name="pos_bridge: domicilios Point automatico").update(
+            enabled=True,
+        )
+
+        call_command("setup_celery_schedules")
+
+        task = PeriodicTask.objects.get(name="pos_bridge: domicilios Point automatico")
+        self.assertFalse(task.enabled)

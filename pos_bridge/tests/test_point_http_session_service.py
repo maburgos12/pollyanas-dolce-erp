@@ -133,3 +133,78 @@ class PointHttpSessionServiceTests(SimpleTestCase):
         self.assertEqual(session.post.call_args_list[0].kwargs["data"]["timeZone"], "0")
         self.assertEqual(session.post.call_args_list[2].kwargs["data"], {"accId": "acc-1"})
         self.assertEqual(session.post.call_args_list[3].kwargs["data"], {"acid": "acc-1"})
+
+    def test_resolve_account_strict_rejects_branch_without_workspace(self):
+        service = PointHttpSessionService(self._settings())
+        accounts = [
+            {
+                "ACC_ID": "acc-1",
+                "JSON_WORKSPACES": json.dumps(
+                    [{"id_suc": "1", "wsName": "Matriz"}],
+                ),
+            },
+        ]
+
+        with self.assertRaisesRegex(
+            ConfigurationError,
+            "no corresponde a ningún workspace",
+        ):
+            service._resolve_account(
+                accounts=accounts,
+                branch_external_id="99",
+                branch_display_name="Matriz",
+                current_account_id="acc-1",
+                strict_branch=True,
+            )
+
+    @patch("pos_bridge.services.point_http_session_service.requests.Session")
+    def test_create_strict_closes_session_before_selecting_wrong_account(
+        self,
+        session_cls,
+    ):
+        session = Mock()
+        session_cls.return_value = session
+        session.get.side_effect = [
+            Mock(status_code=200, raise_for_status=Mock()),
+            Mock(status_code=200, raise_for_status=Mock()),
+            Mock(
+                status_code=200,
+                text="accIdActual = 'acc-1';",
+                raise_for_status=Mock(),
+            ),
+        ]
+        session.post.side_effect = [
+            Mock(
+                status_code=200,
+                json=Mock(return_value={"redirectToUrl": "/Account/workSpaces"}),
+                raise_for_status=Mock(),
+            ),
+            Mock(
+                status_code=200,
+                json=Mock(
+                    return_value={
+                        "json": json.dumps(
+                            [
+                                {
+                                    "ACC_ID": "acc-1",
+                                    "JSON_WORKSPACES": json.dumps(
+                                        [{"id_suc": "1", "wsName": "Matriz"}],
+                                    ),
+                                },
+                            ],
+                        ),
+                    },
+                ),
+                raise_for_status=Mock(),
+            ),
+        ]
+
+        with self.assertRaises(ConfigurationError):
+            PointHttpSessionService(self._settings()).create(
+                branch_external_id="99",
+                branch_display_name="Sucursal inexistente",
+                strict_branch=True,
+            )
+
+        self.assertEqual(session.post.call_count, 2)
+        session.close.assert_called_once_with()

@@ -129,6 +129,15 @@ class PointNoteDetailServiceTests(SimpleTestCase):
         with self.assertRaises(FrozenInstanceError):
             note.lines[0].quantity = Decimal("2")
 
+    def test_fetch_with_session_reuses_caller_session_without_closing_it(self):
+        service, session = self._service()
+
+        note = service.fetch_with_session(session, pk_nota="900001")
+
+        self.assertEqual(note.pk_nota, "900001")
+        self.assertFalse(session.closed)
+        self.assertEqual(len(session.requests), 2)
+
     def test_fetch_rejects_total_mismatch_against_sum_of_point_line_totals(self):
         header = deepcopy(self.header)
         header[0]["Importe"] = "999.00"
