@@ -59,7 +59,7 @@ class OmnichannelOrderDetailInputSerializer(serializers.Serializer):
 class OmnichannelOrderInputSerializer(serializers.Serializer):
     external_source = serializers.CharField(max_length=40)
     external_id = serializers.CharField(max_length=120)
-    canal = serializers.ChoiceField(choices=PedidoCliente.CANAL_CHOICES)
+    canal = serializers.ChoiceField(choices=PedidoCliente.CANAL_CAPTURA_CHOICES)
     cliente = OmnichannelCustomerInputSerializer()
     direccion = OmnichannelAddressInputSerializer()
     pedido = OmnichannelOrderDetailInputSerializer()
@@ -108,7 +108,7 @@ class PointNoteSearchSerializer(serializers.Serializer):
 
 class PointLinkedOrderSerializer(serializers.Serializer):
     pk_nota = serializers.CharField(max_length=120, trim_whitespace=True)
-    canal = serializers.ChoiceField(choices=PedidoCliente.CANAL_CHOICES)
+    canal = serializers.ChoiceField(choices=PedidoCliente.CANAL_CAPTURA_CHOICES)
     social_reference = serializers.CharField(
         max_length=180, required=False, allow_blank=True, default="",
     )
@@ -208,3 +208,70 @@ class OmnichannelDeliveryStatusSerializer(serializers.Serializer):
         if not actor_id or len(actor_id) > 64 or not name or len(name) > 120:
             raise serializers.ValidationError("actor no es válido.")
         return {"id": actor_id, "nombre": name}
+
+
+class OmnichannelDeliveryIntakeSerializer(serializers.Serializer):
+    canal = serializers.ChoiceField(
+        choices=(
+            PedidoCliente.CANAL_MOSTRADOR,
+            PedidoCliente.CANAL_WHATSAPP,
+            PedidoCliente.CANAL_TELEFONO,
+            PedidoCliente.CANAL_FACEBOOK,
+            PedidoCliente.CANAL_INSTAGRAM,
+            PedidoCliente.CANAL_OTRO,
+        ),
+    )
+    social_reference = serializers.CharField(
+        max_length=180,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+    telefono = serializers.CharField(
+        max_length=40,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
+    latitud = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        min_value=Decimal("-90"),
+        max_value=Decimal("90"),
+    )
+    longitud = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+        min_value=Decimal("-180"),
+        max_value=Decimal("180"),
+    )
+    place_id = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+
+    def validate(self, attrs):
+        has_latitude = "latitud" in attrs
+        has_longitude = "longitud" in attrs
+        if has_latitude != has_longitude:
+            raise serializers.ValidationError(
+                {"gps": "latitud y longitud deben enviarse juntas"},
+            )
+        if (
+            attrs.get("canal")
+            in {
+                PedidoCliente.CANAL_FACEBOOK,
+                PedidoCliente.CANAL_INSTAGRAM,
+                PedidoCliente.CANAL_OTRO,
+            }
+            and not str(attrs.get("social_reference") or "").strip()
+        ):
+            raise serializers.ValidationError(
+                {"social_reference": "Este canal requiere una referencia."},
+            )
+        return attrs

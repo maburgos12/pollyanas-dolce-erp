@@ -660,7 +660,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         PedidoCliente.ESTATUS_ENTREGADO,
         PedidoCliente.ESTATUS_CANCELADO,
     }
-    valid_canales = {value for value, _ in PedidoCliente.CANAL_CHOICES}
+    valid_canales = {value for value, _ in PedidoCliente.CANAL_CAPTURA_CHOICES}
     valid_prioridades = {value for value, _ in PedidoCliente.PRIORIDAD_CHOICES}
     if estatus not in valid_estatuses:
         estatus = ""

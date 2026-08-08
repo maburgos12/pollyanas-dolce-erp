@@ -90,6 +90,94 @@ class PointOrderLinkTests(TestCase):
         "crm.services.point_order_link.PointNoteDetailService.fetch",
         return_value=_note(),
     )
+    def test_pending_channel_requires_explicit_internal_link_and_creates_canonical_order(
+        self,
+        _fetch,
+    ):
+        command = _command(
+            channel="POR_CONFIRMAR",
+            social_reference="",
+        )
+
+        with self.assertRaises(ValidationError):
+            link_point_note(command=command, actor=self.actor)
+
+        result = link_point_note(
+            command=command,
+            actor=self.actor,
+            allow_pending_channel=True,
+        )
+
+        self.assertTrue(result.created)
+        self.assertEqual(result.order.canal, PedidoCliente.CANAL_POR_CONFIRMAR)
+        self.assertEqual(result.delivery.canal_origen, PedidoCliente.CANAL_POR_CONFIRMAR)
+
+    @patch("crm.services.point_order_link.PointNoteDetailService.fetch")
+    def test_point_customer_identity_reuses_customer_without_phone_or_email(self, fetch):
+        fetch.side_effect = [
+            _note(pk_nota="900101", folio="18101"),
+            _note(pk_nota="900102", folio="18102"),
+        ]
+
+        first = link_point_note(
+            command=_command(
+                pk_nota="900101",
+                customer_phone="",
+                customer_email="",
+                point_customer_id="POINT-CUSTOMER-7",
+            ),
+            actor=self.actor,
+        )
+        second = link_point_note(
+            command=_command(
+                pk_nota="900102",
+                customer_phone="",
+                customer_email="",
+                point_customer_id="POINT-CUSTOMER-7",
+            ),
+            actor=self.actor,
+        )
+
+        self.assertEqual(first.order.cliente_id, second.order.cliente_id)
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(
+            first.order.cliente.point_customer_id,
+            "POINT-CUSTOMER-7",
+        )
+
+    @patch("crm.services.point_order_link.PointNoteDetailService.fetch")
+    def test_point_customer_identity_keeps_separate_customers_with_shared_phone(self, fetch):
+        fetch.side_effect = [
+            _note(pk_nota="900201", folio="18201"),
+            _note(pk_nota="900202", folio="18202"),
+        ]
+        link_point_note(
+            command=_command(
+                pk_nota="900201",
+                point_customer_id="POINT-CUSTOMER-A",
+            ),
+            actor=self.actor,
+        )
+
+        second = link_point_note(
+            command=_command(
+                pk_nota="900202",
+                point_customer_id="POINT-CUSTOMER-B",
+            ),
+            actor=self.actor,
+        )
+
+        self.assertNotEqual(
+            PedidoCliente.objects.get(point_note_id="900201").cliente_id,
+            second.order.cliente_id,
+        )
+        self.assertEqual(Cliente.objects.count(), 2)
+        self.assertEqual(PedidoCliente.objects.count(), 2)
+
+    @patch(
+        "crm.services.point_order_link.PointNoteDetailService.fetch",
+        return_value=_note(),
+    )
     def test_same_point_note_returns_same_order_and_single_delivery(self, _fetch):
         first = link_point_note(command=_command(), actor=self.actor)
         second = link_point_note(command=_command(), actor=self.actor)
@@ -668,6 +756,31 @@ class PointOrderLinkConcurrencyTests(TransactionTestCase):
         self.assertEqual(
             len(set(Cliente.objects.values_list("codigo", flat=True))),
             2,
+        )
+
+    def test_two_notes_same_point_customer_without_contact_create_one_customer(self):
+        order_ids = self._link_distinct_notes(
+            (
+                _command(
+                    pk_nota="POINT-CUSTOMER-RACE-1",
+                    customer_phone="",
+                    customer_email="",
+                    point_customer_id="POINT-CUSTOMER-RACE",
+                ),
+                _command(
+                    pk_nota="POINT-CUSTOMER-RACE-2",
+                    customer_phone="",
+                    customer_email="",
+                    point_customer_id="POINT-CUSTOMER-RACE",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(set(order_ids)), 2)
+        self.assertEqual(Cliente.objects.count(), 1)
+        self.assertEqual(
+            Cliente.objects.get().point_customer_id,
+            "POINT-CUSTOMER-RACE",
         )
 
     def test_two_notes_with_shared_email_and_different_phones_do_not_merge(self):

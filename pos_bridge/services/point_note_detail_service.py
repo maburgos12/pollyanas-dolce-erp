@@ -102,23 +102,32 @@ class PointNoteDetailService:
 
         auth_session = self.http_session_service.create()
         try:
-            header_payload = self._get_payload(
-                auth_session.session,
-                path=self.HEADER_PATH,
-                pk_nota=note_id,
-                label="cabecera",
-            )
-            detail_payload = self._get_payload(
-                auth_session.session,
-                path=self.DETAIL_PATH,
-                pk_nota=note_id,
-                label="detalle",
-            )
+            return self.fetch_with_session(auth_session.session, pk_nota=note_id)
         finally:
             try:
                 auth_session.session.close()
             except Exception:  # noqa: BLE001
                 pass
+
+    def fetch_with_session(self, session, *, pk_nota: str) -> PointNote:
+        """Fetch a note with a caller-owned authenticated Point session."""
+
+        note_id = str(pk_nota or "").strip()
+        if not note_id:
+            raise PointNoteContractError("PK_NOTA es obligatorio para consultar Point.")
+
+        header_payload = self._get_payload(
+            session,
+            path=self.HEADER_PATH,
+            pk_nota=note_id,
+            label="cabecera",
+        )
+        detail_payload = self._get_payload(
+            session,
+            path=self.DETAIL_PATH,
+            pk_nota=note_id,
+            label="detalle",
+        )
 
         header_rows = self._require_rows(header_payload, label="cabecera", empty_means_not_found=True)
         detail_rows = self._require_rows(detail_payload, label="detalle", empty_means_not_found=True)

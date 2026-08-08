@@ -17,6 +17,13 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
     tipo_cliente = models.CharField(max_length=40, blank=True, default="")
+    point_customer_id = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+        editable=False,
+    )
     sucursal_referencia = models.CharField(max_length=120, blank=True, default="")
     notas = models.TextField(blank=True, default="")
     activo = models.BooleanField(default=True)
@@ -25,6 +32,13 @@ class Cliente(models.Model):
 
     class Meta:
         ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["point_customer_id"],
+                condition=~models.Q(point_customer_id=""),
+                name="crm_cliente_point_id_unico",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.nombre
@@ -155,7 +169,18 @@ class PedidoCliente(models.Model):
     CANAL_FACEBOOK = "FACEBOOK"
     CANAL_INSTAGRAM = "INSTAGRAM"
     CANAL_OTRO = "OTRO"
+    CANAL_POR_CONFIRMAR = "POR_CONFIRMAR"
     CANAL_CHOICES = [
+        (CANAL_MOSTRADOR, "Mostrador"),
+        (CANAL_WHATSAPP, "WhatsApp"),
+        (CANAL_TELEFONO, "Teléfono"),
+        (CANAL_WEB, "Web"),
+        (CANAL_FACEBOOK, "Facebook"),
+        (CANAL_INSTAGRAM, "Instagram"),
+        (CANAL_OTRO, "Otro"),
+        (CANAL_POR_CONFIRMAR, "Canal por confirmar"),
+    ]
+    CANAL_CAPTURA_CHOICES = [
         (CANAL_MOSTRADOR, "Mostrador"),
         (CANAL_WHATSAPP, "WhatsApp"),
         (CANAL_TELEFONO, "Teléfono"),
