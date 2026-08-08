@@ -9,12 +9,14 @@ from .views import (
     RegistroDiarioViewSet,
 )
 from .views_html import bonos_produccion_dashboard, bonos_produccion_manifest, bonos_produccion_pwa, bonos_produccion_sw
+from .solicitudes import PrestamosProduccionViewSet
 
 router = DefaultRouter()
 router.register("periodos", ConfigBonoPeriodoViewSet, basename="bonoproduccion-periodo")
 router.register("bonos", BonoProduccionViewSet, basename="bonoproduccion-bono")
 router.register("registros-diarios", RegistroDiarioViewSet, basename="bonoproduccion-registro")
 router.register("permisos", PermisosProduccionEquipoViewSet, basename="bonoproduccion-permiso")
+router.register("prestamos", PrestamosProduccionViewSet, basename="bonoproduccion-prestamo")
 router.register("horas-extra", HorasExtraProduccionEquipoViewSet, basename="bonoproduccion-hora-extra")
 
 urlpatterns = [
