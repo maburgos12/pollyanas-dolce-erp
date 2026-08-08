@@ -34,6 +34,7 @@ from .serializers import (
     RegistroDiarioSerializer,
 )
 from .services_recalculo import recalcular_desde_registros as _recalcular_desde_registros
+from .solicitudes import empleados_operables_solicitudes_produccion
 
 
 class CanAccessBonosProduccion(BasePermission):
@@ -226,6 +227,9 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
     permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
     origen_solicitud = "bonos_produccion"
 
+    def _es_operadora_solicitudes(self):
+        return is_bonos_produccion_capture_only(self.request.user)
+
     def _context_param(self, key):
         value = self.request.query_params.get(key)
         if value not in (None, ""):
@@ -280,6 +284,8 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         return payload
 
     def can_gestionar_empleado(self, empleado):
+        if self._es_operadora_solicitudes():
+            return False
         if self._es_empleado_propio(empleado):
             return False
         jefe_usuario_id = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp_id", None)
@@ -291,6 +297,11 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         if self._es_empleado_propio(empleado):
             return True
         return super().can_solicitar_empleado(empleado)
+
+    def filter_permisos(self, qs):
+        if self._es_operadora_solicitudes():
+            return qs.filter(empleado__usuario_erp=self.request.user)
+        return super().filter_permisos(qs)
 
     def _bonos_periodo_queryset(self):
         mes = self._context_param("mes")
@@ -400,6 +411,16 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         return Empleado.objects.filter(id__in=ids)
 
     def list(self, request):
+        if self._es_operadora_solicitudes():
+            empleados = list(self._empleados())
+            propio = self._empleado_propio()
+            empleados.sort(key=lambda empleado: (empleado.id != getattr(propio, "id", None), empleado.nombre))
+            return Response(
+                {
+                    "empleados": [self._empleado_payload_produccion(empleado) for empleado in empleados],
+                    "permisos": [_permiso_payload(permiso, request.user) for permiso in self._permisos()],
+                }
+            )
         bonos_periodo = self._bonos_periodo_queryset()
         if bonos_periodo is None:
             empleados = list(self._empleados())
@@ -449,6 +470,8 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
         )
 
     def empleados_queryset(self):
+        if self._es_operadora_solicitudes():
+            return empleados_operables_solicitudes_produccion()
         area = self._context_param("area")
         mes = self._context_param("mes")
         anio = self._context_param("anio")
@@ -482,6 +505,36 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
                 self._con_personal_autorizable(Empleado.objects.filter(id__in=empleados_periodo))
             )
         return self._con_empleado_propio(self._con_personal_autorizable(empleados_elegibles_bonos_produccion()))
+
+    def _gestion_denegada_operadora(self):
+        return Response(
+            {"detail": "Este perfil solo puede capturar solicitudes."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    @action(detail=True, methods=["post"])
+    def editar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().editar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def eliminar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().eliminar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def preautorizar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().preautorizar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().rechazar(request, pk=pk)
 
 
 class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosProduccionEquipoViewSet):
