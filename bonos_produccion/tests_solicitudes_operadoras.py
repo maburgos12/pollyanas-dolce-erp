@@ -1,15 +1,17 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from core.access import ROLE_BONOS_PRODUCCION_CAPTURA
-from rrhh.models import Empleado, PermisoSalida, Prestamo
+from rrhh.models import Empleado, HoraExtra, PermisoSalida, Prestamo
 
+from .models import AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
 from .solicitudes import empleados_operables_solicitudes_produccion
 
 
@@ -73,6 +75,14 @@ class OperadoraCatalogoPermisosTests(TestCase):
             "fecha_fin": "2026-08-11T13:00:00",
             "goce_sueldo": True,
             "motivo": "Cita medica",
+        }
+
+    def _payload_hora_extra(self, empleado, fecha="2026-08-12"):
+        return {
+            "empleado": empleado.id,
+            "fecha": fecha,
+            "horas": "2.00",
+            "notas": "Pedido especial",
         }
 
     def test_catalogo_solo_incluye_produccion_activa_con_jefa_erp(self):
@@ -147,17 +157,281 @@ class OperadoraCatalogoPermisosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["permisos"], [])
 
-    def test_operadora_no_accede_a_bonos_configuracion_registros_ni_horas_extra(self):
+    def test_operadora_no_accede_a_bonos_configuracion_ni_registros_administrativos(self):
         rutas = (
             "/api/bonos-produccion/periodos/",
             "/api/bonos-produccion/bonos/",
             "/api/bonos-produccion/registros-diarios/",
-            "/api/bonos-produccion/horas-extra/",
         )
 
         for ruta in rutas:
             with self.subTest(ruta=ruta):
                 self.assertEqual(self.client.get(ruta).status_code, 403)
+
+    @patch("bonos_produccion.views.notificar_hora_extra_solicitada")
+    def test_operadora_captura_horas_propias_y_de_produccion_sin_importes(self, notificar):
+        for empleado in (self.operadora_empleado, self.produccion_empleado):
+            response = self.client.post(
+                "/api/bonos-produccion/horas-extra/",
+                json.dumps(self._payload_hora_extra(empleado)),
+                content_type="application/json",
+            )
+
+            self.assertEqual(response.status_code, 201)
+            self.assertNotIn("monto_calculado", response.json())
+            hora = HoraExtra.objects.get(pk=response.json()["id"])
+            self.assertEqual(hora.empleado, empleado)
+            self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+            self.assertEqual(hora.jefe_directo, self.carolina_user)
+
+        self.assertEqual(notificar.call_count, 2)
+
+    def test_operadora_no_captura_horas_para_inactivo_ni_ventas(self):
+        for index, empleado in enumerate((self.inactivo, self.ventas), start=13):
+            response = self.client.post(
+                "/api/bonos-produccion/horas-extra/",
+                json.dumps(self._payload_hora_extra(empleado, fecha=f"2026-08-{index}")),
+                content_type="application/json",
+            )
+            self.assertIn(response.status_code, {400, 403})
+
+        self.assertFalse(HoraExtra.objects.exists())
+
+    def test_operadora_lista_horas_sin_importes_y_nunca_las_gestiona(self):
+        hora = HoraExtra.objects.create(
+            empleado=self.produccion_empleado,
+            fecha="2026-08-12",
+            horas=Decimal("2.00"),
+            monto_calculado=Decimal("200.00"),
+            jefe_directo=self.carolina_user,
+        )
+
+        listado = self.client.get("/api/bonos-produccion/horas-extra/")
+
+        self.assertEqual(listado.status_code, 200)
+        item = next(row for row in listado.json()["horas_extra"] if row["id"] == hora.id)
+        self.assertNotIn("monto_calculado", item)
+        self.assertFalse(item["puede_editar"])
+        self.assertFalse(item["puede_eliminar"])
+        self.assertFalse(item["puede_autorizar"])
+
+        for accion in ("editar", "eliminar", "autorizar", "rechazar"):
+            response = self.client.post(
+                f"/api/bonos-produccion/horas-extra/{hora.id}/{accion}/",
+                json.dumps({"motivo_cambio": "Intento no permitido"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 403, accion)
+
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class OperadoraCapturaBonosTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        users = get_user_model().objects
+        cls.carolina_user = users.create_user(username="carolina.bonos", password="test12345")
+        cls.carolina = Empleado.objects.create(
+            codigo="CAR-BONOS",
+            nombre="CAROLINA BONOS",
+            departamento=Empleado.DEP_PRODUCCION,
+            activo=True,
+            usuario_erp=cls.carolina_user,
+        )
+        cls.operadora = users.create_user(username="julissa.bonos", password="test12345")
+        grupo = Group.objects.create(name=ROLE_BONOS_PRODUCCION_CAPTURA)
+        cls.operadora.groups.add(grupo)
+        cls.operadora_empleado = Empleado.objects.create(
+            codigo="306-BONOS",
+            nombre="ANGULO PARRA JULISSA",
+            departamento=Empleado.DEP_PRODUCCION,
+            activo=True,
+            usuario_erp=cls.operadora,
+            jefe_directo=cls.carolina,
+            participa_bonos_produccion=True,
+        )
+        cls.produccion_cerrado = Empleado.objects.create(
+            codigo="PROD-CERRADO",
+            nombre="COLABORADORA BONO CERRADO",
+            departamento=Empleado.DEP_PRODUCCION,
+            activo=True,
+            jefe_directo=cls.carolina,
+            participa_bonos_produccion=True,
+        )
+        cls.produccion_empleado = Empleado.objects.create(
+            codigo="PROD-BONOS",
+            nombre="COLABORADORA PRODUCCION BONOS",
+            departamento=Empleado.DEP_PRODUCCION,
+            activo=True,
+            jefe_directo=cls.carolina,
+            participa_bonos_produccion=True,
+        )
+        cls.ventas = Empleado.objects.create(
+            codigo="VEN-BONOS",
+            nombre="COLABORADORA VENTAS BONOS",
+            departamento=Empleado.DEP_VENTAS,
+            activo=True,
+            jefe_directo=cls.carolina,
+            participa_bonos_produccion=True,
+        )
+        today = timezone.localdate()
+        cls.periodo = ConfigBonoPeriodo.objects.create(mes=today.month, anio=today.year)
+        cls.bono = BonoProduccionEmpleado.objects.create(
+            periodo=cls.periodo,
+            empleado=cls.produccion_empleado,
+            area=AREA_PRODUCCION,
+            bono_extra=Decimal("150.00"),
+            ajuste_positivo=Decimal("75.00"),
+            ajuste_negativo=Decimal("25.00"),
+        )
+        cls.bono_ventas = BonoProduccionEmpleado.objects.create(
+            periodo=cls.periodo,
+            empleado=cls.ventas,
+            area=AREA_PRODUCCION,
+        )
+        cls.bono_cerrado = BonoProduccionEmpleado.objects.create(
+            periodo=cls.periodo,
+            empleado=cls.produccion_cerrado,
+            area=AREA_PRODUCCION,
+            estatus=BonoProduccionEmpleado.ESTATUS_CERRADO,
+        )
+        previous = date(today.year, today.month, 1) - timedelta(days=1)
+        cls.periodo_anterior = ConfigBonoPeriodo.objects.create(mes=previous.month, anio=previous.year)
+        cls.bono_anterior = BonoProduccionEmpleado.objects.create(
+            periodo=cls.periodo_anterior,
+            empleado=cls.produccion_empleado,
+            area=AREA_PRODUCCION,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.operadora)
+
+    @staticmethod
+    def _rows(response):
+        body = response.json()
+        return body.get("results", body) if isinstance(body, dict) else body
+
+    def _payload_registro(self, bono=None, **overrides):
+        payload = {
+            "bono": (bono or self.bono).id,
+            "dia": 10,
+            "tiene_asistencia": True,
+            "tiene_uniforme": True,
+            "tiene_puntualidad": True,
+            "tiene_produccion": True,
+            "cantidad_embetunados": 4,
+            "observacion": "Captura operativa",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_lista_fichas_operativas_sin_importes(self):
+        response = self.client.get("/api/bonos-produccion/bonos-captura/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = self._rows(response)
+        self.assertEqual({row["id"] for row in rows}, {self.bono.id})
+        forbidden = {
+            "total_a_pagar",
+            "bono_extra",
+            "ajuste_positivo",
+            "ajuste_negativo",
+            "monto_uniforme",
+            "monto_asistencia",
+            "monto_puntualidad",
+            "monto_produccion",
+            "monto_premio_embetunado",
+        }
+        self.assertTrue(forbidden.isdisjoint(rows[0]))
+
+    def test_crea_y_actualiza_registro_diario_sin_tocar_ajustes(self):
+        original = (self.bono.bono_extra, self.bono.ajuste_positivo, self.bono.ajuste_negativo)
+        created = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro()),
+            content_type="application/json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        registro = RegistroDiarioProduccion.objects.get(pk=created.json()["id"])
+        self.assertEqual(registro.capturado_por, self.operadora)
+        self.assertEqual(registro.cantidad_embetunados, 4)
+
+        updated = self.client.patch(
+            f"/api/bonos-produccion/registros-diarios-captura/{registro.id}/",
+            json.dumps({"tiene_puntualidad": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(updated.status_code, 200)
+        registro.refresh_from_db()
+        self.assertFalse(registro.tiene_puntualidad)
+        self.bono.refresh_from_db()
+        self.assertEqual(
+            (self.bono.bono_extra, self.bono.ajuste_positivo, self.bono.ajuste_negativo),
+            original,
+        )
+
+    def test_rechaza_campos_monetarios_y_bonos_fuera_de_alcance(self):
+        monetario = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro(bono_extra="9999.00")),
+            content_type="application/json",
+        )
+        ventas = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro(self.bono_ventas, dia=11)),
+            content_type="application/json",
+        )
+        anterior = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro(self.bono_anterior, dia=12)),
+            content_type="application/json",
+        )
+
+        self.assertEqual(monetario.status_code, 400)
+        self.assertIn(ventas.status_code, {400, 403})
+        self.assertIn(anterior.status_code, {400, 403})
+        self.assertFalse(RegistroDiarioProduccion.objects.exists())
+
+    def test_rechaza_bono_cerrado_y_dia_fuera_del_mes(self):
+        cerrado = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro(self.bono_cerrado, dia=11)),
+            content_type="application/json",
+        )
+        dia_invalido = self.client.post(
+            "/api/bonos-produccion/registros-diarios-captura/",
+            json.dumps(self._payload_registro(dia=32)),
+            content_type="application/json",
+        )
+
+        self.assertIn(cerrado.status_code, {400, 403})
+        self.assertEqual(dia_invalido.status_code, 400)
+        self.assertFalse(RegistroDiarioProduccion.objects.exists())
+
+    def test_no_puede_borrar_registros_ni_escribir_fichas_de_bono(self):
+        registro = RegistroDiarioProduccion.objects.create(
+            bono=self.bono,
+            dia=10,
+            tiene_asistencia=True,
+            capturado_por=self.operadora,
+        )
+
+        self.assertEqual(
+            self.client.delete(f"/api/bonos-produccion/registros-diarios-captura/{registro.id}/").status_code,
+            405,
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/api/bonos-produccion/bonos-captura/{self.bono.id}/",
+                json.dumps({"dias_trabajados": 99}),
+                content_type="application/json",
+            ).status_code,
+            405,
+        )
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -354,6 +628,21 @@ class OperadoraPwaTests(TestCase):
         self.assertContains(response, "const OPERADOR_SOLICITUDES=true")
         self.assertContains(response, "function PrestamosTab")
         self.assertContains(response, "/api/bonos-produccion/prestamos/")
+
+    def test_pwa_operadora_contiene_solo_las_cuatro_secciones_aprobadas(self):
+        self.client.force_login(self.operadora)
+
+        response = self.client.get("/bonos-produccion/app/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "OPERADOR_SOLICITUDES?['captura','horas_extra','permisos','prestamos']",
+        )
+        self.assertNotContains(response, "OPERADOR_SOLICITUDES?['permisos','prestamos']")
+        self.assertContains(response, "/api/bonos-produccion/bonos-captura/")
+        self.assertContains(response, "/api/bonos-produccion/registros-diarios-captura/")
+        self.assertContains(response, "operadorSolicitudes:OPERADOR_SOLICITUDES")
 
     def test_pwa_administrativa_no_se_marca_como_operadora_acotada(self):
         self.client.force_login(self.admin)
