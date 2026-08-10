@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework import status, viewsets
+from django.utils import timezone
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
@@ -30,11 +31,38 @@ from .empleados import bonos_produccion_elegibles_queryset, empleados_elegibles_
 from .serializers import (
     BonoProduccionResumenSerializer,
     BonoProduccionSerializer,
+    BonoProduccionCapturaSerializer,
     ConfigBonoPeriodoSerializer,
+    RegistroDiarioCapturaSerializer,
     RegistroDiarioSerializer,
 )
 from .services_recalculo import recalcular_desde_registros as _recalcular_desde_registros
 from .solicitudes import empleados_operables_solicitudes_produccion
+
+
+HORAS_EXTRA_OPERADORA_FIELDS = {
+    "id",
+    "folio",
+    "empleado",
+    "empleado_nombre",
+    "area",
+    "puesto",
+    "sucursal_nombre",
+    "fecha",
+    "horas",
+    "estado",
+    "estado_label",
+    "jefe_directo_nombre",
+    "notas",
+    "creado_en",
+    "puede_autorizar",
+    "puede_editar",
+    "puede_eliminar",
+}
+
+
+def _hora_extra_payload_operadora(payload):
+    return {key: value for key, value in payload.items() if key in HORAS_EXTRA_OPERADORA_FIELDS}
 
 
 class CanAccessBonosProduccion(BasePermission):
@@ -56,6 +84,25 @@ class CanAccessAdministracionBonosProduccion(BasePermission):
             and not is_bonos_produccion_capture_only(user)
             and can_view_submodule(user, "produccion", "bonos")
         )
+
+
+class CanCaptureBonosProduccion(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and is_bonos_produccion_capture_only(user))
+
+
+def bonos_captura_operadora_queryset():
+    today = timezone.localdate()
+    empleados_ids = empleados_operables_solicitudes_produccion().values_list("id", flat=True)
+    return bonos_produccion_elegibles_queryset(
+        BonoProduccionEmpleado.objects.select_related("empleado", "periodo").filter(
+            periodo__mes=today.month,
+            periodo__anio=today.year,
+            empleado_id__in=empleados_ids,
+            estatus=BonoProduccionEmpleado.ESTATUS_BORRADOR,
+        )
+    )
 
 
 def _empleado_de_usuario(user) -> Empleado | None:
@@ -227,6 +274,50 @@ class RegistroDiarioViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         instance = serializer.save(capturado_por=self.request.user if self.request.user.is_authenticated else None)
+        _recalcular_desde_registros(instance.bono)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        _recalcular_desde_registros(instance.bono)
+
+
+class BonoProduccionCapturaViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = BonoProduccionCapturaSerializer
+    permission_classes = [IsAuthenticated, CanCaptureBonosProduccion]
+
+    def get_queryset(self):
+        return bonos_captura_operadora_queryset().order_by("area", "empleado__nombre")
+
+
+class RegistroDiarioCapturaViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = RegistroDiarioCapturaSerializer
+    permission_classes = [IsAuthenticated, CanCaptureBonosProduccion]
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def bonos_permitidos(self):
+        return bonos_captura_operadora_queryset()
+
+    def get_queryset(self):
+        qs = RegistroDiarioProduccion.objects.select_related("bono__empleado", "bono__periodo").filter(
+            bono__in=self.bonos_permitidos()
+        )
+        bono_id = self.request.query_params.get("bono")
+        if bono_id:
+            qs = qs.filter(bono_id=bono_id)
+        return qs.order_by("dia")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["bonos_permitidos"] = self.bonos_permitidos()
+        return context
+
+    def perform_create(self, serializer):
+        instance = serializer.save(capturado_por=self.request.user)
         _recalcular_desde_registros(instance.bono)
 
     def perform_update(self, serializer):
@@ -549,7 +640,7 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
 
 class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosProduccionEquipoViewSet):
-    permission_classes = [IsAuthenticated, CanAccessAdministracionBonosProduccion]
+    permission_classes = [IsAuthenticated, CanAccessBonosProduccion]
 
     def empleados_queryset(self):
         return PermisosProduccionEquipoViewSet.empleados_queryset(self)
@@ -565,14 +656,56 @@ class HorasExtraProduccionEquipoViewSet(BaseHorasExtraEquipoViewSet, PermisosPro
         )
 
     def can_solicitar_empleado(self, empleado):
+        if self._es_operadora_solicitudes():
+            return empleados_operables_solicitudes_produccion().filter(pk=empleado.pk).exists()
         if self._es_empleado_propio(empleado):
             return True
         return super().can_solicitar_empleado(empleado)
 
     def can_gestionar_empleado(self, empleado):
+        if self._es_operadora_solicitudes():
+            return False
         if self._es_empleado_propio(empleado):
             return False
         return can_manage_submodule(self.request.user, "produccion", "bonos") or super().can_gestionar_empleado(empleado)
+
+    def list(self, request):
+        response = super().list(request)
+        if self._es_operadora_solicitudes():
+            response.data["horas_extra"] = [
+                _hora_extra_payload_operadora(item) for item in response.data["horas_extra"]
+            ]
+        return response
+
+    def create(self, request):
+        response = super().create(request)
+        if self._es_operadora_solicitudes() and response.status_code == status.HTTP_201_CREATED:
+            response.data = _hora_extra_payload_operadora(response.data)
+        return response
+
+    @action(detail=True, methods=["post"])
+    def editar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().editar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def eliminar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().eliminar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def autorizar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().autorizar(request, pk=pk)
+
+    @action(detail=True, methods=["post"])
+    def rechazar(self, request, pk=None):
+        if self._es_operadora_solicitudes():
+            return self._gestion_denegada_operadora()
+        return super().rechazar(request, pk=pk)
 
     def after_create(self, hora_extra):
         notificar_hora_extra_solicitada(hora_extra, actor=self.request.user)

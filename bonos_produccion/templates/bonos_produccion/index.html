@@ -268,8 +268,8 @@ function ProduccionCollaboratorPage({bono,periodoLabel}){
 function statusTxt(ok){return ok?'Pasa':'No pasa';}
 function App(){
   const queryTab=new URLSearchParams(window.location.search).get('tab');
-  const tabsPermitidos=OPERADOR_SOLICITUDES?['permisos','prestamos']:['config','captura','permisos','horas_extra','resumen','ajustes','revision'];
-  const initialTab=tabsPermitidos.includes(queryTab)?queryTab:(OPERADOR_SOLICITUDES?'permisos':(FORCE_CAPTURE?'captura':'config'));
+  const tabsPermitidos=OPERADOR_SOLICITUDES?['captura','horas_extra','permisos','prestamos']:['config','captura','permisos','horas_extra','resumen','ajustes','revision'];
+  const initialTab=tabsPermitidos.includes(queryTab)?queryTab:(OPERADOR_SOLICITUDES?'captura':(FORCE_CAPTURE?'captura':'config'));
   const [tab,setTab]=React.useState(initialTab);
   const [mes,setMes]=React.useState(TODAY.getMonth()+1);
   const [anio,setAnio]=React.useState(TODAY.getFullYear());
@@ -281,10 +281,16 @@ function App(){
   const [status,setStatus]=React.useState('');
   const [statusType,setStatusType]=React.useState('ok');
   const [loading,setLoading]=React.useState(false);
-  React.useEffect(()=>{if(!OPERADOR_SOLICITUDES)cargarTodo();},[mes,anio]);
+  React.useEffect(()=>{cargarTodo();},[mes,anio]);
   React.useEffect(()=>{if(selectedBono)cargarRegistros(selectedBono.id);else setRegistros([]);},[selectedBono?.id]);
   function cargarTodo(){
     setLoading(true);
+    if(OPERADOR_SOLICITUDES){
+      api('/api/bonos-produccion/bonos-captura/')
+        .then(data=>{setPeriodo(null);setBonos(data.results||data);setLoading(false);})
+        .catch(err=>{showStatus(err.message,'err');setLoading(false);});
+      return;
+    }
     Promise.all([
       api(`/api/bonos-produccion/periodos/?mes=${mes}&anio=${anio}`),
       api(`/api/bonos-produccion/bonos/resumen/?mes=${mes}&anio=${anio}`).catch(()=>({bonos:[]})),
@@ -294,7 +300,8 @@ function App(){
     }).catch(err=>{showStatus(err.message,'err');setLoading(false);});
   }
   function cargarRegistros(id){
-    api(`/api/bonos-produccion/registros-diarios/?bono=${id}`).then(r=>setRegistros(r.results||r)).catch(err=>showStatus(err.message,'err'));
+    const base=OPERADOR_SOLICITUDES?'/api/bonos-produccion/registros-diarios-captura/':'/api/bonos-produccion/registros-diarios/';
+    api(`${base}?bono=${id}`).then(r=>setRegistros(r.results||r)).catch(err=>showStatus(err.message,'err'));
   }
   function crearPeriodo(){
     api('/api/bonos-produccion/periodos/',{method:'POST',body:JSON.stringify({mes:+mes,anio:+anio,dias_laborables:23})})
@@ -315,8 +322,10 @@ function App(){
     if(!selectedBono)return;
     const ex=registros.find(r=>+r.dia===dia);
     const payload={bono:selectedBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,tiene_produccion:true,cantidad_embetunados:0,observacion:'',...(ex||{}),...patch};
-    const url=ex?`/api/bonos-produccion/registros-diarios/${ex.id}/`:'/api/bonos-produccion/registros-diarios/';
-    return api(url,{method:ex?'PUT':'POST',body:JSON.stringify(payload)}).then(()=>{cargarRegistros(selectedBono.id);cargarTodo();}).catch(err=>{showStatus(err.message,'err');throw err;});
+    const base=OPERADOR_SOLICITUDES?'/api/bonos-produccion/registros-diarios-captura/':'/api/bonos-produccion/registros-diarios/';
+    const url=ex?`${base}${ex.id}/`:base;
+    const method=ex?(OPERADOR_SOLICITUDES?'PATCH':'PUT'):'POST';
+    return api(url,{method,body:JSON.stringify(payload)}).then(()=>{cargarRegistros(selectedBono.id);cargarTodo();}).catch(err=>{showStatus(err.message,'err');throw err;});
   }
   function actualizarBono(id,patch){
     api(`/api/bonos-produccion/bonos/${id}/`,{method:'PATCH',body:JSON.stringify(patch)}).then(()=>{showStatus('Guardado','ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
@@ -326,6 +335,7 @@ function App(){
   const totalGlobal=bonos.reduce((s,b)=>s+Number(b.total_a_pagar||0),0);
   const pasan=bonos.filter(b=>b.pasa_asistencia&&b.pasa_uniforme&&b.pasa_puntualidad&&b.pasa_produccion).length;
   const showBonusContext=!OPERADOR_SOLICITUDES&&!['permisos','prestamos','horas_extra'].includes(tab);
+  const showOperatorBonusContext=OPERADOR_SOLICITUDES&&tab==='captura';
   function selectTab(nextTab){
     setTab(nextTab);
     if(area===AREA_TODAS&&!['captura','permisos','prestamos','horas_extra','revision'].includes(nextTab))setArea('HORNOS');
@@ -334,7 +344,7 @@ function App(){
     h('header',{className:'hdr'},
       h('div',{className:'hdr-brand'},
         h('div',{className:'hdr-icon'},h(IconFactory)),
-        h('div',null,h('div',{className:'hdr-title'},OPERADOR_SOLICITUDES?'Solicitudes de Produccion':'Bonos de Produccion'),h('div',{className:'hdr-sub'},OPERADOR_SOLICITUDES?"Pollyana's Dolce · Permisos y prestamos":"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
+        h('div',null,h('div',{className:'hdr-title'},OPERADOR_SOLICITUDES?'Captura de Produccion':'Bonos de Produccion'),h('div',{className:'hdr-sub'},"Pollyana's Dolce · "+MESES[+mes]+' '+anio))
       ),
         h('div',{className:'hdr-controls'},
         !OPERADOR_SOLICITUDES&&h('input',{type:'number',min:1,max:12,value:mes,onChange:e=>setMes(+e.target.value),title:'Mes'}),
@@ -345,7 +355,7 @@ function App(){
     ),
     status&&h('div',{className:`status-bar ${statusType}`,role:'status','aria-live':'polite'},status),
     h('div',{className:'tabs-wrap'},
-      (OPERADOR_SOLICITUDES?[['permisos','Permisos'],['prestamos','Prestamos']]:[['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']]).map(([id,lbl])=>
+      (OPERADOR_SOLICITUDES?[['captura','Bonos'],['horas_extra','Horas extra'],['permisos','Permisos'],['prestamos','Prestamos']]:[['config','Configuracion'],['captura','Captura diaria'],['permisos','Permisos'],['horas_extra','Horas extra'],['resumen','Resumen mensual'],['ajustes','Ajustes'],['revision','Revision por area']]).map(([id,lbl])=>
         h('button',{key:id,className:`tab-btn ${tab===id?'on':''}`,onClick:()=>selectTab(id)},lbl))
     ),
     h('main',null,
@@ -356,6 +366,10 @@ function App(){
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador},'Recalcular desde checador')
       ),
+      showOperatorBonusContext&&h('div',{className:'periodo-bar'},
+        h('span',{className:'periodo-label'},'Periodo:'),
+        h('span',{className:'periodo-id'},`${MESES[+mes]} ${anio} · captura operativa`)
+      ),
       showBonusContext&&h('div',{className:'metrics'},
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Total a pagar'),h('div',{className:'val gold'},money(totalGlobal))),
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Empleados'),h('div',{className:'val'},bonos.length)),
@@ -363,7 +377,7 @@ function App(){
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area activa'),h('div',{className:'val val-sm'},AREA_LABELS[area]))
       ),
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
-      tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}),
+      tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio,operadorSolicitudes:OPERADOR_SOLICITUDES}),
       tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes:OPERADOR_SOLICITUDES}),
       tab==='prestamos'&&OPERADOR_SOLICITUDES&&h(PrestamosTab,{showStatus}),
       tab==='horas_extra'&&h(HorasExtraTab,{area,setArea,mes,anio,showStatus}),
@@ -713,10 +727,11 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
   const [horas,setHoras]=React.useState('1.00');
   const [notas,setNotas]=React.useState('');
   const [loading,setLoading]=React.useState(false);
+  const [submitting,setSubmitting]=React.useState(false);
   const [previewHoraExtra,setPreviewHoraExtra]=React.useState(null);
   const [lastHoraExtra,setLastHoraExtra]=React.useState(null);
   const [editHoraExtra,setEditHoraExtra]=React.useState(null);
-  const equipo=empleados;
+  const equipo=area===AREA_TODAS?empleados:empleados.filter(e=>e.area===area);
   React.useEffect(()=>{cargarHorasExtra();},[mes,anio,area]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(e=>e.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(e=>e.id).join(','),selected?.id]);
   function cargarHorasExtra(){
@@ -743,10 +758,12 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
     return new Date(`${value}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
   }
   function submitHoraExtra(){
+    if(submitting)return;
     if(!selected){showStatus('Selecciona un empleado.','err');return;}
     if(!Number(horas)||Number(horas)<=0){showStatus('Captura horas extra mayores a cero.','err');return;}
     if(!notas.trim()){showStatus('Captura el motivo de la hora extra.','err');return;}
     const areaSolicitud=selected.area&&selected.area!==AREA_TODAS?selected.area:area;
+    setSubmitting(true);
     api('/api/bonos-produccion/horas-extra/',{method:'POST',body:JSON.stringify({
       empleado:selected.id,
       mes,
@@ -755,7 +772,7 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
       fecha,
       horas,
       notas,
-    })}).then(item=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');setLastHoraExtra(item);setPreviewHoraExtra(item);cargarHorasExtra();}).catch(err=>showStatus(err.message,'err'));
+    })}).then(item=>{showStatus('Hora extra enviada a RRHH','ok');setNotas('');setHoras('1.00');setLastHoraExtra(item);setPreviewHoraExtra(item);cargarHorasExtra();}).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
   }
   function imprimirHoraExtra(item){
     setPreviewHoraExtra(item);
@@ -828,7 +845,7 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
               h('div',{className:'field'},h('label',null,'Horas'),h('input',{className:'form-control',type:'number',min:'0.25',step:'0.25',value:horas,onChange:e=>setHoras(e.target.value)}))
             ),
             h('div',{className:'field'},h('label',null,'Motivo'),h('textarea',{className:'form-control',rows:3,value:notas,onChange:e=>setNotas(e.target.value),placeholder:'Ej. cierre, pedido especial, apoyo de producción...'})),
-            h('button',{className:'btn btn-wine',onClick:submitHoraExtra},'Enviar a RRHH')
+            h('button',{className:'btn btn-wine',onClick:submitHoraExtra,disabled:submitting},submitting?'Enviando…':'Enviar a RRHH')
           )
         )
       ),
@@ -871,7 +888,7 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
     )
   );
 }
-function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio}){
+function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio,operadorSolicitudes=false}){
   const [selDia,setSelDia]=React.useState(null);
   const [savingDia,setSavingDia]=React.useState(null);
   const total=diasEnMes(+mes,+anio);
@@ -899,7 +916,7 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
       h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},(area===AREA_TODAS?'Todo produccion':AREA_LABELS[area])+' — Selecciona empleado')),
       h('div',{className:'card-body'},
         bonosArea.length===0?h('div',{className:'empty'},'Sin empleados en esta area para el periodo.'):
-        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:b=>h(BonusRight,{bono:b})})
+        h(EmployeeSearchList,{items:bonosArea,selected:selectedBono,onSelect:setSelectedBono,placeholder:'Teclea nombre o apellido...',metaText:b=>AREA_LABELS[b.area]||b.area||'Produccion',rightText:operadorSolicitudes?b=>`${b.dias_trabajados||0} dias`:b=>h(BonusRight,{bono:b})})
       )
     ),
     selectedBono&&h('div',{className:'card'},
@@ -910,9 +927,9 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
         ),
         h('div',{className:'badge-row'},
           h(Badge,{ok:selectedBono.pasa_asistencia}),h(Badge,{ok:selectedBono.pasa_uniforme}),h(Badge,{ok:selectedBono.pasa_produccion}),
-          Number(selectedBono.monto_premio_embetunado||0)>0&&h('span',{className:'badge ok'},`Premio ${money(selectedBono.monto_premio_embetunado)}`),
-          Number(selectedBono.ajuste_negativo||0)>0&&h('span',{className:'badge bad'},`Desc. ${money(selectedBono.ajuste_negativo)}`),
-          h('span',{className:'text-total'},money(selectedBono.total_a_pagar))
+          !operadorSolicitudes&&Number(selectedBono.monto_premio_embetunado||0)>0&&h('span',{className:'badge ok'},`Premio ${money(selectedBono.monto_premio_embetunado)}`),
+          !operadorSolicitudes&&Number(selectedBono.ajuste_negativo||0)>0&&h('span',{className:'badge bad'},`Desc. ${money(selectedBono.ajuste_negativo)}`),
+          !operadorSolicitudes&&h('span',{className:'text-total'},money(selectedBono.total_a_pagar))
         )
       ),
       h('div',{className:'card-body'},
