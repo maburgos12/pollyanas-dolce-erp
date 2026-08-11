@@ -592,12 +592,24 @@ def _resolver_incidencias_stale(empleado: Empleado, fecha: date, touched: set[st
     )
 
 
+def _baja_bloquea_evaluacion(empleado: Empleado, fecha: date) -> bool:
+    """Permite revisar el historial, pero nunca genera incidencias posteriores a la baja."""
+    if empleado.activo:
+        return False
+    baja = empleado.bajas_rrhh.order_by("-fecha_baja", "-id").first()
+    return fecha > baja.fecha_baja if baja else True
+
+
 @transaction.atomic
 def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacionAsistencia:
     touched: set[str] = set()
     creados = 0
     actualizados = 0
     resueltos = 0
+
+    if _baja_bloquea_evaluacion(empleado, fecha):
+        resueltos = _resolver_incidencias_stale(empleado, fecha, touched)
+        return ResultadoEvaluacionAsistencia(evaluados=1, resueltos=resueltos)
 
     if empleado.fecha_ingreso and fecha < empleado.fecha_ingreso:
         resueltos = _resolver_incidencias_stale(empleado, fecha, touched)

@@ -10,6 +10,7 @@ from django.utils import timezone
 from rrhh.models import (
     AsistenciaEmpleado,
     Empleado,
+    EmpleadoBaja,
     IncidenciaAsistencia,
     IncidenciaAsistenciaBitacora,
 )
@@ -72,6 +73,59 @@ class ReporteAsistenciaTests(TestCase):
         self.assertEqual(len(reportes), 1)
         self.assertEqual(reportes[0]["resumen"]["comida_excedida"], 1)
         self.assertEqual(reportes[0]["filas"][0]["incidencias"][0]["tipo"], "Comida excedida")
+
+    def test_empleado_dado_de_baja_con_actividad_permanece_en_historial(self):
+        self.empleado.activo = False
+        self.empleado.save(update_fields=["activo"])
+        EmpleadoBaja.objects.create(
+            empleado=self.empleado,
+            nombre=self.empleado.nombre,
+            area=self.empleado.area,
+            puesto=self.empleado.puesto,
+            tipo_contrato=self.empleado.tipo_contrato,
+            fecha_ingreso=self.empleado.fecha_ingreso,
+            fecha_baja=date(2026, 6, 15),
+            motivo=EmpleadoBaja.MOTIVO_ABANDONO,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            self.url,
+            {
+                "fecha_inicio": "2026-06-10",
+                "fecha_fin": "2026-06-10",
+                "empleado": str(self.empleado.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([reporte["empleado"].id for reporte in response.context["reportes"]], [self.empleado.id])
+        empleados_filtro = list(response.context["empleados"])
+        self.assertEqual([empleado.id for empleado in empleados_filtro], [self.empleado.id])
+        self.assertEqual(empleados_filtro[0].fecha_baja_reporte, date(2026, 6, 15))
+        self.assertContains(response, "Baja 2026-06-15")
+
+    def test_empleado_dado_de_baja_sin_actividad_no_satura_el_filtro(self):
+        inactivo_sin_actividad = Empleado.objects.create(
+            codigo="RPT-BAJA-SIN-ACTIVIDAD",
+            nombre="Empleado sin actividad en rango",
+            activo=False,
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        EmpleadoBaja.objects.create(
+            empleado=inactivo_sin_actividad,
+            nombre=inactivo_sin_actividad.nombre,
+            fecha_ingreso=inactivo_sin_actividad.fecha_ingreso,
+            fecha_baja=date(2026, 5, 31),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            self.url,
+            {"fecha_inicio": "2026-06-10", "fecha_fin": "2026-06-10"},
+        )
+
+        self.assertNotIn(inactivo_sin_actividad.id, [empleado.id for empleado in response.context["empleados"]])
 
     def test_export_csv_devuelve_fila_de_incidencia(self):
         self.client.force_login(self.user)
