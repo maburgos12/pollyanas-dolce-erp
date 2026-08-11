@@ -193,6 +193,46 @@ class OperadoraCatalogoPermisosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["id"] for row in response.json()["permisos"]], [permiso.id])
 
+    def test_lista_operadora_sin_periodo_devuelve_todo_su_historial(self):
+        otra_operadora = get_user_model().objects.create_user(username="otra.operadora")
+        propios = [
+            PermisoSalida.objects.create(
+                empleado=self.produccion_empleado,
+                creado_por=self.operadora,
+                tipo=PermisoSalida.TIPO_PERMISO_HORA,
+                fecha_inicio=fecha_inicio,
+                motivo=motivo,
+                origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+            )
+            for fecha_inicio, motivo in (
+                ("2026-07-10T12:00:00Z", "Mes anterior"),
+                ("2026-06-10T12:00:00Z", "Mes historico"),
+            )
+        ]
+        personal = PermisoSalida.objects.create(
+            empleado=self.operadora_empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio="2026-05-10T12:00:00Z",
+            motivo="Personal legacy",
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+        PermisoSalida.objects.create(
+            empleado=self.produccion_empleado,
+            creado_por=otra_operadora,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio="2026-08-10T12:00:00Z",
+            motivo="Captura ajena",
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+
+        response = self.client.get("/api/bonos-produccion/permisos/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in response.json()["permisos"]],
+            [propios[0].id, propios[1].id, personal.id],
+        )
+
     def test_migracion_recupera_capturista_desde_notificacion(self):
         permiso = PermisoSalida.objects.create(
             empleado=self.produccion_empleado,
@@ -704,6 +744,15 @@ class OperadoraPwaTests(TestCase):
         self.assertContains(
             response,
             "operadorSolicitudes?'Permisos registrados':'Permisos de mi equipo'",
+        )
+        self.assertContains(response, "['actual','Este mes']")
+        self.assertContains(response, "['anterior','Mes anterior']")
+        self.assertContains(response, "['historial','Todo el historial']")
+        self.assertContains(response, "useState('actual')")
+        self.assertContains(response, "function periodoAnterior(mes,anio)")
+        self.assertContains(
+            response,
+            "return mesNumero===1?{mes:12,anio:anioNumero-1}:{mes:mesNumero-1,anio:anioNumero};",
         )
 
     def test_pwa_administrativa_no_se_marca_como_operadora_acotada(self):

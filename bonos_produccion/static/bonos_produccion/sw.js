@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-bonos-produccion-pwa-v24-permisos-registrados";
+const CACHE_NAME = "pollyanas-bonos-produccion-pwa-v25-historial-permisos";
 const SHELL_ASSETS = [
   "/bonos-produccion/manifest.json",
   "/static/bonos_produccion/icons/icon-192.png",

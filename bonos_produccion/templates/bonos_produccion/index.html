@@ -503,9 +503,15 @@ function PrestamosTab({showStatus}){
     )
   );
 }
+function periodoAnterior(mes,anio){
+  const mesNumero=Number(mes);
+  const anioNumero=Number(anio);
+  return mesNumero===1?{mes:12,anio:anioNumero-1}:{mes:mesNumero-1,anio:anioNumero};
+}
 function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes=false}){
   const [empleados,setEmpleados]=React.useState([]);
   const [permisos,setPermisos]=React.useState([]);
+  const [alcancePermisos,setAlcancePermisos]=React.useState('actual');
   const [selected,setSelected]=React.useState(null);
   const [tipo,setTipo]=React.useState('permiso_hora');
   const [goce,setGoce]=React.useState(true);
@@ -519,16 +525,32 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
   const [lastPermiso,setLastPermiso]=React.useState(null);
   const [editPermiso,setEditPermiso]=React.useState(null);
   const equipo=empleados;
-  React.useEffect(()=>{cargarPermisos();},[mes,anio,area]);
+  React.useEffect(()=>{cargarPermisos(alcancePermisos);},[mes,anio,area,alcancePermisos]);
   React.useEffect(()=>{if(!selected&&equipo.length)setSelected(equipo[0]);else if(selected&&!equipo.some(b=>b.id===selected.id))setSelected(equipo[0]||null);},[area,equipo.map(b=>b.id).join(','),selected?.id]);
-  function cargarPermisos(){
+  function cargarPermisos(alcance=alcancePermisos){
     setLoading(true);
-    const qs=new URLSearchParams({mes:String(mes),anio:String(anio)});
+    const qs=new URLSearchParams();
+    if(alcance==='actual'){
+      qs.set('mes',String(mes));
+      qs.set('anio',String(anio));
+    }else if(alcance==='anterior'){
+      const anterior=periodoAnterior(mes,anio);
+      qs.set('mes',String(anterior.mes));
+      qs.set('anio',String(anterior.anio));
+    }
     if(area!==AREA_TODAS)qs.set('area',area);
-    api(`/api/bonos-produccion/permisos/?${qs.toString()}`)
+    const sufijo=qs.toString()?`?${qs.toString()}`:'';
+    api(`/api/bonos-produccion/permisos/${sufijo}`)
       .then(d=>{setEmpleados(d.empleados||[]);setPermisos(d.permisos||[]);setLoading(false);})
       .catch(err=>{showStatus(err.message,'err');setLoading(false);});
   }
+  const mesAnterior=periodoAnterior(mes,anio);
+  const alcanceLabel=alcancePermisos==='historial'
+    ?'Todo el historial'
+    :alcancePermisos==='anterior'
+      ?`${MESES[mesAnterior.mes]} ${mesAnterior.anio}`
+      :`${MESES[Number(mes)]} ${anio}`;
+  const tituloPermisos=operadorSolicitudes?'Permisos registrados':'Permisos de mi equipo';
   const pendientes=permisos.filter(p=>p.estado_jefe==='pendiente'&&p.estado==='solicitado').length;
   const preaut=permisos.filter(p=>p.estado_jefe==='preautorizado').length;
   const sinGoce=permisos.filter(p=>!p.goce_sueldo).length;
@@ -563,7 +585,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
       fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
       goce_sueldo:goce,
       motivo,
-    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);cargarPermisos();}).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
+    })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);setAlcancePermisos('actual');cargarPermisos('actual');}).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
   }
   function imprimirPermiso(p){
     setPreviewPermiso(p);
@@ -673,8 +695,13 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
         )
       ),
       h('div',{className:'card'},
-        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},operadorSolicitudes?'Permisos registrados':'Permisos de mi equipo'),!operadorSolicitudes&&h(AreaPill,{area})),
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},operadorSolicitudes?`${tituloPermisos} · ${alcanceLabel}`:tituloPermisos),!operadorSolicitudes&&h(AreaPill,{area})),
         h('div',{className:'card-body'},
+          operadorSolicitudes&&h('div',{className:'segmented permission-history-filter'},
+            [['actual','Este mes'],['anterior','Mes anterior'],['historial','Todo el historial']].map(([valor,etiqueta])=>
+              h('button',{key:valor,type:'button',className:`segment ${alcancePermisos===valor?'on':''}`,onClick:()=>setAlcancePermisos(valor)},etiqueta)
+            )
+          ),
           loading?h('div',{className:'empty'},'Cargando permisos...'):
           permisos.length?h('div',{className:'permission-list'},
             permisos.map(p=>h('div',{key:p.id,className:'permission-item'},
