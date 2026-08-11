@@ -212,6 +212,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
 
         permiso = PermisoSalida.objects.create(
             empleado=empleado,
+            creado_por=request.user,
             tipo=tipo,
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin,

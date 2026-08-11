@@ -673,7 +673,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
         )
       ),
       h('div',{className:'card'},
-        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},operadorSolicitudes?'Mis permisos':'Permisos de mi equipo'),!operadorSolicitudes&&h(AreaPill,{area})),
+        h('div',{className:'card-hdr'},h('div',{className:'card-hdr-title'},operadorSolicitudes?'Permisos registrados':'Permisos de mi equipo'),!operadorSolicitudes&&h(AreaPill,{area})),
         h('div',{className:'card-body'},
           loading?h('div',{className:'empty'},'Cargando permisos...'):
           permisos.length?h('div',{className:'permission-list'},
@@ -712,7 +712,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
                 h('button',{className:'btn btn-wine btn-sm',onClick:guardarEdicion},'Guardar cambios')
               )
             ))
-          ):h('div',{className:'empty'},'Sin permisos registrados para esta area.')
+          ):h('div',{className:'empty'},operadorSolicitudes?'Todavia no hay permisos personales ni solicitudes capturadas por ti.':'Sin permisos registrados para esta area.')
         )
       ),
       previewPermiso&&h(PermisoPrintModal,{permiso:previewPermiso,onClose:()=>setPreviewPermiso(null),contextLabel:contextoPermiso(previewPermiso)})

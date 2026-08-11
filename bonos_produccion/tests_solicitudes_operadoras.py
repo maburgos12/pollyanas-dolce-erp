@@ -1,14 +1,17 @@
 import json
 from datetime import date, timedelta
 from decimal import Decimal
+from importlib import import_module
 from unittest.mock import patch
 
+from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from core.access import ROLE_BONOS_PRODUCCION_CAPTURA
+from core.models import Notificacion
 from rrhh.models import Empleado, HoraExtra, PermisoSalida, Prestamo
 
 from .models import AREA_PRODUCCION, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
@@ -109,8 +112,25 @@ class OperadoraCatalogoPermisosTests(TestCase):
             self.assertEqual(response.status_code, 201)
             permiso = PermisoSalida.objects.get(pk=response.json()["id"])
             self.assertEqual(permiso.empleado, empleado)
+            self.assertEqual(permiso.creado_por, self.operadora)
             self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
             self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
+
+    def test_operadora_ve_permiso_que_capturo_para_otra_persona(self):
+        creado = self.client.post(
+            "/api/bonos-produccion/permisos/",
+            json.dumps(self._payload_permiso(self.produccion_empleado)),
+            content_type="application/json",
+        )
+        self.assertEqual(creado.status_code, 201)
+
+        listado = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
+
+        self.assertEqual(listado.status_code, 200)
+        self.assertEqual(
+            [permiso["id"] for permiso in listado.json()["permisos"]],
+            [creado.json()["id"]],
+        )
 
     def test_operadora_no_captura_para_inactivo_ni_ventas(self):
         for empleado in (self.inactivo, self.ventas):
@@ -144,8 +164,10 @@ class OperadoraCatalogoPermisosTests(TestCase):
         self.assertEqual((permiso.estado, permiso.estado_jefe), estado_inicial)
 
     def test_lista_operadora_no_expone_permisos_ajenos(self):
+        otra_operadora = get_user_model().objects.create_user(username="julissa.angulo")
         PermisoSalida.objects.create(
             empleado=self.produccion_empleado,
+            creado_por=otra_operadora,
             tipo=PermisoSalida.TIPO_PERMISO_HORA,
             fecha_inicio="2026-08-11T12:00:00Z",
             motivo="Registro ajeno",
@@ -156,6 +178,42 @@ class OperadoraCatalogoPermisosTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["permisos"], [])
+
+    def test_lista_operadora_conserva_permiso_personal_legacy_sin_capturista(self):
+        permiso = PermisoSalida.objects.create(
+            empleado=self.operadora_empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio="2026-08-11T12:00:00Z",
+            motivo="Registro personal anterior",
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+
+        response = self.client.get("/api/bonos-produccion/permisos/?area=PRODUCCION")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["id"] for row in response.json()["permisos"]], [permiso.id])
+
+    def test_migracion_recupera_capturista_desde_notificacion(self):
+        permiso = PermisoSalida.objects.create(
+            empleado=self.produccion_empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio="2026-08-11T12:00:00Z",
+            motivo="Registro historico",
+            origen_solicitud=PermisoSalida.ORIGEN_BONOS_PRODUCCION,
+        )
+        Notificacion.objects.create(
+            usuario=self.carolina_user,
+            actor=self.operadora,
+            titulo="Permiso pendiente",
+            objeto_tipo="rrhh.PermisoSalida",
+            objeto_id=str(permiso.id),
+        )
+
+        migration = import_module("rrhh.migrations.0043_permisosalida_creado_por")
+        migration.recuperar_capturista_desde_notificaciones(django_apps, None)
+
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.creado_por, self.operadora)
 
     def test_operadora_no_accede_a_bonos_configuracion_ni_registros_administrativos(self):
         rutas = (
@@ -643,6 +701,10 @@ class OperadoraPwaTests(TestCase):
         self.assertContains(response, "/api/bonos-produccion/bonos-captura/")
         self.assertContains(response, "/api/bonos-produccion/registros-diarios-captura/")
         self.assertContains(response, "operadorSolicitudes:OPERADOR_SOLICITUDES")
+        self.assertContains(
+            response,
+            "operadorSolicitudes?'Permisos registrados':'Permisos de mi equipo'",
+        )
 
     def test_pwa_administrativa_no_se_marca_como_operadora_acotada(self):
         self.client.force_login(self.admin)

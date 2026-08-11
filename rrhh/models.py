@@ -1262,6 +1262,13 @@ class PermisoSalida(models.Model):
     ]
 
     empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="permisos")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="permisos_capturados",
+    )
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField(null=True, blank=True)
