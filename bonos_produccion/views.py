@@ -402,7 +402,9 @@ class PermisosProduccionEquipoViewSet(BasePermisosEquipoViewSet):
 
     def filter_permisos(self, qs):
         if self._es_operadora_solicitudes():
-            return qs.filter(empleado__usuario_erp=self.request.user)
+            return qs.filter(
+                Q(creado_por=self.request.user) | Q(empleado__usuario_erp=self.request.user)
+            ).distinct()
         return super().filter_permisos(qs)
 
     def _bonos_periodo_queryset(self):

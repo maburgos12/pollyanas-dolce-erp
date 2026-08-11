@@ -327,6 +327,7 @@ class PermisoAdmin(admin.ModelAdmin):
         "tipo",
         "fecha_inicio",
         "origen_solicitud",
+        "creado_por",
         "estado_jefe",
         "requiere_direccion",
         "estado_direccion",
@@ -346,9 +347,10 @@ class PermisoAdmin(admin.ModelAdmin):
         "goce_sueldo",
         "fecha_inicio",
     )
-    search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo")
+    search_fields = ("folio", "empleado__nombre", "empleado__codigo", "motivo", "creado_por__username")
     readonly_fields = (
         "folio",
+        "creado_por",
         "estado",
         "estado_jefe",
         "requiere_direccion",
