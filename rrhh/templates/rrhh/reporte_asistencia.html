@@ -35,10 +35,10 @@
       <div class="form-group">
         <label for="empleado">Empleado</label>
         <select class="input-field" id="empleado" name="empleado">
-          <option value="">Todos los empleados activos</option>
+          <option value="">Activos y bajas con actividad en el rango</option>
           {% for empleado in empleados %}
             <option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>
-              {{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}
+              {{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}{% if not empleado.activo %} · Baja {{ empleado.fecha_baja_reporte|date:"Y-m-d" }}{% endif %}
             </option>
           {% endfor %}
         </select>
@@ -64,6 +64,9 @@
       <div class="card-header">
         <div>
           <h2>{{ reporte.datos.nombre }}{% if reporte.datos.codigo %} ({{ reporte.datos.codigo }}){% endif %}</h2>
+          {% if not reporte.empleado.activo %}
+            <span class="badge bg-secondary">Baja {{ reporte.empleado.fecha_baja_reporte|date:"Y-m-d" }}</span>
+          {% endif %}
           <p class="muted">
             {{ reporte.datos.puesto|default:"Sin puesto" }} · {{ reporte.datos.sucursal|default:"Sin sucursal" }} · {{ reporte.datos.departamento|default:"Sin departamento" }}
           </p>

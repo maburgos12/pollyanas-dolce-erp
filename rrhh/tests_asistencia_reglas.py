@@ -11,6 +11,7 @@ from rrhh.models import (
     AplicacionGoceVacaciones,
     AsistenciaEmpleado,
     Empleado,
+    EmpleadoBaja,
     HoraExtra,
     IncidenciaAsistencia,
     PermisoSalida,
@@ -81,6 +82,24 @@ class ReglasAsistenciaRRHHTests(TestCase):
         self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
         self.assertEqual(falta.minutos, 11)
         self.assertIn("se considera falta", falta.detalle)
+
+    def test_no_genera_incidencias_despues_de_fecha_de_baja(self):
+        self.empleado.activo = False
+        self.empleado.save(update_fields=["activo"])
+        EmpleadoBaja.objects.create(
+            empleado=self.empleado,
+            nombre=self.empleado.nombre,
+            fecha_ingreso=self.empleado.fecha_ingreso,
+            fecha_baja=date(2026, 6, 1),
+            motivo=EmpleadoBaja.MOTIVO_ABANDONO,
+        )
+
+        resultado = evaluar_dia_empleado(self.empleado, date(2026, 6, 2))
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(
+            IncidenciaAsistencia.objects.filter(empleado=self.empleado, fecha=date(2026, 6, 2)).exists()
+        )
 
     def test_no_genera_faltas_antes_de_fecha_de_ingreso(self):
         self.empleado.fecha_ingreso = date(2026, 6, 10)

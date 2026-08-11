@@ -10,7 +10,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -25,6 +25,7 @@ from .models import (
     AjusteAsistencia,
     AsistenciaEmpleado,
     Empleado,
+    EmpleadoBaja,
     IncidenciaAsistencia,
     IncidenciaAsistenciaBitacora,
     PermisoSalida,
@@ -45,6 +46,25 @@ REPORTE_ASISTENCIA_HEADERS = [
     "minutos",
     "detalle",
 ]
+
+
+def _empleados_reporte_asistencia(fecha_inicio: date, fecha_fin: date):
+    """Mantiene activos y recupera bajas con actividad en el rango consultado."""
+    ultima_baja = (
+        EmpleadoBaja.objects.filter(empleado_id=OuterRef("pk"))
+        .order_by("-fecha_baja", "-id")
+        .values("fecha_baja")[:1]
+    )
+    return (
+        Empleado.objects.filter(
+            Q(activo=True)
+            | Q(asistencias__fecha__range=(fecha_inicio, fecha_fin))
+            | Q(incidencias_asistencia__fecha__range=(fecha_inicio, fecha_fin))
+        )
+        .annotate(fecha_baja_reporte=Subquery(ultima_baja))
+        .distinct()
+        .order_by("nombre", "codigo")
+    )
 
 
 def _parse_fecha(value: str | None, default: date) -> date:
@@ -160,10 +180,8 @@ def _build_reporte_asistencia(
     sucursal: str,
     user=None,
 ) -> tuple[list[dict], int]:
-    empleados_qs = (
-        Empleado.objects.filter(activo=True)
-        .select_related("jefe_directo__usuario_erp")
-        .order_by("nombre", "codigo")
+    empleados_qs = _empleados_reporte_asistencia(fecha_inicio, fecha_fin).select_related(
+        "jefe_directo__usuario_erp"
     )
     if empleado_id.isdigit():
         empleados_qs = empleados_qs.filter(id=int(empleado_id))
@@ -494,7 +512,7 @@ def reporte_asistencia(request):
         {
             "module_tabs": _module_tabs("reporte_asistencia", request.user),
             "reportes": reportes,
-            "empleados": Empleado.objects.filter(activo=True).order_by("nombre", "codigo"),
+            "empleados": _empleados_reporte_asistencia(fecha_inicio, fecha_fin),
             "fecha_inicio": fecha_inicio.isoformat(),
             "fecha_fin": fecha_fin.isoformat(),
             "empleado_id": empleado_id,
