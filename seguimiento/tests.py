@@ -1950,6 +1950,7 @@ class CalendarioTests(TestCase):
     def test_crear_reunion_recurrente_notifica_y_se_muestra_a_invitado(self):
         UserProfile.objects.create(user=self.user_b, telefono="6687654321")
         self.client.force_login(self.user_a)
+        fecha_reunion = self.manana if self.hoy.weekday() == 6 else self.hoy
 
         with patch("seguimiento.views.send_mail") as send_mail_mock, patch("seguimiento.views._enviar_whatsapp_maya") as whatsapp_mock:
             response = self.client.post(
@@ -1957,7 +1958,7 @@ class CalendarioTests(TestCase):
                 {
                     "tipo": "REUNION",
                     "titulo": "Reunión semanal DG",
-                    "fecha": self.hoy.isoformat(),
+                    "fecha": fecha_reunion.isoformat(),
                     "hora_inicio": "09:00",
                     "hora_fin": "09:30",
                     "invitado_user": str(self.user_b.pk),
