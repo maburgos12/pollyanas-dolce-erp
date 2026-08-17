@@ -5081,6 +5081,95 @@ class SolicitudVentasForecastTests(TestCase):
         self.assertEqual(ws["G2"].value, "kg")
         self.assertEqual(ws["I2"].value, 60)
 
+    def _guardar_calculo_insumos_obsoleto_resoluble(self):
+        unidad = UnidadMedida.objects.create(
+            codigo="kg-stale-calc",
+            nombre="Kg cálculo obsoleto",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Insumo cálculo obsoleto",
+            codigo_point="INS-ST-01",
+            nombre_normalizado="insumo calculo obsoleto",
+            unidad_base=unidad,
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+        )
+        CostoInsumo.objects.create(
+            insumo=insumo,
+            fecha=date(2026, 4, 1),
+            costo_unitario=Decimal("10.00"),
+            source_hash="calculo-insumos-stale-cost",
+        )
+        LineaReceta.objects.create(
+            receta=self.receta,
+            posicion=1,
+            insumo=insumo,
+            insumo_texto=insumo.nombre,
+            cantidad=Decimal("1"),
+            unidad=unidad,
+            unidad_texto="kg",
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+        stale_row = {
+            "receta_id": "",
+            "codigo_point": self.receta.codigo_point,
+            "producto": self.receta.nombre,
+            "presentacion": "",
+            "cantidad": "8",
+            "notas": "",
+        }
+        session = self.client.session
+        session["calculo_insumos_preview"] = {
+            "target_start": "2026-04-01",
+            "target_end": "2026-04-01",
+            "target_label": "Cálculo obsoleto",
+            "alcance": "calculo_insumos",
+            "periodo": "2026-04",
+            "sucursal_nombre": "Producción",
+            "source_label": "Proyección BASE · Abril 2026",
+            "source_rows": [stale_row],
+            "unresolved_rows": [
+                {
+                    **stale_row,
+                    "motivo": "Sin producto final equivalente",
+                    "identificador": self.receta.codigo_point,
+                }
+            ],
+            "skipped_rows": [],
+            "totals": {"forecast_total": 0.0, "recetas_count": 0},
+            "rows": [],
+        }
+        session.save()
+
+    def test_calculo_insumos_pantalla_revalida_preview_obsoleto(self):
+        self._guardar_calculo_insumos_obsoleto_resoluble()
+
+        response = self.client.get(
+            reverse("recetas:plan_produccion"),
+            {"seccion": "calculo_insumos"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["calculo_insumos_context"]["export_ready"])
+        self.assertContains(response, "Exportar XLSX")
+        refreshed = self.client.session["calculo_insumos_preview"]
+        self.assertEqual(refreshed["unresolved_rows"], [])
+        self.assertEqual(refreshed["rows"][0]["receta_id"], self.receta.id)
+
+    def test_calculo_insumos_export_revalida_preview_obsoleto(self):
+        self._guardar_calculo_insumos_obsoleto_resoluble()
+
+        response = self.client.get(reverse("recetas:calculo_insumos_export"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        refreshed = self.client.session["calculo_insumos_preview"]
+        self.assertEqual(refreshed["unresolved_rows"], [])
+        self.assertEqual(refreshed["rows"][0]["receta_id"], self.receta.id)
+
     def test_calculo_insumos_export_bloquea_observaciones_criticas(self):
         session = self.client.session
         session["calculo_insumos_preview"] = {

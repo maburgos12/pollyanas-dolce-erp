@@ -13147,11 +13147,46 @@ def _calculo_insumos_blocking_observations(payload: dict[str, Any], supply: dict
     return blockers
 
 
+def _revalidate_calculo_insumos_session_payload(
+    request: HttpRequest,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not payload or not payload.get("source_rows") or not payload.get("unresolved_rows"):
+        return payload
+    if not any(_resolve_receta_for_calculo_insumos(row) for row in payload["unresolved_rows"]):
+        return payload
+
+    refreshed = _build_calculo_insumos_preview(
+        list(payload["source_rows"]),
+        payload.get("source_label") or "Cálculo de insumos",
+        plan_id=_to_int_safe(payload.get("plan_id"), default=0) or None,
+    )
+    for key in (
+        "alcance",
+        "periodo",
+        "target_start",
+        "target_end",
+        "target_label",
+        "sucursal_id",
+        "sucursal_nombre",
+        "source_label",
+        "created_at",
+        "history_meta",
+        "model_meta",
+    ):
+        if key in payload:
+            refreshed[key] = payload[key]
+    request.session[CALCULO_INSUMOS_SESSION_KEY] = refreshed
+    request.session.modified = True
+    return refreshed
+
+
 def _calculo_insumos_context_from_session(request: HttpRequest, *, plan_id: int | None = None) -> dict[str, Any] | None:
     payload = _calculo_insumos_plan_scoped_payload(
         request.session.get(CALCULO_INSUMOS_SESSION_KEY),
         plan_id,
     )
+    payload = _revalidate_calculo_insumos_session_payload(request, payload)
     draft_payload = _calculo_insumos_draft_payload(request, plan_id=plan_id)
     draft_rows = list(draft_payload.get("source_rows") or [])
     if not payload and not draft_rows:
@@ -17002,6 +17037,7 @@ def calculo_insumos_export(request: HttpRequest) -> HttpResponse:
     if plan_id and payload_plan_id and payload_plan_id != plan_id:
         messages.error(request, "El cálculo activo pertenece a otro plan. Limpia o recalcula antes de exportar.")
         return redirect(_calculo_insumos_redirect_url(request))
+    payload = _revalidate_calculo_insumos_session_payload(request, payload)
     supply = None
     if payload.get("rows"):
         supply = build_projection_supply_context_from_forecast_preview(payload, escenario="base")
