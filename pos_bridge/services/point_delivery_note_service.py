@@ -81,12 +81,6 @@ class PointDeliveryNoteService:
         "PK_Cliente",
         "Cliente",
         "Calle",
-        "NoExterior",
-        "NoInterior",
-        "Colonia",
-        "EntreCalles",
-        "Observaciones",
-        "PK_Direccion_Entrega",
     )
 
     def __init__(
@@ -251,7 +245,7 @@ class PointDeliveryNoteService:
             customer_email=email,
             address=self._address(customer),
             references=self._references(customer),
-            point_address_id=self._optional_text(customer["PK_Direccion_Entrega"]),
+            point_address_id=self._optional_text(customer.get("PK_Direccion_Entrega")),
         )
 
     def _get_json(self, session, *, path: str, params: dict, label: str) -> Any:
@@ -303,6 +297,14 @@ class PointDeliveryNoteService:
         return payload
 
     def _one_row(self, payload: Any, *, label: str) -> dict[str, Any]:
+        if isinstance(payload, dict) and (
+            "hasError" in payload or "data" in payload
+        ):
+            if payload.get("hasError") is not False or "data" not in payload:
+                raise PointDeliveryContractError(
+                    f"Point devolvió una estructura inválida en {label}.",
+                )
+            payload = payload["data"]
         if isinstance(payload, dict):
             return payload
         rows = self._rows(payload, label=label, allow_empty=False)
@@ -328,12 +330,12 @@ class PointDeliveryNoteService:
         number = " ".join(
             value
             for value in (
-                self._optional_text(customer["NoExterior"]),
-                self._optional_text(customer["NoInterior"]),
+                self._optional_text(customer.get("NoExterior")),
+                self._optional_text(customer.get("NoInterior")),
             )
             if value
         )
-        colony = self._optional_text(customer["Colonia"])
+        colony = self._optional_text(customer.get("Colonia"))
         address = " ".join(value for value in (street, number) if value)
         if colony:
             address = f"{address}, Colonia {colony}"
@@ -341,8 +343,8 @@ class PointDeliveryNoteService:
 
     def _references(self, customer: dict[str, Any]) -> str:
         parts = []
-        between = self._optional_text(customer["EntreCalles"])
-        observations = self._optional_text(customer["Observaciones"])
+        between = self._optional_text(customer.get("EntreCalles"))
+        observations = self._optional_text(customer.get("Observaciones"))
         if between:
             parts.append(f"Entre calles: {between}")
         if observations:
