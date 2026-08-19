@@ -39,7 +39,7 @@
 
       <div class="fleet-detail-grid">
         <div class="fleet-detail">
-          <strong>Lavado Lavado</strong>
+          <strong>Lavado</strong>
           {% if row.ultimo_lavado %}
             <div class="fleet-muted">Último: {{ row.ultimo_lavado.fecha|date:"d/m/Y" }}</div>
             <span class="fleet-badge {% if row.dias_sin_lavar > 15 %}danger{% else %}ok{% endif %}">{{ row.dias_sin_lavar }} días</span>
@@ -49,7 +49,7 @@
         </div>
 
         <div class="fleet-detail">
-          <strong>DOC Documentos</strong>
+          <strong>Documentos</strong>
           <div class="fleet-muted">
             Seguro:
             {% if row.documento_seguro %}
@@ -69,7 +69,7 @@
         </div>
 
         <div class="fleet-detail">
-          <strong>Falla Servicios</strong>
+          <strong>Servicios</strong>
           <div class="fleet-muted">
             Último:
             {% if row.ultimo_servicio %}
@@ -90,8 +90,9 @@
 
         <div class="fleet-detail">
           <strong>Gastos año</strong>
-          <div class="fleet-muted">{{ row.reparaciones_anio|intcomma }} reparaciones</div>
-          <span class="fleet-badge {% if row.gasto_anio %}warn{% else %}ok{% endif %}">${{ row.gasto_anio|floatformat:2|intcomma }}</span>
+          <div class="fleet-muted">Servicios: {{ row.servicios_anio|intcomma }} · ${{ row.gasto_servicios_anio|floatformat:2|intcomma }}</div>
+          <div class="fleet-muted">Reparaciones: {{ row.reparaciones_anio|intcomma }} · ${{ row.gasto_reparaciones_anio|floatformat:2|intcomma }}</div>
+          <span class="fleet-badge {% if row.gasto_total_anio %}warn{% else %}ok{% endif %}">Total ${{ row.gasto_total_anio|floatformat:2|intcomma }}</span>
           {% if row.turno_activo %}
             <div class="fleet-muted">Activo: {{ row.turno_activo.repartidor }} desde {{ row.turno_activo.hora_salida|date:"H:i" }}</div>
           {% endif %}
