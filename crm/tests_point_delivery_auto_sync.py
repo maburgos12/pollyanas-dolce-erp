@@ -428,6 +428,12 @@ class PointDeliveryAutoSyncConcurrencyTests(TransactionTestCase):
         self.api_client.capabilities = [PublicApiClient.CAPABILITY_OMNICHANNEL]
         self.api_client.save(update_fields=["capabilities"])
         erp_branch = Sucursal.objects.create(
+            id=(
+                Sucursal.objects.order_by("-id")
+                .values_list("id", flat=True)
+                .first()
+                or 0
+            ) + 1,
             codigo="POINT-DOM-RACE",
             nombre="Matriz Point Race",
         )

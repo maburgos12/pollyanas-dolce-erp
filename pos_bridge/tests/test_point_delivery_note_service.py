@@ -141,7 +141,11 @@ class PointDeliveryNoteServiceTests(SimpleTestCase):
             "Correo": "cliente@example.test",
         }]
         service, session, http, detail = self._service(
-            [{"hasError": False, "data": tray}, delivery_customer, catalog],
+            [
+                {"hasError": False, "data": tray},
+                {"hasError": False, "data": delivery_customer},
+                catalog,
+            ],
         )
 
         result = service.fetch_range(
@@ -198,6 +202,77 @@ class PointDeliveryNoteServiceTests(SimpleTestCase):
         )
         with self.assertRaises(FrozenInstanceError):
             result[0].customer_name = "changed"
+
+    def test_fetch_range_accepts_missing_optional_delivery_customer_fields(self):
+        tray = [{
+            "PK_Nota": 887410,
+            "Folio": 15616,
+            "Sucursal": "Matriz",
+            "Fecha_Hora_Cierre": "2026-08-05T14:16:50",
+            "Total": 514,
+            "Facturado": False,
+        }]
+        delivery_customer = {
+            "PK_Cliente": 321,
+            "Cliente": "Cliente Prueba",
+            "Calle": "Av. Principal",
+            "NoExterior": "101",
+            "Colonia": "Centro",
+            "PK_Direccion_Entrega": 88,
+        }
+        service, _session, _http, _detail = self._service(
+            [
+                {"hasError": False, "data": tray},
+                {"hasError": False, "data": delivery_customer},
+                [],
+            ],
+        )
+
+        result = service.fetch_range(
+            start_date=date(2026, 8, 5),
+            end_date=date(2026, 8, 5),
+        )
+
+        self.assertEqual(len(result.notes), 1)
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result[0].address, "Av. Principal 101, Colonia Centro")
+        self.assertEqual(result[0].references, "")
+
+    def test_fetch_range_rejects_invalid_delivery_customer_envelopes(self):
+        tray = [{
+            "PK_Nota": 887410,
+            "Folio": 15616,
+            "Sucursal": "Matriz",
+            "Fecha_Hora_Cierre": "2026-08-05T14:16:50",
+            "Total": 514,
+            "Facturado": False,
+        }]
+        customer = {
+            "PK_Cliente": 321,
+            "Cliente": "Cliente Prueba",
+            "Calle": "Av. Principal",
+        }
+        invalid_envelopes = {
+            "point_error": {"hasError": True, "data": customer},
+            "missing_data": {"hasError": False},
+            "multiple_rows": {"hasError": False, "data": [customer, customer]},
+            "scalar_data": {"hasError": False, "data": "invalid"},
+        }
+
+        for label, envelope in invalid_envelopes.items():
+            with self.subTest(label=label):
+                service, session, _http, _detail = self._service([tray, envelope])
+
+                result = service.fetch_range(
+                    start_date=date(2026, 8, 5),
+                    end_date=date(2026, 8, 5),
+                )
+
+                self.assertEqual(result.notes, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(result.failures[0].error_code, "POINT_CONTRACT")
+                self.assertEqual(len(session.requests), 2)
+                self.assertTrue(session.closed)
 
     def test_fetch_range_normalizes_invalid_catalog_email_to_blank(self):
         tray = [{
