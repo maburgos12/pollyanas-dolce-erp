@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.staticfiles import finders
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse
@@ -38,6 +38,7 @@ from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import Repartidor, ReparacionUnidad, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
+from logistica.services_flota import validar_fecha_servicio_realizado
 from maestros.models import Proveedor
 
 from .serializers import (
@@ -2269,6 +2270,11 @@ def registrar_servicio_flota(request):
         )
         srv.save()
     else:
+        try:
+            validar_fecha_servicio_realizado(fecha)
+        except ValidationError as error:
+            msg.error(request, error.messages[0])
+            return redirect("mantenimiento:dashboard")
         km = _safe_int(request.POST.get("km_al_servicio")) or None
         srv = ServicioRealizadoUnidad(
             unidad=unidad,

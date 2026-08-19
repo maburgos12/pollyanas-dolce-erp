@@ -81,6 +81,7 @@ from .services_entregas import confirmar_entrega_parada, resolver_alerta_histori
 from .services_discrepancias import pendientes_vencidos_para_planeacion, resolver_discrepancia
 from .services_tiempos_ruta import resumen_tiempos_ruta
 from .services_indicadores_abasto import build_indicadores_abasto
+from .services_flota import resumen_anual_unidad, servicios_realizados_validos, validar_fecha_servicio_realizado
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -3246,8 +3247,8 @@ def flota_resumen(request):
             .order_by("-fecha_vencimiento")
             .first()
         )
-        ultimo_servicio = ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio").filter(unidad=unidad).order_by(
-            "-fecha_servicio"
+        ultimo_servicio = servicios_realizados_validos(unidad, today=today).select_related("tipo_servicio").order_by(
+            "-fecha_servicio", "-id"
         ).first()
         proximo_servicio = _decorate_servicio(
             ServicioRealizadoUnidad.objects.vigentes().select_related("tipo_servicio")
@@ -3255,7 +3256,7 @@ def flota_resumen(request):
             .order_by("proxima_fecha")
             .first()
         )
-        reparaciones_year = ReparacionUnidad.objects.filter(unidad=unidad, fecha_ingreso__year=year)
+        resumen_gastos = resumen_anual_unidad(unidad, year=year, today=today)
         turno_activo = (
             BitacoraSalidaLlegada.objects.select_related("repartidor__user")
             .filter(unidad=unidad, cerrada=False)
@@ -3271,8 +3272,11 @@ def flota_resumen(request):
                 "documento_tarjeta": documento_tarjeta,
                 "ultimo_servicio": ultimo_servicio,
                 "proximo_servicio": proximo_servicio,
-                "reparaciones_anio": reparaciones_year.count(),
-                "gasto_anio": reparaciones_year.aggregate(total=Sum("costo_total")).get("total") or Decimal("0"),
+                "servicios_anio": resumen_gastos.servicios_cantidad,
+                "gasto_servicios_anio": resumen_gastos.servicios_total,
+                "reparaciones_anio": resumen_gastos.reparaciones_cantidad,
+                "gasto_reparaciones_anio": resumen_gastos.reparaciones_total,
+                "gasto_total_anio": resumen_gastos.gasto_total,
                 "turno_activo": turno_activo,
             }
         )
@@ -3378,10 +3382,16 @@ def unidad_servicio_nuevo(request, pk):
     unidad = get_object_or_404(Unidad, pk=pk)
     if request.method == "POST":
         tipo_servicio = get_object_or_404(TipoServicioUnidad, pk=request.POST.get("tipo_servicio"), activo=True)
+        fecha_servicio = _parse_date(request.POST.get("fecha_servicio")) or timezone.localdate()
+        try:
+            validar_fecha_servicio_realizado(fecha_servicio)
+        except ValidationError as error:
+            messages.error(request, error.messages[0])
+            return _redirect_unidad_tab(pk, "servicios")
         ServicioRealizadoUnidad.objects.create(
             unidad=unidad,
             tipo_servicio=tipo_servicio,
-            fecha_servicio=_parse_date(request.POST.get("fecha_servicio")) or timezone.localdate(),
+            fecha_servicio=fecha_servicio,
             km_al_servicio=int(request.POST.get("km_al_servicio") or 0) or None,
             proveedor=(request.POST.get("proveedor") or "").strip(),
             costo=_parse_decimal(request.POST.get("costo")) if request.POST.get("costo") else None,
