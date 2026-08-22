@@ -1934,7 +1934,7 @@ class AutoControlSettings(models.Model):
     max_variacion_produccion_pct = models.DecimalField(max_digits=8, decimal_places=2, default=30)
     max_compra_diaria = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     min_stock_seguridad = models.DecimalField(max_digits=18, decimal_places=3, default=0)
-    enable_auto_purchase = models.BooleanField(default=True)
+    enable_auto_purchase = models.BooleanField(default=False)
     enable_alerts = models.BooleanField(default=True)
     metadata = models.JSONField(default=dict, blank=True)
     actualizado_por = models.ForeignKey(

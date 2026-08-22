@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from core.access import ROLE_DG
 from core.models import Sucursal
+from compras.models import SolicitudCompra
 from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
@@ -42,6 +44,12 @@ from reportes.operations_metrics_service import rebuild_operations_metrics
 ZERO = Decimal("0")
 
 
+class AutoPurchaseSafeDefaultsTests(SimpleTestCase):
+    def test_auto_purchase_global_default_is_disabled(self):
+        self.assertIs(settings.ERP_AUTO_PURCHASE_ENABLED, False)
+
+
+@override_settings(ERP_AUTO_PURCHASE_ENABLED=True)
 class OperationsAutomationFlowTests(TestCase):
     def setUp(self):
         self.target_date = date(2026, 4, 6)
@@ -308,6 +316,18 @@ class OperationsAutomationFlowTests(TestCase):
         result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
 
         self.assertEqual(Decimal(result["branches"][0]["lines"][0]["shortage_immediate"]), Decimal("2.000"))
+
+    @override_settings(ERP_AUTO_PURCHASE_ENABLED=False)
+    def test_auto_purchase_is_fail_closed_when_global_flag_is_off(self):
+        controls = AutoControlSettings.get_solo()
+        controls.enable_auto_purchase = True
+        controls.save(update_fields=["enable_auto_purchase"])
+
+        result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
+
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["generated"], 0)
+        self.assertFalse(SolicitudCompra.objects.filter(area__startswith="AUTO_PRODUCCION:").exists())
 
     def test_stock_alert_usa_total_y_umbral_de_almacen_1(self):
         ExistenciaInsumo.objects.create(
