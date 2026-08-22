@@ -1,7 +1,7 @@
 # Inventario con fuente única Point
 
-**Fecha:** 2026-08-22  
-**Estado:** diseño aprobado para revisión escrita  
+**Fecha:** 2026-08-22
+**Estado:** diseño aprobado para revisión escrita
 **Alcance inicial:** consultas de existencias de insumos, separación ALMACÉN/CEDIS y bloqueo de decisiones con información vencida.
 
 ## Problema

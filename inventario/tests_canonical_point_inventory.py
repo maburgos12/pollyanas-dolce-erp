@@ -1,5 +1,5 @@
-from decimal import Decimal
 from datetime import timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase, override_settings
