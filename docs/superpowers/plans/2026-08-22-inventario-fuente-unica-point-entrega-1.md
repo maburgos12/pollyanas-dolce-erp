@@ -29,6 +29,7 @@
 
 ```python
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
@@ -53,9 +54,18 @@ class CanonicalPointInventoryContractTests(SimpleTestCase):
             require_inventory_location("CFP")
 
     def test_base_units_are_presented_as_kg_liters_or_pieces(self):
-        self.assertEqual(display_quantity(Decimal("169669.245"), "g"), (Decimal("169.669245"), "kg"))
-        self.assertEqual(display_quantity(Decimal("11217.150"), "ml"), (Decimal("11.21715"), "L"))
-        self.assertEqual(display_quantity(Decimal("7"), "pza"), (Decimal("7"), "pza"))
+        self.assertEqual(
+            display_quantity(Decimal("169669.245"), SimpleNamespace(codigo="g")),
+            (Decimal("169.669245"), "kg"),
+        )
+        self.assertEqual(
+            display_quantity(Decimal("11217.150"), SimpleNamespace(codigo="ml")),
+            (Decimal("11.21715"), "L"),
+        )
+        self.assertEqual(
+            display_quantity(Decimal("7"), SimpleNamespace(codigo="pza")),
+            (Decimal("7"), "pza"),
+        )
 ```
 
 - [ ] **Step 2: Ejecutar las pruebas y comprobar RED**
@@ -75,6 +85,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+
+from inventario.units import presentation_quantity
 
 
 class InventoryLocation(StrEnum):
@@ -116,13 +128,8 @@ def require_inventory_location(value: InventoryLocation | str | None) -> Invento
         raise ValueError("La ubicación debe ser ALMACEN o CEDIS.") from exc
 
 
-def display_quantity(quantity: Decimal, base_unit: str) -> tuple[Decimal, str]:
-    normalized = (base_unit or "").strip().lower()
-    if normalized == "g":
-        return quantity / Decimal("1000"), "kg"
-    if normalized == "ml":
-        return quantity / Decimal("1000"), "L"
-    return quantity, base_unit
+def display_quantity(quantity: Decimal, unidad) -> tuple[Decimal, str]:
+    return presentation_quantity(quantity, unidad)
 ```
 
 - [ ] **Step 4: Ejecutar las pruebas y comprobar GREEN**
@@ -235,7 +242,7 @@ class CanonicalPointInventoryService:
         return readings
 ```
 
-`_reading` extraerá `Unidad` de `raw_payload`, validará `POINT_UNIT_ALIASES`, convertirá mediante `cantidad_en_unidad_erp`, presentará con `display_quantity` y comparará `captured_at` contra el límite de `settings.POINT_INVENTORY_CANONICAL_MAX_AGE_MINUTES`. Un código, unidad o snapshot faltante debe devolver `MISSING` o `ERROR` con cantidad `None`, nunca cero.
+`_reading` extraerá `Unidad` de `raw_payload`, validará `POINT_UNIT_ALIASES`, convertirá mediante `cantidad_en_unidad_erp`, presentará reutilizando `inventario.units.presentation_quantity` a través de `display_quantity` y comparará `captured_at` contra el límite de `settings.POINT_INVENTORY_CANONICAL_MAX_AGE_MINUTES`. Un código, unidad o snapshot faltante debe devolver `MISSING` o `ERROR` con cantidad `None`, nunca cero.
 
 - [ ] **Step 4: Ejecutar las pruebas y comprobar GREEN**
 
