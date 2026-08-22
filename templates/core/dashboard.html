@@ -241,9 +241,9 @@
                     <td><strong>{{ row.insumo_nombre }}</strong></td>
                     <td>{{ row.recipe_names|join:", " }}</td>
                     <td class="text-end">{{ row.historico_units|floatformat:0|intcomma }}</td>
-                    <td class="text-end">{{ row.required_qty|floatformat:2|intcomma }}</td>
-                    <td class="text-end">{{ row.stock_actual|floatformat:2|intcomma }}</td>
-                    <td class="text-end">{{ row.shortage|floatformat:2|intcomma }}</td>
+                    <td class="text-end">{{ row.required_qty_display|floatformat:2|intcomma }} {{ row.display_unit }}</td>
+                    <td class="text-end">{% if row.stock_actual_display is not None %}{{ row.stock_actual_display|floatformat:2|intcomma }} {{ row.display_unit }}{% else %}No disponible{% endif %}</td>
+                    <td class="text-end">{{ row.shortage_display|floatformat:2|intcomma }} {{ row.display_unit }}</td>
                     <td>{% if row.master_missing %}{{ row.master_missing|join:", " }}{% elif row.missing_cost %}Costo pendiente{% else %}Listo{% endif %}</td>
                     <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
                 </tr>

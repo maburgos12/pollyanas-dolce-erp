@@ -17,7 +17,12 @@ from compras.models import OrdenCompra, PresupuestoCompraPeriodo, RecepcionCompr
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, PointPendingMatch, Proveedor, UnidadMedida
-from pos_bridge.models import PointBranch, PointSalesDailyProductFact
+from pos_bridge.models import (
+    PointBranch,
+    PointInsumoInventorySnapshot,
+    PointSalesDailyProductFact,
+    PointSyncJob,
+)
 from ventas.models import VentaAutoritativaPoint
 from recetas.models import (
     LineaReceta,
@@ -2333,6 +2338,56 @@ class RecetasCosteoApiTests(TestCase):
         resp_all = self.client.get(url, {"include_all": 1})
         self.assertEqual(resp_all.status_code, 200)
         self.assertEqual(resp_all.json()["totales"]["insumos"], Insumo.objects.filter(activo=True).count())
+
+    def test_endpoint_inventario_sugerencias_preserva_base_y_agrega_presentacion_kg(self):
+        from django.core.cache import cache as django_cache
+
+        gram = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo API presentación",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="AZUCAR MASCABADO API PRESENTACION",
+            codigo_point="011-API-PRES",
+            unidad_base=gram,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_minimo=Decimal("30000"),
+            punto_reorden=Decimal("60000"),
+        )
+        branch = PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True},
+            result_summary={"locations": {"ALMACEN": {"rows": 1, "snapshots": 1}}},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=branch,
+            insumo=insumo,
+            point_code=insumo.codigo_point,
+            point_name=insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=job,
+        )
+        django_cache.clear()
+
+        response = self.client.get(reverse("api_inventario_sugerencias_compra"), {"include_all": 1})
+        self.assertEqual(response.status_code, 200)
+        item = next(row for row in response.json()["items"] if row["insumo_id"] == insumo.id)
+        self.assertEqual(item["stock_actual"], "20000.000000")
+        self.assertEqual(item["unidad"], "g")
+        self.assertEqual(Decimal(item["stock_actual_presentacion"]), Decimal("20"))
+        self.assertEqual(Decimal(item["stock_seguridad_presentacion"]), Decimal("30"))
+        self.assertEqual(Decimal(item["punto_reorden_presentacion"]), Decimal("60"))
+        self.assertEqual(item["unidad_presentacion"], "kg")
 
     def test_endpoint_inventario_sugerencias_compra_no_suma_variantes_internas_sin_point(self):
         self.insumo.codigo_point = "SUG-CANON-001"

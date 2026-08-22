@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from inventario.canonical_point_inventory import CanonicalPointInventoryService, InventoryFreshness
+from inventario.units import presentation_quantity
 from maestros.models import Insumo
 from maestros.utils.canonical_catalog import canonical_insumo_by_id
 from inventario.stock_trace import TRACE_LABELS, TRACE_UNTRACED
@@ -61,6 +62,15 @@ def _stock_status(*, available_before: Decimal, shortage_qty: Decimal) -> tuple[
     return "DISPONIBLE", "Disponible"
 
 
+def _with_presentation(row: dict[str, object], unidad, *quantity_fields: str) -> dict[str, object]:
+    display_unit = getattr(unidad, "codigo", "") or ""
+    for field in quantity_fields:
+        display_value, display_unit = presentation_quantity(_to_decimal(row.get(field)), unidad)
+        row[f"{field}_display"] = display_value
+    row["display_unit"] = display_unit
+    return row
+
+
 def _serialize_sync_run(run: AlmacenSyncRun | None) -> dict[str, object] | None:
     if run is None:
         return None
@@ -81,6 +91,7 @@ class _OrderRequirement:
     insumo_id: int
     insumo_nombre: str
     unidad_codigo: str
+    unidad: object | None
     recipes: set[str]
     required_qty: Decimal = ZERO
 
@@ -248,6 +259,7 @@ def build_production_supply_context(
                         insumo_id=int(bom_line.insumo_id),
                         insumo_nombre=bom_line.insumo.nombre,
                         unidad_codigo=unidad_codigo,
+                        unidad=bom_line.insumo.unidad_base,
                         recipes=set(),
                     ),
                 )
@@ -262,7 +274,7 @@ def build_production_supply_context(
                     shortage_qty=shortage_qty,
                 )
                 recipe_items.append(
-                    {
+                    _with_presentation({
                         "insumo_id": int(bom_line.insumo_id),
                         "insumo_nombre": bom_line.insumo.nombre,
                         "unidad_codigo": unidad_codigo,
@@ -271,7 +283,7 @@ def build_production_supply_context(
                         "shortage_qty": shortage_qty,
                         "status_code": status_code,
                         "status_label": status_label,
-                    }
+                    }, bom_line.insumo.unidad_base, "required_qty", "available_before_qty", "shortage_qty")
                 )
             shortage_items = sum(1 for item in recipe_items if item["shortage_qty"] > ZERO)
             if recipe_items:
@@ -328,7 +340,7 @@ def build_production_supply_context(
                 order_generated_rows += 1
 
             order_items.append(
-                {
+                _with_presentation({
                     "insumo_id": insumo_id,
                     "insumo_nombre": requirement.insumo_nombre,
                     "unidad_codigo": requirement.unidad_codigo,
@@ -349,7 +361,7 @@ def build_production_supply_context(
                     "purchase_status_text": ", ".join(snapshot.solicitud.get_estatus_display() for snapshot in purchase_snapshots),
                     "status_code": status_code,
                     "status_label": status_label,
-                }
+                }, requirement.unidad, "required_qty", "available_before_qty", "committed_qty", "shortage_qty", "available_after_qty", "purchase_generated_qty", "purchase_gap_qty")
             )
 
             aggregate = aggregate_rows.setdefault(
@@ -358,6 +370,7 @@ def build_production_supply_context(
                     "insumo_id": insumo_id,
                     "insumo_nombre": requirement.insumo_nombre,
                     "unidad_codigo": requirement.unidad_codigo,
+                    "unidad": requirement.unidad,
                     "available_qty": _quantize_units(initial_inventory.get(insumo_id, ZERO)),
                     "committed_qty": ZERO,
                     "required_qty": ZERO,
@@ -411,7 +424,7 @@ def build_production_supply_context(
         if visible_updated_at and (latest_visible_update is None or visible_updated_at > latest_visible_update):
             latest_visible_update = visible_updated_at
         rows.append(
-            {
+            _with_presentation({
                 "insumo_id": insumo_id,
                 "insumo_nombre": row["insumo_nombre"],
                 "unidad_codigo": row["unidad_codigo"],
@@ -442,7 +455,7 @@ def build_production_supply_context(
                     available_before=_quantize_units(_to_decimal(row["available_qty"])),
                     shortage_qty=shortage_qty,
                 )[1],
-            }
+            }, row.get("unidad"), "available_qty", "committed_qty", "required_qty", "shortage_qty", "remaining_after_commit", "purchase_generated_qty", "purchase_gap_qty")
         )
 
     rows.sort(key=lambda item: (-item["shortage_qty"], -item["required_qty"], item["insumo_nombre"]))

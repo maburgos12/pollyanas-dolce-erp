@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Reportes - Faltantes{% endblock %}
 {% block page_title %}Reportes · Faltantes Críticos{% endblock %}
 {% block body_class %}page-reportes-faltantes{% endblock %}
@@ -469,11 +470,11 @@
         {% for row in rows %}
         <tr>
           <td>{{ row.insumo.nombre }}</td>
-          <td>{% if row.insumo.unidad_base %}{{ row.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
+          <td>{{ row.display_unit }}</td>
           <td><span class="badge bg-primary">{{ row.enterprise_usage_label }}</span></td>
-          <td class="text-end">{{ row.stock_actual }}</td>
-          <td class="text-end">{{ row.punto_reorden }}</td>
-          <td class="text-end">{{ row.sugerencia_compra }}</td>
+          <td class="text-end">{% if row.stock_actual_display is not None %}{{ row.stock_actual_display|floatformat:3|intcomma }}{% else %}No disponible{% endif %}</td>
+          <td class="text-end">{{ row.punto_reorden_display|floatformat:3|intcomma }}</td>
+          <td class="text-end">{{ row.sugerencia_compra_display|floatformat:3|intcomma }}</td>
           <td>
             <span class="badge {% if row.enterprise_status == 'Listo ERP' %}bg-success{% else %}bg-warning text-dark{% endif %}">
               {{ row.enterprise_status }}

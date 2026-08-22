@@ -4653,6 +4653,7 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
             Decimal(str(getattr(row, "punto_reorden", 0) or 0)) - Decimal(str(getattr(row, "stock_actual", 0) or 0)),
             Decimal("0"),
         )
+        gap_display, display_unit = presentation_quantity(gap, canonical.unidad_base)
         priority_score = historico_units * max(gap, Decimal("1"))
         if historico_units >= Decimal("40") and gap > 0:
             priority_label = "Alta"
@@ -4689,8 +4690,12 @@ def _inventory_commercial_priority_rows(rows: list[SimpleNamespace], *, lookback
                 "insumo_nombre": display_name,
                 "historico_units": historico_units,
                 "gap": gap,
+                "gap_display": gap_display,
                 "stock_actual": Decimal(str(getattr(row, "stock_actual", 0) or 0)),
+                "stock_actual_display": getattr(row, "stock_actual_display", None),
                 "reorder_point": Decimal(str(getattr(row, "punto_reorden", 0) or 0)),
+                "reorder_point_display": getattr(row, "punto_reorden_display", Decimal("0")),
+                "display_unit": getattr(row, "display_unit", "") or display_unit,
                 "priority_label": priority_label,
                 "priority_tone": priority_tone,
                 "master_missing": readiness_profile["missing"][:2] or ["Sin faltante"],
@@ -6075,6 +6080,11 @@ def alertas(request: HttpRequest) -> HttpResponse:
             e.alerta_nivel = nivel_row
             e.alerta_etiqueta = etiqueta
             e.alerta_diferencia = diferencia
+            e.alerta_diferencia_display = (
+                presentation_quantity(diferencia, e.insumo.unidad_base)[0]
+                if diferencia is not None
+                else None
+            )
             rows.append(e)
 
     selected_focus_key = (request.GET.get("master_focus_key") or "auto").strip() or "auto"

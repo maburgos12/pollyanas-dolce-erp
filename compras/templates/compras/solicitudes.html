@@ -270,6 +270,7 @@
             <th class="text-end">Presupuesto</th>
             <th>Fecha</th>
             <th>Estatus</th>
+            <th>Stock Point</th>
             {% if can_manage_compras %}<th>Acción</th>{% endif %}
           </tr>
         </thead>
@@ -294,6 +295,10 @@
             <td class="text-end">${{ s.presupuesto_estimado|floatformat:2|intcomma }}</td>
             <td>{{ s.fecha_requerida }}</td>
             <td>{{ s.get_estatus_display }}</td>
+            <td>
+              <div>{{ s.reabasto_texto }}</div>
+              <div class="muted">{{ s.reabasto_detalle }}</div>
+            </td>
             {% if can_manage_compras %}
             <td>
               <div class="recipe-actions">
@@ -317,7 +322,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="{% if can_manage_compras %}11{% else %}10{% endif %}">
+            <td colspan="{% if can_manage_compras %}12{% else %}11{% endif %}">
               {% include "components/empty_state.html" with message="Sin solicitudes capturadas para este periodo o filtro" icon="folder" %}
             </td>
           </tr>

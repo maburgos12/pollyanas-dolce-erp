@@ -149,8 +149,8 @@
             <td><strong>{{ row.insumo_nombre }}</strong></td>
             <td><span class="badge {% if row.priority_tone == 'danger' %}bg-danger{% elif row.priority_tone == 'warning' %}bg-warning text-dark{% else %}bg-primary{% endif %}">{{ row.priority_label }}</span></td>
             <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
-            <td>{{ row.gap|floatformat:2|intcomma }}</td>
-            <td>{{ row.stock_actual|floatformat:2|intcomma }} / {{ row.reorder_point|floatformat:2|intcomma }}</td>
+            <td>{{ row.gap_display|floatformat:3|intcomma }} {{ row.display_unit }}</td>
+            <td>{{ row.stock_actual_display|floatformat:3|intcomma }} / {{ row.reorder_point_display|floatformat:3|intcomma }} {{ row.display_unit }}</td>
             <td>{{ row.master_missing|join:", " }}</td>
             <td>{{ row.recipe_names|join:", " }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">Abrir artículo</a></td>
@@ -184,8 +184,8 @@
             <td><strong>{{ row.insumo_nombre }}</strong></td>
             <td>{{ row.dominant_recipe_name }}</td>
             <td>{{ row.historico_units|floatformat:0|intcomma }}</td>
-            <td>{{ row.stock_actual|floatformat:2|intcomma }} / {{ row.reorder_point|floatformat:2|intcomma }}</td>
-            <td>{{ row.gap|floatformat:2|intcomma }}</td>
+            <td>{{ row.stock_actual_display|floatformat:3|intcomma }} / {{ row.reorder_point_display|floatformat:3|intcomma }} {{ row.display_unit }}</td>
+            <td>{{ row.gap_display|floatformat:3|intcomma }} {{ row.display_unit }}</td>
             <td>{{ row.master_missing|join:", " }}</td>
             <td><a class="btn btn-secondary btn-sm" href="{{ row.action_url }}">{{ row.action_label }}</a></td>
           </tr>
@@ -329,16 +329,16 @@
               <span class="badge bg-warning text-dark pd-u-6170d94c81">{{ e.operational_blocker_label }}</span>
               {% endif %}
             </td>
-            <td>{% if e.insumo.unidad_base %}{{ e.insumo.unidad_base.codigo }}{% else %}-{% endif %}</td>
+            <td>{{ e.display_unit }}</td>
             <td><span class="badge bg-primary">{{ e.enterprise_usage_label }}</span></td>
-            <td class="text-end">{{ e.stock_actual }}</td>
-            <td class="text-end">{{ e.stock_minimo }}</td>
-            <td class="text-end">{{ e.stock_maximo }}</td>
-            <td class="text-end">{{ e.punto_reorden }}</td>
-            <td class="text-end">{{ e.inventario_promedio }}</td>
+            <td class="text-end">{% if e.stock_actual_display is not None %}{{ e.stock_actual_display|floatformat:3|intcomma }}{% else %}No disponible{% endif %}</td>
+            <td class="text-end">{{ e.stock_minimo_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.stock_maximo_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.punto_reorden_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{{ e.inventario_promedio_display|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ e.dias_llegada_pedido }}</td>
-            <td class="text-end">{{ e.consumo_diario_promedio }}</td>
-            <td class="text-end">{{ e.alerta_diferencia }}</td>
+            <td class="text-end">{{ e.consumo_diario_promedio_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">{% if e.alerta_diferencia_display is not None %}{{ e.alerta_diferencia_display|floatformat:3|intcomma }}{% else %}-{% endif %}</td>
             <td>
               <span class="badge {% if e.enterprise_status == 'Lista para operar' %}bg-success{% else %}bg-warning text-dark{% endif %}">
                 {{ e.enterprise_status }}

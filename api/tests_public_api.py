@@ -20,7 +20,13 @@ from crm.services import PickupAvailabilityService
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.models import (
+    PointBranch,
+    PointInsumoInventorySnapshot,
+    PointInventorySnapshot,
+    PointProduct,
+    PointSyncJob,
+)
 from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryResult
 from recetas.models import LineaReceta, Receta, RecetaCodigoPointAlias
 
@@ -166,6 +172,57 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["results"][0]["inventario_fuente"], "POINT")
         self.assertEqual(response.data["results"][0]["costo_unitario"], "23.500000")
         self.assertTrue(PublicApiAccessLog.objects.filter(client=self.public_client, endpoint=url).exists())
+
+    def test_insumos_preserva_base_y_expone_presentacion_kg(self):
+        gram = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo API pública",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Azucar mascabado pública",
+            codigo_point="011-PUBLIC",
+            unidad_base=gram,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            punto_reorden=Decimal("60000"),
+        )
+        branch = PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True},
+            result_summary={"locations": {"ALMACEN": {"rows": 1, "snapshots": 1}}},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=branch,
+            insumo=insumo,
+            point_code=insumo.codigo_point,
+            point_name=insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=job,
+        )
+        cache.clear()
+
+        response = self.client.get(
+            reverse("api_public_insumos"),
+            {"q": "mascabado pública"},
+            **self._auth_headers(),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        row = response.data["results"][0]
+        self.assertEqual(Decimal(row["stock_actual"]), Decimal("20000"))
+        self.assertEqual(row["unidad"], "g")
+        self.assertEqual(Decimal(row["stock_actual_presentacion"]), Decimal("20"))
+        self.assertEqual(Decimal(row["punto_reorden_presentacion"]), Decimal("60"))
+        self.assertEqual(row["unidad_presentacion"], "kg")
 
     def test_insumos_with_invalid_key_returns_401(self):
         url = reverse("api_public_insumos")

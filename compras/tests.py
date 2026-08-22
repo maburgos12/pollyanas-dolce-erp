@@ -24,9 +24,10 @@ from compras.models import (
     RecepcionCompra,
     SolicitudCompra,
 )
-from compras.views import _apply_recepcion_to_inventario
+from compras.views import _apply_recepcion_to_inventario, _build_insumo_options
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
+from pos_bridge.models import PointBranch, PointInsumoInventorySnapshot, PointSyncJob
 from recetas.models import (
     LineaReceta,
     PlanProduccion,
@@ -3660,3 +3661,74 @@ class ComprasFolioRetryTests(TestCase):
                 observaciones="",
             )
         self.assertEqual(recepcion.folio, "REC-COLLIDE-002")
+
+
+class ComprasPointPresentationUnitTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="compras_unidades_point",
+            email="compras-unidades@example.com",
+            password="test",
+        )
+        self.client.force_login(self.user)
+        self.gram = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo compras",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="AZUCAR MASCABADO COMPRAS",
+            codigo_point="011-COMP",
+            unidad_base=self.gram,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ALMACEN_1",
+            stock_minimo=Decimal("30000"),
+            punto_reorden=Decimal("60000"),
+            consumo_diario_promedio=Decimal("1000"),
+            dias_llegada_pedido=1,
+        )
+        branch = PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True},
+            result_summary={"locations": {"ALMACEN": {"rows": 1, "snapshots": 1}}},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=branch,
+            insumo=self.insumo,
+            point_code=self.insumo.codigo_point,
+            point_name=self.insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=job,
+        )
+        self.solicitud = SolicitudCompra.objects.create(
+            area="Compras",
+            solicitante="Prueba unidades",
+            insumo=self.insumo,
+            cantidad=Decimal("1000"),
+            estatus=SolicitudCompra.STATUS_BORRADOR,
+        )
+
+    def test_opciones_y_solicitudes_presentan_stock_point_en_kg(self):
+        from django.core.cache import cache as django_cache
+
+        django_cache.clear()
+        option = next(item for item in _build_insumo_options() if item["id"] == self.insumo.id)
+        self.assertEqual(option["stock_actual_display"], Decimal("20"))
+        self.assertEqual(option["punto_reorden_display"], Decimal("60"))
+        self.assertEqual(option["stock_seguridad_display"], Decimal("30"))
+        self.assertEqual(option["display_unit"], "kg")
+
+        response = self.client.get(reverse("compras:solicitudes"), {"q": "MASCABADO COMPRAS"})
+        self.assertEqual(response.status_code, 200)
+        solicitud = next(item for item in response.context["solicitudes"] if item.id == self.solicitud.id)
+        self.assertEqual(solicitud.reabasto_detalle, "Stock 20.000 kg / Reorden 60.000 kg")
+        self.assertContains(response, "Stock 20.000 kg / Reorden 60.000 kg")
+        self.assertNotContains(response, "Stock 20000")

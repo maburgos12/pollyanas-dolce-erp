@@ -403,3 +403,40 @@ class OperationsAutomationFlowTests(TestCase):
                 insumo=self.insumo,
             ).exists()
         )
+
+    def test_stock_alert_presenta_masa_en_kg_y_conserva_base_en_metadata(self):
+        gram = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo alertas",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        insumo = Insumo.objects.create(
+            nombre="Azucar mascabado alertas",
+            codigo_point="011-ALERT",
+            unidad_base=gram,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen="ALMACEN_1",
+            stock_minimo=Decimal("30000"),
+            punto_reorden=Decimal("60000"),
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=self.almacen_point,
+            insumo=insumo,
+            point_code=insumo.codigo_point,
+            point_name=insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=self.canonical_inventory_job,
+        )
+
+        generate_operational_alerts(target_date=self.target_date)
+
+        alert = Alert.objects.get(fecha=self.target_date, tipo=Alert.TYPE_STOCK, insumo=insumo)
+        self.assertIn("disponible 20.000 kg vs umbral 60.000 kg", alert.mensaje)
+        self.assertEqual(Decimal(alert.metadata["stock_actual"]), Decimal("20000"))
+        self.assertEqual(Decimal(alert.metadata["stock_actual_presentacion"]), Decimal("20"))
+        self.assertEqual(alert.metadata["unidad_presentacion"], "kg")

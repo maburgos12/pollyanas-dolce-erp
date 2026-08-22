@@ -250,6 +250,12 @@ def generate_operational_alerts(*, target_date: date | None = None) -> dict[str,
         if stock_actual > threshold:
             continue
         shortage = max(threshold - stock_actual, ZERO)
+        stock_actual_display = _to_decimal(row.stock_actual_display)
+        threshold_display = max(
+            _to_decimal(row.stock_minimo_display),
+            _to_decimal(row.punto_reorden_display),
+        )
+        shortage_display = max(threshold_display - stock_actual_display, ZERO)
         severity = Alert.SEVERITY_HIGH if stock_actual <= (_to_decimal(row.stock_minimo) * Decimal("0.5")) else Alert.SEVERITY_MEDIUM
         alerts.append(
             _upsert_alert(
@@ -260,14 +266,18 @@ def generate_operational_alerts(*, target_date: date | None = None) -> dict[str,
                 fecha=target_date,
                 insumo_id=row.insumo_id,
                 mensaje=(
-                    f"Stock crítico en {row.insumo.nombre}: disponible {stock_actual.quantize(Decimal('0.001'))} "
-                    f"vs umbral {threshold.quantize(Decimal('0.001'))}."
+                    f"Stock crítico en {row.insumo.nombre}: disponible {stock_actual_display.quantize(Decimal('0.001'))} "
+                    f"{row.display_unit} vs umbral {threshold_display.quantize(Decimal('0.001'))} {row.display_unit}."
                 ),
                 impacto_estimado=shortage * latest_cost_by_insumo.get(int(row.insumo_id), ZERO),
                 metadata={
                     "stock_actual": str(stock_actual),
                     "stock_minimo": str(row.stock_minimo),
                     "punto_reorden": str(row.punto_reorden),
+                    "stock_actual_presentacion": str(stock_actual_display),
+                    "umbral_presentacion": str(threshold_display),
+                    "faltante_presentacion": str(shortage_display),
+                    "unidad_presentacion": row.display_unit,
                 },
             )
         )

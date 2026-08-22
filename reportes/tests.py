@@ -5,7 +5,10 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import patch
+
+from openpyxl import load_workbook
 
 from maestros.models import CostoInsumo
 from compras.models import OrdenCompra
@@ -1798,10 +1801,9 @@ class ReportesBITests(TestCase):
     def test_bi_shows_plan_supply_watchlist(self):
         sucursal = self._create_sucursal("BI-SUP-01", "Sucursal BI Supply")
         unidad = UnidadMedida.objects.create(
-            codigo="kg-bi-supply",
-            nombre="Kilogramo BI Supply",
+            codigo="g",
+            nombre="Gramo BI Supply",
             tipo=UnidadMedida.TIPO_MASA,
-            factor_to_base=Decimal("1000"),
         )
         insumo = Insumo.objects.create(
             nombre="Chocolate BI Supply",
@@ -1823,7 +1825,7 @@ class ReportesBITests(TestCase):
             insumo_texto=insumo.nombre,
             unidad=unidad,
             unidad_texto="kg",
-            cantidad=Decimal("2"),
+            cantidad=Decimal("2000"),
             match_status=LineaReceta.STATUS_AUTO,
         )
         plan = PlanProduccion.objects.create(
@@ -1846,7 +1848,7 @@ class ReportesBITests(TestCase):
             point_name=insumo.nombre,
             point_quantity=Decimal("4"),
             point_unit="kg",
-            quantity_base=Decimal("4"),
+            quantity_base=Decimal("4000"),
             captured_at=timezone.now(),
             sync_job=canonical_job,
         )
@@ -1866,8 +1868,13 @@ class ReportesBITests(TestCase):
         self.assertTrue(resp.context["supply_watchlist"])
         self.assertEqual(resp.context["supply_watchlist"]["plan_nombre"], "Plan BI Supply")
         self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["insumo_nombre"], "Chocolate BI Supply")
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual"], Decimal("4"))
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage"], Decimal("4"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual"], Decimal("4000"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage"], Decimal("4000"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual_display"], Decimal("4"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage_display"], Decimal("4"))
+        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["display_unit"], "kg")
+        self.assertContains(resp, "kg")
+        self.assertNotContains(resp, "4,000.00")
 
     def test_bi_production_summary_uses_bulk_recipe_cost_map(self):
         target_date = timezone.localdate()
@@ -3357,3 +3364,99 @@ class ReportesCanonicosTests(TestCase):
         from core.models import Sucursal
 
         return Sucursal.objects.create(codigo=codigo, nombre=nombre, activa=True)
+
+
+class InventoryReportPresentationUnitTests(TestCase):
+    def setUp(self):
+        _clear_reportes_runtime_caches()
+        self.user = User.objects.create_user(username="reportes_unidades_point", password="pass123")
+        lectura, _ = Group.objects.get_or_create(name="LECTURA")
+        self.user.groups.add(lectura)
+        self.client.force_login(self.user)
+
+        gramos = UnidadMedida.objects.create(
+            codigo="g",
+            nombre="Gramo",
+            tipo=UnidadMedida.TIPO_MASA,
+        )
+        self.insumo = Insumo.objects.create(
+            nombre="AZUCAR MASCABADO REPORTE",
+            codigo_point="011-RPT",
+            unidad_base=gramos,
+            activo=True,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=self.insumo,
+            almacen="ALMACEN_1",
+            stock_minimo=Decimal("30000"),
+            stock_maximo=Decimal("100000"),
+            punto_reorden=Decimal("60000"),
+        )
+        branch = PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+            result_summary={"locations": {"ALMACEN": {"rows": 1, "snapshots": 1}}},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=branch,
+            insumo=self.insumo,
+            point_code=self.insumo.codigo_point,
+            point_name=self.insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=job,
+        )
+
+    def test_faltantes_muestra_stock_y_reorden_en_kg(self):
+        response = self.client.get(reverse("reportes:faltantes"), {"nivel": "all"})
+
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.context["rows"] if item.insumo_id == self.insumo.id)
+        self.assertEqual(row.stock_actual_display, Decimal("20"))
+        self.assertEqual(row.punto_reorden_display, Decimal("60"))
+        self.assertEqual(row.sugerencia_compra_display, Decimal("40"))
+        self.assertEqual(row.display_unit, "kg")
+        self.assertContains(response, "20.000")
+        self.assertContains(response, "60.000")
+        self.assertContains(response, "40.000")
+        self.assertNotContains(response, "20000.000")
+
+    def test_faltantes_exporta_csv_y_xlsx_en_kg(self):
+        csv_response = self.client.get(
+            reverse("reportes:faltantes"),
+            {"nivel": "all", "export": "csv"},
+        )
+        self.assertEqual(csv_response.status_code, 200)
+        csv_text = csv_response.content.decode("utf-8")
+        self.assertIn("AZUCAR MASCABADO REPORTE,kg,20.000,60.000,40.000", csv_text)
+        self.assertNotIn("20000", csv_text)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:faltantes"),
+            {"nivel": "all", "export": "xlsx"},
+        )
+        self.assertEqual(xlsx_response.status_code, 200)
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True)
+        values = list(workbook["Faltantes"].iter_rows(values_only=True))
+        data_row = next(row for row in values if row[0] == self.insumo.nombre)
+        self.assertEqual(data_row[1:5], ("kg", 20, 60, 40))
+
+    def test_auditoria_insumos_muestra_stock_y_politicas_en_kg(self):
+        response = self.client.get(reverse("reportes:auditoria_insumos"))
+
+        self.assertEqual(response.status_code, 200)
+        stock = next(item for item in response.context["stock_rows"] if item.insumo_id == self.insumo.id)
+        self.assertEqual(stock.stock_actual_display, Decimal("20"))
+        self.assertEqual(stock.stock_minimo_display, Decimal("30"))
+        self.assertEqual(stock.stock_maximo_display, Decimal("100"))
+        self.assertEqual(stock.punto_reorden_display, Decimal("60"))
+        self.assertEqual(stock.display_unit, "kg")
+        self.assertContains(response, "20.000")
+        self.assertContains(response, "30.000")
+        self.assertContains(response, "100.000")
+        self.assertContains(response, "60.000")
+        self.assertNotContains(response, "20,000.000")
