@@ -46,7 +46,7 @@ class InventoryPresentationUnitsTests(TestCase):
         self.assertEqual(from_presentation_quantity(Decimal("1.25"), self.gram), Decimal("1250.00"))
         self.assertEqual(from_presentation_quantity(Decimal("2.5"), self.milliliter), Decimal("2500.0"))
 
-    def test_existencias_form_stores_kg_input_as_grams(self):
+    def test_existencias_form_stores_reorder_inputs_as_grams_without_editing_point_stock(self):
         user = get_user_model().objects.create_superuser(
             username="inventario-unidades", email="inventario@example.com", password="test"
         )
@@ -75,7 +75,7 @@ class InventoryPresentationUnitsTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         existencia = ExistenciaInsumo.objects.get(insumo=insumo, almacen=UBICACION_ALMACEN)
-        self.assertEqual(existencia.stock_actual, Decimal("1250.000"))
+        self.assertEqual(existencia.stock_actual, Decimal("0.000"))
         self.assertEqual(existencia.stock_minimo, Decimal("500.000"))
         self.assertEqual(existencia.stock_maximo, Decimal("2000.000"))
         self.assertEqual(existencia.consumo_diario_promedio, Decimal("100.000"))
@@ -83,7 +83,8 @@ class InventoryPresentationUnitsTests(TestCase):
         page = self.client.get(reverse("inventario:existencias"))
         row = next(item for item in page.context["existencias"] if item.insumo.id == insumo.id)
         self.assertEqual(row.display_unit, "kg")
-        self.assertEqual(row.stock_actual_display, Decimal("1.250"))
+        self.assertIsNone(row.stock_actual_display)
+        self.assertContains(page, "Fuente madre: Point")
 
 
 class _FakeLiveInventoryService:

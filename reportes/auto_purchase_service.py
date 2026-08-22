@@ -12,8 +12,9 @@ from django.db.models import Sum
 from compras.models import SolicitudCompra
 from core.audit import log_event
 from core.models import Sucursal
-from inventario.models import ExistenciaInsumo
+from inventario.canonical_point_inventory import CanonicalPointInventoryService
 from maestros.models import CostoInsumo, Insumo
+from maestros.utils.canonical_catalog import canonical_insumo_by_id
 from recetas.models import LineaReceta
 from reportes.models import (
     AutoControlSettings,
@@ -353,17 +354,21 @@ def generate_purchase_requests_from_production(
     insumo_ids: set[int] = set()
     for line in bom_lines:
         if line.insumo_id and _to_decimal(line.cantidad) > ZERO:
+            canonical = canonical_insumo_by_id(line.insumo_id) or line.insumo
+            line.insumo = canonical
+            line.insumo_id = canonical.id
             bom_by_recipe[int(line.receta_id)].append(line)
             insumo_ids.add(int(line.insumo_id))
 
     supplier_policies_by_pair, supplier_policies_by_insumo = _load_supplier_policies(sorted(insumo_ids))
+    inventory_items = list(Insumo.objects.filter(id__in=sorted(insumo_ids)))
+    inventory_readings = CanonicalPointInventoryService().require_fresh(
+        inventory_items,
+        location="ALMACEN",
+    )
     inventory_pool = {
-        int(row["insumo_id"]): _to_decimal(row["stock_total"])
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
+        item.id: _to_decimal(inventory_readings[item.id].quantity_base)
+        for item in inventory_items
     }
     latest_cost_map = _latest_cost_map(insumo_ids)
     demand_context = _build_insumo_demand_context(

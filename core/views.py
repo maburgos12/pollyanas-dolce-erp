@@ -67,6 +67,11 @@ from maestros.utils.canonical_catalog import (
 from compras.models import PresupuestoCompraPeriodo, SolicitudCompra, OrdenCompra, RecepcionCompra
 from recetas.models import PlanProduccion, PlanProduccionItem, PronosticoVenta, Receta, LineaReceta, VentaHistorica, SolicitudVenta
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from inventario.canonical_point_inventory import (
+    CanonicalPointInventoryService,
+    InventoryFreshness,
+    canonical_point_inventory_report_rows,
+)
 from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile, sucursales_operativas
 from core.audit import log_event
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
@@ -963,20 +968,7 @@ def _log_budget_alert_once(alert_data: dict, kind: str) -> None:
 
 
 def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
-    canonical_rows = canonicalized_active_insumos(limit=limit)
-    member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
-    stock_total_map = {
-        row["insumo_id"]: Decimal(str(row["stock_total"] or 0))
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=member_ids)
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
-    }
-    existencias_map = {
-        ex.insumo_id: ex
-        for ex in ExistenciaInsumo.objects.filter(insumo_id__in=member_ids, almacen="ALMACEN_1")
-    }
+    inventory_rows = canonical_point_inventory_report_rows(location="ALMACEN", limit=limit)
 
     inventario_total_count = 0
     stock_min_config_count = 0
@@ -993,23 +985,15 @@ def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
     total_consumo_diario = Decimal("0")
     cobertura_total = Decimal("0")
     cobertura_items = 0
+    inventory_unavailable_count = 0
 
-    for row in canonical_rows:
-        canonical_id = row["canonical"].id
-        member_existencias = [existencias_map[member_id] for member_id in row["member_ids"] if member_id in existencias_map]
-        if not any(member_id in stock_total_map for member_id in row["member_ids"]):
-            continue
-        inventario_total_count += 1
-        canonical_existencia = existencias_map.get(canonical_id)
-        base_existencia = canonical_existencia or (member_existencias[0] if member_existencias else None)
-
-        stock_actual = sum((stock_total_map.get(member_id, Decimal("0")) for member_id in row["member_ids"]), Decimal("0"))
-        stock_minimo = Decimal(str(getattr(base_existencia, "stock_minimo", 0) or 0))
-        stock_maximo = Decimal(str(getattr(base_existencia, "stock_maximo", 0) or 0))
-        inventario_promedio = Decimal(str(getattr(base_existencia, "inventario_promedio", 0) or 0))
-        punto_reorden = Decimal(str(getattr(base_existencia, "punto_reorden", 0) or 0))
-        dias_llegada = Decimal(str(getattr(base_existencia, "dias_llegada_pedido", 0) or 0))
-        consumo_diario = Decimal(str(getattr(base_existencia, "consumo_diario_promedio", 0) or 0))
+    for row in inventory_rows:
+        stock_minimo = row.stock_minimo
+        stock_maximo = row.stock_maximo
+        inventario_promedio = row.inventario_promedio
+        punto_reorden = row.punto_reorden
+        dias_llegada = Decimal(str(row.dias_llegada_pedido or 0))
+        consumo_diario = row.consumo_diario_promedio
 
         if stock_minimo != 0:
             stock_min_config_count += 1
@@ -1019,6 +1003,11 @@ def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
             inv_prom_config_count += 1
         if punto_reorden != 0:
             punto_reorden_config_count += 1
+        if not row.inventory_decision_ready:
+            inventory_unavailable_count += 1
+            continue
+        inventario_total_count += 1
+        stock_actual = Decimal(str(row.stock_actual))
         if stock_minimo > 0 and stock_actual < stock_minimo:
             stock_bajo_min_count += 1
         if stock_maximo > 0 and stock_actual > stock_maximo:
@@ -1042,7 +1031,7 @@ def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
 
     promedio_base = Decimal(str(inventario_total_count or 0))
     return {
-        "insumos_count": len(canonical_rows),
+        "insumos_count": len(inventory_rows),
         "inventario_total_count": inventario_total_count,
         "stock_min_config_count": stock_min_config_count,
         "stock_max_config_count": stock_max_config_count,
@@ -1058,6 +1047,7 @@ def _build_canonical_inventory_dashboard_metrics(limit: int = 5000) -> dict:
         "avg_consumo_diario": (total_consumo_diario / promedio_base) if promedio_base else Decimal("0"),
         "total_consumo_diario": total_consumo_diario,
         "cobertura_promedio_dias": (cobertura_total / Decimal(str(cobertura_items))) if cobertura_items else Decimal("0"),
+        "inventory_unavailable_count": inventory_unavailable_count,
     }
 
 
@@ -2484,14 +2474,8 @@ def _build_dashboard_supply_watchlist(limit: int = 6) -> dict[str, object] | Non
             .annotate(total=Sum("cantidad"))
         )
     }
-    stock_total_map = {
-        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids)
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
-    }
+    inventory_items = list(Insumo.objects.filter(id__in=canonical_ids))
+    stock_readings = CanonicalPointInventoryService().read_many(inventory_items, location="CEDIS")
 
     aggregated: dict[int, dict[str, object]] = {}
     for item in items:
@@ -2527,10 +2511,14 @@ def _build_dashboard_supply_watchlist(limit: int = 6) -> dict[str, object] | Non
         insumo = payload["insumo"]
         required_qty = Decimal(str(payload["required_qty"] or 0))
         historico_units = Decimal(str(payload["historico_units"] or 0))
-        stock_actual = stock_total_map.get(int(insumo.id), Decimal("0"))
-        shortage = max(required_qty - stock_actual, Decimal("0"))
+        reading = stock_readings.get(int(insumo.id))
+        inventory_ready = bool(reading and reading.freshness is InventoryFreshness.FRESH)
+        stock_actual = reading.quantity_base if inventory_ready else None
+        shortage = max(required_qty - stock_actual, Decimal("0")) if inventory_ready else Decimal("0")
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])
+        if not inventory_ready:
+            missing.append("inventario Point CEDIS no disponible")
         missing_cost = latest_costo_canonico(insumo_id=insumo.id) is None
         if shortage <= 0 and not missing and not missing_cost:
             continue
@@ -2542,6 +2530,7 @@ def _build_dashboard_supply_watchlist(limit: int = 6) -> dict[str, object] | Non
                 "insumo_nombre": insumo.nombre,
                 "required_qty": required_qty,
                 "stock_actual": stock_actual,
+                "inventory_ready": inventory_ready,
                 "shortage": shortage,
                 "historico_units": historico_units,
                 "master_missing": missing,
@@ -2936,6 +2925,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "avg_consumo_diario": inventory_metrics["avg_consumo_diario"],
                 "total_consumo_diario": inventory_metrics["total_consumo_diario"],
                 "cobertura_promedio_dias": inventory_metrics["cobertura_promedio_dias"],
+                "inventory_unavailable_count": inventory_metrics["inventory_unavailable_count"],
             }
         )
     except Exception:

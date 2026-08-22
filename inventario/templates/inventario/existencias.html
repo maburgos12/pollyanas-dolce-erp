@@ -35,10 +35,18 @@
       </a>
     </nav>
     <p class="muted"><strong>{{ selected_ubicacion_label }}:</strong> {{ selected_ubicacion_description }}.</p>
+    <p class="muted">
+      <strong>Fuente madre: Point.</strong>
+      {% if inventory_last_captured_at %}
+        Última captura: {{ inventory_last_captured_at|date:"d/m/Y H:i" }}.
+      {% endif %}
+      {{ inventory_fresh_count }} insumos vigentes;
+      {% if inventory_unavailable_count %}<strong>{{ inventory_unavailable_count }} sin dato vigente.</strong>{% else %}sin bloqueos de vigencia.{% endif %}
+    </p>
   </section>
 
   <section class="card card-animate">
-    {% include "components/section_header.html" with title="Actualizar existencia · "|add:selected_ubicacion_label %}
+    {% include "components/section_header.html" with title="Configurar reorden · "|add:selected_ubicacion_label %}
     <p class="muted">
       Fórmula activa de punto de reorden:
       {% if reorder_formula_mode == formula_excel_legacy %}
@@ -46,7 +54,7 @@
       {% else %}
         <code>(dias_llegada * consumo_diario_promedio) + stock_minimo</code>.
       {% endif %}
-      Captura manual permitida con desviación máxima de <strong>{{ reorder_max_diff_pct|floatformat:2|intcomma }}%</strong> vs recomendado.
+      El stock no se captura aquí: se consulta exclusivamente desde Point. La desviación máxima manual del reorden es <strong>{{ reorder_max_diff_pct|floatformat:2|intcomma }}%</strong> vs recomendado.
     </p>
     {% if can_manage_inventario %}
     <form method="post" class="form-grid-auto pd-u-a82d7062cc">
@@ -59,7 +67,7 @@
     </form>
     <hr class="section-sep">
     <p class="muted">
-      Las cantidades se muestran y capturan en <strong>kg</strong> para insumos cuya base es g,
+      Las cantidades se muestran en <strong>kg</strong> para insumos cuya base es g,
       y en <strong>L</strong> para los que tienen base ml. El ERP conserva g/ml internamente para
       no alterar recetas, compras ni producción.
     </p>
@@ -70,14 +78,13 @@
         <option value="">Insumo</option>
         {% for i in insumos %}<option value="{{ i.id }}">{{ i.display_name }}{% if i.unidad_base.codigo == 'g' %} · kg{% elif i.unidad_base.codigo == 'ml' %} · L{% elif i.unidad_base %} · {{ i.unidad_base.codigo }}{% endif %}</option>{% endfor %}
       </select>
-      <input class="input-field" type="number" step="0.001" name="stock_actual" placeholder="Stock actual (kg/L/unidad)" required>
       <input class="input-field" type="number" step="0.001" name="stock_minimo" placeholder="Stock mínimo (kg/L/unidad)" value="0">
       <input class="input-field" type="number" step="0.001" name="stock_maximo" placeholder="Stock máximo (kg/L/unidad)" value="0">
       <input class="input-field" type="number" step="0.001" name="punto_reorden" placeholder="Punto reorden (kg/L/unidad; vacío = auto)">
       <input class="input-field" type="number" step="0.001" name="inventario_promedio" placeholder="Inventario promedio (kg/L/unidad)" value="0">
       <input class="input-field" type="number" step="1" min="0" name="dias_llegada_pedido" placeholder="Días llegada pedido" value="0">
       <input class="input-field" type="number" step="0.001" name="consumo_diario_promedio" placeholder="Consumo diario (kg/L/unidad)" value="0">
-      <button class="btn btn-primary" type="submit">Guardar existencia</button>
+      <button class="btn btn-primary" type="submit">Guardar parámetros</button>
     </form>
     {% else %}
     <p class="muted">Tu perfil está en modo lectura para Inventario.</p>
@@ -109,7 +116,13 @@
           <tr>
             <td>{{ e.insumo.display_name }}</td>
             <td>{{ e.display_unit }}</td>
-            <td class="text-end">{{ e.stock_actual_display|floatformat:3|intcomma }}</td>
+            <td class="text-end">
+              {% if e.stock_actual_display is not None %}
+                {{ e.stock_actual_display|floatformat:3|intcomma }}
+              {% else %}
+                <span class="muted">No disponible</span>
+              {% endif %}
+            </td>
             <td class="text-end">{{ e.stock_minimo_display|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ e.stock_maximo_display|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ e.punto_reorden_display|floatformat:3|intcomma }}</td>
@@ -119,7 +132,12 @@
             <td class="text-end">{{ e.punto_reorden_recomendado_display|floatformat:3|intcomma }}</td>
             <td class="text-end">{{ e.punto_reorden_diferencia_display|floatformat:3|intcomma }}</td>
             <td>
-              {% if e.stock_actual < e.punto_reorden %}
+              {% if e.inventory_freshness == 'STALE' %}
+                <span class="badge bg-warning">Point desactualizado</span>
+              {% elif e.inventory_freshness == 'MISSING' or e.inventory_freshness == 'ERROR' %}
+                <span class="badge bg-danger">No disponible</span>
+                {% if e.inventory_error %}<span class="muted">{{ e.inventory_error }}</span>{% endif %}
+              {% elif e.stock_actual < e.punto_reorden %}
                 <span class="badge bg-danger">Bajo mínimo</span>
               {% else %}
                 <span class="badge bg-success">Sano</span>

@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from core.audit import log_event
 from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.services.canonical_insumo_inventory_capture_service import CanonicalInsumoInventoryCaptureService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
 from pos_bridge.services.realtime_inventory_service import deliver_ecommerce_webhook, run_realtime_inventory_sync
@@ -29,6 +30,33 @@ from pos_bridge.tasks.run_weekly_cost_snapshot import run_weekly_cost_snapshot
 from reportes.analytics_service import refresh_dashboard_full_materialized_view
 from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
 from reportes.models import AnalyticAuditLog, FactVentaDiaria
+
+
+@shared_task(name="pos_bridge.canonical_insumo_inventory_sync", acks_late=True)
+def task_canonical_insumo_inventory_sync():
+    now = timezone.now()
+    parameters = {
+        "canonical_insumo_inventory": True,
+        "locations": ["ALMACEN", "CEDIS"],
+    }
+    job = PointSyncJob.objects.create(
+        job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+        status=PointSyncJob.STATUS_RUNNING,
+        started_at=now,
+        parameters=parameters,
+        attempt_count=1,
+    )
+    try:
+        result = CanonicalInsumoInventoryCaptureService().capture(sync_job=job, captured_at=now)
+        job.status = PointSyncJob.STATUS_SUCCESS if result["complete"] else PointSyncJob.STATUS_PARTIAL
+        job.result_summary = result
+    except Exception as exc:
+        job.status = PointSyncJob.STATUS_FAILED
+        job.error_message = str(exc)
+        job.result_summary = {"complete": False, "blockers": [{"reason": str(exc)}]}
+    job.finished_at = timezone.now()
+    job.save(update_fields=["status", "result_summary", "error_message", "finished_at", "updated_at"])
+    return {"job_id": job.id, "status": job.status, **job.result_summary}
 
 
 @shared_task(name="pos_bridge.delivery_note_sync", acks_late=True)

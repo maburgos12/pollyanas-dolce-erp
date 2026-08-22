@@ -2,6 +2,7 @@
 from pos_bridge.tasks.celery_tasks import (
     task_analytics_refresh_cycle,
     task_catalog_recipe_sync,
+    task_canonical_insumo_inventory_sync,
     task_conversion_sync,
     task_daily_sales_sync,
     task_ecommerce_webhook_delivery,
@@ -25,6 +26,7 @@ from pos_bridge.tasks.celery_tasks import (
 __all__ = (
     "task_analytics_refresh_cycle",
     "task_catalog_recipe_sync",
+    "task_canonical_insumo_inventory_sync",
     "task_conversion_sync",
     "task_daily_sales_sync",
     "task_ecommerce_webhook_delivery",

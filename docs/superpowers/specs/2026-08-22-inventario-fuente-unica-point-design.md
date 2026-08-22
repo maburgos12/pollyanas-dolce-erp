@@ -1,8 +1,8 @@
 # Inventario con fuente única Point
 
 **Fecha:** 2026-08-22
-**Estado:** diseño aprobado para revisión escrita
-**Alcance inicial:** consultas de existencias de insumos, separación ALMACÉN/CEDIS y bloqueo de decisiones con información vencida.
+**Estado:** implementado para corte productivo
+**Alcance:** captura central de insumos Point, réplica canónica, pantalla de existencias, separación ALMACÉN/CEDIS y bloqueo de decisiones con información vencida.
 
 ## Problema
 
@@ -46,7 +46,7 @@ Los trabajos de sincronización de Point son los únicos que alimentan la répli
 - trabajo de sincronización y resultado;
 - estado de frescura.
 
-La tabla histórica `PointInventorySnapshot` conserva evidencia. Un servicio de lectura canónico selecciona la última posición válida por insumo y ubicación; ningún consumidor consulta ni agrega snapshots por su cuenta.
+La tabla `PointInsumoInventorySnapshot` conserva evidencia normalizada de la tabla oficial de insumos de Point. No se reutiliza `PointInventorySnapshot`, porque esa evidencia corresponde al inventario de productos. Un servicio de lectura canónico selecciona exclusivamente el último ciclo completo por insumo y ubicación; ningún consumidor consulta ni agrega snapshots por su cuenta.
 
 ### 2. Servicio único de lectura
 
@@ -62,7 +62,7 @@ El servicio no tendrá una operación de “stock total empresarial”. Cualquie
 
 ### 3. Frescura y disponibilidad
 
-La frescura se evaluará contra el ciclo de sincronización esperado de la ubicación, no mediante accesos independientes cada diez minutos.
+La frescura se evalúa contra una captura central programada cada cuatro horas, con una tolerancia máxima predeterminada de cinco horas; no mediante accesos independientes cada diez minutos.
 
 - Una lectura es **vigente** si pertenece al último ciclo exitoso exigible para esa ubicación.
 - Es **vencida** cuando existe una lectura anterior, pero no cubre el ciclo esperado.
@@ -165,6 +165,8 @@ La implementación seguirá pruebas rojas-verdes por comportamiento. Los criteri
 ## Despliegue y seguridad operativa
 
 La entrega de código seguirá PR, merge, `deploy_web_safe.sh` y validación en producción. El primer despliegue no corregirá saldos ni ejecutará conciliaciones masivas. Las escrituras de datos se autorizarán por separado y usarán vista previa, transacción, actor de auditoría y lectura posterior desde Point y desde la pantalla consumidora.
+
+El corte productivo incluye un **bootstrap obligatorio e inmediato** después de aplicar la migración: se ejecuta una vez `pos_bridge.canonical_insumo_inventory_sync`, se exige evidencia usable para ALMACÉN y CEDIS y solo entonces se valida la pantalla. No se espera al siguiente ciclo de cuatro horas ni se declara listo mientras la réplica esté vacía, parcial para la ubicación consultada o vencida.
 
 ## Fuera de alcance de la primera entrega
 

@@ -33,9 +33,9 @@
           <div class="bi-hero-highlight-meta">{{ ok_count }} con stock suficiente</div>
         </article>
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Total con existencia</div>
-          <div class="bi-hero-highlight-value">{{ total_count }}</div>
-          <div class="bi-hero-highlight-meta">Artículos con stock registrado</div>
+          <div class="bi-hero-highlight-label">Point no disponible</div>
+          <div class="bi-hero-highlight-value {% if inventory_unavailable_count %}is-warning{% else %}is-success{% endif %}">{{ inventory_unavailable_count }}</div>
+          <div class="bi-hero-highlight-meta">No se clasifican como cero ni como faltante</div>
         </article>
       </div>
     </div>
@@ -48,6 +48,7 @@
         <option value="critico" {% if nivel == "critico" %}selected{% endif %}>Crítico</option>
         <option value="bajo" {% if nivel == "bajo" %}selected{% endif %}>Bajo reorden</option>
         <option value="ok" {% if nivel == "ok" %}selected{% endif %}>Stock suficiente</option>
+        <option value="unavailable" {% if nivel == "unavailable" %}selected{% endif %}>Point no disponible</option>
         <option value="all" {% if nivel == "all" %}selected{% endif %}>Todo</option>
       </select>
       <input name="q" type="text" class="form-control" value="{{ selected_q }}" placeholder="Buscar artículo, categoría o código Point">
@@ -360,6 +361,8 @@
               {% if e.alerta_nivel == 'critico' %}
               <span class="badge bg-danger">{{ e.alerta_etiqueta }}</span>
               {% elif e.alerta_nivel == 'bajo' %}
+              <span class="badge bg-warning text-dark">{{ e.alerta_etiqueta }}</span>
+              {% elif e.alerta_nivel == 'unavailable' %}
               <span class="badge bg-warning text-dark">{{ e.alerta_etiqueta }}</span>
               {% else %}
               <span class="badge bg-success">{{ e.alerta_etiqueta }}</span>

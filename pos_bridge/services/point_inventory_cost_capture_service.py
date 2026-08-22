@@ -57,6 +57,8 @@ class PointInventoryCostCaptureResult:
 
 
 class PointInventoryCostCaptureService:
+    INVENTORY_LOGIN_WORKSPACE = "MATRIZ"
+
     def __init__(
         self,
         bridge_settings: PointBridgeSettings | None = None,
@@ -209,6 +211,7 @@ class PointInventoryCostCaptureService:
         self,
         *,
         branch_hint: str = "ALMACEN",
+        branch_external_id: str | None = None,
         queries: list[str] | None = None,
         point_codes: list[str] | None = None,
         include_all_rows: bool = False,
@@ -219,24 +222,32 @@ class PointInventoryCostCaptureService:
 
         client = PlaywrightBrowserClient(self.settings)
         with BrowserSessionManager(client) as session:
-            # ALMACEN es un filtro dentro de Existencias, no un workspace confiable de login.
-            self.auth_service.login(session, branch_hint=None)
+            # El módulo de Existencias requiere entrar por un workspace operativo;
+            # ALMACEN/CEDIS se seleccionan después dentro del propio reporte.
+            self.auth_service.login(session, branch_hint=self.INVENTORY_LOGIN_WORKSPACE)
             page = PointInventoryPage(session.page, self.settings)
             page.open_inventory_module()
             branches = page.list_branches()
-            target = next(
-                (
+            expected_external_id = str(branch_external_id or "").strip()
+            expected_name = normalizar_nombre(branch_hint)
+            if expected_external_id:
+                target = next(
+                    (branch for branch in branches if str(branch.get("value") or "").strip() == expected_external_id),
+                    None,
+                )
+            else:
+                exact_matches = [
                     branch
                     for branch in branches
-                    if branch_hint.strip().upper() in str(branch.get("label") or "").upper()
-                ),
-                None,
-            )
+                    if normalizar_nombre(str(branch.get("label") or "")) == expected_name
+                ]
+                target = exact_matches[0] if len(exact_matches) == 1 else None
             if target:
                 page.select_branch(target)
                 branch_name = str(target.get("label") or branch_hint)
             else:
-                branch_name = branch_hint
+                expected = expected_external_id or branch_hint
+                raise RuntimeError(f"No se encontró de forma inequívoca la ubicación Point {expected}.")
 
             # ── Paso 1: sección Insumos (#tablaInsumosPA) ─────────────────────
             supply_options = page.list_category_options(kind="supplies")
@@ -291,9 +302,11 @@ class PointInventoryCostCaptureService:
         self,
         *,
         branch_hint: str = "ALMACEN",
+        branch_external_id: str | None = None,
     ) -> list[PointInventoryCostRow]:
         return self.capture_matches(
             branch_hint=branch_hint,
+            branch_external_id=branch_external_id,
             include_all_rows=True,
         )
 

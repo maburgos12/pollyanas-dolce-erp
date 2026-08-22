@@ -382,6 +382,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "kwargs": {"days": 3, "lag_days": 0},
     },
+    "pos_bridge: inventario canonico insumos cada 4 horas": {
+        "task": "pos_bridge.canonical_insumo_inventory_sync",
+        "schedule": crontab(hour="*/4", minute=20),
+        "options": {"timezone": TIME_ZONE},
+    },
     "sat: descarga cfdi nocturna": {
         "task": "sat_client.ejecutar_descarga_sat_nocturna",
         "schedule": crontab(hour=1, minute=0),
@@ -490,7 +495,7 @@ ERP_SLOW_ENDPOINT_MS = env_int("ERP_SLOW_ENDPOINT_MS", 1000)
 ERP_SLOW_QUERY_MS = env_int("ERP_SLOW_QUERY_MS", 200)
 POINT_INVENTORY_CANONICAL_MAX_AGE_MINUTES = env_int(
     "POINT_INVENTORY_CANONICAL_MAX_AGE_MINUTES",
-    720,
+    300,
 )
 ERP_AUTO_PURCHASE_ENABLED = env_bool("ERP_AUTO_PURCHASE_ENABLED", default=False)
 ERP_AUTO_PURCHASE_MIN_SHORTAGE = os.getenv("ERP_AUTO_PURCHASE_MIN_SHORTAGE", "0.001")

@@ -675,7 +675,7 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
 
-    def test_inventory_discrepancies_suma_stock_multiubicacion(self):
+    def test_inventory_discrepancies_no_suma_stock_interno_sin_point(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo,
             almacen="ARMADO",
@@ -685,8 +685,9 @@ class DailyOperationalClosureViewTests(TestCase):
         rows = _inventory_discrepancies(self.target_date)
         fact = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo)
 
-        self.assertEqual(rows[0]["visible_stock"], Decimal("15"))
-        self.assertEqual(rows[0]["difference"], Decimal("15") - fact.stock_final)
+        self.assertIsNone(rows[0]["visible_stock"])
+        self.assertIsNone(rows[0]["difference"])
+        self.assertFalse(rows[0]["inventory_ready"])
 
     def test_cierre_operativo_uses_branch_indicator_tickets_when_sales_facts_have_zero(self):
         FactVentaDiaria.objects.filter(fecha=self.target_date).update(tickets=0)

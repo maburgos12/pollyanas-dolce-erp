@@ -4,7 +4,9 @@
 
 **Goal:** Crear el contrato canónico de lectura Point por ubicación, normalizar unidades y frescura, y dejar Compras automáticas desactivadas de forma segura.
 
-**Architecture:** `CanonicalPointInventoryService` será el único límite de lectura de existencias Point para insumos. Consultará la última evidencia `PointInventorySnapshot` por código y una ubicación obligatoria, devolverá un resultado tipado con frescura y unidades, y bloqueará decisiones cuando falte una captura vigente. Esta entrega no migra todavía todos los consumidores ni modifica saldos históricos.
+**Architecture:** `CanonicalPointInventoryService` es el único límite de lectura de existencias Point para insumos. Consulta la evidencia normalizada `PointInsumoInventorySnapshot` del último ciclo central completo y una ubicación obligatoria, devuelve un resultado tipado con frescura y unidades, y bloquea decisiones cuando falta una captura vigente. La pantalla de Existencias ya consume este contrato y dejó de aceptar edición manual del stock.
+
+> **Nota de cierre:** durante la revisión se comprobó que `PointInventorySnapshot` contenía productos, no insumos. La implementación final incorporó una captura central específica de la tabla de insumos Point, programada cada cuatro horas, y migró la pantalla operativa a esa réplica sin fallback a `ExistenciaInsumo`.
 
 **Tech Stack:** Django 5, PostgreSQL 16, dataclasses/enum de Python, Django TestCase.
 
