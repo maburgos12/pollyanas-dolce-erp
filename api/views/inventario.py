@@ -59,6 +59,7 @@ from compras.views import (
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from integraciones.views import _deactivate_idle_api_clients, _purge_api_logs
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
+from inventario.canonical_point_inventory import canonical_point_inventory_report_rows
 from inventario.views import (
     _apply_ajuste,
     _apply_cross_filters,
@@ -453,34 +454,10 @@ class InventarioSugerenciasCompraView(APIView):
         requerimientos = self._requerimientos_plan(plan_items_qs)
         en_transito = self._en_transito_por_insumo()
 
-        existencias_qs = ExistenciaInsumo.objects.select_related("insumo__unidad_base", "insumo__proveedor_principal").filter(
-            insumo__activo=True
-        )
-        existencias_map: dict[int, dict[str, Any]] = {}
-        for ex in existencias_qs:
-            canonical = canonical_insumo(ex.insumo)
-            if not canonical:
-                continue
-            row = existencias_map.setdefault(
-                canonical.id,
-                {
-                    "canonical": canonical,
-                    "stock_actual": Decimal("0"),
-                    "stock_seguridad": None,
-                    "punto_reorden": None,
-                    "consumo_diario": None,
-                    "lead_time": None,
-                },
-            )
-            row["stock_actual"] += _to_decimal(ex.stock_actual or 0)
-            if row["stock_seguridad"] is None:
-                row["stock_seguridad"] = _to_decimal(ex.stock_minimo or 0)
-            if row["punto_reorden"] is None:
-                row["punto_reorden"] = _to_decimal(ex.punto_reorden or 0)
-            if row["consumo_diario"] is None:
-                row["consumo_diario"] = _to_decimal(ex.consumo_diario_promedio or 0)
-            if row["lead_time"] is None:
-                row["lead_time"] = int(ex.dias_llegada_pedido or 0)
+        existencias_map = {
+            row.insumo_id: row
+            for row in canonical_point_inventory_report_rows(location="ALMACEN", limit=2000)
+        }
 
         insumo_ids = set(existencias_map.keys()) | set(requerimientos.keys()) | set(en_transito.keys())
         if not insumo_ids:
@@ -533,16 +510,18 @@ class InventarioSugerenciasCompraView(APIView):
         total_costo = Decimal("0")
         criticos = 0
         bajo_reorden = 0
+        point_unavailable = 0
 
         for insumo_id in sorted(insumos.keys(), key=lambda pk: insumos[pk].nombre.lower()):
             insumo = insumos[insumo_id]
             ex = existencias_map.get(insumo_id)
 
-            stock_actual = _to_decimal(ex["stock_actual"] if ex else 0)
-            stock_seguridad = _to_decimal(ex["stock_seguridad"] if ex and ex["stock_seguridad"] is not None else 0)
-            punto_reorden = _to_decimal(ex["punto_reorden"] if ex and ex["punto_reorden"] is not None else 0)
-            consumo_diario = _to_decimal(ex["consumo_diario"] if ex and ex["consumo_diario"] is not None else 0)
-            lead_time = int(ex["lead_time"] or 0) if ex else 0
+            inventory_ready = bool(ex and ex.inventory_decision_ready)
+            stock_actual = _to_decimal(ex.stock_actual) if inventory_ready else None
+            stock_seguridad = _to_decimal(ex.stock_minimo if ex else 0)
+            punto_reorden = _to_decimal(ex.punto_reorden if ex else 0)
+            consumo_diario = _to_decimal(ex.consumo_diario_promedio if ex else 0)
+            lead_time = int(ex.dias_llegada_pedido or 0) if ex else 0
             if lead_time <= 0 and insumo.proveedor_principal_id:
                 lead_time = int(insumo.proveedor_principal.lead_time_dias or 0)
             lead_time = max(lead_time, 0)
@@ -552,14 +531,19 @@ class InventarioSugerenciasCompraView(APIView):
             requerido = requerido_plan if requerido_plan > demanda_lead_time else demanda_lead_time
             en_transito_qty = _to_decimal(en_transito.get(insumo_id, 0))
 
-            sugerida = requerido + stock_seguridad - (stock_actual + en_transito_qty)
-            if sugerida < 0:
-                sugerida = Decimal("0")
+            sugerida = Decimal("0")
+            if inventory_ready:
+                sugerida = requerido + stock_seguridad - (stock_actual + en_transito_qty)
+                if sugerida < 0:
+                    sugerida = Decimal("0")
 
             costo_unitario = _to_decimal(latest_cost.get(insumo_id, 0))
             costo_sugerido = sugerida * costo_unitario if sugerida > 0 and costo_unitario > 0 else Decimal("0")
 
-            if stock_actual <= 0 and (requerido > 0 or punto_reorden > 0):
+            if not inventory_ready:
+                estado = "POINT_NO_DISPONIBLE"
+                point_unavailable += 1
+            elif stock_actual <= 0 and (requerido > 0 or punto_reorden > 0):
                 estado = "CRITICO"
                 criticos += 1
             elif punto_reorden > 0 and stock_actual < punto_reorden:
@@ -568,7 +552,7 @@ class InventarioSugerenciasCompraView(APIView):
             else:
                 estado = "SUFICIENTE"
 
-            if not include_all and sugerida <= 0:
+            if not include_all and sugerida <= 0 and inventory_ready:
                 continue
 
             total_sugerido += sugerida
@@ -580,7 +564,7 @@ class InventarioSugerenciasCompraView(APIView):
                     "insumo": insumo.nombre,
                     "unidad": insumo.unidad_base.codigo if insumo.unidad_base_id and insumo.unidad_base else "",
                     "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
-                    "stock_actual": str(stock_actual),
+                    "stock_actual": str(stock_actual) if inventory_ready else None,
                     "stock_seguridad": str(stock_seguridad),
                     "punto_reorden": str(punto_reorden),
                     "en_transito": str(en_transito_qty),
@@ -593,6 +577,8 @@ class InventarioSugerenciasCompraView(APIView):
                     "costo_unitario": str(costo_unitario),
                     "costo_compra_sugerida": str(costo_sugerido),
                     "estatus": estado,
+                    "inventario_fuente": "POINT",
+                    "inventario_ubicacion": "ALMACEN",
                 }
             )
 
@@ -613,6 +599,7 @@ class InventarioSugerenciasCompraView(APIView):
                     "insumos": len(rows[:limit]),
                     "criticos": criticos,
                     "bajo_reorden": bajo_reorden,
+                    "point_no_disponible": point_unavailable,
                     "compra_sugerida_total": str(total_sugerido),
                     "costo_estimado_total": str(total_costo),
                 },

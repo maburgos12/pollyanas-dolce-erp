@@ -1003,11 +1003,12 @@ class DashboardHomologacionContextTests(TestCase):
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["insumos_count"], 1)
-        self.assertEqual(response.context["inventario_total_count"], 1)
-        self.assertEqual(response.context["alertas_count"], 1)
-        self.assertEqual(response.context["bajo_reorden_count"], 1)
+        self.assertEqual(response.context["inventario_total_count"], 0)
+        self.assertEqual(response.context["alertas_count"], 0)
+        self.assertEqual(response.context["bajo_reorden_count"], 0)
+        self.assertEqual(response.context["inventory_unavailable_count"], 1)
 
-    def test_dashboard_inventory_metrics_suma_stock_multiubicacion(self):
+    def test_dashboard_inventory_metrics_no_suma_stock_multiubicacion_sin_point(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg-dash-multi",
             nombre="Kilogramo Dashboard Multi",
@@ -1035,8 +1036,9 @@ class DashboardHomologacionContextTests(TestCase):
         metrics = _build_canonical_inventory_dashboard_metrics()
 
         self.assertEqual(metrics["stock_bajo_min_count"], 0)
+        self.assertEqual(metrics["inventory_unavailable_count"], 1)
 
-    def test_dashboard_supply_watchlist_suma_stock_multiubicacion(self):
+    def test_dashboard_supply_watchlist_no_fabrica_faltante_sin_point_cedis(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg-supply-multi",
             nombre="Kilogramo Supply Multi",
@@ -1066,8 +1068,9 @@ class DashboardHomologacionContextTests(TestCase):
 
         context = _build_dashboard_supply_watchlist()
 
-        self.assertEqual(context["rows"][0]["stock_actual"], Decimal("7"))
-        self.assertEqual(context["rows"][0]["shortage"], Decimal("3"))
+        self.assertIsNone(context["rows"][0]["stock_actual"])
+        self.assertEqual(context["rows"][0]["shortage"], Decimal("0"))
+        self.assertFalse(context["rows"][0]["inventory_ready"])
 
     def test_dashboard_shows_enterprise_governance_cards(self):
         response = self.client.get(reverse("dashboard"))

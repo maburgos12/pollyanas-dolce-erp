@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db.models import Avg, Sum
 from django.utils import timezone
 
-from inventario.models import ExistenciaInsumo
+from inventario.canonical_point_inventory import canonical_point_inventory_report_rows
 from maestros.models import CostoInsumo
 from reportes.models import Alert, AutoControlSettings, FactVentaDiaria, ProductionExecutionLog
 from reportes.opportunity_service import build_opportunity_context
@@ -239,21 +239,13 @@ def generate_operational_alerts(*, target_date: date | None = None) -> dict[str,
             .values("insumo_id", "costo_unitario")
         )
     }
-    stock_rows = list(
-        ExistenciaInsumo.objects.select_related("insumo", "insumo__proveedor_principal")
-        .filter(almacen="ALMACEN_1", stock_minimo__gt=ZERO)
-        .order_by("insumo__nombre")
-    )
-    stock_total_by_insumo = {
-        int(row["insumo_id"]): _to_decimal(row["stock_total"])
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=[item.insumo_id for item in stock_rows])
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
-    }
+    stock_rows = [
+        row
+        for row in canonical_point_inventory_report_rows(location="ALMACEN", limit=2000)
+        if row.inventory_decision_ready and max(_to_decimal(row.stock_minimo), _to_decimal(row.punto_reorden)) > ZERO
+    ]
     for row in stock_rows:
-        stock_actual = stock_total_by_insumo.get(int(row.insumo_id), ZERO)
+        stock_actual = _to_decimal(row.stock_actual)
         threshold = max(_to_decimal(row.stock_minimo), _to_decimal(row.punto_reorden))
         if stock_actual > threshold:
             continue

@@ -162,7 +162,8 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["count"], Insumo.objects.filter(activo=True).count())
         self.assertEqual(response.data["results"][0]["nombre"], "Azucar refinada")
-        self.assertEqual(Decimal(response.data["results"][0]["stock_actual"]), Decimal("15.000"))
+        self.assertIsNone(response.data["results"][0]["stock_actual"])
+        self.assertEqual(response.data["results"][0]["inventario_fuente"], "POINT")
         self.assertEqual(response.data["results"][0]["costo_unitario"], "23.500000")
         self.assertTrue(PublicApiAccessLog.objects.filter(client=self.public_client, endpoint=url).exists())
 
@@ -214,6 +215,10 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["alertas_stock"], 0)
         self.assertEqual(response.data["stock_critico"], 0)
+        self.assertEqual(
+            response.data["inventario_point_no_disponible"],
+            Insumo.objects.filter(activo=True).count(),
+        )
 
     def test_pedidos_create_creates_cliente_and_pedido(self):
         url = reverse("api_public_pedidos_create")

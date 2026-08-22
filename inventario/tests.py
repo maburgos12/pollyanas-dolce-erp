@@ -1007,7 +1007,7 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Nombre Point Operativo")
 
-    def test_existencias_separa_almacen_y_cedis_sin_sumarlos(self):
+    def test_existencias_never_exposes_internal_almacen_or_cedis_ledgers_as_point_stock(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg-ledger-separado",
             nombre="Kilogramo libros separados",
@@ -1039,12 +1039,14 @@ class InventarioAliasesPendingTests(TestCase):
         cedis_row = next(row for row in response_cedis.context["existencias"] if row.insumo.id == insumo.id)
         self.assertEqual(response_almacen.context["selected_ubicacion"], "almacen")
         self.assertEqual(response_cedis.context["selected_ubicacion"], "cedis")
-        self.assertEqual(almacen_row.stock_actual, Decimal("125"))
-        self.assertEqual(cedis_row.stock_actual, Decimal("18"))
+        self.assertIsNone(almacen_row.stock_actual)
+        self.assertIsNone(cedis_row.stock_actual)
+        self.assertEqual(almacen_row.inventory_source, "POINT")
+        self.assertEqual(cedis_row.inventory_source, "POINT")
         self.assertContains(response_almacen, "Stock real de compras y resguardo")
         self.assertContains(response_cedis, "Stock disponible para producción")
 
-    def test_actualizar_existencia_cedis_no_modifica_almacen(self):
+    def test_actualizar_parametros_cedis_no_modifica_stock_interno_de_ninguna_ubicacion(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg-update-cds",
             nombre="Kilogramo ajuste CEDIS",
@@ -1087,7 +1089,7 @@ class InventarioAliasesPendingTests(TestCase):
         cedis.refresh_from_db()
         self.assertRedirects(response, f"{reverse('inventario:existencias')}?ubicacion=cedis")
         self.assertEqual(almacen.stock_actual, Decimal("90"))
-        self.assertEqual(cedis.stock_actual, Decimal("14"))
+        self.assertEqual(cedis.stock_actual, Decimal("10"))
 
     def test_existencias_aggregates_duplicate_variants_into_one_canonical_row(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor Existencias Canon", activo=True)
@@ -1139,7 +1141,7 @@ class InventarioAliasesPendingTests(TestCase):
         filtered = [row for row in existencias if row.insumo.id == canonical.id]
         self.assertEqual(len(filtered), 1)
         row = filtered[0]
-        self.assertEqual(row.stock_actual, Decimal("10"))
+        self.assertIsNone(row.stock_actual)
         self.assertEqual(row.stock_minimo, Decimal("2"))
         self.assertEqual(row.stock_maximo, Decimal("10"))
         self.assertEqual(row.punto_reorden, Decimal("3"))
@@ -2627,7 +2629,7 @@ class InventarioAliasesPendingTests(TestCase):
         if response.context["pending_rows"]:
             self.assertIn("action_url", response.context["pending_rows"][0])
 
-    def test_inventory_dashboard_filters_by_focus_categoria_and_clase(self):
+    def test_inventory_dashboard_filters_never_classify_internal_stock_as_point_critical(self):
         unidad = UnidadMedida.objects.create(codigo="kg-dash-filter", nombre="Kg Dash Filter", tipo=UnidadMedida.TIPO_MASA)
         empaque = Insumo.objects.create(
             nombre="Caja Filtro",
@@ -2655,7 +2657,7 @@ class InventarioAliasesPendingTests(TestCase):
         self.assertEqual(response.context["selected_focus"], "critical")
         self.assertEqual(response.context["selected_categoria"], "Empaque")
         self.assertEqual(response.context["selected_clase"], "empaque")
-        self.assertEqual(response.context["total_items"], 1)
+        self.assertEqual(response.context["total_items"], 0)
         self.assertContains(response, 'option value="Empaque" selected')
         self.assertContains(response, 'option value="empaque" selected')
 

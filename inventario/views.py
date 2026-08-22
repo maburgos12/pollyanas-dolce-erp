@@ -68,6 +68,10 @@ from inventario.stock_trace import (
     attach_sync_trace,
     set_stock_trace,
 )
+from inventario.canonical_point_inventory import (
+    CanonicalPointInventoryService,
+    InventoryFreshness,
+)
 
 from .models import (
     AjusteInventario,
@@ -289,7 +293,43 @@ def _canonicalized_existencias_rows(
                 enterprise_list_url=reverse("maestros:insumo_list") + f"?{urlencode(edit_query)}",
             )
         )
+    point_location = "CEDIS" if almacen == UBICACION_CEDIS else "ALMACEN"
+    return _apply_canonical_point_stock(rows, location=point_location)
+
+
+def _apply_canonical_point_stock(rows, *, location):
+    readings = CanonicalPointInventoryService().read_many(
+        [row.insumo for row in rows],
+        location=location,
+    )
+    for row in rows:
+        reading = readings[row.insumo.id]
+        row.stock_actual = reading.quantity_base
+        row.stock_actual_display = reading.display_quantity
+        row.display_unit = reading.display_unit or row.display_unit
+        row.inventory_source = reading.source
+        row.inventory_freshness = reading.freshness
+        row.inventory_captured_at = reading.captured_at
+        row.inventory_sync_job_id = reading.sync_job_id
+        row.inventory_error = reading.error
+        row.inventory_decision_ready = reading.freshness is InventoryFreshness.FRESH
     return rows
+
+
+def _inventory_stock_is_critical(row):
+    return bool(
+        getattr(row, "inventory_decision_ready", False)
+        and row.stock_actual is not None
+        and Decimal(str(row.stock_actual)) < Decimal(str(row.punto_reorden or 0))
+    )
+
+
+def _inventory_stock_is_healthy(row):
+    return bool(
+        getattr(row, "inventory_decision_ready", False)
+        and row.stock_actual is not None
+        and Decimal(str(row.stock_actual)) >= Decimal(str(row.punto_reorden or 0))
+    )
 
 
 def _inventory_query_matches(*values: object, q: str) -> bool:
@@ -4810,6 +4850,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         )
         if selected_clase != "all" and clase_actual != selected_clase:
             return False
+        if not getattr(row, "inventory_decision_ready", False) and focus in {
+            "critical",
+            "reorder",
+            "healthy",
+        }:
+            return False
         if focus == "critical":
             return stock <= 0
         if focus == "reorder":
@@ -4828,10 +4874,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     critical_out_count = 0
     below_reorder_count = 0
     healthy_count = 0
+    inventory_unavailable_count = 0
     master_blocked_count = 0
     top_shortage_rows: list[dict[str, object]] = []
 
     for row in existencias_rows:
+        if not getattr(row, "inventory_decision_ready", False):
+            inventory_unavailable_count += 1
+            if getattr(row, "is_operational_blocker", False):
+                master_blocked_count += 1
+            continue
         stock = Decimal(str(getattr(row, "stock_actual", 0) or 0))
         reorder = Decimal(str(getattr(row, "punto_reorden", 0) or 0))
         if getattr(row, "is_operational_blocker", False):
@@ -4936,6 +4988,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         {"label": "Saludable", "value": healthy_count},
         {"label": "Bajo reorden", "value": below_reorder_count},
         {"label": "Sin stock", "value": critical_out_count},
+        {"label": "Point no disponible", "value": inventory_unavailable_count},
         {"label": "Bloqueados", "value": master_blocked_count},
     ]
     sync_quality_rows = [
@@ -5000,6 +5053,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "critical_out_count": critical_out_count,
         "below_reorder_count": below_reorder_count,
         "healthy_count": healthy_count,
+        "inventory_unavailable_count": inventory_unavailable_count,
         "master_blocked_count": master_blocked_count,
         "pending_visible_count": pending_visible_count,
         "selected_focus": focus,
@@ -5096,16 +5150,12 @@ def existencias(request: HttpRequest) -> HttpResponse:
         insumo = canonical_insumo_by_id(request.POST.get("insumo_id"))
         if insumo:
             existencia = get_or_create_existencia(insumo, selected_almacen)
-            prev_stock = existencia.stock_actual
             prev_reorden = existencia.punto_reorden
             prev_minimo = existencia.stock_minimo
             prev_maximo = existencia.stock_maximo
             prev_inv_prom = existencia.inventario_promedio
             prev_dias = existencia.dias_llegada_pedido
             prev_consumo = existencia.consumo_diario_promedio
-            new_stock = from_presentation_quantity(
-                _to_decimal(request.POST.get("stock_actual"), "0"), insumo.unidad_base
-            )
             new_minimo = from_presentation_quantity(
                 _to_decimal(request.POST.get("stock_minimo"), "0"), insumo.unidad_base
             )
@@ -5148,8 +5198,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 new_reorden = reorden_recomendado
                 reorden_auto = True
             if (
-                new_stock < 0
-                or new_reorden < 0
+                new_reorden < 0
                 or new_minimo < 0
                 or new_maximo < 0
                 or new_inv_prom < 0
@@ -5159,7 +5208,6 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Los indicadores de inventario no pueden ser negativos.")
                 return redirect(redirect_url)
 
-            existencia = establecer_stock(existencia.insumo, existencia.almacen, new_stock)
             existencia.punto_reorden = new_reorden
             existencia.stock_minimo = new_minimo
             existencia.stock_maximo = new_maximo
@@ -5167,15 +5215,6 @@ def existencias(request: HttpRequest) -> HttpResponse:
             existencia.dias_llegada_pedido = new_dias
             existencia.consumo_diario_promedio = new_consumo
             existencia.actualizado_en = timezone.now()
-            set_stock_trace(
-                existencia,
-                source=TRACE_MANUAL_EDIT,
-                process="inventario.existencias",
-                effective_at=timezone.now(),
-                reference=f"existencia:{existencia.id}",
-                user=request.user,
-                details={"form": "existencias"},
-            )
             existencia.save(
                 update_fields=[
                     "punto_reorden",
@@ -5185,8 +5224,11 @@ def existencias(request: HttpRequest) -> HttpResponse:
                     "dias_llegada_pedido",
                     "consumo_diario_promedio",
                     "actualizado_en",
-                    "trazabilidad_stock",
                 ]
+            )
+            messages.info(
+                request,
+                "El stock operativo proviene exclusivamente de Point; solo se guardaron los parámetros de reorden.",
             )
             if reorden_auto:
                 reorden_display, reorden_unit = presentation_quantity(new_reorden, insumo.unidad_base)
@@ -5205,8 +5247,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 {
                     "insumo_id": existencia.insumo_id,
                     "almacen": existencia.almacen,
-                    "from_stock": str(prev_stock),
-                    "to_stock": str(existencia.stock_actual),
+                    "stock_source": "POINT",
                     "from_reorden": str(prev_reorden),
                     "to_reorden": str(existencia.punto_reorden),
                     "from_stock_minimo": str(prev_minimo),
@@ -5259,6 +5300,16 @@ def existencias(request: HttpRequest) -> HttpResponse:
         selected_focus_key=selected_focus_key,
     )
     master_blocked_count = int(blocker_context.get("master_blocker_total") or 0)
+    critical_count = sum(1 for row in existencias_rows if _inventory_stock_is_critical(row))
+    healthy_count = sum(1 for row in existencias_rows if _inventory_stock_is_healthy(row))
+    unavailable_count = sum(
+        1 for row in existencias_rows if not getattr(row, "inventory_decision_ready", False)
+    )
+    captured_values = [
+        row.inventory_captured_at
+        for row in existencias_rows
+        if getattr(row, "inventory_captured_at", None) is not None
+    ]
 
     context = {
         "existencias": existencias_rows,
@@ -5270,6 +5321,10 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "selected_ubicacion_label": selected_ledger["label"],
         "selected_ubicacion_description": selected_ledger["description"],
         "ledger_options": ledger_options,
+        "inventory_source": "POINT",
+        "inventory_fresh_count": healthy_count + critical_count,
+        "inventory_unavailable_count": unavailable_count,
+        "inventory_last_captured_at": max(captured_values) if captured_values else None,
         "reorder_formula_mode": formula_mode,
         "reorder_max_diff_pct": _inventario_reorder_max_diff_pct(),
         "formula_excel_legacy": FORMULA_EXCEL_LEGACY,
@@ -5278,31 +5333,31 @@ def existencias(request: HttpRequest) -> HttpResponse:
             focus="existencias",
             total_rows=len(existencias_rows),
             blocked_count=master_blocked_count,
-            critical_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))),
+            critical_count=critical_count,
             pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
         ),
         "document_stage_rows": _inventario_document_stage_rows(
             focus="existencias",
             total_rows=len(existencias_rows),
             blocked_count=master_blocked_count,
-            critical_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))),
+            critical_count=critical_count,
             pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
-            healthy_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) >= Decimal(str(row.punto_reorden or 0))),
+            healthy_count=healthy_count,
         ),
         "operational_health_cards": _inventario_operational_health_cards(
             focus="existencias",
             total_rows=len(existencias_rows),
             blocked_count=master_blocked_count,
-            critical_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))),
+            critical_count=critical_count,
             pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
-            healthy_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) >= Decimal(str(row.punto_reorden or 0))),
+            healthy_count=healthy_count,
         ),
         "maturity_summary": _inventario_maturity_summary(
             chain=_inventario_enterprise_chain(
                 focus="existencias",
                 total_rows=len(existencias_rows),
                 blocked_count=master_blocked_count,
-                critical_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))),
+                critical_count=critical_count,
                 pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
             ),
             default_url=reverse("inventario:existencias"),
@@ -5310,8 +5365,8 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "handoff_map": _inventario_handoff_map(
             blocked_count=master_blocked_count,
             pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
-            critical_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))),
-            healthy_count=sum(1 for row in existencias_rows if Decimal(str(row.stock_actual or 0)) >= Decimal(str(row.punto_reorden or 0))),
+            critical_count=critical_count,
+            healthy_count=healthy_count,
         ),
         "release_gate_rows": [
             {
@@ -5329,22 +5384,11 @@ def existencias(request: HttpRequest) -> HttpResponse:
                 "step": "02",
                 "title": "Stock y reorden validados",
                 "detail": "Existencias con stock por encima del punto de reorden y fórmula operativa consistente.",
-                "completed": sum(
-                    1
-                    for row in existencias_rows
-                    if Decimal(str(row.stock_actual or 0)) >= Decimal(str(row.punto_reorden or 0))
-                ),
-                "open_count": sum(
-                    1
-                    for row in existencias_rows
-                    if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))
-                ),
+                "completed": healthy_count,
+                "open_count": critical_count + unavailable_count,
                 "total": max(len(existencias_rows), 1),
                 "tone": "success"
-                if not any(
-                    Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))
-                    for row in existencias_rows
-                )
+                if critical_count == 0 and unavailable_count == 0
                 else "warning",
                 "url": reverse("inventario:alertas"),
                 "cta": "Abrir alertas",
@@ -5421,17 +5465,9 @@ def existencias(request: HttpRequest) -> HttpResponse:
     context["erp_governance_rows"] = _inventario_erp_governance_rows(
         total_rows=len(existencias_rows),
         master_blocked_count=master_blocked_count,
-        critical_count=sum(
-            1
-            for row in existencias_rows
-            if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))
-        ),
+        critical_count=critical_count,
         pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
-        healthy_count=sum(
-            1
-            for row in existencias_rows
-            if Decimal(str(row.stock_actual or 0)) >= Decimal(str(row.punto_reorden or 0))
-        ),
+        healthy_count=healthy_count,
     )
     context["erp_command_center"] = _inventario_command_center(
         governance_rows=context["erp_governance_rows"],
@@ -5449,11 +5485,7 @@ def existencias(request: HttpRequest) -> HttpResponse:
         focus="existencias",
         master_blocked_count=master_blocked_count,
         pending_count=sum(1 for row in existencias_rows if getattr(row, "canonical_pending", False)),
-        critical_count=sum(
-            1
-            for row in existencias_rows
-            if Decimal(str(row.stock_actual or 0)) < Decimal(str(row.punto_reorden or 0))
-        ),
+        critical_count=critical_count,
     )
     context["sales_demand_signal"] = _inventory_sales_demand_signal(existencias_rows)
     context["sales_demand_gate"] = _inventory_sales_demand_gate(context["sales_demand_signal"])
@@ -5979,7 +6011,7 @@ def alertas(request: HttpRequest) -> HttpResponse:
         raise PermissionDenied("No tienes permisos para ver Inventario.")
 
     nivel = (request.GET.get("nivel") or "alerta").lower()
-    valid_levels = {"alerta", "critico", "bajo", "ok", "all"}
+    valid_levels = {"alerta", "critico", "bajo", "ok", "unavailable", "all"}
     if nivel not in valid_levels:
         nivel = "alerta"
     selected_q = (request.GET.get("q") or "").strip()
@@ -6003,12 +6035,22 @@ def alertas(request: HttpRequest) -> HttpResponse:
     criticos_count = 0
     bajo_reorden_count = 0
     ok_count = 0
+    inventory_unavailable_count = 0
 
     for e in existencias:
-        stock = Decimal(str(e.stock_actual or 0))
+        nivel_row = ""
         reorden = Decimal(str(e.punto_reorden or 0))
-        diferencia = stock - reorden
-        if stock <= 0:
+        if not getattr(e, "inventory_decision_ready", False):
+            nivel_row = "unavailable"
+            etiqueta = "Point no disponible"
+            diferencia = None
+            inventory_unavailable_count += 1
+        else:
+            stock = Decimal(str(e.stock_actual))
+            diferencia = stock - reorden
+        if nivel_row == "unavailable":
+            pass
+        elif stock <= 0:
             nivel_row = "critico"
             etiqueta = "Sin stock"
             criticos_count += 1
@@ -6025,7 +6067,7 @@ def alertas(request: HttpRequest) -> HttpResponse:
         if nivel == "all":
             include = True
         elif nivel == "alerta":
-            include = nivel_row in {"critico", "bajo"}
+            include = nivel_row in {"critico", "bajo", "unavailable"}
         elif nivel == nivel_row:
             include = True
 
@@ -6057,6 +6099,7 @@ def alertas(request: HttpRequest) -> HttpResponse:
         "criticos_count": criticos_count,
         "bajo_reorden_count": bajo_reorden_count,
         "ok_count": ok_count,
+        "inventory_unavailable_count": inventory_unavailable_count,
         "total_count": len(existencias),
         "enterprise_chain": _inventario_enterprise_chain(
             focus="alertas",

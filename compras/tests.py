@@ -960,12 +960,12 @@ class ComprasFase2FiltersTests(TestCase):
         # análisis completo (filtros avanzados); reabasto=ok la activa.
         response = self.client.get(
             reverse("compras:solicitudes"),
-            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes, "categoria": "Masa", "reabasto": "ok"},
+            {"periodo_tipo": "mes", "periodo_mes": self.periodo_mes, "categoria": "Masa", "reabasto": "unavailable"},
         )
         self.assertEqual(response.status_code, 200)
         rendered = next(item for item in response.context["solicitudes"] if item.id == solicitud.id)
         self.assertEqual(rendered.costo_unitario, Decimal("9.00"))
-        self.assertEqual(rendered.reabasto_detalle, "Stock 5.000 / Reorden 5.000")
+        self.assertEqual(rendered.reabasto_detalle, "Point ALMACÉN sin ciclo canónico vigente")
 
     def test_solicitudes_view_detecta_variante_no_canonica_como_bloqueo_erp(self):
         canonical = Insumo.objects.create(
@@ -1484,11 +1484,12 @@ class ComprasFase2FiltersTests(TestCase):
         options = _build_insumo_options()
         row = next(o for o in options if o["id"] == self.insumo_masa_blank.id)
 
-        self.assertEqual(row["stock_actual"], Decimal("2"))
+        self.assertIsNone(row["stock_actual"])
         self.assertEqual(row["stock_seguridad"], Decimal("2"))
         self.assertEqual(row["demanda_lead_time"], Decimal("3.0"))
         self.assertEqual(row["en_transito"], Decimal("2"))
-        self.assertEqual(row["recomendado"], Decimal("1.0"))
+        self.assertEqual(row["recomendado"], Decimal("0"))
+        self.assertFalse(row["inventory_ready"])
         self.assertEqual(row["enterprise_status"], "Incompleto")
         self.assertIn("código Point", row["enterprise_missing"])
         self.assertTrue(row["is_operational_blocker"])
@@ -1640,11 +1641,12 @@ class ComprasFase2FiltersTests(TestCase):
         django_cache.clear()
         row = next(item for item in _build_insumo_options() if item["id"] == canonical.id)
 
-        self.assertEqual(row["stock_actual"], Decimal("5"))
+        self.assertIsNone(row["stock_actual"])
         self.assertEqual(row["en_transito"], Decimal("1"))
         self.assertEqual(row["stock_seguridad"], Decimal("2"))
         self.assertEqual(row["demanda_lead_time"], Decimal("3.0"))
         self.assertEqual(row["recomendado"], Decimal("0"))
+        self.assertFalse(row["inventory_ready"])
         self.assertEqual(row["enterprise_status"], "Lista para operar")
         self.assertFalse(row["is_operational_blocker"])
 

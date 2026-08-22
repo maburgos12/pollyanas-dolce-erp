@@ -8,6 +8,8 @@ from django.db.models import Sum
 from control.models import MermaPOS
 from core.models import AuditLog, sucursales_operativas
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
+from inventario.canonical_point_inventory import CanonicalPointInventoryService, InventoryFreshness
+from maestros.models import Insumo
 from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointProductionLine, PointSyncJob, PointWasteLine
 from recetas.models import PlanProduccion, PlanProduccionItem
 from reportes.models import FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
@@ -268,20 +270,32 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
     fact_qs = FactInventarioDiario.objects.filter(fecha=target_date)
     moved_insumo_ids = list(fact_qs.values_list("insumo_id", flat=True))
     visible_qs = ExistenciaInsumo.objects.filter(insumo_id__in=moved_insumo_ids)
+    inventory_items = list(Insumo.objects.filter(id__in=moved_insumo_ids))
+    inventory_readings = CanonicalPointInventoryService().read_many(
+        inventory_items,
+        location="ALMACEN",
+    )
+    usable_readings = [
+        reading
+        for reading in inventory_readings.values()
+        if reading.freshness is InventoryFreshness.FRESH
+    ]
+    unavailable_count = len(inventory_readings) - len(usable_readings)
     movement_qs = MovimientoInventario.objects.filter(fecha__date=target_date)
 
     expected_stock = _to_decimal(fact_qs.aggregate(total=Sum("stock_final")).get("total"))
-    visible_stock = _to_decimal(visible_qs.aggregate(total=Sum("stock_actual")).get("total"))
+    visible_stock = sum((_to_decimal(reading.quantity_base) for reading in usable_readings), ZERO)
     entradas = _to_decimal(fact_qs.aggregate(total=Sum("entradas")).get("total"))
     salidas = _to_decimal(fact_qs.aggregate(total=Sum("salidas")).get("total"))
-    delta_stock = visible_stock - expected_stock
+    delta_stock = None if unavailable_count else visible_stock - expected_stock
     fact_max = FactInventarioDiario.objects.order_by("-fecha").values_list("fecha", flat=True).first()
     movement_max = (
         MovimientoInventario.objects.order_by("-fecha").values_list("fecha", flat=True).first()
     )
     movement_latest_at = movement_qs.order_by("-fecha").values_list("fecha", flat=True).first()
-    visible_updated_max = visible_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
-    visible_updated_min = visible_qs.order_by("actualizado_en").values_list("actualizado_en", flat=True).first()
+    captured_values = [reading.captured_at for reading in inventory_readings.values() if reading.captured_at]
+    visible_updated_max = max(captured_values, default=None)
+    visible_updated_min = min(captured_values, default=None)
     fact_updated_max = fact_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
     latest_sync_run = AlmacenSyncRun.objects.filter(status=AlmacenSyncRun.STATUS_OK).order_by("-started_at", "-id").first()
     latest_sync_any = AlmacenSyncRun.objects.order_by("-started_at", "-id").first()
@@ -318,7 +332,13 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
             untraceable_count += 1
     trace_sources_text = ", ".join(f"{label}: {total}" for label, total in sorted(trace_counts.items())) or "Sin traza suficiente"
 
-    if fact_qs.exists():
+    if unavailable_count:
+        publication = _status_row(
+            label="Point no disponible",
+            tone="warning",
+            detail="No se comparó el cierre contra saldos internos porque el ciclo canónico de ALMACÉN no está completo y vigente.",
+        )
+    elif fact_qs.exists():
         if not same_moment_comparison:
             publication = _status_row(
                 label="Cruza tiempos",
@@ -347,8 +367,8 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
     return {
         "key": "inventario",
         "label": "Inventario",
-        "source_truth": "FactInventarioDiario para movimiento diario; ExistenciaInsumo para stock visible actual",
-        "visible_source": "ExistenciaInsumo muestra stock vivo actual, no un snapshot histórico completo por día",
+        "source_truth": "FactInventarioDiario para movimiento diario; Point ALMACÉN para stock visible actual",
+        "visible_source": "Point ALMACÉN muestra stock vivo actual, no un snapshot histórico completo por día",
         "raw_max_date": movement_max.date() if movement_max else None,
         "fact_max_date": fact_max,
         "visible_max_date": visible_date,
@@ -357,6 +377,7 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
         "expected_stock": expected_stock,
         "visible_stock": visible_stock,
         "delta_stock": delta_stock,
+        "inventory_unavailable_count": unavailable_count,
         "entradas": entradas,
         "salidas": salidas,
         "entradas_dia": entradas_dia,
@@ -485,14 +506,10 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
         .order_by("insumo__nombre")
     )
     insumo_ids = [fact.insumo_id for fact in fact_rows]
-    visible_stock_map = {
-        int(row["insumo_id"]): _to_decimal(row["stock_total"])
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids)
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
-    }
+    inventory_readings = CanonicalPointInventoryService().read_many(
+        [fact.insumo for fact in fact_rows],
+        location="ALMACEN",
+    )
     visible_map: dict[int, ExistenciaInsumo] = {}
     for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids).order_by(
         "insumo_id", "-actualizado_en", "-id"
@@ -501,7 +518,24 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
     rows: list[dict[str, object]] = []
     for fact in fact_rows:
         visible = visible_map.get(int(fact.insumo_id))
-        visible_stock = visible_stock_map.get(int(fact.insumo_id), ZERO)
+        reading = inventory_readings[int(fact.insumo_id)]
+        if reading.freshness is not InventoryFreshness.FRESH:
+            rows.append(
+                {
+                    "insumo_name": fact.insumo.nombre,
+                    "unit_code": getattr(getattr(fact.insumo, "unidad_base", None), "codigo", "") or "s/u",
+                    "unit_name": getattr(getattr(fact.insumo, "unidad_base", None), "nombre", "") or "Sin unidad base",
+                    "trace_label": "Point no disponible",
+                    "trace_effective_at": str(reading.captured_at or ""),
+                    "expected_stock": _to_decimal(fact.stock_final),
+                    "visible_stock": None,
+                    "difference": None,
+                    "movement_scope": _to_decimal(fact.entradas) + _to_decimal(fact.salidas),
+                    "inventory_ready": False,
+                }
+            )
+            continue
+        visible_stock = _to_decimal(reading.quantity_base)
         diff = visible_stock - _to_decimal(fact.stock_final)
         if diff == ZERO:
             continue
@@ -516,9 +550,13 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
                 "visible_stock": visible_stock,
                 "difference": diff,
                 "movement_scope": _to_decimal(fact.entradas) + _to_decimal(fact.salidas),
+                "inventory_ready": True,
             }
         )
-    rows.sort(key=lambda row: abs(_to_decimal(row["difference"])), reverse=True)
+    rows.sort(
+        key=lambda row: (not bool(row.get("inventory_ready")), abs(_to_decimal(row["difference"]))),
+        reverse=True,
+    )
     return rows[:limit]
 
 
@@ -549,7 +587,15 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
                 detail=f"Point ya trae {waste['raw_rows']} renglones de merma para {target_date.isoformat()}, pero la capa visible del ERP no muestra unidades de merma publicadas.",
             )
         )
-    if inventory["delta_stock"] != ZERO:
+    if inventory.get("inventory_unavailable_count"):
+        alerts.append(
+            _status_row(
+                label="Point ALMACÉN no disponible",
+                tone="warning",
+                detail="El cierre no fabricó una diferencia usando saldos internos; falta un ciclo canónico vigente.",
+            )
+        )
+    elif inventory["delta_stock"] != ZERO:
         alerts.append(
             _status_row(
                 label="Desviación de stock",
@@ -566,7 +612,7 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
                 label="Inventario cruza tiempos",
                 tone="warning",
                 detail=(
-                    "El cierre auditado compara stock esperado del día contra ExistenciaInsumo actualizada después; úsalo como conciliación contra stock vivo, no como saldo histórico puro."
+                    "El cierre auditado compara stock esperado del día contra la captura viva de Point ALMACÉN; úsalo como conciliación entre momentos, no como saldo histórico puro."
                 ),
             )
         )
@@ -676,7 +722,7 @@ def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
             },
             {
                 "label": "Inventario",
-                "detail": "El comparativo diario de stock usa FactInventarioDiario como cierre esperado del día auditado y ExistenciaInsumo como stock vivo actual. Las cantidades se muestran en la unidad base configurada en cada insumo.",
+                "detail": "El comparativo diario usa FactInventarioDiario como cierre esperado y Point ALMACÉN como stock vivo actual. Las cantidades se muestran en la unidad base configurada en cada insumo.",
             },
         ],
     }

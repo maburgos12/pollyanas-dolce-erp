@@ -17,6 +17,7 @@ from pos_bridge.models import (
     PointDailyBranchIndicator,
     PointDailySale,
     PointExtractionLog,
+    PointInsumoInventorySnapshot,
     PointInventorySnapshot,
     PointSalesDailyCategoryFact,
     PointSalesDailyProductFact,
@@ -102,7 +103,7 @@ class ReportesBITests(TestCase):
         # Orden sin solicitud para no depender de más catálogos en este test.
         OrdenCompra.objects.create(proveedor=prov, monto_estimado=950, solicitud=solicitud_insumo)
 
-    def test_faltantes_usa_stock_total_y_umbral_de_almacen_1(self):
+    def test_faltantes_no_suma_ledgers_internos_cuando_point_no_esta_disponible(self):
         unidad = UnidadMedida.objects.create(
             codigo="kg-faltantes-multi",
             nombre="Kilogramo Faltantes Multi",
@@ -130,9 +131,9 @@ class ReportesBITests(TestCase):
         rows, _, _ = _faltantes_rows("all")
         row = next(item for item in rows if item.insumo.id == insumo.id)
 
-        self.assertEqual(row.stock_actual, Decimal("6"))
+        self.assertIsNone(row.stock_actual)
         self.assertEqual(row.punto_reorden, Decimal("5"))
-        self.assertEqual(row.nivel, "ok")
+        self.assertEqual(row.nivel, "unavailable")
 
     def test_bi_inventory_snapshot_agrupa_stock_y_usa_umbral_de_almacen_1(self):
         unidad = UnidadMedida.objects.create(
@@ -163,6 +164,7 @@ class ReportesBITests(TestCase):
         self.assertEqual(snapshot["total"], 1)
         self.assertEqual(snapshot["criticos"], 0)
         self.assertEqual(snapshot["bajo_reorden"], 0)
+        self.assertEqual(snapshot["unavailable"], 1)
 
     def test_bi_view_renders(self):
         sucursal = self._create_sucursal("BI-01", "Sucursal BI 01")
@@ -1803,6 +1805,7 @@ class ReportesBITests(TestCase):
         )
         insumo = Insumo.objects.create(
             nombre="Chocolate BI Supply",
+            codigo_point="BI-SUP-INS-01",
             unidad_base=unidad,
             tipo_item=Insumo.TIPO_MATERIA_PRIMA,
             activo=True,
@@ -1830,6 +1833,23 @@ class ReportesBITests(TestCase):
         PlanProduccionItem.objects.create(plan=plan, receta=receta, cantidad=Decimal("4"))
         ExistenciaInsumo.objects.create(insumo=insumo, stock_actual=Decimal("1"), punto_reorden=Decimal("2"))
         ExistenciaInsumo.objects.create(insumo=insumo, almacen="ARMADO", stock_actual=Decimal("3"))
+        point_cedis = PointBranch.objects.create(external_id="BI-SUP-CEDIS", name="CEDIS")
+        canonical_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=point_cedis,
+            insumo=insumo,
+            point_code=insumo.codigo_point,
+            point_name=insumo.nombre,
+            point_quantity=Decimal("4"),
+            point_unit="kg",
+            quantity_base=Decimal("4"),
+            captured_at=timezone.now(),
+            sync_job=canonical_job,
+        )
         VentaHistorica.objects.create(
             receta=receta,
             sucursal=sucursal,
@@ -2014,6 +2034,7 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(snapshot["kpis"]["alertas_stock"], 0)
         self.assertEqual(snapshot["kpis"]["criticos_stock"], 0)
         self.assertEqual(snapshot["kpis"]["bajo_reorden_stock"], 0)
+        self.assertEqual(snapshot["kpis"]["inventario_point_no_disponible"], 1)
 
     def test_compute_bi_snapshot_uses_prefer_complete_canonical_sales_range(self):
         today = timezone.localdate()
@@ -2535,6 +2556,23 @@ class ReportesCanonicosTests(TestCase):
         )
         ExistenciaInsumo.objects.create(insumo=canonical, stock_actual=Decimal("4"), punto_reorden=Decimal("10"))
         ExistenciaInsumo.objects.create(insumo=variant, stock_actual=Decimal("3"), punto_reorden=Decimal("2"))
+        point_almacen = PointBranch.objects.create(external_id="RPT-EX-ALMACEN", name="Almacen")
+        canonical_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=point_almacen,
+            insumo=canonical,
+            point_code=canonical.codigo_point,
+            point_name=canonical.nombre,
+            point_quantity=Decimal("7"),
+            point_unit="pza",
+            quantity_base=Decimal("7"),
+            captured_at=timezone.now(),
+            sync_job=canonical_job,
+        )
 
         response = self.client.get(reverse("reportes:faltantes"), {"nivel": "all"})
         self.assertEqual(response.status_code, 200)

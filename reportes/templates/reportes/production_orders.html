@@ -118,10 +118,10 @@
         <div>
           <h2 class="pd-section-title">Conciliación de insumos para Producción</h2>
           <p class="pd-muted-copy">
-            La fuente de verdad del inventario físico para Producción es el ledger del ERP:
+            La fuente madre del inventario físico para Producción es Point en CEDIS:
             <strong>{{ supply_context.source_of_truth }}</strong>.
-            Point aporta ventas/producción/merma, pero no es el inventario físico de insumos. Este modo
-            <strong>sí compara</strong> lo que se va a producir hoy contra el stock disponible real.
+            ALMACÉN y CEDIS se mantienen separados. Este modo solo calcula cobertura cuando la captura
+            canónica de CEDIS está completa y vigente.
           </p>
         </div>
         <div class="pd-meta-stack">

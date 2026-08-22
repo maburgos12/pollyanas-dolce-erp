@@ -2262,7 +2262,7 @@ class RecetasCosteoApiTests(TestCase):
             403,
         )
 
-    def test_endpoint_inventario_sugerencias_compra_por_plan(self):
+    def test_endpoint_inventario_sugerencias_compra_falla_cerrado_sin_point(self):
         proveedor = Proveedor.objects.create(nombre="Proveedor API", lead_time_dias=3, activo=True)
         self.insumo.proveedor_principal = proveedor
         self.insumo.save(update_fields=["proveedor_principal"])
@@ -2306,13 +2306,14 @@ class RecetasCosteoApiTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload["scope"]["plan_id"], plan.id)
         self.assertGreaterEqual(payload["totales"]["insumos"], 1)
-        self.assertEqual(len(payload["items"]), 1)
+        self.assertGreaterEqual(len(payload["items"]), 1)
 
-        row = payload["items"][0]
+        row = next(item for item in payload["items"] if item["insumo_id"] == self.insumo.id)
         self.assertEqual(row["insumo_id"], self.insumo.id)
-        self.assertEqual(Decimal(row["compra_sugerida"]), Decimal("3"))
-        self.assertEqual(Decimal(row["costo_compra_sugerida"]), Decimal("30"))
-        self.assertEqual(row["estatus"], "BAJO_REORDEN")
+        self.assertEqual(Decimal(row["compra_sugerida"]), Decimal("0"))
+        self.assertEqual(Decimal(row["costo_compra_sugerida"]), Decimal("0"))
+        self.assertIsNone(row["stock_actual"])
+        self.assertEqual(row["estatus"], "POINT_NO_DISPONIBLE")
 
     def test_endpoint_inventario_sugerencias_compra_include_all(self):
         ExistenciaInsumo.objects.create(
@@ -2326,13 +2327,14 @@ class RecetasCosteoApiTests(TestCase):
         url = reverse("api_inventario_sugerencias_compra")
         resp_default = self.client.get(url)
         self.assertEqual(resp_default.status_code, 200)
-        self.assertEqual(resp_default.json()["totales"]["insumos"], 0)
+        self.assertEqual(resp_default.json()["totales"]["insumos"], Insumo.objects.filter(activo=True).count())
+        self.assertEqual(resp_default.json()["totales"]["point_no_disponible"], Insumo.objects.filter(activo=True).count())
 
         resp_all = self.client.get(url, {"include_all": 1})
         self.assertEqual(resp_all.status_code, 200)
-        self.assertEqual(resp_all.json()["totales"]["insumos"], 1)
+        self.assertEqual(resp_all.json()["totales"]["insumos"], Insumo.objects.filter(activo=True).count())
 
-    def test_endpoint_inventario_sugerencias_compra_agrupa_variantes_en_canonico(self):
+    def test_endpoint_inventario_sugerencias_compra_no_suma_variantes_internas_sin_point(self):
         self.insumo.codigo_point = "SUG-CANON-001"
         self.insumo.save(update_fields=["codigo_point"])
         variante = Insumo.objects.create(nombre="AZUCAR API", unidad_base=self.unidad, activo=True)
@@ -2357,10 +2359,11 @@ class RecetasCosteoApiTests(TestCase):
         resp = self.client.get(url, {"include_all": 1})
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
-        self.assertEqual(payload["totales"]["insumos"], 1)
-        row = payload["items"][0]
+        self.assertEqual(payload["totales"]["insumos"], len(payload["items"]))
+        row = next(item for item in payload["items"] if int(item["insumo_id"]) == self.insumo.id)
         self.assertEqual(int(row["insumo_id"]), self.insumo.id)
-        self.assertEqual(Decimal(row["stock_actual"]), Decimal("3"))
+        self.assertIsNone(row["stock_actual"])
+        self.assertEqual(row["estatus"], "POINT_NO_DISPONIBLE")
 
     def test_endpoint_compras_solicitud_crea(self):
         url = reverse("api_compras_solicitud")

@@ -26,7 +26,12 @@ from openpyxl import Workbook, load_workbook
 
 from core.access import can_manage_compras, can_view_compras
 from core.audit import log_event
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import MovimientoInventario
+from inventario.canonical_point_inventory import (
+    CanonicalPointInventoryService,
+    InventoryFreshness,
+    canonical_point_inventory_report_rows,
+)
 from inventario.services_existencias import aplicar_delta
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from maestros.utils.canonical_catalog import (
@@ -1605,13 +1610,11 @@ def _build_plan_branch_supply_rows(
         canonical_by_line[linea.id] = canonical
         canonical_ids.add(canonical.id)
 
-    existencia_map = {
-        int(item.insumo_id): item
-        for item in ExistenciaInsumo.objects.filter(
-            insumo_id__in=canonical_ids,
-            almacen="ALMACEN_1",
-        ).select_related("insumo")
-    }
+    inventory_items = list(Insumo.objects.filter(id__in=canonical_ids))
+    inventory_readings = CanonicalPointInventoryService().read_many(
+        inventory_items,
+        location="ALMACEN",
+    )
     lineas_by_recipe: dict[int, list[LineaReceta]] = defaultdict(list)
     for linea in lineas:
         lineas_by_recipe[int(linea.receta_id)].append(linea)
@@ -1632,11 +1635,14 @@ def _build_plan_branch_supply_rows(
             required_qty = Decimal(str(linea.cantidad or 0)) * plan_qty
             if required_qty <= 0:
                 continue
-            existencia = existencia_map.get(canonical.id)
-            stock_actual = Decimal(str(getattr(existencia, "stock_actual", 0) or 0))
-            shortage = max(required_qty - stock_actual, Decimal("0"))
+            reading = inventory_readings.get(canonical.id)
+            inventory_ready = bool(reading and reading.freshness is InventoryFreshness.FRESH)
+            stock_actual = reading.quantity_base if inventory_ready else None
+            shortage = max(required_qty - stock_actual, Decimal("0")) if inventory_ready else Decimal("0")
             readiness = enterprise_readiness_profile(canonical)
             missing = list(readiness.get("missing") or [])
+            if not inventory_ready:
+                missing.append("inventario Point ALMACÉN no disponible")
             latest_cost = latest_costo_canonico(insumo_id=canonical.id)
             missing_cost = latest_cost is None
             score = (shortage * Decimal("100")) + (Decimal(str(len(missing))) * Decimal("50")) + required_qty
@@ -1649,6 +1655,7 @@ def _build_plan_branch_supply_rows(
                     "insumo_nombre": _insumo_display_name(canonical),
                     "required_qty": required_qty,
                     "stock_actual": stock_actual,
+                    "inventory_ready": inventory_ready,
                     "shortage": shortage,
                     "master_missing": missing,
                     "missing_cost": missing_cost,
@@ -3908,7 +3915,7 @@ def _recepcion_apply_succeeded(result: dict) -> bool:
 
 
 def _build_insumo_options(limit: int = 1200):
-    cache_key = f"compras:solicitudes:insumo-options:{int(limit or 1200)}"
+    cache_key = f"compras:solicitudes:insumo-options:v2:{int(limit or 1200)}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3916,12 +3923,12 @@ def _build_insumo_options(limit: int = 1200):
     canonical_rows = canonicalized_active_insumos(limit=limit)
     grouped_member_ids = [member_id for row in canonical_rows for member_id in row["member_ids"]]
     usage_maps = usage_maps_for_insumo_ids(grouped_member_ids)
-    existencias = {
-        e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(
-            insumo_id__in=grouped_member_ids,
-            almacen="ALMACEN_1",
-        ).select_related("insumo", "insumo__proveedor_principal")
+    inventory_map = {
+        row.insumo_id: row
+        for row in canonical_point_inventory_report_rows(
+            location="ALMACEN",
+            insumos=[row["canonical"] for row in canonical_rows],
+        )
     }
 
     en_transito_by_insumo: dict[int, Decimal] = {}
@@ -3950,9 +3957,9 @@ def _build_insumo_options(limit: int = 1200):
     for row in canonical_rows:
         insumo = row["canonical"]
         member_ids = row["member_ids"]
-        member_existencias = [existencias[mid] for mid in member_ids if mid in existencias]
-        ex = existencias.get(insumo.id) or next((item for item in member_existencias if item), None)
-        stock_actual = sum((item.stock_actual for item in member_existencias), Decimal("0"))
+        ex = inventory_map.get(insumo.id)
+        inventory_ready = bool(ex and ex.inventory_decision_ready)
+        stock_actual = ex.stock_actual if inventory_ready else None
         punto_reorden = ex.punto_reorden if ex else Decimal("0")
         stock_seguridad = ex.stock_minimo if ex else Decimal("0")
         consumo_diario = ex.consumo_diario_promedio if ex else Decimal("0")
@@ -3963,9 +3970,11 @@ def _build_insumo_options(limit: int = 1200):
 
         demanda_lead_time = consumo_diario * Decimal(str(lead_time_dias))
         en_transito = sum((en_transito_by_insumo.get(member_id, Decimal("0")) for member_id in member_ids), Decimal("0"))
-        recomendado = (demanda_lead_time + stock_seguridad) - (stock_actual + en_transito)
-        if recomendado < 0:
-            recomendado = Decimal("0")
+        recomendado = Decimal("0")
+        if inventory_ready:
+            recomendado = (demanda_lead_time + stock_seguridad) - (stock_actual + en_transito)
+            if recomendado < 0:
+                recomendado = Decimal("0")
         enterprise_profile = getattr(insumo, "enterprise_profile", enterprise_readiness_profile(insumo))
         purchase_count = sum(int(usage_maps["purchase_counts"].get(member_id, 0)) for member_id in member_ids)
         is_operational_blocker = enterprise_profile["readiness_label"] == "Incompleto" and purchase_count > 0
@@ -3979,6 +3988,8 @@ def _build_insumo_options(limit: int = 1200):
                 "proveedor_sugerido_id": insumo.proveedor_principal_id or "",
                 "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
+                "inventory_ready": inventory_ready,
+                "inventory_source": "POINT",
                 "punto_reorden": punto_reorden,
                 "stock_seguridad": stock_seguridad,
                 "demanda_lead_time": demanda_lead_time,
@@ -6249,11 +6260,11 @@ def _filtered_solicitudes(
             for member in (canonical_by_id.get(canonical_id, {}) or {}).get("items", [])
         }
     )
-    existencias_raw = {
-        e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(
-            insumo_id__in=canonical_member_ids,
-            almacen="ALMACEN_1",
+    inventory_map = {
+        row.insumo_id: row
+        for row in canonical_point_inventory_report_rows(
+            location="ALMACEN",
+            insumos=list(Insumo.objects.filter(id__in=canonical_ids)),
         )
     }
 
@@ -6272,13 +6283,14 @@ def _filtered_solicitudes(
     for s in solicitudes:
         canonical = canonical_insumo_by_id(s.insumo_id)
         row = member_to_row.get(s.insumo_id)
-        member_ids = row["member_ids"] if row else []
-        member_existencias = [existencias_raw[mid] for mid in member_ids if mid in existencias_raw]
-        ex = existencias_raw.get(canonical.id) if canonical else None
-        ex = ex or next((item for item in member_existencias if item), None)
-        stock_actual = sum((item.stock_actual for item in member_existencias), Decimal("0"))
+        ex = inventory_map.get(canonical.id) if canonical else None
+        inventory_ready = bool(ex and ex.inventory_decision_ready)
+        stock_actual = ex.stock_actual if inventory_ready else None
         punto_reorden = ex.punto_reorden if ex else Decimal("0")
-        if stock_actual <= Decimal("0"):
+        if not inventory_ready:
+            s.reabasto_nivel = "unavailable"
+            s.reabasto_texto = "Point no disponible"
+        elif stock_actual <= Decimal("0"):
             s.reabasto_nivel = "critico"
             s.reabasto_texto = "Sin stock"
         elif stock_actual < punto_reorden:
@@ -6287,7 +6299,11 @@ def _filtered_solicitudes(
         else:
             s.reabasto_nivel = "ok"
             s.reabasto_texto = "Stock suficiente"
-        s.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
+        s.reabasto_detalle = (
+            f"Stock {stock_actual} / Reorden {punto_reorden}"
+            if inventory_ready
+            else "Point ALMACÉN sin ciclo canónico vigente"
+        )
         s.__dict__.update(_source_context_from_scope(area=s.area, planes_map=planes_map))
         s.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         s.presupuesto_estimado = (s.cantidad or Decimal("0")) * (s.costo_unitario or Decimal("0"))
@@ -6522,6 +6538,13 @@ def _enrich_visible_solicitudes(solicitudes: list[SolicitudCompra]) -> None:
         if canonical:
             canonical_ids.add(canonical.id)
     latest_cost_by_insumo = _latest_cost_by_canonical_ids(canonical_ids, canonical_by_id) if canonical_ids else {}
+    inventory_map = {
+        row.insumo_id: row
+        for row in canonical_point_inventory_report_rows(
+            location="ALMACEN",
+            insumos=[item for item in canonical_by_solicitud_id.values() if item],
+        )
+    }
 
     open_orders_by_solicitud = {}
     solicitud_ids = [s.id for s in solicitudes]
@@ -6535,6 +6558,27 @@ def _enrich_visible_solicitudes(solicitudes: list[SolicitudCompra]) -> None:
 
     for solicitud in solicitudes:
         canonical = canonical_by_solicitud_id.get(solicitud.id)
+        inventory_row = inventory_map.get(canonical.id) if canonical else None
+        inventory_ready = bool(inventory_row and inventory_row.inventory_decision_ready)
+        stock_actual = inventory_row.stock_actual if inventory_ready else None
+        punto_reorden = inventory_row.punto_reorden if inventory_row else Decimal("0")
+        if not inventory_ready:
+            solicitud.reabasto_nivel = "unavailable"
+            solicitud.reabasto_texto = "Point no disponible"
+        elif stock_actual <= Decimal("0"):
+            solicitud.reabasto_nivel = "critico"
+            solicitud.reabasto_texto = "Sin stock"
+        elif stock_actual < punto_reorden:
+            solicitud.reabasto_nivel = "bajo"
+            solicitud.reabasto_texto = "Bajo reorden"
+        else:
+            solicitud.reabasto_nivel = "ok"
+            solicitud.reabasto_texto = "Stock suficiente"
+        solicitud.reabasto_detalle = (
+            f"Stock {stock_actual} / Reorden {punto_reorden}"
+            if inventory_ready
+            else "Point ALMACÉN sin ciclo canónico vigente"
+        )
         solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
         solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))
@@ -6878,11 +6922,11 @@ def _dashboard_filtered_solicitudes(
             for member in (canonical_by_id.get(canonical_id, {}) or {}).get("items", [])
         }
     )
-    existencias_raw = {
-        e.insumo_id: e
-        for e in ExistenciaInsumo.objects.filter(
-            insumo_id__in=canonical_member_ids,
-            almacen="ALMACEN_1",
+    inventory_map = {
+        row.insumo_id: row
+        for row in canonical_point_inventory_report_rows(
+            location="ALMACEN",
+            insumos=list(Insumo.objects.filter(id__in=canonical_ids)),
         )
     }
     latest_cost_by_insumo = _latest_cost_by_canonical_ids(canonical_ids, canonical_by_id)
@@ -6907,14 +6951,14 @@ def _dashboard_filtered_solicitudes(
 
     for solicitud in solicitudes:
         canonical = canonical_insumo_by_id(solicitud.insumo_id)
-        row = member_to_row.get(solicitud.insumo_id)
-        member_ids = row["member_ids"] if row else []
-        member_existencias = [existencias_raw[mid] for mid in member_ids if mid in existencias_raw]
-        existencia = existencias_raw.get(canonical.id) if canonical else None
-        existencia = existencia or next((item for item in member_existencias if item), None)
-        stock_actual = sum((item.stock_actual for item in member_existencias), Decimal("0"))
+        existencia = inventory_map.get(canonical.id) if canonical else None
+        inventory_ready = bool(existencia and existencia.inventory_decision_ready)
+        stock_actual = existencia.stock_actual if inventory_ready else None
         punto_reorden = existencia.punto_reorden if existencia else Decimal("0")
-        if stock_actual <= Decimal("0"):
+        if not inventory_ready:
+            solicitud.reabasto_nivel = "unavailable"
+            solicitud.reabasto_texto = "Point no disponible"
+        elif stock_actual <= Decimal("0"):
             solicitud.reabasto_nivel = "critico"
             solicitud.reabasto_texto = "Sin stock"
         elif stock_actual < punto_reorden:
@@ -6923,7 +6967,11 @@ def _dashboard_filtered_solicitudes(
         else:
             solicitud.reabasto_nivel = "ok"
             solicitud.reabasto_texto = "Stock suficiente"
-        solicitud.reabasto_detalle = f"Stock {stock_actual} / Reorden {punto_reorden}"
+        solicitud.reabasto_detalle = (
+            f"Stock {stock_actual} / Reorden {punto_reorden}"
+            if inventory_ready
+            else "Point ALMACÉN sin ciclo canónico vigente"
+        )
         solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
         solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))

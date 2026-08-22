@@ -16,6 +16,7 @@ from inventario.stock_trace import TRACE_MANUAL_SYNC, build_stock_trace
 from maestros.models import CostoInsumo, Insumo, Proveedor, UnidadMedida
 from pos_bridge.models import (
     PointBranch,
+    PointInsumoInventorySnapshot,
     PointInventorySnapshot,
     PointProduct,
     PointRecipeExtractionRun,
@@ -312,12 +313,14 @@ class ProductionSupplyContextTests(TestCase):
         self.insumo_huevo = Insumo.objects.create(
             nombre="Huevo Supply",
             nombre_normalizado="huevo supply",
+            codigo_point="HUEVO-SUPPLY",
             unidad_base=self.unit_piece,
             proveedor_principal=self.provider,
         )
         self.insumo_harina = Insumo.objects.create(
             nombre="Harina Supply",
             nombre_normalizado="harina supply",
+            codigo_point="HARINA-SUPPLY",
             unidad_base=self.unit_kg,
             proveedor_principal=self.provider,
         )
@@ -369,6 +372,26 @@ class ProductionSupplyContextTests(TestCase):
             quality="DIRECT",
         )
         flour.save(update_fields=["trazabilidad_stock"])
+        point_cedis = PointBranch.objects.create(external_id="8001", name="CEDIS")
+        canonical_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+        )
+        for insumo, quantity in ((self.insumo_huevo, Decimal("30")), (self.insumo_harina, Decimal("4"))):
+            PointInsumoInventorySnapshot.objects.create(
+                branch=point_cedis,
+                insumo=insumo,
+                point_code=f"SUP-{insumo.id}",
+                point_name=insumo.nombre,
+                point_quantity=quantity,
+                point_unit=insumo.unidad_base.codigo,
+                quantity_base=quantity,
+                captured_at=timezone.now(),
+                sync_job=canonical_job,
+            )
         self.order = ProductionOrder.objects.create(
             fecha=self.target_date,
             sucursal=self.branch,
@@ -384,8 +407,8 @@ class ProductionSupplyContextTests(TestCase):
 
     def test_supply_context_explodes_bom_and_detects_shortage(self):
         context = build_production_supply_context(target_date=self.target_date)
-        self.assertFalse(context["source_is_point"])
-        self.assertEqual(context["inventory_scope"], "GLOBAL_INSUMO")
+        self.assertTrue(context["source_is_point"])
+        self.assertEqual(context["inventory_scope"], "CEDIS")
         self.assertEqual(context["summary"]["active_orders"], 1)
         self.assertEqual(context["summary"]["unique_insumos"], 2)
         self.assertEqual(context["summary"]["shortage_insumos"], 1)
@@ -408,7 +431,7 @@ class ProductionSupplyContextTests(TestCase):
         self.assertEqual(recipe_items["Huevo Supply"]["status_label"], "Disponible")
         self.assertEqual(recipe_items["Harina Supply"]["status_label"], "Stock parcial")
 
-    def test_supply_context_suma_stock_multiubicacion(self):
+    def test_supply_context_no_suma_stock_interno_multiubicacion(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo_harina,
             almacen="ARMADO",
@@ -418,8 +441,34 @@ class ProductionSupplyContextTests(TestCase):
         context = build_production_supply_context(target_date=self.target_date)
 
         row = next(item for item in context["rows"] if item["insumo_nombre"] == "Harina Supply")
-        self.assertEqual(row["available_qty"], Decimal("7.000"))
-        self.assertEqual(row["shortage_qty"], Decimal("3.000"))
+        self.assertEqual(row["available_qty"], Decimal("4.000"))
+        self.assertEqual(row["shortage_qty"], Decimal("6.000"))
+
+    def test_supply_context_consolidates_historical_variant_before_using_point_stock(self):
+        variant = Insumo.objects.create(
+            nombre="HARINA SUPPLY",
+            nombre_normalizado="harina supply",
+            unidad_base=self.unit_kg,
+            proveedor_principal=self.provider,
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=3,
+            insumo=variant,
+            insumo_texto=variant.nombre,
+            cantidad=Decimal("1"),
+            unidad_texto="kg",
+            unidad=self.unit_kg,
+            match_status=LineaReceta.STATUS_AUTO,
+        )
+
+        context = build_production_supply_context(target_date=self.target_date)
+
+        self.assertEqual(context["summary"]["unique_insumos"], 2)
+        row = next(item for item in context["rows"] if item["insumo_nombre"] == "Harina Supply")
+        self.assertEqual(row["required_qty"], Decimal("20.000"))
+        self.assertEqual(row["available_qty"], Decimal("4.000"))
+        self.assertEqual(row["shortage_qty"], Decimal("16.000"))
 
 
 class ProductionSupplyViewTests(TestCase):
@@ -437,6 +486,7 @@ class ProductionSupplyViewTests(TestCase):
         insumo = Insumo.objects.create(
             nombre="Azúcar Screen",
             nombre_normalizado="azucar screen",
+            codigo_point="AZUCAR-SCREEN",
             unidad_base=unit_piece,
             proveedor_principal=provider,
         )
@@ -467,6 +517,25 @@ class ProductionSupplyViewTests(TestCase):
             "quality": "DIRECT",
         }
         existencia.save(update_fields=["trazabilidad_stock"])
+        point_cedis = PointBranch.objects.create(external_id="8002", name="CEDIS")
+        canonical_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=point_cedis,
+            insumo=insumo,
+            point_code="SCREEN-INSUMO",
+            point_name=insumo.nombre,
+            point_quantity=Decimal("12"),
+            point_unit="pza",
+            quantity_base=Decimal("12"),
+            captured_at=timezone.now(),
+            sync_job=canonical_job,
+        )
         order = ProductionOrder.objects.create(
             fecha=self.target_date,
             sucursal=self.branch,
@@ -487,7 +556,7 @@ class ProductionSupplyViewTests(TestCase):
         self.assertContains(response, "Disponibilidad por receta")
         self.assertContains(response, "Azúcar Screen")
         self.assertContains(response, "Stock parcial")
-        self.assertContains(response, "La fuente de verdad del inventario físico para Producción")
+        self.assertContains(response, "La fuente madre del inventario físico para Producción")
 
 
 class ProjectionSupplyContextTests(TestCase):

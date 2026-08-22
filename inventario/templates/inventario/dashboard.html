@@ -137,9 +137,9 @@
       <div class="bi-kpi-note">Nombres visibles que todavía requieren homologación o cierre.</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if movement_total %}success{% else %}warning{% endif %}">{{ movement_total|intcomma }}</div>
-      <div class="bi-kpi-label">Eventos 30 días</div>
-      <div class="bi-kpi-note">Entradas, salidas, consumos y ajustes con evidencia reciente.</div>
+      <div class="bi-kpi-value {% if inventory_unavailable_count %}warning{% else %}success{% endif %}">{{ inventory_unavailable_count|intcomma }}</div>
+      <div class="bi-kpi-label">Point no disponible</div>
+      <div class="bi-kpi-note">No se reportan como cero ni se usan para decidir reabasto.</div>
     </article>
   </section>
 

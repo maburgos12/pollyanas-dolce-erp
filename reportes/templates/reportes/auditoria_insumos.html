@@ -119,12 +119,14 @@
         <tr>
           <td>{{ row.insumo.nombre }}</td>
           <td>{{ row.insumo.categoria|default:"-" }}</td>
-          <td class="audit-num">{{ row.stock_actual|floatformat:3|intcomma }}</td>
+          <td class="audit-num">{% if row.stock_actual is not None %}{{ row.stock_actual|floatformat:3|intcomma }}{% else %}No disponible{% endif %}</td>
           <td class="audit-num">{{ row.stock_minimo|floatformat:3|intcomma }}</td>
           <td class="audit-num">{{ row.stock_maximo|floatformat:3|intcomma }}</td>
           <td class="audit-num">{{ row.punto_reorden|floatformat:3|intcomma }}</td>
           <td>
-            {% if row.stock_estado == "critico" %}
+            {% if row.stock_estado == "unavailable" %}
+            <span class="stock-bajo">Point no disponible</span>
+            {% elif row.stock_estado == "critico" %}
             <span class="stock-critico">Crítico</span>
             {% elif row.stock_estado == "bajo" %}
             <span class="stock-bajo">Reorden</span>

@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from compras.models import OrdenCompra
 from crm.models import PedidoCliente
-from inventario.models import ExistenciaInsumo, MovimientoInventario
+from inventario.models import MovimientoInventario
+from inventario.canonical_point_inventory import canonical_point_inventory_report_rows
 from logistica.models import EntregaRuta, RutaEntrega
 from reportes.analytics_service import get_sales_fact_range_summary
 from reportes.models import FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
@@ -181,22 +182,19 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
         )
     )
 
-    inventory_rows = list(
-        ExistenciaInsumo.objects.values("insumo_id").annotate(
-            stock_total=Sum("stock_actual"),
-            punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
-        )
-    )
+    inventory_rows = canonical_point_inventory_report_rows(location="ALMACEN", limit=2000)
+    usable_inventory_rows = [row for row in inventory_rows if row.inventory_decision_ready]
+    unavailable_inventory_rows = len(inventory_rows) - len(usable_inventory_rows)
     alertas_stock = sum(
         1
-        for row in inventory_rows
-        if (row["stock_total"] or Decimal("0")) < (row["punto_reorden_almacen_1"] or Decimal("0"))
+        for row in usable_inventory_rows
+        if row.stock_actual < row.punto_reorden
     )
-    criticos_stock = sum(1 for row in inventory_rows if (row["stock_total"] or Decimal("0")) <= 0)
+    criticos_stock = sum(1 for row in usable_inventory_rows if row.stock_actual <= 0)
     bajo_reorden_calc = sum(
         1
-        for row in inventory_rows
-        if Decimal("0") < (row["stock_total"] or Decimal("0")) < (row["punto_reorden_almacen_1"] or Decimal("0"))
+        for row in usable_inventory_rows
+        if Decimal("0") < row.stock_actual < row.punto_reorden
     )
     production_fact_total = (
         FactProduccionDiaria.objects.filter(fecha__gte=date_from, fecha__lte=today).aggregate(total=Sum("producido")).get("total")
@@ -234,6 +232,7 @@ def compute_bi_snapshot(period_days: int = 90, months_window: int = 6) -> dict:
             "alertas_stock": int(alertas_stock),
             "criticos_stock": criticos_stock,
             "bajo_reorden_stock": bajo_reorden_calc,
+            "inventario_point_no_disponible": unavailable_inventory_rows,
             "produccion_total_fact": production_fact_total,
             "ventas_total_fact": fact_sales_total,
         },

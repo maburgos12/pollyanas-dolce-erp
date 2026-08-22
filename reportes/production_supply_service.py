@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Sum
 from django.utils import timezone
 
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
+from inventario.canonical_point_inventory import CanonicalPointInventoryService, InventoryFreshness
+from maestros.models import Insumo
+from maestros.utils.canonical_catalog import canonical_insumo_by_id
 from inventario.stock_trace import TRACE_LABELS, TRACE_UNTRACED
 from recetas.models import LineaReceta
 from reportes.models import AutoPurchaseRequestSnapshot, ProductionOrder
@@ -106,9 +108,9 @@ def build_production_supply_context(
     if not selected_orders:
         return {
             "target_date": target_date,
-            "source_of_truth": "ExistenciaInsumo + MovimientoInventario + importaciones/ajustes del ERP",
-            "source_is_point": False,
-            "inventory_scope": "GLOBAL_INSUMO",
+            "source_of_truth": "Point · CEDIS",
+            "source_is_point": True,
+            "inventory_scope": "CEDIS",
             "summary": {
                 "active_orders": 0,
                 "unique_insumos": 0,
@@ -121,7 +123,7 @@ def build_production_supply_context(
             "rows": [],
             "notes": [
                 "No hay órdenes activas del día para explotar insumos.",
-                "La fuente de verdad del inventario de insumos es el ledger del ERP, no Point.",
+                "La fuente madre del inventario de producción es Point en CEDIS.",
             ],
             "latest_visible_update": None,
             "latest_sync_ok": _serialize_sync_run(
@@ -150,8 +152,51 @@ def build_production_supply_context(
     insumo_ids: set[int] = set()
     for bom_line in bom_lines:
         if bom_line.insumo_id and _to_decimal(bom_line.cantidad) > ZERO:
+            canonical = canonical_insumo_by_id(bom_line.insumo_id) or bom_line.insumo
+            bom_line.insumo = canonical
+            bom_line.insumo_id = canonical.id
             bom_by_recipe[int(bom_line.receta_id)].append(bom_line)
             insumo_ids.add(int(bom_line.insumo_id))
+
+    inventory_items = list(Insumo.objects.filter(id__in=sorted(insumo_ids)))
+    inventory_readings = CanonicalPointInventoryService().read_many(
+        inventory_items,
+        location="CEDIS",
+    )
+    invalid_readings = [
+        reading
+        for reading in inventory_readings.values()
+        if reading.freshness is not InventoryFreshness.FRESH
+    ]
+    if invalid_readings:
+        return {
+            "target_date": target_date,
+            "source_of_truth": "Point · CEDIS",
+            "source_is_point": True,
+            "inventory_scope": "CEDIS",
+            "inventory_ready": False,
+            "summary": {
+                "active_orders": len(selected_orders),
+                "unique_insumos": len(insumo_ids),
+                "shortage_insumos": 0,
+                "covered_insumos": 0,
+                "coverage_rows_pct": ZERO,
+                "purchase_generated_rows": 0,
+                "traceable_rows": 0,
+            },
+            "rows": [],
+            "orders": {},
+            "notes": [
+                "Point CEDIS no tiene un ciclo canónico completo y vigente; no se calcularon faltantes con saldos internos.",
+            ],
+            "latest_visible_update": max(
+                (reading.captured_at for reading in invalid_readings if reading.captured_at),
+                default=None,
+            ),
+            "latest_sync_ok": None,
+            "latest_sync_any": None,
+            "generated_at": timezone.now(),
+        }
 
     existing_purchase_snapshots = list(
         AutoPurchaseRequestSnapshot.objects.select_related("solicitud", "proveedor", "insumo", "sucursal")
@@ -174,12 +219,8 @@ def build_production_supply_context(
     for existencia in existencias:
         latest_existence_by_insumo.setdefault(int(existencia.insumo_id), existencia)
     inventory_pool = {
-        int(row["insumo_id"]): _to_decimal(row["stock_total"])
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=sorted(insumo_ids))
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
+        item.id: _to_decimal(inventory_readings[item.id].quantity_base)
+        for item in inventory_items
     }
     initial_inventory = dict(inventory_pool)
 
@@ -413,9 +454,9 @@ def build_production_supply_context(
     traceable_rows = sum(1 for row in rows if row["trace_label"] != TRACE_LABELS.get(TRACE_UNTRACED))
 
     notes = [
-        "Fuente de verdad para Producción: ledger ERP de insumos (ExistenciaInsumo + MovimientoInventario + importaciones/ajustes). Point no es la fuente física del inventario.",
+        "Fuente madre para Producción: inventario canónico de insumos Point en CEDIS.",
         "Comprometido del día se calcula contra órdenes activas de la fecha; hoy es una reserva operativa calculada, no una reserva física persistida.",
-        "El inventario de insumos hoy es global en ERP; no existe separación física por sucursal en esta conciliación.",
+        "CEDIS se consulta separado de ALMACÉN; nunca se compensan ambos saldos.",
     ]
     if latest_sync_ok is None:
         notes.append("No existe un sync formal OK de almacén registrado; la confiabilidad depende de movimientos/importaciones/ajustes capturados en ERP.")
@@ -426,9 +467,10 @@ def build_production_supply_context(
 
     return {
         "target_date": target_date,
-        "source_of_truth": "ExistenciaInsumo + MovimientoInventario + importaciones/ajustes del ERP",
-        "source_is_point": False,
-        "inventory_scope": "GLOBAL_INSUMO",
+        "source_of_truth": "Point · CEDIS",
+        "source_is_point": True,
+        "inventory_scope": "CEDIS",
+        "inventory_ready": True,
         "summary": {
             "active_orders": len(selected_orders),
             "unique_insumos": unique_insumos,

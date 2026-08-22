@@ -3,17 +3,19 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from core.access import ROLE_DG
 from core.models import Sucursal
+from compras.models import SolicitudCompra
 from inventario.models import ExistenciaInsumo
 from maestros.models import Insumo, Proveedor, UnidadMedida
-from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.models import PointBranch, PointInsumoInventorySnapshot, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import LineaReceta, Receta
 from reportes.alert_service import generate_operational_alerts
 from reportes.auto_production_service import (
@@ -42,6 +44,12 @@ from reportes.operations_metrics_service import rebuild_operations_metrics
 ZERO = Decimal("0")
 
 
+class AutoPurchaseSafeDefaultsTests(SimpleTestCase):
+    def test_auto_purchase_global_default_is_disabled(self):
+        self.assertIs(settings.ERP_AUTO_PURCHASE_ENABLED, False)
+
+
+@override_settings(ERP_AUTO_PURCHASE_ENABLED=True)
 class OperationsAutomationFlowTests(TestCase):
     def setUp(self):
         self.target_date = date(2026, 4, 6)
@@ -62,8 +70,28 @@ class OperationsAutomationFlowTests(TestCase):
         self.insumo = Insumo.objects.create(
             nombre="Harina Auto",
             nombre_normalizado="harina auto",
+            codigo_point="HARINA-AUTO",
             unidad_base=self.unit,
             proveedor_principal=self.provider,
+        )
+        self.almacen_point = PointBranch.objects.create(external_id="9001", name="Almacen")
+        self.canonical_inventory_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+            parameters={"canonical_insumo_inventory": True, "locations": ["ALMACEN", "CEDIS"]},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=self.almacen_point,
+            insumo=self.insumo,
+            point_code="HARINA-AUTO",
+            point_name=self.insumo.nombre,
+            point_quantity=Decimal("6"),
+            point_unit="pza",
+            quantity_base=Decimal("6"),
+            captured_at=timezone.now(),
+            sync_job=self.canonical_inventory_job,
         )
         LineaReceta.objects.create(
             receta=self.recipe,
@@ -291,7 +319,43 @@ class OperationsAutomationFlowTests(TestCase):
         self.assertTrue(alert.resuelta)
         self.assertEqual(alert.resolution_note, "Atendida por operación")
 
-    def test_auto_purchase_suma_stock_multiubicacion(self):
+    def test_auto_purchase_consolidates_historical_variant_before_reserving_point_stock(self):
+        variant = Insumo.objects.create(
+            nombre="HARINA AUTO",
+            nombre_normalizado="harina auto",
+            unidad_base=self.unit,
+            proveedor_principal=self.provider,
+        )
+        LineaReceta.objects.create(
+            receta=self.recipe,
+            posicion=2,
+            tipo_linea=LineaReceta.TIPO_NORMAL,
+            insumo=variant,
+            insumo_texto=variant.nombre,
+            cantidad=Decimal("1"),
+            unidad=self.unit,
+            unidad_texto="pza-auto",
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+            costo_unitario_snapshot=Decimal("8"),
+        )
+        generation = generate_daily_production_orders(self.target_date, created_by=self.user)
+        self.assertEqual(generation["generated_orders"], 1)
+        order = ProductionOrder.objects.prefetch_related("lines").get()
+        approve_production_order(
+            order,
+            approved_by=self.user,
+            approved_quantities={self.recipe.id: Decimal("5")},
+        )
+
+        result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
+
+        self.assertEqual(result["lines"], 1)
+        line = result["branches"][0]["lines"][0]
+        self.assertEqual(line["insumo_id"], self.insumo.id)
+        self.assertEqual(Decimal(line["shortage_immediate"]), Decimal("9.000"))
+
+    def test_auto_purchase_no_suma_stock_interno_multiubicacion(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo,
             almacen="ARMADO",
@@ -307,9 +371,21 @@ class OperationsAutomationFlowTests(TestCase):
 
         result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
 
-        self.assertEqual(Decimal(result["branches"][0]["lines"][0]["shortage_immediate"]), Decimal("2.000"))
+        self.assertEqual(Decimal(result["branches"][0]["lines"][0]["shortage_immediate"]), Decimal("4.000"))
 
-    def test_stock_alert_usa_total_y_umbral_de_almacen_1(self):
+    @override_settings(ERP_AUTO_PURCHASE_ENABLED=False)
+    def test_auto_purchase_is_fail_closed_when_global_flag_is_off(self):
+        controls = AutoControlSettings.get_solo()
+        controls.enable_auto_purchase = True
+        controls.save(update_fields=["enable_auto_purchase"])
+
+        result = generate_purchase_requests_from_production(self.target_date, actor=self.user)
+
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["generated"], 0)
+        self.assertFalse(SolicitudCompra.objects.filter(area__startswith="AUTO_PRODUCCION:").exists())
+
+    def test_stock_alert_usa_point_almacen_y_no_compensa_con_armado(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo,
             almacen="ARMADO",
@@ -320,7 +396,7 @@ class OperationsAutomationFlowTests(TestCase):
 
         generate_operational_alerts(target_date=self.target_date)
 
-        self.assertFalse(
+        self.assertTrue(
             Alert.objects.filter(
                 fecha=self.target_date,
                 tipo=Alert.TYPE_STOCK,

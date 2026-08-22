@@ -42,7 +42,12 @@ from core.branch_catalog import eligible_operational_branch_qs
 from proyecciones.models import ProyeccionProduccion
 from proyecciones.services import ProyeccionProduccionService
 from core.models import AuditLog, Sucursal
-from inventario.models import ConsumoInsumoMensual, ExistenciaInsumo, MovimientoInventario
+from inventario.models import ConsumoInsumoMensual, MovimientoInventario
+from inventario.canonical_point_inventory import (
+    CanonicalPointInventoryService,
+    InventoryFreshness,
+    canonical_point_inventory_report_rows,
+)
 from control.models import MermaPOS, VentaPOS
 from control.services_mermas_devoluciones import merma_audit_context, parse_month as parse_merma_month
 from maestros.models import CostoInsumo, Insumo
@@ -1589,20 +1594,18 @@ def _bi_purchase_snapshot() -> dict[str, object]:
 
 
 def _bi_inventory_snapshot() -> dict[str, object]:
-    rows = list(
-        ExistenciaInsumo.objects.values("insumo_id").annotate(
-            stock_total=Sum("stock_actual"),
-            punto_reorden_almacen_1=Max("punto_reorden", filter=Q(almacen="ALMACEN_1")),
-            stock_minimo_almacen_1=Max("stock_minimo", filter=Q(almacen="ALMACEN_1")),
-        )[:2000]
-    )
+    rows = canonical_point_inventory_report_rows(location="ALMACEN", limit=2000)
     total = len(rows)
     criticos = 0
     bajo_reorden = 0
+    unavailable = 0
     for row in rows:
-        stock = _to_decimal(row.get("stock_total"))
-        reorden = _to_decimal(row.get("punto_reorden_almacen_1"))
-        minimo = _to_decimal(row.get("stock_minimo_almacen_1"))
+        if not row.inventory_decision_ready:
+            unavailable += 1
+            continue
+        stock = _to_decimal(row.stock_actual)
+        reorden = _to_decimal(row.punto_reorden)
+        minimo = _to_decimal(row.stock_minimo)
         if stock <= 0:
             criticos += 1
         elif reorden > 0 and stock < reorden:
@@ -1614,11 +1617,14 @@ def _bi_inventory_snapshot() -> dict[str, object]:
         "total": total,
         "criticos": criticos,
         "bajo_reorden": bajo_reorden,
+        "unavailable": unavailable,
         "movimientos_hoy": movimientos_hoy,
-        "status": "Con riesgo" if criticos else ("En revisión" if bajo_reorden else "Controlado"),
-        "tone": "danger" if criticos else ("warning" if bajo_reorden else "success"),
+        "status": "Point no disponible" if unavailable else ("Con riesgo" if criticos else ("En revisión" if bajo_reorden else "Controlado")),
+        "tone": "warning" if unavailable else ("danger" if criticos else ("warning" if bajo_reorden else "success")),
         "detail": (
-            "Hay artículos críticos que ya comprometen surtido."
+            "El último ciclo canónico de Point no permite clasificar todo el inventario."
+            if unavailable
+            else "Hay artículos críticos que ya comprometen surtido."
             if criticos
             else "Hay artículos que piden reabasto."
             if bajo_reorden
@@ -1998,14 +2004,11 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
             .annotate(total=Sum("cantidad"))
         )
     }
-    stock_total_map = {
-        int(row["insumo_id"]): Decimal(str(row["stock_total"] or 0))
-        for row in (
-            ExistenciaInsumo.objects.filter(insumo_id__in=canonical_ids)
-            .values("insumo_id")
-            .annotate(stock_total=Sum("stock_actual"))
-        )
-    }
+    inventory_items = list(Insumo.objects.filter(id__in=canonical_ids))
+    stock_readings = CanonicalPointInventoryService().read_many(
+        inventory_items,
+        location="CEDIS",
+    )
 
     aggregated: dict[int, dict[str, object]] = {}
     for item in items:
@@ -2041,10 +2044,14 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
         insumo = payload["insumo"]
         required_qty = Decimal(str(payload["required_qty"] or 0))
         historico_units = Decimal(str(payload["historico_units"] or 0))
-        stock_actual = stock_total_map.get(int(insumo.id), Decimal("0"))
-        shortage = max(required_qty - stock_actual, Decimal("0"))
+        reading = stock_readings.get(int(insumo.id))
+        inventory_ready = bool(reading and reading.freshness is InventoryFreshness.FRESH)
+        stock_actual = reading.quantity_base if inventory_ready else None
+        shortage = max(required_qty - stock_actual, Decimal("0")) if inventory_ready else Decimal("0")
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])
+        if not inventory_ready:
+            missing.append("inventario Point CEDIS no disponible")
         missing_cost = latest_costo_canonico(insumo_id=insumo.id) is None
         if shortage <= 0 and not missing and not missing_cost:
             continue
@@ -2056,6 +2063,7 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
                 "insumo_nombre": insumo.nombre,
                 "required_qty": required_qty,
                 "stock_actual": stock_actual,
+                "inventory_ready": inventory_ready,
                 "shortage": shortage,
                 "historico_units": historico_units,
                 "master_missing": missing,
@@ -3188,46 +3196,27 @@ def _export_consumo_xlsx(rows, date_from: str, date_to: str, tipo: str) -> HttpR
 
 
 def _faltantes_rows(nivel: str):
-    member_to_row, canonical_by_id = _canonical_catalog_maps()
-    raw_existencias = list(ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base").order_by("insumo__nombre")[:1000])
-    grouped = {}
-    for existencia in raw_existencias:
-        row = member_to_row.get(existencia.insumo_id)
-        if not row:
-            continue
-        canonical = row["canonical"]
-        bucket = grouped.get(canonical.id)
-        if bucket is None:
-            bucket = SimpleNamespace(
-                insumo=canonical,
-                stock_actual=Decimal("0"),
-                stock_minimo=Decimal("0"),
-                stock_maximo=Decimal("0"),
-                punto_reorden=Decimal("0"),
-                inventario_promedio=Decimal("0"),
-                dias_llegada_pedido=0,
-                consumo_diario_promedio=Decimal("0"),
-                canonical_variant_count=canonical_by_id[canonical.id]["variant_count"],
-                _config_priority=0,
-            )
-            grouped[canonical.id] = bucket
-        bucket.stock_actual += _to_decimal(existencia.stock_actual, "0")
-        config_priority = 2 if existencia.insumo_id == canonical.id else 1
-        if existencia.almacen == "ALMACEN_1" and config_priority > bucket._config_priority:
-            bucket.stock_minimo = _to_decimal(existencia.stock_minimo, "0")
-            bucket.stock_maximo = _to_decimal(existencia.stock_maximo, "0")
-            bucket.punto_reorden = _to_decimal(existencia.punto_reorden, "0")
-            bucket.inventario_promedio = _to_decimal(existencia.inventario_promedio, "0")
-            bucket.dias_llegada_pedido = int(existencia.dias_llegada_pedido or 0)
-            bucket.consumo_diario_promedio = _to_decimal(existencia.consumo_diario_promedio, "0")
-            bucket._config_priority = config_priority
-
-    existencias = list(grouped.values())
+    existencias = canonical_point_inventory_report_rows(location="ALMACEN", limit=1000)
 
     criticos_count = 0
     bajo_count = 0
     rows = []
     for e in existencias:
+        if not e.inventory_decision_ready:
+            e.criticidad = "Sin lectura"
+            e.criticidad_badge = "bg-warning"
+            e.nivel = "unavailable"
+            e.sugerencia_compra = Decimal("0")
+            include = nivel in {"all", "alerta", "unavailable"}
+            if include:
+                meta = _build_report_enterprise_meta(e.insumo)
+                e.enterprise_status = meta["enterprise_status"]
+                e.enterprise_missing = meta["enterprise_missing"]
+                e.enterprise_usage_label = meta["enterprise_usage_label"]
+                e.enterprise_edit_url = meta["enterprise_edit_url"]
+                e.enterprise_list_url = meta["enterprise_list_url"]
+                rows.append(e)
+            continue
         stock = e.stock_actual
         reorden = e.punto_reorden
         if stock <= 0:
@@ -4622,14 +4611,12 @@ def auditoria_insumos(request: HttpRequest) -> HttpResponse:
     total_rows = len(rows)
     ok_rows = sum(1 for row in rows if row.alerta == ConsumoInsumoMensual.ALERTA_OK)
     active_alerts = sum(1 for row in rows if row.alerta in {ConsumoInsumoMensual.ALERTA_MERMA, ConsumoInsumoMensual.ALERTA_FALTANTE})
-    stock_rows = list(
-        ExistenciaInsumo.objects.select_related("insumo", "insumo__unidad_base")
-        .filter(insumo__activo=True)
-        .order_by("insumo__nombre")[:500]
-    )
+    stock_rows = canonical_point_inventory_report_rows(location="ALMACEN", limit=500)
     for stock in stock_rows:
         stock.stock_estado = (
-            "critico"
+            "unavailable"
+            if not stock.inventory_decision_ready
+            else "critico"
             if stock.stock_actual <= 0
             else "bajo"
             if stock.punto_reorden and stock.stock_actual < stock.punto_reorden
