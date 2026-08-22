@@ -33,6 +33,7 @@ from inventario.canonical_point_inventory import (
     canonical_point_inventory_report_rows,
 )
 from inventario.services_existencias import aplicar_delta
+from inventario.units import presentation_quantity
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from maestros.utils.canonical_catalog import (
     canonical_insumo,
@@ -3914,6 +3915,15 @@ def _recepcion_apply_succeeded(result: dict) -> bool:
     return result.get("applied") is True or result.get("reason") == "ya_aplicado"
 
 
+def _point_restock_detail(inventory_row, *, inventory_ready: bool) -> str:
+    if not inventory_ready or inventory_row is None:
+        return "Point ALMACÉN sin ciclo canónico vigente"
+    return (
+        f"Stock {inventory_row.stock_actual_display:.3f} {inventory_row.display_unit} / "
+        f"Reorden {inventory_row.punto_reorden_display:.3f} {inventory_row.display_unit}"
+    )
+
+
 def _build_insumo_options(limit: int = 1200):
     cache_key = f"compras:solicitudes:insumo-options:v2:{int(limit or 1200)}"
     cached = cache.get(cache_key)
@@ -3975,6 +3985,8 @@ def _build_insumo_options(limit: int = 1200):
             recomendado = (demanda_lead_time + stock_seguridad) - (stock_actual + en_transito)
             if recomendado < 0:
                 recomendado = Decimal("0")
+        en_transito_display, _ = presentation_quantity(en_transito, insumo.unidad_base)
+        recomendado_display, _ = presentation_quantity(recomendado, insumo.unidad_base)
         enterprise_profile = getattr(insumo, "enterprise_profile", enterprise_readiness_profile(insumo))
         purchase_count = sum(int(usage_maps["purchase_counts"].get(member_id, 0)) for member_id in member_ids)
         is_operational_blocker = enterprise_profile["readiness_label"] == "Incompleto" and purchase_count > 0
@@ -3988,14 +4000,20 @@ def _build_insumo_options(limit: int = 1200):
                 "proveedor_sugerido_id": insumo.proveedor_principal_id or "",
                 "proveedor_sugerido": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                 "stock_actual": stock_actual,
+                "stock_actual_display": ex.stock_actual_display if ex else Decimal("0"),
                 "inventory_ready": inventory_ready,
                 "inventory_source": "POINT",
+                "display_unit": ex.display_unit if ex else (insumo.unidad_base.codigo if insumo.unidad_base_id else ""),
                 "punto_reorden": punto_reorden,
+                "punto_reorden_display": ex.punto_reorden_display if ex else Decimal("0"),
                 "stock_seguridad": stock_seguridad,
+                "stock_seguridad_display": ex.stock_minimo_display if ex else Decimal("0"),
                 "demanda_lead_time": demanda_lead_time,
                 "en_transito": en_transito,
+                "en_transito_display": en_transito_display,
                 "lead_time_dias": lead_time_dias,
                 "recomendado": recomendado,
+                "recomendado_display": recomendado_display,
                 "enterprise_status": enterprise_profile["readiness_label"],
                 "enterprise_missing": enterprise_profile["missing"],
                 "is_operational_blocker": is_operational_blocker,
@@ -6299,11 +6317,7 @@ def _filtered_solicitudes(
         else:
             s.reabasto_nivel = "ok"
             s.reabasto_texto = "Stock suficiente"
-        s.reabasto_detalle = (
-            f"Stock {stock_actual} / Reorden {punto_reorden}"
-            if inventory_ready
-            else "Point ALMACÉN sin ciclo canónico vigente"
-        )
+        s.reabasto_detalle = _point_restock_detail(ex, inventory_ready=inventory_ready)
         s.__dict__.update(_source_context_from_scope(area=s.area, planes_map=planes_map))
         s.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         s.presupuesto_estimado = (s.cantidad or Decimal("0")) * (s.costo_unitario or Decimal("0"))
@@ -6574,11 +6588,7 @@ def _enrich_visible_solicitudes(solicitudes: list[SolicitudCompra]) -> None:
         else:
             solicitud.reabasto_nivel = "ok"
             solicitud.reabasto_texto = "Stock suficiente"
-        solicitud.reabasto_detalle = (
-            f"Stock {stock_actual} / Reorden {punto_reorden}"
-            if inventory_ready
-            else "Point ALMACÉN sin ciclo canónico vigente"
-        )
+        solicitud.reabasto_detalle = _point_restock_detail(inventory_row, inventory_ready=inventory_ready)
         solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
         solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))
@@ -6967,11 +6977,7 @@ def _dashboard_filtered_solicitudes(
         else:
             solicitud.reabasto_nivel = "ok"
             solicitud.reabasto_texto = "Stock suficiente"
-        solicitud.reabasto_detalle = (
-            f"Stock {stock_actual} / Reorden {punto_reorden}"
-            if inventory_ready
-            else "Point ALMACÉN sin ciclo canónico vigente"
-        )
+        solicitud.reabasto_detalle = _point_restock_detail(existencia, inventory_ready=inventory_ready)
         solicitud.__dict__.update(_source_context_from_scope(area=solicitud.area, planes_map=planes_map))
         solicitud.costo_unitario = latest_cost_by_insumo.get(canonical.id, Decimal("0")) if canonical else Decimal("0")
         solicitud.presupuesto_estimado = (solicitud.cantidad or Decimal("0")) * (solicitud.costo_unitario or Decimal("0"))

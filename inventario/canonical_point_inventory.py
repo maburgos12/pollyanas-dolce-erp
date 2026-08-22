@@ -281,21 +281,39 @@ def canonical_point_inventory_report_rows(*, location, insumos=None, limit=2000)
                 (policies[member_id] for member_id in catalog_row["member_ids"] if member_id in policies),
                 None,
             )
+        stock_minimo = Decimal(str(getattr(policy, "stock_minimo", 0) or 0))
+        stock_maximo = Decimal(str(getattr(policy, "stock_maximo", 0) or 0))
+        punto_reorden = Decimal(str(getattr(policy, "punto_reorden", 0) or 0))
+        inventario_promedio = Decimal(str(getattr(policy, "inventario_promedio", 0) or 0))
+        consumo_diario_promedio = Decimal(
+            str(getattr(policy, "consumo_diario_promedio", 0) or 0)
+        )
+        stock_minimo_display, policy_display_unit = display_quantity(stock_minimo, item.unidad_base)
+        stock_maximo_display, _ = display_quantity(stock_maximo, item.unidad_base)
+        punto_reorden_display, _ = display_quantity(punto_reorden, item.unidad_base)
+        inventario_promedio_display, _ = display_quantity(inventario_promedio, item.unidad_base)
+        consumo_diario_promedio_display, _ = display_quantity(
+            consumo_diario_promedio,
+            item.unidad_base,
+        )
         result.append(
             SimpleNamespace(
                 insumo=item,
                 insumo_id=item.id,
                 stock_actual=reading.quantity_base,
                 stock_actual_display=reading.display_quantity,
-                display_unit=reading.display_unit,
-                stock_minimo=Decimal(str(getattr(policy, "stock_minimo", 0) or 0)),
-                stock_maximo=Decimal(str(getattr(policy, "stock_maximo", 0) or 0)),
-                punto_reorden=Decimal(str(getattr(policy, "punto_reorden", 0) or 0)),
-                inventario_promedio=Decimal(str(getattr(policy, "inventario_promedio", 0) or 0)),
+                display_unit=reading.display_unit or policy_display_unit,
+                stock_minimo=stock_minimo,
+                stock_minimo_display=stock_minimo_display,
+                stock_maximo=stock_maximo,
+                stock_maximo_display=stock_maximo_display,
+                punto_reorden=punto_reorden,
+                punto_reorden_display=punto_reorden_display,
+                inventario_promedio=inventario_promedio,
+                inventario_promedio_display=inventario_promedio_display,
                 dias_llegada_pedido=int(getattr(policy, "dias_llegada_pedido", 0) or 0),
-                consumo_diario_promedio=Decimal(
-                    str(getattr(policy, "consumo_diario_promedio", 0) or 0)
-                ),
+                consumo_diario_promedio=consumo_diario_promedio,
+                consumo_diario_promedio_display=consumo_diario_promedio_display,
                 inventory_source=reading.source,
                 inventory_location=location,
                 inventory_freshness=reading.freshness,

@@ -175,15 +175,15 @@
                 <tr class="{% if row.is_blocker %}pd-row-warning{% endif %}">
                   <td>
                     <strong>{{ row.insumo_nombre }}</strong>
-                    <div class="pd-muted-small">{{ row.unidad_codigo|default:"-" }}</div>
+                    <div class="pd-muted-small">{{ row.display_unit|default:"-" }}</div>
                   </td>
-                  <td>{{ row.available_qty }} {{ row.unidad_codigo }}</td>
-                  <td>{{ row.committed_qty }} {{ row.unidad_codigo }}</td>
-                  <td>{{ row.required_qty }} {{ row.unidad_codigo }}</td>
-                  <td><strong>{{ row.shortage_qty }} {{ row.unidad_codigo }}</strong></td>
+                  <td>{{ row.available_qty_display }} {{ row.display_unit }}</td>
+                  <td>{{ row.committed_qty_display }} {{ row.display_unit }}</td>
+                  <td>{{ row.required_qty_display }} {{ row.display_unit }}</td>
+                  <td><strong>{{ row.shortage_qty_display }} {{ row.display_unit }}</strong></td>
                   <td>{{ row.status_label }}</td>
                   <td>{{ row.coverage_pct }}%</td>
-                  <td>{{ row.remaining_after_commit }} {{ row.unidad_codigo }}</td>
+                  <td>{{ row.remaining_after_commit_display }} {{ row.display_unit }}</td>
                   <td class="pd-cell-lg">
                     <div>{{ row.trace_label }}</div>
                     <div class="pd-muted-small">Efectiva {{ row.trace_effective_at|default:"-" }}</div>
@@ -191,11 +191,11 @@
                   </td>
                   <td class="pd-cell-lg">
                     {% if row.purchase_folios_text %}
-                      <div><strong>{{ row.purchase_generated_qty }} {{ row.unidad_codigo }}</strong></div>
+                      <div><strong>{{ row.purchase_generated_qty_display }} {{ row.display_unit }}</strong></div>
                       <div class="pd-muted-small">{{ row.purchase_folios_text }}</div>
                       <div class="pd-muted-small">{{ row.purchase_status_text }}</div>
                     {% elif row.shortage_qty > 0 %}
-                      <div><strong>{{ row.shortage_qty }} {{ row.unidad_codigo }}</strong></div>
+                      <div><strong>{{ row.shortage_qty_display }} {{ row.display_unit }}</strong></div>
                       <div class="pd-muted-small">Sugerir solicitud para cubrir faltante.</div>
                     {% else %}
                       <span class="pd-muted">Sin solicitud</span>
@@ -317,10 +317,10 @@
                               <tbody>
                                 {% for recipe_item in recipe_row.items %}
                                   <tr class="{% if recipe_item.shortage_qty > 0 %}pd-row-warning{% endif %}">
-                                    <td><strong>{{ recipe_item.insumo_nombre }}</strong><div class="pd-muted-small">{{ recipe_item.unidad_codigo|default:"-" }}</div></td>
-                                    <td>{{ recipe_item.required_qty }} {{ recipe_item.unidad_codigo }}</td>
-                                    <td>{{ recipe_item.available_before_qty }} {{ recipe_item.unidad_codigo }}</td>
-                                    <td><strong>{{ recipe_item.shortage_qty }} {{ recipe_item.unidad_codigo }}</strong></td>
+                                    <td><strong>{{ recipe_item.insumo_nombre }}</strong><div class="pd-muted-small">{{ recipe_item.display_unit|default:"-" }}</div></td>
+                                    <td>{{ recipe_item.required_qty_display }} {{ recipe_item.display_unit }}</td>
+                                    <td>{{ recipe_item.available_before_qty_display }} {{ recipe_item.display_unit }}</td>
+                                    <td><strong>{{ recipe_item.shortage_qty_display }} {{ recipe_item.display_unit }}</strong></td>
                                     <td>{{ recipe_item.status_label }}</td>
                                   </tr>
                                 {% endfor %}
@@ -351,20 +351,20 @@
                     <tbody>
                       {% for item in order.supply_reconciliation.items %}
                         <tr class="{% if item.shortage_qty > 0 %}pd-row-warning{% endif %}">
-                          <td><strong>{{ item.insumo_nombre }}</strong><div class="pd-muted-small">{{ item.unidad_codigo|default:"-" }}</div></td>
-                          <td>{{ item.available_before_qty }} {{ item.unidad_codigo }}</td>
-                          <td>{{ item.required_qty }} {{ item.unidad_codigo }}</td>
-                          <td>{{ item.committed_qty }} {{ item.unidad_codigo }}</td>
-                          <td><strong>{{ item.shortage_qty }} {{ item.unidad_codigo }}</strong></td>
+                          <td><strong>{{ item.insumo_nombre }}</strong><div class="pd-muted-small">{{ item.display_unit|default:"-" }}</div></td>
+                          <td>{{ item.available_before_qty_display }} {{ item.display_unit }}</td>
+                          <td>{{ item.required_qty_display }} {{ item.display_unit }}</td>
+                          <td>{{ item.committed_qty_display }} {{ item.display_unit }}</td>
+                          <td><strong>{{ item.shortage_qty_display }} {{ item.display_unit }}</strong></td>
                           <td>{{ item.status_label }}</td>
-                          <td>{{ item.available_after_qty }} {{ item.unidad_codigo }}</td>
+                          <td>{{ item.available_after_qty_display }} {{ item.display_unit }}</td>
                           <td class="pd-cell-md">
                             {% if item.purchase_folios_text %}
-                              <div><strong>{{ item.purchase_generated_qty }} {{ item.unidad_codigo }}</strong></div>
+                              <div><strong>{{ item.purchase_generated_qty_display }} {{ item.display_unit }}</strong></div>
                               <div class="pd-muted-small">{{ item.purchase_folios_text }}</div>
                               <div class="pd-muted-small">{{ item.purchase_status_text }}</div>
                             {% elif item.shortage_qty > 0 %}
-                              <div><strong>{{ item.purchase_gap_qty }} {{ item.unidad_codigo }}</strong></div>
+                              <div><strong>{{ item.purchase_gap_qty_display }} {{ item.display_unit }}</strong></div>
                               <div class="pd-muted-small">Pendiente de solicitar</div>
                             {% else %}
                               <span class="pd-muted">Sin faltante</span>
@@ -441,8 +441,8 @@
                   <td>{{ snapshot.insumo.nombre }}</td>
                   <td>{{ snapshot.proveedor.nombre|default:"Sin proveedor" }}</td>
                   <td>{{ snapshot.fecha_sugerida_compra|date:"Y-m-d"|default:"-" }}</td>
-                  <td>{{ snapshot.stock_actual }} / {{ snapshot.stock_objetivo }}</td>
-                  <td>{{ snapshot.cantidad_sugerida }} {{ snapshot.insumo.unidad_base.codigo|default:"" }}</td>
+                  <td>{{ snapshot.stock_actual_display }} / {{ snapshot.stock_objetivo_display }} {{ snapshot.display_unit }}</td>
+                  <td>{{ snapshot.cantidad_sugerida_display }} {{ snapshot.display_unit }}</td>
                   <td>{{ snapshot.solicitud.get_estatus_display }}</td>
                   <td class="pd-muted">
                     {{ snapshot.metadata.reason|default:snapshot.solicitud.justificacion_excepcion }}

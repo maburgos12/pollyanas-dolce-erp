@@ -60,6 +60,7 @@ from integraciones.models import PublicApiAccessLog, PublicApiClient
 from integraciones.views import _deactivate_idle_api_clients, _purge_api_logs
 from inventario.models import AjusteInventario, AlmacenSyncRun, ExistenciaInsumo
 from inventario.canonical_point_inventory import canonical_point_inventory_report_rows
+from inventario.units import presentation_quantity
 from inventario.views import (
     _apply_ajuste,
     _apply_cross_filters,
@@ -558,6 +559,13 @@ class InventarioSugerenciasCompraView(APIView):
             total_sugerido += sugerida
             total_costo += costo_sugerido
 
+            en_transito_presentacion, unidad_presentacion = presentation_quantity(en_transito_qty, insumo.unidad_base)
+            requerido_plan_presentacion, _ = presentation_quantity(requerido_plan, insumo.unidad_base)
+            demanda_lead_time_presentacion, _ = presentation_quantity(demanda_lead_time, insumo.unidad_base)
+            requerido_presentacion, _ = presentation_quantity(requerido, insumo.unidad_base)
+            sugerida_presentacion, _ = presentation_quantity(sugerida, insumo.unidad_base)
+            consumo_diario_presentacion, _ = presentation_quantity(consumo_diario, insumo.unidad_base)
+
             rows.append(
                 {
                     "insumo_id": insumo_id,
@@ -565,15 +573,25 @@ class InventarioSugerenciasCompraView(APIView):
                     "unidad": insumo.unidad_base.codigo if insumo.unidad_base_id and insumo.unidad_base else "",
                     "proveedor_principal": insumo.proveedor_principal.nombre if insumo.proveedor_principal_id else "",
                     "stock_actual": str(stock_actual) if inventory_ready else None,
+                    "stock_actual_presentacion": str(ex.stock_actual_display) if inventory_ready else None,
                     "stock_seguridad": str(stock_seguridad),
+                    "stock_seguridad_presentacion": str(ex.stock_minimo_display if ex else Decimal("0")),
                     "punto_reorden": str(punto_reorden),
+                    "punto_reorden_presentacion": str(ex.punto_reorden_display if ex else Decimal("0")),
                     "en_transito": str(en_transito_qty),
+                    "en_transito_presentacion": str(en_transito_presentacion),
                     "requerido_plan": str(requerido_plan),
+                    "requerido_plan_presentacion": str(requerido_plan_presentacion),
                     "demanda_lead_time": str(demanda_lead_time),
+                    "demanda_lead_time_presentacion": str(demanda_lead_time_presentacion),
                     "requerido_total": str(requerido),
+                    "requerido_total_presentacion": str(requerido_presentacion),
                     "compra_sugerida": str(sugerida),
+                    "compra_sugerida_presentacion": str(sugerida_presentacion),
                     "lead_time_dias": lead_time,
                     "consumo_diario_promedio": str(consumo_diario),
+                    "consumo_diario_promedio_presentacion": str(consumo_diario_presentacion),
+                    "unidad_presentacion": ex.display_unit if ex else unidad_presentacion,
                     "costo_unitario": str(costo_unitario),
                     "costo_compra_sugerida": str(costo_sugerido),
                     "estatus": estado,

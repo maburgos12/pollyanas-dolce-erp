@@ -170,7 +170,16 @@ class PublicInsumosView(APIView):
                     "categoria": insumo.categoria,
                     "unidad": insumo.unidad_base.codigo if insumo.unidad_base else "",
                     "stock_actual": str(ex.stock_actual) if ex and ex.inventory_decision_ready else None,
+                    "stock_actual_presentacion": (
+                        str(ex.stock_actual_display) if ex and ex.inventory_decision_ready else None
+                    ),
                     "punto_reorden": str(ex.punto_reorden) if ex else "0",
+                    "punto_reorden_presentacion": str(ex.punto_reorden_display) if ex else "0",
+                    "unidad_presentacion": (
+                        ex.display_unit
+                        if ex
+                        else (insumo.unidad_base.codigo if insumo.unidad_base else "")
+                    ),
                     "inventario_fuente": "POINT",
                     "inventario_ubicacion": "ALMACEN",
                     "inventario_estado": str(ex.inventory_freshness) if ex else "MISSING",

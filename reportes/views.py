@@ -47,6 +47,7 @@ from inventario.canonical_point_inventory import (
     CanonicalPointInventoryService,
     InventoryFreshness,
     canonical_point_inventory_report_rows,
+    display_quantity,
 )
 from control.models import MermaPOS, VentaPOS
 from control.services_mermas_devoluciones import merma_audit_context, parse_month as parse_merma_month
@@ -2048,6 +2049,9 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
         inventory_ready = bool(reading and reading.freshness is InventoryFreshness.FRESH)
         stock_actual = reading.quantity_base if inventory_ready else None
         shortage = max(required_qty - stock_actual, Decimal("0")) if inventory_ready else Decimal("0")
+        required_qty_display, display_unit = display_quantity(required_qty, insumo.unidad_base)
+        stock_actual_display, _ = display_quantity(stock_actual or Decimal("0"), insumo.unidad_base)
+        shortage_display, _ = display_quantity(shortage, insumo.unidad_base)
         readiness = enterprise_readiness_profile(insumo)
         missing = list(readiness.get("missing") or [])
         if not inventory_ready:
@@ -2062,9 +2066,13 @@ def _bi_supply_watchlist(limit: int = 6) -> dict[str, object] | None:
             {
                 "insumo_nombre": insumo.nombre,
                 "required_qty": required_qty,
+                "required_qty_display": required_qty_display,
                 "stock_actual": stock_actual,
+                "stock_actual_display": stock_actual_display if inventory_ready else None,
                 "inventory_ready": inventory_ready,
                 "shortage": shortage,
+                "shortage_display": shortage_display,
+                "display_unit": display_unit,
                 "historico_units": historico_units,
                 "master_missing": missing,
                 "missing_cost": missing_cost,
@@ -3207,6 +3215,10 @@ def _faltantes_rows(nivel: str):
             e.criticidad_badge = "bg-warning"
             e.nivel = "unavailable"
             e.sugerencia_compra = Decimal("0")
+            e.sugerencia_compra_display, _ = display_quantity(
+                e.sugerencia_compra,
+                e.insumo.unidad_base,
+            )
             include = nivel in {"all", "alerta", "unavailable"}
             if include:
                 meta = _build_report_enterprise_meta(e.insumo)
@@ -3235,6 +3247,10 @@ def _faltantes_rows(nivel: str):
             e.nivel = "ok"
 
         e.sugerencia_compra = max(reorden - stock, 0)
+        e.sugerencia_compra_display, _ = display_quantity(
+            e.sugerencia_compra,
+            e.insumo.unidad_base,
+        )
 
         include = False
         if nivel == "all":
@@ -3265,10 +3281,10 @@ def _export_faltantes_csv(rows, nivel: str) -> HttpResponse:
         writer.writerow(
             [
                 row.insumo.nombre,
-                row.insumo.unidad_base.codigo if row.insumo.unidad_base else "-",
-                row.stock_actual,
-                row.punto_reorden,
-                row.sugerencia_compra,
+                row.display_unit,
+                f"{row.stock_actual_display:.3f}" if row.stock_actual_display is not None else "",
+                f"{row.punto_reorden_display:.3f}",
+                f"{row.sugerencia_compra_display:.3f}",
                 row.criticidad,
                 nivel,
             ]
@@ -3285,10 +3301,10 @@ def _export_faltantes_xlsx(rows, nivel: str) -> HttpResponse:
         ws.append(
             [
                 row.insumo.nombre,
-                row.insumo.unidad_base.codigo if row.insumo.unidad_base else "-",
-                float(row.stock_actual or 0),
-                float(row.punto_reorden or 0),
-                float(row.sugerencia_compra or 0),
+                row.display_unit,
+                float(row.stock_actual_display or 0),
+                float(row.punto_reorden_display or 0),
+                float(row.sugerencia_compra_display or 0),
                 row.criticidad,
                 nivel,
             ]
@@ -6214,6 +6230,11 @@ def production_orders(request: HttpRequest) -> HttpResponse:
         .order_by("sucursal__codigo", "id")
     )
     purchase_requests = list(list_auto_purchase_snapshots(target_date=target_date))
+    for snapshot in purchase_requests:
+        unidad = snapshot.insumo.unidad_base if snapshot.insumo_id else None
+        snapshot.stock_actual_display, snapshot.display_unit = display_quantity(snapshot.stock_actual, unidad)
+        snapshot.stock_objetivo_display, _ = display_quantity(snapshot.stock_objetivo, unidad)
+        snapshot.cantidad_sugerida_display, _ = display_quantity(snapshot.cantidad_sugerida, unidad)
     forecast_context = build_daily_forecast_context(target_date=target_date, top_n=24)
     projection_supply_context = build_projection_supply_context(
         target_date=target_date,

@@ -16,7 +16,7 @@ from inventario.models import (
 from inventario.services_point_reconciliation import reconcile_insumo_from_point
 from inventario.units import from_presentation_quantity, presentation_quantity
 from maestros.models import Insumo, UnidadMedida
-from pos_bridge.models import PointBranch
+from pos_bridge.models import PointBranch, PointInsumoInventorySnapshot, PointSyncJob
 from pos_bridge.services.live_inventory_lookup_service import (
     PointLiveInventoryLookupError,
     PointLiveInventoryResult,
@@ -85,6 +85,60 @@ class InventoryPresentationUnitsTests(TestCase):
         self.assertEqual(row.display_unit, "kg")
         self.assertIsNone(row.stock_actual_display)
         self.assertContains(page, "Fuente madre: Point")
+
+    def test_alertas_presenta_stock_reorden_y_diferencia_en_kg(self):
+        user = get_user_model().objects.create_superuser(
+            username="inventario-alertas-unidades",
+            email="alertas-unidades@example.com",
+            password="test",
+        )
+        insumo = Insumo.objects.create(
+            codigo_point="UNIT-ALERT-G",
+            nombre="Insumo alerta en gramos",
+            categoria="PRUEBA",
+            unidad_base=self.gram,
+        )
+        ExistenciaInsumo.objects.create(
+            insumo=insumo,
+            almacen=UBICACION_ALMACEN,
+            stock_minimo=Decimal("30000"),
+            punto_reorden=Decimal("60000"),
+        )
+        branch = PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={"canonical_insumo_inventory": True},
+            result_summary={"locations": {"ALMACEN": {"rows": 1, "snapshots": 1}}},
+        )
+        PointInsumoInventorySnapshot.objects.create(
+            branch=branch,
+            insumo=insumo,
+            point_code=insumo.codigo_point,
+            point_name=insumo.nombre,
+            point_quantity=Decimal("20"),
+            point_unit="KG",
+            quantity_base=Decimal("20000"),
+            captured_at=timezone.now(),
+            sync_job=job,
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("inventario:alertas"),
+            {"nivel": "all", "q": "UNIT-ALERT-G"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.context["rows"] if item.insumo.id == insumo.id)
+        self.assertEqual(row.stock_actual_display, Decimal("20"))
+        self.assertEqual(row.punto_reorden_display, Decimal("60"))
+        self.assertEqual(row.alerta_diferencia_display, Decimal("-40"))
+        self.assertEqual(row.display_unit, "kg")
+        self.assertContains(response, "20.000")
+        self.assertContains(response, "60.000")
+        self.assertContains(response, "-40.000")
+        self.assertNotContains(response, "20,000.000")
 
 
 class _FakeLiveInventoryService:

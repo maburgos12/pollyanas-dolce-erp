@@ -431,6 +431,31 @@ class ProductionSupplyContextTests(TestCase):
         self.assertEqual(recipe_items["Huevo Supply"]["status_label"], "Disponible")
         self.assertEqual(recipe_items["Harina Supply"]["status_label"], "Stock parcial")
 
+    def test_supply_context_presenta_masa_en_kg_sin_cambiar_calculo_base(self):
+        self.unit_kg.codigo = "g"
+        self.unit_kg.nombre = "Gramo Supply"
+        self.unit_kg.save(update_fields=["codigo", "nombre"])
+        harina_line = LineaReceta.objects.get(receta=self.recipe, insumo=self.insumo_harina)
+        harina_line.cantidad = Decimal("1000")
+        harina_line.unidad_texto = "g"
+        harina_line.save(update_fields=["cantidad", "unidad_texto"])
+        snapshot = PointInsumoInventorySnapshot.objects.get(insumo=self.insumo_harina)
+        snapshot.point_quantity = Decimal("4")
+        snapshot.point_unit = "KG"
+        snapshot.quantity_base = Decimal("4000")
+        snapshot.save(update_fields=["point_quantity", "point_unit", "quantity_base"])
+
+        context = build_production_supply_context(target_date=self.target_date)
+
+        row = next(item for item in context["rows"] if item["insumo_nombre"] == "Harina Supply")
+        self.assertEqual(row["available_qty"], Decimal("4000.000"))
+        self.assertEqual(row["required_qty"], Decimal("10000.000"))
+        self.assertEqual(row["shortage_qty"], Decimal("6000.000"))
+        self.assertEqual(row["available_qty_display"], Decimal("4"))
+        self.assertEqual(row["required_qty_display"], Decimal("10"))
+        self.assertEqual(row["shortage_qty_display"], Decimal("6"))
+        self.assertEqual(row["display_unit"], "kg")
+
     def test_supply_context_no_suma_stock_interno_multiubicacion(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo_harina,
