@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pos_bridge.browser.waits import wait_for_any
 from pos_bridge.selectors.workspace_selectors import WORKSPACE_PAGE_MARKERS
-from pos_bridge.utils.exceptions import NavigationError
+from pos_bridge.utils.exceptions import AuthenticationError, NavigationError
 from pos_bridge.utils.helpers import normalize_text, select_candidates
 
 
@@ -54,9 +54,11 @@ class PointWorkspacePage:
         return []
 
     def select_workspace(self, branch_hint: str | None = None) -> dict:
+        self._raise_if_session_expired()
         try:
             self.wait_until_loaded()
         except NavigationError:
+            self._raise_if_session_expired()
             current_url = self.page.url
             if current_url and "/Account/workSpaces" not in current_url:
                 return {
@@ -136,3 +138,11 @@ class PointWorkspacePage:
             "workspace_url": self.page.url,
             "already_inside_workspace": False,
         }
+
+    def _raise_if_session_expired(self) -> None:
+        current_url = str(self.page.url or "")
+        if "sessionexpire" in current_url.lower():
+            raise AuthenticationError(
+                "La sesión de Point expiró porque otro proceso inició sesión con la misma cuenta.",
+                context={"current_url": current_url},
+            )

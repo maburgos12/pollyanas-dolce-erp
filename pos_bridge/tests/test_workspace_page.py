@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from django.test import SimpleTestCase
 
 from pos_bridge.browser.workspace_page import PointWorkspacePage
-from pos_bridge.utils.exceptions import NavigationError
+from pos_bridge.utils.exceptions import AuthenticationError, NavigationError
 
 
 class PointWorkspacePageTests(SimpleTestCase):
@@ -62,4 +62,16 @@ class PointWorkspacePageTests(SimpleTestCase):
         )
 
         with self.assertRaises(NavigationError):
+            workspace_page.select_workspace(branch_hint="MATRIZ")
+
+    def test_select_workspace_rejects_point_session_expired_page(self):
+        page = Mock()
+        page.url = "https://app.pointmeup.com/Account/SessionExpire"
+
+        workspace_page = PointWorkspacePage(page, self._settings())
+        workspace_page.wait_until_loaded = Mock(
+            side_effect=NavigationError("No se detectó la pantalla de sucursales.")
+        )
+
+        with self.assertRaisesRegex(AuthenticationError, "sesión de Point expiró"):
             workspace_page.select_workspace(branch_hint="MATRIZ")
