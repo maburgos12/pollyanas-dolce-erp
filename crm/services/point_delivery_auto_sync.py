@@ -16,6 +16,7 @@ from crm.services.point_order_link import (
 )
 from integraciones.models import PublicApiClient
 from pos_bridge.models import PointBranch, PointSyncJob
+from pos_bridge.services.point_account_session_lock import POINT_ACCOUNT_SESSION_LOCK_ID
 from pos_bridge.services.point_delivery_note_service import PointDeliveryNoteService
 from pos_bridge.utils.exceptions import AuthenticationError, ConfigurationError
 
@@ -35,7 +36,10 @@ class _PreloadedPointNoteService:
 
 
 class PointDeliveryAutoSyncService:
-    LOCK_ID = 7_532_026_080_700_001
+    # El mismo candado protege cualquier sesión larga de la cuenta Point. Si el
+    # inventario está capturando, domicilios omite este minuto y reintenta en el
+    # siguiente ciclo sin invalidar la sesión del navegador.
+    LOCK_ID = POINT_ACCOUNT_SESSION_LOCK_ID
     DEFAULT_LOOKBACK_DAYS = 7
     MAX_LOOKBACK_DAYS = 31
 

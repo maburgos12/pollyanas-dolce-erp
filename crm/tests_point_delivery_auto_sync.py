@@ -28,6 +28,7 @@ from pos_bridge.services.point_delivery_note_service import (
     PointDeliveryUnavailableError,
 )
 from pos_bridge.services.point_note_detail_service import PointNote, PointNoteLine
+from pos_bridge.tasks.celery_tasks import task_canonical_insumo_inventory_sync
 
 
 def _delivery(*, pk_nota="887410", folio="15616", sold_at=None):
@@ -587,3 +588,61 @@ class PointDeliveryAutoSyncConcurrencyTests(TransactionTestCase):
         self.assertEqual(PedidoCliente.objects.count(), 1)
         order = PedidoCliente.objects.get()
         self.assertEqual(order.point_note_id, self.delivery.note.pk_nota)
+
+    def test_canonical_inventory_excludes_delivery_login_during_capture(self):
+        canonical_started = Event()
+        release_canonical = Event()
+        canonical_results = []
+        errors = []
+
+        def capture_inventory(*, sync_job, captured_at):
+            canonical_started.set()
+            self.assertTrue(release_canonical.wait(5))
+            return {
+                "complete": True,
+                "locations": {
+                    "ALMACEN": {"rows": 1, "snapshots": 1},
+                    "CEDIS": {"rows": 1, "snapshots": 1},
+                },
+                "blockers": [],
+            }
+
+        def canonical_worker():
+            close_old_connections()
+            try:
+                canonical_results.append(task_canonical_insumo_inventory_sync())
+            except Exception as exc:  # noqa: BLE001 - evidencia del thread
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        delivery_success = {
+            "status": PointSyncJob.STATUS_SUCCESS,
+            "counts": {"seen": 0, "created": 0, "existing": 0, "failed": 0},
+            "error_code": None,
+            "job_id": 999,
+        }
+        with (
+            patch(
+                "pos_bridge.tasks.celery_tasks.CanonicalInsumoInventoryCaptureService.capture",
+                side_effect=capture_inventory,
+            ),
+            patch.object(
+                PointDeliveryAutoSyncService,
+                "_run_locked",
+                return_value=delivery_success,
+            ) as delivery_run,
+        ):
+            thread = Thread(target=canonical_worker, name="canonical-inventory")
+            thread.start()
+            self.assertTrue(canonical_started.wait(5))
+            delivery_result = PointDeliveryAutoSyncService().run(today=date(2026, 8, 24))
+            release_canonical.set()
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(canonical_results[0]["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(delivery_result["status"], PointSyncJob.STATUS_RUNNING)
+        self.assertEqual(delivery_result["error_code"], "SYNC_IN_PROGRESS")
+        delivery_run.assert_not_called()

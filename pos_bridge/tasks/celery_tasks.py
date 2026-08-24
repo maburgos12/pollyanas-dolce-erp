@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from core.audit import log_event
 from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.canonical_insumo_inventory_capture_service import CanonicalInsumoInventoryCaptureService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
@@ -47,7 +48,8 @@ def task_canonical_insumo_inventory_sync():
         attempt_count=1,
     )
     try:
-        result = CanonicalInsumoInventoryCaptureService().capture(sync_job=job, captured_at=now)
+        with point_account_session_lock(wait=True):
+            result = CanonicalInsumoInventoryCaptureService().capture(sync_job=job, captured_at=now)
         job.status = PointSyncJob.STATUS_SUCCESS if result["complete"] else PointSyncJob.STATUS_PARTIAL
         job.result_summary = result
     except Exception as exc:
