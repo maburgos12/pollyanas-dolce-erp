@@ -164,7 +164,7 @@ ACCESS_SUBMODULES = {
     ],
     "activos": [
         ("dashboard", "Dashboard"),
-        ("seguimiento", "Bandeja Compras"),
+        ("seguimiento", "Seguimiento de mantenimiento"),
         ("catalogo", "Activos"),
         ("planes", "Planes"),
         ("ordenes", "Órdenes"),

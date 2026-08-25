@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Bandeja de Seguimiento — Compras{% endblock %}
+{% block title %}Seguimiento de mantenimiento{% endblock %}
 {% block page_title %}Mantenimiento · Seguimiento{% endblock %}
 {% block body_class %}page-activos-seguimiento{% endblock %}
 
@@ -14,14 +14,14 @@
 <div class="module-shell bi-shell">
   <nav class="module-tabs">
     <a href="{% url 'activos:dashboard' %}" class="module-tab">Dashboard DG</a>
-    <a href="{% url 'activos:seguimiento-compras' %}" class="module-tab active">Bandeja Compras</a>
+    <a href="{% url 'activos:seguimiento-compras' %}" class="module-tab active">Seguimiento de mantenimiento</a>
     <a href="{% url 'fallas:dashboard' %}" class="module-tab">Fallas</a>
     <a href="{% url 'activos:ordenes' %}" class="module-tab">Órdenes</a>
   </nav>
 
   <section class="bi-hero">
     <div class="bi-hero-main">
-      <div class="bi-kicker">Compras · Seguimiento</div>
+      <div class="bi-kicker">Mantenimiento · Seguimiento</div>
       <h1 class="bi-hero-title">Bandeja de seguimiento</h1>
       <p class="bi-copy">Fallas pendientes, órdenes de mantenimiento abiertas y reparaciones recientes de flota en una sola vista operativa.</p>
     </div>

@@ -17,7 +17,7 @@
         <div class="dashboard-hero-subtitle">Corte comercial confirmado por Point, presión operativa y riesgos que sí requieren decisión hoy.</div>
         {% if puede_gestionar_compras_departamentales %}
         <div class="executive-inline-actions">
-            <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm" data-departmental-purchases-shortcut="dashboard">Compras departamentales</a>
+            <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm" data-departmental-purchases-shortcut="dashboard">Atender compras departamentales</a>
         </div>
         {% endif %}
     </div>
@@ -970,7 +970,7 @@
                 </div>
                 <div class="executive-inline-actions executive-inline-actions-wrap">
                     {% if puede_gestionar_compras_departamentales %}
-                    <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm">Compras departamentales</a>
+                    <a href="{% url 'compras:departamental_inicio' %}" class="btn btn-secondary btn-sm">Atender compras departamentales</a>
                     {% endif %}
                     {% if can_view_maestros %}
                     <a href="{% url 'maestros:insumo_list' %}" class="btn btn-secondary btn-sm">Insumos</a>

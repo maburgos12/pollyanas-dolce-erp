@@ -294,23 +294,26 @@ class ComprasDepartamentalesViewTests(TestCase):
             fetch_redirect_response=False,
         )
 
-    def test_compras_departamentales_aparece_en_administracion_y_no_en_operacion(self):
+    def test_gestion_departamental_aparece_en_administracion_sin_etiquetas_ambiguas(self):
         grupos = build_nav_groups(self.ajena, "/dashboard/")
         administracion = next(group for group in grupos if group["key"] == "administracion")
         operacion = next((group for group in grupos if group["key"] == "operacion"), {"items": []})
         mi_trabajo = next(group for group in grupos if group["key"] == "mi_trabajo")
 
-        self.assertIn("Compras departamentales", [item["label"] for item in administracion["items"]])
-        self.assertNotIn("Compras departamentales", [item["label"] for item in operacion["items"]])
-        self.assertNotIn("Compras departamentales", [item["label"] for item in mi_trabajo["items"]])
+        etiquetas_admin = [item["label"] for item in administracion["items"]]
+        self.assertIn("Gestión de compras departamentales", etiquetas_admin)
+        self.assertNotIn("Compras departamentales", etiquetas_admin)
+        self.assertNotIn("Bandeja Compras", etiquetas_admin)
+        self.assertNotIn("Gestión de compras departamentales", [item["label"] for item in operacion["items"]])
+        self.assertNotIn("Gestión de compras departamentales", [item["label"] for item in mi_trabajo["items"]])
 
     def test_responsable_de_otra_area_conserva_acceso_personal_sin_bandeja_admin(self):
         grupos = build_nav_groups(self.responsable, "/dashboard/")
         mi_trabajo = next(group for group in grupos if group["key"] == "mi_trabajo")
         administracion = next((group for group in grupos if group["key"] == "administracion"), {"items": []})
 
-        self.assertIn("Compras departamentales", [item["label"] for item in mi_trabajo["items"]])
-        self.assertNotIn("Compras departamentales", [item["label"] for item in administracion["items"]])
+        self.assertIn("Solicitudes de compra de mi área", [item["label"] for item in mi_trabajo["items"]])
+        self.assertNotIn("Gestión de compras departamentales", [item["label"] for item in administracion["items"]])
 
     def test_dashboard_normal_y_ejecutivo_muestran_acceso_departamental(self):
         contexto = {"puede_gestionar_compras_departamentales": True}
@@ -321,10 +324,10 @@ class ComprasDepartamentalesViewTests(TestCase):
         ejecutivo = render_to_string("core/dashboard_executive.html", contexto, request=request)
 
         self.assertIn(reverse("compras:departamental_inicio"), dashboard)
-        self.assertIn("Compras departamentales", dashboard)
+        self.assertIn("Atender compras departamentales", dashboard)
         self.assertIn('data-departmental-purchases-shortcut="dashboard"', dashboard)
         self.assertIn(reverse("compras:departamental_inicio"), ejecutivo)
-        self.assertIn("Compras departamentales", ejecutivo)
+        self.assertIn("Atender compras departamentales", ejecutivo)
         self.assertIn('data-departmental-purchases-shortcut="executive"', ejecutivo)
 
     def test_seguimiento_muestra_siguiente_responsable_y_no_convierte_diferencia_en_falla(self):

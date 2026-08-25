@@ -438,13 +438,27 @@ class NavigationActiveStateTests(TestCase):
         self.assertIn("Mermas", [item["label"] for item in comercial["items"]])
         self.assertEqual(self._active_labels("/mermas/?tab=insumos"), ["Mermas"])
 
-    def test_administracion_sidebar_group_defines_horizontal_tabs(self):
+    def test_seguimiento_historico_aparece_en_mantenimiento_con_nombre_claro(self):
         with patch("core.navigation.can_view_submodule", return_value=True):
             groups = build_nav_groups(SimpleNamespace(is_authenticated=True, is_superuser=True, is_staff=False), "/activos/seguimiento/")
         administracion = next(group for group in groups if group["key"] == "administracion")
+        mantenimiento = next(group for group in groups if group["key"] == "mantenimiento")
 
-        self.assertIn("Bandeja Compras", [item["label"] for item in administracion["items"]])
-        self.assertEqual(self._active_labels("/activos/seguimiento/"), ["Bandeja Compras"])
+        self.assertNotIn("Bandeja Compras", [item["label"] for item in administracion["items"]])
+        self.assertIn("Seguimiento de mantenimiento", [item["label"] for item in mantenimiento["items"]])
+        self.assertEqual(self._active_labels("/activos/seguimiento/"), ["Seguimiento de mantenimiento"])
+
+    def test_pantallas_de_activos_no_llaman_compras_al_seguimiento_de_mantenimiento(self):
+        templates = [
+            Path(settings.BASE_DIR) / "activos" / "templates" / "activos" / "dashboard.html",
+            Path(settings.BASE_DIR) / "activos" / "templates" / "activos" / "seguimiento_compras.html",
+        ]
+
+        for template in templates:
+            with self.subTest(template=template.name):
+                contenido = template.read_text()
+                self.assertIn("Seguimiento de mantenimiento", contenido)
+                self.assertNotIn("Bandeja Compras", contenido)
 
     def test_fallas_group_has_sidebar_svg_icon(self):
         template = (Path(settings.BASE_DIR) / "templates" / "base.html").read_text()
