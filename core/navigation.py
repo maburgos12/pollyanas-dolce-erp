@@ -233,6 +233,13 @@ NAV_GROUPS = [
         "label": "Mantenimiento",
         "items": [
             ("mantenimiento", "dashboard", "Mantenimiento", "/mantenimiento/", ["/mantenimiento/"]),
+            (
+                "activos",
+                "seguimiento",
+                "Seguimiento de mantenimiento",
+                "/activos/seguimiento/",
+                ["/activos/seguimiento/"],
+            ),
         ],
     },
     {
@@ -284,12 +291,11 @@ NAV_GROUPS = [
             (
                 "compras",
                 "departamentales",
-                "Compras departamentales",
+                "Gestión de compras departamentales",
                 "/compras/departamentales/",
                 ["/compras/departamentales/"],
             ),
             ("activos", "dashboard", "Activos", "/activos/dashboard/", ["/activos/dashboard/"]),
-            ("activos", "seguimiento", "Bandeja Compras", "/activos/seguimiento/", ["/activos/seguimiento/"]),
             ("activos", "catalogo", "Catálogo activos", "/activos/activos/", ["/activos/activos/"]),
             ("activos", "planes", "Planes", "/activos/planes/", ["/activos/planes/"]),
             ("activos", "ordenes", "Órdenes activos", "/activos/ordenes/", ["/activos/ordenes/"]),
@@ -421,7 +427,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 best_match_len = max(best_match_len, match_len)
                 items.append(
                     {
-                        "label": "Compras departamentales",
+                        "label": "Solicitudes de compra de mi área",
                         "url": url_compras_dept,
                         "active": False,
                         "_match_len": match_len,
