@@ -225,6 +225,16 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
         item.progreso_pct = 0
         item.avance_label = "Sin checklist"
         item.avance_detalle = "Avance no medible"
+    checklist_completo = bool(item.checklist_total) and item.checklist_done == item.checklist_total
+    if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+        item.estado_operativo_label = item.get_estatus_display()
+        item.estado_operativo_tone = item.estatus.lower()
+    elif checklist_completo:
+        item.estado_operativo_label = "Listo para cerrar"
+        item.estado_operativo_tone = "listo_cerrar"
+    else:
+        item.estado_operativo_label = item.get_estatus_display()
+        item.estado_operativo_tone = item.estatus.lower()
     item.visual_bucket = _bucket_panel_seguimiento(item)
     item.visual_bucket_label = PANEL_BUCKETS[item.visual_bucket]
 

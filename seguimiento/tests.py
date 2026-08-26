@@ -416,6 +416,40 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertNotContains(response, "Marcar hecho")
         self.assertContains(response, "Detalles técnicos")
 
+    def test_checklist_completo_abierto_expone_estado_listo_para_cerrar(self):
+        self.check.completado = True
+        self.check.completado_por = self.user
+        self.check.completado_at = timezone.now()
+        self.check.save(update_fields=["completado", "completado_por", "completado_at", "updated_at"])
+        self.item.metadata = {"source": "agente_dg", "source_status": "OPEN"}
+        self.item.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        item = response.context["item"]
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Listo para cerrar")
+        self.assertEqual(getattr(item, "estado_operativo_tone", None), "listo_cerrar")
+        self.assertEqual(item.get_estatus_display(), "Pendiente")
+
+    def test_estado_operativo_conserva_pendiente_si_faltan_checks(self):
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        item = response.context["item"]
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Pendiente")
+        self.assertEqual(getattr(item, "estado_operativo_tone", None), "pendiente")
+
+    def test_estado_operativo_conserva_completado_si_acuerdo_esta_cerrado(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+        self.item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+        self.item.save(update_fields=["estatus", "updated_at"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        item = response.context["item"]
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Completado")
+        self.assertEqual(getattr(item, "estado_operativo_tone", None), "completado")
+
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.writeback", password="test12345")
