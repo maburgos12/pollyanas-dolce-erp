@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/lib/task_workspace_common.sh"
+export GIT_OPTIONAL_LOCKS=0
 
 repo=""
 while (( $# )); do
@@ -12,6 +13,7 @@ while (( $# )); do
   esac
 done
 [[ -n "$repo" ]] || die "falta --repo"
+repo="$(base_checkout_path "$repo")"
 registry="$(registry_root "$repo")"
 count() {
   if [[ -d "$registry/$1" ]]; then
@@ -47,6 +49,38 @@ while IFS= read -r branch; do
   fi
 done < <(git -C "$repo" for-each-ref --format='%(refname:short)' refs/heads)
 
+root_branch="$(git -C "$repo" branch --show-current)"
+root_clean="SI"
+[[ -z "$(git -C "$repo" status --porcelain)" ]] || root_clean="NO"
+root_head="$(git -C "$repo" rev-parse main 2>/dev/null || printf 'AUSENTE')"
+origin_head="$(git -C "$repo" rev-parse origin/main 2>/dev/null || printf 'AUSENTE')"
+root_ahead="N/D"
+root_behind="N/D"
+root_state="BLOQUEADO_REFERENCIAS"
+if [[ "$root_head" != "AUSENTE" && "$origin_head" != "AUSENTE" ]]; then
+  read -r root_ahead root_behind < <(
+    git -C "$repo" rev-list --left-right --count main...origin/main
+  )
+  if [[ "$root_branch" != "main" ]]; then
+    root_state="BLOQUEADO_RAMA"
+  elif [[ "$root_clean" != "SI" ]]; then
+    root_state="BLOQUEADO_CAMBIOS"
+  elif (( root_ahead == 0 && root_behind == 0 )); then
+    root_state="SINCRONIZADO"
+  elif (( root_ahead == 0 && root_behind > 0 )); then
+    root_state="REQUIERE_FAST_FORWARD"
+  else
+    root_state="DIVERGENTE"
+  fi
+fi
+
+echo "ROOT_MAIN: $root_state"
+echo "ROOT_BRANCH: ${root_branch:-DETACHED}"
+echo "ROOT_LIMPIO: $root_clean"
+echo "ROOT_AHEAD: $root_ahead"
+echo "ROOT_BEHIND: $root_behind"
+echo "ROOT_HEAD: $root_head"
+echo "ORIGIN_MAIN_SHA: $origin_head"
 echo "WORKTREES: $worktrees"
 echo "RAMAS_LOCALES: $branches"
 echo "DETACHED: $detached"

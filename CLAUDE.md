@@ -243,12 +243,14 @@ python manage.py check                                     # debe quedar en 0 er
 ```
 
 El checkout raíz `/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1` es
-una base de solo lectura. Nunca crear ramas, ejecutar agentes con escritura ni
-implementar tareas dentro de esa carpeta. El preflight es obligatorio antes de
-modificar archivos y debe detener el trabajo ante `detached HEAD`, checkout raíz,
-rama `main`, cambios previos, archivos sin seguimiento o atraso frente a
-`origin/main`. No reparar esas condiciones dentro del mismo árbol: crear o
-recuperar un worktree limpio.
+el plano de control de solo lectura para implementación. Nunca crear ramas de tarea,
+ejecutar agentes con escritura ni implementar cambios dentro de esa carpeta.
+`scripts/task_workspace_start.sh` mantiene su rama `main` como espejo limpio de
+`origin/main`: bajo el bloqueo global valida rama y limpieza, ejecuta `fetch` y
+únicamente permite `merge --ff-only`. Si hay cambios locales, commits propios o
+divergencia, se detiene sin sobrescribir nada. El preflight sigue siendo obligatorio
+en el worktree registrado y bloquea `detached HEAD`, checkout raíz, rama `main`,
+cambios previos, archivos sin seguimiento o atraso frente a `origin/main`.
 
 **Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
 y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
@@ -518,7 +520,7 @@ python manage.py runserver                                    # Servidor local
 Estas reglas complementan las reglas existentes del proyecto. No sustituyen reglas de stack, deploy, pruebas, seguridad ni producción.
 
 - Usar `1 hilo = 1 branch = 1 worktree limpio`.
-- El checkout raíz es base de solo lectura y debe permanecer limpio; no usarlo como worktree de tarea.
+- El checkout raíz es el plano de control: debe permanecer en `main`, limpio y sincronizado automáticamente por los scripts de ciclo de vida; no usarlo como worktree de tarea.
 - Ningún worktree de tarea puede apropiarse de `main`; usar siempre `codex/<modulo>-<cambio>`.
 - Si `git branch --show-current` no devuelve una rama, detenerse: `detached HEAD` nunca es válido para trabajar.
 - Ejecutar `bash scripts/git_workspace_preflight.sh --write` antes de la primera modificación.
@@ -538,8 +540,21 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 
 Las reglas escritas no limpian Git por sí solas. Toda tarea nueva debe crearse con
 `scripts/task_workspace_start.sh`, que registra tarea, propietario, rama, worktree,
-alcance y commit base bajo el directorio común de Git. Después debe ejecutarse
+alcance y commit base bajo el directorio común de Git. Antes de crearla, el script
+adquiere el bloqueo global y sincroniza el checkout raíz exclusivamente mediante
+fast-forward seguro. Si esa actualización reemplaza el propio script de inicio, se
+re-ejecuta la versión nueva conservando la propiedad del bloqueo; el worktree se
+crea con el SHA ya verificado, no volviendo a resolver una referencia móvil.
+`scripts/task_workspace_close.sh` repite la sincronización al cerrar y también se
+re-ejecuta antes de eliminar worktree o ramas cuando recibe una versión nueva.
+`scripts/task_workspace_audit.sh` deriva siempre el checkout raíz, deshabilita las
+escrituras opcionales del índice, permanece read-only y reporta
+`ROOT_MAIN`, `ROOT_AHEAD`, `ROOT_BEHIND`, limpieza y SHAs para distinguir atraso
+recuperable de suciedad o divergencia. Después debe ejecutarse
 `scripts/git_workspace_preflight.sh --write`; un fallo detiene toda escritura.
+La primera instalación de este contrato exige un fast-forward operacional explícito
+del checkout raíz después del merge, porque la versión histórica aún no conoce el
+mecanismo de autoactualización; las ejecuciones posteriores quedan autocontenidas.
 Los worktrees heredados que deban continuar se registran primero mediante
 `scripts/task_workspace_adopt.sh`; no se adoptan árboles sucios ni detached HEAD.
 

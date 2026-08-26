@@ -8,6 +8,7 @@ HANDOFF="$PROJECT_ROOT/scripts/task_workspace_handoff.sh"
 AUDIT="$PROJECT_ROOT/scripts/task_workspace_audit.sh"
 CLOSE="$PROJECT_ROOT/scripts/task_workspace_close.sh"
 ADOPT="$PROJECT_ROOT/scripts/task_workspace_adopt.sh"
+COMMON="$PROJECT_ROOT/scripts/lib/task_workspace_common.sh"
 
 passed=0
 failed=0
@@ -59,6 +60,165 @@ setup_repo() {
 
 cleanup_repo() {
   rm -rf "$TEST_TMP"
+}
+
+advance_remote_main() {
+  git clone "$TEST_TMP/origin.git" "$TEST_TMP/publisher" >/dev/null 2>&1
+  git -C "$TEST_TMP/publisher" config user.name Publisher
+  git -C "$TEST_TMP/publisher" config user.email publisher@example.com
+  echo remote >>"$TEST_TMP/publisher/README.md"
+  git -C "$TEST_TMP/publisher" add README.md
+  git -C "$TEST_TMP/publisher" commit -m remote >/dev/null
+  git -C "$TEST_TMP/publisher" push origin main >/dev/null
+}
+
+test_root_sync_on_start() {
+  setup_repo
+  advance_remote_main
+  remote_head="$(git --git-dir="$TEST_TMP/origin.git" rev-parse main)"
+  [[ "$(git -C "$TEST_TMP/repo" rev-parse main)" != "$remote_head" ]] \
+    && pass "fixture leaves base checkout behind remote main" \
+    || fail "fixture leaves base checkout behind remote main"
+
+  assert_success "start fast-forwards clean base checkout" \
+    "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task synced --branch codex/synced --owner test --scope scripts
+  [[ "$(git -C "$TEST_TMP/repo" rev-parse main)" == "$remote_head" ]] \
+    && pass "start leaves root main synchronized" \
+    || fail "start leaves root main synchronized"
+  [[ "$(git -C "$TEST_TMP/worktrees/synced" rev-parse HEAD)" == "$remote_head" ]] \
+    && pass "start pins worktree to synchronized remote head" \
+    || fail "start pins worktree to synchronized remote head"
+  cleanup_repo
+}
+
+test_start_reexecutes_after_self_update() {
+  setup_repo
+  mkdir -p "$TEST_TMP/repo/scripts/lib"
+  cp "$START" "$TEST_TMP/repo/scripts/task_workspace_start.sh"
+  cp "$COMMON" "$TEST_TMP/repo/scripts/lib/task_workspace_common.sh"
+  chmod +x "$TEST_TMP/repo/scripts/task_workspace_start.sh"
+  git -C "$TEST_TMP/repo" add scripts
+  git -C "$TEST_TMP/repo" commit -m lifecycle >/dev/null
+  git -C "$TEST_TMP/repo" push origin main >/dev/null
+
+  git clone "$TEST_TMP/origin.git" "$TEST_TMP/publisher" >/dev/null 2>&1
+  git -C "$TEST_TMP/publisher" config user.name Publisher
+  git -C "$TEST_TMP/publisher" config user.email publisher@example.com
+  perl -0pi -e 's/set -euo pipefail/set -euo pipefail\nprintf reexecuted >"\$REEXEC_MARKER"/' \
+    "$TEST_TMP/publisher/scripts/task_workspace_start.sh"
+  git -C "$TEST_TMP/publisher" add scripts/task_workspace_start.sh
+  git -C "$TEST_TMP/publisher" commit -m lifecycle-v2 >/dev/null
+  git -C "$TEST_TMP/publisher" push origin main >/dev/null
+
+  assert_success "start reexecutes the version received by fast-forward" \
+    env REEXEC_MARKER="$TEST_TMP/reexecuted" \
+    "$TEST_TMP/repo/scripts/task_workspace_start.sh" \
+    --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task reexec --branch codex/reexec --owner test --scope scripts
+  [[ -f "$TEST_TMP/reexecuted" ]] \
+    && pass "updated start script executed in the same operation" \
+    || fail "updated start script executed in the same operation"
+  [[ ! -d "$TEST_TMP/repo/.git/task-workspaces/locks/global.lock" ]] \
+    && pass "self reexec releases lifecycle lock" \
+    || fail "self reexec releases lifecycle lock"
+  cleanup_repo
+}
+
+test_close_reexecutes_after_self_update() {
+  setup_repo
+  mkdir -p "$TEST_TMP/repo/scripts/lib"
+  cp "$START" "$TEST_TMP/repo/scripts/task_workspace_start.sh"
+  cp "$CLOSE" "$TEST_TMP/repo/scripts/task_workspace_close.sh"
+  cp "$COMMON" "$TEST_TMP/repo/scripts/lib/task_workspace_common.sh"
+  chmod +x "$TEST_TMP/repo/scripts/task_workspace_start.sh" \
+    "$TEST_TMP/repo/scripts/task_workspace_close.sh"
+  git -C "$TEST_TMP/repo" add scripts
+  git -C "$TEST_TMP/repo" commit -m lifecycle >/dev/null
+  git -C "$TEST_TMP/repo" push origin main >/dev/null
+
+  "$TEST_TMP/repo/scripts/task_workspace_start.sh" \
+    --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task close-reexec --branch codex/close-reexec --owner test --scope scripts \
+    >/dev/null
+  git -C "$TEST_TMP/worktrees/close-reexec" push -u origin codex/close-reexec \
+    >/dev/null
+
+  git clone "$TEST_TMP/origin.git" "$TEST_TMP/publisher" >/dev/null 2>&1
+  git -C "$TEST_TMP/publisher" config user.name Publisher
+  git -C "$TEST_TMP/publisher" config user.email publisher@example.com
+  perl -0pi -e 's/set -euo pipefail/set -euo pipefail\nprintf reexecuted >"\$REEXEC_MARKER"/' \
+    "$TEST_TMP/publisher/scripts/task_workspace_close.sh"
+  git -C "$TEST_TMP/publisher" add scripts/task_workspace_close.sh
+  git -C "$TEST_TMP/publisher" commit -m lifecycle-v2 >/dev/null
+  git -C "$TEST_TMP/publisher" push origin main >/dev/null
+
+  assert_success "close reexecutes the version received by fast-forward" \
+    env REEXEC_MARKER="$TEST_TMP/close-reexecuted" \
+    "$TEST_TMP/repo/scripts/task_workspace_close.sh" \
+    --repo "$TEST_TMP/repo" --task close-reexec --state merged
+  [[ -f "$TEST_TMP/close-reexecuted" ]] \
+    && pass "updated close script executed before destructive steps" \
+    || fail "updated close script executed before destructive steps"
+  [[ ! -d "$TEST_TMP/worktrees/close-reexec" ]] \
+    && pass "reexecuted close removes corroborated worktree" \
+    || fail "reexecuted close removes corroborated worktree"
+  [[ ! -d "$TEST_TMP/repo/.git/task-workspaces/locks/global.lock" ]] \
+    && pass "close self reexec releases lifecycle lock" \
+    || fail "close self reexec releases lifecycle lock"
+  cleanup_repo
+}
+
+test_start_uses_pinned_sync_sha() {
+  setup_repo
+  advance_remote_main
+  git -C "$TEST_TMP/publisher" checkout -b future >/dev/null
+  echo future >>"$TEST_TMP/publisher/README.md"
+  git -C "$TEST_TMP/publisher" add README.md
+  git -C "$TEST_TMP/publisher" commit -m future >/dev/null
+  git -C "$TEST_TMP/publisher" push origin future >/dev/null
+  git -C "$TEST_TMP/repo" fetch origin future:refs/remotes/origin/future --quiet
+  synced_sha="$(git --git-dir="$TEST_TMP/origin.git" rev-parse main)"
+  future_sha="$(git -C "$TEST_TMP/repo" rev-parse origin/future)"
+
+  real_git="$(command -v git)"
+  mkdir -p "$TEST_TMP/bin"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "$*" == *"show-ref --verify --quiet refs/heads/codex/race"* ]]; then' \
+    '  "$REAL_GIT" -C "$RACE_REPO" update-ref refs/remotes/origin/main "$RACE_SHA"' \
+    'fi' \
+    'exec "$REAL_GIT" "$@"' >"$TEST_TMP/bin/git"
+  chmod +x "$TEST_TMP/bin/git"
+
+  assert_success "start survives origin/main moving after synchronization" \
+    env PATH="$TEST_TMP/bin:$PATH" REAL_GIT="$real_git" \
+    RACE_REPO="$TEST_TMP/repo" RACE_SHA="$future_sha" \
+    "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task race --branch codex/race --owner test --scope scripts
+  [[ "$(git -C "$TEST_TMP/repo" rev-parse main)" == "$synced_sha" ]] \
+    && pass "race fixture keeps root at synchronized SHA" \
+    || fail "race fixture keeps root at synchronized SHA"
+  [[ "$(git -C "$TEST_TMP/worktrees/race" rev-parse HEAD)" == "$synced_sha" ]] \
+    && pass "start pins worktree to root synchronized SHA" \
+    || fail "start pins worktree to root synchronized SHA"
+  cleanup_repo
+}
+
+test_root_divergence_blocks_start() {
+  setup_repo
+  echo local >>"$TEST_TMP/repo/README.md"
+  git -C "$TEST_TMP/repo" add README.md
+  git -C "$TEST_TMP/repo" commit -m local >/dev/null
+  advance_remote_main
+
+  assert_failure "start rejects divergent root main" \
+    "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task divergent --branch codex/divergent --owner test --scope scripts
+  [[ ! -e "$TEST_TMP/worktrees/divergent" ]] \
+    && pass "divergence creates no task worktree" \
+    || fail "divergence creates no task worktree"
+  cleanup_repo
 }
 
 test_start_and_preflight() {
@@ -133,6 +293,90 @@ test_handoff_and_audit() {
     && pass "audit detects unregistered worktree" || fail "audit detects unregistered worktree"
   grep -Eq "RAMAS_CON_COMMITS_UNICOS: [1-9]" "$TEST_TMP/output" \
     && pass "audit detects unique branches" || fail "audit detects unique branches"
+  cleanup_repo
+}
+
+test_audit_reports_root_state() {
+  setup_repo
+  assert_success "audit reports synchronized root" \
+    "$AUDIT" --repo "$TEST_TMP/repo"
+  grep -q "ROOT_MAIN: SINCRONIZADO" "$TEST_TMP/output" \
+    && pass "audit classifies synchronized root" \
+    || fail "audit classifies synchronized root"
+  grep -q "ROOT_AHEAD: 0" "$TEST_TMP/output" \
+    && pass "audit reports zero commits ahead" \
+    || fail "audit reports zero commits ahead"
+  grep -q "ROOT_BEHIND: 0" "$TEST_TMP/output" \
+    && pass "audit reports zero commits behind" \
+    || fail "audit reports zero commits behind"
+
+  advance_remote_main
+  git -C "$TEST_TMP/repo" fetch origin main --quiet
+  assert_success "audit reports fast-forwardable root" \
+    "$AUDIT" --repo "$TEST_TMP/repo"
+  grep -q "ROOT_MAIN: REQUIERE_FAST_FORWARD" "$TEST_TMP/output" \
+    && pass "audit classifies fast-forwardable root" \
+    || fail "audit classifies fast-forwardable root"
+  grep -q "ROOT_BEHIND: 1" "$TEST_TMP/output" \
+    && pass "audit counts root lag" \
+    || fail "audit counts root lag"
+  cleanup_repo
+
+  setup_repo
+  echo dirty >"$TEST_TMP/repo/dirty.txt"
+  assert_success "audit reports dirty root without mutating it" \
+    "$AUDIT" --repo "$TEST_TMP/repo"
+  grep -q "ROOT_MAIN: BLOQUEADO_CAMBIOS" "$TEST_TMP/output" \
+    && pass "audit classifies dirty root" \
+    || fail "audit classifies dirty root"
+  [[ -f "$TEST_TMP/repo/dirty.txt" ]] \
+    && pass "audit preserves dirty root file" \
+    || fail "audit preserves dirty root file"
+  cleanup_repo
+
+  setup_repo
+  echo local >>"$TEST_TMP/repo/README.md"
+  git -C "$TEST_TMP/repo" add README.md
+  git -C "$TEST_TMP/repo" commit -m local >/dev/null
+  advance_remote_main
+  git -C "$TEST_TMP/repo" fetch origin main --quiet
+  assert_success "audit reports divergent root" \
+    "$AUDIT" --repo "$TEST_TMP/repo"
+  grep -q "ROOT_MAIN: DIVERGENTE" "$TEST_TMP/output" \
+    && pass "audit classifies divergent root" \
+    || fail "audit classifies divergent root"
+  grep -q "ROOT_AHEAD: 1" "$TEST_TMP/output" \
+    && pass "audit counts divergent local commit" \
+    || fail "audit counts divergent local commit"
+  grep -q "ROOT_BEHIND: 1" "$TEST_TMP/output" \
+    && pass "audit counts divergent remote commit" \
+    || fail "audit counts divergent remote commit"
+  cleanup_repo
+}
+
+test_audit_uses_root_and_disables_optional_locks() {
+  setup_repo
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task audit-child --branch codex/audit-child --owner test --scope scripts >/dev/null
+  echo dirty >"$TEST_TMP/worktrees/audit-child/dirty.txt"
+  assert_success "audit derives root when invoked with a linked worktree" \
+    "$AUDIT" --repo "$TEST_TMP/worktrees/audit-child"
+  grep -q "ROOT_BRANCH: main" "$TEST_TMP/output" \
+    && pass "audit reports actual root branch" \
+    || fail "audit reports actual root branch"
+  grep -q "ROOT_LIMPIO: SI" "$TEST_TMP/output" \
+    && pass "audit ignores linked worktree dirtiness for root state" \
+    || fail "audit ignores linked worktree dirtiness for root state"
+
+  touch -t 203001010101 "$TEST_TMP/repo/README.md"
+  trace="$TEST_TMP/audit-trace.json"
+  assert_success "audit succeeds with trace enabled" \
+    env GIT_TRACE2_EVENT="$trace" "$AUDIT" --repo "$TEST_TMP/repo"
+  if grep -q "do_write_index" "$trace"; then
+    fail "audit disables optional index writes"
+  else
+    pass "audit disables optional index writes"
+  fi
   cleanup_repo
 }
 
@@ -220,6 +464,10 @@ test_close_with_stale_base_checkout() {
   git -C "$TEST_TMP/worktrees/stale" push origin HEAD:main >/dev/null
   assert_success "close works when base checkout is behind origin/main" \
     "$CLOSE" --repo "$TEST_TMP/repo" --task stale --state merged
+  [[ "$(git -C "$TEST_TMP/repo" rev-parse main)" == \
+    "$(git -C "$TEST_TMP/repo" rev-parse origin/main)" ]] \
+    && pass "close leaves root main synchronized" \
+    || fail "close leaves root main synchronized"
   git -C "$TEST_TMP/repo" show-ref --verify --quiet refs/heads/codex/stale \
     && fail "close removes local branch when base is behind" \
     || pass "close removes local branch when base is behind"
@@ -258,8 +506,15 @@ test_close_resumes_after_missing_worktree() {
 }
 
 test_start_and_preflight
+test_root_sync_on_start
+test_start_reexecutes_after_self_update
+test_close_reexecutes_after_self_update
+test_start_uses_pinned_sync_sha
+test_root_divergence_blocks_start
 test_preflight_guards
 test_handoff_and_audit
+test_audit_reports_root_state
+test_audit_uses_root_and_disables_optional_locks
 test_adopt_legacy_worktree
 test_safe_close
 test_close_with_stale_base_checkout
