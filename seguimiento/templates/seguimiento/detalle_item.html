@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260723-next-action-v3">
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-detalle-item.css?v=20260825-cierre-claro-v1">
 {% endblock %}
 
 {% block content %}
@@ -25,7 +25,7 @@
         <div class="bi-kicker">{{ item.get_tipo_display }}</div>
         <h1 class="seg-detalle-title">{{ item.titulo }}</h1>
       </div>
-      <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+      <span class="seg-badge-status {{ item.estado_operativo_tone }}">{{ item.estado_operativo_label }}</span>
     </div>
 
     <div class="seg-owner-row">
@@ -168,6 +168,10 @@
       <span class="seg-next-label">Estado actual</span>
       <h2 id="seg-next-title">Esperando revisión</h2>
       <p>Ya enviaste este acuerdo. No necesitas adjuntar más información salvo que te la soliciten.</p>
+    {% elif item.listo_para_cerrar and es_vista_dg %}
+      <span class="seg-next-label">Estado actual</span>
+      <h2 id="seg-next-title">Listo para cerrar</h2>
+      <p>El colaborador terminó todos los puntos. Falta que confirme el cierre del acuerdo.</p>
     {% elif siguiente_check and not es_vista_dg %}
       <span class="seg-next-label">Próxima acción</span>
       <h2 id="seg-next-title">{{ siguiente_check.titulo }}</h2>
@@ -205,7 +209,7 @@
           </form>
         {% endif %}
       </div>
-    {% elif checklist_completo and not es_vista_dg %}
+    {% elif item.listo_para_cerrar and not es_vista_dg %}
       <span class="seg-next-label">Próxima acción</span>
       <h2 id="seg-next-title">Cerrar el acuerdo</h2>
       <p>Todos los puntos están completos. Solo falta confirmar el cierre.</p>
@@ -268,8 +272,8 @@
     <div class="seg-collapse-body seg-status-panel{% if item.esta_cerrado %} is-closed{% elif ultimo_comentario_dg %} is-review{% endif %}">
       <div class="seg-conversation-card {% if item.esta_cerrado %}is-closed{% endif %}">
         <div class="seg-conversation-head">
-          <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% else %}Seguimiento abierto{% endif %}</strong>
-          <span class="seg-badge-status {{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+          <strong>{% if item.esta_cerrado %}Cierre establecido{% elif item.estatus == estatus_en_revision %}En revisión{% elif item.listo_para_cerrar %}Cierre pendiente del responsable{% else %}Seguimiento abierto{% endif %}</strong>
+          <span class="seg-badge-status {{ item.estado_operativo_tone }}">{{ item.estado_operativo_label }}</span>
         </div>
         {% if item.aprobado_at and item.esta_cerrado %}
         <p class="seg-timeline-meta seg-meta-flat">Cerrado el {{ item.aprobado_at|date:"d/m/Y H:i" }}{% if item.aprobado_por %} por {{ item.aprobado_por.get_full_name|default:item.aprobado_por.username }}{% endif %}.</p>

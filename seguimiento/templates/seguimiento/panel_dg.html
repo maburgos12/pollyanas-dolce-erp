@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260529-panel-dg-v2">
-<link rel="stylesheet" href="{% static 'css/template_modules/seguimiento-templates-seguimiento-panel-dg.css' %}?v=20260722-dg-compact-v1">
+<link rel="stylesheet" href="{% static 'css/template_modules/seguimiento-templates-seguimiento-panel-dg.css' %}?v=20260825-cierre-claro-v1">
 {% endblock %}
 
 {% block content %}
@@ -75,7 +75,7 @@
           {% for item in items_estado %}
           <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="panel-dg-agreement-row">
             <span><strong>{{ item.titulo }}</strong><small>{{ item.responsable_nombre }} · {{ item.get_tipo_display }} · {{ item.avance_label }}{% if item.visual_bucket == "desfases" %} · Desfase app{% endif %}{% if item.fecha_limite %} · {{ item.fecha_limite|date:"d/m/Y" }}{% endif %}</small></span>
-            <span class="bi-pill pill-{{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+            <span class="bi-pill pill-{{ item.estado_operativo_tone }}">{{ item.estado_operativo_label }}</span>
           </a>
           {% endfor %}
         </div>
@@ -95,7 +95,7 @@
           {% for item in colab.items %}
           <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="panel-dg-agreement-row">
             <span><strong>{{ item.titulo }}</strong><small>{{ item.get_tipo_display }} · {{ item.area|default:"Sin área" }} · {{ item.avance_label }}{% if item.visual_bucket == "desfases" %} · Desfase app{% endif %}{% if item.fecha_limite %} · {{ item.fecha_limite|date:"d/m/Y" }}{% endif %}</small></span>
-            <span class="bi-pill pill-{{ item.estatus|lower }}">{{ item.get_estatus_display }}</span>
+            <span class="bi-pill pill-{{ item.estado_operativo_tone }}">{{ item.estado_operativo_label }}</span>
           </a>
           {% endfor %}
         </div>
