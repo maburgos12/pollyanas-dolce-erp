@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/lib/task_workspace_common.sh"
+script_path="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+original_args=("$@")
 
 repo="" task="" state=""
 while (( $# )); do
@@ -14,7 +16,18 @@ while (( $# )); do
 done
 for value in repo task state; do [[ -n "${!value}" ]] || die "falta --$value"; done
 [[ "$state" == "merged" || "$state" == "discarded" ]] || die "estado inválido"
+repo="$(cd "$repo" && pwd -P)"
 registry="$(init_registry "$repo")"
+lock="$registry/locks/global.lock"
+acquire_lock "$lock"
+trap 'release_lock "$lock"' EXIT
+sync_root_main "$repo" "$registry"
+root_script="$repo/scripts/task_workspace_close.sh"
+if [[ "$ROOT_SYNC_CHANGED" == "1" && "$script_path" == "$root_script" \
+  && "${TASK_WORKSPACE_CLOSE_REEXEC_SHA:-}" != "$ROOT_SYNC_SHA" ]]; then
+  TASK_WORKSPACE_CLOSE_REEXEC_SHA="$ROOT_SYNC_SHA" \
+    exec "$root_script" "${original_args[@]}"
+fi
 if [[ -f "$registry/closed/$task.json" || -f "$registry/discarded/$task.json" ]]; then
   echo "OK: tarea=$task ya estaba cerrada"
   exit 0
@@ -22,9 +35,6 @@ fi
 record="$(find_record "$registry" "$task")" || die "tarea no registrada: $task"
 case "$record" in "$registry/active/"*|"$registry/delivered/"*|"$registry/blocked/"*) ;; *) die "estado no cerrable";; esac
 
-lock="$registry/locks/global.lock"
-acquire_lock "$lock"
-trap 'release_lock "$lock"' EXIT
 branch="$(json_field "$record" branch)"
 worktree="$(json_field "$record" worktree)"
 base="$(json_field "$record" base_commit)"
@@ -46,7 +56,6 @@ if (( worktree_presente )); then
   [[ -z "$(git -C "$worktree" status --porcelain)" ]] || die "worktree con cambios sin guardar"
 fi
 
-git -C "$repo" fetch origin main --quiet
 if (( worktree_presente )); then
   head="$(git -C "$worktree" rev-parse HEAD)"
 else
@@ -89,6 +98,7 @@ write_record "$destination" "$task" "$owner" "$branch" "$worktree" "$base" \
   "$scope" "$state" "cierre corroborado"
 rm "$record"
 git -C "$repo" fetch --prune origin --quiet
+sync_root_main "$repo" "$registry"
 git -C "$repo" worktree prune
 printf '{"event":"close","task":"%s","state":"%s","at":"%s"}\n' \
   "$(json_escape "$task")" "$state" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib/task_workspace_common.sh
 source "$SCRIPT_DIR/lib/task_workspace_common.sh"
+script_path="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+original_args=("$@")
 
 repo="" root="" task="" branch="" owner="" scope=""
 while (( $# )); do
@@ -36,15 +38,17 @@ trap 'release_lock "$lock"' EXIT
 if find_record "$registry" "$task" >/dev/null; then
   die "la tarea ya está registrada: $task"
 fi
-git -C "$repo" fetch origin main --quiet
-[[ "$(git -C "$repo" branch --show-current)" == "main" ]] \
-  || die "el checkout base debe permanecer en main"
-[[ -z "$(git -C "$repo" status --porcelain)" ]] \
-  || die "el checkout base contiene cambios"
+sync_root_main "$repo" "$registry"
+root_script="$repo/scripts/task_workspace_start.sh"
+if [[ "$ROOT_SYNC_CHANGED" == "1" && "$script_path" == "$root_script" \
+  && "${TASK_WORKSPACE_START_REEXEC_SHA:-}" != "$ROOT_SYNC_SHA" ]]; then
+  TASK_WORKSPACE_START_REEXEC_SHA="$ROOT_SYNC_SHA" \
+    exec "$root_script" "${original_args[@]}"
+fi
 git -C "$repo" show-ref --verify --quiet "refs/heads/$branch" \
   && die "la rama local ya existe: $branch"
 
-base="$(git -C "$repo" rev-parse origin/main)"
+base="$ROOT_SYNC_SHA"
 created_branch=0
 rollback() {
   if (( created_branch )); then

@@ -32,6 +32,12 @@ repo_common_dir() {
   printf '%s\n' "$common"
 }
 
+base_checkout_path() {
+  local common
+  common="$(repo_common_dir "$1")"
+  cd "$common/.." && pwd -P
+}
+
 registry_root() {
   printf '%s/task-workspaces\n' "$(repo_common_dir "$1")"
 }
@@ -83,11 +89,60 @@ write_record() {
 
 acquire_lock() {
   local lock="$1"
-  mkdir "$lock" 2>/dev/null || die "otra operación controla este registro: $lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    if [[ -f "$lock/pid" && "$(cat "$lock/pid")" == "$$" ]]; then
+      return 0
+    fi
+    die "otra operación controla este registro: $lock"
+  fi
   printf '%s\n' "$$" >"$lock/pid"
 }
 
 release_lock() {
   rm -f "$1/pid"
   rmdir "$1" 2>/dev/null || true
+}
+
+sync_root_main() {
+  local repo="$1" registry="$2" base_checkout branch
+  local before after remote ahead behind
+  repo="$(cd "$repo" && pwd -P)"
+  base_checkout="$(base_checkout_path "$repo")"
+  [[ "$repo" == "$base_checkout" ]] \
+    || die "--repo debe apuntar al checkout raíz: $base_checkout"
+
+  branch="$(git -C "$repo" branch --show-current)"
+  [[ "$branch" == "main" ]] || die "el checkout raíz debe permanecer en main"
+  [[ -z "$(git -C "$repo" status --porcelain)" ]] \
+    || die "el checkout raíz contiene cambios; no se sincronizó"
+
+  git -C "$repo" fetch origin main --quiet
+  git -C "$repo" show-ref --verify --quiet refs/heads/main \
+    || die "falta la rama local main"
+  git -C "$repo" show-ref --verify --quiet refs/remotes/origin/main \
+    || die "falta la referencia origin/main"
+
+  read -r ahead behind < <(
+    git -C "$repo" rev-list --left-right --count main...origin/main
+  )
+  (( ahead == 0 )) \
+    || die "main diverge de origin/main: adelante=$ahead atrás=$behind"
+
+  before="$(git -C "$repo" rev-parse main)"
+  if (( behind > 0 )); then
+    git -C "$repo" merge --ff-only --quiet origin/main
+  fi
+  after="$(git -C "$repo" rev-parse main)"
+  remote="$(git -C "$repo" rev-parse origin/main)"
+  [[ "$after" == "$remote" ]] \
+    || die "main no quedó sincronizada con origin/main"
+
+  ROOT_SYNC_BEFORE="$before"
+  ROOT_SYNC_SHA="$after"
+  ROOT_SYNC_CHANGED=0
+  [[ "$before" == "$after" ]] || ROOT_SYNC_CHANGED=1
+
+  printf '{"event":"root-sync","before":"%s","after":"%s","behind":%s,"at":"%s"}\n' \
+    "$before" "$after" "$behind" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >>"$registry/audit-log.jsonl"
 }
