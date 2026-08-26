@@ -392,6 +392,7 @@
 
   .seg-badge-status.pendiente { background: rgba(255,193,7,.18); color: #7a5c00; }
   .seg-badge-status.en_proceso { background: rgba(47,108,119,.14); color: #2f6c77; }
+  .seg-badge-status.listo_cerrar { background: rgba(47,108,119,.14); color: #2f6c77; }
   .seg-badge-status.en_revision { background: rgba(201,168,76,.20); color: #8b6b1c; }
   .seg-badge-status.completado { background: rgba(76,175,80,.16); color: #236d53; }
   .seg-badge-status.bloqueado,

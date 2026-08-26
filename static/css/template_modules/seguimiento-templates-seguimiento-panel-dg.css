@@ -247,6 +247,7 @@ details[open] > summary .panel-dg-chevron { transform: rotate(180deg); }
 
 .pill-pendiente { background: var(--pd-surface-subtle); color: var(--pd-muted); }
 .pill-en_proceso { background: var(--pd-info-soft); color: var(--pd-info); }
+.pill-listo_cerrar { background: var(--pd-info-soft); color: var(--pd-info); }
 .pill-en_revision { background: var(--pd-gold-soft); color: var(--pd-warning); }
 .pill-completado { background: var(--pd-success-soft); color: var(--pd-success); }
 .pill-bloqueado,

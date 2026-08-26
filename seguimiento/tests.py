@@ -450,6 +450,47 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(getattr(item, "estado_operativo_label", None), "Completado")
         self.assertEqual(getattr(item, "estado_operativo_tone", None), "completado")
 
+    def test_colaborador_con_checklist_completo_ve_cierre_como_siguiente_accion(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para cerrar</span>')
+        self.assertContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
+        self.assertContains(response, 'id="seg-cierre-acuerdo"')
+        self.assertContains(response, "Cerrar acuerdo")
+        self.assertContains(response, "<dt>Estado ERP</dt><dd>Pendiente</dd>", html=True)
+
+    def test_dg_ve_que_colaborador_termino_y_falta_cierre(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.cierre", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
+
+        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para cerrar</span>')
+        self.assertContains(
+            response,
+            "El colaborador terminó todos los puntos. Falta que confirme el cierre del acuerdo.",
+        )
+        self.assertNotContains(response, 'id="seg-cierre-acuerdo"')
+
+    def test_panel_dg_muestra_listo_para_cerrar_sin_ocultar_estado_tecnico(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.panel.cierre", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/panel/?estado=activos")
+
+        self.assertContains(response, 'class="bi-pill pill-listo_cerrar">Listo para cerrar</span>')
+
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.writeback", password="test12345")
