@@ -450,6 +450,39 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(getattr(item, "estado_operativo_label", None), "Completado")
         self.assertEqual(getattr(item, "estado_operativo_tone", None), "completado")
 
+    def test_estado_operativo_conserva_bloqueado_aunque_checklist_este_completo(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+        self.item.estatus = SeguimientoItem.ESTATUS_BLOQUEADO
+        self.item.metadata = {"source": "agente_dg", "source_status": "BLOCKED"}
+        self.item.save(update_fields=["estatus", "metadata", "updated_at"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        item = response.context["item"]
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Bloqueado")
+        self.assertEqual(getattr(item, "estado_operativo_tone", None), "bloqueado")
+        self.assertFalse(getattr(item, "listo_para_cerrar", True))
+        self.assertNotContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
+
+    def test_estado_operativo_no_marca_listo_si_fuente_esta_cerrada_o_archivada(self):
+        self.check.completado = True
+        self.check.save(update_fields=["completado", "updated_at"])
+        self.item.metadata = {
+            "source": "agente_dg",
+            "source_status": "COMPLETED",
+            "source_archived_at": timezone.now().isoformat(),
+        }
+        self.item.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/seguimiento/{self.item.pk}/")
+
+        item = response.context["item"]
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Pendiente")
+        self.assertEqual(getattr(item, "estado_operativo_tone", None), "pendiente")
+        self.assertFalse(getattr(item, "listo_para_cerrar", True))
+        self.assertNotContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
+
     def test_colaborador_con_checklist_completo_ve_cierre_como_siguiente_accion(self):
         self.check.completado = True
         self.check.save(update_fields=["completado", "updated_at"])
@@ -465,6 +498,8 @@ class SeguimientoColaboradorTests(TestCase):
     def test_dg_ve_que_colaborador_termino_y_falta_cierre(self):
         self.check.completado = True
         self.check.save(update_fields=["completado", "updated_at"])
+        self.item.metadata = {"source": "agente_dg", "source_status": "OPEN"}
+        self.item.save(update_fields=["metadata", "updated_at"])
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.cierre", password="test12345")
         dg_user.groups.add(dg_group)
@@ -477,6 +512,8 @@ class SeguimientoColaboradorTests(TestCase):
             response,
             "El colaborador terminó todos los puntos. Falta que confirme el cierre del acuerdo.",
         )
+        self.assertContains(response, "<dt>Estado app</dt><dd>OPEN</dd>", html=True)
+        self.assertContains(response, "<dt>Estado ERP</dt><dd>Pendiente</dd>", html=True)
         self.assertNotContains(response, 'id="seg-cierre-acuerdo"')
 
     def test_panel_dg_muestra_listo_para_cerrar_sin_ocultar_estado_tecnico(self):
