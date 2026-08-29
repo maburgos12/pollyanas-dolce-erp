@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
@@ -15,6 +16,7 @@ from rrhh.models import (
     IncidenciaAsistenciaBitacora,
 )
 from rrhh.services_asistencia_reglas import evaluar_dia_empleado
+from rrhh.views_asistencia import _empleados_reporte_asistencia
 
 
 def dt_local(fecha: date, hora: time) -> datetime:
@@ -55,6 +57,29 @@ class ReporteAsistenciaTests(TestCase):
         )
         self.url = reverse("rrhh:rrhh_reporte_asistencia")
         self.editar_url = reverse("rrhh:rrhh_incidencia_editar", args=[self.incidencia.id])
+
+    def test_query_empleados_evitar_join_cruzado(self):
+        sql = str(_empleados_reporte_asistencia(self.fecha, self.fecha).query).upper()
+
+        self.assertIn("EXISTS", sql)
+        self.assertNotIn('JOIN "RRHH_ASISTENCIAEMPLEADO"', sql)
+        self.assertNotIn('JOIN "RRHH_INCIDENCIAASISTENCIA"', sql)
+
+    def test_vista_reutiliza_catalogo_empleados(self):
+        self.client.force_login(self.user)
+
+        with patch(
+            "rrhh.views_asistencia._empleados_reporte_asistencia",
+            wraps=_empleados_reporte_asistencia,
+        ) as empleados_mock:
+            response = self.client.get(
+                self.url,
+                {"fecha_inicio": "2026-06-10", "fecha_fin": "2026-06-10"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(empleados_mock.call_count, 1)
+        self.assertEqual([empleado.id for empleado in response.context["empleados"]], [self.empleado.id])
 
     def test_vista_responde_y_resume_comida_excedida(self):
         self.client.force_login(self.user)
