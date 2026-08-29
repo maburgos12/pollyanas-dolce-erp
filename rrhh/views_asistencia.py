@@ -10,7 +10,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -50,19 +50,26 @@ REPORTE_ASISTENCIA_HEADERS = [
 
 def _empleados_reporte_asistencia(fecha_inicio: date, fecha_fin: date):
     """Mantiene activos y recupera bajas con actividad en el rango consultado."""
+    asistencias_en_rango = AsistenciaEmpleado.objects.filter(
+        empleado_id=OuterRef("pk"),
+        fecha__range=(fecha_inicio, fecha_fin),
+    )
+    incidencias_en_rango = IncidenciaAsistencia.objects.filter(
+        empleado_id=OuterRef("pk"),
+        fecha__range=(fecha_inicio, fecha_fin),
+    )
     ultima_baja = (
         EmpleadoBaja.objects.filter(empleado_id=OuterRef("pk"))
         .order_by("-fecha_baja", "-id")
         .values("fecha_baja")[:1]
     )
     return (
-        Empleado.objects.filter(
-            Q(activo=True)
-            | Q(asistencias__fecha__range=(fecha_inicio, fecha_fin))
-            | Q(incidencias_asistencia__fecha__range=(fecha_inicio, fecha_fin))
+        Empleado.objects.alias(
+            tiene_asistencia=Exists(asistencias_en_rango),
+            tiene_incidencia=Exists(incidencias_en_rango),
         )
+        .filter(Q(activo=True) | Q(tiene_asistencia=True) | Q(tiene_incidencia=True))
         .annotate(fecha_baja_reporte=Subquery(ultima_baja))
-        .distinct()
         .order_by("nombre", "codigo")
     )
 
@@ -179,16 +186,30 @@ def _build_reporte_asistencia(
     empleado_id: str,
     sucursal: str,
     user=None,
+    empleados_disponibles: list[Empleado] | None = None,
 ) -> tuple[list[dict], int]:
-    empleados_qs = _empleados_reporte_asistencia(fecha_inicio, fecha_fin).select_related(
-        "jefe_directo__usuario_erp"
-    )
-    if empleado_id.isdigit():
-        empleados_qs = empleados_qs.filter(id=int(empleado_id))
-    if sucursal:
-        empleados_qs = empleados_qs.filter(sucursal__icontains=sucursal)
-
-    empleados = list(empleados_qs)
+    if empleados_disponibles is None:
+        empleados_qs = _empleados_reporte_asistencia(fecha_inicio, fecha_fin).select_related(
+            "sucursal_ref",
+            "jefe_directo__usuario_erp",
+        )
+        if empleado_id.isdigit():
+            empleados_qs = empleados_qs.filter(id=int(empleado_id))
+        if sucursal:
+            empleados_qs = empleados_qs.filter(sucursal__icontains=sucursal)
+        empleados = list(empleados_qs)
+    else:
+        empleados = empleados_disponibles
+        if empleado_id.isdigit():
+            empleado_pk = int(empleado_id)
+            empleados = [empleado for empleado in empleados if empleado.id == empleado_pk]
+        if sucursal:
+            sucursal_normalizada = sucursal.casefold()
+            empleados = [
+                empleado
+                for empleado in empleados
+                if sucursal_normalizada in (empleado.sucursal or "").casefold()
+            ]
     empleado_ids = [empleado.id for empleado in empleados]
     empleados_por_id = {empleado.id: empleado for empleado in empleados}
     fechas = _date_range(fecha_inicio, fecha_fin)
@@ -482,15 +503,24 @@ def reporte_asistencia(request):
 
     empleado_id = (request.GET.get("empleado") or "").strip()
     sucursal = (request.GET.get("sucursal") or "").strip()
+    export = (request.GET.get("export") or "").strip().lower()
+    empleados_disponibles = None
+    if export not in {"csv", "xlsx"}:
+        empleados_disponibles = list(
+            _empleados_reporte_asistencia(fecha_inicio, fecha_fin).select_related(
+                "sucursal_ref",
+                "jefe_directo__usuario_erp",
+            )
+        )
     reportes, total_incidencias = _build_reporte_asistencia(
         fecha_inicio,
         fecha_fin,
         empleado_id,
         sucursal,
         request.user,
+        empleados_disponibles=empleados_disponibles,
     )
 
-    export = (request.GET.get("export") or "").strip().lower()
     if export in {"csv", "xlsx"}:
         rows = _build_export_rows(reportes)
         if export == "csv":
@@ -512,7 +542,7 @@ def reporte_asistencia(request):
         {
             "module_tabs": _module_tabs("reporte_asistencia", request.user),
             "reportes": reportes,
-            "empleados": _empleados_reporte_asistencia(fecha_inicio, fecha_fin),
+            "empleados": empleados_disponibles,
             "fecha_inicio": fecha_inicio.isoformat(),
             "fecha_fin": fecha_fin.isoformat(),
             "empleado_id": empleado_id,

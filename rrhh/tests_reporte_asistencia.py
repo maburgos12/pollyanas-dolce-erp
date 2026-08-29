@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from io import BytesIO
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from rrhh.models import (
     AsistenciaEmpleado,
@@ -15,6 +18,7 @@ from rrhh.models import (
     IncidenciaAsistenciaBitacora,
 )
 from rrhh.services_asistencia_reglas import evaluar_dia_empleado
+from rrhh.views_asistencia import _empleados_reporte_asistencia
 
 
 def dt_local(fecha: date, hora: time) -> datetime:
@@ -55,6 +59,29 @@ class ReporteAsistenciaTests(TestCase):
         )
         self.url = reverse("rrhh:rrhh_reporte_asistencia")
         self.editar_url = reverse("rrhh:rrhh_incidencia_editar", args=[self.incidencia.id])
+
+    def test_query_empleados_evitar_join_cruzado(self):
+        sql = str(_empleados_reporte_asistencia(self.fecha, self.fecha).query).upper()
+
+        self.assertIn("EXISTS", sql)
+        self.assertNotIn('JOIN "RRHH_ASISTENCIAEMPLEADO"', sql)
+        self.assertNotIn('JOIN "RRHH_INCIDENCIAASISTENCIA"', sql)
+
+    def test_vista_reutiliza_catalogo_empleados(self):
+        self.client.force_login(self.user)
+
+        with patch(
+            "rrhh.views_asistencia._empleados_reporte_asistencia",
+            wraps=_empleados_reporte_asistencia,
+        ) as empleados_mock:
+            response = self.client.get(
+                self.url,
+                {"fecha_inicio": "2026-06-10", "fecha_fin": "2026-06-10"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(empleados_mock.call_count, 1)
+        self.assertEqual([empleado.id for empleado in response.context["empleados"]], [self.empleado.id])
 
     def test_vista_responde_y_resume_comida_excedida(self):
         self.client.force_login(self.user)
@@ -145,6 +172,48 @@ class ReporteAsistenciaTests(TestCase):
         content = response.content.decode("utf-8")
         self.assertIn("RPT-001,Empleado Reporte,Matriz,2026-06-10,Comida excedida", content)
         self.assertIn("Comida excedida por 15 minutos", content)
+
+    def test_filtro_sucursal_conserva_paridad_html_xlsx(self):
+        empleado_otro = Empleado.objects.create(
+            codigo="RPT-002",
+            nombre="Empleado Otra Sucursal",
+            sucursal="Centro",
+            fecha_ingreso=date(2026, 6, 1),
+        )
+        IncidenciaAsistencia.objects.create(
+            empleado=empleado_otro,
+            fecha=self.fecha,
+            tipo=IncidenciaAsistencia.TIPO_RETARDO,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+            minutos=10,
+            detalle="Retardo en otra sucursal",
+        )
+        self.client.force_login(self.user)
+        params = {
+            "fecha_inicio": "2026-06-10",
+            "fecha_fin": "2026-06-10",
+            "sucursal": "matr",
+        }
+
+        response_html = self.client.get(self.url, params)
+        response_xlsx = self.client.get(self.url, {**params, "export": "xlsx"})
+
+        self.assertEqual(response_html.status_code, 200)
+        self.assertEqual(
+            [reporte["empleado"].id for reporte in response_html.context["reportes"]],
+            [self.empleado.id],
+        )
+        self.assertEqual(response_xlsx.status_code, 200)
+        self.assertEqual(
+            response_xlsx["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(BytesIO(response_xlsx.content), read_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertEqual(rows[0][0:4], ("codigo", "nombre", "sucursal", "fecha"))
+        self.assertEqual(rows[1][0:4], ("RPT-001", "Empleado Reporte", "Matriz", "2026-06-10"))
+        self.assertEqual(len(rows), 2)
 
     def test_usuario_sin_permiso_recibe_403(self):
         self.client.force_login(self.sin_permiso)
