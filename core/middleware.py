@@ -256,6 +256,7 @@ class MermasOnlyMiddleware:
         "/app/",
         "/app/sw.js",
         "/app/sucursal/",
+        "/erp-sw.js",
     )
     ALLOWED_PREFIXES = (
         "/app/api/fallas/",

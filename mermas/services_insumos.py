@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from hashlib import sha256
@@ -14,7 +15,24 @@ from pos_bridge.services.live_inventory_lookup_service import (
     PointLiveInventoryLookupError,
     PointLiveInventoryLookupService,
 )
+from pos_bridge.utils.exceptions import AuthenticationError, ExtractionError
 from rrhh.services_identidad import empleado_vinculado_usuario
+
+
+logger = logging.getLogger(__name__)
+
+
+def _es_error_transitorio_point(exc):
+    cause = exc.__cause__
+    if isinstance(cause, (ExtractionError, OSError, TimeoutError)):
+        return True
+    if isinstance(cause, AuthenticationError):
+        message = str(cause).casefold()
+        return any(
+            marker in message
+            for marker in ("429", "500", "502", "503", "504", "timeout", "temporal", "connection")
+        )
+    return False
 
 
 @dataclass(frozen=True)
@@ -101,11 +119,25 @@ def consultar_existencia_insumo_point(
             "La sucursal no tiene una relación vigente con Point."
         )
     service = live_service or PointLiveInventoryLookupService()
-    live_result = service.get_stock(
-        product_codes=[code],
-        sucursal=sucursal,
-        point_branch=point_branch,
-    )
+    live_result = None
+    for attempt in range(3):
+        try:
+            live_result = service.get_stock(
+                product_codes=[code],
+                sucursal=sucursal,
+                point_branch=point_branch,
+            )
+            break
+        except PointLiveInventoryLookupError as exc:
+            if attempt == 2 or not _es_error_transitorio_point(exc):
+                raise
+            logger.warning(
+                "Reintentando existencia Point de insumo codigo=%s sucursal=%s intento=%s: %s",
+                code,
+                sucursal.pk,
+                attempt + 1,
+                exc,
+            )
     if live_result is None:
         raise PointLiveInventoryLookupError(
             "La consulta en vivo de existencias de Point no está habilitada."

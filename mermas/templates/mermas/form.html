@@ -58,9 +58,6 @@
 
         <section class="form-block">
             <h2>Productos</h2>
-            <datalist id="productos-list">
-                {% include "mermas/partials/product_options.html" with productos=productos_iniciales %}
-            </datalist>
             <div class="product-grid-header" aria-hidden="true">
                 <span>Producto</span>
                 <span>Cantidad</span>
@@ -70,8 +67,13 @@
                 <div class="product-row">
                     <div class="field">
                         <label>Producto</label>
-                        <input name="producto_texto[]" list="productos-list" autocomplete="off" placeholder="Escribe producto, sabor, tamaño o código" required>
-                        <input name="receta_id[]" type="hidden">
+                        <select name="receta_id[]" required>
+                            <option value="">Selecciona un producto</option>
+                            {% for producto in productos_iniciales %}
+                            <option value="{{ producto.id }}" data-product-name="{{ producto.nombre }}">{{ producto.nombre }}{% if producto.codigo_point %} · Point {{ producto.codigo_point }}{% endif %}{% if producto.familia %} · {{ producto.familia }}{% endif %}{% if producto.categoria %} · {{ producto.categoria }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <input name="producto_texto[]" type="hidden">
                     </div>
                     <div class="field">
                         <label>Cantidad</label>
@@ -105,7 +107,6 @@
     const form = document.getElementById("merma-capture-form");
     const wrapper = document.getElementById("productos-wrapper");
     const add = document.getElementById("add-product");
-    const options = Array.from(document.querySelectorAll("#productos-list option"));
 
     form.addEventListener("formdata", (event) => {
         const cookieToken = document.cookie
@@ -167,18 +168,18 @@
             });
         }
     });
-    const syncProductId = (row) => {
+    const syncProductText = (row) => {
+        const select = row.querySelector('select[name="receta_id[]"]');
         const textInput = row.querySelector('input[name="producto_texto[]"]');
-        const idInput = row.querySelector('input[name="receta_id[]"]');
-        const match = options.find((option) => option.value === textInput.value);
-        idInput.value = match ? match.dataset.id : "";
+        textInput.value = select.selectedOptions[0]?.dataset.productName || "";
     };
     const wireRow = (row) => {
+        const select = row.querySelector('select[name="receta_id[]"]');
         row.querySelector('[data-remove-product]').addEventListener("click", () => {
             if (wrapper.querySelectorAll(".product-row").length > 1) row.remove();
         });
-        row.querySelector('input[name="producto_texto[]"]').addEventListener("input", () => syncProductId(row));
-        row.querySelector('input[name="producto_texto[]"]').addEventListener("change", () => syncProductId(row));
+        select.addEventListener("change", () => syncProductText(row));
+        syncProductText(row);
     };
     wireRow(wrapper.querySelector(".product-row"));
     add.addEventListener("click", () => {

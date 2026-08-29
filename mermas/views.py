@@ -380,10 +380,11 @@ def crear_registro(request):
                     for receta in Receta.objects.filter(id__in=[row["receta_id"] for row in rows if row["receta_id"]])
                 }
                 for row in rows:
+                    receta = recetas.get(str(row["receta_id"]))
                     MermaProducto.objects.create(
                         registro=registro,
-                        receta=recetas.get(str(row["receta_id"])),
-                        producto_texto=row["producto_texto"],
+                        receta=receta,
+                        producto_texto=receta.nombre if receta else row["producto_texto"],
                         cantidad_enviada=row["cantidad"],
                     )
                 for archivo in ticket_files:

@@ -391,6 +391,61 @@ class InsumosElegiblesPointTests(TestCase):
             point_branch=self.branch,
         )
 
+    def test_consulta_existencia_reintenta_dos_fallas_transitorias_de_point(self):
+        self.recepcion(days_ago=1)
+        from mermas.services_insumos import consultar_existencia_insumo_point
+        from pos_bridge.services.live_inventory_lookup_service import (
+            PointLiveInventoryLookupError,
+        )
+
+        from pos_bridge.utils.exceptions import AuthenticationError, ExtractionError
+
+        auth_error = PointLiveInventoryLookupError("Point respondió HTTP 500")
+        auth_error.__cause__ = AuthenticationError("HTTP 500")
+        extraction_error = PointLiveInventoryLookupError(
+            "Point devolvió un formato inesperado"
+        )
+        extraction_error.__cause__ = ExtractionError("formato inesperado")
+        live_service = Mock()
+        live_service.get_stock.side_effect = [
+            auth_error,
+            extraction_error,
+            SimpleNamespace(
+                stock_qty=Decimal("6.750"),
+                captured_at=timezone.now(),
+            ),
+        ]
+
+        row = consultar_existencia_insumo_point(
+            self.sucursal,
+            "INS-001",
+            live_service=live_service,
+        )
+
+        self.assertEqual(row.existencia, Decimal("6.750"))
+        self.assertEqual(live_service.get_stock.call_count, 3)
+
+    def test_consulta_existencia_no_reintenta_error_determinista_de_catalogo(self):
+        self.recepcion(days_ago=1)
+        from mermas.services_insumos import consultar_existencia_insumo_point
+        from pos_bridge.services.live_inventory_lookup_service import (
+            PointLiveInventoryLookupError,
+        )
+
+        live_service = Mock()
+        live_service.get_stock.side_effect = PointLiveInventoryLookupError(
+            "El insumo no tiene categoría Point configurada"
+        )
+
+        with self.assertRaises(PointLiveInventoryLookupError):
+            consultar_existencia_insumo_point(
+                self.sucursal,
+                "INS-001",
+                live_service=live_service,
+            )
+
+        self.assertEqual(live_service.get_stock.call_count, 1)
+
     def test_conflicto_de_unidad_excluye_insumo(self):
         self.recepcion(days_ago=1, unit="KG")
         self.recepcion(days_ago=0, unit="PZA")

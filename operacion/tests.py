@@ -981,6 +981,9 @@ class OperacionAppTests(TestCase):
         self.assertEqual(self.client.get("/mermas/app/").status_code, 200)
         self.assertEqual(self.client.get("/app/sucursal/?tab=fallas").status_code, 200)
         self.assertEqual(self.client.get("/app/api/fallas/activos/").status_code, 200)
+        erp_sw = self.client.get("/erp-sw.js")
+        self.assertEqual(erp_sw.status_code, 200)
+        self.assertEqual(erp_sw["Content-Type"], "text/javascript")
 
         blocked = self.client.get("/fallas/reportar/")
         self.assertEqual(blocked.status_code, 302)
