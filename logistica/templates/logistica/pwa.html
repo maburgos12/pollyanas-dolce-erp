@@ -4906,7 +4906,7 @@
         const draft = ensureBitacoraSalidaDraft();
         if (!navigator.geolocation) {
           draft.carga_geoStatus = "unavailable";
-          draft.carga_geoLabel = "GPS no disponible";
+          draft.carga_geoLabel = "Se guardará sin ubicación. El ticket, importe y turno quedarán registrados.";
           renderBitacoraSalida();
           return;
         }
@@ -4923,20 +4923,17 @@
           draft.carga_latitud = "";
           draft.carga_longitud = "";
           draft.carga_geoStatus = error.code === 1 ? "denied" : "unavailable";
-          draft.carga_geoLabel = "Se requiere ubicación para guardar la carga.";
+          draft.carga_geoLabel = "Se guardará sin ubicación. El ticket, importe y turno quedarán registrados.";
           renderBitacoraSalida();
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
       }
 
-      function puedeGuardarCargaCombustible() {
-        const draft = ensureBitacoraSalidaDraft();
-        return Boolean(
-          draft.carga_litros &&
-          draft.carga_importe_total &&
-          draft.carga_foto_ticket &&
-          draft.carga_geoStatus === "ready" &&
-          !draft.carga_guardando
-        );
+      function faltantesCargaCombustible(draft) {
+        const faltantes = [];
+        if (!draft.carga_litros) faltantes.push("litros");
+        if (!draft.carga_importe_total) faltantes.push("importe total");
+        if (!draft.carga_foto_ticket) faltantes.push("foto del ticket");
+        return faltantes;
       }
 
       function importeCombustibleParecePrecioPorLitro(litros, importeTotal) {
@@ -5009,11 +5006,11 @@
               </div>
               <div class="field">
                 <label for="carga_litros">Litros cargados</label>
-                <input id="carga_litros" type="number" min="0" step="0.01" required value="${escapeHtml(draft.carga_litros)}" oninput="state.bitacoraSalidaDraft.carga_litros = this.value; document.getElementById('guardar_carga_combustible_btn')?.toggleAttribute('disabled', !puedeGuardarCargaCombustible());">
+                <input id="carga_litros" type="number" min="0" step="0.01" required value="${escapeHtml(draft.carga_litros)}" oninput="state.bitacoraSalidaDraft.carga_litros = this.value;">
               </div>
               <div class="field">
                 <label for="carga_importe_total">Importe total del ticket</label>
-                <input id="carga_importe_total" type="number" min="0" step="0.01" required placeholder="Ej. 800.00, no 27.90 por litro" value="${escapeHtml(draft.carga_importe_total)}" oninput="state.bitacoraSalidaDraft.carga_importe_total = this.value; document.getElementById('guardar_carga_combustible_btn')?.toggleAttribute('disabled', !puedeGuardarCargaCombustible());">
+                <input id="carga_importe_total" type="number" min="0" step="0.01" required placeholder="Ej. 800.00, no 27.90 por litro" value="${escapeHtml(draft.carga_importe_total)}" oninput="state.bitacoraSalidaDraft.carga_importe_total = this.value;">
               </div>
               <div class="field">
                 <label>Nivel de gas después de cargar</label>
@@ -5031,10 +5028,10 @@
                 ` : ""}
                 ${draft.cargaFotoTicketError ? `<p class="error">${escapeHtml(draft.cargaFotoTicketError)}</p>` : ""}
               </div>
-              <p class="${draft.carga_geoStatus === "ready" ? "gps-registered" : "error"}">${escapeHtml(draft.carga_geoLabel || "📍 Ubicación requerida")}</p>
+              <p class="${draft.carga_geoStatus === "ready" ? "gps-registered" : "muted"}">${escapeHtml(draft.carga_geoLabel || "La ubicación es opcional; intentaremos registrarla.")}</p>
               ${draft.carga_geoStatus !== "ready" ? `<button class="secondary-btn" type="button" onclick="capturarUbicacionCargaCombustible()">Activar ubicación</button>` : ""}
               <div class="fuel-save-row">
-                <button id="guardar_carga_combustible_btn" class="primary-btn" type="button" onclick="guardarCargaCombustible()" ${puedeGuardarCargaCombustible() ? "" : "disabled"}>${draft.carga_guardando ? "Guardando..." : "Guardar carga"}</button>
+                <button id="guardar_carga_combustible_btn" class="primary-btn" type="button" onclick="guardarCargaCombustible()" ${draft.carga_guardando ? "disabled" : ""}>${draft.carga_guardando ? "Guardando..." : "Guardar carga"}</button>
               </div>
             </section>
           </div>
@@ -5044,8 +5041,9 @@
       async function guardarCargaCombustible() {
         if (previewBlocked("La carga de combustible está bloqueada en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
-        if (!puedeGuardarCargaCombustible()) {
-          return renderBitacoraSalida("Captura litros, importe total, ticket y ubicación para guardar la carga.");
+        const faltantes = faltantesCargaCombustible(draft);
+        if (faltantes.length) {
+          return renderBitacoraSalida(`Para guardar la carga falta: ${faltantes.join(", ")}.`);
         }
         if (importeCombustibleParecePrecioPorLitro(draft.carga_litros, draft.carga_importe_total)) {
           return renderBitacoraSalida("El importe parece precio por litro. Captura el importe total del ticket.");
@@ -5057,8 +5055,10 @@
         payload.append("importe_total", draft.carga_importe_total);
         payload.append("nivel_gas_despues", draft.carga_nivel_gas_despues || "");
         payload.append("foto_ticket", draft.carga_foto_ticket);
-        payload.append("latitud", draft.carga_latitud);
-        payload.append("longitud", draft.carga_longitud);
+        if (draft.carga_latitud && draft.carga_longitud) {
+          payload.append("latitud", draft.carga_latitud);
+          payload.append("longitud", draft.carga_longitud);
+        }
         const response = await apiFetch("/combustible/", { method: "POST", body: payload });
         if (!response.ok) {
           const error = await response.json().catch(() => ({}));
@@ -5078,12 +5078,9 @@
         await renderBitacoraSalida("✅ Carga de combustible guardada.");
       }
 
-      function puedeCerrarTurno() {
-        return faltantesCierreTurno(ensureBitacoraSalidaDraft(), state.bitacoraSalida).length === 0;
-      }
-
       function faltantesCierreTurno(draft, actual) {
         const faltantes = [];
+        if (!draft.km_llegada) faltantes.push("kilometraje de llegada");
         if (!draft.nivel_gas_llegada) faltantes.push("nivel de gasolina de llegada");
         if (!draft.foto_tablero_llegada) faltantes.push("foto del tablero de llegada");
         if (requiereCargaCombustibleAntesDeCerrar(actual, draft)) faltantes.push("registrar la carga de gasolina del recorrido");
@@ -5256,7 +5253,7 @@
                   Para cerrar turno falta: ${faltantesCierreTurno(draft, actual).filter((item) => item !== "registrar la carga de gasolina del recorrido").join(", ")}.
                 </div>
               ` : ""}
-              <button class="primary-btn" type="submit" ${puedeCerrarTurno() ? "" : "disabled"}>Cerrar turno</button>
+              <button class="primary-btn" type="submit">Cerrar turno</button>
             </form>
           `;
         }
@@ -5367,15 +5364,13 @@
         const form = new FormData(event.currentTarget);
         const draft = ensureBitacoraSalidaDraft();
         const kmLlegada = Number(form.get("km_llegada"));
+        draft.km_llegada = String(form.get("km_llegada") || "").trim();
         const kmSalida = Number(state.bitacoraSalida?.km_salida || 0);
-        if (!draft.nivel_gas_llegada) return renderBitacoraSalida("Selecciona el nivel de gas de llegada.");
         if (!kmLlegada) return renderBitacoraSalida("Captura el kilometraje de llegada.");
+        const faltantes = faltantesCierreTurno(draft, state.bitacoraSalida);
+        if (faltantes.length) return renderBitacoraSalida(`Para cerrar turno falta: ${faltantes.join(", ")}.`);
         if (kmSalida && kmLlegada < kmSalida) {
           return renderBitacoraSalida(`El KM de llegada no puede ser menor al KM de salida (${kmSalida}).`);
-        }
-        if (!draft.foto_tablero_llegada) return renderBitacoraSalida("La foto del tablero de llegada es obligatoria.");
-        if (requiereCargaCombustibleAntesDeCerrar(state.bitacoraSalida, draft)) {
-          return renderBitacoraSalida("El nivel de gasolina subió. Registra la carga de gasolina antes de cerrar el turno.");
         }
         const payload = new FormData();
         payload.append("km_llegada", form.get("km_llegada"));
@@ -5652,7 +5647,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v88-flota-gastos-completos", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v89-turno-combustible-seguro", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
