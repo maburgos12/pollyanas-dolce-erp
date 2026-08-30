@@ -722,65 +722,70 @@ class LogisticaBitacoraSalidaView(_LogisticaBaseView):
         if licencia_bloqueo:
             return Response(licencia_bloqueo, status=status.HTTP_403_FORBIDDEN)
 
-        ruta_activa = _ruta_operativa_dia_para_repartidor(repartidor)
-        abierta = BitacoraSalidaLlegada.objects.select_related("unidad").filter(repartidor=repartidor, cerrada=False).first()
-        if abierta:
-            mensaje = f"Tienes un turno abierto en la unidad {abierta.unidad.codigo}. Debes cerrarlo antes de iniciar uno nuevo."
-            if ruta_activa and ruta_activa.estatus == RutaEntrega.ESTATUS_PLANEADA:
-                mensaje = (
-                    f"Tienes un turno abierto, pero {ruta_activa.folio} sigue planeada. "
-                    "Cierra el turno accidental; luego revisa la carga y vuelve a iniciar turno."
-                )
-            return Response(
-                {
-                    "error": "turno_abierto",
-                    "mensaje": mensaje,
-                    "bitacora_id": abierta.id,
-                    "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(abierta).data,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        serializer = LogisticaBitacoraSalidaCreateSerializer(
-            data=request.data,
-            context={"repartidor": repartidor, "ruta": ruta_activa},
-        )
-        if not serializer.is_valid():
-            return Response(
-                {
-                    "error": "validacion",
-                    "mensaje": _serializer_error_message(serializer.errors),
-                    "detalles": serializer.errors,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        unidad = serializer.validated_data.get("unidad")
-        if (
-            ruta_activa
-            and ruta_activa.estatus == RutaEntrega.ESTATUS_EN_RUTA
-            and ruta_activa.unidad_operativa_id
-            and unidad
-            and unidad.id != ruta_activa.unidad_operativa_id
-        ):
-            unidad_requerida = ruta_activa.unidad_operativa
-            return Response(
-                {
-                    "error": "unidad_ruta_distinta",
-                    "mensaje": (
-                        f"Tienes ruta activa en {unidad_requerida.codigo}. "
-                        "Inicia turno con esa unidad para avanzar en la ruta."
-                    ),
-                    "ruta_id": ruta_activa.id,
-                    "ruta_folio": ruta_activa.folio,
-                    "unidad_requerida": {
-                        "id": unidad_requerida.id,
-                        "codigo": unidad_requerida.codigo,
-                        "descripcion": unidad_requerida.descripcion,
-                    },
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         with transaction.atomic():
+            repartidor = Repartidor.objects.select_for_update().get(pk=repartidor.pk)
+            ruta_activa = _ruta_operativa_dia_para_repartidor(repartidor)
+            abierta = (
+                BitacoraSalidaLlegada.objects.select_related("unidad")
+                .filter(repartidor=repartidor, cerrada=False)
+                .first()
+            )
+            if abierta:
+                mensaje = f"Tienes un turno abierto en la unidad {abierta.unidad.codigo}. Debes cerrarlo antes de iniciar uno nuevo."
+                if ruta_activa and ruta_activa.estatus == RutaEntrega.ESTATUS_PLANEADA:
+                    mensaje = (
+                        f"Tienes un turno abierto, pero {ruta_activa.folio} sigue planeada. "
+                        "Cierra el turno accidental; luego revisa la carga y vuelve a iniciar turno."
+                    )
+                return Response(
+                    {
+                        "error": "turno_abierto",
+                        "mensaje": mensaje,
+                        "bitacora_id": abierta.id,
+                        "bitacora": LogisticaBitacoraSalidaLlegadaSerializer(abierta).data,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            serializer = LogisticaBitacoraSalidaCreateSerializer(
+                data=request.data,
+                context={"repartidor": repartidor, "ruta": ruta_activa},
+            )
+            if not serializer.is_valid():
+                return Response(
+                    {
+                        "error": "validacion",
+                        "mensaje": _serializer_error_message(serializer.errors),
+                        "detalles": serializer.errors,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            unidad = serializer.validated_data.get("unidad")
+            if (
+                ruta_activa
+                and ruta_activa.estatus == RutaEntrega.ESTATUS_EN_RUTA
+                and ruta_activa.unidad_operativa_id
+                and unidad
+                and unidad.id != ruta_activa.unidad_operativa_id
+            ):
+                unidad_requerida = ruta_activa.unidad_operativa
+                return Response(
+                    {
+                        "error": "unidad_ruta_distinta",
+                        "mensaje": (
+                            f"Tienes ruta activa en {unidad_requerida.codigo}. "
+                            "Inicia turno con esa unidad para avanzar en la ruta."
+                        ),
+                        "ruta_id": ruta_activa.id,
+                        "ruta_folio": ruta_activa.folio,
+                        "unidad_requerida": {
+                            "id": unidad_requerida.id,
+                            "codigo": unidad_requerida.codigo,
+                            "descripcion": unidad_requerida.descripcion,
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             bitacora = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"))
         return Response(LogisticaBitacoraSalidaLlegadaSerializer(bitacora).data, status=status.HTTP_201_CREATED)
 

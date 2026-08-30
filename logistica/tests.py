@@ -21,6 +21,7 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.email_rendering import render_email_to_string
@@ -77,6 +78,66 @@ from recetas.models import Receta, SolicitudReabastoCedis, SolicitudReabastoCedi
 from rentabilidad.models_rentabilidad import SucursalRentabilidad
 from reportes.models import FactProduccionDiaria
 from rrhh.models import Empleado
+
+
+class LogisticaTurnoConcurrenteTests(TransactionTestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="repartidor.concurrente", password="pass123")
+        self.user.groups.add(Group.objects.get_or_create(name="repartidor")[0])
+        self.sucursal = Sucursal.objects.create(codigo="QA-CON", nombre="QA Concurrencia", activa=True)
+        self.unidad = Unidad.objects.create(codigo="QA-CON-1", descripcion="Unidad concurrente", sucursal=self.sucursal)
+        self.repartidor = Repartidor.objects.create(
+            user=self.user,
+            sucursal=self.sucursal,
+            unidad_asignada=self.unidad,
+            licencia_expiracion=timezone.localdate() + timezone.timedelta(days=30),
+        )
+
+    def test_dos_solicitudes_simultaneas_crean_un_solo_turno(self):
+        from api.logistica_serializers import LogisticaBitacoraSalidaCreateSerializer
+
+        barrier = __import__("threading").Barrier(2)
+        original_is_valid = LogisticaBitacoraSalidaCreateSerializer.is_valid
+        responses = []
+
+        def synchronized_is_valid(serializer, *args, **kwargs):
+            try:
+                barrier.wait(timeout=1)
+            except __import__("threading").BrokenBarrierError:
+                pass
+            return original_is_valid(serializer, *args, **kwargs)
+
+        def abrir_turno():
+            close_old_connections()
+            client = APIClient()
+            client.force_authenticate(user=User.objects.get(pk=self.user.pk))
+            response = client.post(
+                reverse("api_logistica_bitacora_salida"),
+                {
+                    "unidad": self.unidad.id,
+                    "km_salida": "1000",
+                    "nivel_gas_salida": "lleno",
+                    "latitud_salida": "25.570000",
+                    "longitud_salida": "-108.470000",
+                    "foto_tablero_salida": SimpleUploadedFile(
+                        "tablero.gif",
+                        VALID_GIF,
+                        content_type="image/gif",
+                    ),
+                },
+                format="multipart",
+            )
+            responses.append((response.status_code, response.json()))
+            close_old_connections()
+
+        with patch.object(LogisticaBitacoraSalidaCreateSerializer, "is_valid", synchronized_is_valid):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                list(executor.map(lambda _: abrir_turno(), range(2)))
+
+        self.assertEqual(sorted(status_code for status_code, _ in responses), [201, 400])
+        self.assertEqual(BitacoraSalidaLlegada.objects.filter(repartidor=self.repartidor, cerrada=False).count(), 1)
+        rechazo = next(payload for status_code, payload in responses if status_code == 400)
+        self.assertEqual(rechazo["error"], "turno_abierto")
 
 
 class LogisticaEntregaDomainTests(TestCase):
@@ -1613,9 +1674,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v88-flota-gastos-completos"},
+            {"route-control-v89-turno-combustible-seguro"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v88-flota-gastos-completos", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5140,9 +5201,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v88-flota-gastos-completos", pwa_html)
+        self.assertIn("?v=route-control-v89-turno-combustible-seguro", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v88-flota-gastos-completos", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5288,7 +5349,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v88-flota-gastos-completos", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8770,7 +8831,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v88-flota-gastos-completos", pwa_html)
+        self.assertIn("route-control-v89-turno-combustible-seguro", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
