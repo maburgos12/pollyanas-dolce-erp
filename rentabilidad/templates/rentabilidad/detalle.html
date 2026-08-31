@@ -61,8 +61,16 @@
     </article>
     <article class="kpi-card">
       <div class="label">Punto de equilibrio</div>
-      <div class="value">${{ rent.punto_equilibrio_mensual|floatformat:0|intcomma }}</div>
-      <div class="sub">{{ rent.porcentaje_avance_pe }}% cubierto; brecha de ${{ rent.brecha_pe|floatformat:0|intcomma }}.</div>
+      <div class="value">
+        {% if rent.punto_equilibrio_mensual <= 0 %}No calculable{% else %}${{ rent.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}
+      </div>
+      <div class="sub">
+        {% if rent.gasto_fijo_total <= 0 %}
+        Pendiente: gastos reales no cargados para el periodo.
+        {% else %}
+        {{ rent.porcentaje_avance_pe }}% cubierto; brecha de ${{ rent.brecha_pe|floatformat:0|intcomma }}.
+        {% endif %}
+      </div>
     </article>
     <article class="kpi-card">
       <div class="label">Recuperación inversión</div>

@@ -101,6 +101,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             periodo__month=month,
             tipo_dato="REAL",
         )
+        gastos_suc_disponibles = gastos_qs.exists()
 
         # Clasificar por categoría (ajusta los nombres según tus CategoriaGasto reales)
         def suma_categoria(keyword):
@@ -255,26 +256,38 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         fecha_apertura_suc = proyecto_apertura.fecha_inicio if proyecto_apertura else suc.fecha_apertura
 
         # ---- GUARDAR ----
-        obj, created = SucursalRentabilidad.objects.update_or_create(
-            sucursal=suc,
-            periodo=fecha_inicio_mes,
-            defaults={
-                "ventas_brutas": ventas_brutas,
-                "descuentos": descuentos,
-                "devoluciones": Decimal("0"),
-                "costo_materia_prima": costo_mp_real,
-                "costo_reventa": costo_reventa,
-                "empaque": Decimal("0"),
-                "otros_costos_variables": Decimal("0"),
+        defaults = {
+            "ventas_brutas": ventas_brutas,
+            "descuentos": descuentos,
+            "devoluciones": Decimal("0"),
+            "costo_materia_prima": costo_mp_real,
+            "costo_reventa": costo_reventa,
+            "empaque": Decimal("0"),
+            "otros_costos_variables": Decimal("0"),
+            "inversion_inicial": inversion_total,
+            "fecha_apertura": fecha_apertura_suc,
+        }
+        if gastos_suc_disponibles:
+            defaults.update({
                 "renta": renta,
                 "nomina_directa": nomina_directa,
                 "servicios_luz_agua": servicios,
                 "mantenimiento": mantenimiento,
                 "gastos_admin_prorrateados": admin_prorrateado,
                 "otros_gastos_fijos": otros_fijos,
-                "inversion_inicial": inversion_total,
-                "fecha_apertura": fecha_apertura_suc,
-            }
+            })
+        else:
+            logger.warning(
+                "[Rentabilidad] %s %s sin GastoOperativoMensual REAL; "
+                "se preservan gastos fijos previos si existen",
+                suc.nombre,
+                periodo,
+            )
+
+        obj, created = SucursalRentabilidad.objects.update_or_create(
+            sucursal=suc,
+            periodo=fecha_inicio_mes,
+            defaults=defaults,
         )
         obj.calcular_estado()
         obj.save()

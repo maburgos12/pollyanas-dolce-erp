@@ -290,7 +290,10 @@ class SucursalRentabilidad(models.Model):
         roi  = float(self.roi_anualizado or 0)
         inv  = float(self.porcentaje_recuperacion_inversion)
 
-        if self.ventas_brutas == 0 and self.gasto_fijo_total > 0:
+        if self.ventas_brutas > 0 and self.gasto_fijo_total == 0:
+            self.estado = EstadoRentabilidad.SIN_DATOS
+            self.alerta_nivel = 2
+        elif self.ventas_brutas == 0 and self.gasto_fijo_total > 0:
             self.estado = EstadoRentabilidad.SUBSIDIADA
             self.alerta_nivel = 2
         elif self.ventas_brutas == 0:
