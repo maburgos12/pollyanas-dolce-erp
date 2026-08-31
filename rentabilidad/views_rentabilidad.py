@@ -348,6 +348,10 @@ def dashboard_rentabilidad(request):
     # Enriquecer con colores y datos calculados para el template
     sucursales_data = []
     for r in registros:
+        # Recalcular en memoria para que snapshots históricos creados antes de
+        # las guardas de integridad no se presenten como rentables si carecen
+        # de gastos reales. No modifica la base durante una consulta.
+        r.calcular_estado()
         colores = _colores_estado(r.estado)
         costo_variable_pct = _pct(r.costo_variable_total, r.ventas_netas)
         gasto_fijo_pct = _pct(r.gasto_fijo_total, r.ventas_netas)
@@ -459,18 +463,21 @@ def dashboard_rentabilidad(request):
 def detalle_sucursal(request, pk):
     _require_view_rentabilidad(request.user)
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
+    rent.calcular_estado()
 
     # Historial de los últimos 12 meses para gráfica de tendencia
-    historial = (
+    historial = list(
         SucursalRentabilidad.objects
         .filter(sucursal=rent.sucursal, periodo__lte=rent.periodo)
         .order_by("-periodo")[:12]
     )
+    for item in historial:
+        item.calcular_estado()
 
     context = {
         "rent":     rent,
         "colores":  _colores_estado(rent.estado),
-        "historial": list(reversed(list(historial))),
+        "historial": list(reversed(historial)),
     }
     return render(request, "rentabilidad/detalle.html", context)
 
