@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v23-superuser-preview";
+const CACHE_NAME = "pollyanas-erp-shell-v24-reportes-charts";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
