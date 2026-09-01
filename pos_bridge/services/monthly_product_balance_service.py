@@ -39,6 +39,7 @@ ISSUE_FACTOR_INVALID = "CONVERSION_FACTOR_INVALID"
 ISSUE_DESTINATION_UNRESOLVED = "CONVERSION_DESTINATION_UNRESOLVED"
 ISSUE_SNAPSHOT_UNRESOLVED = "SNAPSHOT_RECIPE_UNRESOLVED"
 ISSUE_SALE_UNRESOLVED = "OFFICIAL_SALE_RECIPE_UNRESOLVED"
+ISSUE_DAILY_SALE_UNRESOLVED = "SALES_DESTINATION_UNRESOLVED"
 ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 
@@ -95,6 +96,9 @@ class MonthlyPointUnresolvedMovement:
     quantity: Decimal
     issue: str
     source_hash: str = ""
+    branch_external_id: str = ""
+    branch_name: str = ""
+    movement_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +155,6 @@ class _MutableBalanceRow:
 
         calculated_closing = None
         difference_point = None
-        status = "REVISAR_FUENTE"
         issues = set(self.issues)
         if self.opening_point is None:
             issues.add(ISSUE_OPENING_MISSING)
@@ -168,12 +171,7 @@ class _MutableBalanceRow:
             issues.add(ISSUE_CLOSING_MISSING)
         if calculated_closing is not None and self.closing_point is not None:
             difference_point = self.closing_point - calculated_closing
-            if abs(difference_point) <= DIFFERENCE_TOLERANCE:
-                status = "COINCIDE"
-            elif difference_point > ZERO:
-                status = "POINT_MAYOR"
-            else:
-                status = "POINT_MENOR"
+        status = self._status(difference=difference_point, issues=issues)
 
         default_counts = {
             "opening_snapshot_rows": 0,
@@ -201,6 +199,16 @@ class _MutableBalanceRow:
             issues=tuple(sorted(issues)),
             source_counts=MappingProxyType(default_counts),
         )
+
+    @staticmethod
+    def _status(*, difference: Decimal | None, issues: set[str]) -> str:
+        if issues or difference is None:
+            return "REVISAR_FUENTE"
+        if abs(difference) <= DIFFERENCE_TOLERANCE:
+            return "COINCIDE"
+        if difference > ZERO:
+            return "POINT_MAYOR"
+        return "POINT_MENOR"
 
 
 class MonthlyPointProductBalanceService:
@@ -288,6 +296,9 @@ class MonthlyPointProductBalanceService:
             "production_rows": sum(value[1] for value in production.values()),
             "sales_rows": sum(value[1] for value in sales.values()),
             "official_sales_unresolved": len(sales_unresolved),
+            "official_daily_sales_unresolved": sum(
+                movement.source == "official_daily_sales" for movement in sales_unresolved
+            ),
             "waste_rows": sum(value[1] for value in waste.values()),
             **conversion_counts,
         }
@@ -513,14 +524,19 @@ class MonthlyPointProductBalanceService:
                     raise
                 official_error = exc
 
-            daily = self._load_daily_sales(month_start=month_start, month_end=month_end)
-            if daily:
+            daily, daily_unresolved, daily_rows_read = self._load_daily_sales(
+                month_start=month_start,
+                month_end=month_end,
+            )
+            if daily_rows_read:
                 return daily, {
                     "source": OFFICIAL_POINT_DAILY_SOURCE,
                     "mode": "official_point_daily_sales",
+                    "row_count": daily_rows_read,
+                    "unresolved_rows": len(daily_unresolved),
                     "warnings": ["No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial."],
                     "fallback_reason": str(official_error),
-                }, []
+                }, daily_unresolved
 
         facts, facts_present = self._load_fact_values(
             month_start=month_start,
@@ -592,13 +608,44 @@ class MonthlyPointProductBalanceService:
         }, unresolved
 
     def _load_daily_sales(self, *, month_start: date, month_end: date):
-        rows = PointDailySale.objects.filter(
-            sale_date__gte=month_start,
-            sale_date__lte=month_end,
-            receta_id__isnull=False,
-            source_endpoint=OFFICIAL_POINT_DAILY_SOURCE,
-        ).only("id", "receta_id", "quantity").order_by("id")
-        return self._aggregate_rows(rows, "quantity")
+        rows = list(
+            PointDailySale.objects.filter(
+                sale_date__gte=month_start,
+                sale_date__lte=month_end,
+                source_endpoint=OFFICIAL_POINT_DAILY_SOURCE,
+            )
+            .select_related("product", "branch")
+            .only(
+                "id",
+                "receta_id",
+                "quantity",
+                "sale_date",
+                "product_id",
+                "product__sku",
+                "product__name",
+                "branch_id",
+                "branch__external_id",
+                "branch__name",
+            )
+            .order_by("id")
+        )
+        matched_rows = [row for row in rows if row.receta_id is not None]
+        unresolved = [
+            MonthlyPointUnresolvedMovement(
+                source="official_daily_sales",
+                movement_id=str(row.id),
+                item_code=row.product.sku,
+                item_name=row.product.name,
+                quantity=Decimal(row.quantity),
+                issue=ISSUE_DAILY_SALE_UNRESOLVED,
+                branch_external_id=row.branch.external_id,
+                branch_name=row.branch.name,
+                movement_date=row.sale_date,
+            )
+            for row in rows
+            if row.receta_id is None
+        ]
+        return self._aggregate_rows(matched_rows, "quantity"), unresolved, len(rows)
 
     def _load_conversions(self, *, month_start: date):
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)

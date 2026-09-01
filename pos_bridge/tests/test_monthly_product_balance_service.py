@@ -320,6 +320,89 @@ class MonthlyProductBalanceConversionTests(TestCase):
         self.assertEqual(unresolved.movement_id, "movement-1")
         self.assertEqual(unresolved.item_code, self.parent.codigo_point)
 
+    def test_complete_snapshots_with_conversion_issue_force_review_status(self):
+        product = PointProduct.objects.create(
+            external_id="conversion-status-slice",
+            sku=self.slice.codigo_point,
+            name=self.slice.nombre,
+        )
+        for stock, captured_at in (
+            ("5", datetime(2026, 7, 31, 8)),
+            ("6", datetime(2026, 8, 31, 8)),
+        ):
+            PointInventorySnapshot.objects.create(
+                branch=self.branch,
+                product=product,
+                stock=Decimal(stock),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=self.sync_job,
+            )
+        scenarios = (
+            ({}, "CONVERSION_ORIGIN_UNRESOLVED"),
+            (
+                {
+                    "source_item_code": self.parent.codigo_point,
+                    "source_item_name": self.parent.nombre,
+                },
+                "CONVERSION_FACTOR_MISSING",
+            ),
+        )
+
+        for index, (overrides, expected_issue) in enumerate(scenarios, start=1):
+            with self.subTest(issue=expected_issue):
+                PointConversionLine.objects.all().delete()
+                self._conversion(
+                    quantity="1",
+                    when=datetime(2026, 8, 15, 12),
+                    movement_external_id=f"status-{index}",
+                    source_hash=f"status-hash-{index}",
+                    **overrides,
+                )
+
+                row = self._service().build("2026-08").rows[self.slice.id]
+
+                self.assertEqual(row.difference_point, Decimal("0"))
+                self.assertIn(expected_issue, row.issues)
+                self.assertEqual(row.status, "REVISAR_FUENTE")
+
+    def test_complete_snapshots_with_factor_mismatch_force_review_status(self):
+        configured_parent = self._recipe("Pastel configurado", "CFG-PARENT")
+        RecetaEquivalencia.objects.create(
+            receta_porcion=self.slice,
+            receta_padre=configured_parent,
+            factor_conversion=Decimal("8"),
+            tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+            activo=True,
+        )
+        product = PointProduct.objects.create(
+            external_id="conversion-status-mismatch",
+            sku=self.slice.codigo_point,
+            name=self.slice.nombre,
+        )
+        for stock, captured_at in (
+            ("5", datetime(2026, 7, 31, 8)),
+            ("6", datetime(2026, 8, 31, 8)),
+        ):
+            PointInventorySnapshot.objects.create(
+                branch=self.branch,
+                product=product,
+                stock=Decimal(stock),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=self.sync_job,
+            )
+        self._conversion(
+            quantity="1",
+            when=datetime(2026, 8, 15, 12),
+            source_item_code=self.parent.codigo_point,
+            source_item_name=self.parent.nombre,
+        )
+
+        row = self._service().build("2026-08").rows[self.slice.id]
+
+        self.assertEqual(row.difference_point, Decimal("0"))
+        self.assertIn("CONVERSION_SOURCE_FACTOR_MISMATCH", row.issues)
+        self.assertEqual(row.status, "REVISAR_FUENTE")
+
 
 class _EmptyOfficialSalesReportService:
     def fetch_report(self, **kwargs):
@@ -659,6 +742,59 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         self.assertEqual(fact_balance.rows[self.parent.id].sales, Decimal("2"))
         self.assertEqual(fact_balance.sources["sales"]["mode"], "production_facts")
+
+    def test_official_daily_sales_preserve_mixed_unmatched_rows(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "matched")
+        unknown_product = PointProduct.objects.create(
+            external_id="daily-unmatched",
+            sku="DAILY-UNKNOWN",
+            name="Venta diaria desconocida",
+        )
+        self._daily_sale(None, unknown_product, "4", date(2026, 7, 4), "unmatched")
+        service = MonthlyPointProductBalanceService(
+            official_sales_report_service=_FailingOfficialSalesReportService()
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+        self.assertEqual(balance.sources["sales"]["mode"], "official_point_daily_sales")
+        unresolved = next(item for item in balance.unresolved_movements if item.source == "official_daily_sales")
+        self.assertEqual(unresolved.item_code, "DAILY-UNKNOWN")
+        self.assertEqual(unresolved.item_name, "Venta diaria desconocida")
+        self.assertEqual(unresolved.branch_external_id, self.branch.external_id)
+        self.assertEqual(unresolved.movement_date, date(2026, 7, 4))
+        self.assertEqual(unresolved.quantity, Decimal("4"))
+        self.assertEqual(unresolved.issue, "SALES_DESTINATION_UNRESOLVED")
+        self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 1)
+
+    def test_all_unmatched_official_daily_sales_do_not_fall_through_to_facts(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        unknown_product = PointProduct.objects.create(
+            external_id="daily-all-unmatched",
+            sku="DAILY-ONLY-UNKNOWN",
+            name="Única venta desconocida",
+        )
+        self._daily_sale(None, unknown_product, "5", date(2026, 7, 5), "only-unmatched")
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 5),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            vendido=Decimal("99"),
+        )
+        service = MonthlyPointProductBalanceService(
+            official_sales_report_service=_FailingOfficialSalesReportService()
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("0"))
+        self.assertEqual(balance.sources["sales"]["mode"], "official_point_daily_sales")
+        self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 1)
+        self.assertTrue(any(item.source == "official_daily_sales" for item in balance.unresolved_movements))
 
     def test_unmatched_snapshot_remains_visible_in_immutable_diagnostics(self):
         unknown = PointProduct.objects.create(external_id="unknown", sku="UNKNOWN", name="Producto desconocido")
