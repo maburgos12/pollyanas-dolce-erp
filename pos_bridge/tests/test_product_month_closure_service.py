@@ -164,6 +164,9 @@ class ProductMonthClosureServiceTests(TestCase):
             persisted.inventario_final_point_total,
             persisted.inventario_final_point_cedis + persisted.inventario_final_point_sucursales,
         )
+        self.assertEqual(preview["totals"]["closing_cedis"], Decimal("6"))
+        self.assertEqual(preview["totals"]["closing_sucursales"], Decimal("4"))
+        self.assertEqual(preview["totals"]["closing_total"], Decimal("10"))
 
     def test_canonical_point_difference_uses_legacy_storage_sign_and_blocks_source_issue(self):
         class CanonicalBalance:
@@ -232,6 +235,50 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(projected["inventario_final_point_sucursales"], Decimal("2"))
         self.assertEqual(preview["metadata"]["validation"]["closing_inventory"]["matched_recipe_count"], 1)
         self.assertEqual(preview["metadata"]["sales_meta"]["mode"], "bridge_history")
+
+    def test_preview_counts_only_snapshot_covered_recipes_and_sums_real_scopes(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        production_only = Receta.objects.create(
+            nombre="Producto sin snapshot de cierre",
+            codigo_point="SIN-SNAPSHOT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="test-sin-snapshot",
+        )
+        covered = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("0"),
+            calculated_closing=Decimal("0"),
+            closing_point=Decimal("0"),
+            closing_point_cedis=Decimal("0"),
+            closing_point_sucursales=Decimal("0"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            source_counts=MappingProxyType({"closing_snapshot_rows": 1}),
+        )
+        uncovered = MonthlyPointBalanceRow(
+            receta_id=production_only.id,
+            opening_point=Decimal("0"),
+            production=Decimal("3"),
+            calculated_closing=Decimal("3"),
+            closing_point=None,
+            difference_point=None,
+            status="REVISAR_FUENTE",
+            source_counts=MappingProxyType({"production_rows": 1, "closing_snapshot_rows": 0}),
+        )
+        preview = ProductMonthClosureService(
+            balance_service=CanonicalBalance(self._canonical_balance({self.parent.id: covered, production_only.id: uncovered}))
+        ).preview(month="2025-09")
+
+        self.assertEqual(preview["metadata"]["validation"]["closing_inventory"]["matched_recipe_count"], 1)
+        self.assertEqual(preview["totals"]["closing_cedis"], Decimal("0"))
+        self.assertEqual(preview["totals"]["closing_sucursales"], Decimal("0"))
+        self.assertEqual(preview["totals"]["closing_total"], Decimal("0"))
 
     def test_historical_line_without_canonical_metadata_remains_readable_without_rebuild(self):
         closure = ProductoMonthClosure.objects.create(

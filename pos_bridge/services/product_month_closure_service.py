@@ -227,7 +227,7 @@ class ProductMonthClosureService:
             "sales_legacy_rows": 0,
             "closing_inventory": {
                 "snapshot_rows": int(balance.source_counts.get("closing_snapshot_rows") or 0),
-                "matched_recipe_count": len(line_rows),
+                "matched_recipe_count": sum(row["source_closing_snapshot_count"] > 0 for row in line_rows),
                 "selected_dates": closing_meta.get("selected_dates", []),
             },
         }
@@ -237,8 +237,8 @@ class ProductMonthClosureService:
             "sales": sum((row["venta_total_equivalente"] for row in line_rows), ZERO),
             "waste": sum((row["merma_total_equivalente"] for row in line_rows), ZERO),
             "ending": sum((row["inventario_final_teorico"] for row in line_rows), ZERO),
-            "closing_cedis": ZERO,
-            "closing_sucursales": ZERO,
+            "closing_cedis": sum((row["inventario_final_point_cedis"] for row in line_rows), ZERO),
+            "closing_sucursales": sum((row["inventario_final_point_sucursales"] for row in line_rows), ZERO),
             "closing_total": sum((row["inventario_final_point_total"] for row in line_rows), ZERO),
             "difference": sum((row["diferencia_teorico_vs_point"] for row in line_rows), ZERO),
         }
