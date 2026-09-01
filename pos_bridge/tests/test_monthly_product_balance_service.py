@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType, SimpleNamespace
+from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from control.models import MermaMensualSucursal
@@ -13,6 +16,7 @@ from pos_bridge.models import (
     PointBranch,
     PointConversionLine,
     PointDailySale,
+    PointExtractionLog,
     PointInventorySnapshot,
     PointProduct,
     PointProductionLine,
@@ -20,6 +24,7 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
+from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
 from reportes.models import FactProduccionDiaria
 
@@ -540,17 +545,53 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             source_endpoint=source_endpoint,
         )
 
-    def _official_sales_job(self, *, status=PointSyncJob.STATUS_SUCCESS):
-        return PointSyncJob.objects.create(
+    def _official_sales_job(
+        self,
+        *,
+        status=PointSyncJob.STATUS_SUCCESS,
+        parameters=None,
+        covered_days=None,
+    ):
+        month_days = iter_business_dates(date(2026, 7, 1), date(2026, 7, 31))
+        job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_SALES,
             status=status,
-            parameters={
+            parameters=parameters or {
                 "source": "POINT_OFFICIAL_REPORT",
                 "start_date": "2026-07-01",
                 "end_date": "2026-07-31",
+                "branch_filter": "",
+                "credito_scopes": ["null"],
+                "excluded_ranges": [],
+                "max_days": None,
             },
-            result_summary={"rows": 1},
+            result_summary={
+                "branch_days_processed": len(month_days),
+                "failed_branch_days": 0,
+                "rows_imported": 1,
+                "rows_deleted": 0,
+                "indicator_rows_created": 0,
+                "indicator_rows_updated": 0,
+                "reports_downloaded": len(month_days),
+                "raw_exports": [],
+                "failures": [],
+            },
         )
+        for covered_day in month_days if covered_days is None else covered_days:
+            PointExtractionLog.objects.create(
+                sync_job=job,
+                level=PointExtractionLog.LEVEL_INFO,
+                message=f"Backfill oficial {self.branch.external_id} {covered_day.isoformat()}",
+                context={
+                    "branch": self.branch.name,
+                    "branch_external_id": self.branch.external_id,
+                    "sale_date": covered_day.isoformat(),
+                    "rows_imported": 0,
+                    "rows_deleted": 0,
+                    "reports_downloaded": 1,
+                },
+            )
+        return job
 
     def _service(self, rows=()):
         official = _OfficialSalesReportService(list(rows))
@@ -1174,6 +1215,161 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(sales["authoritative"])
         self.assertEqual(sales["official_daily_row_count"], 1)
         self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+
+    def test_official_daily_sales_require_unrestricted_writer_contract_and_proven_coverage(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        month_days = iter_business_dates(date(2026, 7, 1), date(2026, 7, 31))
+        restricted_parameters = (
+            {"branch_filter": self.branch.external_id},
+            {"max_days": 1},
+            {"excluded_ranges": [["2026-07-10", "2026-07-10"]]},
+            {"credito_scopes": ["credito"]},
+        )
+        for index, override in enumerate(restricted_parameters):
+            with self.subTest(override=override):
+                PointDailySale.objects.all().delete()
+                PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_SALES).delete()
+                parameters = {
+                    "source": "POINT_OFFICIAL_REPORT",
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-07-31",
+                    "branch_filter": "",
+                    "credito_scopes": ["null"],
+                    "excluded_ranges": [],
+                    "max_days": None,
+                    **override,
+                }
+                job = self._official_sales_job(parameters=parameters)
+                self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), f"restricted-{index}", sync_job=job)
+
+                balance = MonthlyPointProductBalanceService().build("2026-07")
+
+                self.assertFalse(balance.sources["sales"]["authoritative"])
+                self.assertIn("SALES_SYNC_JOB_RESTRICTED", balance.issues)
+
+        PointDailySale.objects.all().delete()
+        PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_SALES).delete()
+        incomplete_job = self._official_sales_job(covered_days=month_days[:-1])
+        incomplete_job.result_summary["branch_days_processed"] = len(month_days) - 1
+        incomplete_job.save(update_fields=["result_summary"])
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "incomplete", sync_job=incomplete_job)
+
+        incomplete = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(incomplete.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_COVERAGE_UNPROVEN", incomplete.issues)
+        self.assertEqual(incomplete.sources["sales"]["coverage_expected_branch_days"], len(month_days))
+        self.assertEqual(incomplete.sources["sales"]["coverage_logged_branch_days"], len(month_days) - 1)
+
+    def test_materialized_bridge_duplicate_reconciles_with_authoritative_daily_sales(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "official", sync_job=job)
+        VentaHistorica.objects.create(
+            receta=self.parent,
+            sucursal=self.sucursal,
+            fecha=date(2026, 7, 3),
+            cantidad=Decimal("3"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
+        self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+
+    def test_divergent_or_unmatched_bridge_rows_block_daily_sales_authority(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "official", sync_job=job)
+        VentaHistorica.objects.create(
+            receta=self.parent,
+            sucursal=self.sucursal,
+            fecha=date(2026, 7, 3),
+            cantidad=Decimal("4"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertFalse(balance.sources["sales"]["materialized_bridge_reconciled"])
+        self.assertIn("SALES_SOURCE_MIXED", balance.issues)
+
+    def test_all_unmatched_bridge_sales_are_preserved_and_non_authoritative(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        class _LegacyBridgeRows(list):
+            def only(self, *_fields):
+                return self
+
+            def select_related(self, *_fields):
+                return self
+
+            def order_by(self, *_fields):
+                return self
+
+        # The current model protects this invariant, but old materializations can
+        # contain it. Exercise the defensive read path against that legacy shape.
+        legacy_rows = _LegacyBridgeRows(
+            [
+                SimpleNamespace(
+                    id=999,
+                    receta_id=None,
+                    sucursal_id=self.sucursal.id,
+                    sucursal=self.sucursal,
+                    fecha=date(2026, 7, 3),
+                    cantidad=Decimal("3"),
+                )
+            ]
+        )
+        with patch(
+            "pos_bridge.services.monthly_product_balance_service.VentaHistorica.objects.filter",
+            return_value=legacy_rows,
+        ):
+            balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        sales = balance.sources["sales"]
+        self.assertEqual(sales["mode"], "bridge_history")
+        self.assertTrue(sales["source_present"])
+        self.assertEqual(sales["raw_row_count"], 1)
+        self.assertEqual(sales["unresolved_rows"], 1)
+        self.assertFalse(sales["authoritative"])
+        self.assertIn("BRIDGE_UNRESOLVED", balance.issues)
+        unresolved = next(item for item in balance.unresolved_movements if item.source == "bridge_sales")
+        self.assertEqual(unresolved.quantity, Decimal("3"))
+
+    def test_daily_sales_bulk_load_selected_jobs_once(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "0", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        for day in range(1, 32):
+            product = PointProduct.objects.create(
+                external_id=f"daily-query-{day}",
+                sku=f"DAILY-QUERY-{day}",
+                name=f"Venta consulta {day}",
+            )
+            PointDailySale.objects.create(
+                branch=self.branch,
+                product=product,
+                receta=self.parent,
+                sync_job=job,
+                sale_date=date(2026, 7, day),
+                quantity=Decimal("0"),
+                source_endpoint="/Report/PrintReportes?idreporte=3",
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        job_queries = [query for query in queries if "pos_bridge_sync_jobs" in query["sql"]]
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertEqual(len(job_queries), 1)
 
     def test_official_daily_and_legacy_history_mix_is_non_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
