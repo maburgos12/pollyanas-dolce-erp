@@ -76,6 +76,25 @@ class PointHttpSessionClientTests(SimpleTestCase):
         audit_callback.assert_called_once()
         self.assertEqual(audit_callback.call_args.kwargs["event"], "point_relogin")
 
+    @patch("pos_bridge.services.point_http_client.time.sleep", return_value=None)
+    def test_login_reenters_when_workspace_token_returns_server_error(self, _sleep):
+        audit_callback = Mock()
+        client = PointHttpSessionClient(self._settings(retry_attempts=3), audit_callback=audit_callback)
+        response = requests.Response()
+        response.status_code = 500
+        response.url = "https://app.pointmeup.com/Account/get_acctok"
+        first_error = requests.HTTPError("500 Server Error", response=response)
+
+        with patch.object(client, "_login_once", side_effect=[first_error, {"branch_name": "Matriz"}]) as login_once:
+            with patch.object(client, "_reset_session") as reset_session:
+                result = client.login(branch_hint="MATRIZ")
+
+        self.assertEqual(result, {"branch_name": "Matriz"})
+        self.assertEqual(login_once.call_count, 2)
+        reset_session.assert_called_once()
+        self.assertEqual(audit_callback.call_args.kwargs["event"], "point_relogin")
+        self.assertEqual(audit_callback.call_args.kwargs["context"]["status_code"], 500)
+
     def test_get_product_stock_uses_stock_endpoint(self):
         client = PointHttpSessionClient(self._settings())
         response = Mock()

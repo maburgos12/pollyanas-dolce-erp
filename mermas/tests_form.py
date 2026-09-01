@@ -60,7 +60,7 @@ class MermaProductoFormularioTests(TestCase):
 
         response = self.client.get(reverse("mermas:app"))
 
-        self.assertContains(response, 'select name="receta_id[]"')
+        self.assertContains(response, 'select name="receta_id[]" data-native-select="true"')
         self.assertContains(response, f'value="{receta.pk}"')
         self.assertNotContains(response, 'list="productos-list"')
 
