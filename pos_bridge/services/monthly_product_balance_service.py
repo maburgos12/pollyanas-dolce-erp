@@ -1153,10 +1153,11 @@ class MonthlyPointProductBalanceService:
             month_end=month_end,
         )
         log_contexts = PointExtractionLog.objects.filter(sync_job_id__in=selected_row_job_ids).values_list(
-            "sync_job_id", "context"
+            "sync_job_id", "level", "message", "context"
         )
         logged_branch_days_by_job: dict[int, set[tuple[str, date]]] = {}
-        for job_id, context in log_contexts:
+        no_aplica_branch_days_by_job: dict[int, set[tuple[str, date]]] = {}
+        for job_id, level, message, context in log_contexts:
             context = context or {}
             branch_external_id = str(context.get("branch_external_id") or "").strip()
             sale_date_text = str(context.get("sale_date") or "").strip()
@@ -1166,7 +1167,19 @@ class MonthlyPointProductBalanceService:
                 logged_date = date.fromisoformat(sale_date_text)
             except ValueError:
                 continue
-            logged_branch_days_by_job.setdefault(job_id, set()).add((branch_external_id, logged_date))
+            branch_day = (branch_external_id, logged_date)
+            if (
+                level == PointExtractionLog.LEVEL_INFO
+                and context.get("status") == "NO_APLICA_POR_APERTURA"
+                and message == f"Backfill oficial no aplica por apertura para {branch_external_id} {logged_date.isoformat()}."
+            ):
+                no_aplica_branch_days_by_job.setdefault(job_id, set()).add(branch_day)
+                continue
+            if (
+                level == PointExtractionLog.LEVEL_INFO
+                and message == f"Backfill oficial {branch_external_id} {logged_date.isoformat()}"
+            ):
+                logged_branch_days_by_job.setdefault(job_id, set()).add(branch_day)
         if any(row.sync_job_id is None for row in daily_rows):
             issues.append(ISSUE_SALES_SYNC_JOB_MISSING)
             rejected_provenance.append({"job_id": None, "reason": "missing_sync_job"})
@@ -1259,6 +1272,12 @@ class MonthlyPointProductBalanceService:
             "coverage_expected_branch_days": len(expected_branch_days),
             "coverage_logged_branch_days": len(logged_branch_days_by_job.get(job.id, set())) if job is not None else 0,
             "coverage_summary_branch_days": int((job.result_summary or {}).get("branch_days_processed") or 0) if job is not None else 0,
+            "coverage_no_aplica_branch_days": tuple(
+                sorted(
+                    f"{branch_external_id}:{sale_date.isoformat()}"
+                    for branch_external_id, sale_date in no_aplica_branch_days_by_job.get(job.id, set())
+                )
+            ) if job is not None else (),
             "coverage_missing_branch_days": tuple(
                 sorted(
                     f"{branch_external_id}:{sale_date.isoformat()}"

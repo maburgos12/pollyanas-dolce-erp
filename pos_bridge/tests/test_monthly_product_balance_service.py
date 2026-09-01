@@ -1262,6 +1262,86 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(incomplete.sources["sales"]["coverage_expected_branch_days"], len(month_days))
         self.assertEqual(incomplete.sources["sales"]["coverage_logged_branch_days"], len(month_days) - 1)
 
+    def test_opening_exception_logs_do_not_count_as_successful_coverage(self):
+        self.sucursal.fecha_apertura = date(2026, 7, 15)
+        self.sucursal.save(update_fields=["fecha_apertura"])
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        month_days = iter_business_dates(date(2026, 7, 1), date(2026, 7, 31))
+        eligible_days = [sale_date for sale_date in month_days if sale_date >= self.sucursal.fecha_apertura]
+        job = self._official_sales_job(covered_days=eligible_days)
+        job.result_summary["branch_days_processed"] = len(eligible_days)
+        job.save(update_fields=["result_summary"])
+        for sale_date in month_days:
+            if sale_date >= self.sucursal.fecha_apertura:
+                continue
+            PointExtractionLog.objects.create(
+                sync_job=job,
+                level=PointExtractionLog.LEVEL_INFO,
+                message=f"Backfill oficial no aplica por apertura para {self.branch.external_id} {sale_date.isoformat()}.",
+                context={
+                    "branch": self.branch.name,
+                    "branch_external_id": self.branch.external_id,
+                    "sale_date": sale_date.isoformat(),
+                    "status": "NO_APLICA_POR_APERTURA",
+                    "reason": "Sucursal todavía no operativa en esta fecha.",
+                },
+            )
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 15), "opened", sync_job=job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertEqual(balance.sources["sales"]["coverage_expected_branch_days"], len(eligible_days))
+        self.assertEqual(balance.sources["sales"]["coverage_logged_branch_days"], len(eligible_days))
+
+    def test_warning_log_never_satisfies_successful_coverage(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        month_days = iter_business_dates(date(2026, 7, 1), date(2026, 7, 31))
+        omitted_day = month_days[0]
+        job = self._official_sales_job(covered_days=month_days[1:])
+        PointExtractionLog.objects.create(
+            sync_job=job,
+            level=PointExtractionLog.LEVEL_WARNING,
+            message=f"Backfill oficial omitido para {self.branch.external_id} {omitted_day.isoformat()} por error de extracción.",
+            context={
+                "branch": self.branch.name,
+                "branch_external_id": self.branch.external_id,
+                "sale_date": omitted_day.isoformat(),
+                "error": "Point 500",
+            },
+        )
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "warning", sync_job=job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_COVERAGE_UNPROVEN", balance.issues)
+        self.assertEqual(balance.sources["sales"]["coverage_logged_branch_days"], len(month_days) - 1)
+
+    def test_unrelated_log_shape_is_ignored_for_successful_coverage(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        PointExtractionLog.objects.create(
+            sync_job=job,
+            level=PointExtractionLog.LEVEL_INFO,
+            message="Indicador diario no disponible para EXTRA 2026-07-03; se conserva venta oficial sin tickets.",
+            context={
+                "branch": "Sucursal extra",
+                "branch_external_id": "EXTRA",
+                "sale_date": "2026-07-03",
+                "error": "sin indicador",
+            },
+        )
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "unrelated", sync_job=job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertEqual(balance.sources["sales"]["coverage_logged_branch_days"], 31)
+
     def test_materialized_bridge_duplicate_reconciles_with_authoritative_daily_sales(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
