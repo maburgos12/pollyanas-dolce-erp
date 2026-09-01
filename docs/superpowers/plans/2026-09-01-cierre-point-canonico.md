@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Mostrar el balance mensual real de Point por producto, usando conversiones registradas y sin presentar el saldo Point como inventario físico.
+**Goal:** Mostrar para cualquier mes disponible el balance mensual real de Point por producto, usando conversiones registradas y sin presentar el saldo Point como inventario físico.
 
 **Architecture:** Un nuevo servicio de dominio en `pos_bridge` construirá una proyección mensual inmutable por receta Point. La vista operativa y el constructor del cierre consumirán esa misma proyección; la vista no volverá a inferir conversiones desde ventas o mermas. Los datos adicionales se persistirán en `ProductoMonthClosureLine.metadata`, sin migración.
 
@@ -174,6 +174,14 @@ def test_balance_formula_and_difference_sign(self):
     self.assertEqual(row.calculated_closing, Decimal("9"))
     self.assertEqual(row.difference_point, Decimal("2"))
     self.assertEqual(row.status, "POINT_MAYOR")
+
+def test_balance_contract_is_month_parameterized(self):
+    self.seed_complete_balance(month="2026-07", opening="6", production="3", sales="2", closing="7")
+    july = MonthlyPointProductBalanceService().build(month="2026-07")
+    august = MonthlyPointProductBalanceService().build(month="2026-08")
+    self.assertEqual(july.month_start, date(2026, 7, 1))
+    self.assertEqual(july.rows[self.parent.id].calculated_closing, Decimal("7"))
+    self.assertEqual(august.month_start, date(2026, 8, 1))
 ```
 
 - [ ] **Step 2: Confirmar que fallan**

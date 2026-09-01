@@ -19,6 +19,8 @@ El cierre mensual y el reporte también reconstruyen el mismo balance por camino
 
 Mostrar, para cada producto homologado con Point, un balance mensual trazable que use exclusivamente fuentes operativas registradas:
 
+El contrato será único y parametrizado por mes. Aplicará a cualquier periodo disponible en Point, sin una excepción ni un parche exclusivo para agosto de 2026.
+
 ```text
 Saldo calculado = Saldo inicial Point
                  + Producción Point
@@ -42,6 +44,7 @@ El signo quedará documentado de forma visible: positivo significa que Point cer
 - Aprobación, bloqueo o ajuste de inventario a partir de un conteo físico.
 - Corrección automática de saldos en Point o en producción.
 - Inventar movimientos faltantes para forzar un cuadre.
+- Reescritura automática y masiva de cierres históricos durante el deploy.
 
 El conteo físico será una fuente separada en una fase posterior. No se reutilizará el saldo Point como sustituto de ese dato.
 
@@ -160,6 +163,7 @@ La implementación seguirá pruebas primero. Como mínimo cubrirá:
 7. las etiquetas visibles y exportadas no afirman que existe inventario físico;
 8. los cierres históricos siguen siendo legibles;
 9. agosto se compara contra la evidencia productiva conocida antes de autorizar su reconstrucción.
+10. al menos otro mes distinto de agosto produce el mismo contrato y fórmula, demostrando que no existe lógica especial por periodo.
 
 ## Despliegue
 
@@ -170,4 +174,3 @@ La implementación seguirá pruebas primero. Como mínimo cubrirá:
 5. Verificar la pantalla productiva y las fuentes de agosto sin modificar el cierre.
 6. Presentar el comparativo anterior/nuevo.
 7. Solo con autorización operacional, reconstruir agosto y hacer una lectura fresca de pantalla y base.
-
