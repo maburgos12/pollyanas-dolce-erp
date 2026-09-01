@@ -16,6 +16,7 @@ from pos_bridge.models import (
     PointDailySale,
     PointInventorySnapshot,
     PointProductionLine,
+    PointSyncJob,
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
@@ -49,6 +50,11 @@ ISSUE_MONTH_SOURCE_INCOMPLETE = "MONTH_SOURCE_INCOMPLETE"
 ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE = "SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE"
 ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE = "SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE"
 ISSUE_OFFICIAL_SALES_REFRESH_REQUIRED = "OFFICIAL_SALES_REFRESH_REQUIRED"
+ISSUE_SALES_SOURCE_REQUIRES_REVIEW = "SALES_SOURCE_REQUIRES_REVIEW"
+ISSUE_SALES_SYNC_JOB_MISSING = "SALES_SYNC_JOB_MISSING"
+ISSUE_SALES_SYNC_JOB_PARTIAL = "SALES_SYNC_JOB_PARTIAL"
+ISSUE_SALES_SYNC_JOB_FAILED = "SALES_SYNC_JOB_FAILED"
+ISSUE_SALES_SOURCE_MIXED = "SALES_SOURCE_MIXED"
 ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 
@@ -965,6 +971,11 @@ class MonthlyPointProductBalanceService:
                 month_end=month_end,
             )
             if daily_rows_read:
+                daily_authoritative, daily_evidence, daily_authority_unresolved = self._validate_official_daily_sales_authority(
+                    month_start=month_start,
+                    month_end=month_end,
+                    official_daily_row_count=daily_rows_read,
+                )
                 return daily, self._sales_meta(
                     {
                         "source": OFFICIAL_POINT_DAILY_SOURCE,
@@ -972,13 +983,14 @@ class MonthlyPointProductBalanceService:
                         "source_present": True,
                         "row_count": daily_rows_read,
                         "unresolved_rows": len(daily_unresolved),
+                        **daily_evidence,
                     },
                     configured_source_mode=configured_source_mode,
                     fallback_chain=fallback_chain,
                     selection_reason=selection_reason or "persisted_official_daily_sales",
                     remote_refresh_requested=remote_refresh_requested,
-                    authoritative=authoritative,
-                ), daily_unresolved
+                    authoritative=authoritative and daily_authoritative,
+                ), daily_unresolved + daily_authority_unresolved
 
         facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
@@ -1009,6 +1021,16 @@ class MonthlyPointProductBalanceService:
             receta_id__isnull=False,
         ).only("id", "receta_id", "cantidad").order_by("id")
         values = self._aggregate_rows(rows, "cantidad")
+        bridge_review = MonthlyPointUnresolvedMovement(
+            source="sales_authority",
+            movement_id=f"{month_start:%Y-%m}",
+            item_code="",
+            item_name="VentaHistorica POINT_BRIDGE_SALES requiere revisión manual antes de cierre.",
+            quantity=ZERO,
+            issue=ISSUE_SALES_SOURCE_REQUIRES_REVIEW,
+            movement_date=month_start,
+        )
+        bridge_present = bool(values)
         return values, self._sales_meta(
             {
                 "source": POINT_BRIDGE_SALES_SOURCE,
@@ -1019,10 +1041,78 @@ class MonthlyPointProductBalanceService:
             },
             configured_source_mode=configured_source_mode,
             fallback_chain=fallback_chain,
-            selection_reason=selection_reason or "bridge_history_fallback",
+            selection_reason=(selection_reason or "bridge_history_requires_manual_review") if bridge_present else "no_persisted_sales",
             remote_refresh_requested=remote_refresh_requested,
-            authoritative=authoritative,
-        ), []
+            authoritative=authoritative if not bridge_present else False,
+        ), [bridge_review] if bridge_present else []
+
+    @staticmethod
+    def _find_latest_official_sales_job(*, month_start: date, month_end: date) -> PointSyncJob | None:
+        for job in PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_SALES).order_by("-started_at", "-id")[:50]:
+            parameters = dict(job.parameters or {})
+            if parameters.get("source") != "POINT_OFFICIAL_REPORT":
+                continue
+            start_raw = str(parameters.get("start_date") or "").strip()
+            end_raw = str(parameters.get("end_date") or "").strip()
+            if not start_raw or not end_raw:
+                continue
+            try:
+                start_date = datetime.strptime(start_raw, "%Y-%m-%d").date()
+                end_date = datetime.strptime(end_raw, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if start_date == month_start and end_date == month_end:
+                return job
+        return None
+
+    def _validate_official_daily_sales_authority(
+        self,
+        *,
+        month_start: date,
+        month_end: date,
+        official_daily_row_count: int,
+    ) -> tuple[bool, dict[str, object], list[MonthlyPointUnresolvedMovement]]:
+        legacy_daily_row_count = PointDailySale.objects.filter(
+            sale_date__gte=month_start,
+            sale_date__lte=month_end,
+            source_endpoint="/Report/VentasCategorias",
+        ).count()
+        legacy_bridge_row_count = VentaHistorica.objects.filter(
+            fecha__gte=month_start,
+            fecha__lte=month_end,
+            fuente=POINT_BRIDGE_SALES_SOURCE,
+        ).count()
+        job = self._find_latest_official_sales_job(month_start=month_start, month_end=month_end)
+        issues: list[str] = []
+        if job is None:
+            issues.append(ISSUE_SALES_SYNC_JOB_MISSING)
+        elif job.status == PointSyncJob.STATUS_PARTIAL:
+            issues.append(ISSUE_SALES_SYNC_JOB_PARTIAL)
+        elif job.status != PointSyncJob.STATUS_SUCCESS:
+            issues.append(ISSUE_SALES_SYNC_JOB_FAILED)
+        if legacy_daily_row_count or legacy_bridge_row_count:
+            issues.append(ISSUE_SALES_SOURCE_MIXED)
+        unresolved = [
+            MonthlyPointUnresolvedMovement(
+                source="sales_authority",
+                movement_id=str(job.id) if job is not None else f"{month_start:%Y-%m}",
+                item_code="",
+                item_name="La evidencia persistida de ventas Point requiere revisión.",
+                quantity=ZERO,
+                issue=issue,
+                movement_date=month_start,
+            )
+            for issue in issues
+        ]
+        return not issues, {
+            "job_id": job.id if job is not None else None,
+            "job_status": job.status if job is not None else "",
+            "job_coverage_start": month_start,
+            "job_coverage_end": month_end,
+            "official_daily_row_count": official_daily_row_count,
+            "legacy_daily_row_count": legacy_daily_row_count,
+            "legacy_bridge_row_count": legacy_bridge_row_count,
+        }, unresolved
 
     @staticmethod
     def _sales_meta(
