@@ -712,10 +712,133 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(opening["selected_rows"], 3)
         self.assertEqual(opening["selected_branch_count"], 2)
         self.assertEqual(opening["applied_branch_count"], 2)
-        self.assertEqual(closing["selected_rows"], 2)
-        self.assertEqual(closing["selected_branch_count"], 2)
+        self.assertEqual(closing["selected_rows"], 0)
+        self.assertEqual(closing["selected_branch_count"], 0)
         self.assertEqual(closing["applied_rows"], 0)
         self.assertEqual(closing["applied_branch_count"], 0)
+
+    def test_snapshot_selection_keeps_prior_day_for_other_branch_when_one_branch_is_exact(self):
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-PRIOR",
+            name="Sucursal Ledger Previa",
+            erp_branch=self.sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("7"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 29, 18), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("7"),
+            captured_at=timezone.make_aware(datetime(2026, 7, 31, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("17"))
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_branch_count"], 2)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_coverage_key_count"], 2)
+        self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+
+    def test_missing_closing_branch_coverage_blocks_all_rows(self):
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-MISSING",
+            name="Sucursal Ledger Faltante",
+            erp_branch=self.sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 30, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        self._snapshot(self.parent_product, "18", datetime(2026, 7, 31, 8))
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.sources["opening_snapshot"]["missing_in_closing_branch_ids"], (second_branch.id,))
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_missing_product_coverage_with_same_branches_blocks_all_rows(self):
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-PRODUCT",
+            name="Sucursal Ledger Producto",
+            erp_branch=self.sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.slice_product, "4", datetime(2026, 6, 30, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 30, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.slice_product,
+            stock=Decimal("3"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 30, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 7, 31, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertNotIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertTrue(balance.sources["opening_snapshot"]["missing_in_closing_coverage_keys"])
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_snapshot_tolerance_is_evaluated_per_branch_product_key(self):
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-STALE",
+            name="Sucursal Ledger Fuera Tolerancia",
+            erp_branch=self.sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 26, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 7, 31, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+
+        balance = self._service()[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("10"))
+        self.assertEqual(opening["selected_branch_count"], 1)
+        self.assertEqual(opening["applied_branch_count"], 1)
+        self.assertEqual(opening["out_of_tolerance_key_count"], 0)
+        self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
 
     def test_fact_priority_preserves_exact_recipe_for_production_and_waste(self):
         self._snapshot(self.slice_product, "10", datetime(2026, 6, 30, 8))
@@ -823,6 +946,82 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         self.assertEqual(fact_balance.rows[self.parent.id].sales, Decimal("2"))
         self.assertEqual(fact_balance.sources["sales"]["mode"], "production_facts")
+
+    def test_auto_sales_mode_uses_persisted_daily_until_remote_refresh_is_requested(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "auto-daily")
+        remote = _OfficialSalesReportService(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("2")}]
+        )
+        service = MonthlyPointProductBalanceService(official_sales_report_service=remote)
+
+        persisted = service.build("2026-07")
+        refreshed = service.build("2026-07", refresh_official_sales=True)
+
+        self.assertEqual(remote.calls, [{"start_date": date(2026, 7, 1), "end_date": date(2026, 7, 31), "branch_external_id": None, "branch_display_name": None, "credito": None}])
+        self.assertEqual(persisted.rows[self.parent.id].sales, Decimal("3"))
+        self.assertEqual(persisted.sources["sales"]["configured_source_mode"], "AUTO")
+        self.assertEqual(persisted.sources["sales"]["selection_reason"], "persisted_official_daily_sales")
+        self.assertEqual(refreshed.rows[self.parent.id].sales, Decimal("2"))
+        self.assertEqual(refreshed.sources["sales"]["selection_reason"], "remote_monthly_report")
+
+    @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="OFFICIAL_MONTHLY_REPORT")
+    def test_strict_official_sales_mode_requires_refresh_and_marks_fallback_non_authoritative(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "strict-daily")
+        remote = _OfficialSalesReportService(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("2")}]
+        )
+        service = MonthlyPointProductBalanceService(official_sales_report_service=remote)
+
+        unrefreshed = service.build("2026-07")
+        refreshed = service.build("2026-07", refresh_official_sales=True)
+
+        self.assertEqual(remote.calls, [{"start_date": date(2026, 7, 1), "end_date": date(2026, 7, 31), "branch_external_id": None, "branch_display_name": None, "credito": None}])
+        self.assertIn("OFFICIAL_SALES_REFRESH_REQUIRED", unrefreshed.issues)
+        self.assertFalse(unrefreshed.sources["sales"]["authoritative"])
+        self.assertEqual(unrefreshed.rows[self.parent.id].status, "REVISAR_FUENTE")
+        self.assertTrue(refreshed.sources["sales"]["authoritative"])
+        self.assertEqual(refreshed.sources["sales"]["mode"], "official_monthly_report")
+
+    @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="OFFICIAL_MONTHLY_REPORT")
+    def test_strict_official_sales_mode_keeps_remote_failure_blocking_after_persisted_fallback(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "strict-failure-daily")
+        service = MonthlyPointProductBalanceService(
+            official_sales_report_service=_FailingOfficialSalesReportService(),
+            refresh_official_sales=True,
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.sources["sales"]["mode"], "official_point_daily_sales")
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("OFFICIAL_SALES_REPORT_INVALID", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="BRIDGE_HISTORY")
+    def test_bridge_history_mode_skips_daily_sales_and_prefers_facts(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "8", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "99", date(2026, 7, 3), "daily-skipped")
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 3),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            vendido=Decimal("2"),
+        )
+        remote = _UnexpectedOfficialSalesReportService()
+
+        balance = MonthlyPointProductBalanceService(official_sales_report_service=remote).build("2026-07")
+
+        self.assertEqual(remote.calls, 0)
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("2"))
+        self.assertEqual(balance.sources["sales"]["mode"], "production_facts")
+        self.assertEqual(balance.sources["sales"]["configured_source_mode"], "BRIDGE_HISTORY")
 
     def test_official_daily_sales_preserve_mixed_unmatched_rows(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -939,7 +1138,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         balance = service.build("2026-07")
 
         fact_sources = {item.source for item in balance.unresolved_movements if item.issue == "FACT_RECIPE_UNRESOLVED"}
-        self.assertEqual(fact_sources, {"fact_production", "fact_sales", "fact_waste"})
+        self.assertEqual(fact_sources, {"fact_production", "fact_waste"})
         production_issue = next(item for item in balance.unresolved_movements if item.source == "fact_production")
         self.assertEqual(production_issue.branch_external_id, self.sucursal.codigo)
         self.assertEqual(production_issue.movement_date, date(2026, 7, 10))

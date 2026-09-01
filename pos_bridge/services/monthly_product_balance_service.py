@@ -9,7 +9,6 @@ from typing import Mapping
 
 from django.apps import apps
 from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -46,6 +45,9 @@ ISSUE_FACT_UNRESOLVED = "FACT_RECIPE_UNRESOLVED"
 ISSUE_OFFICIAL_REPORT_EMPTY = "OFFICIAL_SALES_REPORT_EMPTY"
 ISSUE_OFFICIAL_REPORT_INVALID = "OFFICIAL_SALES_REPORT_INVALID"
 ISSUE_MONTH_SOURCE_INCOMPLETE = "MONTH_SOURCE_INCOMPLETE"
+ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE = "SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE"
+ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE = "SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE"
+ISSUE_OFFICIAL_SALES_REFRESH_REQUIRED = "OFFICIAL_SALES_REFRESH_REQUIRED"
 ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 
@@ -259,12 +261,7 @@ class MonthlyPointProductBalanceService:
 
         opening, opening_meta, opening_unresolved = self._load_snapshot(snapshot_date=opening_target, source="opening_snapshot")
         closing, closing_meta, closing_unresolved = self._load_snapshot(snapshot_date=month_end, source="closing_snapshot")
-        # Preserve the selected day for diagnostics, but do not make a snapshot
-        # outside the closure tolerance authoritative in the ledger formula.
-        if not opening_meta.get("within_tolerance"):
-            opening = {}
-        if not closing_meta.get("within_tolerance"):
-            closing = {}
+        coverage_issues = self._compare_snapshot_coverage(opening_meta=opening_meta, closing_meta=closing_meta)
         production, production_meta, production_unresolved = self._load_production(
             month_start=month_start,
             month_end=month_end,
@@ -307,6 +304,8 @@ class MonthlyPointProductBalanceService:
         month_source_incomplete = bool(unresolved_movements or unresolved_conversions)
         month_source_incomplete = month_source_incomplete or not bool(opening_meta.get("authoritative"))
         month_source_incomplete = month_source_incomplete or not bool(closing_meta.get("authoritative"))
+        month_source_incomplete = month_source_incomplete or bool(coverage_issues)
+        month_source_incomplete = month_source_incomplete or not bool(sales_meta.get("authoritative", True))
         if month_source_incomplete:
             for row in rows.values():
                 row.issues.add(ISSUE_MONTH_SOURCE_INCOMPLETE)
@@ -330,6 +329,7 @@ class MonthlyPointProductBalanceService:
                 {issue for row in frozen_rows.values() for issue in row.issues}
                 | {movement.issue for movement in unresolved_movements}
                 | {conversion.issue for conversion in unresolved_conversions}
+                | coverage_issues
                 | ({ISSUE_MONTH_SOURCE_INCOMPLETE} if month_source_incomplete else set())
             )
         )
@@ -351,10 +351,18 @@ class MonthlyPointProductBalanceService:
             "production_rows": sum(value[1] for value in production.values()),
             "production_unresolved": len(production_unresolved),
             "sales_rows": sum(value[1] for value in sales.values()),
-            "official_sales_unresolved": len(sales_unresolved),
+            "sales_unresolved": len(sales_unresolved),
+            "official_sales_unresolved": sum(movement.source == "official_sales" for movement in sales_unresolved),
             "official_daily_sales_unresolved": sum(
                 movement.source == "official_daily_sales" for movement in sales_unresolved
             ),
+            "official_sales_report_unresolved": sum(
+                movement.source == "official_sales_report" for movement in sales_unresolved
+            ),
+            "official_sales_mode_unresolved": sum(
+                movement.source == "official_sales_mode" for movement in sales_unresolved
+            ),
+            "fact_sales_unresolved": sum(movement.source == "fact_sales" for movement in sales_unresolved),
             "waste_rows": sum(value[1] for value in waste.values()),
             "waste_unresolved": len(waste_unresolved),
             **conversion_counts,
@@ -385,61 +393,39 @@ class MonthlyPointProductBalanceService:
                 setattr(row, field_name, getattr(row, field_name) + quantity)
                 row.counts[count_name] = row.counts.get(count_name, 0) + count
 
+    @staticmethod
+    def _compare_snapshot_coverage(*, opening_meta: dict[str, object], closing_meta: dict[str, object]) -> set[str]:
+        opening_branch_ids = set(opening_meta.get("applied_branch_ids") or ())
+        closing_branch_ids = set(closing_meta.get("applied_branch_ids") or ())
+        opening_keys = set(opening_meta.get("applied_coverage_keys") or ())
+        closing_keys = set(closing_meta.get("applied_coverage_keys") or ())
+        opening_meta["missing_in_closing_branch_ids"] = tuple(sorted(opening_branch_ids - closing_branch_ids))
+        closing_meta["missing_in_opening_branch_ids"] = tuple(sorted(closing_branch_ids - opening_branch_ids))
+        opening_meta["missing_in_closing_coverage_keys"] = tuple(sorted(opening_keys - closing_keys))
+        closing_meta["missing_in_opening_coverage_keys"] = tuple(sorted(closing_keys - opening_keys))
+
+        issues: set[str] = set()
+        if opening_branch_ids != closing_branch_ids:
+            issues.add(ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE)
+        if opening_branch_ids == closing_branch_ids and opening_keys != closing_keys:
+            issues.add(ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE)
+        return issues
+
     def _load_snapshot(self, *, snapshot_date: date, source: str):
         tolerance_days = int(
             getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
         )
         current_timezone = timezone.get_current_timezone()
-        target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), current_timezone)
-        target_end = timezone.make_aware(datetime.combine(snapshot_date + timedelta(days=1), time.min), current_timezone)
-        exact_at = (
-            PointInventorySnapshot.objects.filter(captured_at__gte=target_start, captured_at__lt=target_end)
-            .order_by("captured_at", "id")
-            .values_list("captured_at", flat=True)
-            .first()
+        window_start = timezone.make_aware(
+            datetime.combine(snapshot_date - timedelta(days=tolerance_days), time.min),
+            current_timezone,
         )
-        if exact_at is not None:
-            effective_date = snapshot_date
-        else:
-            before_at = (
-                PointInventorySnapshot.objects.filter(captured_at__lt=target_start)
-                .order_by("-captured_at", "-id")
-                .values_list("captured_at", flat=True)
-                .first()
-            )
-            after_at = (
-                PointInventorySnapshot.objects.filter(captured_at__gte=target_end)
-                .order_by("captured_at", "id")
-                .values_list("captured_at", flat=True)
-                .first()
-            )
-            candidates = [candidate for candidate in (before_at, after_at) if candidate is not None]
-            if not candidates:
-                return {}, self._empty_snapshot_meta(snapshot_date, tolerance_days), []
-            # Compare calendar days. Equal-distance ties choose the earlier day.
-            effective_date = min(
-                (timezone.localtime(candidate, current_timezone).date() for candidate in candidates),
-                key=lambda candidate_date: (
-                    abs((candidate_date - snapshot_date).days),
-                    candidate_date > snapshot_date,
-                ),
-            )
-        day_start = timezone.make_aware(datetime.combine(effective_date, time.min), current_timezone)
-        day_end = timezone.make_aware(datetime.combine(effective_date + timedelta(days=1), time.min), current_timezone)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT DISTINCT ON (branch_id, product_id) id
-                FROM pos_bridge_inventory_snapshots
-                WHERE captured_at >= %s AND captured_at < %s
-                ORDER BY branch_id, product_id, captured_at DESC, id DESC
-                """,
-                [day_start, day_end],
-            )
-            snapshot_ids = [row[0] for row in cursor.fetchall()]
-
-        snapshots = list(
-            PointInventorySnapshot.objects.filter(id__in=snapshot_ids)
+        window_end = timezone.make_aware(
+            datetime.combine(snapshot_date + timedelta(days=tolerance_days + 1), time.min),
+            current_timezone,
+        )
+        candidates = list(
+            PointInventorySnapshot.objects.filter(captured_at__gte=window_start, captured_at__lt=window_end)
             .select_related("product", "branch")
             .only(
                 "id",
@@ -450,14 +436,50 @@ class MonthlyPointProductBalanceService:
                 "branch__external_id",
                 "branch__name",
                 "stock",
+                "captured_at",
             )
-            .order_by("id")
+            .order_by("branch_id", "product_id", "captured_at", "id")
         )
+        selected_by_key: dict[tuple[int, int], PointInventorySnapshot] = {}
+        for candidate in candidates:
+            key = (candidate.branch_id, candidate.product_id)
+            candidate_date = timezone.localtime(candidate.captured_at, current_timezone).date()
+            current = selected_by_key.get(key)
+            if current is None:
+                selected_by_key[key] = candidate
+                continue
+            current_date = timezone.localtime(current.captured_at, current_timezone).date()
+            candidate_rank = (
+                candidate_date != snapshot_date,
+                abs((candidate_date - snapshot_date).days),
+                candidate_date > snapshot_date,
+                -candidate.captured_at.timestamp(),
+                -candidate.id,
+            )
+            current_rank = (
+                current_date != snapshot_date,
+                abs((current_date - snapshot_date).days),
+                current_date > snapshot_date,
+                -current.captured_at.timestamp(),
+                -current.id,
+            )
+            if candidate_rank < current_rank:
+                selected_by_key[key] = candidate
+        snapshots = list(selected_by_key.values())
+        if not snapshots:
+            return {}, self._empty_snapshot_meta(snapshot_date, tolerance_days), []
+
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
         selected_branch_ids = {snapshot.branch_id for snapshot in snapshots}
         selected_branch_codes = {snapshot.branch.external_id for snapshot in snapshots}
         applied_branch_ids: set[int] = set()
+        selected_coverage_keys: set[tuple[int, str]] = set()
+        applied_coverage_keys: set[tuple[int, str]] = set()
+        selected_dates = {
+            timezone.localtime(snapshot.captured_at, current_timezone).date()
+            for snapshot in snapshots
+        }
         for snapshot in snapshots:
             receta = self._match_recipe(
                 code=snapshot.product.sku,
@@ -465,6 +487,7 @@ class MonthlyPointProductBalanceService:
             )
             quantity = Decimal(snapshot.stock)
             if receta is None:
+                selected_coverage_keys.add((snapshot.branch_id, f"product:{snapshot.product_id}"))
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
                         source=source,
@@ -475,35 +498,42 @@ class MonthlyPointProductBalanceService:
                         issue=ISSUE_SNAPSHOT_UNRESOLVED,
                         branch_external_id=snapshot.branch.external_id,
                         branch_name=snapshot.branch.name,
-                        movement_date=effective_date,
+                        movement_date=timezone.localtime(snapshot.captured_at, current_timezone).date(),
                     )
                 )
                 continue
+            coverage_key = (snapshot.branch_id, f"recipe:{receta.id}")
+            selected_coverage_keys.add(coverage_key)
             current, count = values.get(receta.id, (ZERO, 0))
             values[receta.id] = (current + quantity, count + 1)
             applied_branch_ids.add(snapshot.branch_id)
+            applied_coverage_keys.add(coverage_key)
 
-        days_from_target = abs((effective_date - snapshot_date).days)
-        authoritative = bool(snapshots) and days_from_target <= tolerance_days
-        applied_rows = sum(count for _quantity, count in values.values()) if authoritative else 0
-        authoritative_branch_ids = tuple(sorted(applied_branch_ids)) if authoritative else ()
+        fallback_used = any(selected_date != snapshot_date for selected_date in selected_dates)
+        effective_date = next(iter(selected_dates)) if len(selected_dates) == 1 else None
         return values, {
             "source": "PointInventorySnapshot",
             "target_date": snapshot_date,
             "effective_date": effective_date,
             "tolerance_days": tolerance_days,
-            "fallback_used": effective_date != snapshot_date,
-            "within_tolerance": days_from_target <= tolerance_days,
-            "authoritative": authoritative,
-            "days_from_target": days_from_target,
+            "selected_dates": tuple(sorted(selected_dates)),
+            "fallback_used": fallback_used,
+            "within_tolerance": True,
+            "authoritative": bool(snapshots),
+            "days_from_target": max(abs((selected_date - snapshot_date).days) for selected_date in selected_dates),
             "snapshot_rows": len(snapshots),
             "selected_rows": len(snapshots),
             "selected_branch_count": len(selected_branch_ids),
             "selected_branch_ids": tuple(sorted(selected_branch_ids)),
             "selected_branch_codes": tuple(sorted(selected_branch_codes)),
-            "applied_rows": applied_rows,
-            "applied_branch_count": len(authoritative_branch_ids),
-            "applied_branch_ids": authoritative_branch_ids,
+            "selected_coverage_key_count": len(selected_coverage_keys),
+            "selected_coverage_keys": tuple(sorted(selected_coverage_keys)),
+            "applied_rows": sum(count for _quantity, count in values.values()),
+            "applied_branch_count": len(applied_branch_ids),
+            "applied_branch_ids": tuple(sorted(applied_branch_ids)),
+            "applied_coverage_key_count": len(applied_coverage_keys),
+            "applied_coverage_keys": tuple(sorted(applied_coverage_keys)),
+            "out_of_tolerance_key_count": 0,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
         }, unresolved
@@ -514,6 +544,7 @@ class MonthlyPointProductBalanceService:
             "source": "PointInventorySnapshot",
             "target_date": snapshot_date,
             "effective_date": None,
+            "selected_dates": (),
             "tolerance_days": tolerance_days,
             "fallback_used": False,
             "within_tolerance": False,
@@ -524,19 +555,26 @@ class MonthlyPointProductBalanceService:
             "selected_branch_count": 0,
             "selected_branch_ids": (),
             "selected_branch_codes": (),
+            "selected_coverage_key_count": 0,
+            "selected_coverage_keys": (),
             "applied_rows": 0,
             "applied_branch_count": 0,
             "applied_branch_ids": (),
+            "applied_coverage_key_count": 0,
+            "applied_coverage_keys": (),
+            "out_of_tolerance_key_count": 0,
             "matched_recipe_count": 0,
             "unresolved_rows": 0,
         }
 
     @staticmethod
     def _snapshot_warnings(meta: Mapping[str, object], *, label: str) -> list[str]:
-        if not meta.get("effective_date"):
+        selected_dates = tuple(meta.get("selected_dates") or ())
+        if not selected_dates:
             return [f"No existe snapshot Point para {label}; el balance no es autoritativo."]
         if meta.get("fallback_used"):
-            warning = f"Se uso fecha alternativa {meta['effective_date']} para {label} (objetivo {meta['target_date']})."
+            selected_label = ", ".join(str(selected_date) for selected_date in selected_dates)
+            warning = f"Se usaron fechas alternativas {selected_label} para {label} (objetivo {meta['target_date']})."
             if not meta.get("within_tolerance"):
                 warning += " La fecha queda fuera de la tolerancia configurada."
             return [warning]
@@ -725,7 +763,8 @@ class MonthlyPointProductBalanceService:
         matched = [row for row in rows if row.receta_id is not None]
         unresolved = []
         for row in rows:
-            if row.receta_id is not None:
+            quantity = Decimal(getattr(row, field_name) or ZERO)
+            if row.receta_id is not None or quantity == ZERO:
                 continue
             metadata = row.metadata or {}
             unresolved.append(
@@ -734,7 +773,7 @@ class MonthlyPointProductBalanceService:
                     movement_id=str(row.id),
                     item_code=str(metadata.get("item_code") or metadata.get("codigo_point") or ""),
                     item_name=str(metadata.get("item_name") or metadata.get("nombre") or ""),
-                    quantity=Decimal(getattr(row, field_name) or ZERO),
+                    quantity=quantity,
                     issue=ISSUE_FACT_UNRESOLVED,
                     branch_external_id=row.sucursal.codigo if row.sucursal_id else "",
                     branch_name=row.sucursal.nombre if row.sucursal_id else "",
@@ -760,16 +799,33 @@ class MonthlyPointProductBalanceService:
         refresh_official_sales: bool,
     ):
         source_mode = str(getattr(settings, "PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE", "AUTO")).strip().upper() or "AUTO"
-        prefer_official = source_mode in {"AUTO", "OFFICIAL_MONTHLY_REPORT"}
-        official_error: Exception | None = None
-        refresh_unresolved: list[MonthlyPointUnresolvedMovement] = []
-        if refresh_official_sales and prefer_official:
+        if source_mode not in {"AUTO", "OFFICIAL_MONTHLY_REPORT", "BRIDGE_HISTORY"}:
+            source_mode = "AUTO"
+
+        if source_mode == "BRIDGE_HISTORY":
+            return self._load_persisted_sales(
+                month_start=month_start,
+                month_end=month_end,
+                include_daily=False,
+                configured_source_mode=source_mode,
+                fallback_chain=("FactProduccionDiaria", POINT_BRIDGE_SALES_SOURCE),
+                remote_refresh_requested=refresh_official_sales,
+            )
+
+        if refresh_official_sales:
             try:
-                return self._load_official_sales(month_start=month_start, month_end=month_end)
+                values, meta, unresolved = self._load_official_sales(month_start=month_start, month_end=month_end)
+                return values, self._sales_meta(
+                    meta,
+                    configured_source_mode=source_mode,
+                    fallback_chain=(OFFICIAL_CATEGORY_REPORT_SOURCE,),
+                    selection_reason="remote_monthly_report",
+                    remote_refresh_requested=True,
+                    authoritative=True,
+                ), unresolved
             except Exception as exc:  # noqa: BLE001
-                official_error = exc
                 issue = getattr(exc, "issue", ISSUE_OFFICIAL_REPORT_INVALID)
-                refresh_unresolved.append(
+                remote_unresolved = [
                     MonthlyPointUnresolvedMovement(
                         source="official_sales_report",
                         movement_id=f"{month_start:%Y-%m}",
@@ -779,29 +835,87 @@ class MonthlyPointProductBalanceService:
                         issue=issue,
                         movement_date=month_start,
                     )
+                ]
+                values, meta, unresolved = self._load_persisted_sales(
+                    month_start=month_start,
+                    month_end=month_end,
+                    include_daily=True,
+                    configured_source_mode=source_mode,
+                    fallback_chain=(OFFICIAL_CATEGORY_REPORT_SOURCE, OFFICIAL_POINT_DAILY_SOURCE, "FactProduccionDiaria", POINT_BRIDGE_SALES_SOURCE),
+                    remote_refresh_requested=True,
+                    selection_reason="remote_monthly_report_failed",
+                    authoritative=False,
                 )
-
-        daily, daily_unresolved, daily_rows_read = self._load_daily_sales(
-            month_start=month_start,
-            month_end=month_end,
-        )
-        if daily_rows_read:
-            meta = {
-                "source": OFFICIAL_POINT_DAILY_SOURCE,
-                "mode": "official_point_daily_sales",
-                "source_present": True,
-                "row_count": daily_rows_read,
-                "unresolved_rows": len(daily_unresolved),
-                "remote_refresh_requested": refresh_official_sales,
-            }
-            if official_error is not None:
-                meta.update(
+                mutable_meta = dict(meta)
+                mutable_meta.update(
                     {
-                        "warnings": ["No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial."],
-                        "fallback_reason": str(official_error),
+                        "warnings": ["No se pudo usar el reporte oficial mensual; se uso una fuente persistida no autoritativa."],
+                        "fallback_reason": str(exc),
                     }
                 )
-            return daily, meta, refresh_unresolved + daily_unresolved
+                return values, mutable_meta, remote_unresolved + unresolved
+
+        values, meta, unresolved = self._load_persisted_sales(
+            month_start=month_start,
+            month_end=month_end,
+            include_daily=True,
+            configured_source_mode=source_mode,
+            fallback_chain=(OFFICIAL_POINT_DAILY_SOURCE, "FactProduccionDiaria", POINT_BRIDGE_SALES_SOURCE),
+            remote_refresh_requested=False,
+        )
+        if source_mode == "OFFICIAL_MONTHLY_REPORT":
+            required = MonthlyPointUnresolvedMovement(
+                source="official_sales_mode",
+                movement_id=f"{month_start:%Y-%m}",
+                item_code="",
+                item_name="El modo OFFICIAL_MONTHLY_REPORT requiere refresh_official_sales=True.",
+                quantity=ZERO,
+                issue=ISSUE_OFFICIAL_SALES_REFRESH_REQUIRED,
+                movement_date=month_start,
+            )
+            mutable_meta = dict(meta)
+            mutable_meta.update(
+                {
+                    "authoritative": False,
+                    "selection_reason": "official_monthly_refresh_required",
+                    "warnings": ["La fuente persistida se muestra solo como referencia hasta refrescar el reporte oficial mensual."],
+                }
+            )
+            return values, mutable_meta, [required] + unresolved
+        return values, meta, unresolved
+
+    def _load_persisted_sales(
+        self,
+        *,
+        month_start: date,
+        month_end: date,
+        include_daily: bool,
+        configured_source_mode: str,
+        fallback_chain: tuple[str, ...],
+        remote_refresh_requested: bool,
+        selection_reason: str = "",
+        authoritative: bool = True,
+    ):
+        if include_daily:
+            daily, daily_unresolved, daily_rows_read = self._load_daily_sales(
+                month_start=month_start,
+                month_end=month_end,
+            )
+            if daily_rows_read:
+                return daily, self._sales_meta(
+                    {
+                        "source": OFFICIAL_POINT_DAILY_SOURCE,
+                        "mode": "official_point_daily_sales",
+                        "source_present": True,
+                        "row_count": daily_rows_read,
+                        "unresolved_rows": len(daily_unresolved),
+                    },
+                    configured_source_mode=configured_source_mode,
+                    fallback_chain=fallback_chain,
+                    selection_reason=selection_reason or "persisted_official_daily_sales",
+                    remote_refresh_requested=remote_refresh_requested,
+                    authoritative=authoritative,
+                ), daily_unresolved
 
         facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
@@ -810,22 +924,20 @@ class MonthlyPointProductBalanceService:
             source="fact_sales",
         )
         if facts_present:
-            meta = {
-                "source": "FactProduccionDiaria",
-                "mode": "production_facts",
-                "source_present": True,
-                "row_count": fact_rows_read,
-                "unresolved_rows": len(fact_unresolved),
-                "remote_refresh_requested": refresh_official_sales,
-            }
-            if official_error is not None:
-                meta.update(
-                    {
-                        "warnings": ["No se pudo usar el reporte oficial mensual; se usaron facts persistidos."],
-                        "fallback_reason": str(official_error),
-                    }
-                )
-            return facts, meta, refresh_unresolved + fact_unresolved
+            return facts, self._sales_meta(
+                {
+                    "source": "FactProduccionDiaria",
+                    "mode": "production_facts",
+                    "source_present": True,
+                    "row_count": fact_rows_read,
+                    "unresolved_rows": len(fact_unresolved),
+                },
+                configured_source_mode=configured_source_mode,
+                fallback_chain=fallback_chain,
+                selection_reason=selection_reason or "persisted_production_facts",
+                remote_refresh_requested=remote_refresh_requested,
+                authoritative=authoritative,
+            ), fact_unresolved
 
         rows = VentaHistorica.objects.filter(
             fecha__gte=month_start,
@@ -834,22 +946,40 @@ class MonthlyPointProductBalanceService:
             receta_id__isnull=False,
         ).only("id", "receta_id", "cantidad").order_by("id")
         values = self._aggregate_rows(rows, "cantidad")
-        meta = {
-            "source": POINT_BRIDGE_SALES_SOURCE,
-            "mode": "bridge_history",
-            "source_present": bool(values),
-            "row_count": sum(count for _quantity, count in values.values()),
-            "unresolved_rows": 0,
-            "remote_refresh_requested": refresh_official_sales,
+        return values, self._sales_meta(
+            {
+                "source": POINT_BRIDGE_SALES_SOURCE,
+                "mode": "bridge_history",
+                "source_present": bool(values),
+                "row_count": sum(count for _quantity, count in values.values()),
+                "unresolved_rows": 0,
+            },
+            configured_source_mode=configured_source_mode,
+            fallback_chain=fallback_chain,
+            selection_reason=selection_reason or "bridge_history_fallback",
+            remote_refresh_requested=remote_refresh_requested,
+            authoritative=authoritative,
+        ), []
+
+    @staticmethod
+    def _sales_meta(
+        meta: Mapping[str, object],
+        *,
+        configured_source_mode: str,
+        fallback_chain: tuple[str, ...],
+        selection_reason: str,
+        remote_refresh_requested: bool,
+        authoritative: bool,
+    ) -> dict[str, object]:
+        return {
+            **meta,
+            "configured_source_mode": configured_source_mode,
+            "selected_source": meta.get("mode", ""),
+            "fallback_chain_attempted": fallback_chain,
+            "selection_reason": selection_reason,
+            "remote_refresh_requested": remote_refresh_requested,
+            "authoritative": authoritative,
         }
-        if official_error is not None:
-            meta.update(
-                {
-                    "warnings": ["No se pudo usar el reporte oficial mensual; se uso VentaHistorica."],
-                    "fallback_reason": str(official_error),
-                }
-            )
-        return values, meta, refresh_unresolved
 
     def _load_official_sales(self, *, month_start: date, month_end: date):
         report = self.official_sales_report_service.fetch_report(
