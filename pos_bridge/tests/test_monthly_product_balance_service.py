@@ -20,7 +20,7 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
-from recetas.models import Receta, RecetaEquivalencia
+from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
 from reportes.models import FactProduccionDiaria
 
 
@@ -808,6 +808,25 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(balance.sources["opening_snapshot"]["missing_in_closing_coverage_keys"])
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
+    def test_snapshot_coverage_keeps_distinct_point_products_that_map_to_one_recipe(self):
+        alias_product = PointProduct.objects.create(
+            external_id="ledger-parent-alias",
+            sku="LEDGER-PARENT-ALIAS",
+            name=self.parent.nombre,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(alias_product, "2", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+
+        balance = self._service()[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertEqual(opening["applied_coverage_key_count"], 2)
+        self.assertIn((self.branch.id, self.parent_product.id), opening["applied_coverage_keys"])
+        self.assertIn((self.branch.id, alias_product.id), opening["applied_coverage_keys"])
+        self.assertIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
     def test_snapshot_tolerance_is_evaluated_per_branch_product_key(self):
         second_branch = PointBranch.objects.create(
             external_id="LEDGER-STALE",
@@ -880,6 +899,53 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.rows[self.parent.id].waste, Decimal("0"))
         self.assertEqual(balance.sources["production"]["source"], "FactProduccionDiaria")
         self.assertEqual(balance.sources["waste"]["source"], "FactProduccionDiaria")
+
+    def test_unmapped_zero_facts_do_not_block_per_field_fallbacks_but_mapped_zero_stays_authoritative(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 10),
+            sucursal=self.sucursal,
+            receta=None,
+            producido=Decimal("0"),
+            vendido=Decimal("0"),
+            merma=Decimal("0"),
+        )
+        self._production(self.parent, "2", date(2026, 7, 10), "after-unmapped-zero")
+        self._waste(self.parent, "1", datetime(2026, 7, 10, 12), "after-unmapped-zero")
+        VentaHistorica.objects.create(
+            receta=self.parent,
+            sucursal=self.sucursal,
+            fecha=date(2026, 7, 10),
+            cantidad=Decimal("3"),
+            fuente="POINT_BRIDGE_SALES",
+        )
+        service, _official = self._service()
+
+        fallback_balance = service.build("2026-07")
+
+        self.assertEqual(fallback_balance.rows[self.parent.id].production, Decimal("2"))
+        self.assertEqual(fallback_balance.rows[self.parent.id].waste, Decimal("1"))
+        self.assertEqual(fallback_balance.rows[self.parent.id].sales, Decimal("3"))
+        self.assertEqual(fallback_balance.sources["production"]["source"], "PointProductionLine")
+        self.assertEqual(fallback_balance.sources["waste"]["source"], "PointWasteLine")
+        self.assertEqual(fallback_balance.sources["sales"]["mode"], "bridge_history")
+
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 11),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            producido=Decimal("0"),
+        )
+
+        mapped_zero_balance = service.build("2026-07")
+
+        self.assertEqual(mapped_zero_balance.rows[self.parent.id].production, Decimal("0"))
+        self.assertEqual(mapped_zero_balance.rows[self.parent.id].waste, Decimal("0"))
+        self.assertEqual(mapped_zero_balance.rows[self.parent.id].sales, Decimal("0"))
+        self.assertEqual(mapped_zero_balance.sources["production"]["source"], "FactProduccionDiaria")
+        self.assertEqual(mapped_zero_balance.sources["waste"]["source"], "FactProduccionDiaria")
+        self.assertEqual(mapped_zero_balance.sources["sales"]["mode"], "production_facts")
 
     def test_monthly_waste_is_last_resort_fallback(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))

@@ -474,8 +474,10 @@ class MonthlyPointProductBalanceService:
         selected_branch_ids = {snapshot.branch_id for snapshot in snapshots}
         selected_branch_codes = {snapshot.branch.external_id for snapshot in snapshots}
         applied_branch_ids: set[int] = set()
-        selected_coverage_keys: set[tuple[int, str]] = set()
-        applied_coverage_keys: set[tuple[int, str]] = set()
+        selected_coverage_keys: set[tuple[int, int]] = set()
+        applied_coverage_keys: set[tuple[int, int]] = set()
+        selected_mapped_recipe_keys: set[tuple[int, int, int]] = set()
+        applied_mapped_recipe_keys: set[tuple[int, int, int]] = set()
         selected_dates = {
             timezone.localtime(snapshot.captured_at, current_timezone).date()
             for snapshot in snapshots
@@ -486,8 +488,9 @@ class MonthlyPointProductBalanceService:
                 name=snapshot.product.name,
             )
             quantity = Decimal(snapshot.stock)
+            coverage_key = (snapshot.branch_id, snapshot.product_id)
+            selected_coverage_keys.add(coverage_key)
             if receta is None:
-                selected_coverage_keys.add((snapshot.branch_id, f"product:{snapshot.product_id}"))
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
                         source=source,
@@ -502,12 +505,13 @@ class MonthlyPointProductBalanceService:
                     )
                 )
                 continue
-            coverage_key = (snapshot.branch_id, f"recipe:{receta.id}")
-            selected_coverage_keys.add(coverage_key)
+            mapped_recipe_key = (snapshot.branch_id, snapshot.product_id, receta.id)
+            selected_mapped_recipe_keys.add(mapped_recipe_key)
             current, count = values.get(receta.id, (ZERO, 0))
             values[receta.id] = (current + quantity, count + 1)
             applied_branch_ids.add(snapshot.branch_id)
             applied_coverage_keys.add(coverage_key)
+            applied_mapped_recipe_keys.add(mapped_recipe_key)
 
         fallback_used = any(selected_date != snapshot_date for selected_date in selected_dates)
         effective_date = next(iter(selected_dates)) if len(selected_dates) == 1 else None
@@ -528,11 +532,13 @@ class MonthlyPointProductBalanceService:
             "selected_branch_codes": tuple(sorted(selected_branch_codes)),
             "selected_coverage_key_count": len(selected_coverage_keys),
             "selected_coverage_keys": tuple(sorted(selected_coverage_keys)),
+            "selected_mapped_recipe_keys": tuple(sorted(selected_mapped_recipe_keys)),
             "applied_rows": sum(count for _quantity, count in values.values()),
             "applied_branch_count": len(applied_branch_ids),
             "applied_branch_ids": tuple(sorted(applied_branch_ids)),
             "applied_coverage_key_count": len(applied_coverage_keys),
             "applied_coverage_keys": tuple(sorted(applied_coverage_keys)),
+            "applied_mapped_recipe_keys": tuple(sorted(applied_mapped_recipe_keys)),
             "out_of_tolerance_key_count": 0,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
@@ -557,11 +563,13 @@ class MonthlyPointProductBalanceService:
             "selected_branch_codes": (),
             "selected_coverage_key_count": 0,
             "selected_coverage_keys": (),
+            "selected_mapped_recipe_keys": (),
             "applied_rows": 0,
             "applied_branch_count": 0,
             "applied_branch_ids": (),
             "applied_coverage_key_count": 0,
             "applied_coverage_keys": (),
+            "applied_mapped_recipe_keys": (),
             "out_of_tolerance_key_count": 0,
             "matched_recipe_count": 0,
             "unresolved_rows": 0,
@@ -762,10 +770,12 @@ class MonthlyPointProductBalanceService:
         )
         matched = [row for row in rows if row.receta_id is not None]
         unresolved = []
+        has_unmapped_nonzero = False
         for row in rows:
             quantity = Decimal(getattr(row, field_name) or ZERO)
             if row.receta_id is not None or quantity == ZERO:
                 continue
+            has_unmapped_nonzero = True
             metadata = row.metadata or {}
             unresolved.append(
                 MonthlyPointUnresolvedMovement(
@@ -780,7 +790,7 @@ class MonthlyPointProductBalanceService:
                     movement_date=row.fecha,
                 )
             )
-        return self._aggregate_rows(matched, field_name), bool(rows), unresolved, len(rows)
+        return self._aggregate_rows(matched, field_name), bool(matched) or has_unmapped_nonzero, unresolved, len(rows)
 
     @staticmethod
     def _aggregate_rows(rows, field_name: str):
