@@ -430,6 +430,27 @@ class _FailingOfficialSalesReportService:
         raise RuntimeError("Point unavailable")
 
 
+class _UnexpectedOfficialSalesReportService:
+    def __init__(self):
+        self.calls = 0
+
+    def fetch_report(self, **kwargs):
+        self.calls += 1
+        raise AssertionError("build local no debe consultar Point")
+
+
+class _MalformedOfficialSalesReportService:
+    def __init__(self):
+        self.calls = 0
+
+    def fetch_report(self, **kwargs):
+        self.calls += 1
+        return SimpleNamespace(report_path="/tmp/malformed-point-report.xls", request_url="https://point.invalid/report")
+
+    def parse_report(self, *, report_path):
+        return SimpleNamespace(rows={"Codigo": "not-a-list"}, summary={})
+
+
 @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="AUTO")
 class MonthlyProductBalanceLedgerTests(TestCase):
     def setUp(self):
@@ -512,7 +533,10 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
     def _service(self, rows=()):
         official = _OfficialSalesReportService(list(rows))
-        return MonthlyPointProductBalanceService(official_sales_report_service=official), official
+        return MonthlyPointProductBalanceService(
+            official_sales_report_service=official,
+            refresh_official_sales=bool(rows),
+        ), official
 
     def test_exact_recipe_snapshots_and_formula_do_not_roll_slice_into_parent(self):
         RecetaEquivalencia.objects.create(
@@ -582,7 +606,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         self.assertEqual(row.production, Decimal("2"))
         self.assertEqual(row.calculated_closing, Decimal("7"))
-        self.assertEqual(official.calls[0]["end_date"], date(2026, 12, 31))
+        self.assertEqual(official.calls, [])
 
     def test_missing_snapshot_is_non_authoritative_and_warned(self):
         self._production(self.parent, "3", date(2026, 7, 15), "missing-opening")
@@ -638,6 +662,23 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.effective_snapshot_dates["opening"], date(2026, 6, 29))
         self.assertEqual(balance.effective_snapshot_dates["closing"], date(2026, 7, 30))
         self.assertTrue(any("alternativa" in warning.lower() for warning in balance.warnings))
+
+    def test_exact_snapshot_calendar_day_wins_over_adjacent_late_timestamp(self):
+        self._snapshot(self.parent_product, "99", datetime(2026, 6, 29, 23))
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "88", datetime(2026, 7, 30, 23))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("10"))
+        self.assertEqual(balance.rows[self.parent.id].closing_point, Decimal("10"))
+        self.assertEqual(balance.effective_snapshot_dates["opening"], date(2026, 6, 30))
+        self.assertEqual(balance.effective_snapshot_dates["closing"], date(2026, 7, 31))
+        self.assertTrue(balance.sources["opening_snapshot"]["authoritative"])
+        self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 1)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 1)
 
     def test_fact_priority_preserves_exact_recipe_for_production_and_waste(self):
         self._snapshot(self.slice_product, "10", datetime(2026, 6, 30, 8))
@@ -716,6 +757,9 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(unresolved.item_code, "UNKNOWN")
         self.assertEqual(unresolved.quantity, Decimal("2"))
         self.assertEqual(balance.sources["sales"]["mode"], "official_monthly_report")
+        self.assertEqual(balance.rows[self.slice.id].status, "REVISAR_FUENTE")
+        with self.assertRaises(TypeError):
+            balance.sources["sales"]["summary"]["venta"] = "mutada"
 
     def test_sales_falls_back_to_official_daily_then_facts(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -769,6 +813,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(unresolved.quantity, Decimal("4"))
         self.assertEqual(unresolved.issue, "SALES_DESTINATION_UNRESOLVED")
         self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 1)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.rows[self.parent.id].issues)
 
     def test_all_unmatched_official_daily_sales_do_not_fall_through_to_facts(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -796,6 +842,163 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 1)
         self.assertTrue(any(item.source == "official_daily_sales" for item in balance.unresolved_movements))
 
+    def test_default_build_never_fetches_remote_official_report(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        remote = _UnexpectedOfficialSalesReportService()
+        service = MonthlyPointProductBalanceService(official_sales_report_service=remote)
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(remote.calls, 0)
+        self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+
+    def test_explicit_empty_remote_report_is_blocking_and_falls_back(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "daily-after-empty")
+        remote = _OfficialSalesReportService([])
+        service = MonthlyPointProductBalanceService(
+            official_sales_report_service=remote,
+            refresh_official_sales=True,
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(len(remote.calls), 1)
+        self.assertEqual(balance.sources["sales"]["mode"], "official_point_daily_sales")
+        self.assertIn("OFFICIAL_SALES_REPORT_EMPTY", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_explicit_malformed_remote_report_is_blocking_and_falls_back(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "daily-after-malformed")
+        remote = _MalformedOfficialSalesReportService()
+        service = MonthlyPointProductBalanceService(
+            official_sales_report_service=remote,
+            refresh_official_sales=True,
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(remote.calls, 1)
+        self.assertEqual(balance.sources["sales"]["mode"], "official_point_daily_sales")
+        self.assertIn("OFFICIAL_SALES_REPORT_INVALID", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_unmatched_fact_movements_are_preserved_and_block_all_rows(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 10),
+            sucursal=self.sucursal,
+            receta=None,
+            producido=Decimal("4"),
+            merma=Decimal("2"),
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        fact_sources = {item.source for item in balance.unresolved_movements if item.issue == "FACT_RECIPE_UNRESOLVED"}
+        self.assertEqual(fact_sources, {"fact_production", "fact_sales", "fact_waste"})
+        production_issue = next(item for item in balance.unresolved_movements if item.source == "fact_production")
+        self.assertEqual(production_issue.branch_external_id, self.sucursal.codigo)
+        self.assertEqual(production_issue.movement_date, date(2026, 7, 10))
+        self.assertEqual(production_issue.quantity, Decimal("4"))
+        self.assertTrue(balance.sources["production"]["source_present"])
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_all_unmatched_point_production_is_source_present_and_blocking(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        PointProductionLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=None,
+            production_external_id="prod-unmatched",
+            detail_external_id="detail-unmatched",
+            source_hash="prod-unmatched-hash",
+            production_date=date(2026, 7, 10),
+            item_name="Producción desconocida",
+            item_code="PROD-UNKNOWN",
+            produced_quantity=Decimal("4"),
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        unresolved = next(item for item in balance.unresolved_movements if item.source == "point_production")
+        self.assertEqual(unresolved.issue, "PRODUCTION_RECIPE_UNRESOLVED")
+        self.assertEqual(unresolved.item_code, "PROD-UNKNOWN")
+        self.assertEqual(unresolved.branch_external_id, self.branch.external_id)
+        self.assertTrue(balance.sources["production"]["source_present"])
+        self.assertEqual(balance.sources["production"]["rows_read"], 1)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_all_unmatched_authoritative_source_exposes_global_incomplete_issue(self):
+        PointProductionLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=None,
+            production_external_id="prod-only-unmatched",
+            detail_external_id="detail-only-unmatched",
+            source_hash="prod-only-unmatched-hash",
+            production_date=date(2026, 7, 10),
+            item_name="Producción sin receta",
+            item_code="PROD-ONLY-UNKNOWN",
+            produced_quantity=Decimal("4"),
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.rows, {})
+        self.assertTrue(balance.sources["production"]["source_present"])
+        self.assertIn("PRODUCTION_RECIPE_UNRESOLVED", balance.issues)
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.issues)
+
+    def test_all_unmatched_point_and_monthly_waste_are_preserved(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        PointWasteLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=None,
+            movement_external_id="waste-unmatched",
+            source_hash="waste-unmatched-hash",
+            movement_at=timezone.make_aware(datetime(2026, 7, 10, 12), timezone.get_current_timezone()),
+            item_name="Merma desconocida",
+            item_code="WASTE-UNKNOWN",
+            quantity=Decimal("2"),
+        )
+        service, _official = self._service()
+
+        point_balance = service.build("2026-07")
+
+        point_issue = next(item for item in point_balance.unresolved_movements if item.source == "point_waste")
+        self.assertEqual(point_issue.issue, "WASTE_RECIPE_UNRESOLVED")
+        self.assertTrue(point_balance.sources["waste"]["source_present"])
+        self.assertEqual(point_balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+        PointWasteLine.objects.all().delete()
+        MermaMensualSucursal.objects.create(
+            periodo=date(2026, 7, 1),
+            sucursal=self.sucursal,
+            receta=None,
+            nombre_producto="Merma mensual desconocida",
+            unidades_merma=Decimal("3"),
+        )
+
+        monthly_balance = service.build("2026-07")
+
+        monthly_issue = next(item for item in monthly_balance.unresolved_movements if item.source == "monthly_waste")
+        self.assertEqual(monthly_issue.issue, "WASTE_RECIPE_UNRESOLVED")
+        self.assertEqual(monthly_issue.item_name, "Merma mensual desconocida")
+        self.assertTrue(monthly_balance.sources["waste"]["source_present"])
+        self.assertEqual(monthly_balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
     def test_unmatched_snapshot_remains_visible_in_immutable_diagnostics(self):
         unknown = PointProduct.objects.create(external_id="unknown", sku="UNKNOWN", name="Producto desconocido")
         self._snapshot(unknown, "5", datetime(2026, 6, 30, 8))
@@ -807,6 +1010,11 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         unresolved = next(item for item in balance.unresolved_movements if item.source == "opening_snapshot")
         self.assertEqual(unresolved.item_code, "UNKNOWN")
         self.assertEqual(unresolved.quantity, Decimal("5"))
+        self.assertEqual(unresolved.branch_external_id, self.branch.external_id)
         self.assertEqual(balance.source_counts["opening_snapshot_unresolved"], 1)
+        self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 1)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 0)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.rows[self.parent.id].issues)
         with self.assertRaises(TypeError):
             balance.sources["sales"] = {}

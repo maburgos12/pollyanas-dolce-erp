@@ -40,6 +40,12 @@ ISSUE_DESTINATION_UNRESOLVED = "CONVERSION_DESTINATION_UNRESOLVED"
 ISSUE_SNAPSHOT_UNRESOLVED = "SNAPSHOT_RECIPE_UNRESOLVED"
 ISSUE_SALE_UNRESOLVED = "OFFICIAL_SALE_RECIPE_UNRESOLVED"
 ISSUE_DAILY_SALE_UNRESOLVED = "SALES_DESTINATION_UNRESOLVED"
+ISSUE_PRODUCTION_UNRESOLVED = "PRODUCTION_RECIPE_UNRESOLVED"
+ISSUE_WASTE_UNRESOLVED = "WASTE_RECIPE_UNRESOLVED"
+ISSUE_FACT_UNRESOLVED = "FACT_RECIPE_UNRESOLVED"
+ISSUE_OFFICIAL_REPORT_EMPTY = "OFFICIAL_SALES_REPORT_EMPTY"
+ISSUE_OFFICIAL_REPORT_INVALID = "OFFICIAL_SALES_REPORT_INVALID"
+ISSUE_MONTH_SOURCE_INCOMPLETE = "MONTH_SOURCE_INCOMPLETE"
 ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 
@@ -56,13 +62,24 @@ def _empty_mapping() -> Mapping[str, object]:
     return MappingProxyType({})
 
 
+def _freeze_value(value):
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
 def _freeze_mapping(value: Mapping) -> Mapping:
-    return MappingProxyType(
-        {
-            key: _freeze_mapping(item) if isinstance(item, Mapping) else tuple(item) if isinstance(item, list) else item
-            for key, item in value.items()
-        }
-    )
+    return _freeze_value(value)
+
+
+class _OfficialSalesReportError(RuntimeError):
+    def __init__(self, issue: str, message: str):
+        super().__init__(message)
+        self.issue = issue
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,12 +238,21 @@ class MonthlyPointProductBalanceService:
         identity_service: PointRecipeIdentityService | None = None,
         matcher: PointSalesMatchingService | None = None,
         official_sales_report_service: PointSalesCategoryReportService | None = None,
+        refresh_official_sales: bool = False,
     ):
         self.identity_service = identity_service or PointRecipeIdentityService()
         self.matcher = matcher or PointSalesMatchingService()
         self.official_sales_report_service = official_sales_report_service or PointSalesCategoryReportService()
+        self.refresh_official_sales = bool(refresh_official_sales)
 
-    def build(self, month: str | date) -> MonthlyPointBalance:
+    def build(
+        self,
+        month: str | date,
+        *,
+        refresh_official_sales: bool | None = None,
+    ) -> MonthlyPointBalance:
+        self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
+        self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         opening_target = month_start - timedelta(days=1)
@@ -239,9 +265,23 @@ class MonthlyPointProductBalanceService:
             opening = {}
         if not closing_meta.get("within_tolerance"):
             closing = {}
-        production, production_meta = self._load_production(month_start=month_start, month_end=month_end)
-        sales, sales_meta, sales_unresolved = self._load_sales(month_start=month_start, month_end=month_end)
-        waste, waste_meta = self._load_waste(month_start=month_start, month_end=month_end)
+        production, production_meta, production_unresolved = self._load_production(
+            month_start=month_start,
+            month_end=month_end,
+        )
+        sales, sales_meta, sales_unresolved = self._load_sales(
+            month_start=month_start,
+            month_end=month_end,
+            refresh_official_sales=(
+                self.refresh_official_sales
+                if refresh_official_sales is None
+                else bool(refresh_official_sales)
+            ),
+        )
+        waste, waste_meta, waste_unresolved = self._load_waste(
+            month_start=month_start,
+            month_end=month_end,
+        )
         conversion_rows, unresolved_conversions, conversion_unresolved, conversion_counts = self._load_conversions(
             month_start=month_start
         )
@@ -256,8 +296,22 @@ class MonthlyPointProductBalanceService:
         self._merge_quantities(rows, waste, field_name="waste", count_name="waste_rows")
         self._merge_quantities(rows, closing, field_name="closing_point", count_name="closing_snapshot_rows", optional=True)
 
+        unresolved_movements = tuple(
+            opening_unresolved
+            + closing_unresolved
+            + production_unresolved
+            + sales_unresolved
+            + waste_unresolved
+            + conversion_unresolved
+        )
+        month_source_incomplete = bool(unresolved_movements or unresolved_conversions)
+        month_source_incomplete = month_source_incomplete or not bool(opening_meta.get("authoritative"))
+        month_source_incomplete = month_source_incomplete or not bool(closing_meta.get("authoritative"))
+        if month_source_incomplete:
+            for row in rows.values():
+                row.issues.add(ISSUE_MONTH_SOURCE_INCOMPLETE)
+
         frozen_rows = MappingProxyType({receta_id: rows[receta_id].freeze(receta_id) for receta_id in sorted(rows)})
-        unresolved_movements = tuple(opening_unresolved + closing_unresolved + sales_unresolved + conversion_unresolved)
         warnings = self._snapshot_warnings(opening_meta, label="inventario inicial")
         warnings.extend(self._snapshot_warnings(closing_meta, label="inventario final"))
         missing_opening_rows = sum(row.opening_point is None for row in frozen_rows.values())
@@ -276,6 +330,7 @@ class MonthlyPointProductBalanceService:
                 {issue for row in frozen_rows.values() for issue in row.issues}
                 | {movement.issue for movement in unresolved_movements}
                 | {conversion.issue for conversion in unresolved_conversions}
+                | ({ISSUE_MONTH_SOURCE_INCOMPLETE} if month_source_incomplete else set())
             )
         )
         sources = _freeze_mapping(
@@ -294,12 +349,14 @@ class MonthlyPointProductBalanceService:
             "closing_snapshot_rows": int(closing_meta.get("snapshot_rows") or 0),
             "closing_snapshot_unresolved": len(closing_unresolved),
             "production_rows": sum(value[1] for value in production.values()),
+            "production_unresolved": len(production_unresolved),
             "sales_rows": sum(value[1] for value in sales.values()),
             "official_sales_unresolved": len(sales_unresolved),
             "official_daily_sales_unresolved": sum(
                 movement.source == "official_daily_sales" for movement in sales_unresolved
             ),
             "waste_rows": sum(value[1] for value in waste.values()),
+            "waste_unresolved": len(waste_unresolved),
             **conversion_counts,
         }
         return MonthlyPointBalance(
@@ -335,24 +392,38 @@ class MonthlyPointProductBalanceService:
         current_timezone = timezone.get_current_timezone()
         target_start = timezone.make_aware(datetime.combine(snapshot_date, time.min), current_timezone)
         target_end = timezone.make_aware(datetime.combine(snapshot_date + timedelta(days=1), time.min), current_timezone)
-        before_at = (
-            PointInventorySnapshot.objects.filter(captured_at__lt=target_end)
-            .order_by("-captured_at", "-id")
-            .values_list("captured_at", flat=True)
-            .first()
-        )
-        after_at = (
-            PointInventorySnapshot.objects.filter(captured_at__gte=target_start)
+        exact_at = (
+            PointInventorySnapshot.objects.filter(captured_at__gte=target_start, captured_at__lt=target_end)
             .order_by("captured_at", "id")
             .values_list("captured_at", flat=True)
             .first()
         )
-        candidates = [candidate for candidate in (before_at, after_at) if candidate is not None]
-        if not candidates:
-            return {}, self._empty_snapshot_meta(snapshot_date, tolerance_days), []
-
-        selected_at = min(candidates, key=lambda value: abs(value - target_start))
-        effective_date = timezone.localtime(selected_at, current_timezone).date()
+        if exact_at is not None:
+            effective_date = snapshot_date
+        else:
+            before_at = (
+                PointInventorySnapshot.objects.filter(captured_at__lt=target_start)
+                .order_by("-captured_at", "-id")
+                .values_list("captured_at", flat=True)
+                .first()
+            )
+            after_at = (
+                PointInventorySnapshot.objects.filter(captured_at__gte=target_end)
+                .order_by("captured_at", "id")
+                .values_list("captured_at", flat=True)
+                .first()
+            )
+            candidates = [candidate for candidate in (before_at, after_at) if candidate is not None]
+            if not candidates:
+                return {}, self._empty_snapshot_meta(snapshot_date, tolerance_days), []
+            # Compare calendar days. Equal-distance ties choose the earlier day.
+            effective_date = min(
+                (timezone.localtime(candidate, current_timezone).date() for candidate in candidates),
+                key=lambda candidate_date: (
+                    abs((candidate_date - snapshot_date).days),
+                    candidate_date > snapshot_date,
+                ),
+            )
         day_start = timezone.make_aware(datetime.combine(effective_date, time.min), current_timezone)
         day_end = timezone.make_aware(datetime.combine(effective_date + timedelta(days=1), time.min), current_timezone)
         with connection.cursor() as cursor:
@@ -369,20 +440,26 @@ class MonthlyPointProductBalanceService:
 
         snapshots = list(
             PointInventorySnapshot.objects.filter(id__in=snapshot_ids)
-            .select_related("product")
-            .only("id", "product_id", "product__sku", "product__name", "stock")
+            .select_related("product", "branch")
+            .only(
+                "id",
+                "product_id",
+                "product__sku",
+                "product__name",
+                "branch_id",
+                "branch__external_id",
+                "branch__name",
+                "stock",
+            )
             .order_by("id")
         )
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
-        identity_cache: dict[int, Receta | None] = {}
         for snapshot in snapshots:
-            if snapshot.product_id not in identity_cache:
-                identity_cache[snapshot.product_id] = self.matcher.resolve_receta(
-                    codigo_point=snapshot.product.sku,
-                    point_name=snapshot.product.name,
-                )
-            receta = identity_cache[snapshot.product_id]
+            receta = self._match_recipe(
+                code=snapshot.product.sku,
+                name=snapshot.product.name,
+            )
             quantity = Decimal(snapshot.stock)
             if receta is None:
                 unresolved.append(
@@ -393,6 +470,9 @@ class MonthlyPointProductBalanceService:
                         item_name=snapshot.product.name,
                         quantity=quantity,
                         issue=ISSUE_SNAPSHOT_UNRESOLVED,
+                        branch_external_id=snapshot.branch.external_id,
+                        branch_name=snapshot.branch.name,
+                        movement_date=effective_date,
                     )
                 )
                 continue
@@ -400,6 +480,8 @@ class MonthlyPointProductBalanceService:
             values[receta.id] = (current + quantity, count + 1)
 
         days_from_target = abs((effective_date - snapshot_date).days)
+        authoritative = bool(snapshots) and days_from_target <= tolerance_days
+        applied_rows = sum(count for _quantity, count in values.values()) if authoritative else 0
         return values, {
             "source": "PointInventorySnapshot",
             "target_date": snapshot_date,
@@ -407,8 +489,11 @@ class MonthlyPointProductBalanceService:
             "tolerance_days": tolerance_days,
             "fallback_used": effective_date != snapshot_date,
             "within_tolerance": days_from_target <= tolerance_days,
+            "authoritative": authoritative,
             "days_from_target": days_from_target,
             "snapshot_rows": len(snapshots),
+            "selected_rows": len(snapshots),
+            "applied_rows": applied_rows,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
         }, unresolved
@@ -422,8 +507,11 @@ class MonthlyPointProductBalanceService:
             "tolerance_days": tolerance_days,
             "fallback_used": False,
             "within_tolerance": False,
+            "authoritative": False,
             "days_from_target": None,
             "snapshot_rows": 0,
+            "selected_rows": 0,
+            "applied_rows": 0,
             "matched_recipe_count": 0,
             "unresolved_rows": 0,
         }
@@ -440,68 +528,205 @@ class MonthlyPointProductBalanceService:
         return []
 
     def _load_production(self, *, month_start: date, month_end: date):
-        facts, facts_present = self._load_fact_values(
+        facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
             month_end=month_end,
             field_name="producido",
+            source="fact_production",
         )
         if facts_present:
-            return facts, {"source": "FactProduccionDiaria", "priority": "primary"}
-        rows = PointProductionLine.objects.filter(
-            production_date__gte=month_start,
-            production_date__lte=month_end,
-            receta_id__isnull=False,
-            is_insumo=False,
-        ).only("id", "receta_id", "produced_quantity").order_by("id")
-        return self._aggregate_rows(rows, "produced_quantity"), {
+            return facts, {
+                "source": "FactProduccionDiaria",
+                "priority": "primary",
+                "source_present": True,
+                "rows_read": fact_rows_read,
+                "unresolved_rows": len(fact_unresolved),
+            }, fact_unresolved
+        rows = list(
+            PointProductionLine.objects.filter(
+                production_date__gte=month_start,
+                production_date__lte=month_end,
+                is_insumo=False,
+            )
+            .select_related("branch")
+            .only(
+                "id",
+                "receta_id",
+                "produced_quantity",
+                "production_date",
+                "production_external_id",
+                "item_code",
+                "item_name",
+                "branch_id",
+                "branch__external_id",
+                "branch__name",
+            )
+            .order_by("id")
+        )
+        matched = [row for row in rows if row.receta_id is not None]
+        unresolved = [
+            MonthlyPointUnresolvedMovement(
+                source="point_production",
+                movement_id=row.production_external_id or str(row.id),
+                item_code=row.item_code,
+                item_name=row.item_name,
+                quantity=Decimal(row.produced_quantity),
+                issue=ISSUE_PRODUCTION_UNRESOLVED,
+                branch_external_id=row.branch.external_id,
+                branch_name=row.branch.name,
+                movement_date=row.production_date,
+            )
+            for row in rows
+            if row.receta_id is None
+        ]
+        return self._aggregate_rows(matched, "produced_quantity"), {
             "source": "PointProductionLine",
             "priority": "fallback",
-        }
+            "source_present": bool(rows),
+            "rows_read": len(rows),
+            "unresolved_rows": len(unresolved),
+        }, unresolved
 
     def _load_waste(self, *, month_start: date, month_end: date):
-        facts, facts_present = self._load_fact_values(
+        facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
             month_end=month_end,
             field_name="merma",
+            source="fact_waste",
         )
         if facts_present:
-            return facts, {"source": "FactProduccionDiaria", "priority": "primary"}
+            return facts, {
+                "source": "FactProduccionDiaria",
+                "priority": "primary",
+                "source_present": True,
+                "rows_read": fact_rows_read,
+                "unresolved_rows": len(fact_unresolved),
+            }, fact_unresolved
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)
         point_rows = list(
             PointWasteLine.objects.filter(
                 movement_at__gte=lower_bound,
                 movement_at__lt=upper_bound,
-                receta_id__isnull=False,
-            ).only("id", "receta_id", "quantity").order_by("id")
-        )
-        if point_rows:
-            return self._aggregate_rows(point_rows, "quantity"), {
-                "source": "PointWasteLine",
-                "priority": "fallback",
-            }
-
-        monthly_waste_model = apps.get_model("control", "MermaMensualSucursal")
-        monthly_rows = monthly_waste_model.objects.filter(
-            periodo=month_start,
-            receta_id__isnull=False,
-        ).only("id", "receta_id", "unidades_merma").order_by("id")
-        return self._aggregate_rows(monthly_rows, "unidades_merma"), {
-            "source": "MermaMensualSucursal",
-            "priority": "monthly_fallback",
-        }
-
-    def _load_fact_values(self, *, month_start: date, month_end: date, field_name: str):
-        fact_model = apps.get_model("reportes", "FactProduccionDiaria")
-        rows = list(
-            fact_model.objects.filter(
-                fecha__gte=month_start,
-                fecha__lte=month_end,
-                receta_id__isnull=False,
             )
-            .only("id", "receta_id", field_name)
+            .select_related("branch")
+            .only(
+                "id",
+                "receta_id",
+                "quantity",
+                "movement_at",
+                "movement_external_id",
+                "source_hash",
+                "item_code",
+                "item_name",
+                "branch_id",
+                "branch__external_id",
+                "branch__name",
+            )
             .order_by("id")
         )
-        return self._aggregate_rows(rows, field_name), bool(rows)
+        if point_rows:
+            matched = [row for row in point_rows if row.receta_id is not None]
+            unresolved = [
+                MonthlyPointUnresolvedMovement(
+                    source="point_waste",
+                    movement_id=row.movement_external_id or str(row.id),
+                    source_hash=row.source_hash,
+                    item_code=row.item_code,
+                    item_name=row.item_name,
+                    quantity=Decimal(row.quantity),
+                    issue=ISSUE_WASTE_UNRESOLVED,
+                    branch_external_id=row.branch.external_id,
+                    branch_name=row.branch.name,
+                    movement_date=timezone.localtime(row.movement_at).date(),
+                )
+                for row in point_rows
+                if row.receta_id is None
+            ]
+            return self._aggregate_rows(matched, "quantity"), {
+                "source": "PointWasteLine",
+                "priority": "fallback",
+                "source_present": True,
+                "rows_read": len(point_rows),
+                "unresolved_rows": len(unresolved),
+            }, unresolved
+
+        monthly_waste_model = apps.get_model("control", "MermaMensualSucursal")
+        monthly_rows = list(
+            monthly_waste_model.objects.filter(periodo=month_start)
+            .select_related("sucursal")
+            .only(
+                "id",
+                "receta_id",
+                "unidades_merma",
+                "periodo",
+                "nombre_producto",
+                "sucursal_id",
+                "sucursal__codigo",
+                "sucursal__nombre",
+            )
+            .order_by("id")
+        )
+        matched = [row for row in monthly_rows if row.receta_id is not None]
+        unresolved = [
+            MonthlyPointUnresolvedMovement(
+                source="monthly_waste",
+                movement_id=str(row.id),
+                item_code="",
+                item_name=row.nombre_producto,
+                quantity=Decimal(row.unidades_merma),
+                issue=ISSUE_WASTE_UNRESOLVED,
+                branch_external_id=row.sucursal.codigo if row.sucursal_id else "",
+                branch_name=row.sucursal.nombre if row.sucursal_id else "",
+                movement_date=row.periodo,
+            )
+            for row in monthly_rows
+            if row.receta_id is None
+        ]
+        return self._aggregate_rows(matched, "unidades_merma"), {
+            "source": "MermaMensualSucursal",
+            "priority": "monthly_fallback",
+            "source_present": bool(monthly_rows),
+            "rows_read": len(monthly_rows),
+            "unresolved_rows": len(unresolved),
+        }, unresolved
+
+    def _load_fact_values(self, *, month_start: date, month_end: date, field_name: str, source: str):
+        fact_model = apps.get_model("reportes", "FactProduccionDiaria")
+        rows = list(
+            fact_model.objects.filter(fecha__gte=month_start, fecha__lte=month_end)
+            .select_related("sucursal")
+            .only(
+                "id",
+                "receta_id",
+                "fecha",
+                "sucursal_id",
+                "sucursal__codigo",
+                "sucursal__nombre",
+                "metadata",
+                field_name,
+            )
+            .order_by("id")
+        )
+        matched = [row for row in rows if row.receta_id is not None]
+        unresolved = []
+        for row in rows:
+            if row.receta_id is not None:
+                continue
+            metadata = row.metadata or {}
+            unresolved.append(
+                MonthlyPointUnresolvedMovement(
+                    source=source,
+                    movement_id=str(row.id),
+                    item_code=str(metadata.get("item_code") or metadata.get("codigo_point") or ""),
+                    item_name=str(metadata.get("item_name") or metadata.get("nombre") or ""),
+                    quantity=Decimal(getattr(row, field_name) or ZERO),
+                    issue=ISSUE_FACT_UNRESOLVED,
+                    branch_external_id=row.sucursal.codigo if row.sucursal_id else "",
+                    branch_name=row.sucursal.nombre if row.sucursal_id else "",
+                    movement_date=row.fecha,
+                )
+            )
+        return self._aggregate_rows(matched, field_name), bool(rows), unresolved, len(rows)
 
     @staticmethod
     def _aggregate_rows(rows, field_name: str):
@@ -512,39 +737,80 @@ class MonthlyPointProductBalanceService:
             values[row.receta_id] = (current + quantity, count + 1)
         return values
 
-    def _load_sales(self, *, month_start: date, month_end: date):
+    def _load_sales(
+        self,
+        *,
+        month_start: date,
+        month_end: date,
+        refresh_official_sales: bool,
+    ):
         source_mode = str(getattr(settings, "PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE", "AUTO")).strip().upper() or "AUTO"
         prefer_official = source_mode in {"AUTO", "OFFICIAL_MONTHLY_REPORT"}
         official_error: Exception | None = None
-        if prefer_official:
+        refresh_unresolved: list[MonthlyPointUnresolvedMovement] = []
+        if refresh_official_sales and prefer_official:
             try:
                 return self._load_official_sales(month_start=month_start, month_end=month_end)
             except Exception as exc:  # noqa: BLE001
-                if source_mode == "OFFICIAL_MONTHLY_REPORT":
-                    raise
                 official_error = exc
+                issue = getattr(exc, "issue", ISSUE_OFFICIAL_REPORT_INVALID)
+                refresh_unresolved.append(
+                    MonthlyPointUnresolvedMovement(
+                        source="official_sales_report",
+                        movement_id=f"{month_start:%Y-%m}",
+                        item_code="",
+                        item_name=str(exc),
+                        quantity=ZERO,
+                        issue=issue,
+                        movement_date=month_start,
+                    )
+                )
 
-            daily, daily_unresolved, daily_rows_read = self._load_daily_sales(
-                month_start=month_start,
-                month_end=month_end,
-            )
-            if daily_rows_read:
-                return daily, {
-                    "source": OFFICIAL_POINT_DAILY_SOURCE,
-                    "mode": "official_point_daily_sales",
-                    "row_count": daily_rows_read,
-                    "unresolved_rows": len(daily_unresolved),
-                    "warnings": ["No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial."],
-                    "fallback_reason": str(official_error),
-                }, daily_unresolved
+        daily, daily_unresolved, daily_rows_read = self._load_daily_sales(
+            month_start=month_start,
+            month_end=month_end,
+        )
+        if daily_rows_read:
+            meta = {
+                "source": OFFICIAL_POINT_DAILY_SOURCE,
+                "mode": "official_point_daily_sales",
+                "source_present": True,
+                "row_count": daily_rows_read,
+                "unresolved_rows": len(daily_unresolved),
+                "remote_refresh_requested": refresh_official_sales,
+            }
+            if official_error is not None:
+                meta.update(
+                    {
+                        "warnings": ["No se pudo usar el reporte oficial mensual; se uso PointDailySale oficial."],
+                        "fallback_reason": str(official_error),
+                    }
+                )
+            return daily, meta, refresh_unresolved + daily_unresolved
 
-        facts, facts_present = self._load_fact_values(
+        facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
             month_end=month_end,
             field_name="vendido",
+            source="fact_sales",
         )
         if facts_present:
-            return facts, {"source": "FactProduccionDiaria", "mode": "production_facts"}, []
+            meta = {
+                "source": "FactProduccionDiaria",
+                "mode": "production_facts",
+                "source_present": True,
+                "row_count": fact_rows_read,
+                "unresolved_rows": len(fact_unresolved),
+                "remote_refresh_requested": refresh_official_sales,
+            }
+            if official_error is not None:
+                meta.update(
+                    {
+                        "warnings": ["No se pudo usar el reporte oficial mensual; se usaron facts persistidos."],
+                        "fallback_reason": str(official_error),
+                    }
+                )
+            return facts, meta, refresh_unresolved + fact_unresolved
 
         rows = VentaHistorica.objects.filter(
             fecha__gte=month_start,
@@ -553,7 +819,14 @@ class MonthlyPointProductBalanceService:
             receta_id__isnull=False,
         ).only("id", "receta_id", "cantidad").order_by("id")
         values = self._aggregate_rows(rows, "cantidad")
-        meta = {"source": POINT_BRIDGE_SALES_SOURCE, "mode": "bridge_history"}
+        meta = {
+            "source": POINT_BRIDGE_SALES_SOURCE,
+            "mode": "bridge_history",
+            "source_present": bool(values),
+            "row_count": sum(count for _quantity, count in values.values()),
+            "unresolved_rows": 0,
+            "remote_refresh_requested": refresh_official_sales,
+        }
         if official_error is not None:
             meta.update(
                 {
@@ -561,7 +834,7 @@ class MonthlyPointProductBalanceService:
                     "fallback_reason": str(official_error),
                 }
             )
-        return values, meta, []
+        return values, meta, refresh_unresolved
 
     def _load_official_sales(self, *, month_start: date, month_end: date):
         report = self.official_sales_report_service.fetch_report(
@@ -572,17 +845,28 @@ class MonthlyPointProductBalanceService:
             credito=None,
         )
         parsed = self.official_sales_report_service.parse_report(report_path=report.report_path)
+        if not hasattr(parsed, "rows") or not isinstance(parsed.rows, list):
+            raise _OfficialSalesReportError(
+                ISSUE_OFFICIAL_REPORT_INVALID,
+                "El reporte oficial mensual no contiene una estructura de filas valida.",
+            )
+        if not parsed.rows:
+            raise _OfficialSalesReportError(
+                ISSUE_OFFICIAL_REPORT_EMPTY,
+                "El reporte oficial mensual no contiene filas y no puede asumirse como venta cero.",
+            )
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
-        identity_cache: dict[tuple[str, str], Receta | None] = {}
         for index, source_row in enumerate(parsed.rows, start=1):
+            if not isinstance(source_row, Mapping):
+                raise _OfficialSalesReportError(
+                    ISSUE_OFFICIAL_REPORT_INVALID,
+                    f"La fila oficial {index} no tiene estructura valida.",
+                )
             code = str(source_row.get("Codigo") or "").strip()
             name = str(source_row.get("Nombre") or "").strip()
             quantity = Decimal(str(source_row.get("Cantidad") or ZERO))
-            key = (code.casefold(), name.casefold())
-            if key not in identity_cache:
-                identity_cache[key] = self.matcher.resolve_receta(codigo_point=code, point_name=name)
-            receta = identity_cache[key]
+            receta = self._match_recipe(code=code, name=name)
             if receta is None:
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
@@ -603,6 +887,8 @@ class MonthlyPointProductBalanceService:
             "report_path": report.report_path,
             "request_url": report.request_url,
             "row_count": len(parsed.rows),
+            "source_present": True,
+            "remote_refresh_requested": True,
             "unresolved_rows": len(unresolved),
             "summary": {key: str(value) for key, value in parsed.summary.items()},
         }, unresolved
@@ -679,7 +965,6 @@ class MonthlyPointProductBalanceService:
         unresolved_conversions: list[MonthlyPointUnresolvedConversion] = []
         unresolved_movements: list[MonthlyPointUnresolvedMovement] = []
         source_counts = {"conversion_rows_read": len(conversions), "conversion_destination_rows_applied": 0}
-        identity_cache: dict[tuple[str, str], Receta | None] = {}
         for conversion in conversions:
             quantity = Decimal(conversion.quantity)
             if conversion.receta_id is None:
@@ -713,7 +998,7 @@ class MonthlyPointProductBalanceService:
             source_recipe_id, factor, origin, issue = self._resolve_source(
                 conversion,
                 equivalences.get(conversion.receta_id),
-                identity_cache,
+                self._build_conversion_cache,
             )
             destination.record_origin(origin)
             if issue:
@@ -764,6 +1049,15 @@ class MonthlyPointProductBalanceService:
                 return equivalence.receta_padre_id, None, ORIGIN_CONFIGURED_EQUIVALENCE, ISSUE_FACTOR_INVALID
             return equivalence.receta_padre_id, factor, ORIGIN_CONFIGURED_EQUIVALENCE, ""
         return None, None, ORIGIN_UNRESOLVED, ISSUE_CONVERSION_ORIGIN_UNRESOLVED
+
+    def _match_recipe(self, *, code: str, name: str) -> Receta | None:
+        key = ((code or "").strip().casefold(), (name or "").strip().casefold())
+        if key not in self._build_match_cache:
+            self._build_match_cache[key] = self.matcher.resolve_receta(
+                codigo_point=code,
+                point_name=name,
+            )
+        return self._build_match_cache[key]
 
     @staticmethod
     def _month_datetime_bounds(month_start: date):
