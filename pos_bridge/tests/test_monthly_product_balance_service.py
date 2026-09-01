@@ -680,6 +680,43 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 1)
         self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 1)
 
+    def test_snapshot_branch_coverage_is_distinct_from_product_rows_and_respects_tolerance(self):
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-2",
+            name="Sucursal Ledger Dos",
+            erp_branch=self.sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.slice_product, "20", datetime(2026, 6, 30, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 6, 30, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 8, 5, 8))
+        PointInventorySnapshot.objects.create(
+            branch=second_branch,
+            product=self.parent_product,
+            stock=Decimal("8"),
+            captured_at=timezone.make_aware(datetime(2026, 8, 5, 8), timezone.get_current_timezone()),
+            sync_job=self.sync_job,
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        closing = balance.sources["closing_snapshot"]
+        self.assertEqual(opening["selected_rows"], 3)
+        self.assertEqual(opening["selected_branch_count"], 2)
+        self.assertEqual(opening["applied_branch_count"], 2)
+        self.assertEqual(closing["selected_rows"], 2)
+        self.assertEqual(closing["selected_branch_count"], 2)
+        self.assertEqual(closing["applied_rows"], 0)
+        self.assertEqual(closing["applied_branch_count"], 0)
+
     def test_fact_priority_preserves_exact_recipe_for_production_and_waste(self):
         self._snapshot(self.slice_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.slice_product, "12", datetime(2026, 7, 31, 8))

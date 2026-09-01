@@ -455,6 +455,9 @@ class MonthlyPointProductBalanceService:
         )
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
+        selected_branch_ids = {snapshot.branch_id for snapshot in snapshots}
+        selected_branch_codes = {snapshot.branch.external_id for snapshot in snapshots}
+        applied_branch_ids: set[int] = set()
         for snapshot in snapshots:
             receta = self._match_recipe(
                 code=snapshot.product.sku,
@@ -478,10 +481,12 @@ class MonthlyPointProductBalanceService:
                 continue
             current, count = values.get(receta.id, (ZERO, 0))
             values[receta.id] = (current + quantity, count + 1)
+            applied_branch_ids.add(snapshot.branch_id)
 
         days_from_target = abs((effective_date - snapshot_date).days)
         authoritative = bool(snapshots) and days_from_target <= tolerance_days
         applied_rows = sum(count for _quantity, count in values.values()) if authoritative else 0
+        authoritative_branch_ids = tuple(sorted(applied_branch_ids)) if authoritative else ()
         return values, {
             "source": "PointInventorySnapshot",
             "target_date": snapshot_date,
@@ -493,7 +498,12 @@ class MonthlyPointProductBalanceService:
             "days_from_target": days_from_target,
             "snapshot_rows": len(snapshots),
             "selected_rows": len(snapshots),
+            "selected_branch_count": len(selected_branch_ids),
+            "selected_branch_ids": tuple(sorted(selected_branch_ids)),
+            "selected_branch_codes": tuple(sorted(selected_branch_codes)),
             "applied_rows": applied_rows,
+            "applied_branch_count": len(authoritative_branch_ids),
+            "applied_branch_ids": authoritative_branch_ids,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
         }, unresolved
@@ -511,7 +521,12 @@ class MonthlyPointProductBalanceService:
             "days_from_target": None,
             "snapshot_rows": 0,
             "selected_rows": 0,
+            "selected_branch_count": 0,
+            "selected_branch_ids": (),
+            "selected_branch_codes": (),
             "applied_rows": 0,
+            "applied_branch_count": 0,
+            "applied_branch_ids": (),
             "matched_recipe_count": 0,
             "unresolved_rows": 0,
         }
