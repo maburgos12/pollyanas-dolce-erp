@@ -107,16 +107,27 @@ class PointHttpSessionClient:
         for attempt in range(1, attempts + 1):
             try:
                 return self._login_once(branch_hint=branch_hint)
-            except (AuthenticationError, ExtractionError) as exc:
+            except (AuthenticationError, ExtractionError, requests.RequestException) as exc:
                 last_error = exc
                 preview = str(getattr(exc, "context", {}).get("body_preview") or "")
-                session_expired = "Sesión Expirada" in preview or "Sesion Expirada" in preview or "Session Expired" in preview
-                if attempt >= attempts or not session_expired:
+                response = getattr(exc, "response", None)
+                status_code = getattr(response, "status_code", None)
+                reentry_required = (
+                    "Sesión Expirada" in preview
+                    or "Sesion Expirada" in preview
+                    or "Session Expired" in preview
+                    or (isinstance(status_code, int) and status_code >= 500)
+                )
+                if attempt >= attempts or not reentry_required:
                     raise
                 self._audit(
                     "point_relogin",
-                    message="Point devolvió sesión expirada durante login; se reiniciará la sesión y se reintentará.",
-                    context={"attempt": attempt, "branch_hint": branch_hint or ""},
+                    message="Point no completó la sesión; se volverá a ingresar y se reintentará.",
+                    context={
+                        "attempt": attempt,
+                        "branch_hint": branch_hint or "",
+                        "status_code": status_code,
+                    },
                 )
                 self._reset_session()
                 time.sleep(min(attempt, 3))
