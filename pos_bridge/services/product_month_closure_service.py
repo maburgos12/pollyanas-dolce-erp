@@ -214,6 +214,7 @@ class ProductMonthClosureService:
         opening_meta = self._json_compatible(balance.sources.get("opening_snapshot") or {})
         closing_meta = self._json_compatible(balance.sources.get("closing_snapshot") or {})
         sales_meta = self._json_compatible(balance.sources.get("sales") or {})
+        sales_meta["mode"] = sales_meta.get("selected_source") or sales_meta.get("mode") or ""
         validation = {
             "warnings": self._json_compatible(balance.warnings),
             "blocking_issues": blocking_issues,
@@ -226,7 +227,7 @@ class ProductMonthClosureService:
             "sales_legacy_rows": 0,
             "closing_inventory": {
                 "snapshot_rows": int(balance.source_counts.get("closing_snapshot_rows") or 0),
-                "matched_recipe_count": sum(row["inventario_final_point_total"] != ZERO for row in line_rows),
+                "matched_recipe_count": len(line_rows),
                 "selected_dates": closing_meta.get("selected_dates", []),
             },
         }
@@ -322,6 +323,10 @@ class ProductMonthClosureService:
                     "calculated_missing": False,
                     "closing": ZERO,
                     "closing_missing": False,
+                    "closing_cedis": ZERO,
+                    "closing_cedis_missing": False,
+                    "closing_sucursales": ZERO,
+                    "closing_sucursales_missing": False,
                     "point_difference": ZERO,
                     "point_difference_missing": False,
                     "issues": set(),
@@ -348,6 +353,8 @@ class ProductMonthClosureService:
                 ("opening", raw_row.opening_point, "opening_missing"),
                 ("calculated", raw_row.calculated_closing, "calculated_missing"),
                 ("closing", raw_row.closing_point, "closing_missing"),
+                ("closing_cedis", raw_row.closing_point_cedis, "closing_cedis_missing"),
+                ("closing_sucursales", raw_row.closing_point_sucursales, "closing_sucursales_missing"),
                 ("point_difference", raw_row.difference_point, "point_difference_missing"),
             ):
                 if raw_value is None:
@@ -374,6 +381,11 @@ class ProductMonthClosureService:
                 issues.add("OPENING_SNAPSHOT_MISSING")
             if bucket["closing_missing"]:
                 issues.add("CLOSING_SNAPSHOT_MISSING")
+            scopes_available = not bool(bucket["closing_cedis_missing"] or bucket["closing_sucursales_missing"])
+            if scopes_available and abs(bucket["closing"] - bucket["closing_cedis"] - bucket["closing_sucursales"]) > Decimal("0.01"):
+                scopes_available = False
+            if not scopes_available:
+                issues.add("CLOSING_SNAPSHOT_SCOPE_MISSING")
             if bucket["calculated_missing"]:
                 issues.add("CALCULATED_CLOSING_MISSING")
             if bucket["point_difference_missing"]:
@@ -401,7 +413,7 @@ class ProductMonthClosureService:
                         issues=issues,
                     ),
                     "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
-                    "point_final_scopes_available": False,
+                    "point_final_scopes_available": scopes_available,
                 }
             )
             rows.append(
@@ -416,8 +428,8 @@ class ProductMonthClosureService:
                     "merma_derivada_equivalente": bucket["waste_derived"],
                     "merma_total_equivalente": bucket["waste_direct"] + bucket["waste_derived"],
                     "inventario_final_teorico": bucket["calculated"],
-                    "inventario_final_point_cedis": ZERO,
-                    "inventario_final_point_sucursales": ZERO,
+                    "inventario_final_point_cedis": bucket["closing_cedis"],
+                    "inventario_final_point_sucursales": bucket["closing_sucursales"],
                     "inventario_final_point_total": bucket["closing"],
                     "diferencia_teorico_vs_point": legacy_difference,
                     "estado_auditoria": audit_status,
