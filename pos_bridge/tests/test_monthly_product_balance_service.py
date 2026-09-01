@@ -632,6 +632,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         row = balance.rows[self.parent.id]
         self.assertEqual(row.opening_point, Decimal("3"))
         self.assertIsNone(row.closing_point)
+        self.assertIsNone(row.closing_point_cedis)
+        self.assertIsNone(row.closing_point_sucursales)
         self.assertIsNone(row.difference_point)
         self.assertEqual(row.status, "REVISAR_FUENTE")
         self.assertTrue(any("final" in warning.lower() for warning in balance.warnings))
@@ -826,6 +828,60 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertIn((self.branch.id, alias_product.id), opening["applied_coverage_keys"])
         self.assertIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_closing_inventory_preserves_cedis_and_store_scopes_per_recipe(self):
+        cedis_erp, _ = Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "CEDIS"})
+        cedis_branch = PointBranch.objects.create(
+            external_id="LEDGER-CEDIS",
+            name="Inventario central",
+            erp_branch=cedis_erp,
+        )
+        for branch, opening, closing in (
+            (self.branch, "3", "7"),
+            (cedis_branch, "2", "5"),
+        ):
+            for stock, captured_at in (
+                (opening, datetime(2026, 6, 30, 8)),
+                (closing, datetime(2026, 7, 31, 8)),
+            ):
+                PointInventorySnapshot.objects.create(
+                    branch=branch,
+                    product=self.parent_product,
+                    stock=Decimal(stock),
+                    captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                    sync_job=self.sync_job,
+                )
+
+        row = self._service()[0].build("2026-07").rows[self.parent.id]
+
+        self.assertEqual(row.closing_point_cedis, Decimal("5"))
+        self.assertEqual(row.closing_point_sucursales, Decimal("7"))
+        self.assertEqual(row.closing_point, Decimal("12"))
+        self.assertEqual(row.closing_point, row.closing_point_cedis + row.closing_point_sucursales)
+
+    def test_inactive_erp_branch_is_cedis_closing_scope(self):
+        inactive_erp = Sucursal.objects.create(codigo="LEGACY", nombre="Sucursal inactiva", activa=False)
+        inactive_branch = PointBranch.objects.create(
+            external_id="LEDGER-INACTIVE",
+            name="Punto legacy",
+            erp_branch=inactive_erp,
+        )
+        for stock, captured_at in (
+            ("4", datetime(2026, 6, 30, 8)),
+            ("6", datetime(2026, 7, 31, 8)),
+        ):
+            PointInventorySnapshot.objects.create(
+                branch=inactive_branch,
+                product=self.parent_product,
+                stock=Decimal(stock),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=self.sync_job,
+            )
+
+        row = self._service()[0].build("2026-07").rows[self.parent.id]
+
+        self.assertEqual(row.closing_point_cedis, Decimal("6"))
+        self.assertEqual(row.closing_point_sucursales, Decimal("0"))
 
     def test_snapshot_tolerance_is_evaluated_per_branch_product_key(self):
         second_branch = PointBranch.objects.create(

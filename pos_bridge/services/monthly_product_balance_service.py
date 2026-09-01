@@ -22,6 +22,7 @@ from pos_bridge.services.recipe_identity_service import PointRecipeIdentityServi
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
+from recetas.utils.normalizacion import normalizar_nombre
 
 ZERO = Decimal("0")
 DIFFERENCE_TOLERANCE = Decimal("0.01")
@@ -95,6 +96,8 @@ class MonthlyPointBalanceRow:
     conversion_out: Decimal = ZERO
     calculated_closing: Decimal | None = None
     closing_point: Decimal | None = None
+    closing_point_cedis: Decimal | None = None
+    closing_point_sucursales: Decimal | None = None
     difference_point: Decimal | None = None
     status: str = "REVISAR_FUENTE"
     conversion_origin: str = ""
@@ -153,6 +156,8 @@ class _MutableBalanceRow:
     conversion_in: Decimal = ZERO
     conversion_out: Decimal = ZERO
     closing_point: Decimal | None = None
+    closing_point_cedis: Decimal | None = None
+    closing_point_sucursales: Decimal | None = None
     origins: set[str] = field(default_factory=set)
     issues: set[str] = field(default_factory=set)
     counts: dict[str, int] = field(default_factory=dict)
@@ -212,6 +217,8 @@ class _MutableBalanceRow:
             conversion_out=self.conversion_out,
             calculated_closing=calculated_closing,
             closing_point=self.closing_point,
+            closing_point_cedis=self.closing_point_cedis,
+            closing_point_sucursales=self.closing_point_sucursales,
             difference_point=difference_point,
             status=status,
             conversion_origin=conversion_origin,
@@ -292,6 +299,7 @@ class MonthlyPointProductBalanceService:
         self._merge_quantities(rows, sales, field_name="sales", count_name="sales_rows")
         self._merge_quantities(rows, waste, field_name="waste", count_name="waste_rows")
         self._merge_quantities(rows, closing, field_name="closing_point", count_name="closing_snapshot_rows", optional=True)
+        self._apply_closing_scopes(rows, closing_meta)
 
         unresolved_movements = tuple(
             opening_unresolved
@@ -411,6 +419,15 @@ class MonthlyPointProductBalanceService:
             issues.add(ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE)
         return issues
 
+    @staticmethod
+    def _apply_closing_scopes(rows: dict[int, _MutableBalanceRow], closing_meta: Mapping[str, object]) -> None:
+        for receta_id, scopes in (closing_meta.get("recipe_scope_totals") or {}).items():
+            row = rows.get(receta_id)
+            if row is None or row.closing_point is None:
+                continue
+            row.closing_point_cedis = Decimal(scopes["cedis"])
+            row.closing_point_sucursales = Decimal(scopes["sucursales"])
+
     def _load_snapshot(self, *, snapshot_date: date, source: str):
         tolerance_days = int(
             getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
@@ -426,7 +443,7 @@ class MonthlyPointProductBalanceService:
         )
         candidates = list(
             PointInventorySnapshot.objects.filter(captured_at__gte=window_start, captured_at__lt=window_end)
-            .select_related("product", "branch")
+            .select_related("product", "branch", "branch__erp_branch")
             .only(
                 "id",
                 "product_id",
@@ -435,6 +452,9 @@ class MonthlyPointProductBalanceService:
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
+                "branch__erp_branch_id",
+                "branch__erp_branch__codigo",
+                "branch__erp_branch__activa",
                 "stock",
                 "captured_at",
             )
@@ -478,6 +498,9 @@ class MonthlyPointProductBalanceService:
         applied_coverage_keys: set[tuple[int, int]] = set()
         selected_mapped_recipe_keys: set[tuple[int, int, int]] = set()
         applied_mapped_recipe_keys: set[tuple[int, int, int]] = set()
+        recipe_scope_totals: dict[int, dict[str, Decimal]] = {}
+        cedis_scope_rows = 0
+        sucursales_scope_rows = 0
         selected_dates = {
             timezone.localtime(snapshot.captured_at, current_timezone).date()
             for snapshot in snapshots
@@ -512,6 +535,14 @@ class MonthlyPointProductBalanceService:
             applied_branch_ids.add(snapshot.branch_id)
             applied_coverage_keys.add(coverage_key)
             applied_mapped_recipe_keys.add(mapped_recipe_key)
+            if source == "closing_snapshot":
+                scopes = recipe_scope_totals.setdefault(receta.id, {"cedis": ZERO, "sucursales": ZERO})
+                if self._is_cedis_inventory_scope(snapshot):
+                    scopes["cedis"] += quantity
+                    cedis_scope_rows += 1
+                else:
+                    scopes["sucursales"] += quantity
+                    sucursales_scope_rows += 1
 
         fallback_used = any(selected_date != snapshot_date for selected_date in selected_dates)
         effective_date = next(iter(selected_dates)) if len(selected_dates) == 1 else None
@@ -540,6 +571,11 @@ class MonthlyPointProductBalanceService:
             "applied_coverage_keys": tuple(sorted(applied_coverage_keys)),
             "applied_mapped_recipe_keys": tuple(sorted(applied_mapped_recipe_keys)),
             "out_of_tolerance_key_count": 0,
+            "recipe_scope_totals": recipe_scope_totals,
+            "cedis_scope_rows": cedis_scope_rows,
+            "sucursales_scope_rows": sucursales_scope_rows,
+            "cedis_scope_total": sum((scopes["cedis"] for scopes in recipe_scope_totals.values()), ZERO),
+            "sucursales_scope_total": sum((scopes["sucursales"] for scopes in recipe_scope_totals.values()), ZERO),
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
         }, unresolved
@@ -571,9 +607,26 @@ class MonthlyPointProductBalanceService:
             "applied_coverage_keys": (),
             "applied_mapped_recipe_keys": (),
             "out_of_tolerance_key_count": 0,
+            "recipe_scope_totals": {},
+            "cedis_scope_rows": 0,
+            "sucursales_scope_rows": 0,
+            "cedis_scope_total": ZERO,
+            "sucursales_scope_total": ZERO,
             "matched_recipe_count": 0,
             "unresolved_rows": 0,
         }
+
+    @staticmethod
+    def _is_cedis_inventory_scope(snapshot: PointInventorySnapshot) -> bool:
+        branch = snapshot.branch
+        erp_branch = getattr(branch, "erp_branch", None)
+        code = str(getattr(erp_branch, "codigo", "") or "").strip().upper()
+        name = normalizar_nombre(getattr(branch, "name", "") or "")
+        if code in {"CEDIS", "DEVOLUCIONES", "ALMACEN"}:
+            return True
+        if "cedis" in name or "produccion" in name or "devolucion" in name or "almacen" in name:
+            return True
+        return erp_branch is not None and not bool(getattr(erp_branch, "activa", True))
 
     @staticmethod
     def _snapshot_warnings(meta: Mapping[str, object], *, label: str) -> list[str]:
