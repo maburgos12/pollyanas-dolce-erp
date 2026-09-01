@@ -520,12 +520,21 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             quantity=Decimal(quantity),
         )
 
-    def _daily_sale(self, recipe, product, quantity, sale_date, suffix, source_endpoint="/Report/PrintReportes?idreporte=3"):
+    def _daily_sale(
+        self,
+        recipe,
+        product,
+        quantity,
+        sale_date,
+        suffix,
+        source_endpoint="/Report/PrintReportes?idreporte=3",
+        sync_job=None,
+    ):
         return PointDailySale.objects.create(
             branch=self.branch,
             product=product,
             receta=recipe,
-            sync_job=self.sync_job,
+            sync_job=sync_job or self.sync_job,
             sale_date=sale_date,
             quantity=Decimal(quantity),
             source_endpoint=source_endpoint,
@@ -1134,14 +1143,15 @@ class MonthlyProductBalanceLedgerTests(TestCase):
     def test_official_daily_sales_partial_and_failed_jobs_are_non_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
-        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "bad-job")
         for status, expected_issue in (
             (PointSyncJob.STATUS_PARTIAL, "SALES_SYNC_JOB_PARTIAL"),
             (PointSyncJob.STATUS_FAILED, "SALES_SYNC_JOB_FAILED"),
         ):
             with self.subTest(status=status):
                 PointSyncJob.objects.filter(job_type=PointSyncJob.JOB_TYPE_SALES).delete()
-                self._official_sales_job(status=status)
+                PointDailySale.objects.all().delete()
+                job = self._official_sales_job(status=status)
+                self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "bad-job", sync_job=job)
 
                 balance = MonthlyPointProductBalanceService().build("2026-07")
 
@@ -1153,8 +1163,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
     def test_official_daily_sales_with_full_successful_job_are_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
-        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "full-job")
         job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "full-job", sync_job=job)
 
         balance = MonthlyPointProductBalanceService().build("2026-07")
 
@@ -1168,8 +1178,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
     def test_official_daily_and_legacy_history_mix_is_non_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
-        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "mixed")
-        self._official_sales_job()
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "mixed", sync_job=job)
         VentaHistorica.objects.create(
             receta=self.parent,
             sucursal=self.sucursal,
@@ -1186,6 +1196,69 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertFalse(sales["authoritative"])
         self.assertIn("SALES_SOURCE_MIXED", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_daily_sales_linked_to_inventory_job_stay_blocked_despite_separate_successful_sales_job(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "inventory-provenance")
+        self._official_sales_job()
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        sales = balance.sources["sales"]
+        self.assertEqual(sales["selected_row_job_ids"], (self.sync_job.id,))
+        self.assertFalse(sales["authoritative"])
+        self.assertIn("SALES_SYNC_JOB_MISSING", balance.issues)
+        self.assertTrue(sales["rejected_provenance"])
+
+    def test_daily_sales_linked_to_partial_job_stay_blocked_despite_separate_successful_sales_job(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        partial_job = self._official_sales_job(status=PointSyncJob.STATUS_PARTIAL)
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "partial-provenance", sync_job=partial_job)
+        self._official_sales_job(status=PointSyncJob.STATUS_SUCCESS)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertEqual(balance.sources["sales"]["selected_row_job_ids"], (partial_job.id,))
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_JOB_PARTIAL", balance.issues)
+
+    def test_daily_sales_with_mixed_job_ids_are_conservative(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        first_job = self._official_sales_job()
+        second_job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "1", date(2026, 7, 3), "mixed-job-one", sync_job=first_job)
+        self._daily_sale(self.parent, self.parent_product, "2", date(2026, 7, 4), "mixed-job-two", sync_job=second_job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertEqual(balance.sources["sales"]["selected_row_job_ids"], tuple(sorted((first_job.id, second_job.id))))
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_JOB_MIXED", balance.issues)
+
+    def test_linked_old_month_job_is_found_beyond_fifty_newer_unrelated_jobs(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        linked_job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "old-linked-job", sync_job=linked_job)
+        for index in range(51):
+            PointSyncJob.objects.create(
+                job_type=PointSyncJob.JOB_TYPE_SALES,
+                status=PointSyncJob.STATUS_SUCCESS,
+                parameters={
+                    "source": "POINT_OFFICIAL_REPORT",
+                    "start_date": "2026-08-01",
+                    "end_date": "2026-08-31",
+                    "sequence": index,
+                },
+            )
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertEqual(balance.sources["sales"]["job_id"], linked_job.id)
+        self.assertTrue(balance.sources["sales"]["authoritative"])
 
     @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="OFFICIAL_MONTHLY_REPORT")
     def test_strict_official_sales_mode_requires_refresh_and_marks_fallback_non_authoritative(self):
