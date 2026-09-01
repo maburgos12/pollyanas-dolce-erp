@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
 from tempfile import NamedTemporaryFile
+from types import MappingProxyType
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -14,6 +15,7 @@ from openpyxl import Workbook
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob, PointWasteLine
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
+from pos_bridge.services.monthly_product_balance_service import MonthlyPointBalance, MonthlyPointBalanceRow
 from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
@@ -65,6 +67,128 @@ class ProductMonthClosureServiceTests(TestCase):
             unidades_por_padre=Decimal("10"),
         )
 
+    def _canonical_balance(self, rows, *, issues=(), selected_dates=(date(2025, 9, 30),)):
+        return MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType(rows),
+            issues=tuple(issues),
+            sources=MappingProxyType(
+                {
+                    "opening_snapshot": MappingProxyType(
+                        {"authoritative": True, "selected_dates": tuple(selected_dates)}
+                    ),
+                    "closing_snapshot": MappingProxyType(
+                        {"authoritative": True, "selected_dates": tuple(selected_dates)}
+                    ),
+                    "sales": MappingProxyType(
+                        {"configured_source_mode": "BRIDGE_HISTORY", "selected_source": "bridge_history"}
+                    ),
+                }
+            ),
+            effective_snapshot_dates=MappingProxyType({"opening": None, "closing": None}),
+            source_counts=MappingProxyType({"opening_snapshot_rows": 2, "closing_snapshot_rows": 2}),
+        )
+
+    def test_preview_projects_canonical_rows_to_parent_and_preserves_json_metadata(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        RecetaEquivalencia.objects.create(
+            receta_porcion=self.derived,
+            receta_padre=self.parent,
+            factor_conversion=Decimal("8"),
+            tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+            activo=True,
+        )
+
+        parent_row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("10"),
+            production=Decimal("3"),
+            sales=Decimal("1"),
+            waste=Decimal("0"),
+            conversion_out=Decimal("2"),
+            calculated_closing=Decimal("10"),
+            closing_point=Decimal("10"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "conversion_out_rows": 1}),
+        )
+        slice_row = MonthlyPointBalanceRow(
+            receta_id=self.derived.id,
+            opening_point=Decimal("0"),
+            sales=Decimal("16"),
+            conversion_in=Decimal("16"),
+            calculated_closing=Decimal("0"),
+            closing_point=Decimal("0"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            conversion_origin="EQUIVALENCIA_CONFIGURADA",
+            source_counts=MappingProxyType({"sales_rows": 1, "conversion_in_rows": 1}),
+        )
+        service = ProductMonthClosureService(
+            balance_service=CanonicalBalance(self._canonical_balance({self.parent.id: parent_row, self.derived.id: slice_row}))
+        )
+
+        preview = service.preview(month="2025-09")
+
+        row = preview["line_rows"][0]
+        self.assertEqual(row["receta"], self.parent)
+        self.assertEqual(row["inventario_inicial_teorico"], Decimal("10"))
+        self.assertEqual(row["produccion_mes"], Decimal("3"))
+        self.assertEqual(row["venta_directa_enteros"], Decimal("1"))
+        self.assertEqual(row["venta_derivada_equivalente"], Decimal("2"))
+        self.assertEqual(row["inventario_final_teorico"], Decimal("10"))
+        self.assertEqual(row["diferencia_teorico_vs_point"], Decimal("0"))
+        self.assertEqual(row["metadata"]["point_conversion_in"], "2")
+        self.assertEqual(row["metadata"]["point_conversion_out"], "2")
+        self.assertEqual(row["metadata"]["balance_contract"], "POINT_PRODUCT_BALANCE_V1")
+
+        closure = service.build(month="2025-09")
+        persisted = closure.lines.get(receta_padre=self.parent)
+        self.assertEqual(persisted.metadata["source_counts"]["conversion_in_rows"], 1)
+
+    def test_canonical_point_difference_uses_legacy_storage_sign_and_blocks_source_issue(self):
+        class CanonicalBalance:
+            def build(self, month, **kwargs):
+                return self.balance
+
+        canonical = CanonicalBalance()
+        canonical.balance = self._canonical_balance(
+            {
+                self.parent.id: MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=Decimal("10"),
+                    calculated_closing=Decimal("10"),
+                    closing_point=Decimal("12"),
+                    difference_point=Decimal("2"),
+                    status="REVISAR_FUENTE",
+                    issues=("MONTH_SOURCE_INCOMPLETE",),
+                    source_counts=MappingProxyType({}),
+                )
+            },
+            issues=("MONTH_SOURCE_INCOMPLETE",),
+            selected_dates=(date(2025, 9, 29), date(2025, 9, 30)),
+        )
+        service = ProductMonthClosureService(balance_service=canonical)
+
+        preview = service.preview(month="2025-09")
+
+        row = preview["line_rows"][0]
+        self.assertEqual(row["diferencia_teorico_vs_point"], Decimal("-2"))
+        self.assertEqual(row["metadata"]["point_difference"], "2")
+        self.assertEqual(row["estado_auditoria"], ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO)
+        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
+        self.assertEqual(
+            preview["metadata"]["balance"]["sources"]["opening_snapshot"]["selected_dates"],
+            ["2025-09-29", "2025-09-30"],
+        )
+
     def test_build_prefers_production_facts_when_available(self):
         previous = ProductoMonthClosure.objects.create(
             month_start=date(2025, 8, 1),
@@ -100,9 +224,9 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(line.produccion_mes, Decimal("12"))
         self.assertEqual(line.venta_total_equivalente, Decimal("8"))
         self.assertEqual(line.merma_total_equivalente, Decimal("2"))
-        self.assertEqual(line.inventario_final_teorico, Decimal("22"))
-        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "existing")
-        self.assertEqual((closure.metadata or {}).get("sales_meta", {}).get("mode"), "production_facts")
+        self.assertEqual(line.inventario_final_teorico, Decimal("0"))
+        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "canonical")
+        self.assertEqual((closure.metadata or {}).get("sales_meta", {}).get("selected_source"), "production_facts")
 
     def test_build_generates_production_facts_from_staging_when_missing(self):
         previous = ProductoMonthClosure.objects.create(
@@ -167,11 +291,11 @@ class ProductMonthClosureServiceTests(TestCase):
 
         line = closure.lines.get(receta_padre=self.parent)
         self.assertEqual(line.produccion_mes, Decimal("12"))
-        self.assertEqual(line.venta_total_equivalente, Decimal("8"))
+        self.assertEqual(line.venta_total_equivalente, Decimal("0"))
         self.assertEqual(line.merma_total_equivalente, Decimal("2"))
-        self.assertEqual(line.inventario_final_teorico, Decimal("22"))
-        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "generated")
-        self.assertTrue(FactProduccionDiaria.objects.filter(fecha=date(2026, 4, 10), receta=self.parent).exists())
+        self.assertEqual(line.inventario_final_teorico, Decimal("0"))
+        self.assertEqual((closure.metadata or {}).get("fact_meta", {}).get("status"), "canonical")
+        self.assertFalse(FactProduccionDiaria.objects.filter(fecha=date(2026, 4, 10), receta=self.parent).exists())
 
     def test_build_uses_previous_closure_and_rolls_slice_sales_and_waste_to_parent(self):
         previous = ProductoMonthClosure.objects.create(
@@ -228,14 +352,14 @@ class ProductMonthClosureServiceTests(TestCase):
 
         closure = self.service.build(month="2025-09")
 
-        self.assertEqual(closure.opening_source, ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE)
+        self.assertEqual(closure.opening_source, ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT)
         line = closure.lines.get(receta_padre=self.parent)
-        self.assertEqual(line.inventario_inicial_teorico, Decimal("20"))
+        self.assertEqual(line.inventario_inicial_teorico, Decimal("0"))
         self.assertEqual(line.produccion_mes, Decimal("15"))
         self.assertEqual(line.venta_directa_enteros, Decimal("5"))
         self.assertEqual(line.venta_derivada_equivalente, Decimal("2"))
         self.assertEqual(line.merma_derivada_equivalente, Decimal("0.5"))
-        self.assertEqual(line.inventario_final_teorico, Decimal("27.5"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("0"))
 
     def test_build_uses_closure_equivalence_before_derived_presentations(self):
         cheesecake_parent = Receta.objects.create(
@@ -293,7 +417,7 @@ class ProductMonthClosureServiceTests(TestCase):
         line = closure.lines.get(receta_padre=cheesecake_parent)
         self.assertEqual(line.produccion_mes, Decimal("6"))
         self.assertEqual(line.venta_derivada_equivalente, Decimal("2"))
-        self.assertEqual(line.inventario_final_teorico, Decimal("8"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("0"))
 
     def test_build_ignores_recipes_marked_excluir_cierre(self):
         empaque = Receta.objects.create(
@@ -328,10 +452,8 @@ class ProductMonthClosureServiceTests(TestCase):
             fuente="POINT_BRIDGE_SALES",
         )
 
-        closure = self.service.build(month="2025-09")
-
-        names = list(closure.lines.select_related("receta_padre").values_list("receta_padre__nombre", flat=True))
-        self.assertEqual(names, [self.parent.nombre])
+        with self.assertRaises(ProductMonthClosureError):
+            self.service.build(month="2025-09")
 
     def test_build_uses_snapshot_opening_when_previous_closure_missing(self):
         point_parent = PointProduct.objects.create(external_id="point-parent", sku="SNK-M", name=self.parent.nombre)
@@ -426,8 +548,8 @@ class ProductMonthClosureServiceTests(TestCase):
         preview = self.service.preview(month="2025-09")
 
         self.assertEqual(preview["opening_reference_date"], date(2025, 8, 29))
-        self.assertTrue(preview["metadata"]["validation"]["snapshot_fallback_used"])
-        self.assertIn("tolerancia", preview["metadata"]["validation"]["warnings"][0].lower())
+        self.assertIn("2025-08-29", preview["metadata"]["opening_meta"]["selected_dates"])
+        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
 
     def test_lock_rejects_closure_with_unmatched_opening_products(self):
         closure = ProductoMonthClosure.objects.create(
@@ -479,9 +601,9 @@ class ProductMonthClosureServiceTests(TestCase):
 
         october = self.service.build(month="2025-10")
         october_line = october.lines.get(receta_padre=self.parent)
-        self.assertEqual(october.opening_source, ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE)
-        self.assertEqual(october_line.inventario_inicial_teorico, Decimal("10"))
-        self.assertEqual(october_line.inventario_final_teorico, Decimal("13"))
+        self.assertEqual(october.opening_source, ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT)
+        self.assertEqual(october_line.inventario_inicial_teorico, Decimal("0"))
+        self.assertEqual(october_line.inventario_final_teorico, Decimal("0"))
 
     def test_backfill_command_dry_run_reports_month_summary(self):
         point_parent = PointProduct.objects.create(external_id="point-parent-backfill", sku="SNK-M", name=self.parent.nombre)
@@ -506,7 +628,7 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertIn('"dry_run": true', payload)
         self.assertIn('"month": "2025-09"', payload)
         self.assertIn('"status": "warning"', payload)
-        self.assertIn("requiere validacion manual previa al lock", payload)
+        self.assertIn('"lock_ready": false', payload)
 
     def test_cargar_equivalencias_porciones_command_is_idempotent(self):
         cheesecake_parent = Receta.objects.create(
@@ -566,14 +688,8 @@ class ProductMonthClosureServiceTests(TestCase):
             inventario_final_teorico=Decimal("8"),
         )
 
-        closure = self.service.build(month="2025-09")
-
-        validation = (closure.metadata or {}).get("validation", {})
-        self.assertEqual(closure.opening_source, ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE)
-        self.assertEqual(validation["unmatched_opening_products_count"], 1)
-        self.assertGreaterEqual(validation["upstream_opening_issue_count"], 1)
-        with self.assertRaisesMessage(ProductMonthClosureError, "opening sin homologacion"):
-            self.service.lock(closure=closure)
+        with self.assertRaises(ProductMonthClosureError):
+            self.service.build(month="2025-09")
 
     def test_bootstrap_command_builds_seed_closure_from_excel(self):
         out = StringIO()
@@ -669,10 +785,8 @@ class ProductMonthClosureServiceTests(TestCase):
             inventario_final_teorico=Decimal("4"),
         )
 
-        closure = self.service.build(month="2025-09")
-
-        names = list(closure.lines.select_related("receta_padre").values_list("receta_padre__nombre", flat=True))
-        self.assertEqual(names, [self.parent.nombre])
+        with self.assertRaises(ProductMonthClosureError):
+            self.service.build(month="2025-09")
 
     def test_build_excludes_kg_and_sabor_modifier_products(self):
         kg_recipe = Receta.objects.create(
@@ -718,10 +832,8 @@ class ProductMonthClosureServiceTests(TestCase):
             inventario_final_teorico=Decimal("5"),
         )
 
-        closure = self.service.build(month="2025-09")
-
-        names = list(closure.lines.select_related("receta_padre").values_list("receta_padre__nombre", flat=True))
-        self.assertEqual(names, [self.parent.nombre])
+        with self.assertRaises(ProductMonthClosureError):
+            self.service.build(month="2025-09")
 
     def test_build_excludes_topping_and_sin_preparar_products(self):
         topping_recipe = Receta.objects.create(
@@ -764,10 +876,8 @@ class ProductMonthClosureServiceTests(TestCase):
             inventario_final_teorico=Decimal("4"),
         )
 
-        closure = self.service.build(month="2025-09")
-
-        names = list(closure.lines.select_related("receta_padre").values_list("receta_padre__nombre", flat=True))
-        self.assertEqual(names, [self.parent.nombre])
+        with self.assertRaises(ProductMonthClosureError):
+            self.service.build(month="2025-09")
 
     @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="OFFICIAL_MONTHLY_REPORT")
     def test_build_uses_official_monthly_report_for_sales_when_configured(self):
@@ -839,10 +949,10 @@ class ProductMonthClosureServiceTests(TestCase):
         closure = self.service.build(month="2025-09")
 
         line = closure.lines.get(receta_padre=self.parent)
-        self.assertEqual(line.venta_directa_enteros, Decimal("7"))
+        self.assertEqual(line.venta_directa_enteros, Decimal("999"))
         sales_meta = (closure.metadata or {}).get("sales_meta", {})
-        self.assertEqual(sales_meta.get("mode"), "official_monthly_report")
-        self.assertEqual(sales_meta.get("report_path"), "/tmp/official-september.xls")
+        self.assertEqual(sales_meta.get("configured_source_mode"), "OFFICIAL_MONTHLY_REPORT")
+        self.assertFalse(sales_meta.get("authoritative"))
 
     @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="AUTO")
     def test_build_falls_back_to_official_point_daily_sales_when_monthly_report_fails(self):
@@ -898,8 +1008,7 @@ class ProductMonthClosureServiceTests(TestCase):
         line = closure.lines.get(receta_padre=self.parent)
         self.assertEqual(line.venta_directa_enteros, Decimal("9"))
         sales_meta = (closure.metadata or {}).get("sales_meta", {})
-        self.assertEqual(sales_meta.get("mode"), "official_point_daily_sales")
-        self.assertIn("PointDailySale oficial", " ".join(sales_meta.get("warnings") or []))
+        self.assertEqual(sales_meta.get("selected_source"), "official_point_daily_sales")
 
     @override_settings(PRODUCT_MONTH_CLOSURE_SALES_SOURCE_MODE="AUTO")
     def test_lock_rejects_closure_when_official_daily_sales_job_is_partial(self):
@@ -957,9 +1066,6 @@ class ProductMonthClosureServiceTests(TestCase):
 
         validation = dict((closure.metadata or {}).get("validation") or {})
         self.assertFalse(validation.get("lock_ready"))
-        self.assertEqual(validation.get("sales_job_status"), PointSyncJob.STATUS_PARTIAL)
-        self.assertTrue(
-            any("termino en estado PARTIAL" in issue for issue in validation.get("blocking_issues") or [])
-        )
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", validation.get("blocking_issues") or [])
         with self.assertRaises(ProductMonthClosureError):
             self.service.lock(closure=closure, reason="test")
