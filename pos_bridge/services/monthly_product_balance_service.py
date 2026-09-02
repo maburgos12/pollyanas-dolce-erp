@@ -1043,6 +1043,13 @@ class MonthlyPointProductBalanceService:
                 elif expected_count != bound_count:
                     issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
 
+        restricted_row_job_ids = {
+            job_id
+            for job_id in row_job_ids
+            if job_id in restricted_job_ids
+        }
+        if restricted_row_job_ids:
+            issues.append("CONVERSION_FILTERED_NEW_ROWS")
         foreign_job_ids = {
             job_id
             for job_id in row_job_ids
@@ -1061,7 +1068,8 @@ class MonthlyPointProductBalanceService:
             "coverage_start": parameters.get(config["start_key"]),
             "coverage_end": parameters.get(config["end_key"]),
             "rows_bound_to_job": sum(job_id == selected.id for job_id in row_job_ids),
-            "ignored_restricted_sync_job_ids": tuple(sorted(restricted_job_ids)),
+            "restricted_sync_job_ids": tuple(sorted(restricted_job_ids)),
+            "restricted_row_sync_job_ids": tuple(sorted(restricted_row_job_ids)),
             "authority_issues": tuple(issues),
         }
 
@@ -1648,6 +1656,11 @@ class MonthlyPointProductBalanceService:
             month_start=month_start,
             month_end=month_end,
         )
+        if not expected_branch_days:
+            issues.append(ISSUE_SALES_SYNC_COVERAGE_UNPROVEN)
+            rejected_provenance.append(
+                {"reason": "expected_branch_day_catalog_empty"}
+            )
         log_contexts = PointExtractionLog.objects.filter(sync_job_id__in=selected_row_job_ids).values_list(
             "sync_job_id", "level", "message", "context"
         )
@@ -1949,12 +1962,7 @@ class MonthlyPointProductBalanceService:
             month_end=month_end,
             row_job_ids=[conversion.sync_job_id for conversion in all_conversions],
         )
-        ignored_restricted_job_ids = set(authority.get("ignored_restricted_sync_job_ids") or ())
-        conversions = [
-            conversion
-            for conversion in all_conversions
-            if conversion.sync_job_id not in ignored_restricted_job_ids
-        ]
+        conversions = all_conversions
         destination_ids = {row.receta_id for row in conversions if row.receta_id is not None}
         equivalences = {
             equivalence.receta_porcion_id: equivalence

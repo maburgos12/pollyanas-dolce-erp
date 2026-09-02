@@ -132,6 +132,28 @@ class OfficialSalesBackfillServiceTests(SimpleTestCase):
 
 
 class OfficialSalesBackfillPersistenceTests(TestCase):
+    def test_run_fails_when_canonical_sales_branch_catalog_is_empty(self):
+        service = OfficialSalesBackfillService()
+        service.repair_service = SimpleNamespace(
+            repair=lambda **kwargs: SimpleNamespace(
+                bridge_history_deleted=0,
+                bridge_history_created=0,
+                recipe_rows_updated=0,
+                recipe_rows_cleared=0,
+                unresolved_rows=0,
+                non_recipe_rows=0,
+            )
+        )
+
+        with patch.object(service, "_sales_branches", return_value=[]):
+            job = service.run(
+                start_date=date(2026, 7, 1),
+                end_date=date(2026, 7, 31),
+            )
+
+        self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
+        self.assertIn("catálogo", job.error_message.lower())
+
     def test_replace_branch_day_sales_persists_sync_job_for_auditability(self):
         branch = PointBranch.objects.create(external_id="1", name="MATRIZ")
         sync_job = PointSyncJob.objects.create(

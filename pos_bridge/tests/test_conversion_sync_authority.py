@@ -43,7 +43,7 @@ class PointConversionRerunAuthorityTests(TestCase):
             }
         ]
 
-    def _sync(self, *, branch_filter=None):
+    def _sync(self, *, branch_filter=None, resolve_branch=None):
         client_context = MagicMock()
         client_context.return_value.__enter__.return_value = MagicMock()
         with (
@@ -60,7 +60,10 @@ class PointConversionRerunAuthorityTests(TestCase):
             patch("pos_bridge.services.conversion_sync_service._read_report_rows", return_value=self.report_rows),
             patch("pos_bridge.services.conversion_sync_service._build_branch_map", return_value={}),
             patch("pos_bridge.services.conversion_sync_service._build_recipe_map", return_value={}),
-            patch("pos_bridge.services.conversion_sync_service._resolve_branch", return_value=self.branch),
+            patch(
+                "pos_bridge.services.conversion_sync_service._resolve_branch",
+                side_effect=resolve_branch or (lambda row, branch_map: self.branch),
+            ),
             patch("pos_bridge.services.conversion_sync_service._resolve_recipe", return_value=self.recipe),
             patch(
                 "pos_bridge.services.conversion_sync_service._make_hash",
@@ -151,7 +154,7 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(metadata["selected_sync_job_ids"], (full_job.id,))
         self.assertEqual(metadata["coverage_scope"], "all_branches")
 
-    def test_filtered_rows_after_full_month_are_informative_and_do_not_change_canonical_total(self):
+    def test_filtered_rows_newer_than_full_month_are_preserved_and_block_authority(self):
         self._sync()
         full_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
         self.report_rows = [
@@ -170,10 +173,11 @@ class PointConversionRerunAuthorityTests(TestCase):
             month_start=date(2026, 7, 1)
         )
 
-        self.assertTrue(metadata["authoritative"])
+        self.assertFalse(metadata["authoritative"])
         self.assertEqual(metadata["selected_sync_job_ids"], (full_job.id,))
-        self.assertIn(filtered_job.id, metadata["ignored_restricted_sync_job_ids"])
-        self.assertEqual(rows[self.recipe.id].conversion_in, 4)
+        self.assertIn(filtered_job.id, metadata["restricted_row_sync_job_ids"])
+        self.assertIn("CONVERSION_FILTERED_NEW_ROWS", metadata["authority_issues"])
+        self.assertEqual(rows[self.recipe.id].conversion_in, 13)
 
     def test_invalid_quantity_and_date_are_omitted_and_make_job_partial(self):
         self.report_rows = [
@@ -206,6 +210,57 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertIn("CANTIDAD", rows[0])
         self.assertIsNone(rows[0]["CANTIDAD"])
+
+    def test_report_normalization_preserves_rows_missing_branch_or_product_for_accounting(self):
+        records = [
+            {"A": "SUCURSAL", "B": "PRODUCTO", "C": "CANTIDAD", "D": "FECHA", "E": "PK_MOVIMIENTO"},
+            {"A": None, "B": self.recipe.nombre, "C": "1", "D": "2026-07-15", "E": "NO-BRANCH"},
+            {"A": self.branch.name, "B": None, "C": "2", "D": "2026-07-16", "E": "NO-PRODUCT"},
+            {"A": None, "B": None, "C": "3", "D": "2026-07-17", "E": None},
+        ]
+
+        rows = _normalize_inventory_report_rows(records)
+
+        self.assertEqual(len(rows), 3)
+
+    def test_missing_branch_product_or_movement_id_rows_are_counted_and_make_job_partial(self):
+        self.report_rows = [
+            {**self.report_rows[0], "PK_Movimiento": "NO-BRANCH", "Sucursal": ""},
+            {
+                **self.report_rows[0],
+                "PK_Movimiento": "NO-PRODUCT",
+                "Sucursal": self.branch.name,
+                "Producto": "",
+                "Codigo": "",
+            },
+            {
+                **self.report_rows[0],
+                "PK_Movimiento": "NO-BRANCH-PRODUCT",
+                "Sucursal": "",
+                "Producto": "",
+                "Codigo": "",
+            },
+            {
+                **self.report_rows[0],
+                "PK_Movimiento": "",
+                "Sucursal": self.branch.name,
+            },
+        ]
+
+        result = self._sync(
+            resolve_branch=lambda row, branch_map: (
+                None if not row.get("Sucursal") else self.branch
+            )
+        )
+        job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+
+        self.assertEqual(result["total_rows"], 4)
+        self.assertEqual(result["skipped_unmatched_branch"], 2)
+        self.assertEqual(result["invalid_identity_rows"], 2)
+        self.assertEqual(result["invalid_rows"], 2)
+        self.assertEqual(PointConversionLine.objects.count(), 0)
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
+        self.assertFalse(self._conversion_authority()["authoritative"])
 
     def test_poll_report_never_falls_back_to_historical_generic_report(self):
         created_after = timezone.make_aware(datetime(2026, 7, 1, 12, 0, 0))
@@ -263,6 +318,15 @@ class PointConversionRerunAuthorityTests(TestCase):
         response.json.return_value = "REQUESTED"
 
         self.assertEqual(_created_report_pk(response), "REQUESTED")
+
+    def test_create_report_pk_rejects_boolean_identifiers(self):
+        scalar = MagicMock()
+        scalar.json.return_value = True
+        mapping = MagicMock()
+        mapping.json.return_value = {"PK_Reporte": True}
+
+        self.assertEqual(_created_report_pk(scalar), "")
+        self.assertEqual(_created_report_pk(mapping), "")
 
     def test_failed_success_transition_rolls_back_relinks_and_new_rows(self):
         first_result = self._sync()

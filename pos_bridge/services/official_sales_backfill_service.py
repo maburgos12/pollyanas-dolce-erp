@@ -345,6 +345,10 @@ class OfficialSalesBackfillService:
 
         try:
             branches = self._sales_branches(branch_filter=branch_filter)
+            if not branches:
+                raise RuntimeError(
+                    "El catálogo canónico de sucursales Point está vacío; no se puede certificar un mes en cero."
+                )
             session_cache: dict[str, object] = {}
             summary = {
                 "branch_days_processed": 0,

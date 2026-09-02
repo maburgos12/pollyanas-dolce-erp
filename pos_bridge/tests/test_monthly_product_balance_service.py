@@ -1367,6 +1367,27 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             balance.sources["sales"]["authority_issues"],
         )
 
+    def test_zero_month_is_not_authoritative_without_expected_branch_days(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        job.result_summary = {
+            **job.result_summary,
+            "branch_days_processed": 0,
+            "rows_imported": 0,
+        }
+        job.save(update_fields=["result_summary", "updated_at"])
+        PointExtractionLog.objects.filter(sync_job=job).delete()
+
+        with patch(
+            "pos_bridge.services.monthly_product_balance_service.PointSalesBranchIndicatorService.canonical_branches",
+            return_value=[],
+        ):
+            balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_COVERAGE_UNPROVEN", balance.issues)
+
     def test_official_daily_writer_count_must_match_persisted_rows(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))

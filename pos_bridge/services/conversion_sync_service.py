@@ -51,6 +51,8 @@ def _created_report_pk(response) -> str:
             payload = json.loads(str(getattr(response, "text", "") or ""))
         except (TypeError, ValueError):
             return ""
+    if isinstance(payload, bool):
+        return ""
     if isinstance(payload, (str, int)):
         return str(payload).strip()
     candidates = payload if isinstance(payload, list) else [payload]
@@ -58,7 +60,10 @@ def _created_report_pk(response) -> str:
         if not isinstance(candidate, dict):
             continue
         for key in ("PK_Reporte", "pkReporte", "pk_reporte", "id"):
-            value = str(candidate.get(key) or "").strip()
+            raw_value = candidate.get(key)
+            if isinstance(raw_value, bool):
+                continue
+            value = str(raw_value or "").strip()
             if value:
                 return value
     return ""
@@ -127,8 +132,6 @@ def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
             if value is not None
         )
         if "TOTAL POR" in marker or marker.startswith("TOTAL"):
-            continue
-        if not row.get("SUCURSAL") or not row.get("PRODUCTO"):
             continue
         rows.append(row)
     return rows
@@ -338,6 +341,7 @@ def sync_conversion_lines(
         invalid_rows = 0
         invalid_quantity_rows = 0
         invalid_date_rows = 0
+        invalid_identity_rows = 0
 
         with transaction.atomic():
             for row in rows:
@@ -370,6 +374,20 @@ def sync_conversion_lines(
                     skipped += 1
                     continue
 
+                item_name = str(
+                    _first_value(row, "Producto", "Articulo", "Artículo", "Descripcion", "Descripción") or ""
+                )[:250]
+                item_code = str(
+                    _first_value(row, "Codigo", "Código", "CodigoProducto", "Código Producto", "Clave") or ""
+                )[:80]
+                movement_external_id = str(
+                    _first_value(row, "PK_Movimiento", "Movimiento", "id", "ID") or ""
+                )[:40]
+                if (not item_name and not item_code) or not movement_external_id:
+                    invalid_identity_rows += 1
+                    invalid_rows += 1
+                    continue
+
                 source_hash = _make_hash(row)
                 existing = (
                     PointConversionLine.objects.select_for_update()
@@ -391,11 +409,11 @@ def sync_conversion_lines(
                     erp_branch=branch.erp_branch,
                     receta=_resolve_recipe(row, recipe_map),
                     sync_job=job,
-                    movement_external_id=str(_first_value(row, "PK_Movimiento", "Movimiento", "id", "ID") or "")[:40],
+                    movement_external_id=movement_external_id,
                     source_hash=source_hash,
                     movement_at=movement_at,
-                    item_name=str(_first_value(row, "Producto", "Articulo", "Artículo", "Descripcion", "Descripción") or "")[:250],
-                    item_code=str(_first_value(row, "Codigo", "Código", "CodigoProducto", "Código Producto", "Clave") or "")[:80],
+                    item_name=item_name,
+                    item_code=item_code,
                     quantity=quantity,
                     unit=str(_first_value(row, "Unidad", "UM", "Medida") or "")[:40],
                     unit_cost=_decimal(_first_value(row, "CostoUnitario", "Costo Unitario", "Costo")),
@@ -416,18 +434,25 @@ def sync_conversion_lines(
                 "invalid_rows": invalid_rows,
                 "invalid_quantity_rows": invalid_quantity_rows,
                 "invalid_date_rows": invalid_date_rows,
+                "invalid_identity_rows": invalid_identity_rows,
                 "issues": [
                     issue
                     for issue, count in (
                         ("CONVERSION_INVALID_QUANTITY", invalid_quantity_rows),
                         ("CONVERSION_INVALID_DATE", invalid_date_rows),
+                        ("CONVERSION_INVALID_IDENTITY", invalid_identity_rows),
+                        ("CONVERSION_BRANCH_UNRESOLVED", skipped_unmatched_branch),
                     )
                     if count
                 ],
                 "total_rows": len(rows),
                 "report_pk": pk_reporte,
             }
-            job.status = PointSyncJob.STATUS_PARTIAL if invalid_rows else PointSyncJob.STATUS_SUCCESS
+            job.status = (
+                PointSyncJob.STATUS_PARTIAL
+                if invalid_rows or skipped_unmatched_branch
+                else PointSyncJob.STATUS_SUCCESS
+            )
             job.finished_at = timezone.now()
             job.result_summary = result
             job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])
