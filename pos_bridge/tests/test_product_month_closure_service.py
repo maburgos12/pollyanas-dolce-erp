@@ -1555,6 +1555,20 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(historical["conteo_historico_sucursales"], "2")
         self.assertEqual(historical["inventario_historico_fisico_total"], "3")
         self.assertFalse(any("point" in key.lower() for key in historical))
+        self.assertEqual(
+            historical["movement_authority"],
+            {
+                "sales": {"source": "test", "source_present": False, "authoritative": False},
+                "production": {"source": "test", "source_present": False, "authoritative": False},
+                "waste": {"source": "test", "source_present": False, "authoritative": False},
+                "conversions": {"source": "sin_datos", "source_present": False, "authoritative": False},
+            },
+        )
+        from pos_bridge.services.product_closure_projection import project_product_closure_line
+
+        projected = project_product_closure_line(closure.lines.get(), historical_excel_import=True)
+        for field in ("production", "sales_total", "waste_total", "point_conversion_in", "calculated_closing"):
+            self.assertIsNone(projected[field], field)
 
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(

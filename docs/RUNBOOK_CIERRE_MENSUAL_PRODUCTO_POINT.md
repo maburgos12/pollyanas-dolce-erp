@@ -170,6 +170,12 @@ nuevo bloqueo, no la mutación silenciosa de las líneas selladas.
 
 - opening source correcto
 - fecha de opening correcta
+
+En un import histórico, el archivo Excel acredita únicamente las columnas de
+inventario/conteo declaradas. Ventas, producción y merma leídas de tablas
+operativas quedan como observaciones no validadas hasta acreditar cobertura; si
+falta una fuente, la pantalla, API, CSV y XLSX muestran `Sin dato`/`null`, nunca
+un cero autoritativo ni un saldo calculado aparentemente válido.
 - venta derivada coherente
 - merma derivada coherente
 - sin guardas activas en la vista

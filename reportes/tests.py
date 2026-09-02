@@ -3885,8 +3885,9 @@ class ReportesCanonicosTests(TestCase):
         html_body = html_response.content.decode("utf-8")
         self.assertIn("Inventario histórico físico", html_body)
         self.assertIn("Diferencia histórica", html_body)
-        self.assertIn("Sobrante físico", html_body)
+        self.assertIn("Revisar fuente", html_body)
         self.assertIn("Importación histórica de Excel", html_body)
+        self.assertIn("Movimientos operativos no validados", html_body)
         self.assertNotIn("Fin. Point", html_body)
         self.assertNotIn("Dif. Point", html_body)
 
@@ -3903,8 +3904,10 @@ class ReportesCanonicosTests(TestCase):
         self.assertNotIn("Fin. Point", headers)
         self.assertNotIn("Dif. Point", headers)
         self.assertEqual(Decimal(values[headers.index("Inventario histórico físico")]), Decimal("10"))
-        self.assertEqual(Decimal(values[headers.index("Diferencia histórica")]), Decimal("-3"))
-        self.assertEqual(values[headers.index("Estado")], "Sobrante físico")
+        self.assertEqual(values[headers.index("Diferencia histórica")], "Sin dato")
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
+        for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
+            self.assertEqual(values[headers.index(header)], "Sin dato", header)
 
         xlsx_response = self.client.get(
             reverse("reportes:cierre_producto"),
@@ -3916,7 +3919,9 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("Inventario histórico físico", xlsx_headers)
         self.assertIn("Diferencia histórica", xlsx_headers)
         self.assertNotIn("Fin. Point", xlsx_headers)
-        self.assertEqual(xlsx_values[xlsx_headers.index("Diferencia histórica")], -3)
+        self.assertEqual(xlsx_values[xlsx_headers.index("Diferencia histórica")], "Sin dato")
+        for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
+            self.assertEqual(xlsx_values[xlsx_headers.index(header)], "Sin dato", header)
 
         canonical = ProductoMonthClosure.objects.create(
             month_start=date(2026, 6, 1),

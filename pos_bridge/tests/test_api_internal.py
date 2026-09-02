@@ -342,12 +342,18 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertIsNone(row["closing_point"])
         self.assertIsNone(row["point_difference"])
         self.assertEqual(row["historical_count"], "18.000000")
-        self.assertEqual(row["historical_difference"], "3.000000")
-        self.assertEqual(row["point_status"], ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
+        self.assertIsNone(row["historical_difference"])
+        self.assertEqual(row["point_status"], "REVISAR_FUENTE")
         self.assertIsNone(response.data["total_closing_point"])
         self.assertIsNone(response.data["total_point_difference"])
         self.assertEqual(response.data["total_historical_count"], "18.000000")
-        self.assertEqual(response.data["total_historical_difference"], "3.000000")
+        self.assertIsNone(response.data["total_historical_difference"])
+        for field in ("production", "sales_total", "waste_total", "point_conversion_in", "calculated_closing"):
+            self.assertIsNone(row[field], field)
+        self.assertIsNone(response.data["total_production"])
+        self.assertIsNone(response.data["total_sales"])
+        self.assertIsNone(response.data["total_waste"])
+        self.assertIsNone(response.data["total_ending_inventory"])
 
     def test_product_closure_present_but_non_authoritative_sources_are_null_not_zero(self):
         line = self.product_closure.lines.get()

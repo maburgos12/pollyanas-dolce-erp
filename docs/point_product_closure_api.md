@@ -31,9 +31,17 @@ proyecta URLs de solicitud, rutas de reportes ni muestras crudas persistidas.
 
 Para importaciones históricas, `closing_point*` y `point_difference` son `null`
 porque el conteo no proviene de Point. `historical_count` y
-`historical_difference` conservan explícitamente el conteo físico y el contrato
-del importador (`final calculado - conteo físico`); sus totales son `total_historical_count` y
-`total_historical_difference`.
+`historical_difference` separan explícitamente el conteo físico del cálculo. El
+conteo importado puede existir aunque `historical_difference` sea `null`: la
+diferencia solo se publica cuando ventas, producción, merma y conversiones tienen
+autoridad mensual comprobada. Los decimales almacenados por compatibilidad cuando
+falta una fuente son placeholders internos y no se exponen como cero. Sus totales
+son `total_historical_count` y `total_historical_difference`.
+
+`historical_excel_import` identifica archivo/hoja únicamente como procedencia del
+conteo físico. Las etiquetas de movimientos nombran por separado las tablas
+operativas consultadas y las marcan como observadas no validadas; no atribuyen al
+Excel ventas, producción o merma que el archivo no importó.
 
 `point_difference` siempre usa el signo `Point final - final calculado`. Los
 cierres importados de Excel conservan su semántica histórica y la identifican

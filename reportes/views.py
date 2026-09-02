@@ -5644,13 +5644,21 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     sales_mode = str(sales_meta.get("mode") or "").strip()
     historical_excel_meta = dict(closure_metadata.get("historical_excel_import") or {})
     if inventory_labels["is_historical"]:
-        movement_source_label = "Importación histórica de Excel"
+        movement_source_label = "Movimientos operativos no validados"
         source_file = str(historical_excel_meta.get("source_file") or "archivo histórico")
         source_sheet = str(historical_excel_meta.get("source_sheet") or "").strip()
-        movement_source_detail = f"Conteo físico conservado desde {source_file}"
+        operational_sources = dict(historical_excel_meta.get("operational_sources") or {})
+        movement_source_detail = f"Conteo histórico: Importación histórica de Excel desde {source_file}"
         if source_sheet:
             movement_source_detail += f", hoja {source_sheet}"
-        movement_source_detail += "; no corresponde a un inventario Point."
+        source_summary = ", ".join(
+            f"{label}={operational_sources.get(key) or 'sin_datos'}"
+            for key, label in (("ventas", "ventas"), ("produccion", "producción"), ("merma", "merma"))
+        )
+        movement_source_detail += (
+            "; el conteo no corresponde a inventario Point. "
+            f"Movimientos observados en tablas operativas ({source_summary}) sin autoridad mensual comprobada."
+        )
     elif fact_status in {"existing", "generated"}:
         movement_source_label = "FactProduccionDiaria"
         movement_source_detail = (

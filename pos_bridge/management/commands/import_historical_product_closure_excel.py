@@ -427,12 +427,63 @@ class Command(BaseCommand):
                     "closure_lines": len(matched_rows),
                     "unmatched_rows": unmatched_rows[:50],
                     "stopped_at_conversion_helper": stopped_at_conversion_helper,
-                }
+                },
+                "opening_meta": {
+                    "source": f"Excel histórico: {input_path.name} / {sheet_name}",
+                    "source_present": True,
+                    "authoritative": True,
+                },
+                "sales_meta": {
+                    "source": sales_source,
+                    "source_present": bool(sales_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "production_meta": {
+                    "source": production_source,
+                    "source_present": bool(production_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "waste_meta": {
+                    "source": merma_source,
+                    "source_present": bool(merma_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "conversion_meta": {
+                    "source": "sin_datos",
+                    "source_present": False,
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_CONVERSION_SOURCE_MISSING"],
+                },
             }
             closure.save()
 
             for row in matched_rows:
                 receta = row["receta"]
+                movement_authority = {
+                    "sales": {
+                        "source": sales_source,
+                        "source_present": receta.id in sales_map,
+                        "authoritative": False,
+                    },
+                    "production": {
+                        "source": production_source,
+                        "source_present": receta.id in production_map,
+                        "authoritative": False,
+                    },
+                    "waste": {
+                        "source": merma_source,
+                        "source_present": receta.id in merma_map,
+                        "authoritative": False,
+                    },
+                    "conversions": {
+                        "source": "sin_datos",
+                        "source_present": False,
+                        "authoritative": False,
+                    },
+                }
                 producido = production_map.get(receta.id, Decimal("0"))
                 vendido = sales_map.get(receta.id, Decimal("0"))
                 merma = merma_map.get(receta.id, Decimal("0"))
@@ -475,6 +526,12 @@ class Command(BaseCommand):
                             "conteo_historico_sucursales": str(row["sucursales"]),
                             "inventario_historico_fisico_total": str(row["fisico_total"]),
                             "operational_sources": payload["operational_sources"],
+                            "movement_authority": movement_authority,
+                            "observed_movements": {
+                                "production": str(producido) if receta.id in production_map else None,
+                                "sales": str(vendido) if receta.id in sales_map else None,
+                                "waste": str(merma) if receta.id in merma_map else None,
+                            },
                         }
                     },
                 )

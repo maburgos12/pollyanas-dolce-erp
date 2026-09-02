@@ -59,6 +59,12 @@ def project_product_closure_line(
     issues = {str(issue) for issue in metadata.get("issues") or []}
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
     is_historical_excel = bool(historical_excel_import or metadata.get("historical_excel"))
+    historical_metadata = metadata.get("historical_excel")
+    if not isinstance(historical_metadata, dict):
+        historical_metadata = {}
+    historical_movement_authority = historical_metadata.get("movement_authority")
+    if not isinstance(historical_movement_authority, dict):
+        historical_movement_authority = {}
 
     calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
     sales_missing = is_canonical and (
@@ -90,6 +96,25 @@ def project_product_closure_line(
             conversion_authoritative,
         )
     )
+    if is_historical_excel:
+        # The Excel is authoritative only for the explicitly imported physical
+        # counts. Values copied from operational tables are observations without
+        # proof of complete monthly coverage and must not become valid zeros.
+        sales_authoritative = bool(
+            (historical_movement_authority.get("sales") or {}).get("authoritative") is True
+        )
+        production_authoritative = bool(
+            (historical_movement_authority.get("production") or {}).get("authoritative") is True
+        )
+        waste_authoritative = bool(
+            (historical_movement_authority.get("waste") or {}).get("authoritative") is True
+        )
+        conversion_authoritative = bool(
+            (historical_movement_authority.get("conversions") or {}).get("authoritative") is True
+        )
+        calculated_authoritative = all(
+            (opening_authoritative, sales_authoritative, production_authoritative, waste_authoritative, conversion_authoritative)
+        )
     calculated_missing = calculated_missing or not calculated_authoritative
     closing_missing = closing_missing or not closing_authoritative
 
@@ -103,7 +128,11 @@ def project_product_closure_line(
             closing_missing = True
         else:
             historical_count = Decimal(str(line.inventario_final_point_total))
-            historical_difference = Decimal(str(line.diferencia_teorico_vs_point))
+            historical_difference = (
+                Decimal(str(line.diferencia_teorico_vs_point))
+                if calculated_authoritative
+                else None
+            )
             point_difference = None
             closing_missing = True
             closing_authoritative = False
@@ -143,8 +172,11 @@ def project_product_closure_line(
         else ""
     )
     legacy_review = line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO
-    if is_historical_excel:
+    if is_historical_excel and calculated_authoritative:
         status_label = line.get_estado_auditoria_display()
+    elif is_historical_excel:
+        point_status = "REVISAR_FUENTE"
+        status_label = point_status_label(point_status)
     elif (
         issues
         or line.has_catalog_issue
@@ -171,8 +203,8 @@ def project_product_closure_line(
         "sales_direct": None if not sales_authoritative else Decimal(str(line.venta_directa_enteros)),
         "sales_derived": None if not sales_authoritative else Decimal(str(line.venta_derivada_equivalente)),
         "sales_total": None if not sales_authoritative else Decimal(str(line.venta_total_equivalente)),
-        "point_conversion_in": None if conversion_missing else decimal_value(metadata.get("point_conversion_in")),
-        "point_conversion_out": None if conversion_missing else decimal_value(metadata.get("point_conversion_out")),
+        "point_conversion_in": None if not conversion_authoritative else decimal_value(metadata.get("point_conversion_in")),
+        "point_conversion_out": None if not conversion_authoritative else decimal_value(metadata.get("point_conversion_out")),
         "conversion_origin": conversion_origin,
         "conversion_origins": exact_conversion_origins,
         "projection_sources": projection_sources,
@@ -187,7 +219,16 @@ def project_product_closure_line(
         "is_historical_inventory": is_historical_excel,
         "historical_count": historical_count,
         "historical_difference": historical_difference,
-        "source_issues": tuple(sorted(issues)),
+        "source_issues": tuple(
+            sorted(
+                issues
+                | (
+                    {"HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"}
+                    if is_historical_excel and not calculated_authoritative
+                    else set()
+                )
+            )
+        ),
         "source_authority": {
             "opening": opening_authoritative,
             "sales": sales_authoritative,
