@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 from django.test import RequestFactory, TestCase
+from django.template.loader import render_to_string
+from django.contrib.auth.models import AnonymousUser
 
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointBalanceRow
 from recetas.models import Receta
@@ -71,6 +73,15 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
                 self.factory.get("/reportes/produccion/", {"periodo": period})
             )
         return context, service
+
+    def _render(self, context):
+        request = self.factory.get("/reportes/produccion/")
+        request.user = AnonymousUser()
+        return render_to_string(
+            "reportes/producido_vs_vendido.html",
+            context,
+            request=request,
+        )
 
     def test_slice_sale_without_point_conversion_never_infers_conversion_from_sale_or_waste(self):
         context, _ = self._context(
@@ -166,6 +177,76 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIsNone(row["inventario_final_point_total"])
         self.assertIsNone(row["diferencia_inventario"])
         self.assertEqual(row["estado_inventario"], "Revisar fuente")
+
+    def test_totals_keep_authoritative_dif_when_reference_rows_share_the_category(self):
+        reference = Receta.objects.create(
+            nombre="Referencia canónica",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Pastel Mediano",
+            pasa_modulo_produccion=False,
+            hash_contenido="test-pvv-reference",
+        )
+        self.parent.pasa_modulo_produccion = True
+        self.parent.save(update_fields=["pasa_modulo_produccion"])
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    production=Decimal("10"),
+                    sales=Decimal("2"),
+                    status="REVISAR_FUENTE",
+                ),
+                MonthlyPointBalanceRow(
+                    receta_id=reference.id,
+                    production=Decimal("20"),
+                    sales=Decimal("1"),
+                    status="REVISAR_FUENTE",
+                ),
+            )
+        )
+        self.assertEqual(context["groups"][0]["total"]["dif"], Decimal("8"))
+        self.assertEqual(context["grand_total"]["dif"], Decimal("8"))
+
+    def test_missing_total_values_render_as_sin_dato_without_bare_currency_or_success_state(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(receta_id=self.parent.id, status="REVISAR_FUENTE"),
+                sources={
+                    "opening_snapshot": {"source": "PointInventorySnapshot", "authoritative": False},
+                    "closing_snapshot": {"source": "PointInventorySnapshot", "authoritative": False},
+                    "production": {"source": "PointProductionLine", "source_present": False},
+                    "sales": {"source": "PointDailySale", "source_present": False},
+                    "waste": {"source": "PointWasteLine", "source_present": False},
+                    "conversions": {"source": "PointConversionLine"},
+                },
+            )
+        )
+        self.assertIsNone(context["grand_total"]["vendido"])
+        self.assertIsNone(context["grand_total"]["producido"])
+        self.assertIsNone(context["grand_total"]["dif"])
+        self.assertIsNone(context["grand_total"]["costo_merma"])
+        rendered = self._render(context)
+        self.assertGreaterEqual(rendered.count("Sin dato"), 8)
+        self.assertNotIn('kpi-number is-success"></div>', rendered)
+        self.assertNotIn('class="text-success"></span>', rendered)
+        self.assertNotIn('>$</div>', rendered)
+
+    def test_html_exposes_point_authority_snapshots_and_conversion_source(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    conversion_in=Decimal("2"),
+                    conversion_origin="point_conversion_line",
+                    status="REVISAR_FUENTE",
+                )
+            )
+        )
+        rendered = self._render(context)
+        self.assertIn("Conversiones Point: PointConversionLine", rendered)
+        self.assertIn("Autoridad Point: Verificada", rendered)
+        self.assertIn("Snapshots Point: 2026-07-31 → 2026-08-31", rendered)
+        self.assertIn("Origen de conversión: point_conversion_line", rendered)
 
     def test_sources_and_issues_become_concise_traceable_banners(self):
         context, _ = self._context(

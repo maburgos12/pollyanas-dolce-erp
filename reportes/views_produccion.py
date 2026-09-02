@@ -584,6 +584,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "authoritative": source.get("authoritative"),
             "effective_date": source.get("effective_date"),
             "coverage": source.get("applied_coverage_key_count"),
+            "target_date": source.get("target_date"),
+            "selected_dates": source.get("selected_dates") or (),
+            "fallback_used": bool(source.get("fallback_used")),
         }
 
     def _canonical_sources(self, balance) -> dict[str, Any]:
@@ -661,7 +664,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         totals = {
             "vendido": _sum_or_none(rows, "vendido"),
             "producido": _sum_or_none(rows, "producido"),
-            "dif": _sum_or_none(rows, "dif"),
+            "dif": self._difference_total(rows),
             "merma_reportada": _sum_or_none(rows, "merma_reportada"),
             "costo_merma": _sum_or_none(rows, "costo_merma"),
             "convertido": _sum_or_none(rows, "convertido"),
@@ -681,6 +684,14 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             else None
         )
         return totals
+
+    @staticmethod
+    def _difference_total(rows: list[dict[str, Any]]) -> Decimal | None:
+        non_reference_rows = [row for row in rows if not row.get("produccion_referencia")]
+        authoritative_values = [row["dif"] for row in non_reference_rows if row.get("dif") is not None]
+        if not authoritative_values:
+            return None
+        return sum(authoritative_values, ZERO)
 
     def _categories(self) -> list[str]:
         values = (
