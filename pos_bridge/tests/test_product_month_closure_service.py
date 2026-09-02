@@ -168,6 +168,34 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(preview["totals"]["closing_sucursales"], Decimal("4"))
         self.assertEqual(preview["totals"]["closing_total"], Decimal("10"))
 
+    def test_preview_sales_authority_alone_controls_lock_readiness_and_compacts_metadata(self):
+        class CanonicalBalance:
+            def __init__(self, balance): self.balance = balance
+            def build(self, month, **kwargs): return self.balance
+
+        row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id, opening_point=Decimal("1"), calculated_closing=Decimal("1"),
+            closing_point=Decimal("1"), closing_point_cedis=Decimal("1"), closing_point_sucursales=Decimal("0"),
+            difference_point=Decimal("0"), status="COINCIDE", source_counts=MappingProxyType({"closing_snapshot_rows": 1}),
+        )
+        balance = self._canonical_balance({self.parent.id: row}, issues=("MONTH_SOURCE_INCOMPLETE",))
+        sources = dict(balance.sources)
+        sources["sales"] = MappingProxyType({
+            "authoritative": False, "selected_source": "bridge_history", "selected_row_job_ids": tuple(range(30)),
+            "recipe_scope_totals": {str(index): index for index in range(30)},
+        })
+        balance = MonthlyPointBalance(
+            month_start=balance.month_start, month_end=balance.month_end, rows=balance.rows, issues=balance.issues,
+            sources=MappingProxyType(sources), effective_snapshot_dates=balance.effective_snapshot_dates,
+            source_counts=balance.source_counts,
+        )
+        preview = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")
+        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", preview["metadata"]["validation"]["blocking_issues"])
+        compact = preview["metadata"]["sales_meta"]
+        self.assertEqual(compact["selected_row_job_ids"]["count"], 30)
+        self.assertEqual(compact["recipe_scope_totals"]["count"], 30)
+
     def test_canonical_point_difference_uses_legacy_storage_sign_and_blocks_source_issue(self):
         class CanonicalBalance:
             def build(self, month, **kwargs):

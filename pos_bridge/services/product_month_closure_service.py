@@ -294,17 +294,27 @@ class ProductMonthClosureService:
 
     def _compact_source_metadata(self, source):
         raw = self._json_compatible(source)
-        compact = {}
-        coverage_keys = ("coverage_keys", "mapped_recipe_keys", "branch_ids", "branch_codes")
-        for key, value in raw.items():
-            if any(token in key for token in coverage_keys) and isinstance(value, list):
-                digest = sha256(repr(value).encode()).hexdigest()[:16]
-                compact[f"{key}_count"] = len(value)
-                compact[f"{key}_hash"] = digest
-                compact[f"{key}_sample"] = value[:5]
-                continue
-            compact[key] = value
-        return compact
+        return {str(key): self._compact_metadata_value(value) for key, value in raw.items()}
+
+    @classmethod
+    def _compact_metadata_value(cls, value, *, sample_limit=5, mapping_limit=12):
+        if isinstance(value, list):
+            if len(value) <= sample_limit:
+                return [cls._compact_metadata_value(item) for item in value]
+            return {
+                "count": len(value),
+                "hash": sha256(repr(value).encode()).hexdigest()[:16],
+                "sample": [cls._compact_metadata_value(item) for item in value[:sample_limit]],
+            }
+        if isinstance(value, dict):
+            if len(value) > mapping_limit:
+                return {
+                    "count": len(value),
+                    "hash": sha256(repr(value).encode()).hexdigest()[:16],
+                    "sample": {str(key): cls._compact_metadata_value(item) for key, item in list(value.items())[:sample_limit]},
+                }
+            return {str(key): cls._compact_metadata_value(item) for key, item in value.items()}
+        return value
 
     @staticmethod
     def _decimal_text(value: Decimal) -> str:
