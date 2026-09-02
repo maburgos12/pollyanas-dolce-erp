@@ -225,6 +225,41 @@ class OfficialSalesBackfillPersistenceTests(TestCase):
         row = PointDailySale.objects.get(branch=branch, sale_date=date(2025, 10, 1))
         self.assertEqual(row.sync_job_id, sync_job.id)
 
+    def test_replace_branch_day_sales_locks_branch_before_resolution_and_orders_products(self):
+        branch = PointBranch.objects.create(external_id="serialized", name="MATRIZ")
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_RUNNING,
+        )
+        service = OfficialSalesBackfillService()
+        resolved: list[str] = []
+        original_lock = PointBranch.objects.select_for_update
+
+        def resolve_after_lock(*, sku, name, category):
+            self.assertTrue(lock_mock.called)
+            resolved.append(sku)
+            return PointProduct.objects.create(
+                external_id=f"serialized-{sku}", sku=sku, name=name, category=category
+            )
+
+        rows = {
+            ("Z", "Producto Z", "Cat"): {**self._aggregated_row().popitem()[1], "sku": "Z", "name": "Producto Z"},
+            ("A", "Producto A", "Cat"): {**self._aggregated_row().popitem()[1], "sku": "A", "name": "Producto A"},
+        }
+        with (
+            patch.object(PointBranch.objects, "select_for_update", wraps=original_lock) as lock_mock,
+            patch.object(service, "_resolve_product", side_effect=resolve_after_lock),
+        ):
+            service._replace_branch_day_sales(
+                branch=branch,
+                sale_date=date(2025, 10, 6),
+                sync_job=sync_job,
+                aggregated_rows=rows,
+            )
+
+        self.assertEqual(resolved, ["A", "Z"])
+        lock_mock.assert_called_once_with()
+
     def test_replace_branch_day_sales_rolls_back_delete_when_resolution_fails(self):
         branch = PointBranch.objects.create(external_id="rollback-delete", name="MATRIZ")
         sale_date = date(2025, 10, 2)

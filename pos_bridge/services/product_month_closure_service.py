@@ -132,21 +132,16 @@ class ProductMonthClosureService:
         refresh_official_sales: bool | None = None,
     ) -> ProductoMonthClosure:
         month_start = self._parse_month(month)
-        existing_closure = ProductoMonthClosure.objects.filter(month_start=month_start).order_by("-id").first()
-        if existing_closure is not None and existing_closure.is_locked:
-            if rebuild:
-                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild.")
-            raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
-
-        plan = self.preview(month=month_start, refresh_official_sales=refresh_official_sales)
-        month_end = plan["month_end"]
-        now = timezone.now()
-        notes = plan["notes"]
-
         with transaction.atomic():
-            closure, _ = ProductoMonthClosure.objects.get_or_create(
+            closure, created = ProductoMonthClosure.objects.get_or_create(
                 month_start=month_start,
-                defaults={"month_end": month_end},
+                defaults={
+                    "month_end": date(
+                        month_start.year,
+                        month_start.month,
+                        monthrange(month_start.year, month_start.month)[1],
+                    )
+                },
             )
             closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
             if closure.is_locked:
@@ -155,6 +150,23 @@ class ProductMonthClosureService:
                         f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
                     )
                 raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
+            if not created and not rebuild:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} ya existe; se requiere rebuild para reemplazarlo."
+                )
+
+            # El cierre mensual es el mutex estable del periodo. Toda lectura de
+            # fuentes ocurre despues de adquirirlo para impedir que un writer
+            # atrasado publique un plan calculado antes que otro writer.
+            plan = self.preview(month=month_start, refresh_official_sales=refresh_official_sales)
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                )
+            month_end = plan["month_end"]
+            now = timezone.now()
+            notes = plan["notes"]
             closure.lines.all().delete()
 
             closure.month_end = month_end
@@ -665,22 +677,8 @@ class ProductMonthClosureService:
     ) -> ProductoMonthClosure:
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
-        existing_closure = ProductoMonthClosure.objects.filter(month_start=month_start).order_by("-id").first()
-        if existing_closure is not None and existing_closure.is_locked:
-            if rebuild:
-                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild.")
-            raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
-
-        line_rows, opening_meta, validation = self._build_bootstrap_seed_rows(seed_rows=seed_rows)
-        notes = self._build_bootstrap_notes(
-            month_start=month_start,
-            source_label=source_label,
-            validation=validation,
-        )
-        now = timezone.now()
-
         with transaction.atomic():
-            closure, _ = ProductoMonthClosure.objects.get_or_create(
+            closure, created = ProductoMonthClosure.objects.get_or_create(
                 month_start=month_start,
                 defaults={"month_end": month_end},
             )
@@ -691,6 +689,23 @@ class ProductMonthClosureService:
                         f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
                     )
                 raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
+            if not created and not rebuild:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} ya existe; se requiere rebuild para reemplazarlo."
+                )
+
+            line_rows, opening_meta, validation = self._build_bootstrap_seed_rows(seed_rows=seed_rows)
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                )
+            notes = self._build_bootstrap_notes(
+                month_start=month_start,
+                source_label=source_label,
+                validation=validation,
+            )
+            now = timezone.now()
             closure.lines.all().delete()
             closure.month_end = month_end
             closure.status = ProductoMonthClosure.STATUS_DRAFT

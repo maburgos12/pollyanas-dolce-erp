@@ -257,3 +257,33 @@ class PosBridgeInternalApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_product_closures_existing_month_requires_explicit_rebuild(self):
+        original_line = self.product_closure.lines.get()
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": self.product_closure.month_start.strftime("%Y-%m")},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("rebuild", response.data["detail"])
+        self.assertTrue(ProductoMonthClosureLine.objects.filter(pk=original_line.pk).exists())
+
+    def test_product_closures_production_operator_cannot_request_rebuild(self):
+        operator = get_user_model().objects.create_user(
+            username="product_closure_production",
+            email="product_closure_production@example.com",
+            password="test12345",
+        )
+        production_group, _ = Group.objects.get_or_create(name="PRODUCCION")
+        operator.groups.add(production_group)
+        self.client.force_authenticate(operator)
+
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": self.product_closure.month_start.strftime("%Y-%m"), "rebuild": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

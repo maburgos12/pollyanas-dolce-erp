@@ -1176,6 +1176,55 @@ class ProductMonthClosureServiceTests(TestCase):
         with self.assertRaisesMessage(ProductMonthClosureError, "bloqueado"):
             self.service.build(month="2025-09", rebuild=True)
 
+    def test_build_rejects_existing_closure_without_explicit_rebuild_and_preserves_it(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            metadata={"sentinel": "preserve"},
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=self.parent,
+            inventario_final_teorico=Decimal("17"),
+        )
+
+        with patch.object(self.service, "preview") as preview:
+            with self.assertRaisesMessage(ProductMonthClosureError, "se requiere rebuild"):
+                self.service.build(month="2025-09")
+
+        preview.assert_not_called()
+        closure.refresh_from_db()
+        line.refresh_from_db()
+        self.assertEqual(closure.metadata, {"sentinel": "preserve"})
+        self.assertEqual(line.inventario_final_teorico, Decimal("17"))
+
+    def test_bootstrap_rejects_existing_closure_without_explicit_rebuild_and_preserves_it(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            metadata={"sentinel": "preserve-bootstrap"},
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=self.parent,
+            inventario_final_teorico=Decimal("9"),
+        )
+
+        with patch.object(self.service, "_build_bootstrap_seed_rows") as projector:
+            with self.assertRaisesMessage(ProductMonthClosureError, "se requiere rebuild"):
+                self.service.build_bootstrap_seed(
+                    month="2026-06",
+                    seed_rows=[],
+                    source_label="histórico",
+                )
+
+        projector.assert_not_called()
+        closure.refresh_from_db()
+        self.assertEqual(closure.metadata, {"sentinel": "preserve-bootstrap"})
+        self.assertEqual(closure.lines.get().inventario_final_teorico, Decimal("9"))
+
     def test_build_revalidates_locked_closure_after_preview_and_never_unlocks_it(self):
         closure = ProductoMonthClosure.objects.create(
             month_start=date(2025, 9, 1),
@@ -1206,9 +1255,12 @@ class ProductMonthClosureServiceTests(TestCase):
                 self.service.build(month="2025-09", rebuild=True)
 
         closure.refresh_from_db()
-        self.assertTrue(closure.is_locked)
-        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_LOCKED)
-        self.assertEqual(closure.metadata, {"sentinel": "concurrent-lock"})
+        # El callback corre dentro de la misma transacción serializada; al
+        # detectar el cambio, todo el intento (incluido ese update simulado)
+        # se revierte y el cierre previo queda intacto.
+        self.assertFalse(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_BUILT)
+        self.assertEqual(closure.metadata, {"sentinel": "before-lock"})
         self.assertEqual(closure.updated_at, original_updated_at)
 
     def test_lock_reloads_and_rejects_a_stale_instance_locked_by_another_request(self):
@@ -1269,9 +1321,9 @@ class ProductMonthClosureServiceTests(TestCase):
                 )
 
         closure.refresh_from_db()
-        self.assertTrue(closure.is_locked)
-        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_LOCKED)
-        self.assertEqual(closure.metadata, {"sentinel": "concurrent-lock"})
+        self.assertFalse(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_BUILT)
+        self.assertEqual(closure.metadata, {"sentinel": "before-lock"})
         self.assertEqual(closure.updated_at, original_updated_at)
 
     def test_historical_excel_import_revalidates_concurrent_lock_before_rebuild(self):

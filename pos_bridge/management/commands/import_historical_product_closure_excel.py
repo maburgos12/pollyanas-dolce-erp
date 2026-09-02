@@ -345,9 +345,12 @@ class Command(BaseCommand):
                 bucket[key] += source_row[key]
 
         matched_rows = list(grouped_rows.values())
-        sales_map, sales_source = _sales_map(month_start, month_end)
-        production_map, production_source = _production_map(month_start, month_end)
-        merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
+        sales_map = production_map = merma_map = merma_cost_map = None
+        sales_source = production_source = merma_source = ""
+        if options.get("dry_run"):
+            sales_map, sales_source = _sales_map(month_start, month_end)
+            production_map, production_source = _production_map(month_start, month_end)
+            merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
 
         payload = {
             "mode": "dry_run" if options.get("dry_run") else "import",
@@ -382,6 +385,17 @@ class Command(BaseCommand):
                 raise CommandError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
             if closure.lines.exists() and not options.get("rebuild"):
                 raise CommandError(f"El cierre {month_start:%Y-%m} ya tiene lineas. Usa --rebuild.")
+            # Las fuentes operativas también forman parte del estado mensual:
+            # leerlas bajo el mismo lock evita publicar un mapa calculado antes
+            # que otro importador del periodo.
+            sales_map, sales_source = _sales_map(month_start, month_end)
+            production_map, production_source = _production_map(month_start, month_end)
+            merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
+            payload["operational_sources"] = {
+                "ventas": sales_source,
+                "produccion": production_source,
+                "merma": merma_source,
+            }
             closure.lines.all().delete()
             closure.month_end = month_end
             closure.status = ProductoMonthClosure.STATUS_BUILT

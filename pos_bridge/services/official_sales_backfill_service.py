@@ -255,10 +255,14 @@ class OfficialSalesBackfillService:
         sync_job: PointSyncJob,
         aggregated_rows: dict[tuple[str, str, str], dict],
     ) -> tuple[int, int]:
+        # PointBranch es la fila estable que serializa el reemplazo oficial. El
+        # lock debe preceder tanto al delete como a la resolución/upsert de
+        # productos para que dos jobs no se intercalen ni choquen en uniques.
+        branch = PointBranch.objects.select_for_update().get(pk=branch.pk)
         deleted, _ = PointDailySale.objects.filter(branch=branch, sale_date=sale_date).delete()
         rows_to_create: list[PointDailySale] = []
 
-        for payload in aggregated_rows.values():
+        for _, payload in sorted(aggregated_rows.items(), key=lambda item: tuple(str(value) for value in item[0])):
             product = self._resolve_product(sku=payload["sku"], name=payload["name"], category=payload["category"])
             raw_payload = {
                 "source": "POINT_OFFICIAL_REPORT",
