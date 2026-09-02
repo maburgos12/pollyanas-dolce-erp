@@ -684,6 +684,13 @@ class ProductMonthClosureService:
                 month_start=month_start,
                 defaults={"month_end": month_end},
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                if rebuild:
+                    raise ProductMonthClosureError(
+                        f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                    )
+                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
             closure.lines.all().delete()
             closure.month_end = month_end
             closure.status = ProductoMonthClosure.STATUS_DRAFT
@@ -711,7 +718,6 @@ class ProductMonthClosureService:
                 "recipe_count": len(line_rows),
                 "rebuild": bool(rebuild),
             }
-            closure.is_locked = False
             closure.save()
 
             for row in line_rows:
@@ -744,8 +750,7 @@ class ProductMonthClosureService:
                 )
 
             closure.status = ProductoMonthClosure.STATUS_BUILT
-            closure.is_locked = False
-            closure.save(update_fields=["status", "is_locked", "updated_at"])
+            closure.save(update_fields=["status", "updated_at"])
 
         return closure
 

@@ -377,6 +377,7 @@ class Command(BaseCommand):
                     "opening_source": ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
                 },
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
             if closure.is_locked:
                 raise CommandError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
             if closure.lines.exists() and not options.get("rebuild"):

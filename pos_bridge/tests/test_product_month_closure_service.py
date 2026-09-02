@@ -9,6 +9,7 @@ from types import MappingProxyType
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.db import connection
 from django.test.utils import CaptureQueriesContext, override_settings
@@ -1235,6 +1236,107 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertTrue(stale.is_locked)
         self.assertEqual(stale.status, ProductoMonthClosure.STATUS_LOCKED)
         self.assertEqual(stale.metadata, {"sentinel": "concurrent-lock"})
+
+    def test_bootstrap_seed_revalidates_concurrent_lock_before_rebuild(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            is_locked=False,
+            metadata={"sentinel": "before-lock"},
+        )
+        original_updated_at = closure.updated_at
+
+        def seed_rows_with_concurrent_lock(**kwargs):
+            ProductoMonthClosure.objects.filter(pk=closure.pk).update(
+                status=ProductoMonthClosure.STATUS_LOCKED,
+                is_locked=True,
+                metadata={"sentinel": "concurrent-lock"},
+            )
+            return [], {}, {}
+
+        with patch.object(
+            self.service,
+            "_build_bootstrap_seed_rows",
+            side_effect=seed_rows_with_concurrent_lock,
+        ):
+            with self.assertRaisesMessage(ProductMonthClosureError, "bloqueado"):
+                self.service.build_bootstrap_seed(
+                    month="2026-06",
+                    seed_rows=[],
+                    source_label="cierre histórico",
+                    rebuild=True,
+                )
+
+        closure.refresh_from_db()
+        self.assertTrue(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_LOCKED)
+        self.assertEqual(closure.metadata, {"sentinel": "concurrent-lock"})
+        self.assertEqual(closure.updated_at, original_updated_at)
+
+    def test_historical_excel_import_revalidates_concurrent_lock_before_rebuild(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 7, 1),
+            month_end=date(2026, 7, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            is_locked=False,
+            metadata={"sentinel": "before-lock"},
+        )
+        original_updated_at = closure.updated_at
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "JULIO 26"
+        worksheet["B1"] = self.parent.nombre
+        worksheet["D1"] = 5
+        worksheet["I1"] = 1
+        worksheet["J1"] = 2
+        worksheet["K1"] = 3
+
+        with NamedTemporaryFile(suffix=".xlsx") as tmp:
+            workbook.save(tmp.name)
+            concurrently_locked = ProductoMonthClosure.objects.get(pk=closure.pk)
+            concurrently_locked.status = ProductoMonthClosure.STATUS_LOCKED
+            concurrently_locked.is_locked = True
+            concurrently_locked.metadata = {"sentinel": "concurrent-lock"}
+
+            with (
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._resolve_receta",
+                    return_value=self.parent,
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._sales_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._production_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._merma_maps",
+                    return_value=({}, {}, "test"),
+                ),
+                patch.object(
+                    ProductoMonthClosure.objects,
+                    "select_for_update",
+                ) as select_for_update,
+            ):
+                select_for_update.return_value.get.return_value = concurrently_locked
+                with self.assertRaisesMessage(CommandError, "bloqueado"):
+                    call_command(
+                        "import_historical_product_closure_excel",
+                        tmp.name,
+                        sheet="JULIO 26",
+                        month="2026-07",
+                        rebuild=True,
+                    )
+                select_for_update.assert_called_once_with()
+
+        closure.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_BUILT)
+        self.assertEqual(closure.metadata, {"sentinel": "before-lock"})
+        self.assertEqual(closure.updated_at, original_updated_at)
 
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(
