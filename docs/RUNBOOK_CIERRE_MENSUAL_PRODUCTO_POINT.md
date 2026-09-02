@@ -159,7 +159,7 @@ El bloqueo deja rastro en `metadata.lock_event` con:
 - nota
 
 La revalidación final usa un mutex transaccional por mes y vuelve a calcular la
-huella inmediatamente antes de sellar. El backfill oficial de ventas, producción,
+huella inmediatamente antes de sellar. El backfill oficial y legacy de ventas, producción,
 merma, conversiones y snapshots de inventario adquieren el mismo advisory mutex
 mensual, en orden cronológico cuando abarcan varios meses. Cada timestamp se
 asigna al día de negocio de Mazatlán. Un snapshot coordina los meses cuyo último

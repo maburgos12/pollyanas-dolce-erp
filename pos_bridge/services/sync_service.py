@@ -259,6 +259,7 @@ class PointSyncService:
 
     @transaction.atomic
     def persist_daily_sales(self, sync_job: PointSyncJob, sales_result) -> dict:
+        lock_product_month_sources([sales_result.sale_date])
         branch = self._upsert_branch(sales_result.branch)
         created_sales = 0
         updated_sales = 0

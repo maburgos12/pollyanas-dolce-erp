@@ -12,6 +12,7 @@ from pos_bridge.services.product_month_source_mutex import (
     snapshot_affected_months,
 )
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
+from pos_bridge.services.sync_service import PointSyncService
 
 
 class ProductMonthSourceDateTests(SimpleTestCase):
@@ -32,6 +33,47 @@ class ProductMonthSourceDateTests(SimpleTestCase):
 
 
 class ProductMonthSourceMutexBoundaryTests(TransactionTestCase):
+    def test_legacy_sales_writer_waits_for_its_local_month_not_utc_month(self):
+        for locked_month, should_wait in ((date(2026, 8, 1), True), (date(2026, 9, 1), False)):
+            with self.subTest(locked_month=locked_month):
+                finished = Event()
+                errors = []
+
+                def write():
+                    close_old_connections()
+                    try:
+                        result = SimpleNamespace(
+                            sale_date=datetime(2026, 9, 1, 1, tzinfo=datetime_timezone.utc),
+                            branch={
+                                "external_id": f"legacy-mutex-{locked_month.month}",
+                                "name": "Legacy mutex",
+                                "status": "ACTIVE",
+                                "metadata": {},
+                            },
+                            sales_rows=[],
+                        )
+                        PointSyncService().persist_daily_sales(SimpleNamespace(), result)
+                        finished.set()
+                    except Exception as exc:
+                        errors.append(exc)
+                    finally:
+                        close_old_connections()
+
+                writer = Thread(target=write)
+                try:
+                    with transaction.atomic():
+                        lock_product_month_sources([locked_month])
+                        writer.start()
+                        if should_wait:
+                            self.assertFalse(finished.wait(0.2))
+                        else:
+                            self.assertTrue(finished.wait(3), errors)
+                finally:
+                    writer.join(3)
+                self.assertFalse(writer.is_alive())
+                self.assertEqual(errors, [])
+                self.assertTrue(finished.is_set())
+
     def test_waste_writer_uses_local_august_for_utc_september_timestamp(self):
         acquired_months = []
         service = PointMovementSyncService()
