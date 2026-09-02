@@ -11,7 +11,17 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.utils import timezone
 
-from pos_bridge.models import PointDailySale, PointInventorySnapshot, PointProductionLine, PointSyncJob, PointWasteLine
+from core.models import Sucursal
+from pos_bridge.models import (
+    PointBranch,
+    PointConversionLine,
+    PointDailySale,
+    PointInventorySnapshot,
+    PointProduct,
+    PointProductionLine,
+    PointSyncJob,
+    PointWasteLine,
+)
 from pos_bridge.services.monthly_product_balance_service import (
     ORIGIN_CONFIGURED_EQUIVALENCE,
     ORIGIN_POINT,
@@ -103,6 +113,9 @@ class ProductMonthClosureService:
         ("conversion_meta", "conversiones Point"),
         ("closing_inventory_meta", "inventario final Point"),
     )
+    CANONICAL_FINGERPRINT_METADATA_KEYS = tuple(
+        key for key, _label in CANONICAL_LOCK_REQUIRED_SOURCES
+    ) + ("balance",)
 
     def __init__(
         self,
@@ -306,6 +319,31 @@ class ProductMonthClosureService:
             f"Cierre {month_start:%Y-%m} proyectado del contrato canónico POINT_PRODUCT_BALANCE_V1. "
             "Las fuentes y advertencias se conservan en metadata."
         )
+        metadata = {
+            "opening_meta": opening_meta,
+            "sales_meta": sales_meta,
+            "production_meta": movement_meta["production"],
+            "waste_meta": movement_meta["waste"],
+            "conversion_meta": movement_meta["conversions"],
+            "fact_meta": {"source": "MonthlyPointProductBalanceService", "status": "canonical"},
+            "closing_inventory_meta": closing_meta,
+            "recipe_count": len(line_rows),
+            "validation": validation,
+            "balance": self._json_compatible(
+                {
+                    "contract": "POINT_PRODUCT_BALANCE_V1",
+                    "issues": balance.issues,
+                    "warnings": balance.warnings,
+                    "source_names": sorted(balance.sources),
+                    "effective_snapshot_dates": balance.effective_snapshot_dates,
+                    "source_counts": balance.source_counts,
+                }
+            ),
+        }
+        metadata["source_fingerprint"] = self._build_source_fingerprint(
+            balance=balance,
+            persisted_metadata=metadata,
+        )
         return {
             "month_start": month_start,
             "month_end": balance.month_end,
@@ -313,29 +351,116 @@ class ProductMonthClosureService:
             "opening_reference_date": opening_reference_date,
             "notes": notes,
             "line_rows": line_rows,
-            "metadata": {
-                "opening_meta": opening_meta,
-                "sales_meta": sales_meta,
-                "production_meta": movement_meta["production"],
-                "waste_meta": movement_meta["waste"],
-                "conversion_meta": movement_meta["conversions"],
-                "fact_meta": {"source": "MonthlyPointProductBalanceService", "status": "canonical"},
-                "closing_inventory_meta": closing_meta,
-                "recipe_count": len(line_rows),
-                "validation": validation,
-                "balance": self._json_compatible(
-                    {
-                        "contract": "POINT_PRODUCT_BALANCE_V1",
-                        "issues": balance.issues,
-                        "warnings": balance.warnings,
-                        "source_names": sorted(balance.sources),
-                        "effective_snapshot_dates": balance.effective_snapshot_dates,
-                        "source_counts": balance.source_counts,
-                    }
-                ),
-            },
+            "metadata": metadata,
             "totals": totals,
         }
+
+    def _build_source_fingerprint(self, *, balance, persisted_metadata: dict[str, object]) -> dict[str, str]:
+        payload = {
+            "contract": "POINT_PRODUCT_BALANCE_V1",
+            "month_start": balance.month_start,
+            "month_end": balance.month_end,
+            "sources": {
+                source_name: balance.sources.get(source_name) or {}
+                for source_name in (
+                    "opening_snapshot",
+                    "closing_snapshot",
+                    "sales",
+                    "production",
+                    "waste",
+                    "conversions",
+                )
+            },
+            "effective_snapshot_dates": balance.effective_snapshot_dates,
+            "source_counts": balance.source_counts,
+            "resolved_rows": {
+                receta_id: {
+                    "opening_point": row.opening_point,
+                    "production": row.production,
+                    "sales": row.sales,
+                    "waste": row.waste,
+                    "conversion_in": row.conversion_in,
+                    "conversion_out": row.conversion_out,
+                    "calculated_closing": row.calculated_closing,
+                    "closing_point": row.closing_point,
+                    "closing_point_cedis": row.closing_point_cedis,
+                    "closing_point_sucursales": row.closing_point_sucursales,
+                    "difference_point": row.difference_point,
+                    "status": row.status,
+                    "conversion_origin": row.conversion_origin,
+                    "conversion_origins": row.conversion_origins,
+                    "issues": row.issues,
+                    "source_counts": row.source_counts,
+                }
+                for receta_id, row in sorted(balance.rows.items())
+            },
+            "unresolved_movements": [
+                {
+                    "source": row.source,
+                    "movement_id": row.movement_id,
+                    "item_code": row.item_code,
+                    "item_name": row.item_name,
+                    "quantity": row.quantity,
+                    "issue": row.issue,
+                    "source_hash": row.source_hash,
+                    "branch_external_id": row.branch_external_id,
+                    "movement_date": row.movement_date,
+                }
+                for row in balance.unresolved_movements
+            ],
+            "unresolved_conversions": [
+                {
+                    "movement_external_id": row.movement_external_id,
+                    "source_hash": row.source_hash,
+                    "item_code": row.item_code,
+                    "item_name": row.item_name,
+                    "quantity": row.quantity,
+                    "issue": row.issue,
+                }
+                for row in balance.unresolved_conversions
+            ],
+        }
+        return {
+            "algorithm": "sha256",
+            "digest": self._metadata_digest(payload),
+            "metadata_digest": self._canonical_source_metadata_digest(persisted_metadata),
+        }
+
+    @classmethod
+    def _canonical_source_metadata_digest(cls, metadata: dict[str, object]) -> str:
+        return cls._metadata_digest(
+            {
+                key: metadata.get(key) or {}
+                for key in cls.CANONICAL_FINGERPRINT_METADATA_KEYS
+            }
+        )
+
+    @staticmethod
+    def _lock_canonical_source_tables() -> None:
+        if connection.vendor != "postgresql":
+            raise ProductMonthClosureError("El bloqueo canónico de fuentes requiere PostgreSQL.")
+        source_models = (
+            PointSyncJob,
+            PointInventorySnapshot,
+            PointDailySale,
+            PointProductionLine,
+            PointWasteLine,
+            PointConversionLine,
+            VentaHistorica,
+            FactProduccionDiaria,
+            PointBranch,
+            PointProduct,
+            Sucursal,
+            Receta,
+            RecetaEquivalencia,
+            RecetaPresentacionDerivada,
+        )
+        quoted_tables = ", ".join(
+            connection.ops.quote_name(model._meta.db_table)
+            for model in source_models
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(f"LOCK TABLE {quoted_tables} IN SHARE MODE")
 
     @staticmethod
     def _json_compatible(value):
@@ -833,6 +958,35 @@ class ProductMonthClosureService:
                 raise ProductMonthClosureError(
                     f"El cierre {closure.month_start:%Y-%m} tiene una fuente requerida ausente o sin autoridad: "
                     f"{invalid_sources[0]}."
+                )
+            stored_fingerprint = dict(metadata.get("source_fingerprint") or {})
+            if (
+                stored_fingerprint.get("algorithm") != "sha256"
+                or not stored_fingerprint.get("digest")
+                or not stored_fingerprint.get("metadata_digest")
+            ):
+                raise ProductMonthClosureError(
+                    f"El cierre {closure.month_start:%Y-%m} no tiene huella de fuentes Point; "
+                    "reconstruye el cierre antes de bloquearlo."
+                )
+            persisted_metadata_digest = self._canonical_source_metadata_digest(metadata)
+            if stored_fingerprint["metadata_digest"] != persisted_metadata_digest:
+                raise ProductMonthClosureError(
+                    "La metadata de fuentes del cierre cambió; reconstruye el cierre antes de bloquearlo."
+                )
+
+            # El lock de tablas espera a escritores ya iniciados y evita que una
+            # venta, merma, producción, conversión, snapshot o job cambie entre
+            # la relectura y el commit del bloqueo institucional.
+            self._lock_canonical_source_tables()
+            current_plan = self.preview(
+                month=closure.month_start,
+                refresh_official_sales=False,
+            )
+            current_fingerprint = dict(current_plan["metadata"].get("source_fingerprint") or {})
+            if current_fingerprint.get("digest") != stored_fingerprint["digest"]:
+                raise ProductMonthClosureError(
+                    "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo."
                 )
 
         lock_time = timezone.now()

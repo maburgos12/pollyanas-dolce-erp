@@ -1934,6 +1934,46 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(opening["sync_job_verified"])
         self.assertTrue(opening["authoritative"])
 
+    def test_snapshot_mixed_effective_dates_is_non_authoritative_for_opening_and_closing(self):
+        second_sucursal = Sucursal.objects.create(
+            codigo="LEDGER-MIXED-DATE",
+            nombre="Sucursal corte mixto",
+        )
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-MIXED-DATE",
+            name="Sucursal corte mixto",
+            erp_branch=second_sucursal,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 23, 50))
+        self._snapshot(self.parent_product, "9", datetime(2026, 7, 31, 23, 50))
+        for stock, captured_at in (
+            ("8", datetime(2026, 6, 29, 23, 50)),
+            ("7", datetime(2026, 7, 30, 23, 50)),
+        ):
+            PointInventorySnapshot.objects.create(
+                branch=second_branch,
+                product=self.parent_product,
+                stock=Decimal(stock),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=self.sync_job,
+            )
+        self._seal_inventory_job()
+
+        balance = self._service()[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        closing = balance.sources["closing_snapshot"]
+        self.assertEqual(opening["selected_dates"], (date(2026, 6, 29), date(2026, 6, 30)))
+        self.assertEqual(closing["selected_dates"], (date(2026, 7, 30), date(2026, 7, 31)))
+        self.assertIsNone(opening["effective_date"])
+        self.assertIsNone(closing["effective_date"])
+        self.assertFalse(opening["authoritative"])
+        self.assertFalse(closing["authoritative"])
+        self.assertIn("SNAPSHOT_EFFECTIVE_DATE_MIXED", opening["snapshot_issues"])
+        self.assertIn("SNAPSHOT_EFFECTIVE_DATE_MIXED", closing["snapshot_issues"])
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
     def test_equal_snapshot_subsets_do_not_prove_full_catalog_coverage(self):
         missing_branch = PointBranch.objects.create(
             external_id="LEDGER-NOT-CAPTURED",

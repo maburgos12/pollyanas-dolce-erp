@@ -5435,6 +5435,33 @@ def _product_closure_opening_labels(closure: ProductoMonthClosure | None) -> tup
     return "Saldo inicial", "Fuente inicial"
 
 
+def _product_closure_inventory_labels(
+    closure: ProductoMonthClosure | None,
+    *,
+    lines: list[ProductoMonthClosureLine] | None = None,
+) -> dict[str, object]:
+    metadata = dict(closure.metadata or {}) if closure else {}
+    is_historical = bool(metadata.get("historical_excel_import")) or any(
+        (line.metadata or {}).get("historical_excel")
+        for line in (lines or [])
+    )
+    if is_historical:
+        return {
+            "is_historical": True,
+            "closing": "Inventario histórico físico",
+            "difference": "Diferencia histórica",
+            "cedis": "Conteo histórico CEDIS",
+            "sucursales": "Conteo histórico sucursales",
+        }
+    return {
+        "is_historical": False,
+        "closing": "Fin. Point",
+        "difference": "Dif. Point",
+        "cedis": "Point CEDIS",
+        "sucursales": "Point sucursales",
+    }
+
+
 def _product_closure_point_status_label(status: str) -> str:
     return {
         "COINCIDE": "Coincide",
@@ -5503,8 +5530,15 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         .first()
     )
     lines = list(closure.lines.select_related("receta_padre").all()) if closure else []
-    export_rows = [_product_closure_export_row(line) for line in lines]
     opening_balance_label, opening_source_label = _product_closure_opening_labels(closure)
+    inventory_labels = _product_closure_inventory_labels(closure, lines=lines)
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in lines
+    ]
     closure_display_rows = []
     for line, export_row in zip(lines, export_rows):
         status = str(export_row["point_status"])
@@ -5512,9 +5546,23 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             {
                 "line": line,
                 **export_row,
-                "point_status_label": _product_closure_point_status_label(status),
+                "point_status_label": export_row.get("status_label") or _product_closure_point_status_label(status),
                 "point_status_tone": (
-                    "success" if status == "COINCIDE" else "warning" if status in {"POINT_MAYOR", "POINT_MENOR"} else "danger"
+                    "success"
+                    if status
+                    in {
+                        "COINCIDE",
+                        ProductoMonthClosureLine.AUDIT_STATUS_CUADRA,
+                        ProductoMonthClosureLine.AUDIT_STATUS_CUADRA_CON_MERMA,
+                    }
+                    else "warning"
+                    if status
+                    in {
+                        "POINT_MAYOR",
+                        "POINT_MENOR",
+                        ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+                    }
+                    else "danger"
                 ),
             }
         )
@@ -5557,7 +5605,13 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     recent_rows: list[dict[str, object]] = []
     for recent in recent_closures:
         recent_lines = list(recent.lines.all())
-        recent_export_rows = [_product_closure_export_row(line) for line in recent_lines]
+        recent_is_historical = bool(
+            _product_closure_inventory_labels(recent, lines=recent_lines)["is_historical"]
+        )
+        recent_export_rows = [
+            _product_closure_export_row(line, historical_excel_import=recent_is_historical)
+            for line in recent_lines
+        ]
         recent_rows.append(
             {
                 "month_label": recent.month_start.strftime("%b %Y").capitalize(),
@@ -5584,7 +5638,16 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     lock_event = closure_metadata.get("lock_event", {})
     fact_status = str(fact_meta.get("status") or "").strip()
     sales_mode = str(sales_meta.get("mode") or "").strip()
-    if fact_status in {"existing", "generated"}:
+    historical_excel_meta = dict(closure_metadata.get("historical_excel_import") or {})
+    if inventory_labels["is_historical"]:
+        movement_source_label = "Importación histórica de Excel"
+        source_file = str(historical_excel_meta.get("source_file") or "archivo histórico")
+        source_sheet = str(historical_excel_meta.get("source_sheet") or "").strip()
+        movement_source_detail = f"Conteo físico conservado desde {source_file}"
+        if source_sheet:
+            movement_source_detail += f", hoja {source_sheet}"
+        movement_source_detail += "; no corresponde a un inventario Point."
+    elif fact_status in {"existing", "generated"}:
         movement_source_label = "FactProduccionDiaria"
         movement_source_detail = (
             "Facts ya publicados en PostgreSQL."
@@ -5622,6 +5685,27 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             lock_guard_errors.append("La validación del cierre indica que el mes no está listo para bloquearse.")
         for guard in movement_authority_guards:
             lock_guard_errors.extend(guard["messages"])
+        is_canonical_closure = (
+            str((closure_metadata.get("balance") or {}).get("contract") or "")
+            == "POINT_PRODUCT_BALANCE_V1"
+            or any(
+                str((line.metadata or {}).get("balance_contract") or "")
+                == "POINT_PRODUCT_BALANCE_V1"
+                for line in lines
+            )
+        )
+        if is_canonical_closure:
+            fingerprint = dict(closure_metadata.get("source_fingerprint") or {})
+            if not fingerprint.get("digest") or not fingerprint.get("metadata_digest"):
+                lock_guard_errors.append(
+                    "El cierre no tiene huella de fuentes Point; las fuentes deben reconstruirse antes de bloquear."
+                )
+            elif fingerprint["metadata_digest"] != ProductMonthClosureService._canonical_source_metadata_digest(
+                closure_metadata
+            ):
+                lock_guard_errors.append(
+                    "La metadata de fuentes cambió; reconstruir el cierre antes de bloquear."
+                )
     lock_guard_errors = list(dict.fromkeys(lock_guard_errors))
 
     exception_rows: list[dict[str, str]] = []
@@ -5693,6 +5777,11 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "closure_display_rows": closure_display_rows,
         "opening_balance_label": opening_balance_label,
         "opening_source_label": opening_source_label,
+        "is_historical_inventory": inventory_labels["is_historical"],
+        "inventory_balance_label": inventory_labels["closing"],
+        "inventory_difference_label": inventory_labels["difference"],
+        "inventory_cedis_label": inventory_labels["cedis"],
+        "inventory_sucursales_label": inventory_labels["sucursales"],
         "closure_status_tone": _product_closure_status_tone(closure.status) if closure else "warning",
         "total_opening": total_opening,
         "total_production": total_production,
@@ -5738,7 +5827,11 @@ def _closure_metadata_values(value: object) -> tuple[str, ...]:
     return (str(value),)
 
 
-def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, object]:
+def _product_closure_export_row(
+    line: ProductoMonthClosureLine,
+    *,
+    historical_excel_import: bool = False,
+) -> dict[str, object]:
     """Project persisted closure fields into the public Point balance contract.
 
     The database keeps the legacy difference sign (calculated - Point) for
@@ -5749,6 +5842,7 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     metadata = dict(line.metadata or {})
     issues = {str(issue) for issue in metadata.get("issues") or []}
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
+    is_historical_excel = bool(historical_excel_import or metadata.get("historical_excel"))
 
     calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
     sales_missing = is_canonical and (
@@ -5762,6 +5856,12 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     raw_point_difference = metadata.get("point_difference") if is_canonical else None
     if is_canonical:
         point_difference = _decimal_export_value(raw_point_difference)
+    elif is_historical_excel:
+        if line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
+            point_difference = None
+            closing_missing = True
+        else:
+            point_difference = Decimal(str(line.diferencia_teorico_vs_point))
     elif line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
         point_difference = None
         closing_missing = True
@@ -5793,9 +5893,17 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     )
     calculated_closing = None if calculated_missing else Decimal(str(line.inventario_final_teorico))
     closing_point = None if closing_missing else Decimal(str(line.inventario_final_point_total))
-    point_status = str(metadata.get("point_status") or "") if is_canonical else ""
+    point_status = (
+        str(metadata.get("point_status") or "")
+        if is_canonical
+        else line.estado_auditoria
+        if is_historical_excel
+        else ""
+    )
     legacy_review = line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO
-    if issues or line.has_catalog_issue or legacy_review:
+    if is_historical_excel:
+        status_label = line.get_estado_auditoria_display()
+    elif issues or line.has_catalog_issue or legacy_review:
         point_status = "REVISAR_FUENTE"
     elif point_status not in _POINT_EXPORT_STATUSES:
         if point_difference is None:
@@ -5806,6 +5914,8 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
             point_status = "POINT_MAYOR"
         else:
             point_status = "POINT_MENOR"
+    if not is_historical_excel:
+        status_label = _product_closure_point_status_label(point_status)
 
     return {
         "opening_point": None if opening_missing else Decimal(str(line.inventario_inicial_teorico)),
@@ -5829,6 +5939,8 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
         "closing_point": closing_point,
         "point_difference": point_difference,
         "point_status": point_status,
+        "status_label": status_label,
+        "is_historical_inventory": is_historical_excel,
     }
 
 
@@ -5860,7 +5972,17 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="cierre_producto_{context["selected_month"]}.csv"'
     writer = csv.writer(response)
-    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    inventory_labels = _product_closure_inventory_labels(
+        context.get("closure"),
+        lines=list(context.get("closure_lines") or []),
+    )
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in context.get("closure_lines") or []
+    ]
     opening_total = _sum_available_export_values(export_rows, "opening_point")
     writer.writerow(["Mes", context["selected_month"]])
     writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
@@ -5876,10 +5998,10 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
     difference_total = _sum_available_export_values(export_rows, "point_difference")
     writer.writerow(["Saldo calculado", _closure_export_display(calculated_total)])
-    writer.writerow(["Inventario Point CEDIS", _closure_export_display(closing_cedis_total)])
-    writer.writerow(["Inventario Point sucursales", _closure_export_display(closing_sucursales_total)])
-    writer.writerow(["Fin. Point", _closure_export_display(closing_total)])
-    writer.writerow(["Dif. Point", _closure_export_display(difference_total)])
+    writer.writerow([inventory_labels["cedis"], _closure_export_display(closing_cedis_total)])
+    writer.writerow([inventory_labels["sucursales"], _closure_export_display(closing_sucursales_total)])
+    writer.writerow([inventory_labels["closing"], _closure_export_display(closing_total)])
+    writer.writerow([inventory_labels["difference"], _closure_export_display(difference_total)])
     writer.writerow([])
     writer.writerow(
         [
@@ -5895,10 +6017,10 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             "Origen conversión",
             "Proyección",
             "Saldo calculado",
-            "Point CEDIS",
-            "Point sucursales",
-            "Fin. Point",
-            "Dif. Point",
+            inventory_labels["cedis"],
+            inventory_labels["sucursales"],
+            inventory_labels["closing"],
+            inventory_labels["difference"],
             "Estado",
             "Catalog issue",
             "Catalog issue note",
@@ -5923,7 +6045,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 _closure_export_display(export_row["closing_point_sucursales"]),
                 _closure_export_display(export_row["closing_point"]),
                 _closure_export_display(export_row["point_difference"]),
-                _product_closure_point_status_label(str(export_row["point_status"])),
+                export_row["status_label"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5935,7 +6057,17 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     wb = Workbook()
     summary_ws = wb.active
     summary_ws.title = "Resumen"
-    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    inventory_labels = _product_closure_inventory_labels(
+        context.get("closure"),
+        lines=list(context.get("closure_lines") or []),
+    )
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in context.get("closure_lines") or []
+    ]
     opening_total = _sum_available_export_values(export_rows, "opening_point")
     summary_ws.append(["Mes", context["selected_month"]])
     summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
@@ -5951,10 +6083,10 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
     difference_total = _sum_available_export_values(export_rows, "point_difference")
     summary_ws.append(["Saldo calculado", _closure_export_cell(calculated_total)])
-    summary_ws.append(["Inventario Point CEDIS", _closure_export_cell(closing_cedis_total)])
-    summary_ws.append(["Inventario Point sucursales", _closure_export_cell(closing_sucursales_total)])
-    summary_ws.append(["Fin. Point", _closure_export_cell(closing_total)])
-    summary_ws.append(["Dif. Point", _closure_export_cell(difference_total)])
+    summary_ws.append([inventory_labels["cedis"], _closure_export_cell(closing_cedis_total)])
+    summary_ws.append([inventory_labels["sucursales"], _closure_export_cell(closing_sucursales_total)])
+    summary_ws.append([inventory_labels["closing"], _closure_export_cell(closing_total)])
+    summary_ws.append([inventory_labels["difference"], _closure_export_cell(difference_total)])
 
     detail_ws = wb.create_sheet("Detalle")
     detail_ws.append(
@@ -5971,10 +6103,10 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             "Origen conversión",
             "Proyección",
             "Saldo calculado",
-            "Point CEDIS",
-            "Point sucursales",
-            "Fin. Point",
-            "Dif. Point",
+            inventory_labels["cedis"],
+            inventory_labels["sucursales"],
+            inventory_labels["closing"],
+            inventory_labels["difference"],
             "Estado",
             "Catalog issue",
             "Catalog issue note",
@@ -5999,7 +6131,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 _closure_export_cell(export_row["closing_point_sucursales"]),
                 _closure_export_cell(export_row["closing_point"]),
                 _closure_export_cell(export_row["point_difference"]),
-                _product_closure_point_status_label(str(export_row["point_status"])),
+                export_row["status_label"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]

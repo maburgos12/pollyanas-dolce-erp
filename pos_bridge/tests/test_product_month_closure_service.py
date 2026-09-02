@@ -94,6 +94,84 @@ class ProductMonthClosureServiceTests(TestCase):
             source_counts=MappingProxyType({"opening_snapshot_rows": 2, "closing_snapshot_rows": 2}),
         )
 
+    def _lockable_fingerprint_balance(self, *, sales_job_id=101):
+        source = lambda **extra: MappingProxyType(
+            {
+                "source_present": True,
+                "authoritative": True,
+                **extra,
+            }
+        )
+        return MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType(
+                {
+                    self.parent.id: MonthlyPointBalanceRow(
+                        receta_id=self.parent.id,
+                        opening_point=Decimal("10"),
+                        production=Decimal("2"),
+                        sales=Decimal("1"),
+                        waste=Decimal("0"),
+                        conversion_in=Decimal("0"),
+                        conversion_out=Decimal("0"),
+                        calculated_closing=Decimal("11"),
+                        closing_point=Decimal("11"),
+                        closing_point_cedis=Decimal("6"),
+                        closing_point_sucursales=Decimal("5"),
+                        difference_point=Decimal("0"),
+                        status="COINCIDE",
+                        source_counts=MappingProxyType(
+                            {
+                                "opening_snapshot_rows": 1,
+                                "closing_snapshot_rows": 1,
+                                "production_rows": 1,
+                                "sales_rows": 1,
+                            }
+                        ),
+                    )
+                }
+            ),
+            sources=MappingProxyType(
+                {
+                    "opening_snapshot": source(
+                        selected_dates=(date(2025, 8, 31),),
+                        effective_date=date(2025, 8, 31),
+                        selected_sync_job_ids=(91,),
+                        snapshot_rows=1,
+                    ),
+                    "closing_snapshot": source(
+                        selected_dates=(date(2025, 9, 30),),
+                        effective_date=date(2025, 9, 30),
+                        selected_sync_job_ids=(92,),
+                        snapshot_rows=1,
+                    ),
+                    "sales": source(
+                        selected_source="official_point_daily_sales",
+                        job_id=sales_job_id,
+                        job_status=PointSyncJob.STATUS_SUCCESS,
+                        official_daily_row_count=1,
+                    ),
+                    "production": source(selected_sync_job_ids=(93,), row_count=1),
+                    "waste": source(selected_sync_job_ids=(94,), row_count=0),
+                    "conversions": source(selected_sync_job_ids=(95,), row_count=0),
+                }
+            ),
+            effective_snapshot_dates=MappingProxyType(
+                {"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}
+            ),
+            source_counts=MappingProxyType(
+                {
+                    "opening_snapshot_rows": 1,
+                    "closing_snapshot_rows": 1,
+                    "production_rows": 1,
+                    "sales_rows": 1,
+                    "waste_rows": 0,
+                    "conversion_rows": 0,
+                }
+            ),
+        )
+
     def test_preview_projects_canonical_rows_to_parent_and_preserves_json_metadata(self):
         class CanonicalBalance:
             def __init__(self, balance):
@@ -1390,6 +1468,61 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(closure.metadata, {"sentinel": "before-lock"})
         self.assertEqual(closure.updated_at, original_updated_at)
 
+    def test_historical_excel_import_metadata_names_physical_count_without_claiming_point(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "JUNIO 25"
+        worksheet["B1"] = self.parent.nombre
+        worksheet["D1"] = 5
+        worksheet["I1"] = 1
+        worksheet["J1"] = 2
+        worksheet["K1"] = 3
+
+        with NamedTemporaryFile(suffix=".xlsx") as tmp:
+            workbook.save(tmp.name)
+            with (
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._resolve_receta",
+                    return_value=self.parent,
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._sales_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._production_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._merma_maps",
+                    return_value=({}, {}, "test"),
+                ),
+            ):
+                call_command(
+                    "import_historical_product_closure_excel",
+                    tmp.name,
+                    sheet="JUNIO 25",
+                    month="2025-06",
+                    stdout=StringIO(),
+                )
+
+        closure = ProductoMonthClosure.objects.get(month_start=date(2025, 6, 1))
+        imported_columns = closure.metadata["historical_excel_import"]["imported_columns"]
+        self.assertEqual(
+            imported_columns,
+            [
+                "inventario_inicial_historico",
+                "conteo_historico_cedis",
+                "conteo_historico_sucursales",
+                "inventario_historico_fisico_total",
+            ],
+        )
+        historical = closure.lines.get().metadata["historical_excel"]
+        self.assertEqual(historical["conteo_historico_cedis"], "1")
+        self.assertEqual(historical["conteo_historico_sucursales"], "2")
+        self.assertEqual(historical["inventario_historico_fisico_total"], "3")
+        self.assertFalse(any("point" in key.lower() for key in historical))
+
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(
             month_start=date(2025, 9, 1),
@@ -1411,6 +1544,101 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(locked.status, ProductoMonthClosure.STATUS_LOCKED)
         self.assertIn("lock_event", locked.metadata)
         self.assertEqual(locked.metadata["lock_event"]["line_count"], 1)
+
+    def test_canonical_build_persists_source_fingerprint_and_unchanged_lock_succeeds(self):
+        class MutableBalanceService:
+            def __init__(self, balance):
+                self.balance = balance
+                self.refresh_values = []
+
+            def build(self, month, **kwargs):
+                self.refresh_values.append(kwargs.get("refresh_official_sales"))
+                return self.balance
+
+        balance_service = MutableBalanceService(self._lockable_fingerprint_balance())
+        service = ProductMonthClosureService(balance_service=balance_service)
+
+        closure = service.build(month="2025-09")
+
+        fingerprint = closure.metadata.get("source_fingerprint")
+        self.assertEqual(fingerprint["algorithm"], "sha256")
+        self.assertEqual(len(fingerprint["digest"]), 64)
+        self.assertEqual(len(fingerprint["metadata_digest"]), 64)
+        locked = service.lock(closure=closure, reason="fuentes sin cambios")
+        self.assertTrue(locked.is_locked)
+        self.assertIs(balance_service.refresh_values[-1], False)
+
+    def test_canonical_lock_rejects_when_current_source_fingerprint_changed(self):
+        class MutableBalanceService:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        balance_service = MutableBalanceService(self._lockable_fingerprint_balance(sales_job_id=101))
+        service = ProductMonthClosureService(balance_service=balance_service)
+        closure = service.build(month="2025-09")
+        balance_service.balance = self._lockable_fingerprint_balance(sales_job_id=202)
+
+        with self.assertRaisesMessage(
+            ProductMonthClosureError,
+            "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo.",
+        ):
+            service.lock(closure=closure, reason="fuente nueva")
+
+        closure.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_BUILT)
+
+    def test_canonical_lock_rejects_missing_or_tampered_source_fingerprint(self):
+        class BalanceService:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        service = ProductMonthClosureService(
+            balance_service=BalanceService(self._lockable_fingerprint_balance())
+        )
+        closure = service.build(month="2025-09")
+        metadata = dict(closure.metadata)
+        metadata.pop("source_fingerprint")
+        closure.metadata = metadata
+        closure.save(update_fields=["metadata", "updated_at"])
+
+        with self.assertRaisesMessage(ProductMonthClosureError, "no tiene huella de fuentes"):
+            service.lock(closure=closure)
+
+        closure = service.build(month="2025-09", rebuild=True)
+        metadata = dict(closure.metadata)
+        metadata["sales_meta"] = {**metadata["sales_meta"], "job_id": 999}
+        closure.metadata = metadata
+        closure.save(update_fields=["metadata", "updated_at"])
+        with self.assertRaisesMessage(
+            ProductMonthClosureError,
+            "La metadata de fuentes del cierre cambió; reconstruye el cierre antes de bloquearlo.",
+        ):
+            service.lock(closure=closure)
+
+    def test_historical_excel_closure_keeps_explicit_lock_policy_without_point_fingerprint(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 7, 1),
+            month_end=date(2025, 7, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            metadata={"historical_excel_import": {"scope": "inventory_only"}},
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=self.parent,
+            metadata={"historical_excel": {"scope": "inventory_only"}},
+        )
+
+        locked = self.service.lock(closure=closure, reason="cierre histórico documentado")
+
+        self.assertTrue(locked.is_locked)
+        self.assertNotIn("source_fingerprint", locked.metadata)
 
     def test_lock_rejects_validation_not_ready_without_blocking_issues(self):
         closure = ProductoMonthClosure.objects.create(

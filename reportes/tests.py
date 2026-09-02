@@ -3841,7 +3841,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("Pastel con conversión Point", panel)
         self.assertNotIn("Pastel con venta derivada sin conversión Point", panel)
 
-    def test_cierre_producto_historical_export_translates_legacy_sign_and_status_without_rewrite(self):
+    def test_historical_excel_inventory_is_not_presented_as_point_and_canonical_remains_point(self):
         receta = Receta.objects.create(
             nombre="Pastel Export Historico",
             codigo_point="EXPHIST001",
@@ -3852,8 +3852,9 @@ class ReportesCanonicosTests(TestCase):
             month_start=date(2025, 6, 1),
             month_end=date(2025, 6, 30),
             status=ProductoMonthClosure.STATUS_BUILT,
-            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
             opening_reference_date=date(2025, 5, 31),
+            metadata={"historical_excel_import": {"scope": "inventory_only", "source_file": "junio.xlsx"}},
         )
         line = ProductoMonthClosureLine.objects.create(
             closure=closure,
@@ -3862,8 +3863,17 @@ class ReportesCanonicosTests(TestCase):
             inventario_final_point_total=Decimal("10"),
             diferencia_teorico_vs_point=Decimal("-3"),
             estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
-            metadata={},
+            metadata={"historical_excel": {"scope": "inventory_only"}},
         )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})
+        html_body = html_response.content.decode("utf-8")
+        self.assertIn("Inventario histórico físico", html_body)
+        self.assertIn("Diferencia histórica", html_body)
+        self.assertIn("Sobrante físico", html_body)
+        self.assertIn("Importación histórica de Excel", html_body)
+        self.assertNotIn("Fin. Point", html_body)
+        self.assertNotIn("Dif. Point", html_body)
 
         response = self.client.get(
             reverse("reportes:cierre_producto"),
@@ -3873,9 +3883,53 @@ class ReportesCanonicosTests(TestCase):
         headers = rows[rows.index([]) + 1]
         values = rows[rows.index([]) + 2]
 
-        self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("3"))
-        self.assertEqual(values[headers.index("Estado")], "Point mayor")
-        self.assertNotIn("Sobrante físico", response.content.decode("utf-8"))
+        self.assertIn("Inventario histórico físico", headers)
+        self.assertIn("Diferencia histórica", headers)
+        self.assertNotIn("Fin. Point", headers)
+        self.assertNotIn("Dif. Point", headers)
+        self.assertEqual(Decimal(values[headers.index("Inventario histórico físico")]), Decimal("10"))
+        self.assertEqual(Decimal(values[headers.index("Diferencia histórica")]), Decimal("-3"))
+        self.assertEqual(values[headers.index("Estado")], "Sobrante físico")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2025-06", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        xlsx_headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        xlsx_values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertIn("Inventario histórico físico", xlsx_headers)
+        self.assertIn("Diferencia histórica", xlsx_headers)
+        self.assertNotIn("Fin. Point", xlsx_headers)
+        self.assertEqual(xlsx_values[xlsx_headers.index("Diferencia histórica")], -3)
+
+        canonical = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            metadata={"balance": {"contract": "POINT_PRODUCT_BALANCE_V1"}},
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=canonical,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-3"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "3",
+                "point_status": "POINT_MAYOR",
+                "issues": [],
+            },
+        )
+        canonical_csv = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-06", "export": "csv"},
+        ).content.decode("utf-8")
+        self.assertIn("Fin. Point", canonical_csv)
+        self.assertIn("Dif. Point", canonical_csv)
+        self.assertNotIn("Inventario histórico físico", canonical_csv)
         line.refresh_from_db()
         self.assertEqual(line.diferencia_teorico_vs_point, Decimal("-3"))
         self.assertEqual(line.estado_auditoria, ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)

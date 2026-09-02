@@ -60,6 +60,7 @@ ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE = "SNAPSHOT_PRODUCT_COVERAGE_INCOMPLE
 ISSUE_SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS = "SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS"
 ISSUE_SNAPSHOT_BRANCH_UNMAPPED = "SNAPSHOT_BRANCH_UNMAPPED"
 ISSUE_SNAPSHOT_BRANCH_OUT_OF_SCOPE = "SNAPSHOT_BRANCH_OUT_OF_SCOPE"
+ISSUE_SNAPSHOT_EFFECTIVE_DATE_MIXED = "SNAPSHOT_EFFECTIVE_DATE_MIXED"
 ISSUE_OFFICIAL_SALES_REFRESH_REQUIRED = "OFFICIAL_SALES_REFRESH_REQUIRED"
 ISSUE_SALES_SOURCE_REQUIRES_REVIEW = "SALES_SOURCE_REQUIRES_REVIEW"
 ISSUE_SALES_SYNC_JOB_MISSING = "SALES_SYNC_JOB_MISSING"
@@ -724,6 +725,9 @@ class MonthlyPointProductBalanceService:
             timezone.localtime(snapshot.captured_at, current_timezone).date()
             for snapshot in snapshots
         }
+        single_effective_date = len(selected_dates) == 1
+        if not single_effective_date:
+            snapshot_issues.add(ISSUE_SNAPSHOT_EFFECTIVE_DATE_MIXED)
         for snapshot in snapshots:
             receta = self._match_recipe(
                 code=snapshot.product.sku,
@@ -792,6 +796,7 @@ class MonthlyPointProductBalanceService:
             "out_of_scope_branch_ids": tuple(sorted(selected_out_of_scope_branch_ids)),
             "authoritative": bool(
                 snapshots
+                and single_effective_date
                 and expected_branches
                 and not missing_expected_branches
                 and product_manifest_verified
@@ -902,6 +907,12 @@ class MonthlyPointProductBalanceService:
         selected_dates = tuple(meta.get("selected_dates") or ())
         if not selected_dates:
             return [f"No existe snapshot Point para {label}; el balance no es autoritativo."]
+        if len(selected_dates) != 1 or meta.get("effective_date") is None:
+            selected_label = ", ".join(str(selected_date) for selected_date in selected_dates)
+            return [
+                f"El snapshot de {label} mezcla fechas efectivas ({selected_label}); "
+                "se requiere un único corte y el balance no es autoritativo."
+            ]
         if meta.get("fallback_used"):
             selected_label = ", ".join(str(selected_date) for selected_date in selected_dates)
             warning = f"Se usaron fechas alternativas {selected_label} para {label} (objetivo {meta['target_date']})."

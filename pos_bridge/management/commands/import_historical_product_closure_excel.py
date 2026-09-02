@@ -411,10 +411,10 @@ class Command(BaseCommand):
                     "source_sheet": sheet_name,
                     "scope": "inventory_only",
                     "imported_columns": [
-                        "inventario_inicial",
-                        "inventario_final_point_cedis",
-                        "inventario_final_point_sucursales",
-                        "inventario_final_point_total",
+                        "inventario_inicial_historico",
+                        "conteo_historico_cedis",
+                        "conteo_historico_sucursales",
+                        "inventario_historico_fisico_total",
                     ],
                     "excluded_columns": [
                         "produccion_mes_desde_excel",
@@ -470,10 +470,10 @@ class Command(BaseCommand):
                         "historical_excel": {
                             "scope": "inventory_only",
                             "source_rows": row["source_rows"],
-                            "inventario_inicial": str(row["inventario_inicial"]),
-                            "inventario_final_point_cedis": str(row["cedis"]),
-                            "inventario_final_point_sucursales": str(row["sucursales"]),
-                            "inventario_final_point_total": str(row["fisico_total"]),
+                            "inventario_inicial_historico": str(row["inventario_inicial"]),
+                            "conteo_historico_cedis": str(row["cedis"]),
+                            "conteo_historico_sucursales": str(row["sucursales"]),
+                            "inventario_historico_fisico_total": str(row["fisico_total"]),
                             "operational_sources": payload["operational_sources"],
                         }
                     },
