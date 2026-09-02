@@ -288,19 +288,32 @@ class MonthlyPointProductBalanceService:
     ) -> MonthlyPointBalance:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        month_start = self._parse_month(month)
+        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        month_start_text = month_start.isoformat()
+        month_end_text = month_end.isoformat()
         self._build_movement_jobs = list(
             PointSyncJob.objects.filter(
-                Q(job_type__in=(PointSyncJob.JOB_TYPE_PRODUCTION, PointSyncJob.JOB_TYPE_WASTE))
+                Q(
+                    job_type=PointSyncJob.JOB_TYPE_PRODUCTION,
+                    parameters__start_date=month_start_text,
+                    parameters__end_date=month_end_text,
+                )
+                | Q(
+                    job_type=PointSyncJob.JOB_TYPE_WASTE,
+                    parameters__start_date=month_start_text,
+                    parameters__end_date=month_end_text,
+                )
                 | Q(
                     job_type=PointSyncJob.JOB_TYPE_INVENTORY,
                     parameters__source="point_conversion_lines",
+                    parameters__date_from=month_start_text,
+                    parameters__date_to=month_end_text,
                 )
             )
             .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
             .order_by("-started_at", "-id")
         )
-        month_start = self._parse_month(month)
-        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         opening_target = month_start - timedelta(days=1)
 
         opening, opening_meta, opening_unresolved = self._load_snapshot(snapshot_date=opening_target, source="opening_snapshot")
@@ -938,8 +951,14 @@ class MonthlyPointProductBalanceService:
         config = configs[family]
         cached_jobs = getattr(self, "_build_movement_jobs", None)
         if cached_jobs is None:
+            filters = {
+                f"parameters__{config['start_key']}": month_start.isoformat(),
+                f"parameters__{config['end_key']}": month_end.isoformat(),
+            }
+            if config["source"]:
+                filters["parameters__source"] = config["source"]
             cached_jobs = list(
-                PointSyncJob.objects.filter(job_type=config["job_type"])
+                PointSyncJob.objects.filter(job_type=config["job_type"], **filters)
                 .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
                 .order_by("-started_at", "-id")
             )
@@ -958,22 +977,10 @@ class MonthlyPointProductBalanceService:
                 "authority_issues": (f"{prefix}_SYNC_JOB_MISSING",),
             }
 
-        def exact_range(job):
-            parameters = job.parameters or {}
-            return (
-                str(parameters.get(config["start_key"]) or "") == month_start.isoformat()
-                and str(parameters.get(config["end_key"]) or "") == month_end.isoformat()
-            )
-
         def unrestricted(job):
             return not str((job.parameters or {}).get("branch_filter") or "").strip()
 
-        exact_success = [
-            job
-            for job in jobs
-            if exact_range(job) and unrestricted(job) and job.status == PointSyncJob.STATUS_SUCCESS
-        ]
-        selected = exact_success[0] if exact_success else jobs[0]
+        selected = jobs[0]
         issues: list[str] = []
         if selected.status == PointSyncJob.STATUS_FAILED:
             issues.append(f"{prefix}_SYNC_JOB_FAILED")
@@ -981,8 +988,6 @@ class MonthlyPointProductBalanceService:
             issues.append(f"{prefix}_SYNC_JOB_PARTIAL")
         elif selected.status != PointSyncJob.STATUS_SUCCESS:
             issues.append(f"{prefix}_SYNC_JOB_INCOMPLETE")
-        if not exact_range(selected):
-            issues.append(f"{prefix}_SYNC_RANGE_INCOMPLETE")
         if not unrestricted(selected):
             issues.append(f"{prefix}_SYNC_JOB_RESTRICTED")
 
@@ -1000,18 +1005,28 @@ class MonthlyPointProductBalanceService:
                 if family == "conversions":
                     created = summary.get("created")
                     skipped = summary.get("skipped")
+                    relinked = summary.get("relinked", 0 if summary.get("skipped") in (0, "0") else None)
                     unmatched = summary.get("skipped_unmatched_branch")
-                    if any(value is None for value in (created, skipped, unmatched)) or not summary.get("report_pk"):
+                    if any(value is None for value in (created, skipped, relinked, unmatched)) or not summary.get(
+                        "report_pk"
+                    ):
                         issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
                     else:
                         try:
                             created = int(created)
                             skipped = int(skipped)
+                            relinked = int(relinked)
                             unmatched = int(unmatched)
                         except (TypeError, ValueError):
                             issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
                         else:
-                            if expected_count != created + skipped + unmatched or bound_count != created:
+                            if (
+                                relinked < 0
+                                or relinked > skipped
+                                or skipped != relinked
+                                or expected_count != created + skipped + unmatched
+                                or bound_count != created + relinked
+                            ):
                                 issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
                             if unmatched:
                                 issues.append(f"{prefix}_SYNC_BRANCH_COVERAGE_INCOMPLETE")

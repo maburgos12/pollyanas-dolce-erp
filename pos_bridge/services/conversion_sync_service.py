@@ -286,6 +286,7 @@ def sync_conversion_lines(
         branch_filter_norm = normalize_text(branch_filter) if branch_filter else ""
         created = 0
         skipped = 0
+        relinked = 0
         skipped_unmatched_branch = 0
 
         with transaction.atomic():
@@ -304,8 +305,19 @@ def sync_conversion_lines(
                     continue
 
                 source_hash = _make_hash(row)
-                if PointConversionLine.objects.filter(source_hash=source_hash).exists():
+                existing = (
+                    PointConversionLine.objects.select_for_update()
+                    .filter(source_hash=source_hash)
+                    .only("id", "branch_id", "movement_at", "sync_job_id")
+                    .first()
+                )
+                if existing is not None:
                     skipped += 1
+                    movement_date = timezone.localtime(existing.movement_at).date()
+                    if existing.branch_id == branch.id and date_from <= movement_date <= date_to:
+                        existing.sync_job = job
+                        existing.save(update_fields=["sync_job", "updated_at"])
+                        relinked += 1
                     continue
 
                 PointConversionLine.objects.create(
@@ -336,6 +348,7 @@ def sync_conversion_lines(
         result = {
             "created": created,
             "skipped": skipped,
+            "relinked": relinked,
             "skipped_unmatched_branch": skipped_unmatched_branch,
             "total_rows": len(rows),
             "report_pk": pk_reporte,

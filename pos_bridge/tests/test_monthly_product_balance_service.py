@@ -969,7 +969,10 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_nonoperational_cedis_mixed_with_store_makes_scopes_unavailable(self):
-        cedis_erp, _ = Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "CEDIS"})
+        cedis_erp, _ = Sucursal.objects.update_or_create(
+            codigo="CEDIS",
+            defaults={"nombre": "CEDIS", "activa": False},
+        )
         cedis_branch = PointBranch.objects.create(
             external_id="LEDGER-CEDIS",
             name="Inventario central",
@@ -2306,7 +2309,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             ("failed", {"status": PointSyncJob.STATUS_FAILED}, "SYNC_JOB_FAILED"),
             ("partial", {"status": PointSyncJob.STATUS_PARTIAL}, "SYNC_JOB_PARTIAL"),
             ("filtered", {"branch_filter": self.branch.external_id}, "SYNC_JOB_RESTRICTED"),
-            ("range", {"start": "2026-07-02"}, "SYNC_RANGE_INCOMPLETE"),
+            ("range", {"start": "2026-07-02"}, "SYNC_JOB_MISSING"),
         )
         service, _official = self._service()
         for family in ("production", "waste", "conversions"):
@@ -2328,6 +2331,65 @@ class MonthlyProductBalanceLedgerTests(TestCase):
                         )
                     self.assertFalse(meta["authoritative"])
                     self.assertTrue(any(issue.endswith(issue_suffix) for issue in meta["authority_issues"]))
+
+    def test_other_month_jobs_are_not_selected_as_month_evidence(self):
+        service, _official = self._service()
+        for family in ("production", "waste", "conversions"):
+            with self.subTest(family=family):
+                PointSyncJob.objects.exclude(pk=self.sync_job.pk).delete()
+                self._movement_job(
+                    family,
+                    start="2026-06-01",
+                    end="2026-06-30",
+                )
+
+                if family == "production":
+                    _values, meta, _unresolved = service._load_production(
+                        month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                    )
+                elif family == "waste":
+                    _values, meta, _unresolved = service._load_waste(
+                        month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                    )
+                else:
+                    _values, _unresolved, _movements, _counts, meta = service._load_conversions(
+                        month_start=date(2026, 7, 1)
+                    )
+
+                self.assertFalse(meta["job_present"])
+                self.assertEqual(meta["selected_sync_job_ids"], ())
+                self.assertEqual(meta["authority_issues"], (f"{family.upper().rstrip('S')}_SYNC_JOB_MISSING",))
+
+    def test_exact_partial_or_filtered_job_wins_over_newer_other_month_competitor(self):
+        cases = (
+            ("production", {"status": PointSyncJob.STATUS_PARTIAL}, "PRODUCTION_SYNC_JOB_PARTIAL"),
+            ("waste", {"branch_filter": self.branch.external_id}, "WASTE_SYNC_JOB_RESTRICTED"),
+            ("conversions", {"status": PointSyncJob.STATUS_PARTIAL}, "CONVERSION_SYNC_JOB_PARTIAL"),
+        )
+        service, _official = self._service()
+        for family, exact_kwargs, expected_issue in cases:
+            with self.subTest(family=family):
+                PointSyncJob.objects.exclude(pk=self.sync_job.pk).delete()
+                exact_job = self._movement_job(family, **exact_kwargs)
+                self._movement_job(family, start="2026-08-01", end="2026-08-31")
+
+                if family == "production":
+                    _values, meta, _unresolved = service._load_production(
+                        month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                    )
+                elif family == "waste":
+                    _values, meta, _unresolved = service._load_waste(
+                        month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                    )
+                else:
+                    _values, _unresolved, _movements, _counts, meta = service._load_conversions(
+                        month_start=date(2026, 7, 1)
+                    )
+
+                self.assertTrue(meta["job_present"])
+                self.assertEqual(meta["selected_sync_job_ids"], (exact_job.id,))
+                self.assertIn(expected_issue, meta["authority_issues"])
+                self.assertNotIn(f"{family.upper().rstrip('S')}_SYNC_RANGE_INCOMPLETE", meta["authority_issues"])
 
     def test_informative_fact_fallback_does_not_authorize_calculated_balance(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
