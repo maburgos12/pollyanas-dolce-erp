@@ -3578,6 +3578,58 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(xlsx_values[xlsx_headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(xlsx_values[xlsx_headers.index("Dif. Point")], "Sin dato")
 
+    def test_secondary_closure_panels_project_missing_sales_and_opening_as_sin_dato(self):
+        receta = Receta.objects.create(
+            nombre="Pastel panel sin fuentes",
+            codigo_point="PANEL-MISSING-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-panel-missing-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            venta_derivada_equivalente=Decimal("9"),
+            venta_total_equivalente=Decimal("9"),
+            merma_derivada_equivalente=Decimal("1"),
+            merma_total_equivalente=Decimal("1"),
+            inventario_inicial_teorico=Decimal("0"),
+            inventario_final_teorico=Decimal("0"),
+            has_catalog_issue=True,
+            catalog_issue_note="Fuentes canónicas ausentes",
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": [
+                    "SALES_SOURCE_MISSING",
+                    "OPENING_SNAPSHOT_MISSING",
+                    "CALCULATED_CLOSING_MISSING",
+                ],
+                "sales_source_available": False,
+                "point_status": "REVISAR_FUENTE",
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-06"})
+
+        conversion_row = response.context["conversion_rows"][0]
+        catalog_row = response.context["catalog_issue_rows"][0]
+        self.assertIsNone(conversion_row["sales_derived"])
+        self.assertIsNone(conversion_row["calculated_closing"])
+        self.assertIsNone(catalog_row["calculated_closing"])
+        body = response.content.decode("utf-8")
+        conversion_panel = body.split("Presentaciones derivadas consolidadas", 1)[1].split("Riesgo de catálogo", 1)[0]
+        catalog_panel = body.split("Incidencias visibles", 1)[1].split("Auditoría de líneas", 1)[0]
+        self.assertIn("Sin dato", conversion_panel)
+        self.assertNotIn(">9.00<", conversion_panel)
+        self.assertNotIn(">0.00<", conversion_panel)
+        self.assertIn("Sin dato", catalog_panel)
+        self.assertNotIn(">0.00<", catalog_panel)
+
     def test_cierre_producto_historical_export_translates_legacy_sign_and_status_without_rewrite(self):
         receta = Receta.objects.create(
             nombre="Pastel Export Historico",

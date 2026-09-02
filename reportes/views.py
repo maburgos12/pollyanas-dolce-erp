@@ -5484,20 +5484,21 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
 
     conversion_rows = [
-        line
-        for line in lines
-        if Decimal(str(line.venta_derivada_equivalente or 0)) > 0
-        or Decimal(str(line.merma_derivada_equivalente or 0)) > 0
+        row
+        for row in closure_display_rows
+        if (row["sales_derived"] is not None and Decimal(row["sales_derived"]) > 0)
+        or Decimal(str(row["line"].merma_derivada_equivalente or 0)) > 0
     ]
     conversion_rows.sort(
-        key=lambda line: (
-            Decimal(str(line.venta_derivada_equivalente or 0)) + Decimal(str(line.merma_derivada_equivalente or 0)),
-            line.receta_padre.nombre.lower(),
+        key=lambda row: (
+            Decimal(row["sales_derived"] or 0)
+            + Decimal(str(row["line"].merma_derivada_equivalente or 0)),
+            row["line"].receta_padre.nombre.lower(),
         ),
         reverse=True,
     )
 
-    catalog_issue_rows = [line for line in lines if line.has_catalog_issue]
+    catalog_issue_rows = [row for row in closure_display_rows if row["line"].has_catalog_issue]
     recent_closures = (
         ProductoMonthClosure.objects.prefetch_related("lines")
         .order_by("-month_start", "-id")[:6]

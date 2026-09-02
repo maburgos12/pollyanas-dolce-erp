@@ -303,12 +303,12 @@
             {% for line in conversion_rows %}
             <tr>
               <td>
-                <strong>{{ line.receta_padre.nombre }}</strong>
-                {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+                <strong>{{ line.line.receta_padre.nombre }}</strong>
+                {% if line.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.line.receta_padre.codigo_point }}</div>{% endif %}
               </td>
-              <td class="text-end">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ line.merma_derivada_equivalente|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% if line.sales_derived != None %}{{ line.sales_derived|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+              <td class="text-end">{{ line.line.merma_derivada_equivalente|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             </tr>
             {% empty %}
             <tr>
@@ -331,9 +331,9 @@
       <div class="bi-list bi-list-dense">
         {% for line in catalog_issue_rows %}
         <article class="bi-list-item is-signal-warning">
-          <strong>{{ line.receta_padre.nombre }}</strong>
-          <div class="bi-subtle">{{ line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
-          <div>{{ line.inventario_final_teorico|floatformat:2|intcomma }} saldo calculado</div>
+          <strong>{{ line.line.receta_padre.nombre }}</strong>
+          <div class="bi-subtle">{{ line.line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
+          <div>{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado</div>
         </article>
         {% empty %}
         <article class="bi-list-item is-signal-success">
