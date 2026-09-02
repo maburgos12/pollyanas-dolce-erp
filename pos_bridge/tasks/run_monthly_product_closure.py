@@ -218,7 +218,8 @@ def _run_monthly_product_closure_locked(
         if step["status"] != PointSyncJob.STATUS_SUCCESS
     ]
     retryable = any(
-        bool(step.get("retryable")) and step.get("status") == PointSyncJob.STATUS_FAILED
+        bool(step.get("retryable"))
+        and step.get("status") in (PointSyncJob.STATUS_FAILED, PointSyncJob.STATUS_PARTIAL)
         for step in source_refresh
     )
     if retryable:

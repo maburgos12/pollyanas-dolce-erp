@@ -9,7 +9,8 @@ from unittest.mock import patch
 from django.db import close_old_connections
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
-from pos_bridge.models import PointSyncJob
+from pos_bridge.models import PointBranch, PointSyncJob
+from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError
 from pos_bridge.tasks.celery_tasks import task_monthly_product_closure, task_visible_cut_refresh_cycle
 from pos_bridge.tasks.run_monthly_product_closure import run_monthly_product_closure
@@ -22,6 +23,47 @@ from pos_bridge.utils.source_retry import source_error_metadata
 
 
 class PointSalesSyncTaskRoutingTests(TestCase):
+    def test_real_official_partial_timeout_retries_without_building_even_when_exhausted(self):
+        branch = PointBranch.objects.create(external_id="partial-retry", name="Matriz")
+        service = OfficialSalesBackfillService()
+        repair_result = SimpleNamespace(
+            bridge_history_deleted=0, bridge_history_created=0, recipe_rows_updated=0,
+            recipe_rows_cleared=0, unresolved_rows=0, non_recipe_rows=0,
+        )
+        with (
+            patch.object(service, "_sales_branches", return_value=[branch]),
+            patch.object(service, "_fetch_branch_day_reports_with_retry", side_effect=[TimeoutError("Point timeout"), ([], [])]),
+            patch.object(service.indicator_service, "fetch_branch_day", side_effect=ValueError("no indicator")),
+            patch.object(service.repair_service, "repair", return_value=repair_result),
+        ):
+            job = service.run(start_date=date(2026, 8, 1), end_date=date(2026, 8, 2))
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
+        self.assertEqual(job.result_summary["branch_days_processed"], 1)
+        self.assertTrue(job.result_summary["retryable"])
+        from pos_bridge.tasks.run_monthly_product_closure import _serialize_source_step
+
+        refresh = [_serialize_source_step("sales", job)]
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources", return_value=refresh),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+            patch.object(task_monthly_product_closure, "retry", side_effect=RuntimeError("retry requested")) as retry,
+            patch.object(task_monthly_product_closure.request, "retries", 0),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "retry requested"):
+                task_monthly_product_closure.run(month="2026-08")
+            retry.assert_called_once()
+            closure_service.assert_not_called()
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources", return_value=refresh),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+            patch.object(task_monthly_product_closure, "retry") as retry,
+            patch.object(task_monthly_product_closure.request, "retries", 1),
+        ):
+            result = task_monthly_product_closure.run(month="2026-08")
+            self.assertTrue(result["retry_exhausted"])
+            retry.assert_not_called()
+            closure_service.assert_not_called()
+
     def test_source_retry_classification_is_strict(self):
         self.assertTrue(source_error_metadata(TimeoutError("timeout"))["retryable"])
         self.assertTrue(source_error_metadata(ConnectionError("connection"))["retryable"])

@@ -47,8 +47,11 @@ son `total_historical_count` y `total_historical_difference`.
 En importaciones históricas `opening_point` siempre es `null`:
 `historical_opening` identifica el saldo del Excel y `opening_balance` es el campo
 neutro compartido por reportes. Ambos respetan presencia por celda. Para metadata
-legada sin `inventory_presence`, la presencia sólo se infiere si existe la clave
-histórica específica del alcance, incluso cuando su valor guardado es cero.
+legada sin `inventory_presence`, las claves no bastan: el importador antiguo
+también las guardaba con cero para celdas vacías. Se conservan observaciones no
+cero; un cero sin evidencia explícita se publica como desconocido (`null`). El
+estado `SIN_INVENTARIO_FISICO` invalida los alcances físicos legacy. El mapa nuevo
+de presencia prevalece, por lo que un cero explícito nuevo sí se conserva.
 
 `historical_excel_import` identifica archivo/hoja únicamente como procedencia del
 conteo físico. Las etiquetas de movimientos nombran por separado las tablas

@@ -16,10 +16,10 @@ POINT_STATUSES = {"COINCIDE", "POINT_MAYOR", "POINT_MENOR", "REVISAR_FUENTE"}
 CONVERSION_PROJECTION_VALUES = {"DIRECTA", "EQUIVALENCIA", "PRESENTACION_DERIVADA"}
 CONVERSION_ORIGIN_LABELS = {"MIXED": "Mixto", "UNRESOLVED": "Sin resolver"}
 HISTORICAL_INVENTORY_KEYS = {
-    "opening": ("inventario_inicial_historico", "saldo_inicial_historico"),
-    "cedis": ("conteo_historico_cedis", "inventario_historico_cedis"),
-    "sucursales": ("conteo_historico_sucursales", "inventario_historico_sucursales"),
-    "total": ("inventario_historico_fisico_total", "conteo_historico_total"),
+    "opening": ("inventario_inicial_historico",),
+    "cedis": ("conteo_historico_cedis",),
+    "sucursales": ("conteo_historico_sucursales",),
+    "total": ("inventario_historico_fisico_total",),
 }
 
 
@@ -56,12 +56,21 @@ def is_historical_closure(closure, *, lines=None) -> bool:
     return any((line.metadata or {}).get("historical_excel") for line in (lines or []))
 
 
-def historical_inventory_presence(metadata: dict[str, object]) -> dict[str, bool]:
+def historical_inventory_presence(metadata: dict[str, object], *, audit_status: str = "") -> dict[str, bool]:
     explicit = metadata.get("inventory_presence")
     if isinstance(explicit, dict):
         return {scope: explicit.get(scope) is True for scope in HISTORICAL_INVENTORY_KEYS}
+    # The old importer emitted every key even for blank cells, storing zero.
+    # Only nonzero observations prove legacy presence; a key or audit status
+    # alone cannot distinguish a measured zero from an internal placeholder.
     return {
-        scope: any(key in metadata for key in legacy_keys)
+        scope: (
+            not (
+                scope != "opening"
+                and audit_status == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO
+            )
+            and any(decimal_value(metadata.get(key)) not in (None, Decimal("0")) for key in legacy_keys)
+        )
         for scope, legacy_keys in HISTORICAL_INVENTORY_KEYS.items()
     }
 
@@ -78,7 +87,7 @@ def project_product_closure_line(
     historical_metadata = metadata.get("historical_excel")
     if not isinstance(historical_metadata, dict):
         historical_metadata = {}
-    historical_presence = historical_inventory_presence(historical_metadata)
+    historical_presence = historical_inventory_presence(historical_metadata, audit_status=line.estado_auditoria)
     historical_movement_authority = historical_metadata.get("movement_authority")
     if not isinstance(historical_movement_authority, dict):
         historical_movement_authority = {}
@@ -118,6 +127,7 @@ def project_product_closure_line(
         # counts. Values copied from operational tables are observations without
         # proof of complete monthly coverage and must not become valid zeros.
         opening_authoritative = historical_presence["opening"]
+        closing_authoritative = False
         sales_authoritative = bool(
             (historical_movement_authority.get("sales") or {}).get("authoritative") is True
         )

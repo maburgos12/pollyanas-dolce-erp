@@ -161,8 +161,11 @@ El bloqueo deja rastro en `metadata.lock_event` con:
 La revalidación final usa un mutex transaccional por mes y vuelve a calcular la
 huella inmediatamente antes de sellar. El backfill oficial de ventas, producción,
 merma, conversiones y snapshots de inventario adquieren el mismo advisory mutex
-mensual, en orden cronológico cuando abarcan varios meses. Un snapshot coordina
-su mes de captura y el siguiente porque puede servir como cierre y como apertura.
+mensual, en orden cronológico cuando abarcan varios meses. Cada timestamp se
+asigna al día de negocio de Mazatlán. Un snapshot coordina los meses cuyo último
+día cae dentro de la tolerancia configurada respecto a la captura, más sus meses
+siguientes (apertura). Así una captura del 1–3 de septiembre también coordina el
+cierre de agosto, sin bloquear meses alejados.
 No toma locks `SHARE` sobre tablas completas: otros periodos continúan operando.
 Los catálogos globales no forman parte de la huella cruda mensual; su efecto se
 congela en el digest de líneas proyectadas, evitando prometer serialización que
@@ -184,14 +187,21 @@ operativas quedan como observaciones no validadas hasta acreditar cobertura; si
 falta una fuente, la pantalla, API, CSV y XLSX muestran `Sin dato`/`null`, nunca
 un cero autoritativo ni un saldo calculado aparentemente válido.
 El saldo inicial histórico se publica como `Saldo inicial`, nunca como inventario
-Point. En metadata antigua sólo cuenta como presente si conserva la clave histórica
-del alcance; el decimal placeholder por sí solo no acredita disponibilidad.
+Point. La metadata antigua siempre escribía las claves, incluso para celdas
+vacías: sus ceros sin evidencia explícita son ambiguos y se muestran como `Sin dato`.
+Se preservan valores legacy no cero; `SIN_INVENTARIO_FISICO` mantiene nulos los
+alcances físicos. El mapa nuevo explícito prevalece sobre esta inferencia.
 - venta derivada coherente
 - merma derivada coherente
 - sin guardas activas en la vista
 - sin incidencias de catalogo
 
 ## Qué hacer si falla
+
+Las fuentes `FAILED` o `PARTIAL` con `retryable=true` difieren el build y Celery
+reintenta como máximo una vez. Un `PARTIAL` por cobertura/datos sin marca
+transitoria no se reintenta automáticamente. Al agotar el intento, el resultado
+queda para revisión sin construir sobre la fuente transitoriamente incompleta.
 
 ### Caso 1. No hay snapshot
 

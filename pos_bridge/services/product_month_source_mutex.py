@@ -1,15 +1,27 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from calendar import monthrange
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import connection
+from django.utils import timezone
 
 PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE = 1_347_901_004
+POINT_BUSINESS_TIMEZONE = ZoneInfo("America/Mazatlan")
+
+
+def _business_date(value: date | datetime) -> date:
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value, POINT_BUSINESS_TIMEZONE)
+        return value.date()
+    return value
 
 
 def month_start(value: date | datetime) -> date:
-    if isinstance(value, datetime):
-        value = value.date()
+    value = _business_date(value)
     return date(value.year, value.month, 1)
 
 
@@ -41,6 +53,15 @@ def lock_product_month_sources(months) -> tuple[date, ...]:
     return ordered
 
 
-def snapshot_affected_months(captured_at: date | datetime) -> tuple[date, date]:
-    current = month_start(captured_at)
-    return current, next_month(current)
+def snapshot_affected_months(captured_at: date | datetime) -> tuple[date, ...]:
+    """Coordinate every month-end whose canonical window accepts this capture."""
+    captured_date = _business_date(captured_at)
+    tolerance = max(0, int(getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", 3)))
+    earliest = captured_date - timedelta(days=tolerance)
+    latest = captured_date + timedelta(days=tolerance)
+    affected = set()
+    for candidate in months_in_range(earliest, latest):
+        target = date(candidate.year, candidate.month, monthrange(candidate.year, candidate.month)[1])
+        if earliest <= target <= latest:
+            affected.update((candidate, next_month(candidate)))
+    return tuple(sorted(affected))

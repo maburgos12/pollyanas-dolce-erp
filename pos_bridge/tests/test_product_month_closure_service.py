@@ -1620,7 +1620,7 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertIsNone(projected["historical_count_sucursales"])
         self.assertEqual(projected["historical_count"], Decimal("0"))
 
-    def test_legacy_historical_presence_is_inferred_only_from_metadata_keys(self):
+    def test_legacy_historical_zero_keys_are_ambiguous_without_explicit_presence(self):
         line = ProductoMonthClosureLine.objects.create(
             closure=ProductoMonthClosure.objects.create(
                 month_start=date(2025, 4, 1),
@@ -1642,10 +1642,35 @@ class ProductMonthClosureServiceTests(TestCase):
 
         projected = project_product_closure_line(line, historical_excel_import=True)
         self.assertIsNone(projected["opening_point"])
-        self.assertEqual(projected["historical_opening"], Decimal("0"))
-        self.assertEqual(projected["historical_count_cedis"], Decimal("0"))
+        self.assertIsNone(projected["historical_opening"])
+        self.assertIsNone(projected["historical_count_cedis"])
         self.assertIsNone(projected["historical_count_sucursales"])
-        self.assertEqual(projected["historical_count"], Decimal("0"))
+        self.assertIsNone(projected["historical_count"])
+
+        line.inventario_inicial_teorico = Decimal("5")
+        line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO
+        line.metadata["historical_excel"].update({
+            "inventario_inicial_historico": "5",
+            "conteo_historico_sucursales": "0",
+        })
+        absent = project_product_closure_line(line, historical_excel_import=True)
+        self.assertEqual(absent["historical_opening"], Decimal("5"))
+        self.assertIsNone(absent["historical_count"])
+        self.assertIsNone(absent["historical_count_cedis"])
+        self.assertIsNone(absent["historical_count_sucursales"])
+
+        line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_FALTANTE_NO_EXPLICADO
+        line.metadata["historical_excel"]["conteo_historico_sucursales"] = "7"
+        partial = project_product_closure_line(line, historical_excel_import=True)
+        self.assertEqual(partial["historical_count_sucursales"], Decimal("7"))
+        self.assertIsNone(partial["historical_count_cedis"])
+        self.assertIsNone(partial["historical_count"])
+
+        line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO
+        line.metadata["historical_excel"]["inventory_presence"] = {"cedis": True, "total": True}
+        explicit = project_product_closure_line(line, historical_excel_import=True)
+        self.assertEqual(explicit["historical_count_cedis"], Decimal("0"))
+        self.assertEqual(explicit["historical_count"], Decimal("0"))
 
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(
