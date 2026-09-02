@@ -3444,9 +3444,11 @@ class BudgetAreaUploadServiceTests(TestCase):
             return path.read_bytes()
 
     def test_duplicate_is_detected_before_reimport(self):
+        # Reuse the same file: rebuilding an XLSX changes its ZIP metadata.
+        workbook_bytes = self._build_general_upload()
         first_upload = SimpleUploadedFile(
             "presupuesto_general.xlsx",
-            self._build_general_upload(),
+            workbook_bytes,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         result = self.service.process_uploaded_file(area_key="general", uploaded_file=first_upload, uploaded_by=self.user)
@@ -3455,7 +3457,7 @@ class BudgetAreaUploadServiceTests(TestCase):
 
         second_upload = SimpleUploadedFile(
             "presupuesto_general_duplicado.xlsx",
-            self._build_general_upload(),
+            workbook_bytes,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         with patch.object(
