@@ -15,6 +15,7 @@ from pos_bridge.models import (
     PointConversionLine,
     PointExtractionLog,
     PointInventorySnapshot,
+    PointProduct,
     PointProductionLine,
     PointSyncJob,
     PointWasteLine,
@@ -432,6 +433,10 @@ class MonthlyPointProductBalanceService:
         issues: set[str] = set()
         if opening_meta.get("missing_expected_branch_ids") or closing_meta.get("missing_expected_branch_ids"):
             issues.add(ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE)
+        if opening_meta.get("missing_expected_product_coverage_keys") or closing_meta.get(
+            "missing_expected_product_coverage_keys"
+        ):
+            issues.add(ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE)
         if opening_branch_ids != closing_branch_ids:
             issues.add(ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE)
         if opening_branch_ids == closing_branch_ids and opening_keys != closing_keys:
@@ -474,6 +479,7 @@ class MonthlyPointProductBalanceService:
                 "branch__erp_branch_id",
                 "branch__erp_branch__codigo",
                 "branch__erp_branch__activa",
+                "sync_job_id",
                 "stock",
                 "captured_at",
             )
@@ -523,6 +529,34 @@ class MonthlyPointProductBalanceService:
         missing_expected_branches = [
             branch for branch in expected_branches if branch.erp_branch_id not in selected_erp_branch_ids
         ]
+        expected_product_ids = set(PointProduct.objects.filter(active=True).values_list("id", flat=True))
+        selected_erp_product_keys = {
+            (snapshot.branch.erp_branch_id, snapshot.product_id)
+            for snapshot in snapshots
+            if snapshot.branch.erp_branch_id is not None
+        }
+        expected_product_coverage_keys = {
+            (branch.erp_branch_id, product_id)
+            for branch in expected_branches
+            for product_id in expected_product_ids
+        }
+        missing_expected_product_coverage_keys = expected_product_coverage_keys - selected_erp_product_keys
+        selected_sync_job_ids = tuple(sorted({snapshot.sync_job_id for snapshot in snapshots}))
+        selected_sync_jobs = PointSyncJob.objects.filter(id__in=selected_sync_job_ids).only(
+            "id", "job_type", "status", "parameters"
+        ).in_bulk()
+        selected_sync_job = (
+            selected_sync_jobs.get(selected_sync_job_ids[0]) if len(selected_sync_job_ids) == 1 else None
+        )
+        sync_parameters = dict(selected_sync_job.parameters or {}) if selected_sync_job is not None else {}
+        sync_job_verified = bool(
+            selected_sync_job is not None
+            and selected_sync_job.job_type == PointSyncJob.JOB_TYPE_INVENTORY
+            and selected_sync_job.status == PointSyncJob.STATUS_SUCCESS
+            and not str(sync_parameters.get("branch_filter") or "").strip()
+            and sync_parameters.get("limit_branches") is None
+        )
+        product_manifest_verified = bool(expected_product_coverage_keys) and not missing_expected_product_coverage_keys
         applied_branch_ids: set[int] = set()
         selected_coverage_keys: set[tuple[int, int]] = set()
         applied_coverage_keys: set[tuple[int, int]] = set()
@@ -585,8 +619,19 @@ class MonthlyPointProductBalanceService:
             "fallback_used": fallback_used,
             "within_tolerance": True,
             "source_present": bool(snapshots),
-            "coverage_manifest_present": bool(expected_branches),
-            "authoritative": bool(snapshots) and bool(expected_branches) and not missing_expected_branches,
+            "coverage_manifest_present": bool(expected_branches) and bool(expected_product_ids),
+            "sync_job_verified": sync_job_verified,
+            "selected_sync_job_ids": selected_sync_job_ids,
+            "product_manifest_source": "PointProduct.active",
+            "product_manifest_verified": product_manifest_verified,
+            "authoritative": bool(
+                snapshots
+                and expected_branches
+                and expected_product_ids
+                and not missing_expected_branches
+                and product_manifest_verified
+                and sync_job_verified
+            ),
             "days_from_target": max(abs((selected_date - snapshot_date).days) for selected_date in selected_dates),
             "snapshot_rows": len(snapshots),
             "selected_rows": len(snapshots),
@@ -597,6 +642,9 @@ class MonthlyPointProductBalanceService:
             "expected_branch_ids": tuple(sorted(branch.id for branch in expected_branches)),
             "missing_expected_branch_ids": tuple(sorted(branch.id for branch in missing_expected_branches)),
             "missing_expected_branch_codes": tuple(sorted(branch.external_id for branch in missing_expected_branches)),
+            "expected_product_count": len(expected_product_ids),
+            "expected_product_coverage_key_count": len(expected_product_coverage_keys),
+            "missing_expected_product_coverage_keys": tuple(sorted(missing_expected_product_coverage_keys)),
             "selected_coverage_key_count": len(selected_coverage_keys),
             "selected_coverage_keys": tuple(sorted(selected_coverage_keys)),
             "selected_mapped_recipe_keys": tuple(sorted(selected_mapped_recipe_keys)),
@@ -629,6 +677,10 @@ class MonthlyPointProductBalanceService:
             "authoritative": False,
             "source_present": False,
             "coverage_manifest_present": False,
+            "sync_job_verified": False,
+            "selected_sync_job_ids": (),
+            "product_manifest_source": "PointProduct.active",
+            "product_manifest_verified": False,
             "days_from_target": None,
             "snapshot_rows": 0,
             "selected_rows": 0,
@@ -639,6 +691,9 @@ class MonthlyPointProductBalanceService:
             "expected_branch_ids": (),
             "missing_expected_branch_ids": (),
             "missing_expected_branch_codes": (),
+            "expected_product_count": 0,
+            "expected_product_coverage_key_count": 0,
+            "missing_expected_product_coverage_keys": (),
             "selected_coverage_key_count": 0,
             "selected_coverage_keys": (),
             "selected_mapped_recipe_keys": (),

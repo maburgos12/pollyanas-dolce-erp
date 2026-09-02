@@ -638,6 +638,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
     def test_difference_sign_and_generic_august_month(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 9))
         self._snapshot(self.parent_product, "12.02", datetime(2026, 8, 31, 9))
+        self._snapshot(self.slice_product, "0", datetime(2026, 7, 31, 9))
+        self._snapshot(self.slice_product, "0", datetime(2026, 8, 31, 9))
         service, official = self._service(
             [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("1")}]
         )
@@ -732,6 +734,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "88", datetime(2026, 7, 30, 23))
         self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        self._snapshot(self.slice_product, "0", datetime(2026, 6, 30, 8))
+        self._snapshot(self.slice_product, "0", datetime(2026, 7, 31, 8))
         service, _official = self._service()
 
         balance = service.build("2026-07")
@@ -741,8 +745,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.effective_snapshot_dates["opening"], date(2026, 6, 30))
         self.assertEqual(balance.effective_snapshot_dates["closing"], date(2026, 7, 31))
         self.assertTrue(balance.sources["opening_snapshot"]["authoritative"])
-        self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 1)
-        self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 1)
+        self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 2)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 2)
 
     def test_snapshot_branch_coverage_is_distinct_from_product_rows_and_respects_tolerance(self):
         second_branch = PointBranch.objects.create(
@@ -1205,6 +1209,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
     def test_official_daily_sales_with_full_successful_job_are_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._snapshot(self.slice_product, "0", datetime(2026, 6, 30, 8))
+        self._snapshot(self.slice_product, "0", datetime(2026, 7, 31, 8))
         job = self._official_sales_job()
         self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "full-job", sync_job=job)
 
@@ -1450,7 +1456,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         job_queries = [query for query in queries if "pos_bridge_sync_jobs" in query["sql"]]
         self.assertTrue(balance.sources["sales"]["authoritative"])
-        self.assertEqual(len(job_queries), 1)
+        self.assertEqual(len(job_queries), 3)
 
     def test_official_daily_and_legacy_history_mix_is_non_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -1680,6 +1686,57 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertFalse(balance.sources["closing_snapshot"]["authoritative"])
         self.assertIn(missing_branch.id, balance.sources["opening_snapshot"]["missing_expected_branch_ids"])
         self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_equal_product_subset_across_all_branches_does_not_prove_catalog_coverage(self):
+        second_sucursal = Sucursal.objects.create(codigo="LEDGER-PROD-MISS", nombre="Sucursal producto faltante")
+        second_branch = PointBranch.objects.create(
+            external_id="LEDGER-PRODUCT-MISSING",
+            name="Sucursal producto faltante",
+            erp_branch=second_sucursal,
+        )
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            PointInventorySnapshot.objects.create(
+                branch=second_branch,
+                product=self.parent_product,
+                stock=Decimal("8"),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=self.sync_job,
+            )
+
+        balance = self._service()[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertFalse(opening["authoritative"])
+        self.assertTrue(opening["missing_expected_product_coverage_keys"])
+        self.assertIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_full_active_product_catalog_from_successful_unrestricted_job_is_authoritative(self):
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            self._snapshot(self.slice_product, "4", captured_at)
+
+        balance = self._service(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("0")}]
+        )[0].build("2026-07")
+
+        self.assertTrue(balance.sources["opening_snapshot"]["sync_job_verified"])
+        self.assertTrue(balance.sources["opening_snapshot"]["product_manifest_verified"])
+        self.assertTrue(balance.sources["opening_snapshot"]["authoritative"])
+
+    def test_full_snapshot_from_non_successful_job_is_not_authoritative(self):
+        self.sync_job.status = PointSyncJob.STATUS_PARTIAL
+        self.sync_job.save(update_fields=["status"])
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            self._snapshot(self.slice_product, "4", captured_at)
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertFalse(balance.sources["opening_snapshot"]["sync_job_verified"])
+        self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_snapshot_without_canonical_branch_manifest_is_not_authoritative(self):
