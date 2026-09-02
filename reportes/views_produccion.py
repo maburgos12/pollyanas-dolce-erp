@@ -87,6 +87,7 @@ PDF_EXPORT_COLUMNS = [
     ("dif", "Dif."),
     ("merma_reportada", "Merma"),
     ("pct_merma", "%"),
+    ("inventario_inicial", "Ini. Point"),
     ("inventario_final_teorico", "Saldo calculado"),
     ("inventario_final_point_total", "Fin. Point"),
     ("diferencia_inventario", "Dif. Point"),

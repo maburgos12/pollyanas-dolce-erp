@@ -5640,6 +5640,7 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
 
     calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
+    opening_missing = is_canonical and "OPENING_SNAPSHOT_MISSING" in issues
     closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
     raw_point_difference = metadata.get("point_difference") if is_canonical else None
     if is_canonical:
@@ -5677,6 +5678,7 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
             point_status = "POINT_MENOR"
 
     return {
+        "opening_point": None if opening_missing else Decimal(str(line.inventario_inicial_teorico)),
         "calculated_closing": calculated_closing,
         "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
         "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
@@ -5714,14 +5716,15 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="cierre_producto_{context["selected_month"]}.csv"'
     writer = csv.writer(response)
+    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    opening_total = _sum_available_export_values(export_rows, "opening_point")
     writer.writerow(["Mes", context["selected_month"]])
     writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    writer.writerow(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    writer.writerow(["Inventario inicial", context["total_opening"]])
+    writer.writerow(["Fuente Ini. Point", context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    writer.writerow(["Ini. Point", _closure_export_display(opening_total)])
     writer.writerow(["Produccion", context["total_production"]])
     writer.writerow(["Venta equivalente", context["total_sales"]])
     writer.writerow(["Merma equivalente", context["total_waste"]])
-    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
     calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
     closing_total = _sum_available_export_values(export_rows, "closing_point")
     closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
@@ -5737,7 +5740,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
         [
             "Receta padre",
             "Codigo point",
-            "Inicial",
+            "Ini. Point",
             "Produccion",
             "Venta directa",
             "Venta derivada",
@@ -5757,7 +5760,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                line.inventario_inicial_teorico,
+                _closure_export_display(export_row["opening_point"]),
                 line.produccion_mes,
                 line.venta_directa_enteros,
                 line.venta_derivada_equivalente,
@@ -5779,14 +5782,15 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     wb = Workbook()
     summary_ws = wb.active
     summary_ws.title = "Resumen"
+    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    opening_total = _sum_available_export_values(export_rows, "opening_point")
     summary_ws.append(["Mes", context["selected_month"]])
     summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    summary_ws.append(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    summary_ws.append(["Inventario inicial", float(context["total_opening"])])
+    summary_ws.append(["Fuente Ini. Point", context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    summary_ws.append(["Ini. Point", _closure_export_cell(opening_total)])
     summary_ws.append(["Produccion", float(context["total_production"])])
     summary_ws.append(["Venta equivalente", float(context["total_sales"])])
     summary_ws.append(["Merma equivalente", float(context["total_waste"])])
-    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
     calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
     closing_total = _sum_available_export_values(export_rows, "closing_point")
     closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
@@ -5803,7 +5807,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
         [
             "Receta padre",
             "Codigo point",
-            "Inicial",
+            "Ini. Point",
             "Produccion",
             "Venta directa",
             "Venta derivada",
@@ -5823,7 +5827,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                float(line.inventario_inicial_teorico or 0),
+                _closure_export_cell(export_row["opening_point"]),
                 float(line.produccion_mes or 0),
                 float(line.venta_directa_enteros or 0),
                 float(line.venta_derivada_equivalente or 0),

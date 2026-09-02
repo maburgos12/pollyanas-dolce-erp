@@ -3339,7 +3339,11 @@ class ReportesCanonicosTests(TestCase):
                 "balance_contract": "POINT_PRODUCT_BALANCE_V1",
                 "point_difference": "",
                 "point_status": "REVISAR_FUENTE",
-                "issues": ["CALCULATED_CLOSING_MISSING", "CLOSING_SNAPSHOT_MISSING"],
+                "issues": [
+                    "OPENING_SNAPSHOT_MISSING",
+                    "CALCULATED_CLOSING_MISSING",
+                    "CLOSING_SNAPSHOT_MISSING",
+                ],
             },
         )
 
@@ -3351,6 +3355,11 @@ class ReportesCanonicosTests(TestCase):
         csv_rows = list(csv.reader(StringIO(csv_body)))
         detail_headers = csv_rows[csv_rows.index([]) + 1]
         detail_values = csv_rows[csv_rows.index([]) + 2]
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        self.assertEqual(summary["Fuente Ini. Point"], "Snapshot Point")
+        self.assertEqual(summary["Ini. Point"], "Sin dato")
+        self.assertIn("Ini. Point", detail_headers)
+        self.assertEqual(detail_values[detail_headers.index("Ini. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
@@ -3361,9 +3370,19 @@ class ReportesCanonicosTests(TestCase):
             {"month": "2026-07", "export": "xlsx"},
         )
         workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        summary_sheet = workbook["Resumen"]
+        summary_values = {
+            row[0]: row[1]
+            for row in summary_sheet.iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
         detail = workbook["Detalle"]
         headers = [cell.value for cell in next(detail.iter_rows(min_row=1, max_row=1))]
         values = next(detail.iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(summary_values["Ini. Point"], "Sin dato")
+        self.assertEqual(summary_values["Fuente Ini. Point"], "Snapshot Point")
+        self.assertIn("Ini. Point", headers)
+        self.assertEqual(values[headers.index("Ini. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(values[headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
