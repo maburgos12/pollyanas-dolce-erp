@@ -1,7 +1,7 @@
 # Diseño: cierre mensual canónico de productos Point
 
-Fecha: 2026-09-01  
-Estado: pendiente de aprobación  
+Fecha: 2026-09-01
+Estado: implementado; pendiente de despliegue
 Alcance: `pos_bridge`, `reportes` y pruebas relacionadas
 
 ## Problema
