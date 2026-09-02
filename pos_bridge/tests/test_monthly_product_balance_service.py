@@ -366,7 +366,8 @@ class MonthlyProductBalanceConversionTests(TestCase):
 
                 row = self._service().build("2026-08").rows[self.slice.id]
 
-                self.assertEqual(row.difference_point, Decimal("0"))
+                self.assertIsNone(row.difference_point)
+                self.assertIn("CALCULATED_CLOSING_MISSING", row.issues)
                 self.assertIn(expected_issue, row.issues)
                 self.assertEqual(row.status, "REVISAR_FUENTE")
 
@@ -404,7 +405,8 @@ class MonthlyProductBalanceConversionTests(TestCase):
 
         row = self._service().build("2026-08").rows[self.slice.id]
 
-        self.assertEqual(row.difference_point, Decimal("0"))
+        self.assertIsNone(row.difference_point)
+        self.assertIn("CALCULATED_CLOSING_MISSING", row.issues)
         self.assertIn("CONVERSION_SOURCE_FACTOR_MISMATCH", row.issues)
         self.assertEqual(row.status, "REVISAR_FUENTE")
 
@@ -669,7 +671,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         row = service.build("2026-12").rows[self.parent.id]
 
         self.assertEqual(row.production, Decimal("2"))
-        self.assertEqual(row.calculated_closing, Decimal("7"))
+        self.assertIsNone(row.calculated_closing)
+        self.assertIn("CALCULATED_CLOSING_MISSING", row.issues)
         self.assertEqual(official.calls, [])
 
     def test_missing_snapshot_is_non_authoritative_and_warned(self):
@@ -810,7 +813,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         balance = self._service()[0].build("2026-07")
 
-        self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("17"))
+        self.assertIsNone(balance.rows[self.parent.id].opening_point)
+        self.assertIn("SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS", balance.issues)
         self.assertEqual(balance.sources["opening_snapshot"]["applied_branch_count"], 2)
         self.assertEqual(balance.sources["opening_snapshot"]["applied_coverage_key_count"], 2)
         self.assertFalse(balance.sources["sales"]["source_present"])
@@ -976,7 +980,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         balance = self._service()[0].build("2026-07")
 
         opening = balance.sources["opening_snapshot"]
-        self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("10"))
+        self.assertIsNone(balance.rows[self.parent.id].opening_point)
+        self.assertIn("SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS", balance.issues)
         self.assertEqual(opening["selected_branch_count"], 1)
         self.assertEqual(opening["applied_branch_count"], 1)
         self.assertEqual(opening["out_of_tolerance_key_count"], 0)
@@ -1666,6 +1671,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(remote.calls, 0)
         self.assertFalse(balance.sources["sales"]["source_present"])
         self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIsNone(balance.rows[self.parent.id].calculated_closing)
+        self.assertIn("CALCULATED_CLOSING_MISSING", balance.rows[self.parent.id].issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_equal_snapshot_subsets_do_not_prove_full_catalog_coverage(self):
@@ -1688,7 +1695,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
-    def test_equal_product_subset_across_all_branches_does_not_prove_catalog_coverage(self):
+    def test_job_bound_product_manifest_does_not_depend_on_current_product_catalog(self):
         second_sucursal = Sucursal.objects.create(codigo="LEDGER-PROD-MISS", nombre="Sucursal producto faltante")
         second_branch = PointBranch.objects.create(
             external_id="LEDGER-PRODUCT-MISSING",
@@ -1708,12 +1715,13 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         balance = self._service()[0].build("2026-07")
 
         opening = balance.sources["opening_snapshot"]
-        self.assertFalse(opening["authoritative"])
-        self.assertTrue(opening["missing_expected_product_coverage_keys"])
-        self.assertIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertTrue(opening["authoritative"])
+        self.assertEqual(opening["manifest_product_ids"], (self.parent_product.id,))
+        self.assertFalse(opening["missing_expected_product_coverage_keys"])
+        self.assertNotIn("SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
-    def test_full_active_product_catalog_from_successful_unrestricted_job_is_authoritative(self):
+    def test_identical_job_product_manifest_from_successful_unrestricted_job_is_authoritative(self):
         for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
             self._snapshot(self.parent_product, "10", captured_at)
             self._snapshot(self.slice_product, "4", captured_at)
@@ -1725,6 +1733,20 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(balance.sources["opening_snapshot"]["sync_job_verified"])
         self.assertTrue(balance.sources["opening_snapshot"]["product_manifest_verified"])
         self.assertTrue(balance.sources["opening_snapshot"]["authoritative"])
+
+    def test_inventory_job_count_metadata_mismatch_blocks_authority(self):
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            self._snapshot(self.slice_product, "4", captured_at)
+        self.sync_job.result_summary = {"snapshots_created": 999}
+        self.sync_job.save(update_fields=["result_summary"])
+
+        balance = self._service()[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertFalse(opening["authoritative"])
+        self.assertFalse(opening["product_manifest_verified"])
+        self.assertEqual(opening["job_count_mismatches"]["snapshots_created"]["reported"], 999)
 
     def test_full_snapshot_from_non_successful_job_is_not_authoritative(self):
         self.sync_job.status = PointSyncJob.STATUS_PARTIAL
@@ -1738,6 +1760,95 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertFalse(balance.sources["opening_snapshot"]["sync_job_verified"])
         self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_two_point_aliases_for_same_erp_branch_make_snapshot_total_unavailable(self):
+        alias = PointBranch.objects.create(
+            external_id="LEDGER-ALIAS",
+            name="Alias de la misma sucursal",
+            erp_branch=self.sucursal,
+        )
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            for branch in (self.branch, alias):
+                for product in (self.parent_product, self.slice_product):
+                    PointInventorySnapshot.objects.create(
+                        branch=branch,
+                        product=product,
+                        stock=Decimal("5"),
+                        captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                        sync_job=self.sync_job,
+                    )
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertIn("SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS", balance.issues)
+        self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
+        self.assertIsNone(balance.rows[self.parent.id].opening_point)
+        self.assertIsNone(balance.rows[self.parent.id].closing_point)
+
+    def test_unmapped_point_branch_mixed_into_job_makes_snapshot_total_unavailable(self):
+        unmapped = PointBranch.objects.create(external_id="LEDGER-UNMAPPED", name="Sucursal sin homologar")
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            for product in (self.parent_product, self.slice_product):
+                self._snapshot(product, "5", captured_at)
+                PointInventorySnapshot.objects.create(
+                    branch=unmapped,
+                    product=product,
+                    stock=Decimal("99"),
+                    captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                    sync_job=self.sync_job,
+                )
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertIn("SNAPSHOT_BRANCH_UNMAPPED", balance.issues)
+        self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
+        self.assertIsNone(balance.rows[self.parent.id].opening_point)
+        self.assertIsNone(balance.rows[self.parent.id].closing_point)
+
+    def test_new_product_from_later_job_does_not_invalidate_old_job_manifest(self):
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            self._snapshot(self.slice_product, "4", captured_at)
+        later_product = PointProduct.objects.create(
+            external_id="ledger-later-product",
+            sku="LEDGER-LATER",
+            name="Producto agregado después",
+            active=True,
+        )
+        later_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        PointInventorySnapshot.objects.create(
+            branch=self.branch,
+            product=later_product,
+            stock=Decimal("1"),
+            captured_at=timezone.make_aware(datetime(2026, 9, 30, 8), timezone.get_current_timezone()),
+            sync_job=later_job,
+        )
+
+        balance = self._service(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("0")}]
+        )[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertTrue(opening["authoritative"])
+        self.assertNotIn(later_product.id, opening["manifest_product_ids"])
+
+    def test_current_deactivation_does_not_hide_product_observed_by_old_job(self):
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            self._snapshot(self.parent_product, "10", captured_at)
+            self._snapshot(self.slice_product, "4", captured_at)
+        self.slice_product.active = False
+        self.slice_product.save(update_fields=["active"])
+
+        balance = self._service(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("0")}]
+        )[0].build("2026-07")
+
+        opening = balance.sources["opening_snapshot"]
+        self.assertTrue(opening["authoritative"])
+        self.assertIn(self.slice_product.id, opening["manifest_product_ids"])
 
     def test_snapshot_without_canonical_branch_manifest_is_not_authoritative(self):
         self.branch.erp_branch = None

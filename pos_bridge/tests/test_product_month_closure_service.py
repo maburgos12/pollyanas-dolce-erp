@@ -951,7 +951,8 @@ class ProductMonthClosureServiceTests(TestCase):
         line = closure.lines.get(receta_padre=self.parent)
         self.assertEqual(line.inventario_inicial_teorico, Decimal("2.5"))
         self.assertEqual(line.source_snapshot_count, 2)
-        self.assertEqual(line.inventario_final_teorico, Decimal("2.5"))
+        self.assertEqual(line.inventario_final_teorico, Decimal("0"))
+        self.assertIn("CALCULATED_CLOSING_MISSING", line.metadata["issues"])
 
     def test_build_rejects_locked_closure_rebuild(self):
         ProductoMonthClosure.objects.create(
@@ -1055,7 +1056,8 @@ class ProductMonthClosureServiceTests(TestCase):
         )
         september = self.service.build(month="2025-09")
         september_line = september.lines.get(receta_padre=self.parent)
-        self.assertEqual(september_line.inventario_final_teorico, Decimal("10"))
+        self.assertEqual(september_line.inventario_final_teorico, Decimal("0"))
+        self.assertIn("CALCULATED_CLOSING_MISSING", september_line.metadata["issues"])
 
         PointProductionLine.objects.create(
             branch=self.point_branch,
