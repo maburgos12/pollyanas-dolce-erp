@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from hashlib import sha256
+import json
 
 from django.conf import settings
 from django.db import connection, transaction
@@ -79,6 +80,8 @@ class _AggregateBucket:
 
 class ProductMonthClosureService:
     DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
+    METADATA_COMPACTION_SAMPLE_LIMIT = 5
+    METADATA_COMPACTION_MAPPING_LIMIT = 12
 
     def __init__(
         self,
@@ -297,24 +300,37 @@ class ProductMonthClosureService:
         return {str(key): self._compact_metadata_value(value) for key, value in raw.items()}
 
     @classmethod
-    def _compact_metadata_value(cls, value, *, sample_limit=5, mapping_limit=12):
+    def _compact_metadata_value(cls, value, *, sample_limit=None, mapping_limit=None):
+        sample_limit = cls.METADATA_COMPACTION_SAMPLE_LIMIT if sample_limit is None else sample_limit
+        mapping_limit = cls.METADATA_COMPACTION_MAPPING_LIMIT if mapping_limit is None else mapping_limit
         if isinstance(value, list):
             if len(value) <= sample_limit:
                 return [cls._compact_metadata_value(item) for item in value]
             return {
                 "count": len(value),
-                "hash": sha256(repr(value).encode()).hexdigest()[:16],
+                "hash": cls._metadata_digest(value),
                 "sample": [cls._compact_metadata_value(item) for item in value[:sample_limit]],
             }
         if isinstance(value, dict):
             if len(value) > mapping_limit:
+                items = sorted(value.items(), key=lambda item: str(item[0]))
                 return {
                     "count": len(value),
-                    "hash": sha256(repr(value).encode()).hexdigest()[:16],
-                    "sample": {str(key): cls._compact_metadata_value(item) for key, item in list(value.items())[:sample_limit]},
+                    "hash": cls._metadata_digest(value),
+                    "sample": {str(key): cls._compact_metadata_value(item) for key, item in items[:sample_limit]},
                 }
-            return {str(key): cls._compact_metadata_value(item) for key, item in value.items()}
+            return {str(key): cls._compact_metadata_value(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
         return value
+
+    @classmethod
+    def _metadata_digest(cls, value) -> str:
+        payload = json.dumps(
+            cls._json_compatible(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _decimal_text(value: Decimal) -> str:

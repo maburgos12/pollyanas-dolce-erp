@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
@@ -8,7 +9,8 @@ from types import MappingProxyType
 
 from django.core.management import call_command
 from django.test import TestCase
-from django.test.utils import override_settings
+from django.db import connection
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
 from openpyxl import Workbook
 
@@ -195,6 +197,249 @@ class ProductMonthClosureServiceTests(TestCase):
         compact = preview["metadata"]["sales_meta"]
         self.assertEqual(compact["selected_row_job_ids"]["count"], 30)
         self.assertEqual(compact["recipe_scope_totals"]["count"], 30)
+
+    def test_preview_propagates_sales_authority_matrix_to_lock_readiness(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("10"),
+            production=Decimal("2"),
+            sales=Decimal("3"),
+            waste=Decimal("1"),
+            calculated_closing=Decimal("8"),
+            closing_point=Decimal("8"),
+            closing_point_cedis=Decimal("5"),
+            closing_point_sucursales=Decimal("3"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            source_counts=MappingProxyType(
+                {
+                    "opening_snapshot_rows": 1,
+                    "closing_snapshot_rows": 1,
+                    "sales_rows": 1,
+                    "production_rows": 1,
+                    "waste_rows": 1,
+                }
+            ),
+        )
+        base_sources = {
+            "opening_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 8, 31),)}),
+            "closing_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 9, 30),)}),
+        }
+        cases = (
+            ("bridge", False, "SALES_SOURCE_REQUIRES_REVIEW", {"selected_source": "bridge_history"}),
+            ("missing_job", False, "SALES_SYNC_JOB_MISSING", {"selected_source": "official_point_daily_sales"}),
+            ("partial_job", False, "SALES_SYNC_JOB_PARTIAL", {"selected_source": "official_point_daily_sales", "job_status": "PARTIAL"}),
+            ("failed_job", False, "SALES_SYNC_JOB_FAILED", {"selected_source": "official_point_daily_sales", "job_status": "FAILED"}),
+            ("restricted_job", False, "SALES_SYNC_JOB_RESTRICTED", {"selected_source": "official_point_daily_sales"}),
+            ("coverage_unproven", False, "SALES_SYNC_COVERAGE_UNPROVEN", {"selected_source": "official_point_daily_sales"}),
+            ("divergent_bridge", False, "SALES_SOURCE_MIXED", {"selected_source": "official_point_daily_sales", "materialized_bridge_reconciled": False}),
+            ("official_full", True, None, {"selected_source": "official_point_daily_sales", "job_id": 901, "job_status": "SUCCESS"}),
+            ("reconciled_duplicate", True, None, {"selected_source": "official_point_daily_sales", "job_id": 902, "job_status": "SUCCESS", "materialized_bridge_reconciled": True}),
+        )
+
+        for label, authoritative, expected_issue, extra_sales in cases:
+            with self.subTest(case=label):
+                sales = {
+                    "configured_source_mode": "AUTO",
+                    "selected_source": "official_point_daily_sales",
+                    "authoritative": authoritative,
+                    "selected_dates": (date(2025, 9, 1), date(2025, 9, 30)),
+                    "coverage_expected_branch_days": 30,
+                    "coverage_logged_branch_days": 30,
+                    **extra_sales,
+                }
+                balance = MonthlyPointBalance(
+                    month_start=date(2025, 9, 1),
+                    month_end=date(2025, 9, 30),
+                    rows=MappingProxyType({self.parent.id: row}),
+                    issues=() if expected_issue is None else (expected_issue,),
+                    sources=MappingProxyType({**base_sources, "sales": MappingProxyType(sales)}),
+                    effective_snapshot_dates=MappingProxyType({"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}),
+                    source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 1}),
+                )
+
+                preview = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")
+                validation = preview["metadata"]["validation"]
+
+                self.assertEqual(validation["lock_ready"], expected_issue is None)
+                if expected_issue is None:
+                    self.assertEqual(validation["blocking_issues"], [])
+                else:
+                    self.assertIn(expected_issue, validation["blocking_issues"])
+
+    def test_preview_recursively_compacts_large_source_metadata_with_stable_full_hashes(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("10"),
+            calculated_closing=Decimal("10"),
+            closing_point=Decimal("10"),
+            closing_point_cedis=Decimal("10"),
+            closing_point_sucursales=Decimal("0"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 1}),
+        )
+        source = MappingProxyType(
+            {
+                "configured_source_mode": "AUTO",
+                "selected_source": "official_point_daily_sales",
+                "authoritative": True,
+                "job_id": 777,
+                "selected_dates": (date(2025, 9, 30),),
+                "coverage_expected_branch_days": 270,
+                "coverage_logged_branch_days": 270,
+                "selected_row_job_ids": tuple(range(100, 140)),
+                "coverage_no_aplica_branch_days": tuple(f"CEDIS:{day:02d}" for day in range(40)),
+                "coverage_missing_branch_days": tuple(f"SUC:{day:02d}" for day in range(40)),
+                "rejected_provenance": tuple({"job_id": job_id, "reason": "synthetic"} for job_id in range(40)),
+                "recipe_scope_totals": {str(index): {"cedis": Decimal(index), "sucursales": Decimal(index + 1)} for index in range(40)},
+                "nested": {"mixed": [{"positions": list(range(40)), "labels": [f"r-{index}" for index in range(40)]}]},
+            }
+        )
+        sources = MappingProxyType(
+            {
+                "opening_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 8, 31),)}),
+                "closing_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 9, 30),)}),
+                "sales": source,
+            }
+        )
+        balance = MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType({self.parent.id: row}),
+            sources=sources,
+            effective_snapshot_dates=MappingProxyType({"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}),
+            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 1}),
+        )
+        service = ProductMonthClosureService(balance_service=CanonicalBalance(balance))
+
+        preview = service.preview(month="2025-09")
+        closure = service.build(month="2025-09")
+        metadata = closure.metadata
+        sales_meta = metadata["sales_meta"]
+        serialized = json.dumps(metadata, sort_keys=True).encode("utf-8")
+
+        for key, original in {
+            "selected_row_job_ids": source["selected_row_job_ids"],
+            "coverage_no_aplica_branch_days": source["coverage_no_aplica_branch_days"],
+            "coverage_missing_branch_days": source["coverage_missing_branch_days"],
+            "rejected_provenance": source["rejected_provenance"],
+            "recipe_scope_totals": source["recipe_scope_totals"],
+        }.items():
+            with self.subTest(key=key):
+                compact = sales_meta[key]
+                self.assertIsInstance(compact, dict)
+                self.assertEqual(compact["count"], len(original))
+                self.assertRegex(compact["hash"], r"^[0-9a-f]{64}$")
+                self.assertLessEqual(len(compact["sample"]), service.METADATA_COMPACTION_SAMPLE_LIMIT)
+                self.assertNotEqual(compact, original)
+                self.assertNotEqual(compact["sample"], ProductMonthClosureService._json_compatible(original))
+
+        nested_positions = sales_meta["nested"]["mixed"][0]["positions"]
+        self.assertEqual(nested_positions["count"], 40)
+        self.assertRegex(nested_positions["hash"], r"^[0-9a-f]{64}$")
+        self.assertLessEqual(len(nested_positions["sample"]), service.METADATA_COMPACTION_SAMPLE_LIMIT)
+        self.assertEqual(sales_meta["configured_source_mode"], "AUTO")
+        self.assertEqual(sales_meta["selected_source"], "official_point_daily_sales")
+        self.assertTrue(sales_meta["authoritative"])
+        self.assertEqual(sales_meta["job_id"], 777)
+        self.assertEqual(sales_meta["selected_dates"], ["2025-09-30"])
+        self.assertEqual(sales_meta["coverage_expected_branch_days"], 270)
+        self.assertEqual(sales_meta["coverage_logged_branch_days"], 270)
+        self.assertIn("opening_meta", metadata)
+        self.assertIn("sales_meta", metadata)
+        self.assertIn("closing_inventory_meta", metadata)
+        self.assertLess(len(serialized), 20_000)
+        self.assertEqual(preview["metadata"]["sales_meta"], sales_meta)
+
+    def test_project_canonical_balance_uses_bounded_queries_and_equivalence_precedence(self):
+        def balance_for(recipes):
+            return MonthlyPointBalance(
+                month_start=date(2025, 9, 1),
+                month_end=date(2025, 9, 30),
+                rows=MappingProxyType(
+                    {
+                        receta.id: MonthlyPointBalanceRow(
+                            receta_id=receta.id,
+                            opening_point=Decimal("20"),
+                            sales=Decimal("20") if receta != self.parent else Decimal("3"),
+                            calculated_closing=Decimal("20") if receta != self.parent else Decimal("17"),
+                            closing_point=Decimal("20") if receta != self.parent else Decimal("17"),
+                            closing_point_cedis=Decimal("20") if receta != self.parent else Decimal("17"),
+                            closing_point_sucursales=Decimal("0"),
+                            difference_point=Decimal("0"),
+                            status="COINCIDE",
+                            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 1}),
+                        )
+                        for receta in recipes
+                    }
+                ),
+            )
+
+        raw_recipes = []
+        for index in range(20):
+            raw = Receta.objects.create(
+                nombre=f"Producto proyeccion {index}",
+                codigo_point=f"PROY-{index}",
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+                hash_contenido=f"projection-{index}",
+            )
+            raw_recipes.append(raw)
+            if index % 2 == 0:
+                RecetaEquivalencia.objects.create(
+                    receta_porcion=raw,
+                    receta_padre=self.parent,
+                    factor_conversion=Decimal("2"),
+                    tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+                    activo=True,
+                )
+            else:
+                RecetaPresentacionDerivada.objects.create(
+                    receta_padre=self.parent,
+                    receta_derivada=raw,
+                    codigo_point_derivado=f"PROY-DER-{index}",
+                    nombre_derivado=raw.nombre,
+                    unidades_por_padre=Decimal("10"),
+                    activo=True,
+                )
+        hybrid = raw_recipes[0]
+        RecetaPresentacionDerivada.objects.create(
+            receta_padre=self.parent,
+            receta_derivada=hybrid,
+            codigo_point_derivado="PROY-HYBRID",
+            nombre_derivado=hybrid.nombre,
+            unidades_por_padre=Decimal("10"),
+            activo=True,
+        )
+        service = ProductMonthClosureService()
+
+        with CaptureQueriesContext(connection) as small_queries:
+            small_rows = service._project_canonical_balance(balance=balance_for([self.parent]))
+        with CaptureQueriesContext(connection) as many_queries:
+            many_rows = service._project_canonical_balance(balance=balance_for([self.parent, *raw_recipes]))
+
+        self.assertEqual(len(small_queries), 3)
+        self.assertEqual(len(many_queries), 3)
+        self.assertLessEqual(len(many_queries), len(small_queries) + 1)
+        self.assertEqual(len(many_rows), 1)
+        self.assertEqual(many_rows[0]["receta"], self.parent)
+        self.assertEqual(many_rows[0]["venta_directa_enteros"], Decimal("3"))
+        self.assertEqual(many_rows[0]["venta_derivada_equivalente"], Decimal("120"))
+        self.assertEqual(small_rows[0]["venta_total_equivalente"], Decimal("3"))
 
     def test_canonical_point_difference_uses_legacy_storage_sign_and_blocks_source_issue(self):
         class CanonicalBalance:
