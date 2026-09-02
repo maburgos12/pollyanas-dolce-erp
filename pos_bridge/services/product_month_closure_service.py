@@ -212,7 +212,7 @@ class ProductMonthClosureService:
         source_issues = set(balance.issues)
         for source_name in ("opening_snapshot", "closing_snapshot", "sales"):
             source = dict(balance.sources.get(source_name) or {})
-            if source and source.get("authoritative") is False:
+            if source and (source.get("authoritative") is False or source.get("source_present") is False):
                 source_issues.add("MONTH_SOURCE_INCOMPLETE")
         line_rows = self._project_canonical_balance(balance=balance, global_issues=source_issues)
         if not line_rows:

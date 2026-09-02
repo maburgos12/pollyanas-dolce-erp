@@ -430,6 +430,8 @@ class MonthlyPointProductBalanceService:
         closing_meta["missing_in_opening_coverage_keys"] = tuple(sorted(closing_keys - opening_keys))
 
         issues: set[str] = set()
+        if opening_meta.get("missing_expected_branch_ids") or closing_meta.get("missing_expected_branch_ids"):
+            issues.add(ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE)
         if opening_branch_ids != closing_branch_ids:
             issues.add(ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE)
         if opening_branch_ids == closing_branch_ids and opening_keys != closing_keys:
@@ -510,6 +512,17 @@ class MonthlyPointProductBalanceService:
         unresolved: list[MonthlyPointUnresolvedMovement] = []
         selected_branch_ids = {snapshot.branch_id for snapshot in snapshots}
         selected_branch_codes = {snapshot.branch.external_id for snapshot in snapshots}
+        selected_erp_branch_ids = {
+            snapshot.branch.erp_branch_id for snapshot in snapshots if snapshot.branch.erp_branch_id is not None
+        }
+        expected_branches = [
+            branch
+            for branch in PointSalesBranchIndicatorService.canonical_branches()
+            if not branch.erp_branch_id or branch.erp_branch.esta_operativa(snapshot_date)
+        ]
+        missing_expected_branches = [
+            branch for branch in expected_branches if branch.erp_branch_id not in selected_erp_branch_ids
+        ]
         applied_branch_ids: set[int] = set()
         selected_coverage_keys: set[tuple[int, int]] = set()
         applied_coverage_keys: set[tuple[int, int]] = set()
@@ -571,13 +584,18 @@ class MonthlyPointProductBalanceService:
             "selected_dates": tuple(sorted(selected_dates)),
             "fallback_used": fallback_used,
             "within_tolerance": True,
-            "authoritative": bool(snapshots),
+            "source_present": bool(snapshots),
+            "authoritative": bool(snapshots) and not missing_expected_branches,
             "days_from_target": max(abs((selected_date - snapshot_date).days) for selected_date in selected_dates),
             "snapshot_rows": len(snapshots),
             "selected_rows": len(snapshots),
             "selected_branch_count": len(selected_branch_ids),
             "selected_branch_ids": tuple(sorted(selected_branch_ids)),
             "selected_branch_codes": tuple(sorted(selected_branch_codes)),
+            "expected_branch_count": len(expected_branches),
+            "expected_branch_ids": tuple(sorted(branch.id for branch in expected_branches)),
+            "missing_expected_branch_ids": tuple(sorted(branch.id for branch in missing_expected_branches)),
+            "missing_expected_branch_codes": tuple(sorted(branch.external_id for branch in missing_expected_branches)),
             "selected_coverage_key_count": len(selected_coverage_keys),
             "selected_coverage_keys": tuple(sorted(selected_coverage_keys)),
             "selected_mapped_recipe_keys": tuple(sorted(selected_mapped_recipe_keys)),
@@ -608,12 +626,17 @@ class MonthlyPointProductBalanceService:
             "fallback_used": False,
             "within_tolerance": False,
             "authoritative": False,
+            "source_present": False,
             "days_from_target": None,
             "snapshot_rows": 0,
             "selected_rows": 0,
             "selected_branch_count": 0,
             "selected_branch_ids": (),
             "selected_branch_codes": (),
+            "expected_branch_count": 0,
+            "expected_branch_ids": (),
+            "missing_expected_branch_ids": (),
+            "missing_expected_branch_codes": (),
             "selected_coverage_key_count": 0,
             "selected_coverage_keys": (),
             "selected_mapped_recipe_keys": (),
@@ -1076,7 +1099,7 @@ class MonthlyPointProductBalanceService:
             fallback_chain=fallback_chain,
             selection_reason=(selection_reason or "bridge_history_requires_manual_review") if bridge_present else "no_persisted_sales",
             remote_refresh_requested=remote_refresh_requested,
-            authoritative=authoritative if not bridge_present else False,
+            authoritative=False,
         ), ([bridge_review] if bridge_present else []) + unresolved
 
     @staticmethod

@@ -809,7 +809,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.rows[self.parent.id].opening_point, Decimal("17"))
         self.assertEqual(balance.sources["opening_snapshot"]["applied_branch_count"], 2)
         self.assertEqual(balance.sources["opening_snapshot"]["applied_coverage_key_count"], 2)
-        self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+        self.assertFalse(balance.sources["sales"]["source_present"])
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_missing_closing_branch_coverage_blocks_all_rows(self):
         second_branch = PointBranch.objects.create(
@@ -1657,7 +1658,29 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         balance = service.build("2026-07")
 
         self.assertEqual(remote.calls, 0)
-        self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+        self.assertFalse(balance.sources["sales"]["source_present"])
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
+    def test_equal_snapshot_subsets_do_not_prove_full_catalog_coverage(self):
+        missing_branch = PointBranch.objects.create(
+            external_id="LEDGER-NOT-CAPTURED",
+            name="Sucursal esperada no capturada",
+            erp_branch=Sucursal.objects.create(
+                codigo="LEDGER-NOT-CAPTURED",
+                nombre="Sucursal esperada no capturada",
+            ),
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
+        self.assertFalse(balance.sources["closing_snapshot"]["authoritative"])
+        self.assertIn(missing_branch.id, balance.sources["opening_snapshot"]["missing_expected_branch_ids"])
+        self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_explicit_empty_remote_report_is_blocking_and_falls_back(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))

@@ -198,6 +198,38 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(compact["selected_row_job_ids"]["count"], 30)
         self.assertEqual(compact["recipe_scope_totals"]["count"], 30)
 
+    def test_preview_blocks_required_source_marked_absent_even_if_authoritative_flag_is_stale(self):
+        class CanonicalBalance:
+            def __init__(self, balance): self.balance = balance
+            def build(self, month, **kwargs): return self.balance
+
+        balance = MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType({
+                self.parent.id: MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=Decimal("10"),
+                    calculated_closing=Decimal("10"),
+                    closing_point=Decimal("10"),
+                    difference_point=Decimal("0"),
+                    status="COINCIDE",
+                )
+            }),
+            sources=MappingProxyType({
+                "opening_snapshot": MappingProxyType({"authoritative": True, "source_present": True}),
+                "closing_snapshot": MappingProxyType({"authoritative": True, "source_present": True}),
+                "sales": MappingProxyType({"authoritative": True, "source_present": False}),
+            }),
+            effective_snapshot_dates=MappingProxyType({"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}),
+        )
+        self.service.balance_service = CanonicalBalance(balance)
+
+        preview = self.service.preview(month="2025-09")
+
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", preview["metadata"]["validation"]["blocking_issues"])
+        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
+
     def test_preview_propagates_sales_authority_matrix_to_lock_readiness(self):
         class CanonicalBalance:
             def __init__(self, balance):
