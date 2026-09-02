@@ -296,7 +296,8 @@
               <th>Receta padre</th>
               <th class="text-end">Conv. entrada Point</th>
               <th class="text-end">Conv. salida Point</th>
-              <th>Origen</th>
+              <th>Origen conversión</th>
+              <th>Proyección</th>
               <th class="text-end">Saldo calculado</th>
             </tr>
           </thead>
@@ -310,11 +311,12 @@
               <td class="text-end">{% if line.point_conversion_in != None %}{{ line.point_conversion_in|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
               <td class="text-end">{% if line.point_conversion_out != None %}{{ line.point_conversion_out|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
               <td>{% if line.conversion_origin %}{{ line.conversion_origin|join:", " }}{% else %}Sin dato{% endif %}</td>
+              <td>{% if line.projection_sources %}{{ line.projection_sources|join:", " }}{% else %}Sin dato{% endif %}</td>
               <td class="text-end">{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="5">No hubo conversiones Point registradas visibles en este mes.</td>
+              <td colspan="6">No hubo conversiones Point registradas visibles en este mes.</td>
             </tr>
             {% endfor %}
           </tbody>

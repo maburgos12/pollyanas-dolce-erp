@@ -5726,6 +5726,16 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
 
 
 _POINT_EXPORT_STATUSES = {"COINCIDE", "POINT_MAYOR", "POINT_MENOR", "REVISAR_FUENTE"}
+_CONVERSION_ORIGIN_VALUES = {"POINT", "EQUIVALENCIA_CONFIGURADA"}
+_CONVERSION_PROJECTION_VALUES = {"DIRECTA", "EQUIVALENCIA", "PRESENTACION_DERIVADA"}
+
+
+def _closure_metadata_values(value: object) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in value)
+    return (str(value),)
 
 
 def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, object]:
@@ -5760,6 +5770,15 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
 
     if calculated_missing or closing_missing:
         point_difference = None
+
+    stored_conversion_values = _closure_metadata_values(metadata.get("conversion_origin"))
+    conversion_origin = tuple(value for value in stored_conversion_values if value in _CONVERSION_ORIGIN_VALUES)
+    projection_sources = tuple(
+        dict.fromkeys(
+            list(_closure_metadata_values(metadata.get("projection_sources")))
+            + [value for value in stored_conversion_values if value in _CONVERSION_PROJECTION_VALUES]
+        )
+    )
 
     scopes_missing = closing_missing or (
         is_canonical
@@ -5796,7 +5815,8 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
         "point_conversion_out": (
             None if conversion_missing else _decimal_export_value(metadata.get("point_conversion_out"))
         ),
-        "conversion_origin": tuple(str(value) for value in metadata.get("conversion_origin") or ()),
+        "conversion_origin": conversion_origin,
+        "projection_sources": projection_sources,
         "waste_total": None if waste_missing else Decimal(str(line.merma_total_equivalente)),
         "calculated_closing": calculated_closing,
         "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
@@ -5868,6 +5888,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             "Conv. entrada Point",
             "Conv. salida Point",
             "Origen conversión",
+            "Proyección",
             "Saldo calculado",
             "Point CEDIS",
             "Point sucursales",
@@ -5891,6 +5912,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 _closure_export_display(export_row["point_conversion_in"]),
                 _closure_export_display(export_row["point_conversion_out"]),
                 " | ".join(export_row["conversion_origin"]) or "Sin dato",
+                " | ".join(export_row["projection_sources"]) or "Sin dato",
                 _closure_export_display(export_row["calculated_closing"]),
                 _closure_export_display(export_row["closing_point_cedis"]),
                 _closure_export_display(export_row["closing_point_sucursales"]),
@@ -5942,6 +5964,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             "Conv. entrada Point",
             "Conv. salida Point",
             "Origen conversión",
+            "Proyección",
             "Saldo calculado",
             "Point CEDIS",
             "Point sucursales",
@@ -5965,6 +5988,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 _closure_export_cell(export_row["point_conversion_in"]),
                 _closure_export_cell(export_row["point_conversion_out"]),
                 " | ".join(export_row["conversion_origin"]) or "Sin dato",
+                " | ".join(export_row["projection_sources"]) or "Sin dato",
                 _closure_export_cell(export_row["calculated_closing"]),
                 _closure_export_cell(export_row["closing_point_cedis"]),
                 _closure_export_cell(export_row["closing_point_sucursales"]),

@@ -3108,7 +3108,7 @@ class ReportesCanonicosTests(TestCase):
             built_by=self.user,
             notes="Conciliacion teorica mensual.\nSin inventario fisico.",
         )
-        ProductoMonthClosureLine.objects.create(
+        line = ProductoMonthClosureLine.objects.create(
             closure=closure,
             receta_padre=receta,
             inventario_inicial_teorico=Decimal("15"),
@@ -3304,8 +3304,16 @@ class ReportesCanonicosTests(TestCase):
                 "point_conversion_in": "8",
                 "point_conversion_out": "1",
                 "conversion_origin": ["POINT"],
+                "projection_sources": ["EQUIVALENCIA"],
             },
         )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        html_body = html_response.content.decode("utf-8")
+        self.assertIn("Origen conversión", html_body)
+        self.assertIn("Proyección", html_body)
+        self.assertIn(">POINT<", html_body)
+        self.assertIn(">EQUIVALENCIA<", html_body)
 
         csv_response = self.client.get(
             reverse("reportes:cierre_producto"),
@@ -3326,6 +3334,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. entrada Point")]), Decimal("8"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. salida Point")]), Decimal("1"))
         self.assertEqual(detail_values[detail_headers.index("Origen conversión")], "POINT")
+        self.assertEqual(detail_values[detail_headers.index("Proyección")], "EQUIVALENCIA")
         self.assertEqual(detail_values[detail_headers.index("Estado")], "Point mayor")
         self.assertNotIn("Diferencia teorico vs Point", csv_body)
         self.assertNotIn("Sobrante físico", csv_body)
@@ -3350,7 +3359,65 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Conv. entrada Point")], 8)
         self.assertEqual(values[headers.index("Conv. salida Point")], 1)
         self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Proyección")], "EQUIVALENCIA")
         self.assertEqual(values[headers.index("Estado")], "Point mayor")
+
+    def test_historical_mixed_conversion_metadata_is_split_conservatively_in_outputs(self):
+        receta = Receta.objects.create(
+            nombre="Pastel trazabilidad histórica",
+            codigo_point="HIST-TRACE-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-historical-conversion-trace",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 4, 1),
+            month_end=date(2026, 4, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "4",
+                "point_conversion_out": "1",
+                "conversion_origin": ["POINT", "PRESENTACION_DERIVADA"],
+                "conversion_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "sales_source_available": True,
+                "issues": [],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["conversion_origin"], ("POINT",))
+        self.assertEqual(conversion["projection_sources"], ("PRESENTACION_DERIVADA",))
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-04", "export": "csv"}
+        )
+        rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Proyección")], "PRESENTACION_DERIVADA")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-04", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Proyección")], "PRESENTACION_DERIVADA")
+
+        line.metadata = {**line.metadata, "conversion_origin": "POINT"}
+        line.save(update_fields=["metadata", "updated_at"])
+        scalar_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+        self.assertEqual(scalar_response.context["conversion_rows"][0]["conversion_origin"], ("POINT",))
 
     def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
         receta = Receta.objects.create(

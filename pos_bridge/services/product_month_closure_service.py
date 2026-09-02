@@ -12,7 +12,11 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from pos_bridge.models import PointDailySale, PointInventorySnapshot, PointProductionLine, PointSyncJob, PointWasteLine
-from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
+from pos_bridge.services.monthly_product_balance_service import (
+    ORIGIN_CONFIGURED_EQUIVALENCE,
+    ORIGIN_POINT,
+    MonthlyPointProductBalanceService,
+)
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import (
@@ -401,7 +405,7 @@ class ProductMonthClosureService:
             receta = recipes.get(receta_id)
             if receta is None:
                 continue
-            parent, _converted_one, equivalence_issue, is_derived, conversion_source = self._resolve_projected_recipe(
+            parent, _converted_one, equivalence_issue, is_derived, projection_source = self._resolve_projected_recipe(
                 receta, equivalences.get(receta.id), derived_relations.get(receta.id)
             )
             if parent is None or not self._is_recipe_eligible_for_closure(parent):
@@ -432,6 +436,7 @@ class ProductMonthClosureService:
                     "point_difference_missing": False,
                     "issues": set(),
                     "origins": set(),
+                    "projection_sources": set(),
                     "source_counts": {},
                     "raw_recipe_ids": [],
                     "point_statuses": set(),
@@ -444,10 +449,10 @@ class ProductMonthClosureService:
             bucket["point_statuses"].add(raw_row.status)
             if equivalence_issue:
                 bucket["issues"].add(equivalence_issue)
-            if raw_row.conversion_origin:
+            if raw_row.conversion_origin in {ORIGIN_POINT, ORIGIN_CONFIGURED_EQUIVALENCE}:
                 bucket["origins"].add(raw_row.conversion_origin)
-            if conversion_source:
-                bucket["origins"].add(conversion_source)
+            if projection_source:
+                bucket["projection_sources"].add(projection_source)
             for count_name, count in raw_row.source_counts.items():
                 bucket["source_counts"][count_name] = bucket["source_counts"].get(count_name, 0) + int(count)
             for field, raw_value, missing_flag in (
@@ -511,6 +516,7 @@ class ProductMonthClosureService:
                     "point_conversion_in": self._decimal_text(bucket["conversion_in"]),
                     "point_conversion_out": self._decimal_text(bucket["conversion_out"]),
                     "conversion_origin": sorted(bucket["origins"]),
+                    "projection_sources": sorted(bucket["projection_sources"]),
                     "source_counts": bucket["source_counts"],
                     "issues": sorted(issues),
                     "point_difference": "" if point_difference is None else self._decimal_text(point_difference),
@@ -689,7 +695,7 @@ class ProductMonthClosureService:
                     inventario_final_point_total=ZERO,
                     diferencia_teorico_vs_point=row["inventario_final_teorico"],
                     estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
-                    detalle_auditoria="Bootstrap histórico sin inventario físico Point del cierre.",
+                    detalle_auditoria="Bootstrap histórico sin saldo final Point del cierre.",
                     source_closing_snapshot_count=0,
                     source_snapshot_count=0,
                     source_sale_rows=0,
@@ -1439,26 +1445,29 @@ class ProductMonthClosureService:
         if not closing_inventory_available:
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
-                "No hay snapshot Point de inventario final para comparar contra el teórico.",
+                "No hay snapshot Point de inventario final para comparar contra el saldo calculado.",
             )
         if abs(difference) <= tolerance:
             if Decimal(str(waste_total or 0)) > tolerance:
                 return (
                     ProductoMonthClosureLine.AUDIT_STATUS_CUADRA_CON_MERMA,
-                    "El cierre cuadra después de descontar la merma registrada.",
+                    (
+                        "El saldo calculado coincide con el inventario final Point "
+                        "después de descontar la merma registrada."
+                    ),
                 )
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_CUADRA,
-                "El inventario teórico coincide con el inventario final Point.",
+                "El saldo calculado coincide con el inventario final Point.",
             )
         if difference < ZERO:
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
-                "Point reporta más inventario físico que el inventario teórico.",
+                "Point reporta más inventario final que el saldo calculado.",
             )
         return (
             ProductoMonthClosureLine.AUDIT_STATUS_FALTANTE_NO_EXPLICADO,
-            "El inventario teórico es mayor al inventario físico Point.",
+            "El saldo calculado es mayor al inventario final Point.",
         )
 
     def _build_closing_inventory_validation(
@@ -1545,7 +1554,9 @@ class ProductMonthClosureService:
         if bootstrap_seeded:
             warnings.append("El opening proviene de un bootstrap historico aprobado.")
         if opening_meta.get("previous_closure_opening_basis") == "theoretical_closing":
-            warnings.append("El opening heredado usa cierre teorico previo porque no habia inventario fisico Point.")
+            warnings.append(
+                "El saldo inicial heredado usa el cierre calculado previo porque no había inventario final Point."
+            )
         if unmatched_products:
             blocking_issues.append("Existen productos del opening sin homologacion Point -> ERP.")
         if snapshot_missing_exact_day and not snapshot_within_tolerance:

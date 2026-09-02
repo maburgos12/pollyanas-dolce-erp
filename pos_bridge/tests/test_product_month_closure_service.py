@@ -153,6 +153,8 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(row["diferencia_teorico_vs_point"], Decimal("0"))
         self.assertEqual(row["metadata"]["point_conversion_in"], "2")
         self.assertEqual(row["metadata"]["point_conversion_out"], "2")
+        self.assertEqual(row["metadata"]["conversion_origin"], ["EQUIVALENCIA_CONFIGURADA"])
+        self.assertEqual(row["metadata"]["projection_sources"], ["DIRECTA", "EQUIVALENCIA"])
         self.assertEqual(row["metadata"]["balance_contract"], "POINT_PRODUCT_BALANCE_V1")
         self.assertTrue(row["metadata"]["point_final_scopes_available"])
         self.assertEqual(row["inventario_final_point_cedis"], Decimal("6"))
@@ -169,6 +171,32 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(preview["totals"]["closing_cedis"], Decimal("6"))
         self.assertEqual(preview["totals"]["closing_sucursales"], Decimal("4"))
         self.assertEqual(preview["totals"]["closing_total"], Decimal("10"))
+
+    def test_new_canonical_audit_detail_names_point_balance_not_physical_inventory(self):
+        missing_status, missing_detail = self.service._canonical_audit_status(
+            issues=set(),
+            closing_missing=True,
+            point_difference=None,
+            waste_total=Decimal("0"),
+        )
+        greater_status, greater_detail = self.service._canonical_audit_status(
+            issues=set(),
+            closing_missing=False,
+            point_difference=Decimal("2"),
+            waste_total=Decimal("0"),
+        )
+        lower_status, lower_detail = self.service._canonical_audit_status(
+            issues=set(),
+            closing_missing=False,
+            point_difference=Decimal("-2"),
+            waste_total=Decimal("0"),
+        )
+
+        self.assertEqual(missing_status, ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO)
+        self.assertIn("inventario final Point", missing_detail)
+        for detail in (missing_detail, greater_detail, lower_detail):
+            self.assertNotIn("físic", detail.lower())
+            self.assertNotIn("fisic", detail.lower())
 
     def test_preview_sales_authority_alone_controls_lock_readiness_and_compacts_metadata(self):
         class CanonicalBalance:
