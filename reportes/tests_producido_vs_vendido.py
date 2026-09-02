@@ -88,6 +88,45 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
             request=request,
         )
 
+    def _conversion_origin_context(self):
+        mixed = Receta.objects.create(
+            nombre="Producto conversión mixta",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Galletas",
+            hash_contenido="test-pvv-mixed",
+        )
+        unresolved = Receta.objects.create(
+            nombre="Producto conversión sin resolver",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            categoria="Pay Grande",
+            hash_contenido="test-pvv-unresolved",
+        )
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    conversion_in=Decimal("1"),
+                    conversion_origin="POINT",
+                ),
+                MonthlyPointBalanceRow(
+                    receta_id=self.slice.id,
+                    conversion_in=Decimal("1"),
+                    conversion_origin="EQUIVALENCIA_CONFIGURADA",
+                ),
+                MonthlyPointBalanceRow(
+                    receta_id=mixed.id,
+                    conversion_in=Decimal("1"),
+                    conversion_origin="MIXED",
+                ),
+                MonthlyPointBalanceRow(
+                    receta_id=unresolved.id,
+                    conversion_in=Decimal("1"),
+                    conversion_origin="UNRESOLVED",
+                ),
+            )
+        )
+        return context
+
     def test_slice_sale_without_point_conversion_never_infers_conversion_from_sale_or_waste(self):
         context, _ = self._context(
             canonical_balance(
@@ -211,6 +250,17 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         )
         self.assertEqual(context["groups"][0]["total"]["dif"], Decimal("8"))
         self.assertEqual(context["grand_total"]["dif"], Decimal("8"))
+
+    def test_operational_difference_total_is_unavailable_when_any_operational_row_is_missing(self):
+        total = ProducidoVsVendidoMermaView()._difference_total(
+            [
+                {"produccion_referencia": False, "dif": Decimal("2")},
+                {"produccion_referencia": False, "dif": None},
+                {"produccion_referencia": True, "dif": None},
+            ]
+        )
+
+        self.assertIsNone(total)
 
     def test_missing_total_values_render_as_sin_dato_without_bare_currency_or_success_state(self):
         context, _ = self._context(
@@ -489,6 +539,14 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn("Sobrante físico", body)
         self.assertNotIn("Faltante no explicado", body)
 
+    def test_csv_export_includes_exact_conversion_provenance(self):
+        response = ProducidoVsVendidoMermaView()._export_csv(self._conversion_origin_context())
+        body = response.content.decode("utf-8")
+
+        self.assertIn("Procedencia conversión", body)
+        for label in ("Point", "equivalencia configurada", "mixta", "sin resolver"):
+            self.assertIn(label, body)
+
     def test_xlsx_export_uses_canonical_point_headers_and_preserves_missing_values(self):
         context, _ = self._context(
             canonical_balance(
@@ -519,6 +577,19 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertEqual(detail[headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(detail[headers.index("Dif. Point")], "Sin dato")
 
+    def test_xlsx_export_includes_exact_conversion_provenance(self):
+        response = ProducidoVsVendidoMermaView()._export_xlsx(self._conversion_origin_context())
+        workbook = load_workbook(BytesIO(response.content), data_only=True, read_only=True)
+        sheet = workbook["Producido vs Vendido"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=5, max_row=5))]
+        provenance_index = headers.index("Procedencia conversión")
+        values = {
+            row[provenance_index]
+            for row in sheet.iter_rows(min_row=6, values_only=True)
+        }
+
+        self.assertTrue({"Point", "equivalencia configurada", "mixta", "sin resolver"}.issubset(values))
+
     def test_pdf_export_uses_canonical_point_labels_and_neutral_status(self):
         context, _ = self._context(
             canonical_balance(
@@ -548,3 +619,10 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn("Físico", body)
         self.assertNotIn("Sobrante físico", body)
         self.assertNotIn("Faltante no explicado", body)
+
+    def test_pdf_export_includes_exact_conversion_provenance(self):
+        response = ProducidoVsVendidoMermaView()._export_pdf(self._conversion_origin_context())
+        body = response.content.decode("latin-1")
+
+        for label in ("Point", "equivalencia configurada", "mixta", "sin resolver"):
+            self.assertIn(f"Procedencia conversion: {label}", body)

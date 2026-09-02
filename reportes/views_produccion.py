@@ -71,6 +71,7 @@ PRODUCTION_EXPORT_COLUMNS = [
     ("merma_reportada", "Merma", "number"),
     ("conversion_entrada", "Conv. entrada Point", "number"),
     ("conversion_salida", "Conv. salida Point", "number"),
+    ("conversion_provenance_label", "Procedencia conversión", "text"),
     ("costo_merma", "Costo merma", "currency"),
     ("pct_merma", "% merma", "percent"),
     ("inventario_inicial", "Ini. Point", "number"),
@@ -458,6 +459,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             status = _export_display_value(row, "estado_inventario", "text") or "-"
             lines.extend(textwrap.wrap(operational_metrics, width=118, subsequent_indent="  "))
             lines.extend(textwrap.wrap(f"{point_metrics} | Estado {status}", width=118, subsequent_indent="  "))
+            if row.get("_row_type") == "detail":
+                provenance = _export_display_value(row, "conversion_provenance_label", "text") or "Sin dato"
+                lines.append(f"Procedencia conversion: {provenance}")
             costo = _export_display_value(row, "costo_merma", "currency") or "$0.00"
             lines.append(f"Costo merma: {costo}")
             lines.append("")
@@ -601,8 +605,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return {
             "POINT": "Point",
             "EQUIVALENCIA_CONFIGURADA": "equivalencia configurada",
-            "MIXED": "orígenes mixtos",
-            "UNRESOLVED": "Revisar fuente",
+            "MIXED": "mixta",
+            "UNRESOLVED": "sin resolver",
         }.get(origin, "Sin dato")
 
     @staticmethod
@@ -797,10 +801,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     @staticmethod
     def _difference_total(rows: list[dict[str, Any]]) -> Decimal | None:
         non_reference_rows = [row for row in rows if not row.get("produccion_referencia")]
-        authoritative_values = [row["dif"] for row in non_reference_rows if row.get("dif") is not None]
-        if not authoritative_values:
+        if not non_reference_rows or any(row.get("dif") is None for row in non_reference_rows):
             return None
-        return sum(authoritative_values, ZERO)
+        return sum((row["dif"] for row in non_reference_rows), ZERO)
 
     def _categories(self) -> list[str]:
         values = (
