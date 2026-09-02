@@ -8,6 +8,7 @@ from django.db import connection
 from django.utils import timezone
 
 from pos_bridge.models import PointSyncJob
+from pos_bridge.utils.source_retry import source_error_metadata
 from pos_bridge.services.conversion_sync_service import sync_conversion_lines
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
@@ -81,7 +82,7 @@ def _serialize_source_step(name: str, result) -> dict[str, object]:
 
 
 def _is_transient_source_error(exc: Exception) -> bool:
-    return isinstance(exc, (TimeoutError, ConnectionError, OSError))
+    return bool(source_error_metadata(exc)["retryable"])
 
 
 def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=None) -> list[dict[str, object]]:

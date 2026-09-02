@@ -24,11 +24,13 @@ from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchI
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from pos_bridge.services.sales_materialization_repair_service import BridgeSalesMaterializationRepairService
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, months_in_range
 from pos_bridge.services.sync_service import PointSyncService
 from pos_bridge.utils.exceptions import ExtractionError
 from pos_bridge.utils.dates import iter_business_dates
 from pos_bridge.utils.helpers import deterministic_id
 from pos_bridge.utils.logger import get_job_logger
+from pos_bridge.utils.source_retry import source_error_metadata
 
 
 @dataclass
@@ -255,6 +257,7 @@ class OfficialSalesBackfillService:
         sync_job: PointSyncJob,
         aggregated_rows: dict[tuple[str, str, str], dict],
     ) -> tuple[int, int]:
+        lock_product_month_sources([sale_date])
         # PointBranch es la fila estable que serializa el reemplazo oficial. El
         # lock debe preceder tanto al delete como a la resolución/upsert de
         # productos para que dos jobs no se intercalen ni choquen en uniques.
@@ -444,6 +447,7 @@ class OfficialSalesBackfillService:
                             },
                         )
                     except Exception as exc:
+                        error_metadata = source_error_metadata(exc)
                         PointSalesQualityAlert.objects.create(
                             sync_job=sync_job,
                             branch=branch,
@@ -470,6 +474,10 @@ class OfficialSalesBackfillService:
                             },
                         )
                         summary["failed_branch_days"] += 1
+                        summary["retryable"] = bool(summary.get("retryable")) or bool(error_metadata["retryable"])
+                        summary.setdefault("error_types", [])
+                        if error_metadata["error_type"] not in summary["error_types"]:
+                            summary["error_types"].append(error_metadata["error_type"])
                         if len(summary["failures"]) < 50:
                             summary["failures"].append(
                                 {
@@ -477,10 +485,13 @@ class OfficialSalesBackfillService:
                                     "branch": branch.name,
                                     "sale_date": sale_date.isoformat(),
                                     "error": str(exc),
+                                    **error_metadata,
                                 }
                             )
 
-            repair = self.repair_service.repair(start_date=start_date, end_date=end_date)
+            with transaction.atomic():
+                lock_product_month_sources(months_in_range(start_date, end_date))
+                repair = self.repair_service.repair(start_date=start_date, end_date=end_date)
             summary.update(
                 {
                     "bridge_history_deleted": repair.bridge_history_deleted,
@@ -492,7 +503,12 @@ class OfficialSalesBackfillService:
                 }
             )
             if summary["branch_days_processed"] == 0 and summary["failed_branch_days"] > 0:
-                raise RuntimeError("No se pudo importar ningún branch-day desde Point oficial.")
+                failure = RuntimeError("No se pudo importar ningún branch-day desde Point oficial.")
+                failure.context = {
+                    "retryable": bool(summary.get("retryable")),
+                    "error_type": (summary.get("error_types") or [type(failure).__name__])[0],
+                }
+                raise failure
             if summary["failed_branch_days"] > 0:
                 return self.sync_service.mark_partial(
                     sync_job,

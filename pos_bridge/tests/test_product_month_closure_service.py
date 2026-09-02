@@ -1570,6 +1570,54 @@ class ProductMonthClosureServiceTests(TestCase):
         for field in ("production", "sales_total", "waste_total", "point_conversion_in", "calculated_closing"):
             self.assertIsNone(projected[field], field)
 
+    def test_historical_excel_preserves_blank_scopes_and_explicit_zero_total(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "MAYO 25"
+        worksheet["B1"] = self.parent.nombre
+        worksheet["K1"] = 0
+
+        with NamedTemporaryFile(suffix=".xlsx") as tmp:
+            workbook.save(tmp.name)
+            with (
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._resolve_receta",
+                    return_value=self.parent,
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._sales_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._production_map",
+                    return_value=({}, "test"),
+                ),
+                patch(
+                    "pos_bridge.management.commands.import_historical_product_closure_excel._merma_maps",
+                    return_value=({}, {}, "test"),
+                ),
+            ):
+                call_command(
+                    "import_historical_product_closure_excel",
+                    tmp.name,
+                    sheet="MAYO 25",
+                    month="2025-05",
+                    stdout=StringIO(),
+                )
+
+        line = ProductoMonthClosure.objects.get(month_start=date(2025, 5, 1)).lines.get()
+        historical = line.metadata["historical_excel"]
+        self.assertEqual(
+            historical["inventory_presence"],
+            {"opening": False, "cedis": False, "sucursales": False, "total": True},
+        )
+        from pos_bridge.services.product_closure_projection import project_product_closure_line
+
+        projected = project_product_closure_line(line, historical_excel_import=True)
+        self.assertIsNone(projected["historical_count_cedis"])
+        self.assertIsNone(projected["historical_count_sucursales"])
+        self.assertEqual(projected["historical_count"], Decimal("0"))
+
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(
             month_start=date(2025, 9, 1),

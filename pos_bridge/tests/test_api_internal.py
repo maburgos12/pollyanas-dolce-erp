@@ -330,7 +330,7 @@ class PosBridgeInternalApiTests(APITestCase):
             line.inventario_final_teorico - line.inventario_final_point_total
         )
         line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO
-        line.metadata = {"historical_excel": True}
+        line.metadata = {"historical_excel": {"inventory_presence": {"total": True}}}
         line.save()
         self.product_closure.metadata = {"historical_excel_import": {"source_file": "historico.xlsx"}}
         self.product_closure.save(update_fields=["metadata", "updated_at"])
@@ -339,12 +339,12 @@ class PosBridgeInternalApiTests(APITestCase):
 
         row = response.data["lines"][0]
         self.assertTrue(row["is_historical_inventory"])
-        self.assertIsNone(row["closing_point"])
+        self.assertEqual(row["closing_point"], "18.000000")
         self.assertIsNone(row["point_difference"])
         self.assertEqual(row["historical_count"], "18.000000")
         self.assertIsNone(row["historical_difference"])
         self.assertEqual(row["point_status"], "REVISAR_FUENTE")
-        self.assertIsNone(response.data["total_closing_point"])
+        self.assertEqual(response.data["total_closing_point"], "18.000000")
         self.assertIsNone(response.data["total_point_difference"])
         self.assertEqual(response.data["total_historical_count"], "18.000000")
         self.assertIsNone(response.data["total_historical_difference"])

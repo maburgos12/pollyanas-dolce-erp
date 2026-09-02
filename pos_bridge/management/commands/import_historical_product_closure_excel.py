@@ -282,6 +282,13 @@ class Command(BaseCommand):
             if normalized == "producto":
                 continue
 
+            raw_values = {
+                "inventario_inicial": ws[f"D{row_idx}"].value,
+                "cedis": ws[f"I{row_idx}"].value,
+                "sucursales": ws[f"J{row_idx}"].value,
+                "fisico_total": ws[f"K{row_idx}"].value,
+            }
+            presence = {key: _has_value(value) for key, value in raw_values.items()}
             values = {
                 "inventario_inicial": _parse_decimal(ws[f"D{row_idx}"].value),
                 "cedis": _parse_decimal(ws[f"I{row_idx}"].value),
@@ -289,10 +296,12 @@ class Command(BaseCommand):
                 "fisico_total": _parse_decimal(ws[f"K{row_idx}"].value),
             }
             numeric_values = list(values.values())
-            if _is_category_row(product_name, numeric_values):
+            if _is_category_row(product_name, numeric_values) and (
+                any(value != 0 for value in numeric_values) or not any(presence.values())
+            ):
                 category = product_name.strip().title()
                 continue
-            if not any(value != 0 for value in numeric_values):
+            if not any(presence.values()):
                 continue
 
             receta = _resolve_receta(matcher=matcher, variant_map=recipe_variant_map, product_name=product_name)
@@ -301,6 +310,7 @@ class Command(BaseCommand):
                 "category": category,
                 "product_name": product_name,
                 "receta": receta,
+                "presence": presence,
                 **values,
             }
             rows.append(row_payload)
@@ -331,6 +341,7 @@ class Command(BaseCommand):
                 {
                     "receta": receta,
                     "source_rows": [],
+                    "presence": {key: False for key in decimal_keys},
                     **{key: Decimal("0") for key in decimal_keys},
                 },
             )
@@ -343,6 +354,7 @@ class Command(BaseCommand):
             )
             for key in decimal_keys:
                 bucket[key] += source_row[key]
+                bucket["presence"][key] = bucket["presence"][key] or source_row["presence"][key]
 
         matched_rows = list(grouped_rows.values())
         sales_map = production_map = merma_map = merma_cost_map = None
@@ -489,11 +501,7 @@ class Command(BaseCommand):
                 merma = merma_map.get(receta.id, Decimal("0"))
                 inventario_teorico = row["inventario_inicial"] + producido - vendido - merma
                 diferencia_inventario = inventario_teorico - row["fisico_total"]
-                physical_cells_have_values = any(
-                    _has_value(ws[f"{column}{source_row['row_number']}"].value)
-                    for source_row in row["source_rows"]
-                    for column in ["I", "J", "K"]
-                )
+                physical_cells_have_values = row["presence"]["fisico_total"]
                 status = _audit_status(
                     final_difference=diferencia_inventario,
                     total_waste=merma,
@@ -525,6 +533,12 @@ class Command(BaseCommand):
                             "conteo_historico_cedis": str(row["cedis"]),
                             "conteo_historico_sucursales": str(row["sucursales"]),
                             "inventario_historico_fisico_total": str(row["fisico_total"]),
+                            "inventory_presence": {
+                                "opening": row["presence"]["inventario_inicial"],
+                                "cedis": row["presence"]["cedis"],
+                                "sucursales": row["presence"]["sucursales"],
+                                "total": row["presence"]["fisico_total"],
+                            },
                             "operational_sources": payload["operational_sources"],
                             "movement_authority": movement_authority,
                             "observed_movements": {

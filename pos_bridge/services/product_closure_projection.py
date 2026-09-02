@@ -119,21 +119,36 @@ def project_product_closure_line(
     closing_missing = closing_missing or not closing_authoritative
 
     historical_count = None
+    historical_count_cedis = None
+    historical_count_sucursales = None
     historical_difference = None
     if is_canonical:
         point_difference = decimal_value(metadata.get("point_difference"))
     elif is_historical_excel:
-        if line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
+        presence = historical_metadata.get("inventory_presence")
+        if not isinstance(presence, dict):
+            presence = {}
+        historical_count_cedis = (
+            Decimal(str(line.inventario_final_point_cedis)) if presence.get("cedis") is True else None
+        )
+        historical_count_sucursales = (
+            Decimal(str(line.inventario_final_point_sucursales))
+            if presence.get("sucursales") is True
+            else None
+        )
+        historical_count = (
+            Decimal(str(line.inventario_final_point_total)) if presence.get("total") is True else None
+        )
+        if historical_count is None:
             point_difference = None
             closing_missing = True
         else:
-            historical_count = Decimal(str(line.inventario_final_point_total))
             historical_difference = (
                 Decimal(str(line.diferencia_teorico_vs_point))
                 if calculated_authoritative
                 else None
             )
-            point_difference = None
+            point_difference = historical_difference
             closing_missing = True
             closing_authoritative = False
     elif line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
@@ -141,7 +156,7 @@ def project_product_closure_line(
         closing_missing = True
     else:
         point_difference = -Decimal(str(line.diferencia_teorico_vs_point))
-    if calculated_missing or closing_missing:
+    if calculated_missing or (closing_missing and not is_historical_excel):
         point_difference = None
 
     stored_conversion_values = metadata_values(metadata.get("conversion_origin"))
@@ -163,6 +178,8 @@ def project_product_closure_line(
             or metadata.get("point_final_scopes_available") is False
         )
     )
+    if is_historical_excel:
+        scopes_missing = False
 
     point_status = (
         str(metadata.get("point_status") or "")
@@ -210,14 +227,28 @@ def project_product_closure_line(
         "projection_sources": projection_sources,
         "waste_total": None if not waste_authoritative else Decimal(str(line.merma_total_equivalente)),
         "calculated_closing": None if calculated_missing else Decimal(str(line.inventario_final_teorico)),
-        "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
-        "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
-        "closing_point": None if closing_missing else Decimal(str(line.inventario_final_point_total)),
+        "closing_point_cedis": historical_count_cedis
+        if is_historical_excel
+        else None
+        if scopes_missing
+        else Decimal(str(line.inventario_final_point_cedis)),
+        "closing_point_sucursales": historical_count_sucursales
+        if is_historical_excel
+        else None
+        if scopes_missing
+        else Decimal(str(line.inventario_final_point_sucursales)),
+        "closing_point": historical_count
+        if is_historical_excel
+        else None
+        if closing_missing
+        else Decimal(str(line.inventario_final_point_total)),
         "point_difference": point_difference,
         "point_status": point_status,
         "status_label": status_label,
         "is_historical_inventory": is_historical_excel,
         "historical_count": historical_count,
+        "historical_count_cedis": historical_count_cedis,
+        "historical_count_sucursales": historical_count_sucursales,
         "historical_difference": historical_difference,
         "source_issues": tuple(
             sorted(

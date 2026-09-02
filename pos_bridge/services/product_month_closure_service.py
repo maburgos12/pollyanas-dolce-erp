@@ -31,6 +31,7 @@ from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
 )
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import (
     ProductoMonthClosure,
@@ -97,7 +98,6 @@ class _AggregateBucket:
 
 
 class ProductMonthClosureService:
-    MONTH_SOURCE_LOCK_NAMESPACE = 1_347_901_004
     DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
     METADATA_COMPACTION_SAMPLE_LIMIT = 5
     METADATA_COMPACTION_MAPPING_LIMIT = 12
@@ -642,15 +642,9 @@ class ProductMonthClosureService:
             "fact_operational_fallback": fact_qs,
             "sync_jobs": jobs_qs,
             "extraction_logs": logs_qs,
-            "point_branches": PointBranch.objects.all(),
-            "point_products": PointProduct.objects.filter(
-                Q(snapshots__in=snapshot_qs) | Q(daily_sales__in=daily_sales_qs)
-            ).distinct(),
-            "erp_branches": Sucursal.objects.all(),
-            "recipes": Receta.objects.all(),
-            "recipe_point_aliases": RecetaCodigoPointAlias.objects.all(),
-            "recipe_equivalences": RecetaEquivalencia.objects.all(),
-            "derived_presentations": RecetaPresentacionDerivada.objects.all(),
+            # Catálogos no son hechos mensuales y sus escritores no comparten
+            # este mutex. Su efecto queda congelado y auditable en el digest de
+            # líneas proyectadas; el raw digest sólo certifica hechos coordinados.
         }
         return {
             name: cls._queryset_evidence(queryset)
@@ -668,14 +662,7 @@ class ProductMonthClosureService:
 
     @classmethod
     def _lock_canonical_source_month(cls, month_start: date) -> None:
-        if connection.vendor != "postgresql":
-            raise ProductMonthClosureError("El mutex canónico mensual requiere PostgreSQL.")
-        month_key = month_start.year * 100 + month_start.month
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_advisory_xact_lock(%s, %s)",
-                [cls.MONTH_SOURCE_LOCK_NAMESPACE, month_key],
-            )
+        lock_product_month_sources([month_start])
 
     @staticmethod
     def _json_compatible(value):

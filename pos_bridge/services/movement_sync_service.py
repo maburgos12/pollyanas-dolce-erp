@@ -38,11 +38,13 @@ from pos_bridge.services.inventory_baseline import (
 )
 from pos_bridge.services.movement_matching_service import PointMovementMatchingService
 from pos_bridge.services.production_entry_extractor import PointProductionEntryExtractor
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.transfer_extractor import PointTransferExtractor
 from pos_bridge.services.waste_extractor import PointWasteExtractor
 from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
+from pos_bridge.utils.source_retry import source_error_metadata
 from recetas.models import InventarioCedisProducto, MovimientoProductoCedis
 
 
@@ -561,6 +563,7 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_waste_lines(self, sync_job: PointSyncJob, extracted_lines: list) -> dict:
+        lock_product_month_sources(item.movement_at for item in extracted_lines)
         staged_created = 0
         staged_updated = 0
         ledger_created = 0
@@ -621,6 +624,7 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_production_lines(self, sync_job: PointSyncJob, extracted_lines: list) -> dict:
+        lock_product_month_sources(item.production_date for item in extracted_lines)
         staged_created = 0
         staged_updated = 0
         inventory_entries_created = 0
@@ -847,13 +851,14 @@ class PointMovementSyncService:
         log_event(sync_job.triggered_by, "POS_BRIDGE_SYNC_SUCCESS", "pos_bridge.PointSyncJob", str(sync_job.id), payload=summary)
         return sync_job
 
-    def _mark_failure(self, sync_job: PointSyncJob, exc: Exception) -> PointSyncJob:
+    def _mark_failure(self, sync_job: PointSyncJob, exc: Exception, *, source_exc: Exception | None = None) -> PointSyncJob:
         context = sanitize_sensitive_data(getattr(exc, "context", {}) or {})
         sync_job.status = PointSyncJob.STATUS_FAILED
         sync_job.finished_at = timezone.now()
         sync_job.error_message = str(exc)
+        sync_job.result_summary = {**(sync_job.result_summary or {}), **source_error_metadata(source_exc or exc)}
         sync_job.artifacts = {**sync_job.artifacts, **context}
-        sync_job.save(update_fields=["status", "finished_at", "error_message", "artifacts", "updated_at"])
+        sync_job.save(update_fields=["status", "finished_at", "error_message", "result_summary", "artifacts", "updated_at"])
         self.record_log(sync_job, PointExtractionLog.LEVEL_ERROR, str(exc), context=context)
         self.alert_service.emit_failure(job_id=sync_job.id, message=str(exc), context=context)
         return sync_job
@@ -869,7 +874,7 @@ class PointMovementSyncService:
         except PosBridgeError as exc:
             return self._mark_failure(sync_job, exc)
         except Exception as exc:
-            return self._mark_failure(sync_job, PersistenceError(f"Error no controlado en sync de mermas Point: {exc}"))
+            return self._mark_failure(sync_job, PersistenceError(f"Error no controlado en sync de mermas Point: {exc}"), source_exc=exc)
 
     def run_production_sync(self, *, start_date: date, end_date: date, branch_filter: str | None = None, triggered_by=None) -> PointSyncJob:
         parameters = {"start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "branch_filter": branch_filter or ""}
@@ -882,7 +887,7 @@ class PointMovementSyncService:
         except PosBridgeError as exc:
             return self._mark_failure(sync_job, exc)
         except Exception as exc:
-            return self._mark_failure(sync_job, PersistenceError(f"Error no controlado en sync de producción Point: {exc}"))
+            return self._mark_failure(sync_job, PersistenceError(f"Error no controlado en sync de producción Point: {exc}"), source_exc=exc)
 
     def run_transfer_sync(self, *, start_date: date, end_date: date, branch_filter: str | None = None, triggered_by=None, apply_inventory: bool = True) -> PointSyncJob:
         parameters = {

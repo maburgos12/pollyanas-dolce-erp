@@ -3878,7 +3878,10 @@ class ReportesCanonicosTests(TestCase):
             inventario_final_point_total=Decimal("10"),
             diferencia_teorico_vs_point=Decimal("-3"),
             estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
-            metadata={"historical_excel": {"scope": "inventory_only"}},
+            metadata={"historical_excel": {
+                "scope": "inventory_only",
+                "inventory_presence": {"cedis": True, "sucursales": True, "total": True},
+            }},
         )
 
         html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})

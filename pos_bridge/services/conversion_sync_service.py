@@ -16,6 +16,7 @@ from django.utils import timezone
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.models import PointBranch, PointConversionLine, PointSyncJob
 from pos_bridge.services.point_http_client import PointHttpSessionClient
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, months_in_range
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import Receta
 
@@ -344,6 +345,7 @@ def sync_conversion_lines(
         invalid_identity_rows = 0
 
         with transaction.atomic():
+            lock_product_month_sources(months_in_range(date_from, date_to))
             for row in rows:
                 movement_at = _coerce_datetime(
                     _first_value(row, "Fecha", "FechaMovimiento", "Fecha Movimiento", "Fecha_creacion"),

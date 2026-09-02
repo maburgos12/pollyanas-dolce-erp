@@ -5863,11 +5863,6 @@ def _product_closure_export_row(
         line,
         historical_excel_import=historical_excel_import,
     )
-    if projected["is_historical_inventory"]:
-        projected["closing_point_cedis"] = Decimal(str(line.inventario_final_point_cedis))
-        projected["closing_point_sucursales"] = Decimal(str(line.inventario_final_point_sucursales))
-        projected["closing_point"] = projected["historical_count"]
-        projected["point_difference"] = projected["historical_difference"]
     return projected
 
     # Kept below temporarily as executable-history context for this long-lived

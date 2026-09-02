@@ -159,8 +159,14 @@ El bloqueo deja rastro en `metadata.lock_event` con:
 - nota
 
 La revalidación final usa un mutex transaccional por mes y vuelve a calcular la
-huella inmediatamente antes de sellar. No toma locks `SHARE` sobre tablas
-completas: ventas, movimientos y catálogos de otros periodos continúan operando.
+huella inmediatamente antes de sellar. El backfill oficial de ventas, producción,
+merma, conversiones y snapshots de inventario adquieren el mismo advisory mutex
+mensual, en orden cronológico cuando abarcan varios meses. Un snapshot coordina
+su mes de captura y el siguiente porque puede servir como cierre y como apertura.
+No toma locks `SHARE` sobre tablas completas: otros periodos continúan operando.
+Los catálogos globales no forman parte de la huella cruda mensual; su efecto se
+congela en el digest de líneas proyectadas, evitando prometer serialización que
+sus servicios globales no ofrecen.
 Las escrituras sobre líneas de un cierre ya bloqueado sí se rechazan por trigger
 de base de datos. Las fuentes Point conservan su huella inmutable en el cierre;
 una corrección histórica posterior exige un rebuild operacional explícito y un
@@ -172,7 +178,8 @@ nuevo bloqueo, no la mutación silenciosa de las líneas selladas.
 - fecha de opening correcta
 
 En un import histórico, el archivo Excel acredita únicamente las columnas de
-inventario/conteo declaradas. Ventas, producción y merma leídas de tablas
+inventario/conteo declaradas, preservando por alcance celda vacía frente a cero
+explícito. Ventas, producción y merma leídas de tablas
 operativas quedan como observaciones no validadas hasta acreditar cobertura; si
 falta una fuente, la pantalla, API, CSV y XLSX muestran `Sin dato`/`null`, nunca
 un cero autoritativo ni un saldo calculado aparentemente válido.

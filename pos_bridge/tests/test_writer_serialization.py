@@ -318,6 +318,86 @@ class WriterSerializationTests(TransactionTestCase):
         self.assertEqual(sale.quantity, Decimal("2"))
         self.assertEqual(sale.sync_job_id, jobs[1].id)
 
+    def test_closure_month_mutex_blocks_official_sales_replacement_until_commit(self):
+        branch = PointBranch.objects.create(external_id="closure-writer", name="Matriz")
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES)
+        month_locked = Event()
+        release_lock = Event()
+        writer_finished = Event()
+        errors = []
+
+        def hold_lock():
+            with transaction.atomic():
+                ProductMonthClosureService._lock_canonical_source_month(date(2026, 8, 1))
+                month_locked.set()
+                self.assertTrue(release_lock.wait(5))
+
+        lock_thread = self._thread(hold_lock, errors)
+        self.assertTrue(month_locked.wait(5))
+
+        def write():
+            OfficialSalesBackfillService()._replace_branch_day_sales(
+                branch=branch,
+                sale_date=date(2026, 8, 15),
+                sync_job=job,
+                aggregated_rows={},
+            )
+            writer_finished.set()
+
+        writer_thread = self._thread(write, errors)
+        self.assertFalse(writer_finished.wait(0.25))
+        release_lock.set()
+        lock_thread.join(5)
+        writer_thread.join(5)
+        self.assertEqual(errors, [])
+        self.assertTrue(writer_finished.is_set())
+
+    def test_official_writer_holds_month_mutex_then_closure_waits_before_revalidation(self):
+        recipe = Receta.objects.create(
+            nombre="Revalidación tras writer", tipo=Receta.TIPO_PRODUCTO_FINAL, hash_contenido="writer-first"
+        )
+        closure, _line, current_plan = self._canonical_closure_for_line_race(
+            month_start=date(2026, 8, 1), recipe=recipe
+        )
+        branch = PointBranch.objects.create(external_id="writer-first", name="Matriz")
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES)
+        writer_inside = Event()
+        release_writer = Event()
+        preview_called = Event()
+        errors = []
+        writer_service = OfficialSalesBackfillService()
+        original_resolve = writer_service._resolve_product
+
+        def paused_resolve(**kwargs):
+            writer_inside.set()
+            self.assertTrue(release_writer.wait(5))
+            return original_resolve(**kwargs)
+
+        writer_service._resolve_product = paused_resolve
+        rows = {("SKU-W", "Producto writer", "Cat"): {
+            "sku": "SKU-W", "name": "Producto writer", "category": "Cat", "quantity": Decimal("1"),
+            "gross_amount": Decimal("1"), "discount_amount": Decimal("0"), "total_amount": Decimal("1"),
+            "tax_amount": Decimal("0"), "net_amount": Decimal("1"), "scopes": {"null"},
+        }}
+        writer_thread = self._thread(lambda: writer_service._replace_branch_day_sales(
+            branch=branch, sale_date=date(2026, 8, 10), sync_job=job, aggregated_rows=rows
+        ), errors)
+        self.assertTrue(writer_inside.wait(5))
+        closure_service = ProductMonthClosureService()
+
+        def preview(**kwargs):
+            preview_called.set()
+            return current_plan
+
+        with patch.object(closure_service, "_fresh_canonical_preview", side_effect=preview):
+            lock_thread = self._thread(lambda: closure_service.lock(closure=closure), errors)
+            self.assertFalse(preview_called.wait(0.25))
+            release_writer.set()
+            writer_thread.join(5)
+            lock_thread.join(5)
+        self.assertTrue(preview_called.is_set())
+        self.assertEqual(errors, [])
+
     def test_different_branches_with_shared_product_finish_consistently(self):
         branches = [
             PointBranch.objects.create(external_id=f"parallel-{index}", name=f"Sucursal {index}")
@@ -337,7 +417,7 @@ class WriterSerializationTests(TransactionTestCase):
                 return original(**kwargs)
             service._resolve_product = resolve_together
             service._replace_branch_day_sales(
-                branch=branches[index], sale_date=date(2026, 8, 2), sync_job=jobs[index],
+                branch=branches[index], sale_date=date(2026, 8 + index, 2), sync_job=jobs[index],
                 aggregated_rows={("SHARED", "Compartido", "Cat"): {
                     "sku": "SHARED", "name": "Compartido", "category": "Cat", "quantity": Decimal(index + 1),
                     "gross_amount": Decimal("1"), "discount_amount": Decimal("0"), "total_amount": Decimal("1"),
@@ -353,7 +433,7 @@ class WriterSerializationTests(TransactionTestCase):
 
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(errors, [])
-        rows = list(PointDailySale.objects.filter(sale_date=date(2026, 8, 2)).order_by("branch_id"))
+        rows = list(PointDailySale.objects.filter(branch__in=branches).order_by("branch_id"))
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0].product_id, rows[1].product_id)
 
@@ -378,7 +458,7 @@ class WriterSerializationTests(TransactionTestCase):
         after = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
         self.assertNotEqual(before["extraction_logs"]["digest"], after["extraction_logs"]["digest"])
 
-    def test_month_mutex_does_not_block_alias_remap_and_fresh_fingerprint_sees_it(self):
+    def test_month_fact_fingerprint_excludes_uncoordinated_global_catalogs(self):
         first = Receta.objects.create(
             nombre="Alias origen",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
@@ -394,17 +474,11 @@ class WriterSerializationTests(TransactionTestCase):
             codigo_point="ALIAS-LOCK",
             nombre_point="Alias lock",
         )
-        before = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
-
         self._assert_month_mutex_does_not_block_uncoordinated_writer(
             lambda: RecetaCodigoPointAlias.objects.filter(pk=alias.pk).update(receta=second)
         )
-
-        after = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
-        self.assertNotEqual(
-            before["recipe_point_aliases"]["digest"],
-            after["recipe_point_aliases"]["digest"],
-        )
+        evidence = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
+        self.assertNotIn("recipe_point_aliases", evidence)
 
     def test_closure_lock_blocks_concurrent_line_update_until_commit(self):
         self._assert_line_dml_waits_for_lock_and_remains_detectable(

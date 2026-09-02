@@ -27,6 +27,7 @@ from pos_bridge.services.alert_service import PointAlertService
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, snapshot_affected_months
 from pos_bridge.services.recipe_gap_audit_service import PointRecipeGapAuditService
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_extractor import PointSalesExtractor
@@ -34,6 +35,7 @@ from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
+from pos_bridge.utils.source_retry import source_error_metadata
 from reportes.analytics_service import mark_analytics_dirty_for_range
 from recetas.models import VentaHistorica
 
@@ -162,6 +164,7 @@ class PointSyncService:
 
     @transaction.atomic
     def persist_branch_inventory(self, sync_job: PointSyncJob, branch_result) -> dict:
+        lock_product_month_sources(snapshot_affected_months(branch_result.captured_at))
         branch = self._upsert_branch(branch_result.branch)
         snapshots_to_create = []
         products_seen = 0
@@ -412,8 +415,14 @@ class PointSyncService:
         sync_job.status = PointSyncJob.STATUS_FAILED
         sync_job.finished_at = timezone.now()
         sync_job.error_message = str(exc)
+        retry_metadata = source_error_metadata(exc)
+        if "retryable" in context:
+            retry_metadata["retryable"] = bool(context["retryable"])
+        if context.get("error_type"):
+            retry_metadata["error_type"] = context["error_type"]
+        sync_job.result_summary = {**(sync_job.result_summary or {}), **retry_metadata}
         sync_job.artifacts = {**sync_job.artifacts, **context}
-        sync_job.save(update_fields=["status", "finished_at", "error_message", "artifacts", "updated_at"])
+        sync_job.save(update_fields=["status", "finished_at", "error_message", "result_summary", "artifacts", "updated_at"])
         self.record_log(sync_job, PointExtractionLog.LEVEL_ERROR, str(exc), context=context)
         self.alert_service.emit_failure(job_id=sync_job.id, message=str(exc), context=context)
         log_event(

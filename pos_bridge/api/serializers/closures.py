@@ -82,6 +82,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     source_issues = serializers.SerializerMethodField()
     is_historical_inventory = serializers.SerializerMethodField()
     historical_count = serializers.SerializerMethodField()
+    historical_count_cedis = serializers.SerializerMethodField()
+    historical_count_sucursales = serializers.SerializerMethodField()
     historical_difference = serializers.SerializerMethodField()
 
     class Meta:
@@ -114,6 +116,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
             "source_issues",
             "is_historical_inventory",
             "historical_count",
+            "historical_count_cedis",
+            "historical_count_sucursales",
             "historical_difference",
             "inventario_inicial_teorico",
             "produccion_mes",
@@ -216,6 +220,12 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
 
     def get_historical_count(self, obj):
         return self._decimal(self._projection(obj)["historical_count"])
+
+    def get_historical_count_cedis(self, obj):
+        return self._decimal(self._projection(obj)["historical_count_cedis"])
+
+    def get_historical_count_sucursales(self, obj):
+        return self._decimal(self._projection(obj)["historical_count_sucursales"])
 
     def get_historical_difference(self, obj):
         return self._decimal(self._projection(obj)["historical_difference"])

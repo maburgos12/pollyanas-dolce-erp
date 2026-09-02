@@ -17,9 +17,24 @@ from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_production_sync import run_production_sync
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from pos_bridge.tasks.run_waste_sync import run_waste_sync
+from pos_bridge.services.movement_sync_service import PointMovementSyncService
+from pos_bridge.utils.source_retry import source_error_metadata
 
 
 class PointSalesSyncTaskRoutingTests(TestCase):
+    def test_source_retry_classification_is_strict(self):
+        self.assertTrue(source_error_metadata(TimeoutError("timeout"))["retryable"])
+        self.assertTrue(source_error_metadata(ConnectionError("connection"))["retryable"])
+        self.assertFalse(source_error_metadata(FileNotFoundError("missing"))["retryable"])
+        self.assertFalse(source_error_metadata(PermissionError("denied"))["retryable"])
+
+    def test_real_movement_service_timeout_result_is_retryable_for_orchestration(self):
+        service = PointMovementSyncService()
+        with patch.object(service.production_extractor, "extract", side_effect=TimeoutError("Point timeout")):
+            job = service.run_production_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+        self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
+        self.assertEqual(job.result_summary["error_type"], "TimeoutError")
+        self.assertTrue(job.result_summary["retryable"])
     def test_monthly_closure_is_not_duplicated_in_static_beat_schedule(self):
         from django.conf import settings
 

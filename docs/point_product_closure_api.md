@@ -23,15 +23,20 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 `calculated_closing`, `closing_point_cedis`, `closing_point_sucursales`,
 `closing_point`, `point_difference`, `point_status`, `point_status_label`,
 `conversion_origin`, `conversion_origins`, `projection_sources`,
-`source_authority`, `source_issues` e `is_historical_inventory`.
+`source_authority`, `source_issues`, `is_historical_inventory`,
+`historical_count_cedis`, `historical_count_sucursales` e `historical_count`.
 
 `source_authority` sólo expone la etiqueta de fuente, presencia, autoridad,
 estado/incidencias, identificadores de jobs y conteos/fechas de cobertura. No
 proyecta URLs de solicitud, rutas de reportes ni muestras crudas persistidas.
 
-Para importaciones históricas, `closing_point*` y `point_difference` son `null`
-porque el conteo no proviene de Point. `historical_count` y
-`historical_difference` separan explícitamente el conteo físico del cálculo. El
+Para importaciones históricas, `closing_point*` contienen únicamente los alcances
+del conteo histórico que estuvieron presentes y se distinguen con
+`is_historical_inventory=true`; `point_difference` usa en ese modo la diferencia
+histórica y sólo existe cuando los movimientos tienen autoridad. `historical_count_cedis`,
+`historical_count_sucursales`, `historical_count` y `historical_difference`
+separan explícitamente el conteo físico del cálculo. Una celda vacía produce
+`null` y un cero explícito produce `0.000000`, independientemente por alcance. El
 conteo importado puede existir aunque `historical_difference` sea `null`: la
 diferencia solo se publica cuando ventas, producción, merma y conversiones tienen
 autoridad mensual comprobada. Los decimales almacenados por compatibilidad cuando
