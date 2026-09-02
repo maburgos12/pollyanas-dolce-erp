@@ -696,6 +696,14 @@ class ProductMonthClosureService:
             cursor.execute(f"LOCK TABLE {quoted_tables} IN SHARE MODE")
 
     @staticmethod
+    def _lock_closure_line_table() -> None:
+        if connection.vendor != "postgresql":
+            raise ProductMonthClosureError("El bloqueo de líneas del cierre requiere PostgreSQL.")
+        table = connection.ops.quote_name(ProductoMonthClosureLine._meta.db_table)
+        with connection.cursor() as cursor:
+            cursor.execute(f"LOCK TABLE {table} IN SHARE MODE")
+
+    @staticmethod
     def _json_compatible(value):
         if isinstance(value, Decimal):
             return str(value)
@@ -1145,7 +1153,11 @@ class ProductMonthClosureService:
                 f"El cierre {closure.month_start:%Y-%m} debe estar construido antes de bloquearse."
             )
 
-        lines = list(closure.lines.all())
+        # El row lock del cierre serializa build/lock del mismo mes. El SHARE
+        # de la tabla hija cubre además el gap de filas: ningún UPDATE, DELETE
+        # o INSERT puede entrar entre esta lectura, los digests y el commit.
+        self._lock_closure_line_table()
+        lines = list(closure.lines.select_for_update().all())
         if not lines:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} no tiene lineas para bloquear.")
 

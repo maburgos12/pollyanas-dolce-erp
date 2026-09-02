@@ -84,6 +84,88 @@ class WriterSerializationTests(TransactionTestCase):
         self.assertEqual(errors, [])
         self.assertTrue(writer_finished.is_set())
 
+    def _canonical_closure_for_line_race(self, *, month_start, recipe):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=month_start,
+            month_end=date(month_start.year, month_start.month, 28),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=recipe,
+            inventario_inicial_teorico=Decimal("1"),
+            inventario_final_teorico=Decimal("1"),
+            inventario_final_point_total=Decimal("1"),
+            metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
+        )
+        line.refresh_from_db()
+        metadata = {
+            "balance": {"contract": "POINT_PRODUCT_BALANCE_V1"},
+            "validation": {"lock_ready": True, "blocking_issues": []},
+        }
+        for metadata_key, _label in ProductMonthClosureService.CANONICAL_LOCK_REQUIRED_SOURCES:
+            metadata[metadata_key] = {"authoritative": True, "source_present": True}
+        projected_lines_digest = ProductMonthClosureService._persisted_lines_digest([line])
+        metadata["source_fingerprint"] = {
+            "algorithm": "sha256",
+            "digest": "stable-source-digest",
+            "metadata_digest": ProductMonthClosureService._canonical_source_metadata_digest(metadata),
+            "projected_lines_digest": projected_lines_digest,
+            "raw_sources_digest": "stable-raw-digest",
+        }
+        closure.metadata = metadata
+        closure.save(update_fields=["metadata", "updated_at"])
+        current_plan = {"metadata": {"source_fingerprint": dict(metadata["source_fingerprint"])}}
+        return closure, line, current_plan
+
+    def _assert_line_dml_waits_for_lock_and_remains_detectable(self, *, month_start, writer):
+        recipe = Receta.objects.create(
+            nombre=f"Línea protegida {month_start:%Y-%m}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"line-lock-{month_start:%Y-%m}",
+        )
+        closure, line, current_plan = self._canonical_closure_for_line_race(
+            month_start=month_start,
+            recipe=recipe,
+        )
+        validation_inside = Event()
+        release_validation = Event()
+        writer_finished = Event()
+        errors = []
+        service = ProductMonthClosureService()
+
+        def fresh_preview(**kwargs):
+            validation_inside.set()
+            self.assertTrue(release_validation.wait(5))
+            return current_plan
+
+        lock_thread = None
+        with patch.object(service, "_fresh_canonical_preview", side_effect=fresh_preview):
+            lock_thread = self._thread(lambda: service.lock(closure=closure), errors)
+            self.assertTrue(validation_inside.wait(5), errors)
+
+            def run_writer():
+                writer(closure, line)
+                writer_finished.set()
+
+            writer_thread = self._thread(run_writer, errors)
+            self.assertFalse(writer_finished.wait(0.25))
+            release_validation.set()
+            lock_thread.join(5)
+            writer_thread.join(5)
+
+        self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(writer_finished.is_set())
+        closure.refresh_from_db()
+        self.assertTrue(closure.is_locked)
+        current_lines = list(closure.lines.all())
+        self.assertNotEqual(
+            ProductMonthClosureService._persisted_lines_digest(current_lines),
+            closure.metadata["source_fingerprint"]["projected_lines_digest"],
+        )
+
     def test_two_rebuilds_and_following_lock_serialize_on_month_row(self):
         closure = ProductoMonthClosure.objects.create(
             month_start=date(2026, 8, 1), month_end=date(2026, 8, 31), status=ProductoMonthClosure.STATUS_BUILT
@@ -260,6 +342,35 @@ class WriterSerializationTests(TransactionTestCase):
         self.assertNotEqual(
             before["recipe_point_aliases"]["digest"],
             after["recipe_point_aliases"]["digest"],
+        )
+
+    def test_closure_lock_blocks_concurrent_line_update_until_commit(self):
+        self._assert_line_dml_waits_for_lock_and_remains_detectable(
+            month_start=date(2026, 5, 1),
+            writer=lambda _closure, line: ProductoMonthClosureLine.objects.filter(pk=line.pk).update(
+                produccion_mes=Decimal("9")
+            ),
+        )
+
+    def test_closure_lock_blocks_concurrent_line_delete_until_commit(self):
+        self._assert_line_dml_waits_for_lock_and_remains_detectable(
+            month_start=date(2026, 6, 1),
+            writer=lambda _closure, line: ProductoMonthClosureLine.objects.filter(pk=line.pk).delete(),
+        )
+
+    def test_closure_lock_blocks_concurrent_line_insert_until_commit(self):
+        inserted_recipe = Receta.objects.create(
+            nombre="Línea concurrente insertada",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="line-lock-inserted",
+        )
+        self._assert_line_dml_waits_for_lock_and_remains_detectable(
+            month_start=date(2026, 7, 1),
+            writer=lambda closure, _line: ProductoMonthClosureLine.objects.create(
+                closure=closure,
+                receta_padre=inserted_recipe,
+                metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
+            ),
         )
 
     def test_lock_waits_for_rebuild_and_never_gets_overwritten_or_unlocked(self):
