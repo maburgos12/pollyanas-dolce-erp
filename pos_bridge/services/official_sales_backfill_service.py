@@ -298,7 +298,6 @@ class OfficialSalesBackfillService:
 
         if rows_to_create:
             PointDailySale.objects.bulk_create(rows_to_create, batch_size=500)
-            bump_cache_scopes("ventas", "dashboard")
             mark_analytics_dirty_for_range(
                 start_date=min(row.sale_date for row in rows_to_create),
                 end_date=max(row.sale_date for row in rows_to_create),
@@ -307,6 +306,7 @@ class OfficialSalesBackfillService:
                 include_forecast=True,
                 reason="official_sales_backfill_service",
             )
+            transaction.on_commit(lambda: bump_cache_scopes("ventas", "dashboard"))
         return deleted, len(rows_to_create)
 
     def run(
