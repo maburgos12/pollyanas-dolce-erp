@@ -548,7 +548,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         pct_merma = None
         if merma_reportada is not None and vendido and vendido > ZERO:
             pct_merma = (merma_reportada / vendido) * Decimal("100")
-        snapshots_authoritative = self._snapshots_are_authoritative(sources)
         row = {
             "receta_id": recipe.id,
             "receta": recipe.nombre,
@@ -568,10 +567,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "conversion_salida": conversion_salida,
             "conversion_provenance": balance_row.conversion_origin or "Sin dato",
             "conversion_provenance_label": self._conversion_provenance_label(balance_row.conversion_origin),
-            "inventario_inicial": balance_row.opening_point if snapshots_authoritative else None,
-            "inventario_final_teorico": balance_row.calculated_closing if snapshots_authoritative else None,
-            "inventario_final_point_total": balance_row.closing_point if snapshots_authoritative else None,
-            "diferencia_inventario": balance_row.difference_point if snapshots_authoritative else None,
+            "inventario_inicial": balance_row.opening_point,
+            "inventario_final_teorico": balance_row.calculated_closing,
+            "inventario_final_point_total": balance_row.closing_point,
+            "diferencia_inventario": balance_row.difference_point,
             "estado_inventario": self._point_status_label(balance_row.status),
         }
         row["json"] = {
@@ -726,7 +725,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             )
         ]
         if not self._snapshots_are_authoritative(balance.sources):
-            banners.append("Snapshots Point no autoritativos: los saldos y su diferencia se muestran como Sin dato.")
+            banners.append("Se muestran los saldos Point disponibles. Las incidencias de cobertura se indican aparte; no equivalen a ausencia del dato.")
         banners.extend(str(warning) for warning in balance.warnings)
         banners.extend(str(issue) for issue in balance.issues)
         return list(dict.fromkeys(banners))

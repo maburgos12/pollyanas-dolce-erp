@@ -56,6 +56,25 @@ def canonical_balance(*rows, sources=None, warnings=(), issues=()):
 
 
 class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
+    def test_known_point_closing_is_displayed_even_when_opening_or_audit_is_missing(self):
+        balance = canonical_balance(MonthlyPointBalanceRow(
+            receta_id=self.parent.id, opening_point=None, closing_point=Decimal("22"),
+            status="REVISAR_FUENTE",
+        ))
+        balance.sources["opening_snapshot"]["authoritative"] = False
+        balance.sources["closing_snapshot"]["authoritative"] = False
+        context, _ = self._context(balance)
+        row = context["groups"][0]["rows"][0]
+        self.assertEqual(row["inventario_final_point_total"], Decimal("22"))
+        self.assertIsNone(row["inventario_inicial"])
+        self.assertIsNone(row["diferencia_inventario"])
+        self.assertEqual(row["estado_inventario"], "Revisar fuente")
+        self.assertNotIn("los saldos y su diferencia se muestran como Sin dato", self._render(context))
+        self.assertIn("fecha operativa", self._render(context))
+        for export in ("_export_csv", "_export_xlsx", "_export_pdf"):
+            response = getattr(ProducidoVsVendidoMermaView(), export)(context)
+            self.assertEqual(response.status_code, 200)
+
     def setUp(self):
         self.factory = RequestFactory()
         self.parent = Receta.objects.create(
@@ -316,7 +335,7 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         rendered = self._render(context)
         self.assertIn("Conversiones Point: PointConversionLine", rendered)
         self.assertIn("Autoridad Point: Verificada", rendered)
-        self.assertIn("Snapshots Point: 2026-07-31 → 2026-08-31", rendered)
+        self.assertIn("Cierres operativos Point: 2026-07-31 → 2026-08-31", rendered)
         self.assertIn("Origen: Point", rendered)
         self.assertNotIn('title="Origen de conversión:', rendered)
 

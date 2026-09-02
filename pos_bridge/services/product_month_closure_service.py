@@ -175,6 +175,7 @@ class ProductMonthClosureService:
     ) -> ProductoMonthClosure:
         month_start = self._parse_month(month)
         with transaction.atomic():
+            self._lock_canonical_source_month(month_start)
             closure, created = ProductoMonthClosure.objects.get_or_create(
                 month_start=month_start,
                 defaults={
@@ -344,6 +345,11 @@ class ProductMonthClosureService:
             "difference": sum((row["diferencia_teorico_vs_point"] for row in line_rows), ZERO),
         }
         opening_reference_date = balance.effective_snapshot_dates.get("opening")
+        opening_source = (
+            ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE
+            if opening_meta.get("source") == "ProductoMonthClosure"
+            else ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT
+        )
         notes = (
             f"Cierre {month_start:%Y-%m} proyectado del contrato canónico POINT_PRODUCT_BALANCE_V1. "
             "Las fuentes y advertencias se conservan en metadata."
@@ -366,6 +372,17 @@ class ProductMonthClosureService:
                     "source_names": sorted(balance.sources),
                     "effective_snapshot_dates": balance.effective_snapshot_dates,
                     "source_counts": balance.source_counts,
+                    "closing_by_recipe": {
+                        str(recipe_id): {
+                            "quantity": row.closing_point,
+                            "snapshot_rows": int(row.source_counts.get("closing_snapshot_rows") or 0),
+                        }
+                        for recipe_id, row in balance.rows.items()
+                    },
+                    "closing_coverage": {
+                        key: (balance.sources.get("closing_snapshot") or {}).get(key, ())
+                        for key in ("applied_branch_ids", "applied_coverage_keys", "snapshot_issues")
+                    },
                 }
             ),
         }
@@ -373,12 +390,12 @@ class ProductMonthClosureService:
             balance=balance,
             persisted_metadata=metadata,
             line_rows=line_rows,
-            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_source=opening_source,
         )
         return {
             "month_start": month_start,
             "month_end": balance.month_end,
-            "opening_source": ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            "opening_source": opening_source,
             "opening_reference_date": opening_reference_date,
             "notes": notes,
             "line_rows": line_rows,
@@ -550,28 +567,21 @@ class ProductMonthClosureService:
         current_timezone = timezone.get_current_timezone()
         lower_bound = timezone.make_aware(datetime.combine(month_start, time.min), current_timezone)
         upper_bound = timezone.make_aware(datetime.combine(next_month, time.min), current_timezone)
-        tolerance_days = int(
-            getattr(
-                settings,
-                "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS",
-                cls.DEFAULT_SNAPSHOT_TOLERANCE_DAYS,
-            )
-        )
         opening_target = month_start - timedelta(days=1)
         opening_snapshot_start = timezone.make_aware(
-            datetime.combine(opening_target - timedelta(days=tolerance_days), time.min),
+            datetime.combine(opening_target, time.min),
             current_timezone,
         )
         opening_snapshot_end = timezone.make_aware(
-            datetime.combine(opening_target + timedelta(days=tolerance_days + 1), time.min),
+            datetime.combine(month_start, time.min),
             current_timezone,
         )
         closing_snapshot_start = timezone.make_aware(
-            datetime.combine(month_end - timedelta(days=tolerance_days), time.min),
+            datetime.combine(month_end, time.min),
             current_timezone,
         )
         closing_snapshot_end = timezone.make_aware(
-            datetime.combine(month_end + timedelta(days=tolerance_days + 1), time.min),
+            datetime.combine(next_month, time.min),
             current_timezone,
         )
 
@@ -632,6 +642,13 @@ class ProductMonthClosureService:
         logs_qs = PointExtractionLog.objects.filter(sync_job_id__in=jobs_qs.values("id"))
 
         querysets = {
+            "previous_product_closure": ProductoMonthClosure.objects.filter(
+                month_start=opening_target.replace(day=1), month_end=opening_target,
+                status__in=(ProductoMonthClosure.STATUS_BUILT, ProductoMonthClosure.STATUS_LOCKED),
+                metadata__balance__contract="POINT_PRODUCT_BALANCE_V1",
+                metadata__closing_inventory_meta__effective_date=opening_target.isoformat(),
+                metadata__balance__has_key="closing_by_recipe",
+            ),
             "opening_and_closing_snapshot_candidates": snapshot_qs,
             "sales_point_daily": daily_sales_qs,
             "sales_historical_fallback": historical_sales_qs,
@@ -662,7 +679,11 @@ class ProductMonthClosureService:
 
     @classmethod
     def _lock_canonical_source_month(cls, month_start: date) -> None:
-        lock_product_month_sources([month_start])
+        previous_month = (month_start - timedelta(days=1)).replace(day=1)
+        # Always acquire source locks before parent rows, in calendar order.
+        # The prior BUILT close is mutable and is now an input to this month.
+        lock_product_month_sources([previous_month, month_start])
+        list(ProductoMonthClosure.objects.select_for_update().filter(month_start=previous_month).values_list("pk", flat=True))
 
     @staticmethod
     def _json_compatible(value):
@@ -1116,6 +1137,8 @@ class ProductMonthClosureService:
         note: str = "",
         channel: str = "service",
     ) -> ProductoMonthClosure:
+        source_month = ProductoMonthClosure.objects.values_list("month_start", flat=True).get(pk=closure.pk)
+        self._lock_canonical_source_month(source_month)
         closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
         if closure.is_locked:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} ya esta bloqueado.")
@@ -1197,11 +1220,8 @@ class ProductMonthClosureService:
                     "Las líneas persistidas cambiaron; reconstruye el cierre antes de bloquearlo."
                 )
 
-            # Serializa únicamente cierres del mismo periodo. La revalidación
-            # siguiente es deliberadamente corta: no congela las 16 tablas de
-            # ventas, movimientos, snapshots y catálogos durante toda la
-            # proyección.
-            self._lock_canonical_source_month(closure.month_start)
+            # Current and previous-month sources have been coordinated before
+            # row locks; revalidate while the carried opening is protected.
             current_plan = self._fresh_canonical_preview(month=closure.month_start)
             current_fingerprint = dict(current_plan["metadata"].get("source_fingerprint") or {})
             if current_fingerprint.get("projected_lines_digest") != stored_fingerprint["projected_lines_digest"]:

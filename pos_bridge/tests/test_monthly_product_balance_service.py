@@ -823,7 +823,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(any("receta" in warning.lower() and "inicial" in warning.lower() for warning in balance.warnings))
         self.assertTrue(any("receta" in warning.lower() and "final" in warning.lower() for warning in balance.warnings))
 
-    def test_latest_snapshot_per_branch_product_and_fallback_day_are_exposed(self):
+    def test_nearby_snapshot_days_are_not_substituted_for_month_boundaries(self):
         self._snapshot(self.parent_product, "1", datetime(2026, 6, 29, 8))
         self._snapshot(self.parent_product, "8", datetime(2026, 6, 29, 18))
         self._snapshot(self.parent_product, "8", datetime(2026, 7, 30, 18))
@@ -831,12 +831,10 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         balance = service.build("2026-07")
 
-        row = balance.rows[self.parent.id]
-        self.assertEqual(row.opening_point, Decimal("8"))
-        self.assertEqual(row.closing_point, Decimal("8"))
-        self.assertEqual(balance.effective_snapshot_dates["opening"], date(2026, 6, 29))
-        self.assertEqual(balance.effective_snapshot_dates["closing"], date(2026, 7, 30))
-        self.assertTrue(any("alternativa" in warning.lower() for warning in balance.warnings))
+        self.assertNotIn(self.parent.id, balance.rows)
+        self.assertIsNone(balance.effective_snapshot_dates["opening"])
+        self.assertIsNone(balance.effective_snapshot_dates["closing"])
+        self.assertTrue(any("No se sustituye" in warning for warning in balance.warnings))
 
     def test_snapshot_history_and_job_manifest_hydrate_only_selected_rows(self):
         captured_at = timezone.make_aware(datetime(2026, 6, 30, 12))
@@ -872,14 +870,13 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(unresolved, [])
         self.assertEqual(len(hydrated), 2, "Historical candidates and job manifest must stay in PostgreSQL")
 
-    def test_snapshot_database_selection_preserves_calendar_rank_and_ties(self):
+    def test_snapshot_database_selection_enforces_exact_calendar_day_and_ties(self):
         target = date(2026, 6, 30)
         cases = (
             # Exact day beats a more recent adjacent date; latest timestamp wins.
             (3, (datetime(2026, 7, 1, 23), datetime(2026, 6, 30, 8), datetime(2026, 6, 30, 23))),
-            # Equally distant days prefer the earlier day, not the newest capture.
+            # Neither equidistant nor nearer days can substitute the target day.
             (3, (datetime(2026, 6, 29, 1), datetime(2026, 7, 1, 23))),
-            # A nearer later day beats a more distant earlier day.
             (3, (datetime(2026, 6, 28, 23), datetime(2026, 7, 1, 1))),
             # Identical timestamps prefer the largest id.
             (3, (datetime(2026, 6, 30, 23), datetime(2026, 6, 30, 23))),
@@ -894,16 +891,16 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             ):
                 PointInventorySnapshot.objects.all().delete()
                 candidates = [self._snapshot(self.parent_product, str(index), when) for index, when in enumerate(times)]
-                eligible = [item for item in candidates if abs((timezone.localdate(item.captured_at) - target).days) <= tolerance]
-                expected = min(eligible, key=lambda item: (
-                    timezone.localdate(item.captured_at) != target,
-                    abs((timezone.localdate(item.captured_at) - target).days),
-                    timezone.localdate(item.captured_at) > target,
-                    -item.captured_at.timestamp(), -item.pk,
-                ))
+                eligible = [item for item in candidates if timezone.localdate(item.captured_at) == target]
+                expected = max(eligible, key=lambda item: (item.captured_at.timestamp(), item.pk)) if eligible else None
                 service, _official = self._service()
                 service._build_match_cache = {}
                 values, metadata, _unresolved = service._load_snapshot(snapshot_date=target, source="opening_snapshot")
+                if expected is None:
+                    self.assertEqual(values, {})
+                    self.assertIsNone(metadata["effective_date"])
+                    self.assertEqual(metadata["selected_rows"], 0)
+                    continue
                 self.assertEqual(values[self.parent.id], (expected.stock, 1))
                 self.assertEqual(metadata["effective_date"], timezone.localdate(expected.captured_at))
                 self.assertEqual(metadata["selected_rows"], 1)
@@ -983,7 +980,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(closing["applied_rows"], 0)
         self.assertEqual(closing["applied_branch_count"], 0)
 
-    def test_snapshot_selection_keeps_prior_day_for_other_branch_when_one_branch_is_exact(self):
+    def test_snapshot_selection_does_not_borrow_prior_day_for_another_branch(self):
         second_branch = PointBranch.objects.create(
             external_id="LEDGER-PRIOR",
             name="Sucursal Ledger Previa",
@@ -1010,8 +1007,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         self.assertIsNone(balance.rows[self.parent.id].opening_point)
         self.assertIn("SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS", balance.issues)
-        self.assertEqual(balance.sources["opening_snapshot"]["applied_branch_count"], 2)
-        self.assertEqual(balance.sources["opening_snapshot"]["applied_coverage_key_count"], 2)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_branch_count"], 1)
+        self.assertEqual(balance.sources["opening_snapshot"]["applied_coverage_key_count"], 1)
         self.assertFalse(balance.sources["sales"]["source_present"])
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
@@ -2023,7 +2020,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(opening["sync_job_verified"])
         self.assertTrue(opening["authoritative"])
 
-    def test_snapshot_mixed_effective_dates_is_non_authoritative_for_opening_and_closing(self):
+    def test_snapshot_excludes_other_days_and_marks_missing_branch_coverage(self):
         second_sucursal = Sucursal.objects.create(
             codigo="LEDGER-MIXED-DATE",
             nombre="Sucursal corte mixto",
@@ -2052,14 +2049,14 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         opening = balance.sources["opening_snapshot"]
         closing = balance.sources["closing_snapshot"]
-        self.assertEqual(opening["selected_dates"], (date(2026, 6, 29), date(2026, 6, 30)))
-        self.assertEqual(closing["selected_dates"], (date(2026, 7, 30), date(2026, 7, 31)))
-        self.assertIsNone(opening["effective_date"])
-        self.assertIsNone(closing["effective_date"])
+        self.assertEqual(opening["selected_dates"], (date(2026, 6, 30),))
+        self.assertEqual(closing["selected_dates"], (date(2026, 7, 31),))
+        self.assertEqual(opening["effective_date"], date(2026, 6, 30))
+        self.assertEqual(closing["effective_date"], date(2026, 7, 31))
         self.assertFalse(opening["authoritative"])
         self.assertFalse(closing["authoritative"])
-        self.assertIn("SNAPSHOT_EFFECTIVE_DATE_MIXED", opening["snapshot_issues"])
-        self.assertIn("SNAPSHOT_EFFECTIVE_DATE_MIXED", closing["snapshot_issues"])
+        self.assertIn(second_branch.id, opening["missing_expected_branch_ids"])
+        self.assertIn(second_branch.id, closing["missing_expected_branch_ids"])
         self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
