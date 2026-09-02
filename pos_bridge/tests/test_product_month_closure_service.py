@@ -274,6 +274,57 @@ class ProductMonthClosureServiceTests(TestCase):
                 else:
                     self.assertIn(expected_issue, validation["blocking_issues"])
 
+    def test_preview_copies_sales_validation_compatibility_fields_from_canonical_metadata(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("10"),
+            calculated_closing=Decimal("10"),
+            closing_point=Decimal("10"),
+            closing_point_cedis=Decimal("10"),
+            closing_point_sucursales=Decimal("0"),
+            difference_point=Decimal("0"),
+            status="COINCIDE",
+            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 12}),
+        )
+        balance = MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType({self.parent.id: row}),
+            sources=MappingProxyType(
+                {
+                    "opening_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 8, 31),)}),
+                    "closing_snapshot": MappingProxyType({"authoritative": True, "selected_dates": (date(2025, 9, 30),)}),
+                    "sales": MappingProxyType(
+                        {
+                            "authoritative": True,
+                            "selected_source": "official_point_daily_sales",
+                            "job_id": 445,
+                            "job_status": "SUCCESS",
+                            "official_daily_row_count": 12,
+                            "legacy_daily_row_count": 3,
+                            "legacy_bridge_row_count": 4,
+                        }
+                    ),
+                }
+            ),
+            effective_snapshot_dates=MappingProxyType({"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}),
+            source_counts=MappingProxyType({"opening_snapshot_rows": 1, "closing_snapshot_rows": 1, "sales_rows": 999}),
+        )
+
+        validation = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")["metadata"]["validation"]
+
+        self.assertEqual(validation["sales_job_id"], 445)
+        self.assertEqual(validation["sales_job_status"], "SUCCESS")
+        self.assertEqual(validation["sales_official_rows"], 12)
+        self.assertEqual(validation["sales_legacy_rows"], 7)
+
     def test_preview_recursively_compacts_large_source_metadata_with_stable_full_hashes(self):
         class CanonicalBalance:
             def __init__(self, balance):
@@ -299,7 +350,8 @@ class ProductMonthClosureServiceTests(TestCase):
                 "selected_source": "official_point_daily_sales",
                 "authoritative": True,
                 "job_id": 777,
-                "selected_dates": (date(2025, 9, 30),),
+                "selected_dates": tuple(date(2025, 9, day) for day in range(1, 11)),
+                "warnings": tuple(f"advertencia sintetica {index}" for index in range(40)),
                 "coverage_expected_branch_days": 270,
                 "coverage_logged_branch_days": 270,
                 "selected_row_job_ids": tuple(range(100, 140)),
@@ -357,7 +409,10 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(sales_meta["selected_source"], "official_point_daily_sales")
         self.assertTrue(sales_meta["authoritative"])
         self.assertEqual(sales_meta["job_id"], 777)
-        self.assertEqual(sales_meta["selected_dates"], ["2025-09-30"])
+        self.assertEqual(sales_meta["selected_dates"], [f"2025-09-{day:02d}" for day in range(1, 11)])
+        self.assertEqual(sales_meta["warnings"], [f"advertencia sintetica {index}" for index in range(40)])
+        self.assertIsInstance(sales_meta["selected_dates"], list)
+        self.assertIsInstance(sales_meta["warnings"], list)
         self.assertEqual(sales_meta["coverage_expected_branch_days"], 270)
         self.assertEqual(sales_meta["coverage_logged_branch_days"], 270)
         self.assertIn("opening_meta", metadata)

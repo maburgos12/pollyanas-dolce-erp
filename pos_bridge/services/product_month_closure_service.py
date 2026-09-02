@@ -82,6 +82,9 @@ class ProductMonthClosureService:
     DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
     METADATA_COMPACTION_SAMPLE_LIMIT = 5
     METADATA_COMPACTION_MAPPING_LIMIT = 12
+    PUBLIC_SOURCE_METADATA_ARRAY_KEYS = frozenset(
+        {"blocking_issues", "fallback_chain_attempted", "selected_dates", "warnings"}
+    )
 
     def __init__(
         self,
@@ -219,7 +222,8 @@ class ProductMonthClosureService:
         blocking_issues = sorted(source_issues | {issue for row in line_rows for issue in row["metadata"]["issues"]})
         opening_meta = self._compact_source_metadata(balance.sources.get("opening_snapshot") or {})
         closing_meta = self._compact_source_metadata(balance.sources.get("closing_snapshot") or {})
-        sales_meta = self._compact_source_metadata(balance.sources.get("sales") or {})
+        canonical_sales_meta = self._json_compatible(balance.sources.get("sales") or {})
+        sales_meta = self._compact_source_metadata(canonical_sales_meta)
         sales_meta["mode"] = sales_meta.get("selected_source") or sales_meta.get("mode") or ""
         validation = {
             "warnings": self._json_compatible(balance.warnings),
@@ -227,10 +231,13 @@ class ProductMonthClosureService:
             "lock_ready": not blocking_issues,
             "catalog_issue_line_count": sum(row["has_catalog_issue"] for row in line_rows),
             "sales_source_mode": sales_meta.get("selected_source") or sales_meta.get("mode") or "",
-            "sales_job_id": None,
-            "sales_job_status": "",
-            "sales_official_rows": int(balance.source_counts.get("sales_rows") or 0),
-            "sales_legacy_rows": 0,
+            "sales_job_id": canonical_sales_meta.get("job_id"),
+            "sales_job_status": str(canonical_sales_meta.get("job_status") or ""),
+            "sales_official_rows": int(canonical_sales_meta.get("official_daily_row_count") or 0),
+            "sales_legacy_rows": sum(
+                int(canonical_sales_meta.get(key) or 0)
+                for key in ("legacy_daily_row_count", "legacy_bridge_row_count")
+            ),
             "closing_inventory": {
                 "snapshot_rows": int(balance.source_counts.get("closing_snapshot_rows") or 0),
                 "matched_recipe_count": sum(row["source_closing_snapshot_count"] > 0 for row in line_rows),
@@ -297,7 +304,14 @@ class ProductMonthClosureService:
 
     def _compact_source_metadata(self, source):
         raw = self._json_compatible(source)
-        return {str(key): self._compact_metadata_value(value) for key, value in raw.items()}
+        return {
+            str(key): (
+                [self._compact_metadata_value(item) for item in value]
+                if key in self.PUBLIC_SOURCE_METADATA_ARRAY_KEYS and isinstance(value, list)
+                else self._compact_metadata_value(value)
+            )
+            for key, value in raw.items()
+        }
 
     @classmethod
     def _compact_metadata_value(cls, value, *, sample_limit=None, mapping_limit=None):
