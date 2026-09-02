@@ -392,15 +392,60 @@ def sync_conversion_lines(
                 existing = (
                     PointConversionLine.objects.select_for_update()
                     .filter(source_hash=source_hash)
-                    .only("id", "branch_id", "movement_at", "sync_job_id")
                     .first()
                 )
                 if existing is not None:
                     skipped += 1
-                    movement_date = timezone.localtime(existing.movement_at).date()
-                    if not branch_filter_norm and existing.branch_id == branch.id and date_from <= movement_date <= date_to:
+                    movement_date = timezone.localtime(movement_at).date()
+                    if not branch_filter_norm and date_from <= movement_date <= date_to:
+                        existing.branch = branch
+                        existing.erp_branch = branch.erp_branch
+                        existing.receta = _resolve_recipe(row, recipe_map)
                         existing.sync_job = job
-                        existing.save(update_fields=["sync_job", "updated_at"])
+                        existing.movement_external_id = movement_external_id
+                        existing.movement_at = movement_at
+                        existing.item_name = item_name
+                        existing.item_code = item_code
+                        existing.quantity = quantity
+                        existing.unit = str(_first_value(row, "Unidad", "UM", "Medida") or "")[:40]
+                        existing.unit_cost = _decimal(
+                            _first_value(row, "CostoUnitario", "Costo Unitario", "Costo")
+                        )
+                        existing.total_cost = _decimal(
+                            _first_value(row, "CostoTotal", "Costo Total", "Importe", "Total")
+                        )
+                        existing.source_item_name = str(
+                            _first_value(
+                                row,
+                                "ProductoOrigen",
+                                "Producto Origen",
+                                "ArticuloOrigen",
+                                "Artículo Origen",
+                            )
+                            or ""
+                        )[:250]
+                        existing.source_item_code = str(
+                            _first_value(row, "CodigoOrigen", "Código Origen") or ""
+                        )[:80]
+                        existing.save(
+                            update_fields=[
+                                "branch",
+                                "erp_branch",
+                                "receta",
+                                "sync_job",
+                                "movement_external_id",
+                                "movement_at",
+                                "item_name",
+                                "item_code",
+                                "quantity",
+                                "unit",
+                                "unit_cost",
+                                "total_cost",
+                                "source_item_name",
+                                "source_item_code",
+                                "updated_at",
+                            ]
+                        )
                         relinked += 1
                     continue
 

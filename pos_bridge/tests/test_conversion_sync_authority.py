@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -38,12 +39,15 @@ class PointConversionRerunAuthorityTests(TestCase):
                 "Producto": self.recipe.nombre,
                 "Codigo": self.recipe.codigo_point,
                 "Cantidad": "4",
+                "Unidad": "PZA",
+                "CostoUnitario": "12.50",
+                "CostoTotal": "50",
                 "ProductoOrigen": self.recipe.nombre,
                 "CodigoOrigen": self.recipe.codigo_point,
             }
         ]
 
-    def _sync(self, *, branch_filter=None, resolve_branch=None):
+    def _sync(self, *, branch_filter=None, resolve_branch=None, resolve_recipe=None):
         client_context = MagicMock()
         client_context.return_value.__enter__.return_value = MagicMock()
         with (
@@ -64,7 +68,10 @@ class PointConversionRerunAuthorityTests(TestCase):
                 "pos_bridge.services.conversion_sync_service._resolve_branch",
                 side_effect=resolve_branch or (lambda row, branch_map: self.branch),
             ),
-            patch("pos_bridge.services.conversion_sync_service._resolve_recipe", return_value=self.recipe),
+            patch(
+                "pos_bridge.services.conversion_sync_service._resolve_recipe",
+                side_effect=resolve_recipe or (lambda row, recipe_map: self.recipe),
+            ),
             patch(
                 "pos_bridge.services.conversion_sync_service._make_hash",
                 side_effect=lambda row: (
@@ -109,6 +116,69 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertTrue(second_authority["authoritative"])
         self.assertEqual(second_authority["selected_sync_job_ids"], (second_job.id,))
         self.assertNotIn("CONVERSION_SYNC_JOB_MIXED", second_authority["authority_issues"])
+
+    def test_duplicate_rerun_refreshes_recipe_when_previously_unresolved(self):
+        first = self._sync(resolve_recipe=lambda row, recipe_map: None)
+        line = PointConversionLine.objects.get(source_hash="conversion-rerun-hash")
+        self.assertEqual(first["created"], 1)
+        self.assertIsNone(line.receta_id)
+
+        second = self._sync(resolve_recipe=lambda row, recipe_map: self.recipe)
+        line.refresh_from_db()
+
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["relinked"], 1)
+        self.assertEqual(line.receta_id, self.recipe.id)
+
+    def test_duplicate_rerun_corrects_stale_recipe_and_erp_branch_homologation(self):
+        stale_recipe = Receta.objects.create(
+            nombre="Receta homologada incorrectamente",
+            codigo_point="CONV-RERUN-STALE",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-conversion-rerun-stale",
+        )
+        stale_sucursal = Sucursal.objects.create(
+            codigo="CONV-STALE",
+            nombre="Sucursal homologada incorrectamente",
+            activa=True,
+        )
+        self.branch.erp_branch = stale_sucursal
+        self.branch.save(update_fields=["erp_branch", "updated_at"])
+        self._sync(resolve_recipe=lambda row, recipe_map: stale_recipe)
+        PointConversionLine.objects.filter(source_hash="conversion-rerun-hash").update(
+            movement_external_id="MOVIMIENTO-OBSOLETO",
+            movement_at=timezone.make_aware(datetime(2020, 1, 1, 0, 0)),
+            item_name="Producto obsoleto",
+            item_code="CODIGO-OBSOLETO",
+            quantity=Decimal("999"),
+            unit="CAJA",
+            unit_cost=Decimal("999"),
+            total_cost=Decimal("999"),
+            source_item_name="Origen obsoleto",
+            source_item_code="ORIGEN-OBSOLETO",
+        )
+
+        self.branch.erp_branch = self.sucursal
+        self.branch.save(update_fields=["erp_branch", "updated_at"])
+        result = self._sync(resolve_recipe=lambda row, recipe_map: self.recipe)
+        line = PointConversionLine.objects.get(source_hash="conversion-rerun-hash")
+
+        self.assertEqual(result["relinked"], 1)
+        self.assertEqual(line.receta_id, self.recipe.id)
+        self.assertEqual(line.branch_id, self.branch.id)
+        self.assertEqual(line.erp_branch_id, self.sucursal.id)
+        self.assertEqual(line.movement_external_id, "MOV-RERUN-001")
+        self.assertEqual(timezone.localtime(line.movement_at), timezone.make_aware(datetime(2026, 7, 15, 10, 0)))
+        self.assertEqual(line.item_name, self.recipe.nombre)
+        self.assertEqual(line.item_code, self.recipe.codigo_point)
+        self.assertEqual(line.quantity, Decimal("4"))
+        self.assertEqual(line.unit, "PZA")
+        self.assertEqual(line.unit_cost, Decimal("12.50"))
+        self.assertEqual(line.total_cost, Decimal("50"))
+        self.assertEqual(line.source_item_name, self.recipe.nombre)
+        self.assertEqual(line.source_item_code, self.recipe.codigo_point)
+        self.assertEqual(line.raw_payload, self.report_rows[0])
+        self.assertEqual(line.source_hash, "conversion-rerun-hash")
 
     def test_unreconciled_duplicate_skip_does_not_become_false_authority(self):
         self._sync()
@@ -329,7 +399,13 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(_created_report_pk(mapping), "")
 
     def test_failed_success_transition_rolls_back_relinks_and_new_rows(self):
-        first_result = self._sync()
+        stale_recipe = Receta.objects.create(
+            nombre="Receta previa al rollback",
+            codigo_point="CONV-ROLLBACK-STALE",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-conversion-rollback-stale",
+        )
+        first_result = self._sync(resolve_recipe=lambda row, recipe_map: stale_recipe)
         first_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
         self.report_rows.append(
             {
@@ -347,7 +423,7 @@ class PointConversionRerunAuthorityTests(TestCase):
 
         with patch.object(PointSyncJob, "save", new=fail_success_save):
             with self.assertRaisesRegex(RuntimeError, "fallo inyectado"):
-                self._sync()
+                self._sync(resolve_recipe=lambda row, recipe_map: self.recipe)
 
         first_job.refresh_from_db()
         original_line = PointConversionLine.objects.get(source_hash="conversion-rerun-hash")
@@ -356,6 +432,7 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(first_job.status, PointSyncJob.STATUS_SUCCESS)
         self.assertEqual(first_job.result_summary, first_result)
         self.assertEqual(original_line.sync_job_id, first_job.id)
+        self.assertEqual(original_line.receta_id, stale_recipe.id)
         self.assertFalse(
             PointConversionLine.objects.filter(source_hash="conversion-rerun-hash-MOV-RERUN-NEW").exists()
         )
