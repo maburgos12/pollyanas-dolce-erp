@@ -342,6 +342,10 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("positivo = Point reporta más", rendered)
         self.assertIn("negativo = Point reporta menos", rendered)
         self.assertIn("cualquier valor distinto de cero requiere revisión", rendered)
+        self.assertIn(
+            "La Dif. Point no identifica ni explica por sí sola la causa y no atribuye responsabilidad.",
+            rendered,
+        )
         self.assertIn("Origen: equivalencia configurada", rendered)
         self.assertNotIn("Origen: Sin dato", rendered)
 
