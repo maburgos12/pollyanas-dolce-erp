@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Mapping
+from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from pos_bridge.models import (
     PointConversionLine,
-    PointDailySale,
     PointExtractionLog,
     PointInventorySnapshot,
     PointProductionLine,
@@ -28,6 +27,10 @@ from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
 from recetas.utils.normalizacion import normalizar_nombre
+from ventas.services.sales_canonical_source import (
+    legacy_point_sales_row_count_for_range,
+    official_point_sales_rows_for_range,
+)
 
 ZERO = Decimal("0")
 DIFFERENCE_TOLERANCE = Decimal("0.01")
@@ -1125,13 +1128,12 @@ class MonthlyPointProductBalanceService:
         month_start: date,
         month_end: date,
         official_daily_row_count: int,
-        daily_rows: list[PointDailySale],
+        daily_rows: list[Any],
     ) -> tuple[bool, dict[str, object], list[MonthlyPointUnresolvedMovement]]:
-        legacy_daily_row_count = PointDailySale.objects.filter(
-            sale_date__gte=month_start,
-            sale_date__lte=month_end,
-            source_endpoint="/Report/VentasCategorias",
-        ).count()
+        legacy_daily_row_count = legacy_point_sales_row_count_for_range(
+            start_date=month_start,
+            end_date=month_end,
+        )
         bridge_rows = list(
             VentaHistorica.objects.filter(
             fecha__gte=month_start,
@@ -1370,11 +1372,7 @@ class MonthlyPointProductBalanceService:
 
     def _load_daily_sales(self, *, month_start: date, month_end: date):
         rows = list(
-            PointDailySale.objects.filter(
-                sale_date__gte=month_start,
-                sale_date__lte=month_end,
-                source_endpoint=OFFICIAL_POINT_DAILY_SOURCE,
-            )
+            official_point_sales_rows_for_range(start_date=month_start, end_date=month_end)
             .select_related("product", "branch")
             .only(
                 "id",

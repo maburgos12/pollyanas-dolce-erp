@@ -6,6 +6,7 @@ from calendar import monthrange
 
 from django.conf import settings
 from django.db.models import Q, Sum
+from django.db.models.functions import TruncMonth
 
 from core.cache_versions import get_or_set_versioned_cache
 from pos_bridge.models import PointDailySale, PointSalesDailyCategoryFact, PointSalesDailyProductFact
@@ -17,6 +18,48 @@ POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
 OFFICIAL_POINT_SOURCE = "/Report/PrintReportes?idreporte=3"
 RECENT_POINT_SOURCE = "/Report/VentasCategorias"
 SALES_CANONICAL_CACHE_GENERATION = "sales-canonical-v2"
+
+
+def official_point_sales_rows_for_range(*, start_date: date, end_date: date):
+    """Return the persisted rows written by the official Point daily report."""
+    return PointDailySale.objects.filter(
+        sale_date__gte=start_date,
+        sale_date__lte=end_date,
+        source_endpoint=OFFICIAL_POINT_SOURCE,
+    )
+
+
+def legacy_point_sales_row_count_for_range(*, start_date: date, end_date: date) -> int:
+    """Count legacy category rows that would make an official cut ambiguous."""
+    return PointDailySale.objects.filter(
+        sale_date__gte=start_date,
+        sale_date__lte=end_date,
+        source_endpoint=RECENT_POINT_SOURCE,
+    ).count()
+
+
+def canonical_sales_evidence_months() -> tuple[str, ...]:
+    """List months represented by any canonical Point sales persistence layer."""
+    months: set[str] = set()
+    sources = (
+        (VentaAutoritativaPoint.objects.all(), "sale_date"),
+        (PointSalesDailyCategoryFact.objects.all(), "sale_date"),
+        (PointSalesDailyProductFact.objects.all(), "sale_date"),
+        (
+            PointDailySale.objects.filter(source_endpoint__in=(OFFICIAL_POINT_SOURCE, RECENT_POINT_SOURCE)),
+            "sale_date",
+        ),
+        (VentaHistorica.objects.filter(fuente=POINT_BRIDGE_SALES_SOURCE), "fecha"),
+    )
+    for queryset, field in sources:
+        values = (
+            queryset.annotate(sales_month=TruncMonth(field))
+            .order_by()
+            .values_list("sales_month", flat=True)
+            .distinct()
+        )
+        months.update(value.strftime("%Y-%m") for value in values if value)
+    return tuple(sorted(months, reverse=True))
 
 
 def _range_totals_payload(*, value, net_value, quantity, source_label: str, source_detail: str) -> dict[str, object]:

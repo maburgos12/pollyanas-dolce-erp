@@ -24,16 +24,15 @@ from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
 from pos_bridge.models import (
     PointConversionLine,
-    PointDailySale,
     PointInventorySnapshot,
     PointProductionLine,
-    PointSalesDailyProductFact,
     PointWasteLine,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from recetas.models import ProductoMonthClosure, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
+from ventas.services.sales_canonical_source import canonical_sales_evidence_months
 
 
 ZERO = Decimal("0")
@@ -677,13 +676,11 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return list(dict.fromkeys(banners))
 
     def _available_periods(self, *, selected: str) -> list[str]:
-        months = {selected}
+        months = {selected, *canonical_sales_evidence_months()}
         for model, field in (
             (ProductoMonthClosure, "month_start"),
             (FactProduccionDiaria, "fecha"),
             (PointProductionLine, "production_date"),
-            (PointSalesDailyProductFact, "sale_date"),
-            (PointDailySale, "sale_date"),
             (PointConversionLine, "movement_at"),
             (PointWasteLine, "movement_at"),
             (MermaMensualSucursal, "periodo"),
