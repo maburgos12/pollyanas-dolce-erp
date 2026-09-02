@@ -5,7 +5,7 @@ from decimal import Decimal
 from threading import Barrier, Event, Thread
 from unittest.mock import patch
 
-from django.db import close_old_connections, transaction
+from django.db import DatabaseError, close_old_connections, transaction
 from django.test import TransactionTestCase
 from django.utils import timezone
 
@@ -146,8 +146,10 @@ class WriterSerializationTests(TransactionTestCase):
             self.assertTrue(validation_inside.wait(5), errors)
 
             def run_writer():
-                writer(closure, line)
-                writer_finished.set()
+                try:
+                    writer(closure, line)
+                finally:
+                    writer_finished.set()
 
             writer_thread = self._thread(run_writer, errors)
             self.assertFalse(writer_finished.wait(0.25))
@@ -156,12 +158,14 @@ class WriterSerializationTests(TransactionTestCase):
             writer_thread.join(5)
 
         self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
-        self.assertEqual(errors, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], DatabaseError)
+        self.assertIn("cierre mensual bloqueado", str(errors[0]))
         self.assertTrue(writer_finished.is_set())
         closure.refresh_from_db()
         self.assertTrue(closure.is_locked)
         current_lines = list(closure.lines.all())
-        self.assertNotEqual(
+        self.assertEqual(
             ProductMonthClosureService._persisted_lines_digest(current_lines),
             closure.metadata["source_fingerprint"]["projected_lines_digest"],
         )
@@ -408,19 +412,21 @@ class WriterSerializationTests(TransactionTestCase):
         service = ProductMonthClosureService()
 
         def writer():
-            with transaction.atomic():
-                ProductoMonthClosureLine.objects.create(
-                    closure=other,
-                    receta_padre=first_insert_recipe,
-                )
-                first_inserted.set()
-                self.assertTrue(attempt_target_insert.wait(5))
-                ProductoMonthClosureLine.objects.create(
-                    closure=target,
-                    receta_padre=target_insert_recipe,
-                    metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
-                )
-            writer_finished.set()
+            try:
+                with transaction.atomic():
+                    ProductoMonthClosureLine.objects.create(
+                        closure=other,
+                        receta_padre=first_insert_recipe,
+                    )
+                    first_inserted.set()
+                    self.assertTrue(attempt_target_insert.wait(5))
+                    ProductoMonthClosureLine.objects.create(
+                        closure=target,
+                        receta_padre=target_insert_recipe,
+                        metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
+                    )
+            finally:
+                writer_finished.set()
 
         def fresh_preview(**kwargs):
             validation_inside.set()
@@ -446,15 +452,96 @@ class WriterSerializationTests(TransactionTestCase):
             writer_thread.join(5)
 
         self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
-        self.assertEqual(errors, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], DatabaseError)
+        self.assertIn("cierre mensual bloqueado", str(errors[0]))
         self.assertTrue(lock_finished.is_set())
         self.assertTrue(writer_finished.is_set())
         target.refresh_from_db()
         self.assertTrue(target.is_locked)
-        self.assertNotEqual(
+        self.assertEqual(other.lines.count(), 0)
+        self.assertEqual(
             ProductMonthClosureService._persisted_lines_digest(list(target.lines.all())),
             target.metadata["source_fingerprint"]["projected_lines_digest"],
         )
+
+    def test_database_rejects_direct_insert_update_and_delete_on_locked_closure(self):
+        locked = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 2, 1),
+            month_end=date(2026, 2, 28),
+            status=ProductoMonthClosure.STATUS_LOCKED,
+            is_locked=True,
+        )
+        recipe = Receta.objects.create(
+            nombre="Línea DB protegida",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="db-guard-locked-line",
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=ProductoMonthClosure.objects.create(
+                month_start=date(2026, 1, 1),
+                month_end=date(2026, 1, 31),
+                status=ProductoMonthClosure.STATUS_BUILT,
+            ),
+            receta_padre=recipe,
+            produccion_mes=Decimal("1"),
+        )
+
+        with self.assertRaisesMessage(DatabaseError, "cierre mensual bloqueado"):
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.create(closure=locked, receta_padre=recipe)
+        self.assertFalse(locked.lines.exists())
+
+        line.closure = locked
+        with self.assertRaisesMessage(DatabaseError, "cierre mensual bloqueado"):
+            with transaction.atomic():
+                line.save(update_fields=["closure", "updated_at"])
+        line.refresh_from_db()
+        self.assertNotEqual(line.closure_id, locked.id)
+
+        ProductoMonthClosure.objects.filter(pk=line.closure_id).update(is_locked=True)
+        with self.assertRaisesMessage(DatabaseError, "cierre mensual bloqueado"):
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.filter(pk=line.pk).update(produccion_mes=Decimal("8"))
+        line.refresh_from_db()
+        self.assertEqual(line.produccion_mes, Decimal("1"))
+
+        with self.assertRaisesMessage(DatabaseError, "cierre mensual bloqueado"):
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.filter(pk=line.pk).delete()
+        self.assertTrue(ProductoMonthClosureLine.objects.filter(pk=line.pk).exists())
+
+    def test_database_allows_line_dml_on_unlocked_closure_and_rolls_back_failed_batch(self):
+        unlocked = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 12, 1),
+            month_end=date(2025, 12, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+        )
+        locked = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 11, 1),
+            month_end=date(2025, 11, 30),
+            status=ProductoMonthClosure.STATUS_LOCKED,
+            is_locked=True,
+        )
+        recipe = Receta.objects.create(
+            nombre="Línea DB abierta",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="db-guard-unlocked-line",
+        )
+        line = ProductoMonthClosureLine.objects.create(closure=unlocked, receta_padre=recipe)
+        ProductoMonthClosureLine.objects.filter(pk=line.pk).update(produccion_mes=Decimal("3"))
+        line.refresh_from_db()
+        self.assertEqual(line.produccion_mes, Decimal("3"))
+
+        with self.assertRaisesMessage(DatabaseError, "cierre mensual bloqueado"):
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.filter(pk=line.pk).update(produccion_mes=Decimal("7"))
+                ProductoMonthClosureLine.objects.create(closure=locked, receta_padre=recipe)
+        line.refresh_from_db()
+        self.assertEqual(line.produccion_mes, Decimal("3"))
+
+        ProductoMonthClosureLine.objects.filter(pk=line.pk).delete()
+        self.assertFalse(ProductoMonthClosureLine.objects.filter(pk=line.pk).exists())
 
     def test_lock_waits_for_rebuild_and_never_gets_overwritten_or_unlocked(self):
         recipe = Receta.objects.create(
