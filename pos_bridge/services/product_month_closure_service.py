@@ -1145,11 +1145,11 @@ class ProductMonthClosureService:
                 f"El cierre {closure.month_start:%Y-%m} debe estar construido antes de bloquearse."
             )
 
-        # El padre se bloqueó primero: serializa build/lock y hace esperar el
-        # KEY SHARE que PostgreSQL necesita para insertar una línea por FK. Las
-        # filas hijas actuales se bloquean sin tomar un lock global de tabla,
-        # evitando el ciclo padre -> tabla frente a writers ya iniciados.
-        lines = list(closure.lines.select_for_update().all())
+        # El padre serializa build/lock. El trigger de líneas toma KEY SHARE
+        # sobre este padre antes de cada INSERT/UPDATE/DELETE, por lo que ningún
+        # DML puede confirmar mientras validamos y sellamos el cierre. Bloquear
+        # además las hijas formaría un ciclo con un writer que ya tomó su fila.
+        lines = list(closure.lines.all())
         if not lines:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} no tiene lineas para bloquear.")
 

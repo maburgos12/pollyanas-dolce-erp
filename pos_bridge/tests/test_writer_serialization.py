@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from pos_bridge.models import PointBranch, PointDailySale, PointExtractionLog, PointSyncJob
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
-from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
+from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaCodigoPointAlias
 
 
@@ -167,6 +167,64 @@ class WriterSerializationTests(TransactionTestCase):
         current_lines = list(closure.lines.all())
         self.assertEqual(
             ProductMonthClosureService._persisted_lines_digest(current_lines),
+            closure.metadata["source_fingerprint"]["projected_lines_digest"],
+        )
+
+    def _assert_parent_lock_does_not_deadlock_with_line_writer(self, *, month_start, writer):
+        recipe = Receta.objects.create(
+            nombre=f"Línea parent-first {month_start:%Y-%m}",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"line-parent-first-{month_start:%Y-%m}",
+        )
+        closure, line, current_plan = self._canonical_closure_for_line_race(
+            month_start=month_start,
+            recipe=recipe,
+        )
+        parent_locked = Event()
+        writer_attempted = Event()
+        writer_finished = Event()
+        locker_finished = Event()
+        locker_errors = []
+        writer_errors = []
+        service = ProductMonthClosureService()
+
+        def run_locker():
+            # Pausa exactamente después de tomar el lock del padre. El writer
+            # alcanza primero la fila hija y queda dentro del trigger esperando
+            # KEY SHARE sobre este mismo padre.
+            with transaction.atomic():
+                locked_closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+                parent_locked.set()
+                self.assertTrue(writer_attempted.wait(5))
+                self.assertFalse(writer_finished.wait(0.25))
+                service.lock(closure=locked_closure)
+            locker_finished.set()
+
+        def run_writer():
+            try:
+                self.assertTrue(parent_locked.wait(5))
+                writer_attempted.set()
+                writer(closure, line)
+            finally:
+                writer_finished.set()
+
+        with patch.object(service, "_fresh_canonical_preview", return_value=current_plan):
+            lock_thread = self._thread(run_locker, locker_errors)
+            self.assertTrue(parent_locked.wait(5), locker_errors)
+            writer_thread = self._thread(run_writer, writer_errors)
+            lock_thread.join(5)
+            writer_thread.join(5)
+
+        self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
+        self.assertEqual(locker_errors, [])
+        self.assertTrue(locker_finished.is_set())
+        self.assertEqual(len(writer_errors), 1)
+        self.assertIsInstance(writer_errors[0], DatabaseError)
+        self.assertIn("cierre mensual bloqueado", str(writer_errors[0]))
+        closure.refresh_from_db()
+        self.assertTrue(closure.is_locked)
+        self.assertEqual(
+            ProductMonthClosureService._persisted_lines_digest(list(closure.lines.all())),
             closure.metadata["source_fingerprint"]["projected_lines_digest"],
         )
 
@@ -375,6 +433,70 @@ class WriterSerializationTests(TransactionTestCase):
                 receta_padre=inserted_recipe,
                 metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
             ),
+        )
+
+    def test_parent_first_lock_does_not_deadlock_with_line_update_already_in_trigger(self):
+        self._assert_parent_lock_does_not_deadlock_with_line_writer(
+            month_start=date(2026, 10, 1),
+            writer=lambda _closure, line: ProductoMonthClosureLine.objects.filter(pk=line.pk).update(
+                produccion_mes=Decimal("9")
+            ),
+        )
+
+    def test_parent_first_lock_does_not_deadlock_with_line_delete_already_in_trigger(self):
+        self._assert_parent_lock_does_not_deadlock_with_line_writer(
+            month_start=date(2026, 11, 1),
+            writer=lambda _closure, line: ProductoMonthClosureLine.objects.filter(pk=line.pk).delete(),
+        )
+
+    def test_line_writer_before_parent_lock_commits_and_lock_detects_changed_digest(self):
+        recipe = Receta.objects.create(
+            nombre="Línea writer-first sobre el mismo cierre",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="line-writer-before-parent",
+        )
+        closure, line, _current_plan = self._canonical_closure_for_line_race(
+            month_start=date(2026, 12, 1),
+            recipe=recipe,
+        )
+        writer_changed = Event()
+        release_writer = Event()
+        locker_finished = Event()
+        writer_errors = []
+        locker_errors = []
+
+        def writer():
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.filter(pk=line.pk).update(produccion_mes=Decimal("12"))
+                writer_changed.set()
+                self.assertTrue(release_writer.wait(5))
+
+        def locker():
+            try:
+                ProductMonthClosureService().lock(closure=closure)
+            finally:
+                locker_finished.set()
+
+        writer_thread = self._thread(writer, writer_errors)
+        self.assertTrue(writer_changed.wait(5), writer_errors)
+        lock_thread = self._thread(locker, locker_errors)
+        self.assertFalse(locker_finished.wait(0.25))
+        release_writer.set()
+        writer_thread.join(5)
+        lock_thread.join(5)
+
+        self.assertFalse(writer_thread.is_alive() or lock_thread.is_alive())
+        self.assertEqual(writer_errors, [])
+        self.assertEqual(len(locker_errors), 1)
+        self.assertIsInstance(locker_errors[0], ProductMonthClosureError)
+        self.assertIn("líneas persistidas cambiaron", str(locker_errors[0]).lower())
+        closure.refresh_from_db()
+        line.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+        self.assertEqual(line.produccion_mes, Decimal("12"))
+        self.assertNotEqual(
+            ProductMonthClosureService._persisted_lines_digest(list(closure.lines.all())),
+            closure.metadata["source_fingerprint"]["projected_lines_digest"],
         )
 
     def test_writer_started_first_does_not_deadlock_with_closure_lock(self):
