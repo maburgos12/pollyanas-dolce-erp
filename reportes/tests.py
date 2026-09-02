@@ -3124,7 +3124,7 @@ class ReportesCanonicosTests(TestCase):
         response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-09"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cierre teórico de producto terminado")
+        self.assertContains(response, "Cierre mensual de producto terminado")
         self.assertContains(response, "Detalle del cierre mensual")
         self.assertContains(response, "Meses disponibles")
         self.assertContains(response, "Pastel Cierre Operativo")
@@ -3314,6 +3314,101 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Fin. Point")], 11)
         self.assertEqual(values[headers.index("Dif. Point")], 2)
         self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
+
+    def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
+        receta = Receta.objects.create(
+            nombre="Pastel HTML Canonico",
+            codigo_point="HTMLCAN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-html-canonico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 7, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("10"),
+            inventario_final_teorico=Decimal("9"),
+            inventario_final_point_total=Decimal("11"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "POINT_MAYOR",
+                "issues": [],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        body = response.content.decode("utf-8")
+
+        self.assertContains(response, "Saldo calculado")
+        self.assertContains(response, "Fin. Point")
+        self.assertContains(response, "Dif. Point")
+        self.assertContains(response, "Point mayor")
+        self.assertEqual(response.context["total_closing_difference"], Decimal("2"))
+        self.assertNotIn("Point físico", body)
+        self.assertNotIn("Sobrante físico", body)
+        self.assertNotIn("Faltante no explicado", body)
+
+    def test_historical_non_point_opening_uses_honest_labels_in_html_csv_and_xlsx(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Apertura Historica",
+            codigo_point="HISTOPEN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-apertura-historica-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 10, 1),
+            month_end=date(2025, 10, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE,
+            opening_reference_date=date(2025, 9, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("7"),
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("7"),
+            diferencia_teorico_vs_point=Decimal("0"),
+        )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-10"})
+        self.assertContains(html_response, "Saldo inicial")
+        self.assertContains(html_response, "Cierre previo")
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-10", "export": "csv"}
+        )
+        csv_rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        self.assertEqual(summary["Fuente inicial"], "Cierre previo")
+        self.assertEqual(Decimal(summary["Saldo inicial"]), Decimal("7"))
+        self.assertIn("Saldo inicial", detail_headers)
+        self.assertNotIn("Ini. Point", detail_headers)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-10", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        summary_values = {
+            row[0]: row[1]
+            for row in workbook["Resumen"].iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
+        headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        self.assertEqual(summary_values["Fuente inicial"], "Cierre previo")
+        self.assertEqual(summary_values["Saldo inicial"], 7)
+        self.assertIn("Saldo inicial", headers)
+        self.assertNotIn("Ini. Point", headers)
 
     def test_cierre_producto_exports_do_not_turn_missing_canonical_sources_into_zero(self):
         receta = Receta.objects.create(

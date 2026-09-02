@@ -5430,6 +5430,21 @@ def _product_closure_status_tone(status: str) -> str:
     return "neutral"
 
 
+def _product_closure_opening_labels(closure: ProductoMonthClosure | None) -> tuple[str, str]:
+    if closure and closure.opening_source == ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT:
+        return "Ini. Point", "Fuente Ini. Point"
+    return "Saldo inicial", "Fuente inicial"
+
+
+def _product_closure_point_status_label(status: str) -> str:
+    return {
+        "COINCIDE": "Coincide",
+        "POINT_MAYOR": "Point mayor",
+        "POINT_MENOR": "Point menor",
+        "REVISAR_FUENTE": "Revisar fuente",
+    }.get(status, "Revisar fuente")
+
+
 def _build_product_closure_context(selected_month_start: date) -> dict[str, object]:
     closure = (
         ProductoMonthClosure.objects.select_related("built_by").prefetch_related("lines", "lines__receta_padre")
@@ -5438,6 +5453,21 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         .first()
     )
     lines = list(closure.lines.select_related("receta_padre").all()) if closure else []
+    export_rows = [_product_closure_export_row(line) for line in lines]
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(closure)
+    closure_display_rows = []
+    for line, export_row in zip(lines, export_rows):
+        status = str(export_row["point_status"])
+        closure_display_rows.append(
+            {
+                "line": line,
+                **export_row,
+                "point_status_label": _product_closure_point_status_label(status),
+                "point_status_tone": (
+                    "success" if status == "COINCIDE" else "warning" if status in {"POINT_MAYOR", "POINT_MENOR"} else "danger"
+                ),
+            }
+        )
 
     total_opening = sum((Decimal(str(line.inventario_inicial_teorico or 0)) for line in lines), Decimal("0"))
     total_production = sum((Decimal(str(line.produccion_mes or 0)) for line in lines), Decimal("0"))
@@ -5454,10 +5484,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         Decimal("0"),
     )
     total_closing_point = sum((Decimal(str(line.inventario_final_point_total or 0)) for line in lines), Decimal("0"))
-    total_closing_difference = sum(
-        (Decimal(str(line.diferencia_teorico_vs_point or 0)) for line in lines),
-        Decimal("0"),
-    )
+    total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
 
     conversion_rows = [
         line
@@ -5592,6 +5619,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "month_options": _product_closure_month_options(selected_month_start),
         "closure": closure,
         "closure_lines": lines,
+        "closure_display_rows": closure_display_rows,
+        "opening_balance_label": opening_balance_label,
+        "opening_source_label": opening_source_label,
         "closure_status_tone": _product_closure_status_tone(closure.status) if closure else "warning",
         "total_opening": total_opening,
         "total_production": total_production,
@@ -5720,8 +5750,9 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     opening_total = _sum_available_export_values(export_rows, "opening_point")
     writer.writerow(["Mes", context["selected_month"]])
     writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    writer.writerow(["Fuente Ini. Point", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    writer.writerow(["Ini. Point", _closure_export_display(opening_total)])
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
+    writer.writerow([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    writer.writerow([opening_balance_label, _closure_export_display(opening_total)])
     writer.writerow(["Produccion", context["total_production"]])
     writer.writerow(["Venta equivalente", context["total_sales"]])
     writer.writerow(["Merma equivalente", context["total_waste"]])
@@ -5740,7 +5771,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
         [
             "Receta padre",
             "Codigo point",
-            "Ini. Point",
+            opening_balance_label,
             "Produccion",
             "Venta directa",
             "Venta derivada",
@@ -5786,8 +5817,9 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     opening_total = _sum_available_export_values(export_rows, "opening_point")
     summary_ws.append(["Mes", context["selected_month"]])
     summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    summary_ws.append(["Fuente Ini. Point", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    summary_ws.append(["Ini. Point", _closure_export_cell(opening_total)])
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
+    summary_ws.append([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    summary_ws.append([opening_balance_label, _closure_export_cell(opening_total)])
     summary_ws.append(["Produccion", float(context["total_production"])])
     summary_ws.append(["Venta equivalente", float(context["total_sales"])])
     summary_ws.append(["Merma equivalente", float(context["total_waste"])])
@@ -5807,7 +5839,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
         [
             "Receta padre",
             "Codigo point",
-            "Ini. Point",
+            opening_balance_label,
             "Produccion",
             "Venta directa",
             "Venta derivada",

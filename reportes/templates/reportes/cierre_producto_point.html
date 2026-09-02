@@ -25,8 +25,8 @@
   <section class="bi-hero">
     <div class="bi-hero-main">
       <div class="bi-kicker">Point · Conciliación mensual</div>
-      <h1 class="bi-hero-title">Cierre teórico de producto terminado</h1>
-      <p class="bi-copy">Libro mensual bloqueable: inventario inicial + producción - venta - merma = inventario final teórico. La lectura operativa diaria queda en Producido vs Vendido.</p>
+      <h1 class="bi-hero-title">Cierre mensual de producto terminado</h1>
+      <p class="bi-copy">Saldo calculado = saldo inicial + producción + conversión de entrada - venta - merma - conversión de salida. Dif. Point = Fin. Point - Saldo calculado; un valor positivo indica que Point cerró con más unidades.</p>
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Mes visible</div>
@@ -39,9 +39,9 @@
           <div class="bi-hero-highlight-meta">{{ movement_source_label }}</div>
         </article>
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Inventario final teórico</div>
+          <div class="bi-hero-highlight-label">Saldo calculado</div>
           <div class="bi-hero-highlight-value">{{ total_ending|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Point físico {{ total_closing_point|floatformat:2|intcomma }} · Dif {{ total_closing_difference|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-meta">Fin. Point {{ total_closing_point|floatformat:2|intcomma }} · Dif. Point {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
         </article>
       </div>
     </div>
@@ -105,7 +105,7 @@
           <strong>{{ movement_source_label }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Opening</span>
+          <span>{{ opening_balance_label }}</span>
           <strong>{{ total_opening|floatformat:2|intcomma }}</strong>
         </div>
         <div class="bi-summary-chip">
@@ -126,8 +126,8 @@
   <section class="bi-kpi-grid">
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">{{ total_opening|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario inicial teórico</div>
-      <div class="bi-kpi-note">{% if closure.opening_reference_date %}Base de {{ closure.opening_reference_date|date:"Y-m-d" }}{% else %}Sin referencia{% endif %}</div>
+      <div class="bi-kpi-label">{{ opening_balance_label }}</div>
+      <div class="bi-kpi-note">{{ closure.get_opening_source_display }}{% if closure.opening_reference_date %} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value success">{{ total_production|floatformat:2|intcomma }}</div>
@@ -141,13 +141,13 @@
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if total_ending < 0 %}danger{% endif %}">{{ total_ending|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario final teórico</div>
+      <div class="bi-kpi-label">Saldo calculado</div>
       <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if total_closing_difference > 0 %}danger{% elif total_closing_difference < 0 %}warning{% else %}success{% endif %}">{{ total_closing_point|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario final Point</div>
-      <div class="bi-kpi-note">CEDIS {{ total_closing_cedis|floatformat:2|intcomma }} · sucursales {{ total_closing_sucursales|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value">{{ total_closing_point|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-label">Fin. Point</div>
+      <div class="bi-kpi-note">Dif. Point {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · Point menos saldo calculado</div>
     </article>
   </section>
 
@@ -351,7 +351,7 @@
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
         <h2 class="bi-panel-title">Detalle del cierre mensual {{ selected_month }}</h2>
-        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}: inventario inicial + producción - venta - merma = final teórico por receta padre.</p>
+        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}. La diferencia conserva el signo Fin. Point menos Saldo calculado.</p>
       </div>
       <div class="bi-panel-actions">
         <span class="bi-pill is-muted">Fuente: {{ movement_source_label }}</span>
@@ -364,34 +364,37 @@
         <colgroup>
           <col class="col-receta-padre">
           <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
-          <col class="col-metric"><col class="col-estado">
+          <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-estado">
         </colgroup>
         <thead>
           <tr>
             <th>Receta padre</th>
-            <th class="text-end">Inicial</th>
+            <th class="text-end">{{ opening_balance_label }}</th>
             <th class="text-end">Producción</th>
             <th class="text-end">Venta</th>
             <th class="text-end">Merma total</th>
-            <th class="text-end">Final teórico {{ selected_month }}</th>
-            <th>Lectura</th>
+            <th class="text-end">Saldo calculado</th>
+            <th class="text-end">Fin. Point</th>
+            <th class="text-end">Dif. Point</th>
+            <th>Estado</th>
           </tr>
         </thead>
         <tbody>
-          {% for line in closure_lines %}
+          {% for row in closure_display_rows %}
           <tr>
             <td class="bi-closure-name-cell">
-              <strong>{{ line.receta_padre.nombre }}</strong>
-              {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+              <strong>{{ row.line.receta_padre.nombre }}</strong>
+              {% if row.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ row.line.receta_padre.codigo_point }}</div>{% endif %}
             </td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_inicial_teorico|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.produccion_mes|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.venta_total_equivalente|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.merma_total_equivalente|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.opening_point != None %}{{ row.opening_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{{ row.line.produccion_mes|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ row.line.venta_total_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{{ row.line.merma_total_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.calculated_closing != None %}{{ row.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.closing_point != None %}{{ row.closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.point_difference != None %}{{ row.point_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="bi-closure-reading-cell">
-              <span class="bi-tone {% if line.estado_auditoria == 'CUADRA' or line.estado_auditoria == 'CUADRA_CON_MERMA' %}success{% elif line.estado_auditoria == 'SOBRANTE_FISICO' %}warning{% else %}danger{% endif %}">{{ line.get_estado_auditoria_display }}</span>
-              <div class="bi-subtle">{{ line.detalle_auditoria }}</div>
+              <span class="bi-tone {{ row.point_status_tone }}">{{ row.point_status_label }}</span>
             </td>
           </tr>
           {% endfor %}
