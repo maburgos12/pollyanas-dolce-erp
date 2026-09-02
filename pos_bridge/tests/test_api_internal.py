@@ -287,3 +287,38 @@ class PosBridgeInternalApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_product_closures_production_operator_cannot_lock_after_build(self):
+        operator = get_user_model().objects.create_user(username="closure_builder_only", password="test12345")
+        production_group, _ = Group.objects.get_or_create(name="PRODUCCION")
+        operator.groups.add(production_group)
+        self.client.force_authenticate(operator)
+
+        with patch("pos_bridge.api.views.closures.ProductMonthClosureService.build") as build:
+            response = self.client.post(
+                "/api/pos-bridge/product-closures/build/",
+                {"month": "2025-09", "lock_after_build": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        build.assert_not_called()
+
+    def test_product_closures_dg_can_build_and_lock_in_one_request(self):
+        director = get_user_model().objects.create_user(username="closure_dg", password="test12345")
+        dg_group, _ = Group.objects.get_or_create(name="DG")
+        director.groups.add(dg_group)
+        self.client.force_authenticate(director)
+
+        with patch(
+            "pos_bridge.api.views.closures.ProductMonthClosureService.build",
+            return_value=self.product_closure,
+        ) as build:
+            response = self.client.post(
+                "/api/pos-bridge/product-closures/build/",
+                {"month": "2025-09", "lock_after_build": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(build.call_args.kwargs["lock_after_build"])
