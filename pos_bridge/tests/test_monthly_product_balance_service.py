@@ -511,7 +511,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         }
         job.save(update_fields=["parameters", "result_summary"])
 
-    def _production(self, recipe, quantity, production_date, suffix):
+    def _production(self, recipe, quantity, production_date, suffix, *, sync_job=None):
         return PointProductionLine.objects.create(
             branch=self.branch,
             erp_branch=self.sucursal,
@@ -523,9 +523,10 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             item_name=recipe.nombre,
             item_code=recipe.codigo_point,
             produced_quantity=Decimal(quantity),
+            sync_job=sync_job,
         )
 
-    def _waste(self, recipe, quantity, when, suffix):
+    def _waste(self, recipe, quantity, when, suffix, *, sync_job=None):
         return PointWasteLine.objects.create(
             branch=self.branch,
             erp_branch=self.sucursal,
@@ -536,6 +537,50 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             item_name=recipe.nombre,
             item_code=recipe.codigo_point,
             quantity=Decimal(quantity),
+            sync_job=sync_job,
+        )
+
+    def _movement_job(
+        self,
+        family,
+        *,
+        status=PointSyncJob.STATUS_SUCCESS,
+        start="2026-07-01",
+        end="2026-07-31",
+        branch_filter="",
+        rows_seen=0,
+    ):
+        if family == "conversions":
+            return PointSyncJob.objects.create(
+                job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+                status=status,
+                parameters={
+                    "source": "point_conversion_lines",
+                    "date_from": start,
+                    "date_to": end,
+                    "branch_filter": branch_filter,
+                },
+                result_summary={
+                    "created": rows_seen,
+                    "skipped": 0,
+                    "skipped_unmatched_branch": 0,
+                    "total_rows": rows_seen,
+                    "report_pk": "report-1",
+                },
+            )
+        job_type = {
+            "production": PointSyncJob.JOB_TYPE_PRODUCTION,
+            "waste": PointSyncJob.JOB_TYPE_WASTE,
+        }[family]
+        count_key = {
+            "production": "production_lines_seen",
+            "waste": "waste_lines_seen",
+        }[family]
+        return PointSyncJob.objects.create(
+            job_type=job_type,
+            status=status,
+            parameters={"start_date": start, "end_date": end, "branch_filter": branch_filter},
+            result_summary={count_key: rows_seen},
         )
 
     def _daily_sale(
@@ -625,8 +670,11 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self._snapshot(self.slice_product, "24", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "12", datetime(2026, 7, 31, 8))
         self._snapshot(self.slice_product, "17", datetime(2026, 7, 31, 8))
-        self._production(self.slice, "4", date(2026, 7, 10), "july")
-        self._waste(self.slice, "1", datetime(2026, 7, 20, 12), "july")
+        production_job = self._movement_job("production", rows_seen=1)
+        waste_job = self._movement_job("waste", rows_seen=1)
+        self._movement_job("conversions")
+        self._production(self.slice, "4", date(2026, 7, 10), "july", sync_job=production_job)
+        self._waste(self.slice, "1", datetime(2026, 7, 20, 12), "july", sync_job=waste_job)
         service, _official = self._service(
             [{"Codigo": self.slice.codigo_point, "Nombre": self.slice.nombre, "Cantidad": Decimal("10")}]
         )
@@ -657,7 +705,12 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         service, official = self._service(
             [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("1")}]
         )
-        self._production(self.parent, "3", date(2026, 8, 15), "august")
+        production_job = self._movement_job(
+            "production", start="2026-08-01", end="2026-08-31", rows_seen=1
+        )
+        self._movement_job("waste", start="2026-08-01", end="2026-08-31")
+        self._movement_job("conversions", start="2026-08-01", end="2026-08-31")
+        self._production(self.parent, "3", date(2026, 8, 15), "august", sync_job=production_job)
         self._seal_inventory_job()
 
         balance = service.build("2026-08")
@@ -1006,7 +1059,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(opening["out_of_tolerance_key_count"], 0)
         self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
 
-    def test_fact_priority_preserves_exact_recipe_for_production_and_waste(self):
+    def test_observed_point_rows_remain_primary_over_informative_facts(self):
         self._snapshot(self.slice_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.slice_product, "12", datetime(2026, 7, 31, 8))
         self._production(self.slice, "99", date(2026, 7, 10), "ignored")
@@ -1022,11 +1075,13 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         row = service.build("2026-07").rows[self.slice.id]
 
-        self.assertEqual(row.production, Decimal("5"))
-        self.assertEqual(row.waste, Decimal("3"))
+        self.assertEqual(row.production, Decimal("99"))
+        self.assertEqual(row.waste, Decimal("99"))
+        self.assertEqual(service.build("2026-07").sources["production"]["source"], "PointProductionLine")
+        self.assertFalse(service.build("2026-07").sources["production"]["authoritative"])
         self.assertNotIn(self.parent.id, service.build("2026-07").rows)
 
-    def test_zero_fact_rows_still_take_priority_over_bridge_rows(self):
+    def test_zero_facts_do_not_override_observed_point_rows(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
         self._production(self.parent, "99", date(2026, 7, 10), "ignored-zero-fact")
@@ -1042,10 +1097,10 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         balance = service.build("2026-07")
 
-        self.assertEqual(balance.rows[self.parent.id].production, Decimal("0"))
-        self.assertEqual(balance.rows[self.parent.id].waste, Decimal("0"))
-        self.assertEqual(balance.sources["production"]["source"], "FactProduccionDiaria")
-        self.assertEqual(balance.sources["waste"]["source"], "FactProduccionDiaria")
+        self.assertEqual(balance.rows[self.parent.id].production, Decimal("99"))
+        self.assertEqual(balance.rows[self.parent.id].waste, Decimal("99"))
+        self.assertEqual(balance.sources["production"]["source"], "PointProductionLine")
+        self.assertEqual(balance.sources["waste"]["source"], "PointWasteLine")
 
     def test_unmapped_zero_facts_do_not_block_per_field_fallbacks_but_mapped_zero_stays_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -1087,11 +1142,11 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         mapped_zero_balance = service.build("2026-07")
 
-        self.assertEqual(mapped_zero_balance.rows[self.parent.id].production, Decimal("0"))
-        self.assertEqual(mapped_zero_balance.rows[self.parent.id].waste, Decimal("0"))
+        self.assertEqual(mapped_zero_balance.rows[self.parent.id].production, Decimal("2"))
+        self.assertEqual(mapped_zero_balance.rows[self.parent.id].waste, Decimal("1"))
         self.assertEqual(mapped_zero_balance.rows[self.parent.id].sales, Decimal("0"))
-        self.assertEqual(mapped_zero_balance.sources["production"]["source"], "FactProduccionDiaria")
-        self.assertEqual(mapped_zero_balance.sources["waste"]["source"], "FactProduccionDiaria")
+        self.assertEqual(mapped_zero_balance.sources["production"]["source"], "PointProductionLine")
+        self.assertEqual(mapped_zero_balance.sources["waste"]["source"], "PointWasteLine")
         self.assertEqual(mapped_zero_balance.sources["sales"]["mode"], "production_facts")
 
     def test_monthly_waste_is_last_resort_fallback(self):
@@ -1238,6 +1293,9 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self._seal_inventory_job()
         job = self._official_sales_job()
         self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "full-job", sync_job=job)
+        self._movement_job("production")
+        self._movement_job("waste")
+        self._movement_job("conversions")
 
         balance = MonthlyPointProductBalanceService().build("2026-07")
 
@@ -1481,7 +1539,9 @@ class MonthlyProductBalanceLedgerTests(TestCase):
 
         job_queries = [query for query in queries if "pos_bridge_sync_jobs" in query["sql"]]
         self.assertTrue(balance.sources["sales"]["authoritative"])
-        self.assertEqual(len(job_queries), 3)
+        # Snapshot opening/final, ventas y las tres familias de movimientos se
+        # cargan en lotes; la autoridad mensual añade una sola consulta compartida.
+        self.assertEqual(len(job_queries), 6)
 
     def test_official_daily_and_legacy_history_mix_is_non_authoritative(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -1702,6 +1762,9 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         service, _official = self._service(
             [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("0")}]
         )
+        self._movement_job("production")
+        self._movement_job("waste")
+        self._movement_job("conversions")
 
         row = service.build("2026-07").rows[self.parent.id]
 
@@ -2163,3 +2226,130 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.rows[self.parent.id].issues)
         with self.assertRaises(TypeError):
             balance.sources["sales"] = {}
+
+    def test_complete_unrestricted_month_jobs_prove_authoritative_zero_for_required_movements(self):
+        self._movement_job("production")
+        self._movement_job("waste")
+        self._movement_job("conversions")
+        service, _official = self._service()
+
+        production, production_meta, _ = service._load_production(
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+        )
+        waste, waste_meta, _ = service._load_waste(
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+        )
+        _rows, _unresolved, _movements, conversion_counts, conversion_meta = service._load_conversions(
+            month_start=date(2026, 7, 1)
+        )
+
+        self.assertEqual(production, {})
+        self.assertEqual(waste, {})
+        self.assertEqual(conversion_counts["conversion_rows_read"], 0)
+        for metadata in (production_meta, waste_meta, conversion_meta):
+            self.assertTrue(metadata["source_present"])
+            self.assertTrue(metadata["authoritative"])
+            self.assertEqual(metadata["coverage_scope"], "all_branches")
+
+    def test_production_authority_reconciles_writer_count_including_insumo_lines(self):
+        job = self._movement_job("production", rows_seen=2)
+        self._production(self.parent, "4", date(2026, 7, 5), "finished-good", sync_job=job)
+        PointProductionLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=None,
+            sync_job=job,
+            production_external_id="prod-input",
+            detail_external_id="detail-input",
+            source_hash="prod-hash-input",
+            production_date=date(2026, 7, 5),
+            item_name="Insumo de producción",
+            item_code="INPUT-001",
+            produced_quantity=Decimal("1"),
+            is_insumo=True,
+        )
+        service, _official = self._service()
+
+        values, metadata, unresolved = service._load_production(
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+        )
+
+        self.assertEqual(values[self.parent.id], (Decimal("4"), 1))
+        self.assertEqual(unresolved, [])
+        self.assertTrue(metadata["authoritative"])
+        self.assertEqual(metadata["rows_bound_to_job"], 2)
+
+    def test_absent_month_jobs_never_turn_required_movements_into_authoritative_zero(self):
+        service, _official = self._service()
+
+        _production, production_meta, _ = service._load_production(
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+        )
+        _waste, waste_meta, _ = service._load_waste(
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+        )
+        _rows, _unresolved, _movements, _counts, conversion_meta = service._load_conversions(
+            month_start=date(2026, 7, 1)
+        )
+
+        for metadata, family in (
+            (production_meta, "PRODUCTION"),
+            (waste_meta, "WASTE"),
+            (conversion_meta, "CONVERSION"),
+        ):
+            self.assertFalse(metadata["source_present"])
+            self.assertFalse(metadata["authoritative"])
+            self.assertIn(f"{family}_SYNC_JOB_MISSING", metadata["authority_issues"])
+
+    def test_failed_filtered_or_incomplete_month_jobs_are_not_authoritative(self):
+        cases = (
+            ("failed", {"status": PointSyncJob.STATUS_FAILED}, "SYNC_JOB_FAILED"),
+            ("partial", {"status": PointSyncJob.STATUS_PARTIAL}, "SYNC_JOB_PARTIAL"),
+            ("filtered", {"branch_filter": self.branch.external_id}, "SYNC_JOB_RESTRICTED"),
+            ("range", {"start": "2026-07-02"}, "SYNC_RANGE_INCOMPLETE"),
+        )
+        service, _official = self._service()
+        for family in ("production", "waste", "conversions"):
+            for label, kwargs, issue_suffix in cases:
+                with self.subTest(family=family, case=label):
+                    PointSyncJob.objects.exclude(pk=self.sync_job.pk).delete()
+                    self._movement_job(family, **kwargs)
+                    if family == "production":
+                        _values, meta, _unresolved = service._load_production(
+                            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                        )
+                    elif family == "waste":
+                        _values, meta, _unresolved = service._load_waste(
+                            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31)
+                        )
+                    else:
+                        _values, _unresolved, _movements, _counts, meta = service._load_conversions(
+                            month_start=date(2026, 7, 1)
+                        )
+                    self.assertFalse(meta["authoritative"])
+                    self.assertTrue(any(issue.endswith(issue_suffix) for issue in meta["authority_issues"]))
+
+    def test_informative_fact_fallback_does_not_authorize_calculated_balance(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "12", datetime(2026, 7, 31, 8))
+        self._seal_inventory_job()
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 10),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            producido=Decimal("2"),
+            merma=Decimal("0"),
+        )
+        service, _official = self._service(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("0")}]
+        )
+
+        balance = service.build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].production, Decimal("2"))
+        self.assertFalse(balance.sources["production"]["authoritative"])
+        self.assertFalse(balance.sources["waste"]["authoritative"])
+        self.assertFalse(balance.sources["conversions"]["authoritative"])
+        self.assertIsNone(balance.rows[self.parent.id].calculated_closing)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+        self.assertIn("CALCULATED_CLOSING_MISSING", balance.rows[self.parent.id].issues)

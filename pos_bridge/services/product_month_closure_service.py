@@ -210,7 +210,14 @@ class ProductMonthClosureService:
         if not balance.rows:
             raise ProductMonthClosureError(f"No hay datos para construir cierre mensual {month_start:%Y-%m}.")
         source_issues = set(balance.issues)
-        for source_name in ("opening_snapshot", "closing_snapshot", "sales"):
+        for source_name in (
+            "opening_snapshot",
+            "closing_snapshot",
+            "sales",
+            "production",
+            "waste",
+            "conversions",
+        ):
             source = dict(balance.sources.get(source_name) or {})
             if source and (source.get("authoritative") is False or source.get("source_present") is False):
                 source_issues.add("MONTH_SOURCE_INCOMPLETE")
@@ -364,6 +371,10 @@ class ProductMonthClosureService:
         ).order_by("id"):
             derived_relations.setdefault(item.receta_derivada_id, item)
         global_issues = set(balance.issues if global_issues is None else global_issues)
+        source_authority = {
+            family: bool((balance.sources.get(family) or {}).get("authoritative"))
+            for family in ("production", "waste", "conversions")
+        }
         buckets: dict[int, dict[str, object]] = {}
         for receta_id, raw_row in sorted(balance.rows.items()):
             receta = recipes.get(receta_id)
@@ -490,6 +501,9 @@ class ProductMonthClosureService:
                     "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
                     "point_final_scopes_available": scopes_available,
                     "sales_source_available": not bool(bucket["sales_missing"]),
+                    "production_source_authoritative": source_authority["production"],
+                    "waste_source_authoritative": source_authority["waste"],
+                    "conversion_source_authoritative": source_authority["conversions"],
                 }
             )
             rows.append(

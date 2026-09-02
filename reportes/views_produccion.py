@@ -69,8 +69,8 @@ PRODUCTION_EXPORT_COLUMNS = [
     ("producido", "Producido", "number"),
     ("dif", "Dif. operativa", "number"),
     ("merma_reportada", "Merma", "number"),
-    ("conversion_entrada", "Conv.", "number"),
-    ("enteros_equivalentes", "Eq.", "number"),
+    ("conversion_entrada", "Conv. entrada Point", "number"),
+    ("conversion_salida", "Conv. salida Point", "number"),
     ("costo_merma", "Costo merma", "currency"),
     ("pct_merma", "% merma", "percent"),
     ("inventario_inicial", "Ini. Point", "number"),
@@ -85,6 +85,8 @@ PDF_EXPORT_COLUMNS = [
     ("producido", "Prod."),
     ("dif", "Dif."),
     ("merma_reportada", "Merma"),
+    ("conversion_entrada", "Conv. entrada Point"),
+    ("conversion_salida", "Conv. salida Point"),
     ("pct_merma", "%"),
     ("inventario_inicial", "Ini. Point"),
     ("inventario_final_teorico", "Saldo calculado"),
@@ -438,18 +440,24 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 f"Merma: {context['fuentes']['merma']['label']} | "
                 f"Inventario: {context['fuentes']['inventario']['label']}"
             ),
+            "Dif. Point = Fin. Point - Saldo calculado; positivo = Point mayor, negativo = Point menor.",
             "",
         ]
         for row in _export_rows(context):
             prefix = "TOTAL" if row.get("_row_type") == "total" else "SUBTOTAL" if row.get("_row_type") == "subtotal" else "RECETA"
             name_line = f"{prefix}: {row.get('categoria') or ''} - {row.get('receta') or ''}".strip()
             lines.extend(textwrap.wrap(name_line, width=118) or [""])
-            metrics = " | ".join(
+            operational_metrics = " | ".join(
                 f"{label} {_export_display_value(row, key, 'percent' if key == 'pct_merma' else 'number') or '-'}"
-                for key, label in PDF_EXPORT_COLUMNS
+                for key, label in PDF_EXPORT_COLUMNS[:7]
+            )
+            point_metrics = " | ".join(
+                f"{label} {_export_display_value(row, key, 'number') or '-'}"
+                for key, label in PDF_EXPORT_COLUMNS[7:]
             )
             status = _export_display_value(row, "estado_inventario", "text") or "-"
-            lines.extend(textwrap.wrap(f"{metrics} | Estado {status}", width=118, subsequent_indent="  "))
+            lines.extend(textwrap.wrap(operational_metrics, width=118, subsequent_indent="  "))
+            lines.extend(textwrap.wrap(f"{point_metrics} | Estado {status}", width=118, subsequent_indent="  "))
             costo = _export_display_value(row, "costo_merma", "currency") or "$0.00"
             lines.append(f"Costo merma: {costo}")
             lines.append("")
@@ -516,6 +524,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         vendido = self._movement_value(balance_row.sales, sources.get("sales"))
         producido = self._movement_value(balance_row.production, sources.get("production"))
         merma_reportada = self._movement_value(balance_row.waste, sources.get("waste"))
+        conversion_entrada = self._movement_value(balance_row.conversion_in, sources.get("conversions"))
+        conversion_salida = self._movement_value(balance_row.conversion_out, sources.get("conversions"))
         categoria = _category_label(recipe.categoria)
         produccion_referencia = not bool(recipe.pasa_modulo_produccion)
         dif = None
@@ -545,10 +555,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "merma_reportada": merma_reportada,
             "costo_merma": costo_merma,
             "pct_merma": pct_merma,
-            "convertido": balance_row.conversion_in,
-            "enteros_equivalentes": balance_row.conversion_out,
-            "conversion_entrada": balance_row.conversion_in,
-            "conversion_salida": balance_row.conversion_out,
+            "convertido": conversion_entrada,
+            "enteros_equivalentes": conversion_salida,
+            "conversion_entrada": conversion_entrada,
+            "conversion_salida": conversion_salida,
             "conversion_provenance": balance_row.conversion_origin or "Sin dato",
             "conversion_provenance_label": self._conversion_provenance_label(balance_row.conversion_origin),
             "inventario_inicial": balance_row.opening_point if snapshots_authoritative else None,
@@ -640,8 +650,13 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             source = canonical[key]
             if source["source_present"] is False:
                 reasons.append(f"{label}: {source['selected_source']} no disponible")
-            if key in {"opening", "closing", "sales"} and not source["authoritative"]:
+            if not source["authoritative"]:
                 reasons.append(f"{label}: {source['selected_source']} sin autoridad")
+        conversions = canonical["conversions"]
+        if conversions["source_present"] is False:
+            reasons.append(f"Conversiones: {conversions['selected_source']} no disponible")
+        if not conversions["authoritative"]:
+            reasons.append(f"Conversiones: {conversions['selected_source']} sin autoridad")
 
         sales = canonical["sales"]
         if sales["mode"] == "BRIDGE_HISTORY":

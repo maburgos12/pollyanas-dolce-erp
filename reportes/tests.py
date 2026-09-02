@@ -3279,6 +3279,12 @@ class ReportesCanonicosTests(TestCase):
                 "point_status": "POINT_MAYOR",
                 "issues": [],
                 "sales_source_available": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "point_conversion_in": "8",
+                "point_conversion_out": "1",
+                "conversion_origin": ["POINT"],
             },
         )
 
@@ -3298,6 +3304,9 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(Decimal(detail_values[detail_headers.index("Dif. Point")]), Decimal("2"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Venta directa")]), Decimal("0"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Venta derivada")]), Decimal("0"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. entrada Point")]), Decimal("8"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. salida Point")]), Decimal("1"))
+        self.assertEqual(detail_values[detail_headers.index("Origen conversión")], "POINT")
         self.assertEqual(detail_values[detail_headers.index("Estado")], "POINT_MAYOR")
         self.assertNotIn("Diferencia teorico vs Point", csv_body)
         self.assertNotIn("Sobrante físico", csv_body)
@@ -3319,6 +3328,9 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Dif. Point")], 2)
         self.assertEqual(values[headers.index("Venta directa")], 0)
         self.assertEqual(values[headers.index("Venta derivada")], 0)
+        self.assertEqual(values[headers.index("Conv. entrada Point")], 8)
+        self.assertEqual(values[headers.index("Conv. salida Point")], 1)
+        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
         self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
 
     def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
@@ -3465,6 +3477,10 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("Ini. Point", detail_headers)
         self.assertEqual(detail_values[detail_headers.index("Ini. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Produccion")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Merma total")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Conv. entrada Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Conv. salida Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Estado")], "REVISAR_FUENTE")
@@ -3495,6 +3511,10 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("Ini. Point", headers)
         self.assertEqual(values[headers.index("Ini. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(values[headers.index("Produccion")], "Sin dato")
+        self.assertEqual(values[headers.index("Merma total")], "Sin dato")
+        self.assertEqual(values[headers.index("Conv. entrada Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Conv. salida Point")], "Sin dato")
         self.assertEqual(values[headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
@@ -3616,19 +3636,79 @@ class ReportesCanonicosTests(TestCase):
 
         response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-06"})
 
-        conversion_row = response.context["conversion_rows"][0]
         catalog_row = response.context["catalog_issue_rows"][0]
-        self.assertIsNone(conversion_row["sales_derived"])
-        self.assertIsNone(conversion_row["calculated_closing"])
+        self.assertEqual(response.context["conversion_rows"], [])
         self.assertIsNone(catalog_row["calculated_closing"])
         body = response.content.decode("utf-8")
-        conversion_panel = body.split("Presentaciones derivadas consolidadas", 1)[1].split("Riesgo de catálogo", 1)[0]
+        conversion_panel = body.split("Conversión Point registrada", 1)[1].split("Riesgo de catálogo", 1)[0]
         catalog_panel = body.split("Incidencias visibles", 1)[1].split("Auditoría de líneas", 1)[0]
-        self.assertIn("Sin dato", conversion_panel)
+        self.assertIn("No hubo conversiones Point registradas", conversion_panel)
         self.assertNotIn(">9.00<", conversion_panel)
         self.assertNotIn(">0.00<", conversion_panel)
         self.assertIn("Sin dato", catalog_panel)
         self.assertNotIn(">0.00<", catalog_panel)
+
+    def test_conversion_panel_uses_only_canonical_point_conversion_movements(self):
+        sale_parent = Receta.objects.create(
+            nombre="Pastel con venta derivada sin conversión Point",
+            codigo_point="NO-CONV-POINT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-no-conv-point",
+        )
+        converted_parent = Receta.objects.create(
+            nombre="Pastel con conversión Point",
+            codigo_point="WITH-CONV-POINT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-with-conv-point",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 5, 1),
+            month_end=date(2026, 5, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=sale_parent,
+            venta_derivada_equivalente=Decimal("8"),
+            merma_derivada_equivalente=Decimal("1"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "0",
+                "point_conversion_out": "0",
+                "conversion_origin": [],
+                "conversion_source_authoritative": True,
+                "issues": [],
+                "sales_source_available": True,
+            },
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=converted_parent,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "16",
+                "point_conversion_out": "2",
+                "conversion_origin": ["EQUIVALENCIA_CONFIGURADA"],
+                "conversion_source_authoritative": True,
+                "issues": [],
+                "sales_source_available": True,
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-05"})
+
+        self.assertEqual(len(response.context["conversion_rows"]), 1)
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["line"].receta_padre_id, converted_parent.id)
+        self.assertEqual(conversion["point_conversion_in"], Decimal("16"))
+        self.assertEqual(conversion["point_conversion_out"], Decimal("2"))
+        self.assertEqual(conversion["conversion_origin"], ("EQUIVALENCIA_CONFIGURADA",))
+        panel = response.content.decode("utf-8").split("Conversión Point registrada", 1)[1].split(
+            "Riesgo de catálogo", 1
+        )[0]
+        self.assertIn("Pastel con conversión Point", panel)
+        self.assertNotIn("Pastel con venta derivada sin conversión Point", panel)
 
     def test_cierre_producto_historical_export_translates_legacy_sign_and_status_without_rewrite(self):
         receta = Receta.objects.create(

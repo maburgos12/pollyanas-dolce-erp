@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -73,6 +74,9 @@ ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 ISSUE_CALCULATED_CLOSING_MISSING = "CALCULATED_CLOSING_MISSING"
 ISSUE_SALES_SOURCE_MISSING = "SALES_SOURCE_MISSING"
+ISSUE_PRODUCTION_SOURCE_MISSING = "PRODUCTION_SOURCE_MISSING"
+ISSUE_WASTE_SOURCE_MISSING = "WASTE_SOURCE_MISSING"
+ISSUE_CONVERSION_SOURCE_MISSING = "CONVERSION_SOURCE_MISSING"
 
 OFFICIAL_CATEGORY_REPORT_SOURCE = "POINT_OFFICIAL_MONTHLY_CATEGORY_REPORT"
 OFFICIAL_POINT_DAILY_SOURCE = "/Report/PrintReportes?idreporte=3"
@@ -284,6 +288,17 @@ class MonthlyPointProductBalanceService:
     ) -> MonthlyPointBalance:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        self._build_movement_jobs = list(
+            PointSyncJob.objects.filter(
+                Q(job_type__in=(PointSyncJob.JOB_TYPE_PRODUCTION, PointSyncJob.JOB_TYPE_WASTE))
+                | Q(
+                    job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+                    parameters__source="point_conversion_lines",
+                )
+            )
+            .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
+            .order_by("-started_at", "-id")
+        )
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         opening_target = month_start - timedelta(days=1)
@@ -308,9 +323,13 @@ class MonthlyPointProductBalanceService:
             month_start=month_start,
             month_end=month_end,
         )
-        conversion_rows, unresolved_conversions, conversion_unresolved, conversion_counts = self._load_conversions(
-            month_start=month_start
-        )
+        (
+            conversion_rows,
+            unresolved_conversions,
+            conversion_unresolved,
+            conversion_counts,
+            conversion_meta,
+        ) = self._load_conversions(month_start=month_start)
 
         receta_ids = set(opening) | set(closing) | set(production) | set(sales) | set(waste) | set(conversion_rows)
         rows: dict[int, _MutableBalanceRow] = {
@@ -336,6 +355,14 @@ class MonthlyPointProductBalanceService:
         month_source_incomplete = month_source_incomplete or not bool(closing_meta.get("authoritative"))
         month_source_incomplete = month_source_incomplete or bool(coverage_issues)
         month_source_incomplete = month_source_incomplete or not bool(sales_meta.get("authoritative", True))
+        required_movement_sources = {
+            "production": (production_meta, ISSUE_PRODUCTION_SOURCE_MISSING),
+            "waste": (waste_meta, ISSUE_WASTE_SOURCE_MISSING),
+            "conversions": (conversion_meta, ISSUE_CONVERSION_SOURCE_MISSING),
+        }
+        month_source_incomplete = month_source_incomplete or any(
+            not bool(meta.get("authoritative")) for meta, _issue in required_movement_sources.values()
+        )
         if month_source_incomplete:
             for row in rows.values():
                 row.issues.add(ISSUE_MONTH_SOURCE_INCOMPLETE)
@@ -343,6 +370,13 @@ class MonthlyPointProductBalanceService:
             for row in rows.values():
                 row.sales = None
                 row.issues.add(ISSUE_SALES_SOURCE_MISSING)
+                row.issues.add(ISSUE_CALCULATED_CLOSING_MISSING)
+        for _family, (meta, missing_issue) in required_movement_sources.items():
+            if meta.get("authoritative"):
+                continue
+            for row in rows.values():
+                if meta.get("source_present") is False:
+                    row.issues.add(missing_issue)
                 row.issues.add(ISSUE_CALCULATED_CLOSING_MISSING)
 
         frozen_rows = MappingProxyType({receta_id: rows[receta_id].freeze(receta_id) for receta_id in sorted(rows)})
@@ -375,7 +409,7 @@ class MonthlyPointProductBalanceService:
                 "production": production_meta,
                 "sales": sales_meta,
                 "waste": waste_meta,
-                "conversions": {"source": "PointConversionLine"},
+                "conversions": conversion_meta,
             }
         )
         source_counts = {
@@ -861,28 +895,153 @@ class MonthlyPointProductBalanceService:
             return [warning]
         return []
 
+    def _validate_month_movement_job(
+        self,
+        *,
+        family: str,
+        month_start: date,
+        month_end: date,
+        row_job_ids: list[int | None],
+    ) -> dict[str, object]:
+        """Validate only the persisted contract written by each Point sync.
+
+        An empty table is not evidence of a zero month.  Zero becomes authoritative
+        only when a successful, unrestricted job names the exact monthly range and
+        its persisted counters reconcile with the rows owned by that job.
+        """
+        configs = {
+            "production": {
+                "job_type": PointSyncJob.JOB_TYPE_PRODUCTION,
+                "prefix": "PRODUCTION",
+                "start_key": "start_date",
+                "end_key": "end_date",
+                "count_key": "production_lines_seen",
+                "source": None,
+            },
+            "waste": {
+                "job_type": PointSyncJob.JOB_TYPE_WASTE,
+                "prefix": "WASTE",
+                "start_key": "start_date",
+                "end_key": "end_date",
+                "count_key": "waste_lines_seen",
+                "source": None,
+            },
+            "conversions": {
+                "job_type": PointSyncJob.JOB_TYPE_INVENTORY,
+                "prefix": "CONVERSION",
+                "start_key": "date_from",
+                "end_key": "date_to",
+                "count_key": "total_rows",
+                "source": "point_conversion_lines",
+            },
+        }
+        config = configs[family]
+        cached_jobs = getattr(self, "_build_movement_jobs", None)
+        if cached_jobs is None:
+            cached_jobs = list(
+                PointSyncJob.objects.filter(job_type=config["job_type"])
+                .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
+                .order_by("-started_at", "-id")
+            )
+        jobs = [job for job in cached_jobs if job.job_type == config["job_type"]]
+        if config["source"]:
+            jobs = [job for job in jobs if (job.parameters or {}).get("source") == config["source"]]
+        prefix = config["prefix"]
+        if not jobs:
+            return {
+                "authoritative": False,
+                "job_present": False,
+                "selected_sync_job_ids": (),
+                "coverage_scope": "unproven",
+                "coverage_start": None,
+                "coverage_end": None,
+                "authority_issues": (f"{prefix}_SYNC_JOB_MISSING",),
+            }
+
+        def exact_range(job):
+            parameters = job.parameters or {}
+            return (
+                str(parameters.get(config["start_key"]) or "") == month_start.isoformat()
+                and str(parameters.get(config["end_key"]) or "") == month_end.isoformat()
+            )
+
+        def unrestricted(job):
+            return not str((job.parameters or {}).get("branch_filter") or "").strip()
+
+        exact_success = [
+            job
+            for job in jobs
+            if exact_range(job) and unrestricted(job) and job.status == PointSyncJob.STATUS_SUCCESS
+        ]
+        selected = exact_success[0] if exact_success else jobs[0]
+        issues: list[str] = []
+        if selected.status == PointSyncJob.STATUS_FAILED:
+            issues.append(f"{prefix}_SYNC_JOB_FAILED")
+        elif selected.status == PointSyncJob.STATUS_PARTIAL:
+            issues.append(f"{prefix}_SYNC_JOB_PARTIAL")
+        elif selected.status != PointSyncJob.STATUS_SUCCESS:
+            issues.append(f"{prefix}_SYNC_JOB_INCOMPLETE")
+        if not exact_range(selected):
+            issues.append(f"{prefix}_SYNC_RANGE_INCOMPLETE")
+        if not unrestricted(selected):
+            issues.append(f"{prefix}_SYNC_JOB_RESTRICTED")
+
+        summary = selected.result_summary or {}
+        expected_count = summary.get(config["count_key"])
+        if expected_count is None:
+            issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
+        else:
+            try:
+                expected_count = int(expected_count)
+            except (TypeError, ValueError):
+                issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
+            else:
+                bound_count = sum(job_id == selected.id for job_id in row_job_ids)
+                if family == "conversions":
+                    created = summary.get("created")
+                    skipped = summary.get("skipped")
+                    unmatched = summary.get("skipped_unmatched_branch")
+                    if any(value is None for value in (created, skipped, unmatched)) or not summary.get("report_pk"):
+                        issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
+                    else:
+                        try:
+                            created = int(created)
+                            skipped = int(skipped)
+                            unmatched = int(unmatched)
+                        except (TypeError, ValueError):
+                            issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
+                        else:
+                            if expected_count != created + skipped + unmatched or bound_count != created:
+                                issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
+                            if unmatched:
+                                issues.append(f"{prefix}_SYNC_BRANCH_COVERAGE_INCOMPLETE")
+                elif expected_count != bound_count:
+                    issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
+
+        foreign_job_ids = {job_id for job_id in row_job_ids if job_id != selected.id}
+        if foreign_job_ids:
+            issues.append(f"{prefix}_SYNC_JOB_MIXED")
+        issues = list(dict.fromkeys(issues))
+        parameters = selected.parameters or {}
+        return {
+            "authoritative": not issues,
+            "job_present": True,
+            "selected_sync_job_ids": (selected.id,),
+            "job_status": selected.status,
+            "coverage_scope": "all_branches" if unrestricted(selected) else "filtered",
+            "coverage_start": parameters.get(config["start_key"]),
+            "coverage_end": parameters.get(config["end_key"]),
+            "rows_bound_to_job": sum(job_id == selected.id for job_id in row_job_ids),
+            "authority_issues": tuple(issues),
+        }
+
     def _load_production(self, *, month_start: date, month_end: date):
-        facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
-            month_start=month_start,
-            month_end=month_end,
-            field_name="producido",
-            source="fact_production",
-        )
-        if facts_present:
-            return facts, {
-                "source": "FactProduccionDiaria",
-                "priority": "primary",
-                "source_present": True,
-                "rows_read": fact_rows_read,
-                "unresolved_rows": len(fact_unresolved),
-            }, fact_unresolved
         rows = list(
             PointProductionLine.objects.filter(
                 production_date__gte=month_start,
                 production_date__lte=month_end,
-                is_insumo=False,
             )
-            .select_related("branch")
+            .select_related("branch", "sync_job")
             .only(
                 "id",
                 "receta_id",
@@ -894,10 +1053,13 @@ class MonthlyPointProductBalanceService:
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
+                "sync_job_id",
+                "is_insumo",
             )
             .order_by("id")
         )
-        matched = [row for row in rows if row.receta_id is not None]
+        product_rows = [row for row in rows if not row.is_insumo]
+        matched = [row for row in product_rows if row.receta_id is not None]
         unresolved = [
             MonthlyPointUnresolvedMovement(
                 source="point_production",
@@ -910,39 +1072,50 @@ class MonthlyPointProductBalanceService:
                 branch_name=row.branch.name,
                 movement_date=row.production_date,
             )
-            for row in rows
+            for row in product_rows
             if row.receta_id is None
         ]
-        return self._aggregate_rows(matched, "produced_quantity"), {
-            "source": "PointProductionLine",
-            "priority": "fallback",
-            "source_present": bool(rows),
-            "rows_read": len(rows),
-            "unresolved_rows": len(unresolved),
-        }, unresolved
+        authority = self._validate_month_movement_job(
+            family="production",
+            month_start=month_start,
+            month_end=month_end,
+            row_job_ids=[row.sync_job_id for row in rows],
+        )
+        if product_rows or authority["authoritative"]:
+            return self._aggregate_rows(matched, "produced_quantity"), {
+                "source": "PointProductionLine",
+                "priority": "point_primary",
+                "source_present": bool(product_rows) or bool(authority["authoritative"]),
+                "rows_read": len(product_rows),
+                "writer_rows_read": len(rows),
+                "unresolved_rows": len(unresolved),
+                **authority,
+            }, unresolved
 
-    def _load_waste(self, *, month_start: date, month_end: date):
         facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
             month_end=month_end,
-            field_name="merma",
-            source="fact_waste",
+            field_name="producido",
+            source="fact_production",
         )
-        if facts_present:
-            return facts, {
-                "source": "FactProduccionDiaria",
-                "priority": "primary",
-                "source_present": True,
-                "rows_read": fact_rows_read,
-                "unresolved_rows": len(fact_unresolved),
-            }, fact_unresolved
+        return facts, {
+            "source": "FactProduccionDiaria" if facts_present else "PointProductionLine",
+            "priority": "informative_fallback" if facts_present else "point_primary",
+            "source_present": bool(facts_present),
+            "rows_read": fact_rows_read,
+            "unresolved_rows": len(fact_unresolved),
+            "authoritative": False,
+            **{key: value for key, value in authority.items() if key != "authoritative"},
+        }, fact_unresolved
+
+    def _load_waste(self, *, month_start: date, month_end: date):
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)
         point_rows = list(
             PointWasteLine.objects.filter(
                 movement_at__gte=lower_bound,
                 movement_at__lt=upper_bound,
             )
-            .select_related("branch")
+            .select_related("branch", "sync_job")
             .only(
                 "id",
                 "receta_id",
@@ -955,10 +1128,18 @@ class MonthlyPointProductBalanceService:
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
+                "sync_job_id",
+                "insumo_id",
             )
             .order_by("id")
         )
-        if point_rows:
+        authority = self._validate_month_movement_job(
+            family="waste",
+            month_start=month_start,
+            month_end=month_end,
+            row_job_ids=[row.sync_job_id for row in point_rows],
+        )
+        if point_rows or authority["authoritative"]:
             matched = [row for row in point_rows if row.receta_id is not None]
             unresolved = [
                 MonthlyPointUnresolvedMovement(
@@ -974,15 +1155,33 @@ class MonthlyPointProductBalanceService:
                     movement_date=timezone.localtime(row.movement_at).date(),
                 )
                 for row in point_rows
-                if row.receta_id is None
+                if row.receta_id is None and row.insumo_id is None
             ]
             return self._aggregate_rows(matched, "quantity"), {
                 "source": "PointWasteLine",
-                "priority": "fallback",
-                "source_present": True,
+                "priority": "point_primary",
+                "source_present": bool(point_rows) or bool(authority["authoritative"]),
                 "rows_read": len(point_rows),
                 "unresolved_rows": len(unresolved),
+                **authority,
             }, unresolved
+
+        facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
+            month_start=month_start,
+            month_end=month_end,
+            field_name="merma",
+            source="fact_waste",
+        )
+        if facts_present:
+            return facts, {
+                "source": "FactProduccionDiaria",
+                "priority": "informative_fallback",
+                "source_present": True,
+                "rows_read": fact_rows_read,
+                "unresolved_rows": len(fact_unresolved),
+                "authoritative": False,
+                **{key: value for key, value in authority.items() if key != "authoritative"},
+            }, fact_unresolved
 
         monthly_waste_model = apps.get_model("control", "MermaMensualSucursal")
         monthly_rows = list(
@@ -1018,10 +1217,12 @@ class MonthlyPointProductBalanceService:
         ]
         return self._aggregate_rows(matched, "unidades_merma"), {
             "source": "MermaMensualSucursal",
-            "priority": "monthly_fallback",
+            "priority": "informative_monthly_fallback",
             "source_present": bool(monthly_rows),
             "rows_read": len(monthly_rows),
             "unresolved_rows": len(unresolved),
+            "authoritative": False,
+            **{key: value for key, value in authority.items() if key != "authoritative"},
         }, unresolved
 
     def _load_fact_values(self, *, month_start: date, month_end: date, field_name: str, source: str):
@@ -1613,6 +1814,7 @@ class MonthlyPointProductBalanceService:
 
     def _load_conversions(self, *, month_start: date):
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)
+        month_end = (upper_bound - timedelta(days=1)).date()
         conversions = list(
             PointConversionLine.objects.filter(movement_at__gte=lower_bound, movement_at__lt=upper_bound)
             .only(
@@ -1626,6 +1828,7 @@ class MonthlyPointProductBalanceService:
                 "quantity",
                 "source_item_code",
                 "source_item_name",
+                "sync_job_id",
             )
             .order_by("movement_at", "id")
         )
@@ -1697,7 +1900,21 @@ class MonthlyPointProductBalanceService:
             source = result.setdefault(source_recipe_id, _MutableBalanceRow())
             source.add("conversion_out", quantity / factor, count_name="conversion_out_rows")
             source.record_origin(origin)
-        return result, unresolved_conversions, unresolved_movements, source_counts
+        authority = self._validate_month_movement_job(
+            family="conversions",
+            month_start=month_start,
+            month_end=month_end,
+            row_job_ids=[conversion.sync_job_id for conversion in conversions],
+        )
+        metadata = {
+            "source": "PointConversionLine",
+            "priority": "point_primary",
+            "source_present": bool(conversions) or bool(authority["authoritative"]),
+            "rows_read": len(conversions),
+            "unresolved_rows": len(unresolved_movements) + len(unresolved_conversions),
+            **authority,
+        }
+        return result, unresolved_conversions, unresolved_movements, source_counts, metadata
 
     def _resolve_source(self, conversion, equivalence, identity_cache):
         point_code = (conversion.source_item_code or "").strip()

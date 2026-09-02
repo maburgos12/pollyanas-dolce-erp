@@ -38,15 +38,15 @@ def canonical_balance(*rows, sources=None, warnings=(), issues=()):
                 "effective_date": date(2026, 8, 31),
                 "applied_coverage_key_count": 9,
             },
-            "production": {"source": "PointProductionLine", "authoritative": True},
+            "production": {"source": "PointProductionLine", "authoritative": True, "source_present": True},
             "sales": {
                 "source": "PointDailySale",
                 "authoritative": True,
                 "mode": "OFFICIAL_DAILY",
                 "selected_source": "PointDailySale",
             },
-            "waste": {"source": "PointWasteLine", "authoritative": True},
-            "conversions": {"source": "PointConversionLine"},
+            "waste": {"source": "PointWasteLine", "authoritative": True, "source_present": True},
+            "conversions": {"source": "PointConversionLine", "authoritative": True, "source_present": True},
         },
         effective_snapshot_dates={"opening": date(2026, 7, 31), "closing": date(2026, 8, 31)},
         warnings=warnings,
@@ -436,6 +436,8 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Saldo calculado", body)
         self.assertIn("Fin. Point", body)
         self.assertIn("Dif. Point", body)
+        self.assertIn("Conv. entrada Point", body)
+        self.assertIn("Conv. salida Point", body)
         self.assertIn("Point mayor", body)
         self.assertIn(",9,11,2,Point mayor", body)
         self.assertIn("Sin dato", body)
@@ -466,6 +468,8 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Saldo calculado", headers)
         self.assertIn("Fin. Point", headers)
         self.assertIn("Dif. Point", headers)
+        self.assertIn("Conv. entrada Point", headers)
+        self.assertIn("Conv. salida Point", headers)
         self.assertNotIn("Inv. físico registrado", headers)
         self.assertEqual(detail[headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(detail[headers.index("Fin. Point")], "Sin dato")
@@ -492,6 +496,9 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Saldo calculado 9", body)
         self.assertIn("Fin. Point 11", body)
         self.assertIn("Dif. Point 2", body)
+        self.assertIn("Conv. entrada Point", body)
+        self.assertIn("Conv. salida Point", body)
+        self.assertIn("positivo = Point mayor", body)
         self.assertLess(body.index("Ini. Point 10"), body.index("Saldo calculado 9"))
         self.assertIn("Estado Point mayor", body)
         self.assertNotIn("Físico", body)

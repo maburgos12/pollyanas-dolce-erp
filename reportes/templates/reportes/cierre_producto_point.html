@@ -130,7 +130,7 @@
       <div class="bi-kpi-note">{{ closure.get_opening_source_display }}{% if closure.opening_reference_date %} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value success">{{ total_production|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value success">{% if total_production != None %}{{ total_production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Producción del mes</div>
       <div class="bi-kpi-note">Movimiento operativo consolidado desde Point</div>
     </article>
@@ -142,7 +142,7 @@
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Saldo calculado</div>
-      <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
+      <div class="bi-kpi-note">{% if total_waste != None %}{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes{% else %}Sin dato de merma autoritativa{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value">{% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
@@ -285,8 +285,8 @@
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Conversión</div>
-          <h2 class="bi-panel-title">Presentaciones derivadas consolidadas</h2>
-          <p class="bi-panel-copy">Top de recetas padre que absorbieron venta o merma proveniente de rebanadas u otras presentaciones derivadas.</p>
+          <h2 class="bi-panel-title">Conversión Point registrada</h2>
+          <p class="bi-panel-copy">Solo muestra entradas y salidas de conversión registradas por Point; ventas y mermas derivadas no se reinterpretan como conversión.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -294,8 +294,9 @@
           <thead>
             <tr>
               <th>Receta padre</th>
-              <th class="text-end">Venta derivada</th>
-              <th class="text-end">Merma derivada</th>
+              <th class="text-end">Conv. entrada Point</th>
+              <th class="text-end">Conv. salida Point</th>
+              <th>Origen</th>
               <th class="text-end">Saldo calculado</th>
             </tr>
           </thead>
@@ -306,13 +307,14 @@
                 <strong>{{ line.line.receta_padre.nombre }}</strong>
                 {% if line.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.line.receta_padre.codigo_point }}</div>{% endif %}
               </td>
-              <td class="text-end">{% if line.sales_derived != None %}{{ line.sales_derived|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
-              <td class="text-end">{{ line.line.merma_derivada_equivalente|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% if line.point_conversion_in != None %}{{ line.point_conversion_in|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+              <td class="text-end">{% if line.point_conversion_out != None %}{{ line.point_conversion_out|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+              <td>{% if line.conversion_origin %}{{ line.conversion_origin|join:", " }}{% else %}Sin dato{% endif %}</td>
               <td class="text-end">{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="4">No hubo conversiones derivadas visibles en este mes.</td>
+              <td colspan="5">No hubo conversiones Point registradas visibles en este mes.</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -387,9 +389,9 @@
               {% if row.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ row.line.receta_padre.codigo_point }}</div>{% endif %}
             </td>
             <td class="text-end bi-closure-metric-cell">{% if row.opening_point != None %}{{ row.opening_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
-            <td class="text-end bi-closure-metric-cell">{{ row.line.produccion_mes|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.production != None %}{{ row.production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
-            <td class="text-end bi-closure-metric-cell">{{ row.line.merma_total_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.waste_total != None %}{{ row.waste_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.calculated_closing != None %}{{ row.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.closing_point != None %}{{ row.closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.point_difference != None %}{{ row.point_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
