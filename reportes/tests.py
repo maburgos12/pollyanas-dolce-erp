@@ -3175,7 +3175,8 @@ class ReportesCanonicosTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Se construyó el cierre teórico de producto Point para 2025-09.")
+        self.assertContains(response, "Se construyó el cierre calculado de producto Point para 2025-09.")
+        self.assertNotContains(response, "cierre teórico")
         closure = ProductoMonthClosure.objects.get(month_start=date(2025, 9, 1))
         self.assertEqual(closure.built_by, admin_user)
         line = closure.lines.get(receta_padre=receta)
@@ -3356,6 +3357,9 @@ class ReportesCanonicosTests(TestCase):
         self.assertNotIn("Point físico", body)
         self.assertNotIn("Sobrante físico", body)
         self.assertNotIn("Faltante no explicado", body)
+        self.assertNotIn("Final teórico", body)
+        self.assertNotIn("final teórico", body)
+        self.assertNotIn("cierre teórico", body.lower())
 
     def test_historical_non_point_opening_uses_honest_labels_in_html_csv_and_xlsx(self):
         receta = Receta.objects.create(
@@ -3459,6 +3463,13 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Estado")], "REVISAR_FUENTE")
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-07"})
+        self.assertIsNone(html_response.context["total_opening"])
+        self.assertIsNone(html_response.context["total_ending"])
+        self.assertIsNone(html_response.context["total_closing_point"])
+        self.assertIsNone(html_response.context["total_closing_difference"])
+        self.assertContains(html_response, "Sin dato")
 
         xlsx_response = self.client.get(
             reverse("reportes:cierre_producto"),

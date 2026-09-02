@@ -5469,21 +5469,18 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             }
         )
 
-    total_opening = sum((Decimal(str(line.inventario_inicial_teorico or 0)) for line in lines), Decimal("0"))
+    total_opening = _sum_available_export_values(export_rows, "opening_point")
     total_production = sum((Decimal(str(line.produccion_mes or 0)) for line in lines), Decimal("0"))
     total_sales = sum((Decimal(str(line.venta_total_equivalente or 0)) for line in lines), Decimal("0"))
     total_waste = sum((Decimal(str(line.merma_total_equivalente or 0)) for line in lines), Decimal("0"))
-    total_ending = sum((Decimal(str(line.inventario_final_teorico or 0)) for line in lines), Decimal("0"))
+    total_ending = _sum_available_export_values(export_rows, "calculated_closing")
     total_direct_sales = sum((Decimal(str(line.venta_directa_enteros or 0)) for line in lines), Decimal("0"))
     total_derived_sales = sum((Decimal(str(line.venta_derivada_equivalente or 0)) for line in lines), Decimal("0"))
     total_direct_waste = sum((Decimal(str(line.merma_directa_enteros or 0)) for line in lines), Decimal("0"))
     total_derived_waste = sum((Decimal(str(line.merma_derivada_equivalente or 0)) for line in lines), Decimal("0"))
-    total_closing_cedis = sum((Decimal(str(line.inventario_final_point_cedis or 0)) for line in lines), Decimal("0"))
-    total_closing_sucursales = sum(
-        (Decimal(str(line.inventario_final_point_sucursales or 0)) for line in lines),
-        Decimal("0"),
-    )
-    total_closing_point = sum((Decimal(str(line.inventario_final_point_total or 0)) for line in lines), Decimal("0"))
+    total_closing_cedis = _sum_available_export_values(export_rows, "closing_point_cedis")
+    total_closing_sucursales = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    total_closing_point = _sum_available_export_values(export_rows, "closing_point")
     total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
 
     conversion_rows = [
@@ -5939,7 +5936,7 @@ def cierre_producto(request: HttpRequest) -> HttpResponse:
                         )
                         messages.success(
                             request,
-                            f"Se reconstruyó el cierre teórico de producto Point para {selected_month_start:%Y-%m}.",
+                            f"Se reconstruyó el cierre calculado de producto Point para {selected_month_start:%Y-%m}.",
                         )
                     except ProductMonthClosureError as exc:
                         messages.error(request, str(exc))
@@ -5958,7 +5955,7 @@ def cierre_producto(request: HttpRequest) -> HttpResponse:
                     )
                     messages.success(
                         request,
-                        f"Se construyó el cierre teórico de producto Point para {selected_month_start:%Y-%m}.",
+                        f"Se construyó el cierre calculado de producto Point para {selected_month_start:%Y-%m}.",
                     )
                 except ProductMonthClosureError as exc:
                     messages.error(request, str(exc))

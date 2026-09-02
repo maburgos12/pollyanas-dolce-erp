@@ -40,8 +40,8 @@
         </article>
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Saldo calculado</div>
-          <div class="bi-hero-highlight-value">{{ total_ending|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Fin. Point {{ total_closing_point|floatformat:2|intcomma }} · Dif. Point {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+          <div class="bi-hero-highlight-value">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+          <div class="bi-hero-highlight-meta">Fin. Point {% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · Dif. Point {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
         </article>
       </div>
     </div>
@@ -106,7 +106,7 @@
         </div>
         <div class="bi-summary-chip">
           <span>{{ opening_balance_label }}</span>
-          <strong>{{ total_opening|floatformat:2|intcomma }}</strong>
+          <strong>{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</strong>
         </div>
         <div class="bi-summary-chip">
           <span>Alcance</span>
@@ -125,7 +125,7 @@
   {% if closure %}
   <section class="bi-kpi-grid">
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{{ total_opening|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value">{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">{{ opening_balance_label }}</div>
       <div class="bi-kpi-note">{{ closure.get_opening_source_display }}{% if closure.opening_reference_date %} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% endif %}</div>
     </article>
@@ -140,12 +140,12 @@
       <div class="bi-kpi-note">{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if total_ending < 0 %}danger{% endif %}">{{ total_ending|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Saldo calculado</div>
       <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{{ total_closing_point|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value">{% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Fin. Point</div>
       <div class="bi-kpi-note">Dif. Point {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · Point menos saldo calculado</div>
     </article>
@@ -296,7 +296,7 @@
               <th>Receta padre</th>
               <th class="text-end">Venta derivada</th>
               <th class="text-end">Merma derivada</th>
-              <th class="text-end">Final teórico</th>
+              <th class="text-end">Saldo calculado</th>
             </tr>
           </thead>
           <tbody>
@@ -333,7 +333,7 @@
         <article class="bi-list-item is-signal-warning">
           <strong>{{ line.receta_padre.nombre }}</strong>
           <div class="bi-subtle">{{ line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
-          <div>{{ line.inventario_final_teorico|floatformat:2|intcomma }} final teórico</div>
+          <div>{{ line.inventario_final_teorico|floatformat:2|intcomma }} saldo calculado</div>
         </article>
         {% empty %}
         <article class="bi-list-item is-signal-success">
