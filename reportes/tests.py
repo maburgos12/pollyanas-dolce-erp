@@ -1,3 +1,5 @@
+import csv
+import re
 from django.contrib.auth.models import Group, User
 from django.core.cache import cache
 from django.test import TestCase
@@ -5,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from openpyxl import load_workbook
@@ -59,6 +61,7 @@ from reportes.views import (
     _sales_previous_dates,
     _sales_source_context,
     _ventas_historicas_bi_summary,
+    _product_closure_month_options,
 )
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from reportes.models import (
@@ -2044,9 +2047,9 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(snapshot["kpis"]["inventario_point_no_disponible"], 1)
 
     def test_compute_bi_snapshot_uses_prefer_complete_canonical_sales_range(self):
-        today = timezone.localdate()
-        first_day = today - timedelta(days=2)
-        second_day = today - timedelta(days=1)
+        today = date(2026, 8, 15)
+        first_day = date(2026, 8, 13)
+        second_day = date(2026, 8, 14)
 
         VentaAutoritativaPoint.objects.create(
             branch=self.sucursal,
@@ -2099,7 +2102,8 @@ class ReportesBIUtilsTests(TestCase):
             source_endpoint="/Report/VentasCategorias",
         )
 
-        snapshot = compute_bi_snapshot(period_days=7, months_window=3)
+        with patch("reportes.bi_utils.timezone.localdate", return_value=today):
+            snapshot = compute_bi_snapshot(period_days=7, months_window=3)
 
         self.assertEqual(snapshot["kpis"]["ventas_total"], Decimal("1200"))
         self.assertEqual(snapshot["kpis"]["pedidos_venta"], 2)
@@ -3105,7 +3109,7 @@ class ReportesCanonicosTests(TestCase):
             built_by=self.user,
             notes="Conciliacion teorica mensual.\nSin inventario fisico.",
         )
-        ProductoMonthClosureLine.objects.create(
+        line = ProductoMonthClosureLine.objects.create(
             closure=closure,
             receta_padre=receta,
             inventario_inicial_teorico=Decimal("15"),
@@ -3123,7 +3127,7 @@ class ReportesCanonicosTests(TestCase):
         response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-09"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Cierre teórico de producto terminado")
+        self.assertContains(response, "Cierre mensual de producto terminado")
         self.assertContains(response, "Detalle del cierre mensual")
         self.assertContains(response, "Meses disponibles")
         self.assertContains(response, "Pastel Cierre Operativo")
@@ -3134,6 +3138,23 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.context["closure"].id, closure.id)
         self.assertEqual(response.context["total_sales"], Decimal("10"))
         self.assertEqual(response.context["total_ending"], Decimal("14"))
+
+    @patch("reportes.views.timezone.localdate", return_value=date(2026, 9, 1))
+    def test_cierre_producto_month_options_use_calendar_months_and_include_all_historical_closures(self, _localdate):
+        for month_start in (date(2024, 1, 1), date(2025, 12, 1)):
+            ProductoMonthClosure.objects.create(
+                month_start=month_start,
+                month_end=date(month_start.year, month_start.month, 28),
+                status=ProductoMonthClosure.STATUS_BUILT,
+                opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            )
+
+        with self.assertNumQueries(1):
+            values = [option["value"] for option in _product_closure_month_options(date(2026, 9, 1))]
+
+        self.assertEqual(values[:4], ["2026-09", "2026-08", "2026-07", "2026-06"])
+        self.assertIn("2025-12", values)
+        self.assertIn("2024-01", values)
 
     def test_cierre_producto_post_builds_month_if_missing(self):
         admin_user = User.objects.create_user(username="admin_build_cierre", password="pass123")
@@ -3174,13 +3195,14 @@ class ReportesCanonicosTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Se construyó el cierre teórico de producto Point para 2025-09.")
+        self.assertContains(response, "Se construyó el cierre calculado de producto Point para 2025-09.")
+        self.assertNotContains(response, "cierre teórico")
         closure = ProductoMonthClosure.objects.get(month_start=date(2025, 9, 1))
         self.assertEqual(closure.built_by, admin_user)
         line = closure.lines.get(receta_padre=receta)
         self.assertEqual(line.inventario_inicial_teorico, Decimal("9"))
         self.assertContains(response, "Pastel Build Cierre")
-        self.assertContains(response, "9.00")
+        self.assertContains(response, "Sin dato")
 
     def test_cierre_producto_build_rejects_lectura_user(self):
         sucursal = self._create_sucursal("CLOSE-02", "Sucursal Cierre 02")
@@ -3250,6 +3272,764 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("attachment; filename=\"cierre_producto_2025-12.csv\"", response["Content-Disposition"])
         self.assertIn("Pastel Export Cierre", response.content.decode("utf-8"))
 
+    def test_cierre_producto_exports_use_canonical_point_sign_labels_and_status(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Canonico",
+            codigo_point="EXPCAN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-canonico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 7, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("10"),
+            inventario_final_teorico=Decimal("9"),
+            inventario_final_point_total=Decimal("11"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "POINT_MAYOR",
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
+                "issues": [],
+                "sales_source_available": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "point_conversion_in": "8",
+                "point_conversion_out": "1",
+                "conversion_origin": "MIXED",
+                "conversion_origins": ["EQUIVALENCIA_CONFIGURADA", "POINT"],
+                "projection_sources": ["EQUIVALENCIA"],
+            },
+        )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        html_body = html_response.content.decode("utf-8")
+        self.assertIn("Origen conversión", html_body)
+        self.assertIn("Proyección", html_body)
+        self.assertIn("EQUIVALENCIA_CONFIGURADA, POINT", html_body)
+        self.assertIn(">EQUIVALENCIA<", html_body)
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-08", "export": "csv"},
+        )
+        csv_body = csv_response.content.decode("utf-8")
+        self.assertIn("Saldo calculado", csv_body)
+        self.assertIn("Fin. Point", csv_body)
+        self.assertIn("Dif. Point", csv_body)
+        csv_rows = list(csv.reader(StringIO(csv_body)))
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        detail_values = csv_rows[csv_rows.index([]) + 2]
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Saldo calculado")]), Decimal("9"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Fin. Point")]), Decimal("11"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Dif. Point")]), Decimal("2"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Venta directa")]), Decimal("0"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Venta derivada")]), Decimal("0"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. entrada Point")]), Decimal("8"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. salida Point")]), Decimal("1"))
+        self.assertEqual(
+            detail_values[detail_headers.index("Origen conversión")],
+            "EQUIVALENCIA_CONFIGURADA | POINT",
+        )
+        self.assertEqual(detail_values[detail_headers.index("Proyección")], "EQUIVALENCIA")
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "Point mayor")
+        self.assertNotIn("Diferencia teorico vs Point", csv_body)
+        self.assertNotIn("Sobrante físico", csv_body)
+        self.assertNotIn("Faltante no explicado", csv_body)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-08", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        detail = workbook["Detalle"]
+        headers = [cell.value for cell in next(detail.iter_rows(min_row=1, max_row=1))]
+        values = next(detail.iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertIn("Saldo calculado", headers)
+        self.assertIn("Fin. Point", headers)
+        self.assertIn("Dif. Point", headers)
+        self.assertEqual(values[headers.index("Saldo calculado")], 9)
+        self.assertEqual(values[headers.index("Fin. Point")], 11)
+        self.assertEqual(values[headers.index("Dif. Point")], 2)
+        self.assertEqual(values[headers.index("Venta directa")], 0)
+        self.assertEqual(values[headers.index("Venta derivada")], 0)
+        self.assertEqual(values[headers.index("Conv. entrada Point")], 8)
+        self.assertEqual(values[headers.index("Conv. salida Point")], 1)
+        self.assertEqual(values[headers.index("Origen conversión")], "EQUIVALENCIA_CONFIGURADA | POINT")
+        self.assertEqual(values[headers.index("Proyección")], "EQUIVALENCIA")
+        self.assertEqual(values[headers.index("Estado")], "Point mayor")
+
+    def test_historical_mixed_conversion_metadata_is_split_conservatively_in_outputs(self):
+        receta = Receta.objects.create(
+            nombre="Pastel trazabilidad histórica",
+            codigo_point="HIST-TRACE-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-historical-conversion-trace",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 4, 1),
+            month_end=date(2026, 4, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "4",
+                "point_conversion_out": "1",
+                "conversion_origin": ["POINT", "PRESENTACION_DERIVADA"],
+                "conversion_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "sales_source_available": True,
+                "issues": [],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["conversion_origin"], ("POINT",))
+        self.assertEqual(conversion["projection_sources"], ("PRESENTACION_DERIVADA",))
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-04", "export": "csv"}
+        )
+        rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Proyección")], "PRESENTACION_DERIVADA")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-04", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Proyección")], "PRESENTACION_DERIVADA")
+
+        line.metadata = {
+            key: value
+            for key, value in line.metadata.items()
+            if key != "conversion_origins"
+        }
+        line.metadata["conversion_origin"] = "MIXED"
+        line.save(update_fields=["metadata", "updated_at"])
+        scalar_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+        self.assertEqual(scalar_response.context["conversion_rows"][0]["conversion_origin"], ("Mixto",))
+
+    def test_unresolved_conversion_origin_is_visible_without_inventing_components(self):
+        receta = Receta.objects.create(
+            nombre="Conversión sin origen resuelto",
+            codigo_point="UNRESOLVED-CONV-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-unresolved-conversion-output",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 3, 1),
+            month_end=date(2026, 3, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "1",
+                "point_conversion_out": "0",
+                "conversion_origin": "UNRESOLVED",
+                "conversion_origins": ["UNRESOLVED"],
+                "conversion_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "sales_source_available": True,
+                "issues": ["CONVERSION_ORIGIN_UNRESOLVED"],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-03"})
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["conversion_origin"], ("Sin resolver",))
+        self.assertNotIn("POINT", conversion["conversion_origin"])
+        self.assertNotIn("EQUIVALENCIA_CONFIGURADA", conversion["conversion_origin"])
+
+    def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
+        receta = Receta.objects.create(
+            nombre="Pastel HTML Canonico",
+            codigo_point="HTMLCAN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-html-canonico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 7, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("10"),
+            inventario_final_teorico=Decimal("9"),
+            inventario_final_point_total=Decimal("11"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "POINT_MAYOR",
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
+                "issues": [],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        body = response.content.decode("utf-8")
+
+        self.assertContains(response, "Saldo calculado")
+        self.assertContains(response, "Fin. Point")
+        self.assertContains(response, "Dif. Point")
+        self.assertContains(response, "Point mayor")
+        self.assertEqual(response.context["total_closing_difference"], Decimal("2"))
+        self.assertNotIn("Point físico", body)
+        self.assertNotIn("Sobrante físico", body)
+        self.assertNotIn("Faltante no explicado", body)
+        self.assertNotIn("Final teórico", body)
+        self.assertNotIn("final teórico", body)
+        self.assertNotIn("cierre teórico", body.lower())
+
+    def test_historical_non_point_opening_uses_honest_labels_in_html_csv_and_xlsx(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Apertura Historica",
+            codigo_point="HISTOPEN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-apertura-historica-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 10, 1),
+            month_end=date(2025, 10, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_PREVIOUS_CLOSURE,
+            opening_reference_date=date(2025, 9, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("7"),
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("7"),
+            diferencia_teorico_vs_point=Decimal("0"),
+        )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-10"})
+        self.assertContains(html_response, "Saldo inicial")
+        self.assertContains(html_response, "Cierre previo")
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-10", "export": "csv"}
+        )
+        csv_rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        self.assertEqual(summary["Fuente inicial"], "Cierre previo")
+        self.assertEqual(Decimal(summary["Saldo inicial"]), Decimal("7"))
+        self.assertIn("Saldo inicial", detail_headers)
+        self.assertNotIn("Ini. Point", detail_headers)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-10", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        summary_values = {
+            row[0]: row[1]
+            for row in workbook["Resumen"].iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
+        headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        self.assertEqual(summary_values["Fuente inicial"], "Cierre previo")
+        self.assertEqual(summary_values["Saldo inicial"], 7)
+        self.assertIn("Saldo inicial", headers)
+        self.assertNotIn("Ini. Point", headers)
+
+    def test_cierre_producto_exports_do_not_turn_missing_canonical_sources_into_zero(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Sin Fuente",
+            codigo_point="EXPMISS001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-sin-fuente-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 7, 1),
+            month_end=date(2026, 7, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 6, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("0"),
+            inventario_final_point_total=Decimal("0"),
+            diferencia_teorico_vs_point=Decimal("0"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "",
+                "point_status": "REVISAR_FUENTE",
+                "issues": [
+                    "OPENING_SNAPSHOT_MISSING",
+                    "CALCULATED_CLOSING_MISSING",
+                    "CLOSING_SNAPSHOT_MISSING",
+                ],
+            },
+        )
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "export": "csv"},
+        )
+        csv_body = csv_response.content.decode("utf-8")
+        csv_rows = list(csv.reader(StringIO(csv_body)))
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        detail_values = csv_rows[csv_rows.index([]) + 2]
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        self.assertEqual(summary["Fuente Ini. Point"], "Snapshot Point")
+        self.assertEqual(summary["Ini. Point"], "Sin dato")
+        self.assertIn("Ini. Point", detail_headers)
+        self.assertEqual(detail_values[detail_headers.index("Ini. Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Produccion")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Merma total")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Conv. entrada Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Conv. salida Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "Revisar fuente")
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-07"})
+        self.assertIsNone(html_response.context["total_opening"])
+        self.assertIsNone(html_response.context["total_ending"])
+        self.assertIsNone(html_response.context["total_closing_point"])
+        self.assertIsNone(html_response.context["total_closing_difference"])
+        self.assertContains(html_response, "Sin dato")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        summary_sheet = workbook["Resumen"]
+        summary_values = {
+            row[0]: row[1]
+            for row in summary_sheet.iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
+        detail = workbook["Detalle"]
+        headers = [cell.value for cell in next(detail.iter_rows(min_row=1, max_row=1))]
+        values = next(detail.iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(summary_values["Ini. Point"], "Sin dato")
+        self.assertEqual(summary_values["Fuente Ini. Point"], "Snapshot Point")
+        self.assertIn("Ini. Point", headers)
+        self.assertEqual(values[headers.index("Ini. Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(values[headers.index("Produccion")], "Sin dato")
+        self.assertEqual(values[headers.index("Merma total")], "Sin dato")
+        self.assertEqual(values[headers.index("Conv. entrada Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Conv. salida Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Fin. Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
+
+    def test_real_missing_sales_propagates_sin_dato_through_closure_and_recent_card(self):
+        admin_user = User.objects.create_user(username="admin_missing_sales", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        sucursal = self._create_sucursal("NO-SALES", "Sucursal sin ventas")
+        branch = PointBranch.objects.create(external_id="NO-SALES", name="Sucursal sin ventas", erp_branch=sucursal)
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        receta = Receta.objects.create(
+            nombre="Pastel sin fuente venta",
+            codigo_point="NO-SALES-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-no-sales-001",
+        )
+        product = PointProduct.objects.create(
+            external_id="NO-SALES-PRODUCT",
+            sku=receta.codigo_point,
+            name=receta.nombre,
+            active=True,
+        )
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            PointInventorySnapshot.objects.create(
+                branch=branch,
+                product=product,
+                stock=Decimal("5"),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=job,
+            )
+
+        response = self.client.post(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "action": "build"},
+            follow=True,
+        )
+        closure = ProductoMonthClosure.objects.get(month_start=date(2026, 7, 1))
+        line = closure.lines.get(receta_padre=receta)
+
+        self.assertIn("CALCULATED_CLOSING_MISSING", line.metadata["issues"])
+        self.assertIn("SALES_SOURCE_MISSING", line.metadata["issues"])
+        self.assertIsNone(response.context["closure_display_rows"][0]["sales_total"])
+        self.assertIsNone(response.context["total_sales"])
+        self.assertIsNone(response.context["total_ending"])
+        self.assertIsNone(response.context["recent_closure_rows"][0]["ending_inventory"])
+        self.assertIsNone(response.context["recent_closure_rows"][0]["sales_total"])
+        self.assertContains(response, "Sin dato")
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-07", "export": "csv"}
+        )
+        csv_rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        headers = csv_rows[csv_rows.index([]) + 1]
+        values = csv_rows[csv_rows.index([]) + 2]
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        self.assertEqual(summary["Venta equivalente"], "Sin dato")
+        self.assertEqual(values[headers.index("Venta directa")], "Sin dato")
+        self.assertEqual(values[headers.index("Venta derivada")], "Sin dato")
+        self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-07", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        xlsx_headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        xlsx_values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        xlsx_summary = {
+            row[0]: row[1]
+            for row in workbook["Resumen"].iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
+        self.assertEqual(xlsx_summary["Venta equivalente"], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Venta directa")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Venta derivada")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Dif. Point")], "Sin dato")
+
+    def test_secondary_closure_panels_project_missing_sales_and_opening_as_sin_dato(self):
+        receta = Receta.objects.create(
+            nombre="Pastel panel sin fuentes",
+            codigo_point="PANEL-MISSING-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-panel-missing-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            venta_derivada_equivalente=Decimal("9"),
+            venta_total_equivalente=Decimal("9"),
+            merma_derivada_equivalente=Decimal("1"),
+            merma_total_equivalente=Decimal("1"),
+            inventario_inicial_teorico=Decimal("0"),
+            inventario_final_teorico=Decimal("0"),
+            has_catalog_issue=True,
+            catalog_issue_note="Fuentes canónicas ausentes",
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": [
+                    "SALES_SOURCE_MISSING",
+                    "OPENING_SNAPSHOT_MISSING",
+                    "CALCULATED_CLOSING_MISSING",
+                ],
+                "sales_source_available": False,
+                "point_status": "REVISAR_FUENTE",
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-06"})
+
+        catalog_row = response.context["catalog_issue_rows"][0]
+        self.assertEqual(response.context["conversion_rows"], [])
+        self.assertIsNone(catalog_row["calculated_closing"])
+        body = response.content.decode("utf-8")
+        conversion_panel = body.split("Conversión Point registrada", 1)[1].split("Riesgo de catálogo", 1)[0]
+        catalog_panel = body.split("Incidencias visibles", 1)[1].split("Auditoría de líneas", 1)[0]
+        self.assertIn("No hubo conversiones Point registradas", conversion_panel)
+        self.assertNotIn(">9.00<", conversion_panel)
+        self.assertNotIn(">0.00<", conversion_panel)
+        self.assertIn("Sin dato", catalog_panel)
+        self.assertNotIn(">0.00<", catalog_panel)
+
+    def test_conversion_panel_uses_only_canonical_point_conversion_movements(self):
+        sale_parent = Receta.objects.create(
+            nombre="Pastel con venta derivada sin conversión Point",
+            codigo_point="NO-CONV-POINT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-no-conv-point",
+        )
+        converted_parent = Receta.objects.create(
+            nombre="Pastel con conversión Point",
+            codigo_point="WITH-CONV-POINT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-with-conv-point",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 5, 1),
+            month_end=date(2026, 5, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=sale_parent,
+            venta_derivada_equivalente=Decimal("8"),
+            merma_derivada_equivalente=Decimal("1"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "0",
+                "point_conversion_out": "0",
+                "conversion_origin": [],
+                "conversion_source_authoritative": True,
+                "issues": [],
+                "sales_source_available": True,
+            },
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=converted_parent,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "16",
+                "point_conversion_out": "2",
+                "conversion_origin": ["EQUIVALENCIA_CONFIGURADA"],
+                "conversion_source_authoritative": True,
+                "issues": [],
+                "sales_source_available": True,
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-05"})
+
+        self.assertEqual(len(response.context["conversion_rows"]), 1)
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["line"].receta_padre_id, converted_parent.id)
+        self.assertEqual(conversion["point_conversion_in"], Decimal("16"))
+        self.assertEqual(conversion["point_conversion_out"], Decimal("2"))
+        self.assertEqual(conversion["conversion_origin"], ("EQUIVALENCIA_CONFIGURADA",))
+        panel = response.content.decode("utf-8").split("Conversión Point registrada", 1)[1].split(
+            "Riesgo de catálogo", 1
+        )[0]
+        self.assertIn("Pastel con conversión Point", panel)
+        self.assertNotIn("Pastel con venta derivada sin conversión Point", panel)
+
+    def test_historical_excel_inventory_is_not_presented_as_point_and_canonical_remains_point(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Historico",
+            codigo_point="EXPHIST001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-historico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 6, 1),
+            month_end=date(2025, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
+            opening_reference_date=date(2025, 5, 31),
+            metadata={"historical_excel_import": {"scope": "inventory_only", "source_file": "junio.xlsx"}},
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-3"),
+            estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+            metadata={"historical_excel": {
+                "scope": "inventory_only",
+                "inventory_presence": {"cedis": True, "sucursales": True, "total": True},
+            }},
+        )
+
+        html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})
+        html_body = html_response.content.decode("utf-8")
+        self.assertIsNone(html_response.context["closure_display_rows"][0]["opening_balance"])
+        self.assertIn("Inventario histórico físico", html_body)
+        self.assertIn("Diferencia histórica", html_body)
+        self.assertIn("Revisar fuente", html_body)
+        self.assertIn("Importación histórica de Excel", html_body)
+        self.assertIn("Movimientos operativos no validados", html_body)
+        self.assertNotIn("Fin. Point", html_body)
+        self.assertNotIn("Dif. Point", html_body)
+
+        response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2025-06", "export": "csv"},
+        )
+        rows = list(csv.reader(StringIO(response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+
+        self.assertIn("Inventario histórico físico", headers)
+        self.assertIn("Diferencia histórica", headers)
+        self.assertNotIn("Fin. Point", headers)
+        self.assertNotIn("Dif. Point", headers)
+        self.assertEqual(Decimal(values[headers.index("Inventario histórico físico")]), Decimal("10"))
+        self.assertEqual(values[headers.index("Diferencia histórica")], "Sin dato")
+        self.assertEqual(values[headers.index("Saldo inicial")], "Sin dato")
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
+        for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
+            self.assertEqual(values[headers.index(header)], "Sin dato", header)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2025-06", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        xlsx_headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        xlsx_values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertIn("Inventario histórico físico", xlsx_headers)
+        self.assertIn("Diferencia histórica", xlsx_headers)
+        self.assertNotIn("Fin. Point", xlsx_headers)
+        self.assertEqual(xlsx_values[xlsx_headers.index("Diferencia histórica")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Saldo inicial")], "Sin dato")
+        for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
+            self.assertEqual(xlsx_values[xlsx_headers.index(header)], "Sin dato", header)
+
+        line.metadata["historical_excel"]["inventory_presence"]["opening"] = True
+        line.inventario_inicial_teorico = Decimal("0")
+        line.save(update_fields=["metadata", "inventario_inicial_teorico", "updated_at"])
+        zero_html = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})
+        self.assertEqual(zero_html.context["closure_display_rows"][0]["opening_balance"], Decimal("0"))
+        zero_csv = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-06", "export": "csv"}
+        )
+        zero_rows = list(csv.reader(StringIO(zero_csv.content.decode("utf-8"))))
+        zero_headers = zero_rows[zero_rows.index([]) + 1]
+        zero_values = zero_rows[zero_rows.index([]) + 2]
+        self.assertEqual(Decimal(zero_values[zero_headers.index("Saldo inicial")]), Decimal("0"))
+        zero_xlsx = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-06", "export": "xlsx"}
+        )
+        zero_workbook = load_workbook(BytesIO(zero_xlsx.content), data_only=True, read_only=True)
+        zero_xlsx_headers = [cell.value for cell in next(zero_workbook["Detalle"].iter_rows(max_row=1))]
+        zero_xlsx_values = next(zero_workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(zero_xlsx_values[zero_xlsx_headers.index("Saldo inicial")], 0)
+
+        canonical = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 6, 1),
+            month_end=date(2026, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            metadata={"balance": {"contract": "POINT_PRODUCT_BALANCE_V1"}},
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=canonical,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-3"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "3",
+                "point_status": "POINT_MAYOR",
+                "issues": [],
+            },
+        )
+        canonical_csv = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-06", "export": "csv"},
+        ).content.decode("utf-8")
+        self.assertIn("Fin. Point", canonical_csv)
+        self.assertIn("Dif. Point", canonical_csv)
+        self.assertNotIn("Inventario histórico físico", canonical_csv)
+        line.refresh_from_db()
+        self.assertEqual(line.diferencia_teorico_vs_point, Decimal("-3"))
+        self.assertEqual(line.estado_auditoria, ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
+
+    def test_cierre_producto_export_keeps_total_when_only_point_scope_split_is_missing(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Scope Parcial",
+            codigo_point="EXPSCOPE001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-scope-parcial-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 5, 1),
+            month_end=date(2026, 5, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 4, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("8"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "REVISAR_FUENTE",
+                "point_final_scopes_available": False,
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
+                "issues": ["CLOSING_SNAPSHOT_SCOPE_MISSING"],
+            },
+        )
+
+        response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-05", "export": "csv"},
+        )
+        rows = list(csv.reader(StringIO(response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+
+        self.assertEqual(values[headers.index("Point CEDIS")], "Sin dato")
+        self.assertEqual(values[headers.index("Point sucursales")], "Sin dato")
+        self.assertEqual(Decimal(values[headers.index("Fin. Point")]), Decimal("10"))
+        self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("2"))
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
+
     def test_cierre_producto_lock_requires_admin_or_dg(self):
         receta = Receta.objects.create(
             nombre="Pastel Lock Lectura",
@@ -3281,6 +4061,158 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(closure.is_locked)
         self.assertContains(response, "Solo Dirección General o Administración pueden bloquear cierres mensuales.")
+
+    def test_cierre_producto_disables_lock_and_explains_each_movement_authority_guard(self):
+        admin_user = User.objects.create_user(username="admin_cierre_fuentes", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        cases = (
+            (
+                "production",
+                date(2026, 1, 1),
+                ("PRODUCTION_SYNC_JOB_PARTIAL", "PRODUCTION_SYNC_RANGE_INCOMPLETE"),
+                ("Producción: job Point parcial", "Producción: rango mensual incompleto"),
+            ),
+            (
+                "waste",
+                date(2026, 2, 1),
+                ("WASTE_SYNC_JOB_MISSING", "WASTE_SYNC_JOB_RESTRICTED"),
+                ("Merma: falta job Point del mes", "Merma: job Point filtrado por sucursal"),
+            ),
+            (
+                "conversion",
+                date(2026, 3, 1),
+                (
+                    "CONVERSION_SYNC_CONTRACT_INCOMPLETE",
+                    "CONVERSION_SYNC_COUNT_MISMATCH",
+                    "CONVERSION_SYNC_JOB_MIXED",
+                ),
+                (
+                    "Conversiones: contrato del job incompleto",
+                    "Conversiones: conteo del job no reconcilia",
+                    "Conversiones: filas mezcladas entre jobs",
+                ),
+            ),
+        )
+        for family, month_start, authority_issues, expected_messages in cases:
+            with self.subTest(family=family):
+                receta = Receta.objects.create(
+                    nombre=f"Pastel guarda {family}",
+                    codigo_point=f"GUARD-{family.upper()}",
+                    tipo=Receta.TIPO_PRODUCTO_FINAL,
+                    hash_contenido=f"hash-guard-{family}",
+                )
+                metadata_key = f"{family}_meta"
+                closure = ProductoMonthClosure.objects.create(
+                    month_start=month_start,
+                    month_end=date(month_start.year, month_start.month, 28),
+                    status=ProductoMonthClosure.STATUS_BUILT,
+                    opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+                    metadata={
+                        "validation": {
+                            "lock_ready": False,
+                            "blocking_issues": ["MONTH_SOURCE_INCOMPLETE"],
+                        },
+                        metadata_key: {
+                            "source": {
+                                "production": "PointProductionLine",
+                                "waste": "PointWasteLine",
+                                "conversion": "PointConversionLine",
+                            }[family],
+                            "authoritative": False,
+                            "source_present": family != "waste",
+                            "job_status": "PARTIAL" if family == "production" else "SUCCESS",
+                            "authority_issues": list(authority_issues),
+                        },
+                    },
+                )
+                ProductoMonthClosureLine.objects.create(
+                    closure=closure,
+                    receta_padre=receta,
+                    metadata={
+                        "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                        "issues": ["MONTH_SOURCE_INCOMPLETE"],
+                    },
+                )
+
+                response = self.client.get(
+                    reverse("reportes:cierre_producto"),
+                    {"month": month_start.strftime("%Y-%m")},
+                )
+
+                self.assertTrue(response.context["can_lock_closure"])
+                button = re.search(r"<button[^>]*>Bloquear cierre</button>", response.content.decode("utf-8"))
+                self.assertIsNotNone(button)
+                self.assertIn("disabled", button.group(0))
+                self.assertIn(
+                    "Guarda de validación: MONTH_SOURCE_INCOMPLETE",
+                    response.context["lock_guard_errors"],
+                )
+                self.assertContains(response, "Guarda de validación: MONTH_SOURCE_INCOMPLETE")
+                for message in expected_messages:
+                    self.assertIn(message, response.context["lock_guard_errors"])
+                    self.assertContains(response, message)
+                details = " ".join(row["detail"] for row in response.context["exception_rows"])
+                for message in expected_messages:
+                    self.assertIn(message, details)
+
+    def test_cierre_producto_sales_authority_guard_is_human_readable_and_disables_lock(self):
+        admin_user = User.objects.create_user(username="admin_cierre_ventas", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        receta = Receta.objects.create(
+            nombre="Pastel guarda ventas",
+            codigo_point="GUARD-SALES",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-guard-sales",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 4, 1),
+            month_end=date(2026, 4, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            metadata={
+                "validation": {"lock_ready": False, "blocking_issues": []},
+                "sales_meta": {
+                    "source": "PointDailySale",
+                    "authoritative": False,
+                    "source_present": True,
+                    "authority_issues": [
+                        "SALES_SYNC_JOB_MISSING",
+                        "OFFICIAL_SALES_REFRESH_REQUIRED",
+                    ],
+                },
+            },
+        )
+        ProductoMonthClosureLine.objects.create(closure=closure, receta_padre=receta)
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+
+        expected = (
+            "Ventas: falta job Point del mes",
+            "Ventas: falta actualizar el reporte oficial de Point",
+        )
+        button = re.search(r"<button[^>]*>Bloquear cierre</button>", response.content.decode("utf-8"))
+        self.assertIsNotNone(button)
+        self.assertIn("disabled", button.group(0))
+        for message in expected:
+            self.assertIn(message, response.context["lock_guard_errors"])
+            self.assertContains(response, message)
+        rendered_exceptions = " ".join(row["detail"] for row in response.context["exception_rows"])
+        self.assertNotIn("SALES_SYNC_JOB_MISSING", rendered_exceptions)
+
+        post_response = self.client.post(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-04", "action": "lock"},
+            follow=True,
+        )
+
+        closure.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+        self.assertContains(post_response, "no esta listo para bloquearse")
+        self.assertNotIn("OFFICIAL_SALES_REFRESH_REQUIRED", rendered_exceptions)
 
     def test_cierre_producto_lock_succeeds_for_admin_when_closure_is_clean(self):
         admin_user = User.objects.create_user(username="admin_cierre", password="pass123")

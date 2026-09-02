@@ -55,6 +55,7 @@ from maestros.models import CostoInsumo, Insumo
 from maestros.utils.canonical_catalog import canonicalized_active_insumos, enterprise_readiness_profile, latest_costo_canonico
 from recetas.models import (
     ProductoMonthClosure,
+    ProductoMonthClosureLine,
     Receta,
     LineaReceta,
     RecetaCostoSemanal,
@@ -74,6 +75,10 @@ from pos_bridge.models import (
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.tasks.celery_tasks import task_operations_automation_cycle, task_visible_cut_refresh_cycle
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
+from pos_bridge.services.product_closure_projection import (
+    project_product_closure_line as canonical_product_closure_row,
+    sum_complete_values as canonical_sum_complete_values,
+)
 from ventas.services.sales_canonical_source import (
     OFFICIAL_POINT_SOURCE as CANONICAL_OFFICIAL_POINT_SOURCE,
     POINT_BRIDGE_SALES_SOURCE as CANONICAL_POINT_BRIDGE_SALES_SOURCE,
@@ -5393,15 +5398,14 @@ def _normalize_product_closure_month(raw_value: str | None) -> date:
 
 def _product_closure_month_options(selected_month_start: date, months_back: int = 10) -> list[dict[str, str]]:
     month_candidates: list[date] = [selected_month_start]
-    latest_month = ProductoMonthClosure.objects.order_by("-month_start").values_list("month_start", flat=True).first()
-    if latest_month:
-        month_candidates.append(latest_month)
+    month_candidates.extend(
+        ProductoMonthClosure.objects.order_by().values_list("month_start", flat=True).distinct()
+    )
 
     anchor = timezone.localdate().replace(day=1)
     for offset in range(months_back):
-        candidate_month_end = anchor - timedelta(days=offset * 31)
-        candidate_month_start = date(candidate_month_end.year, candidate_month_end.month, 1)
-        month_candidates.append(candidate_month_start)
+        month_index = anchor.year * 12 + anchor.month - 1 - offset
+        month_candidates.append(date(month_index // 12, month_index % 12 + 1, 1))
 
     unique_months: list[date] = []
     seen: set[str] = set()
@@ -5429,6 +5433,99 @@ def _product_closure_status_tone(status: str) -> str:
     return "neutral"
 
 
+def _product_closure_opening_labels(closure: ProductoMonthClosure | None) -> tuple[str, str]:
+    if closure and closure.opening_source == ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT:
+        return "Ini. Point", "Fuente Ini. Point"
+    return "Saldo inicial", "Fuente inicial"
+
+
+def _product_closure_inventory_labels(
+    closure: ProductoMonthClosure | None,
+    *,
+    lines: list[ProductoMonthClosureLine] | None = None,
+) -> dict[str, object]:
+    metadata = dict(closure.metadata or {}) if closure else {}
+    is_historical = bool(metadata.get("historical_excel_import")) or any(
+        (line.metadata or {}).get("historical_excel")
+        for line in (lines or [])
+    )
+    if is_historical:
+        return {
+            "is_historical": True,
+            "closing": "Inventario histórico físico",
+            "difference": "Diferencia histórica",
+            "cedis": "Conteo histórico CEDIS",
+            "sucursales": "Conteo histórico sucursales",
+        }
+    return {
+        "is_historical": False,
+        "closing": "Fin. Point",
+        "difference": "Dif. Point",
+        "cedis": "Point CEDIS",
+        "sucursales": "Point sucursales",
+    }
+
+
+def _product_closure_point_status_label(status: str) -> str:
+    return {
+        "COINCIDE": "Coincide",
+        "POINT_MAYOR": "Point mayor",
+        "POINT_MENOR": "Point menor",
+        "REVISAR_FUENTE": "Revisar fuente",
+    }.get(status, "Revisar fuente")
+
+
+_MOVEMENT_AUTHORITY_META = (
+    ("sales_meta", "Ventas"),
+    ("production_meta", "Producción"),
+    ("waste_meta", "Merma"),
+    ("conversion_meta", "Conversiones"),
+)
+
+
+def _movement_authority_issue_label(issue: str) -> str:
+    exact_labels = {
+        "OFFICIAL_SALES_REFRESH_REQUIRED": "falta actualizar el reporte oficial de Point",
+        "SALES_SOURCE_REQUIRES_REVIEW": "fuente mensual requiere revisión",
+        "SALES_SOURCE_MIXED": "fuentes de venta mezcladas",
+        "SALES_SYNC_COVERAGE_UNPROVEN": "cobertura mensual no comprobada",
+        "BRIDGE_UNRESOLVED": "ventas legacy pendientes de resolver",
+    }
+    labels = {
+        "SYNC_JOB_MISSING": "falta job Point del mes",
+        "SYNC_JOB_FAILED": "job Point fallido",
+        "SYNC_JOB_PARTIAL": "job Point parcial",
+        "SYNC_JOB_INCOMPLETE": "job Point incompleto",
+        "SYNC_RANGE_INCOMPLETE": "rango mensual incompleto",
+        "SYNC_JOB_RESTRICTED": "job Point filtrado por sucursal",
+        "SYNC_CONTRACT_INCOMPLETE": "contrato del job incompleto",
+        "SYNC_COUNT_MISMATCH": "conteo del job no reconcilia",
+        "SYNC_BRANCH_COVERAGE_INCOMPLETE": "cobertura de sucursales incompleta",
+        "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
+    }
+    issue = str(issue or "")
+    if issue in exact_labels:
+        return exact_labels[issue]
+    for suffix, label in labels.items():
+        if issue.endswith(suffix):
+            return label
+    return issue or "razón de autoridad no informada"
+
+
+def _movement_authority_guards(metadata: dict[str, object]) -> list[dict[str, object]]:
+    guards: list[dict[str, object]] = []
+    for metadata_key, label in _MOVEMENT_AUTHORITY_META:
+        source = dict(metadata.get(metadata_key) or {})
+        if not source or (source.get("authoritative") is True and source.get("source_present") is not False):
+            continue
+        issues = list(source.get("authority_issues") or [])
+        messages = [f"{label}: {_movement_authority_issue_label(issue)}" for issue in issues]
+        if not messages:
+            messages.append(f"{label}: fuente mensual sin autoridad comprobada")
+        guards.append({"label": label, "messages": messages, "source": source})
+    return guards
+
+
 def _build_product_closure_context(selected_month_start: date) -> dict[str, object]:
     closure = (
         ProductoMonthClosure.objects.select_related("built_by").prefetch_related("lines", "lines__receta_padre")
@@ -5437,42 +5534,73 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         .first()
     )
     lines = list(closure.lines.select_related("receta_padre").all()) if closure else []
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(closure)
+    inventory_labels = _product_closure_inventory_labels(closure, lines=lines)
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in lines
+    ]
+    closure_display_rows = []
+    for line, export_row in zip(lines, export_rows):
+        status = str(export_row["point_status"])
+        closure_display_rows.append(
+            {
+                "line": line,
+                **export_row,
+                "point_status_label": export_row.get("status_label") or _product_closure_point_status_label(status),
+                "point_status_tone": (
+                    "success"
+                    if status
+                    in {
+                        "COINCIDE",
+                        ProductoMonthClosureLine.AUDIT_STATUS_CUADRA,
+                        ProductoMonthClosureLine.AUDIT_STATUS_CUADRA_CON_MERMA,
+                    }
+                    else "warning"
+                    if status
+                    in {
+                        "POINT_MAYOR",
+                        "POINT_MENOR",
+                        ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+                    }
+                    else "danger"
+                ),
+            }
+        )
 
-    total_opening = sum((Decimal(str(line.inventario_inicial_teorico or 0)) for line in lines), Decimal("0"))
-    total_production = sum((Decimal(str(line.produccion_mes or 0)) for line in lines), Decimal("0"))
-    total_sales = sum((Decimal(str(line.venta_total_equivalente or 0)) for line in lines), Decimal("0"))
-    total_waste = sum((Decimal(str(line.merma_total_equivalente or 0)) for line in lines), Decimal("0"))
-    total_ending = sum((Decimal(str(line.inventario_final_teorico or 0)) for line in lines), Decimal("0"))
-    total_direct_sales = sum((Decimal(str(line.venta_directa_enteros or 0)) for line in lines), Decimal("0"))
-    total_derived_sales = sum((Decimal(str(line.venta_derivada_equivalente or 0)) for line in lines), Decimal("0"))
+    total_opening = _sum_available_export_values(export_rows, "opening_balance")
+    total_production = _sum_available_export_values(export_rows, "production")
+    total_sales = _sum_available_export_values(export_rows, "sales_total")
+    total_waste = _sum_available_export_values(export_rows, "waste_total")
+    total_ending = _sum_available_export_values(export_rows, "calculated_closing")
+    total_direct_sales = _sum_available_export_values(export_rows, "sales_direct")
+    total_derived_sales = _sum_available_export_values(export_rows, "sales_derived")
     total_direct_waste = sum((Decimal(str(line.merma_directa_enteros or 0)) for line in lines), Decimal("0"))
     total_derived_waste = sum((Decimal(str(line.merma_derivada_equivalente or 0)) for line in lines), Decimal("0"))
-    total_closing_cedis = sum((Decimal(str(line.inventario_final_point_cedis or 0)) for line in lines), Decimal("0"))
-    total_closing_sucursales = sum(
-        (Decimal(str(line.inventario_final_point_sucursales or 0)) for line in lines),
-        Decimal("0"),
-    )
-    total_closing_point = sum((Decimal(str(line.inventario_final_point_total or 0)) for line in lines), Decimal("0"))
-    total_closing_difference = sum(
-        (Decimal(str(line.diferencia_teorico_vs_point or 0)) for line in lines),
-        Decimal("0"),
-    )
+    total_closing_cedis = _sum_available_export_values(export_rows, "closing_point_cedis")
+    total_closing_sucursales = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    total_closing_point = _sum_available_export_values(export_rows, "closing_point")
+    total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
 
     conversion_rows = [
-        line
-        for line in lines
-        if Decimal(str(line.venta_derivada_equivalente or 0)) > 0
-        or Decimal(str(line.merma_derivada_equivalente or 0)) > 0
+        row
+        for row in closure_display_rows
+        if (row["point_conversion_in"] is not None and row["point_conversion_in"] != 0)
+        or (row["point_conversion_out"] is not None and row["point_conversion_out"] != 0)
     ]
     conversion_rows.sort(
-        key=lambda line: (
-            Decimal(str(line.venta_derivada_equivalente or 0)) + Decimal(str(line.merma_derivada_equivalente or 0)),
-            line.receta_padre.nombre.lower(),
+        key=lambda row: (
+            abs(Decimal(row["point_conversion_in"] or 0))
+            + abs(Decimal(row["point_conversion_out"] or 0)),
+            row["line"].receta_padre.nombre.lower(),
         ),
         reverse=True,
     )
 
-    catalog_issue_rows = [line for line in lines if line.has_catalog_issue]
+    catalog_issue_rows = [row for row in closure_display_rows if row["line"].has_catalog_issue]
     recent_closures = (
         ProductoMonthClosure.objects.prefetch_related("lines")
         .order_by("-month_start", "-id")[:6]
@@ -5481,6 +5609,13 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     recent_rows: list[dict[str, object]] = []
     for recent in recent_closures:
         recent_lines = list(recent.lines.all())
+        recent_is_historical = bool(
+            _product_closure_inventory_labels(recent, lines=recent_lines)["is_historical"]
+        )
+        recent_export_rows = [
+            _product_closure_export_row(line, historical_excel_import=recent_is_historical)
+            for line in recent_lines
+        ]
         recent_rows.append(
             {
                 "month_label": recent.month_start.strftime("%b %Y").capitalize(),
@@ -5488,28 +5623,43 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                 "status": recent.get_status_display(),
                 "tone": _product_closure_status_tone(recent.status),
                 "line_count": len(recent_lines),
-                "ending_inventory": sum(
-                    (Decimal(str(line.inventario_final_teorico or 0)) for line in recent_lines),
-                    Decimal("0"),
+                "ending_inventory": _sum_available_export_values(
+                    recent_export_rows,
+                    "calculated_closing",
                 ),
-                "sales_total": sum(
-                    (Decimal(str(line.venta_total_equivalente or 0)) for line in recent_lines),
-                    Decimal("0"),
-                ),
+                "sales_total": _sum_available_export_values(recent_export_rows, "sales_total"),
             }
         )
 
     notes_rows = [row.strip() for row in (closure.notes or "").splitlines() if row.strip()] if closure else []
-    opening_meta = (closure.metadata or {}).get("opening_meta", {}) if closure else {}
-    sales_meta = (closure.metadata or {}).get("sales_meta", {}) if closure else {}
-    fact_meta = (closure.metadata or {}).get("fact_meta", {}) if closure else {}
-    validation = (closure.metadata or {}).get("validation", {}) if closure else {}
+    closure_metadata = dict(closure.metadata or {}) if closure else {}
+    opening_meta = closure_metadata.get("opening_meta", {})
+    sales_meta = closure_metadata.get("sales_meta", {})
+    fact_meta = closure_metadata.get("fact_meta", {})
+    validation = closure_metadata.get("validation", {})
     automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
-    lock_event = (closure.metadata or {}).get("lock_event", {}) if closure else {}
+    lock_event = closure_metadata.get("lock_event", {})
     fact_status = str(fact_meta.get("status") or "").strip()
     sales_mode = str(sales_meta.get("mode") or "").strip()
-    if fact_status in {"existing", "generated"}:
+    historical_excel_meta = dict(closure_metadata.get("historical_excel_import") or {})
+    if inventory_labels["is_historical"]:
+        movement_source_label = "Movimientos operativos no validados"
+        source_file = str(historical_excel_meta.get("source_file") or "archivo histórico")
+        source_sheet = str(historical_excel_meta.get("source_sheet") or "").strip()
+        operational_sources = dict(historical_excel_meta.get("operational_sources") or {})
+        movement_source_detail = f"Conteo histórico: Importación histórica de Excel desde {source_file}"
+        if source_sheet:
+            movement_source_detail += f", hoja {source_sheet}"
+        source_summary = ", ".join(
+            f"{label}={operational_sources.get(key) or 'sin_datos'}"
+            for key, label in (("ventas", "ventas"), ("produccion", "producción"), ("merma", "merma"))
+        )
+        movement_source_detail += (
+            "; el conteo no corresponde a inventario Point. "
+            f"Movimientos observados en tablas operativas ({source_summary}) sin autoridad mensual comprobada."
+        )
+    elif fact_status in {"existing", "generated"}:
         movement_source_label = "FactProduccionDiaria"
         movement_source_detail = (
             "Facts ya publicados en PostgreSQL."
@@ -5529,6 +5679,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         movement_source_label = "Sin fuente publicada"
         movement_source_detail = "Construye el cierre para resolver la fuente mensual."
     lock_guard_errors: list[str] = []
+    movement_authority_guards = _movement_authority_guards(closure_metadata)
     if closure:
         if closure.is_locked:
             lock_guard_errors.append("El cierre ya fue bloqueado.")
@@ -5540,6 +5691,42 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             lock_guard_errors.append("Existen incidencias de catalogo pendientes en las lineas del cierre.")
         if unmatched_products:
             lock_guard_errors.append("Existen productos del opening sin homologacion Point -> ERP.")
+        for issue in validation.get("blocking_issues") or []:
+            lock_guard_errors.append(f"Guarda de validación: {issue}")
+        if validation.get("lock_ready") is False and not validation.get("blocking_issues"):
+            lock_guard_errors.append("La validación del cierre indica que el mes no está listo para bloquearse.")
+        for guard in movement_authority_guards:
+            lock_guard_errors.extend(guard["messages"])
+        is_canonical_closure = (
+            str((closure_metadata.get("balance") or {}).get("contract") or "")
+            == "POINT_PRODUCT_BALANCE_V1"
+            or any(
+                str((line.metadata or {}).get("balance_contract") or "")
+                == "POINT_PRODUCT_BALANCE_V1"
+                for line in lines
+            )
+        )
+        if is_canonical_closure:
+            fingerprint = dict(closure_metadata.get("source_fingerprint") or {})
+            if any(
+                not fingerprint.get(key)
+                for key in (
+                    "digest",
+                    "metadata_digest",
+                    "projected_lines_digest",
+                    "raw_sources_digest",
+                )
+            ):
+                lock_guard_errors.append(
+                    "El cierre no tiene huella de fuentes Point; las fuentes deben reconstruirse antes de bloquear."
+                )
+            elif fingerprint["metadata_digest"] != ProductMonthClosureService._canonical_source_metadata_digest(
+                closure_metadata
+            ):
+                lock_guard_errors.append(
+                    "La metadata de fuentes cambió; reconstruir el cierre antes de bloquear."
+                )
+    lock_guard_errors = list(dict.fromkeys(lock_guard_errors))
 
     exception_rows: list[dict[str, str]] = []
     if validation.get("snapshot_fallback_used"):
@@ -5567,6 +5754,22 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                 "detail": f"El cierre tiene {len(catalog_issue_rows)} linea(s) con derivadas o catalogo pendientes.",
             }
         )
+    if validation.get("blocking_issues"):
+        exception_rows.append(
+            {
+                "tone": "danger",
+                "title": "Guardas de validación activas",
+                "detail": " · ".join(str(issue) for issue in validation["blocking_issues"]),
+            }
+        )
+    for guard in movement_authority_guards:
+        exception_rows.append(
+            {
+                "tone": "danger",
+                "title": f"{guard['label']} sin autoridad mensual",
+                "detail": " · ".join(guard["messages"]),
+            }
+        )
     for review in automation_reviews:
         if not review.get("passed"):
             exception_rows.append(
@@ -5591,6 +5794,14 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "month_options": _product_closure_month_options(selected_month_start),
         "closure": closure,
         "closure_lines": lines,
+        "closure_display_rows": closure_display_rows,
+        "opening_balance_label": opening_balance_label,
+        "opening_source_label": opening_source_label,
+        "is_historical_inventory": inventory_labels["is_historical"],
+        "inventory_balance_label": inventory_labels["closing"],
+        "inventory_difference_label": inventory_labels["difference"],
+        "inventory_cedis_label": inventory_labels["cedis"],
+        "inventory_sucursales_label": inventory_labels["sucursales"],
         "closure_status_tone": _product_closure_status_tone(closure.status) if closure else "warning",
         "total_opening": total_opening,
         "total_production": total_production,
@@ -5623,58 +5834,243 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     }
 
 
+_POINT_EXPORT_STATUSES = {"COINCIDE", "POINT_MAYOR", "POINT_MENOR", "REVISAR_FUENTE"}
+_CONVERSION_PROJECTION_VALUES = {"DIRECTA", "EQUIVALENCIA", "PRESENTACION_DERIVADA"}
+_CONVERSION_ORIGIN_LABELS = {"MIXED": "Mixto", "UNRESOLVED": "Sin resolver"}
+
+
+def _closure_metadata_values(value: object) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in value)
+    return (str(value),)
+
+
+def _product_closure_export_row(
+    line: ProductoMonthClosureLine,
+    *,
+    historical_excel_import: bool = False,
+) -> dict[str, object]:
+    """Project persisted closure fields into the public Point balance contract.
+
+    The database keeps the legacy difference sign (calculated - Point) for
+    compatibility. Exports always expose Point - calculated. Canonical metadata
+    also tells us when numeric zero is only the storage placeholder for a missing
+    source and must therefore be rendered as ``Sin dato``.
+    """
+    projected = canonical_product_closure_row(
+        line,
+        historical_excel_import=historical_excel_import,
+    )
+    return projected
+
+    # Kept below temporarily as executable-history context for this long-lived
+    # report module; the canonical implementation above now lives in pos_bridge.
+    metadata = dict(line.metadata or {})
+    issues = {str(issue) for issue in metadata.get("issues") or []}
+    is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
+    is_historical_excel = bool(historical_excel_import or metadata.get("historical_excel"))
+
+    calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
+    sales_missing = is_canonical and (
+        "SALES_SOURCE_MISSING" in issues or metadata.get("sales_source_available") is not True
+    )
+    conversion_missing = is_canonical and metadata.get("conversion_source_authoritative") is not True
+    production_missing = is_canonical and metadata.get("production_source_authoritative") is not True
+    waste_missing = is_canonical and metadata.get("waste_source_authoritative") is not True
+    opening_missing = is_canonical and "OPENING_SNAPSHOT_MISSING" in issues
+    closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
+    raw_point_difference = metadata.get("point_difference") if is_canonical else None
+    if is_canonical:
+        point_difference = _decimal_export_value(raw_point_difference)
+    elif is_historical_excel:
+        if line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
+            point_difference = None
+            closing_missing = True
+        else:
+            point_difference = Decimal(str(line.diferencia_teorico_vs_point))
+    elif line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
+        point_difference = None
+        closing_missing = True
+    else:
+        point_difference = -Decimal(str(line.diferencia_teorico_vs_point))
+
+    if calculated_missing or closing_missing:
+        point_difference = None
+
+    stored_conversion_values = _closure_metadata_values(metadata.get("conversion_origin"))
+    exact_conversion_origins = _closure_metadata_values(metadata.get("conversion_origins"))
+    origin_values = exact_conversion_origins or tuple(
+        value for value in stored_conversion_values if value not in _CONVERSION_PROJECTION_VALUES
+    )
+    conversion_origin = tuple(_CONVERSION_ORIGIN_LABELS.get(value, value) for value in origin_values)
+    projection_sources = tuple(
+        dict.fromkeys(
+            list(_closure_metadata_values(metadata.get("projection_sources")))
+            + [value for value in stored_conversion_values if value in _CONVERSION_PROJECTION_VALUES]
+        )
+    )
+
+    scopes_missing = closing_missing or (
+        is_canonical
+        and (
+            "CLOSING_SNAPSHOT_SCOPE_MISSING" in issues
+            or metadata.get("point_final_scopes_available") is False
+        )
+    )
+    calculated_closing = None if calculated_missing else Decimal(str(line.inventario_final_teorico))
+    closing_point = None if closing_missing else Decimal(str(line.inventario_final_point_total))
+    point_status = (
+        str(metadata.get("point_status") or "")
+        if is_canonical
+        else line.estado_auditoria
+        if is_historical_excel
+        else ""
+    )
+    legacy_review = line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO
+    if is_historical_excel:
+        status_label = line.get_estado_auditoria_display()
+    elif issues or line.has_catalog_issue or legacy_review:
+        point_status = "REVISAR_FUENTE"
+    elif point_status not in _POINT_EXPORT_STATUSES:
+        if point_difference is None:
+            point_status = "REVISAR_FUENTE"
+        elif abs(point_difference) <= Decimal("0.01"):
+            point_status = "COINCIDE"
+        elif point_difference > 0:
+            point_status = "POINT_MAYOR"
+        else:
+            point_status = "POINT_MENOR"
+    if not is_historical_excel:
+        status_label = _product_closure_point_status_label(point_status)
+
+    return {
+        "opening_point": None if opening_missing else Decimal(str(line.inventario_inicial_teorico)),
+        "production": None if production_missing else Decimal(str(line.produccion_mes)),
+        "sales_direct": None if sales_missing else Decimal(str(line.venta_directa_enteros)),
+        "sales_derived": None if sales_missing else Decimal(str(line.venta_derivada_equivalente)),
+        "sales_total": None if sales_missing else Decimal(str(line.venta_total_equivalente)),
+        "point_conversion_in": (
+            None if conversion_missing else _decimal_export_value(metadata.get("point_conversion_in"))
+        ),
+        "point_conversion_out": (
+            None if conversion_missing else _decimal_export_value(metadata.get("point_conversion_out"))
+        ),
+        "conversion_origin": conversion_origin,
+        "conversion_origins": exact_conversion_origins,
+        "projection_sources": projection_sources,
+        "waste_total": None if waste_missing else Decimal(str(line.merma_total_equivalente)),
+        "calculated_closing": calculated_closing,
+        "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
+        "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
+        "closing_point": closing_point,
+        "point_difference": point_difference,
+        "point_status": point_status,
+        "status_label": status_label,
+        "is_historical_inventory": is_historical_excel,
+    }
+
+
+def _decimal_export_value(value: object) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _sum_available_export_values(rows: list[dict[str, object]], key: str) -> Decimal | None:
+    return canonical_sum_complete_values(rows, key)
+
+
+def _closure_export_display(value: object) -> object:
+    return "Sin dato" if value is None else value
+
+
+def _closure_export_cell(value: object) -> object:
+    return "Sin dato" if value is None else float(Decimal(str(value)))
+
+
 def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="cierre_producto_{context["selected_month"]}.csv"'
     writer = csv.writer(response)
+    inventory_labels = _product_closure_inventory_labels(
+        context.get("closure"),
+        lines=list(context.get("closure_lines") or []),
+    )
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in context.get("closure_lines") or []
+    ]
+    opening_total = _sum_available_export_values(export_rows, "opening_balance")
     writer.writerow(["Mes", context["selected_month"]])
     writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    writer.writerow(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    writer.writerow(["Inventario inicial", context["total_opening"]])
-    writer.writerow(["Produccion", context["total_production"]])
-    writer.writerow(["Venta equivalente", context["total_sales"]])
-    writer.writerow(["Merma equivalente", context["total_waste"]])
-    writer.writerow(["Inventario final", context["total_ending"]])
-    writer.writerow(["Inventario Point CEDIS", context["total_closing_cedis"]])
-    writer.writerow(["Inventario Point sucursales", context["total_closing_sucursales"]])
-    writer.writerow(["Inventario Point total", context["total_closing_point"]])
-    writer.writerow(["Diferencia teorico vs Point", context["total_closing_difference"]])
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
+    writer.writerow([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    writer.writerow([opening_balance_label, _closure_export_display(opening_total)])
+    writer.writerow(["Produccion", _closure_export_display(context["total_production"])])
+    writer.writerow(["Venta equivalente", _closure_export_display(context["total_sales"])])
+    writer.writerow(["Merma equivalente", _closure_export_display(context["total_waste"])])
+    calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
+    closing_total = _sum_available_export_values(export_rows, "closing_point")
+    closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
+    closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    difference_total = _sum_available_export_values(export_rows, "point_difference")
+    writer.writerow(["Saldo calculado", _closure_export_display(calculated_total)])
+    writer.writerow([inventory_labels["cedis"], _closure_export_display(closing_cedis_total)])
+    writer.writerow([inventory_labels["sucursales"], _closure_export_display(closing_sucursales_total)])
+    writer.writerow([inventory_labels["closing"], _closure_export_display(closing_total)])
+    writer.writerow([inventory_labels["difference"], _closure_export_display(difference_total)])
     writer.writerow([])
     writer.writerow(
         [
             "Receta padre",
             "Codigo point",
-            "Inicial",
+            opening_balance_label,
             "Produccion",
             "Venta directa",
             "Venta derivada",
             "Merma total",
-            "Final teorico",
-            "Point CEDIS",
-            "Point sucursales",
-            "Point total",
-            "Diferencia",
+            "Conv. entrada Point",
+            "Conv. salida Point",
+            "Origen conversión",
+            "Proyección",
+            "Saldo calculado",
+            inventory_labels["cedis"],
+            inventory_labels["sucursales"],
+            inventory_labels["closing"],
+            inventory_labels["difference"],
             "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
     )
-    for line in context.get("closure_lines") or []:
+    for line, export_row in zip(context.get("closure_lines") or [], export_rows):
         writer.writerow(
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                line.inventario_inicial_teorico,
-                line.produccion_mes,
-                line.venta_directa_enteros,
-                line.venta_derivada_equivalente,
-                line.merma_total_equivalente,
-                line.inventario_final_teorico,
-                line.inventario_final_point_cedis,
-                line.inventario_final_point_sucursales,
-                line.inventario_final_point_total,
-                line.diferencia_teorico_vs_point,
-                line.get_estado_auditoria_display(),
+                _closure_export_display(export_row["opening_balance"]),
+                _closure_export_display(export_row["production"]),
+                _closure_export_display(export_row["sales_direct"]),
+                _closure_export_display(export_row["sales_derived"]),
+                _closure_export_display(export_row["waste_total"]),
+                _closure_export_display(export_row["point_conversion_in"]),
+                _closure_export_display(export_row["point_conversion_out"]),
+                " | ".join(export_row["conversion_origin"]) or "Sin dato",
+                " | ".join(export_row["projection_sources"]) or "Sin dato",
+                _closure_export_display(export_row["calculated_closing"]),
+                _closure_export_display(export_row["closing_point_cedis"]),
+                _closure_export_display(export_row["closing_point_sucursales"]),
+                _closure_export_display(export_row["closing_point"]),
+                _closure_export_display(export_row["point_difference"]),
+                export_row["status_label"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5686,55 +6082,81 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     wb = Workbook()
     summary_ws = wb.active
     summary_ws.title = "Resumen"
+    inventory_labels = _product_closure_inventory_labels(
+        context.get("closure"),
+        lines=list(context.get("closure_lines") or []),
+    )
+    export_rows = [
+        _product_closure_export_row(
+            line,
+            historical_excel_import=bool(inventory_labels["is_historical"]),
+        )
+        for line in context.get("closure_lines") or []
+    ]
+    opening_total = _sum_available_export_values(export_rows, "opening_balance")
     summary_ws.append(["Mes", context["selected_month"]])
     summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
-    summary_ws.append(["Fuente inventario inicial", context["closure"].get_opening_source_display() if context.get("closure") else ""])
-    summary_ws.append(["Inventario inicial", float(context["total_opening"])])
-    summary_ws.append(["Produccion", float(context["total_production"])])
-    summary_ws.append(["Venta equivalente", float(context["total_sales"])])
-    summary_ws.append(["Merma equivalente", float(context["total_waste"])])
-    summary_ws.append(["Inventario final", float(context["total_ending"])])
-    summary_ws.append(["Inventario Point CEDIS", float(context["total_closing_cedis"])])
-    summary_ws.append(["Inventario Point sucursales", float(context["total_closing_sucursales"])])
-    summary_ws.append(["Inventario Point total", float(context["total_closing_point"])])
-    summary_ws.append(["Diferencia teorico vs Point", float(context["total_closing_difference"])])
+    opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
+    summary_ws.append([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
+    summary_ws.append([opening_balance_label, _closure_export_cell(opening_total)])
+    summary_ws.append(["Produccion", _closure_export_cell(context["total_production"])])
+    summary_ws.append(["Venta equivalente", _closure_export_cell(context["total_sales"])])
+    summary_ws.append(["Merma equivalente", _closure_export_cell(context["total_waste"])])
+    calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
+    closing_total = _sum_available_export_values(export_rows, "closing_point")
+    closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
+    closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    difference_total = _sum_available_export_values(export_rows, "point_difference")
+    summary_ws.append(["Saldo calculado", _closure_export_cell(calculated_total)])
+    summary_ws.append([inventory_labels["cedis"], _closure_export_cell(closing_cedis_total)])
+    summary_ws.append([inventory_labels["sucursales"], _closure_export_cell(closing_sucursales_total)])
+    summary_ws.append([inventory_labels["closing"], _closure_export_cell(closing_total)])
+    summary_ws.append([inventory_labels["difference"], _closure_export_cell(difference_total)])
 
     detail_ws = wb.create_sheet("Detalle")
     detail_ws.append(
         [
             "Receta padre",
             "Codigo point",
-            "Inicial",
+            opening_balance_label,
             "Produccion",
             "Venta directa",
             "Venta derivada",
             "Merma total",
-            "Final teorico",
-            "Point CEDIS",
-            "Point sucursales",
-            "Point total",
-            "Diferencia",
+            "Conv. entrada Point",
+            "Conv. salida Point",
+            "Origen conversión",
+            "Proyección",
+            "Saldo calculado",
+            inventory_labels["cedis"],
+            inventory_labels["sucursales"],
+            inventory_labels["closing"],
+            inventory_labels["difference"],
             "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
     )
-    for line in context.get("closure_lines") or []:
+    for line, export_row in zip(context.get("closure_lines") or [], export_rows):
         detail_ws.append(
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                float(line.inventario_inicial_teorico or 0),
-                float(line.produccion_mes or 0),
-                float(line.venta_directa_enteros or 0),
-                float(line.venta_derivada_equivalente or 0),
-                float(line.merma_total_equivalente or 0),
-                float(line.inventario_final_teorico or 0),
-                float(line.inventario_final_point_cedis or 0),
-                float(line.inventario_final_point_sucursales or 0),
-                float(line.inventario_final_point_total or 0),
-                float(line.diferencia_teorico_vs_point or 0),
-                line.get_estado_auditoria_display(),
+                _closure_export_cell(export_row["opening_balance"]),
+                _closure_export_cell(export_row["production"]),
+                _closure_export_cell(export_row["sales_direct"]),
+                _closure_export_cell(export_row["sales_derived"]),
+                _closure_export_cell(export_row["waste_total"]),
+                _closure_export_cell(export_row["point_conversion_in"]),
+                _closure_export_cell(export_row["point_conversion_out"]),
+                " | ".join(export_row["conversion_origin"]) or "Sin dato",
+                " | ".join(export_row["projection_sources"]) or "Sin dato",
+                _closure_export_cell(export_row["calculated_closing"]),
+                _closure_export_cell(export_row["closing_point_cedis"]),
+                _closure_export_cell(export_row["closing_point_sucursales"]),
+                _closure_export_cell(export_row["closing_point"]),
+                _closure_export_cell(export_row["point_difference"]),
+                export_row["status_label"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5804,7 +6226,7 @@ def cierre_producto(request: HttpRequest) -> HttpResponse:
                         )
                         messages.success(
                             request,
-                            f"Se reconstruyó el cierre teórico de producto Point para {selected_month_start:%Y-%m}.",
+                            f"Se reconstruyó el cierre calculado de producto Point para {selected_month_start:%Y-%m}.",
                         )
                     except ProductMonthClosureError as exc:
                         messages.error(request, str(exc))
@@ -5823,7 +6245,7 @@ def cierre_producto(request: HttpRequest) -> HttpResponse:
                     )
                     messages.success(
                         request,
-                        f"Se construyó el cierre teórico de producto Point para {selected_month_start:%Y-%m}.",
+                        f"Se construyó el cierre calculado de producto Point para {selected_month_start:%Y-%m}.",
                     )
                 except ProductMonthClosureError as exc:
                     messages.error(request, str(exc))

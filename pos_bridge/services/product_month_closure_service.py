@@ -4,18 +4,42 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from hashlib import sha256
+import json
 
+from django.apps import apps
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import connection, models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from pos_bridge.models import PointDailySale, PointInventorySnapshot, PointProductionLine, PointSyncJob, PointWasteLine
+from core.models import Sucursal
+from pos_bridge.models import (
+    PointBranch,
+    PointConversionLine,
+    PointDailySale,
+    PointExtractionLog,
+    PointInventorySnapshot,
+    PointProduct,
+    PointProductionLine,
+    PointSyncJob,
+    PointWasteLine,
+)
+from pos_bridge.services.monthly_product_balance_service import (
+    ORIGIN_CONFIGURED_EQUIVALENCE,
+    ORIGIN_POINT,
+    MonthlyPointProductBalanceService,
+)
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
     Receta,
+    RecetaCodigoPointAlias,
+    RecetaEquivalencia,
+    RecetaPresentacionDerivada,
     VentaHistorica,
 )
 from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
@@ -75,10 +99,67 @@ class _AggregateBucket:
 
 class ProductMonthClosureService:
     DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
+    METADATA_COMPACTION_SAMPLE_LIMIT = 5
+    METADATA_COMPACTION_MAPPING_LIMIT = 12
+    PUBLIC_SOURCE_METADATA_ARRAY_KEYS = frozenset(
+        {
+            "authority_issues",
+            "blocking_issues",
+            "fallback_chain_attempted",
+            "selected_dates",
+            "warnings",
+        }
+    )
+    CANONICAL_LOCK_REQUIRED_SOURCES = (
+        ("opening_meta", "inventario inicial Point"),
+        ("sales_meta", "ventas Point"),
+        ("production_meta", "produccion Point"),
+        ("waste_meta", "merma Point"),
+        ("conversion_meta", "conversiones Point"),
+        ("closing_inventory_meta", "inventario final Point"),
+    )
+    CANONICAL_FINGERPRINT_METADATA_KEYS = tuple(
+        key for key, _label in CANONICAL_LOCK_REQUIRED_SOURCES
+    ) + ("balance",)
+    CANONICAL_LINE_DIGEST_FIELDS = (
+        "inventario_inicial_teorico",
+        "produccion_mes",
+        "venta_directa_enteros",
+        "venta_derivada_equivalente",
+        "venta_total_equivalente",
+        "merma_directa_enteros",
+        "merma_derivada_equivalente",
+        "merma_total_equivalente",
+        "inventario_final_teorico",
+        "inventario_final_point_cedis",
+        "inventario_final_point_sucursales",
+        "inventario_final_point_total",
+        "diferencia_teorico_vs_point",
+        "estado_auditoria",
+        "detalle_auditoria",
+        "source_closing_snapshot_count",
+        "source_snapshot_count",
+        "source_sale_rows",
+        "source_production_rows",
+        "source_waste_rows",
+        "has_catalog_issue",
+        "catalog_issue_note",
+    )
 
-    def __init__(self, matcher: PointSalesMatchingService | None = None):
+    def __init__(
+        self,
+        matcher: PointSalesMatchingService | None = None,
+        balance_service: MonthlyPointProductBalanceService | None = None,
+        refresh_official_sales: bool = False,
+    ):
         self.matcher = matcher or PointSalesMatchingService()
         self.official_sales_report_service = PointSalesCategoryReportService()
+        self.balance_service = balance_service or MonthlyPointProductBalanceService(
+            matcher=self.matcher,
+            official_sales_report_service=self.official_sales_report_service,
+            refresh_official_sales=refresh_official_sales,
+        )
+        self.refresh_official_sales = bool(refresh_official_sales)
 
     def build(
         self,
@@ -90,24 +171,44 @@ class ProductMonthClosureService:
         approval_note: str = "",
         approval_reason: str = "",
         approval_channel: str = "service",
+        refresh_official_sales: bool | None = None,
     ) -> ProductoMonthClosure:
         month_start = self._parse_month(month)
-        existing_closure = ProductoMonthClosure.objects.filter(month_start=month_start).order_by("-id").first()
-        if existing_closure is not None and existing_closure.is_locked:
-            if rebuild:
-                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild.")
-            raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
-
-        plan = self.preview(month=month_start)
-        month_end = plan["month_end"]
-        now = timezone.now()
-        notes = plan["notes"]
-
         with transaction.atomic():
-            closure, _ = ProductoMonthClosure.objects.get_or_create(
+            closure, created = ProductoMonthClosure.objects.get_or_create(
                 month_start=month_start,
-                defaults={"month_end": month_end},
+                defaults={
+                    "month_end": date(
+                        month_start.year,
+                        month_start.month,
+                        monthrange(month_start.year, month_start.month)[1],
+                    )
+                },
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                if rebuild:
+                    raise ProductMonthClosureError(
+                        f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                    )
+                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
+            if not created and not rebuild:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} ya existe; se requiere rebuild para reemplazarlo."
+                )
+
+            # El cierre mensual es el mutex estable del periodo. Toda lectura de
+            # fuentes ocurre despues de adquirirlo para impedir que un writer
+            # atrasado publique un plan calculado antes que otro writer.
+            plan = self.preview(month=month_start, refresh_official_sales=refresh_official_sales)
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                )
+            month_end = plan["month_end"]
+            now = timezone.now()
+            notes = plan["notes"]
             closure.lines.all().delete()
 
             closure.month_end = month_end
@@ -122,7 +223,6 @@ class ProductMonthClosureService:
                 **dict(plan["metadata"]),
                 "rebuild": bool(rebuild),
             }
-            closure.is_locked = False
             closure.save()
 
             for row in plan["line_rows"]:
@@ -152,13 +252,13 @@ class ProductMonthClosureService:
                     has_catalog_issue=row["has_catalog_issue"],
                     catalog_issue_note=row["catalog_issue_note"],
                     metadata={
+                        **row["metadata"],
                         "opening_source": plan["opening_source"],
                     },
                 )
 
             closure.status = ProductoMonthClosure.STATUS_BUILT
-            closure.is_locked = False
-            closure.save(update_fields=["status", "is_locked", "updated_at"])
+            closure.save(update_fields=["status", "updated_at"])
 
             if lock_after_build:
                 closure = self.lock(
@@ -171,181 +271,732 @@ class ProductMonthClosureService:
 
         return closure
 
-    def preview(self, *, month: str | date) -> dict[str, object]:
+    def preview(
+        self,
+        *,
+        month: str | date,
+        refresh_official_sales: bool | None = None,
+    ) -> dict[str, object]:
         month_start = self._parse_month(month)
-        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
-        prev_month_end = month_start - timedelta(days=1)
-
-        fact_meta = self._ensure_month_facts(month_start=month_start, month_end=month_end)
-        opening_source, opening_reference_date, openings, opening_meta = self._load_opening(month_start=month_start)
-        production = self._load_production(month_start=month_start, month_end=month_end)
-        sales, sales_meta = self._load_sales(month_start=month_start, month_end=month_end)
-        waste = self._load_waste(month_start=month_start, month_end=month_end)
-        closing_inventory, closing_meta = self._load_closing_inventory(month_end=month_end)
-
-        recipe_ids = set(openings) | set(production) | set(sales) | set(waste) | set(closing_inventory)
-        if not recipe_ids:
+        balance = self.balance_service.build(
+            month_start,
+            refresh_official_sales=(
+                self.refresh_official_sales if refresh_official_sales is None else bool(refresh_official_sales)
+            ),
+        )
+        if not balance.rows:
             raise ProductMonthClosureError(f"No hay datos para construir cierre mensual {month_start:%Y-%m}.")
-
-        line_rows: list[dict[str, object]] = []
-        validation = self._build_validation_summary(opening_meta=opening_meta)
-        if fact_meta.get("status") == "generated":
-            validation["warnings"].append(
-                "Se genero FactProduccionDiaria desde staging PostgreSQL antes de construir el cierre."
-            )
-        elif fact_meta.get("status") == "generation_failed":
-            validation["warnings"].append(
-                "No se pudo generar FactProduccionDiaria; el cierre uso respaldos disponibles."
-            )
-        sales_validation = self._build_sales_validation_summary(
-            month_start=month_start,
-            month_end=month_end,
-            sales_meta=sales_meta,
-        )
-        validation["warnings"] = list(
-            dict.fromkeys(list(validation.get("warnings") or []) + list(sales_validation.get("warnings") or []))
-        )
-        validation["blocking_issues"] = list(
-            dict.fromkeys(
-                list(validation.get("blocking_issues") or []) + list(sales_validation.get("blocking_issues") or [])
-            )
-        )
-        validation.update(
-            {
-                "sales_source_mode": sales_validation.get("sales_source_mode", ""),
-                "sales_job_id": sales_validation.get("sales_job_id"),
-                "sales_job_status": sales_validation.get("sales_job_status", ""),
-                "sales_official_rows": sales_validation.get("sales_official_rows", 0),
-                "sales_legacy_rows": sales_validation.get("sales_legacy_rows", 0),
-            }
-        )
-        totals = {
-            "opening": ZERO,
-            "production": ZERO,
-            "sales": ZERO,
-            "waste": ZERO,
-            "ending": ZERO,
-            "closing_cedis": ZERO,
-            "closing_sucursales": ZERO,
-            "closing_total": ZERO,
-            "difference": ZERO,
-        }
-        catalog_issue_count = 0
-
-        for receta_id in sorted(recipe_ids):
-            receta = Receta.objects.get(pk=receta_id)
-            if not self._is_recipe_eligible_for_closure(receta):
-                continue
-            opening_bucket = openings.get(receta_id, _AggregateBucket())
-            production_bucket = production.get(receta_id, _AggregateBucket())
-            sales_bucket = sales.get(receta_id, _AggregateBucket())
-            waste_bucket = waste.get(receta_id, _AggregateBucket())
-            closing_bucket = closing_inventory.get(receta_id, _AggregateBucket())
-            sale_total = sales_bucket.direct_value + sales_bucket.derived_value
-            waste_total = waste_bucket.direct_value + waste_bucket.derived_value
-            ending_total = opening_bucket.value + production_bucket.value - sale_total - waste_total
-            difference_total = ending_total - closing_bucket.value
-            issue_notes = set()
-            for bucket in (opening_bucket, production_bucket, sales_bucket, waste_bucket):
-                if bucket.has_catalog_issue:
-                    issue_notes.update(bucket.issue_notes or set())
-            if issue_notes:
-                catalog_issue_count += 1
-            audit_status, audit_detail = self._resolve_audit_status(
-                has_catalog_issue=bool(issue_notes),
-                closing_inventory_available=bool(closing_meta.get("snapshot_rows")),
-                difference=difference_total,
-                waste_total=waste_total,
-            )
-
-            totals["opening"] += opening_bucket.value
-            totals["production"] += production_bucket.value
-            totals["sales"] += sale_total
-            totals["waste"] += waste_total
-            totals["ending"] += ending_total
-            totals["closing_cedis"] += closing_bucket.cedis_value
-            totals["closing_sucursales"] += closing_bucket.sucursales_value
-            totals["closing_total"] += closing_bucket.value
-            totals["difference"] += difference_total
-
-            line_rows.append(
-                {
-                    "receta": receta,
-                    "inventario_inicial_teorico": opening_bucket.value,
-                    "produccion_mes": production_bucket.value,
-                    "venta_directa_enteros": sales_bucket.direct_value,
-                    "venta_derivada_equivalente": sales_bucket.derived_value,
-                    "venta_total_equivalente": sale_total,
-                    "merma_directa_enteros": waste_bucket.direct_value,
-                    "merma_derivada_equivalente": waste_bucket.derived_value,
-                    "merma_total_equivalente": waste_total,
-                    "inventario_final_teorico": ending_total,
-                    "inventario_final_point_cedis": closing_bucket.cedis_value,
-                    "inventario_final_point_sucursales": closing_bucket.sucursales_value,
-                    "inventario_final_point_total": closing_bucket.value,
-                    "diferencia_teorico_vs_point": difference_total,
-                    "estado_auditoria": audit_status,
-                    "detalle_auditoria": audit_detail,
-                    "source_closing_snapshot_count": closing_bucket.snapshot_count,
-                    "source_snapshot_count": opening_bucket.snapshot_count,
-                    "source_sale_rows": sales_bucket.row_count,
-                    "source_production_rows": production_bucket.row_count,
-                    "source_waste_rows": waste_bucket.row_count,
-                    "has_catalog_issue": bool(issue_notes),
-                    "catalog_issue_note": " | ".join(sorted(issue_notes))[:255],
-                }
-            )
-
+        source_issues = set(balance.issues)
+        for source_name in (
+            "opening_snapshot",
+            "closing_snapshot",
+            "sales",
+            "production",
+            "waste",
+            "conversions",
+        ):
+            source = dict(balance.sources.get(source_name) or {})
+            if source and (source.get("authoritative") is False or source.get("source_present") is False):
+                source_issues.add("MONTH_SOURCE_INCOMPLETE")
+        line_rows = self._project_canonical_balance(balance=balance, global_issues=source_issues)
         if not line_rows:
             raise ProductMonthClosureError(
                 f"No hay productos terminados elegibles para construir el cierre mensual {month_start:%Y-%m}."
             )
-
-        validation["catalog_issue_line_count"] = catalog_issue_count
-        if catalog_issue_count:
-            validation["blocking_issues"].append("Existen lineas con incidencias de catalogo o derivadas.")
-        closing_validation = self._build_closing_inventory_validation(
-            closing_meta=closing_meta,
+        blocking_issues = sorted(source_issues | {issue for row in line_rows for issue in row["metadata"]["issues"]})
+        opening_meta = self._compact_source_metadata(balance.sources.get("opening_snapshot") or {})
+        closing_meta = self._compact_source_metadata(balance.sources.get("closing_snapshot") or {})
+        canonical_sales_meta = self._json_compatible(balance.sources.get("sales") or {})
+        sales_meta = self._compact_source_metadata(canonical_sales_meta)
+        sales_meta["mode"] = sales_meta.get("selected_source") or sales_meta.get("mode") or ""
+        movement_meta = {
+            family: self._compact_source_metadata(balance.sources.get(family) or {})
+            for family in ("production", "waste", "conversions")
+        }
+        validation = {
+            "warnings": self._json_compatible(balance.warnings),
+            "blocking_issues": blocking_issues,
+            "lock_ready": not blocking_issues,
+            "catalog_issue_line_count": sum(row["has_catalog_issue"] for row in line_rows),
+            "sales_source_mode": sales_meta.get("selected_source") or sales_meta.get("mode") or "",
+            "sales_job_id": canonical_sales_meta.get("job_id"),
+            "sales_job_status": str(canonical_sales_meta.get("job_status") or ""),
+            "sales_official_rows": int(canonical_sales_meta.get("official_daily_row_count") or 0),
+            "sales_legacy_rows": sum(
+                int(canonical_sales_meta.get(key) or 0)
+                for key in ("legacy_daily_row_count", "legacy_bridge_row_count")
+            ),
+            "closing_inventory": {
+                "snapshot_rows": int(balance.source_counts.get("closing_snapshot_rows") or 0),
+                "matched_recipe_count": sum(row["source_closing_snapshot_count"] > 0 for row in line_rows),
+                "selected_dates": closing_meta.get("selected_dates", []),
+            },
+        }
+        totals = {
+            "opening": sum((row["inventario_inicial_teorico"] for row in line_rows), ZERO),
+            "production": sum((row["produccion_mes"] for row in line_rows), ZERO),
+            "sales": sum((row["venta_total_equivalente"] for row in line_rows), ZERO),
+            "waste": sum((row["merma_total_equivalente"] for row in line_rows), ZERO),
+            "ending": sum((row["inventario_final_teorico"] for row in line_rows), ZERO),
+            "closing_cedis": sum((row["inventario_final_point_cedis"] for row in line_rows), ZERO),
+            "closing_sucursales": sum((row["inventario_final_point_sucursales"] for row in line_rows), ZERO),
+            "closing_total": sum((row["inventario_final_point_total"] for row in line_rows), ZERO),
+            "difference": sum((row["diferencia_teorico_vs_point"] for row in line_rows), ZERO),
+        }
+        opening_reference_date = balance.effective_snapshot_dates.get("opening")
+        notes = (
+            f"Cierre {month_start:%Y-%m} proyectado del contrato canónico POINT_PRODUCT_BALANCE_V1. "
+            "Las fuentes y advertencias se conservan en metadata."
+        )
+        metadata = {
+            "opening_meta": opening_meta,
+            "sales_meta": sales_meta,
+            "production_meta": movement_meta["production"],
+            "waste_meta": movement_meta["waste"],
+            "conversion_meta": movement_meta["conversions"],
+            "fact_meta": {"source": "MonthlyPointProductBalanceService", "status": "canonical"},
+            "closing_inventory_meta": closing_meta,
+            "recipe_count": len(line_rows),
+            "validation": validation,
+            "balance": self._json_compatible(
+                {
+                    "contract": "POINT_PRODUCT_BALANCE_V1",
+                    "issues": balance.issues,
+                    "warnings": balance.warnings,
+                    "source_names": sorted(balance.sources),
+                    "effective_snapshot_dates": balance.effective_snapshot_dates,
+                    "source_counts": balance.source_counts,
+                }
+            ),
+        }
+        metadata["source_fingerprint"] = self._build_source_fingerprint(
+            balance=balance,
+            persisted_metadata=metadata,
             line_rows=line_rows,
-            totals=totals,
-        )
-        validation["warnings"] = list(
-            dict.fromkeys(list(validation.get("warnings") or []) + list(closing_validation.get("warnings") or []))
-        )
-        validation["blocking_issues"] = list(
-            dict.fromkeys(
-                list(validation.get("blocking_issues") or [])
-                + list(closing_validation.get("blocking_issues") or [])
-            )
-        )
-        validation["automation_reviews"] = closing_validation["automation_reviews"]
-        validation["closing_inventory"] = closing_validation["closing_inventory"]
-        validation["lock_ready"] = not validation["blocking_issues"]
-        notes = self._build_notes(
-            opening_source=opening_source,
-            month_start=month_start,
-            prev_month_end=prev_month_end,
-            opening_meta=opening_meta,
-            sales_meta=sales_meta,
-            validation=validation,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
         )
         return {
             "month_start": month_start,
-            "month_end": month_end,
-            "opening_source": opening_source,
+            "month_end": balance.month_end,
+            "opening_source": ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
             "opening_reference_date": opening_reference_date,
             "notes": notes,
             "line_rows": line_rows,
-            "metadata": {
-                "opening_meta": opening_meta,
-                "sales_meta": sales_meta,
-                "fact_meta": fact_meta,
-                "closing_inventory_meta": closing_meta,
-                "recipe_count": len(recipe_ids),
-                "validation": validation,
-            },
+            "metadata": metadata,
             "totals": totals,
         }
+
+    def _build_source_fingerprint(
+        self,
+        *,
+        balance,
+        persisted_metadata: dict[str, object],
+        line_rows: list[dict[str, object]],
+        opening_source: str,
+    ) -> dict[str, str]:
+        raw_sources = self._raw_source_evidence(month_start=balance.month_start)
+        payload = {
+            "contract": "POINT_PRODUCT_BALANCE_V1",
+            "month_start": balance.month_start,
+            "month_end": balance.month_end,
+            "sources": {
+                source_name: balance.sources.get(source_name) or {}
+                for source_name in (
+                    "opening_snapshot",
+                    "closing_snapshot",
+                    "sales",
+                    "production",
+                    "waste",
+                    "conversions",
+                )
+            },
+            "effective_snapshot_dates": balance.effective_snapshot_dates,
+            "source_counts": balance.source_counts,
+            "resolved_rows": {
+                receta_id: {
+                    "opening_point": row.opening_point,
+                    "production": row.production,
+                    "sales": row.sales,
+                    "waste": row.waste,
+                    "conversion_in": row.conversion_in,
+                    "conversion_out": row.conversion_out,
+                    "calculated_closing": row.calculated_closing,
+                    "closing_point": row.closing_point,
+                    "closing_point_cedis": row.closing_point_cedis,
+                    "closing_point_sucursales": row.closing_point_sucursales,
+                    "difference_point": row.difference_point,
+                    "status": row.status,
+                    "conversion_origin": row.conversion_origin,
+                    "conversion_origins": row.conversion_origins,
+                    "issues": row.issues,
+                    "source_counts": row.source_counts,
+                }
+                for receta_id, row in sorted(balance.rows.items())
+            },
+            "unresolved_movements": [
+                {
+                    "source": row.source,
+                    "movement_id": row.movement_id,
+                    "item_code": row.item_code,
+                    "item_name": row.item_name,
+                    "quantity": row.quantity,
+                    "issue": row.issue,
+                    "source_hash": row.source_hash,
+                    "branch_external_id": row.branch_external_id,
+                    "movement_date": row.movement_date,
+                }
+                for row in balance.unresolved_movements
+            ],
+            "unresolved_conversions": [
+                {
+                    "movement_external_id": row.movement_external_id,
+                    "source_hash": row.source_hash,
+                    "item_code": row.item_code,
+                    "item_name": row.item_name,
+                    "quantity": row.quantity,
+                    "issue": row.issue,
+                }
+                for row in balance.unresolved_conversions
+            ],
+            "raw_sources": raw_sources,
+        }
+        return {
+            "algorithm": "sha256",
+            "digest": self._metadata_digest(payload),
+            "metadata_digest": self._canonical_source_metadata_digest(persisted_metadata),
+            "projected_lines_digest": self._projected_lines_digest(
+                line_rows,
+                opening_source=opening_source,
+            ),
+            "raw_sources_digest": self._metadata_digest(raw_sources),
+        }
+
+    @classmethod
+    def _line_payload_from_projection(
+        cls,
+        row: dict[str, object],
+        *,
+        opening_source: str,
+    ) -> dict[str, object]:
+        return {
+            "receta_padre_id": row["receta"].pk,
+            **{
+                key: cls._canonical_line_value(row[key])
+                for key in cls.CANONICAL_LINE_DIGEST_FIELDS
+            },
+            "metadata": {
+                **dict(row["metadata"]),
+                "opening_source": opening_source,
+            },
+        }
+
+    @classmethod
+    def _line_payload_from_model(cls, line: ProductoMonthClosureLine) -> dict[str, object]:
+        return {
+            "receta_padre_id": line.receta_padre_id,
+            **{
+                field_name: cls._canonical_line_value(getattr(line, field_name))
+                for field_name in cls.CANONICAL_LINE_DIGEST_FIELDS
+            },
+            "metadata": dict(line.metadata or {}),
+        }
+
+    @classmethod
+    def _canonical_line_value(cls, value):
+        if isinstance(value, Decimal):
+            return cls._decimal_text(value)
+        return value
+
+    @classmethod
+    def _projected_lines_digest(cls, line_rows, *, opening_source: str) -> str:
+        payload = [
+            cls._line_payload_from_projection(row, opening_source=opening_source)
+            for row in line_rows
+        ]
+        return cls._metadata_digest(sorted(payload, key=lambda row: row["receta_padre_id"]))
+
+    @classmethod
+    def _persisted_lines_digest(cls, lines: list[ProductoMonthClosureLine]) -> str:
+        payload = [cls._line_payload_from_model(line) for line in lines]
+        return cls._metadata_digest(sorted(payload, key=lambda row: row["receta_padre_id"]))
+
+    @classmethod
+    def _queryset_evidence(cls, queryset: models.QuerySet) -> dict[str, object]:
+        model = queryset.model
+        field_names = tuple(field.attname for field in model._meta.concrete_fields)
+        digest = sha256()
+        row_count = 0
+        for values in queryset.order_by(model._meta.pk.attname).values_list(*field_names).iterator(chunk_size=2000):
+            row_count += 1
+            encoded = json.dumps(
+                cls._json_compatible(dict(zip(field_names, values))),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return {
+            "model": model._meta.label_lower,
+            "fields": field_names,
+            "row_count": row_count,
+            "digest": digest.hexdigest(),
+        }
+
+    @classmethod
+    def _raw_source_evidence(cls, *, month_start: date) -> dict[str, object]:
+        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        next_month = month_end + timedelta(days=1)
+        current_timezone = timezone.get_current_timezone()
+        lower_bound = timezone.make_aware(datetime.combine(month_start, time.min), current_timezone)
+        upper_bound = timezone.make_aware(datetime.combine(next_month, time.min), current_timezone)
+        tolerance_days = int(
+            getattr(
+                settings,
+                "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS",
+                cls.DEFAULT_SNAPSHOT_TOLERANCE_DAYS,
+            )
+        )
+        opening_target = month_start - timedelta(days=1)
+        opening_snapshot_start = timezone.make_aware(
+            datetime.combine(opening_target - timedelta(days=tolerance_days), time.min),
+            current_timezone,
+        )
+        opening_snapshot_end = timezone.make_aware(
+            datetime.combine(opening_target + timedelta(days=tolerance_days + 1), time.min),
+            current_timezone,
+        )
+        closing_snapshot_start = timezone.make_aware(
+            datetime.combine(month_end - timedelta(days=tolerance_days), time.min),
+            current_timezone,
+        )
+        closing_snapshot_end = timezone.make_aware(
+            datetime.combine(month_end + timedelta(days=tolerance_days + 1), time.min),
+            current_timezone,
+        )
+
+        snapshot_qs = PointInventorySnapshot.objects.filter(
+            Q(
+                captured_at__gte=opening_snapshot_start,
+                captured_at__lt=opening_snapshot_end,
+            )
+            | Q(
+                captured_at__gte=closing_snapshot_start,
+                captured_at__lt=closing_snapshot_end,
+            )
+        )
+        production_qs = PointProductionLine.objects.filter(
+            production_date__gte=month_start,
+            production_date__lte=month_end,
+        )
+        waste_qs = PointWasteLine.objects.filter(
+            movement_at__gte=lower_bound,
+            movement_at__lt=upper_bound,
+        )
+        conversion_qs = PointConversionLine.objects.filter(
+            movement_at__gte=lower_bound,
+            movement_at__lt=upper_bound,
+        )
+        daily_sales_qs = PointDailySale.objects.filter(
+            sale_date__gte=month_start,
+            sale_date__lte=month_end,
+        )
+        historical_sales_qs = VentaHistorica.objects.filter(
+            fecha__gte=month_start,
+            fecha__lte=month_end,
+            fuente=POINT_BRIDGE_SALES_SOURCE,
+        )
+        fact_qs = FactProduccionDiaria.objects.filter(
+            fecha__gte=month_start,
+            fecha__lte=month_end,
+        )
+        monthly_waste_model = apps.get_model("control", "MermaMensualSucursal")
+        monthly_waste_qs = monthly_waste_model.objects.filter(periodo=month_start)
+
+        referenced_job_ids: set[int] = set()
+        for queryset in (snapshot_qs, production_qs, waste_qs, conversion_qs, daily_sales_qs):
+            referenced_job_ids.update(
+                queryset.exclude(sync_job_id=None).values_list("sync_job_id", flat=True)
+            )
+        jobs_qs = PointSyncJob.objects.filter(
+            Q(id__in=referenced_job_ids)
+            | Q(
+                parameters__start_date=month_start.isoformat(),
+                parameters__end_date=month_end.isoformat(),
+            )
+            | Q(
+                parameters__date_from=month_start.isoformat(),
+                parameters__date_to=month_end.isoformat(),
+            )
+        )
+        logs_qs = PointExtractionLog.objects.filter(sync_job_id__in=jobs_qs.values("id"))
+
+        querysets = {
+            "opening_and_closing_snapshot_candidates": snapshot_qs,
+            "sales_point_daily": daily_sales_qs,
+            "sales_historical_fallback": historical_sales_qs,
+            "production_point": production_qs,
+            "waste_point": waste_qs,
+            "waste_monthly_fallback": monthly_waste_qs,
+            "conversion_point": conversion_qs,
+            "fact_operational_fallback": fact_qs,
+            "sync_jobs": jobs_qs,
+            "extraction_logs": logs_qs,
+            # Catálogos no son hechos mensuales y sus escritores no comparten
+            # este mutex. Su efecto queda congelado y auditable en el digest de
+            # líneas proyectadas; el raw digest sólo certifica hechos coordinados.
+        }
+        return {
+            name: cls._queryset_evidence(queryset)
+            for name, queryset in sorted(querysets.items())
+        }
+
+    @classmethod
+    def _canonical_source_metadata_digest(cls, metadata: dict[str, object]) -> str:
+        return cls._metadata_digest(
+            {
+                key: metadata.get(key) or {}
+                for key in cls.CANONICAL_FINGERPRINT_METADATA_KEYS
+            }
+        )
+
+    @classmethod
+    def _lock_canonical_source_month(cls, month_start: date) -> None:
+        lock_product_month_sources([month_start])
+
+    @staticmethod
+    def _json_compatible(value):
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, (date, datetime)):
+            return value.isoformat()
+        if isinstance(value, dict) or hasattr(value, "items"):
+            return {str(key): ProductMonthClosureService._json_compatible(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [ProductMonthClosureService._json_compatible(item) for item in value]
+        if isinstance(value, set) or isinstance(value, frozenset):
+            return [ProductMonthClosureService._json_compatible(item) for item in sorted(value, key=str)]
+        return value
+
+    def _compact_source_metadata(self, source):
+        raw = self._json_compatible(source)
+        return {
+            str(key): (
+                [self._compact_metadata_value(item) for item in value]
+                if key in self.PUBLIC_SOURCE_METADATA_ARRAY_KEYS and isinstance(value, list)
+                else self._compact_metadata_value(value)
+            )
+            for key, value in raw.items()
+        }
+
+    @classmethod
+    def _compact_metadata_value(cls, value, *, sample_limit=None, mapping_limit=None):
+        sample_limit = cls.METADATA_COMPACTION_SAMPLE_LIMIT if sample_limit is None else sample_limit
+        mapping_limit = cls.METADATA_COMPACTION_MAPPING_LIMIT if mapping_limit is None else mapping_limit
+        if isinstance(value, list):
+            if len(value) <= sample_limit:
+                return [cls._compact_metadata_value(item) for item in value]
+            return {
+                "count": len(value),
+                "hash": cls._metadata_digest(value),
+                "sample": [cls._compact_metadata_value(item) for item in value[:sample_limit]],
+            }
+        if isinstance(value, dict):
+            if len(value) > mapping_limit:
+                items = sorted(value.items(), key=lambda item: str(item[0]))
+                return {
+                    "count": len(value),
+                    "hash": cls._metadata_digest(value),
+                    "sample": {str(key): cls._compact_metadata_value(item) for key, item in items[:sample_limit]},
+                }
+            return {str(key): cls._compact_metadata_value(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
+        return value
+
+    @classmethod
+    def _metadata_digest(cls, value) -> str:
+        payload = json.dumps(
+            cls._json_compatible(value),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _decimal_text(value: Decimal) -> str:
+        return format(Decimal(value).normalize(), "f")
+
+    def _project_canonical_balance(self, *, balance, global_issues=None):
+        recipes = Receta.objects.in_bulk(balance.rows.keys())
+        raw_recipe_ids = set(recipes)
+        equivalences = {}
+        for item in RecetaEquivalencia.objects.select_related("receta_padre").filter(
+            receta_porcion_id__in=raw_recipe_ids,
+            activo=True,
+            tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+        ).order_by("id"):
+            equivalences.setdefault(item.receta_porcion_id, item)
+        derived_relations = {}
+        for item in RecetaPresentacionDerivada.objects.select_related("receta_padre").filter(
+            receta_derivada_id__in=raw_recipe_ids, activo=True
+        ).order_by("id"):
+            derived_relations.setdefault(item.receta_derivada_id, item)
+        global_issues = set(balance.issues if global_issues is None else global_issues)
+        source_authority = {
+            family: bool((balance.sources.get(family) or {}).get("authoritative"))
+            for family in (
+                "opening_snapshot",
+                "sales",
+                "production",
+                "waste",
+                "conversions",
+                "closing_snapshot",
+            )
+        }
+        buckets: dict[int, dict[str, object]] = {}
+        for receta_id, raw_row in sorted(balance.rows.items()):
+            receta = recipes.get(receta_id)
+            if receta is None:
+                continue
+            parent, _converted_one, equivalence_issue, is_derived, projection_source = self._resolve_projected_recipe(
+                receta, equivalences.get(receta.id), derived_relations.get(receta.id)
+            )
+            if parent is None or not self._is_recipe_eligible_for_closure(parent):
+                continue
+            bucket = buckets.setdefault(
+                parent.id,
+                {
+                    "receta": parent,
+                    "opening": ZERO,
+                    "opening_missing": False,
+                    "production": ZERO,
+                    "sales_direct": ZERO,
+                    "sales_derived": ZERO,
+                    "sales_missing": False,
+                    "waste_direct": ZERO,
+                    "waste_derived": ZERO,
+                    "conversion_in": ZERO,
+                    "conversion_out": ZERO,
+                    "calculated": ZERO,
+                    "calculated_missing": False,
+                    "closing": ZERO,
+                    "closing_missing": False,
+                    "closing_cedis": ZERO,
+                    "closing_cedis_missing": False,
+                    "closing_sucursales": ZERO,
+                    "closing_sucursales_missing": False,
+                    "point_difference": ZERO,
+                    "point_difference_missing": False,
+                    "issues": set(),
+                    "origins": set(),
+                    "origin_summaries": set(),
+                    "projection_sources": set(),
+                    "source_counts": {},
+                    "raw_recipe_ids": [],
+                    "point_statuses": set(),
+                },
+            )
+            factor = Decimal(_converted_one)
+            bucket["raw_recipe_ids"].append(receta.id)
+            bucket["issues"].update(global_issues)
+            bucket["issues"].update(raw_row.issues)
+            bucket["point_statuses"].add(raw_row.status)
+            if equivalence_issue:
+                bucket["issues"].add(equivalence_issue)
+            observed_origins = tuple(getattr(raw_row, "conversion_origins", ()) or ())
+            if observed_origins:
+                bucket["origins"].update(observed_origins)
+            if raw_row.conversion_origin:
+                bucket["origin_summaries"].add(raw_row.conversion_origin)
+                if not observed_origins and raw_row.conversion_origin in {
+                    ORIGIN_POINT,
+                    ORIGIN_CONFIGURED_EQUIVALENCE,
+                    "UNRESOLVED",
+                }:
+                    bucket["origins"].add(raw_row.conversion_origin)
+            contributes_conversion = (
+                Decimal(raw_row.conversion_in) != ZERO
+                or Decimal(raw_row.conversion_out) != ZERO
+            )
+            if projection_source and contributes_conversion:
+                bucket["projection_sources"].add(projection_source)
+            for count_name, count in raw_row.source_counts.items():
+                bucket["source_counts"][count_name] = bucket["source_counts"].get(count_name, 0) + int(count)
+            for field, raw_value, missing_flag in (
+                ("opening", raw_row.opening_point, "opening_missing"),
+                ("calculated", raw_row.calculated_closing, "calculated_missing"),
+                ("closing", raw_row.closing_point, "closing_missing"),
+                ("closing_cedis", raw_row.closing_point_cedis, "closing_cedis_missing"),
+                ("closing_sucursales", raw_row.closing_point_sucursales, "closing_sucursales_missing"),
+                ("point_difference", raw_row.difference_point, "point_difference_missing"),
+            ):
+                if raw_value is None:
+                    bucket[missing_flag] = True
+                else:
+                    bucket[field] += Decimal(raw_value) * factor
+            bucket["production"] += Decimal(raw_row.production) * factor
+            bucket["conversion_in"] += Decimal(raw_row.conversion_in) * factor
+            bucket["conversion_out"] += Decimal(raw_row.conversion_out) * factor
+            sales = ZERO
+            if raw_row.sales is None:
+                bucket["sales_missing"] = True
+            else:
+                sales = Decimal(raw_row.sales) * factor
+            waste = Decimal(raw_row.waste) * factor
+            if is_derived:
+                bucket["sales_derived"] += sales
+                bucket["waste_derived"] += waste
+            else:
+                bucket["sales_direct"] += sales
+                bucket["waste_direct"] += waste
+
+        rows = []
+        for parent_id in sorted(buckets):
+            bucket = buckets[parent_id]
+            issues = set(bucket["issues"])
+            if bucket["opening_missing"]:
+                issues.add("OPENING_SNAPSHOT_MISSING")
+            if bucket["closing_missing"]:
+                issues.add("CLOSING_SNAPSHOT_MISSING")
+            scopes_available = not bool(bucket["closing_cedis_missing"] or bucket["closing_sucursales_missing"])
+            if scopes_available and abs(bucket["closing"] - bucket["closing_cedis"] - bucket["closing_sucursales"]) > Decimal("0.01"):
+                scopes_available = False
+            if not scopes_available:
+                issues.add("CLOSING_SNAPSHOT_SCOPE_MISSING")
+            if bucket["calculated_missing"]:
+                issues.add("CALCULATED_CLOSING_MISSING")
+            if bucket["sales_missing"]:
+                issues.add("SALES_SOURCE_MISSING")
+            if bucket["point_difference_missing"]:
+                issues.add("POINT_DIFFERENCE_MISSING")
+            point_difference = None if bucket["point_difference_missing"] else bucket["point_difference"]
+            legacy_difference = ZERO if point_difference is None else -point_difference
+            audit_status, audit_detail = self._canonical_audit_status(
+                issues=issues,
+                closing_missing=bool(bucket["closing_missing"]),
+                point_difference=point_difference,
+                waste_total=bucket["waste_direct"] + bucket["waste_derived"],
+            )
+            conversion_origins = sorted(bucket["origins"])
+            conversion_origin = self._conversion_origin_summary(
+                origins=conversion_origins,
+                summaries=bucket["origin_summaries"],
+            )
+            metadata = self._json_compatible(
+                {
+                    "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                    "point_conversion_in": self._decimal_text(bucket["conversion_in"]),
+                    "point_conversion_out": self._decimal_text(bucket["conversion_out"]),
+                    "conversion_origin": conversion_origin,
+                    "conversion_origins": conversion_origins,
+                    "projection_sources": sorted(bucket["projection_sources"]),
+                    "source_counts": bucket["source_counts"],
+                    "issues": sorted(issues),
+                    "point_difference": "" if point_difference is None else self._decimal_text(point_difference),
+                    "point_status": self._projected_point_status(
+                        point_statuses=bucket["point_statuses"],
+                        point_difference=point_difference,
+                        issues=issues,
+                    ),
+                    "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
+                    "point_final_scopes_available": scopes_available,
+                    "sales_source_available": not bool(bucket["sales_missing"]),
+                    "opening_source_authoritative": source_authority["opening_snapshot"],
+                    "sales_source_authoritative": source_authority["sales"],
+                    "production_source_authoritative": source_authority["production"],
+                    "waste_source_authoritative": source_authority["waste"],
+                    "conversion_source_authoritative": source_authority["conversions"],
+                    "closing_source_authoritative": source_authority["closing_snapshot"],
+                }
+            )
+            rows.append(
+                {
+                    "receta": bucket["receta"],
+                    "inventario_inicial_teorico": bucket["opening"],
+                    "produccion_mes": bucket["production"],
+                    "venta_directa_enteros": bucket["sales_direct"],
+                    "venta_derivada_equivalente": bucket["sales_derived"],
+                    "venta_total_equivalente": bucket["sales_direct"] + bucket["sales_derived"],
+                    "merma_directa_enteros": bucket["waste_direct"],
+                    "merma_derivada_equivalente": bucket["waste_derived"],
+                    "merma_total_equivalente": bucket["waste_direct"] + bucket["waste_derived"],
+                    "inventario_final_teorico": bucket["calculated"],
+                    "inventario_final_point_cedis": bucket["closing_cedis"],
+                    "inventario_final_point_sucursales": bucket["closing_sucursales"],
+                    "inventario_final_point_total": bucket["closing"],
+                    "diferencia_teorico_vs_point": legacy_difference,
+                    "estado_auditoria": audit_status,
+                    "detalle_auditoria": audit_detail,
+                    "source_closing_snapshot_count": int(bucket["source_counts"].get("closing_snapshot_rows", 0)),
+                    "source_snapshot_count": int(bucket["source_counts"].get("opening_snapshot_rows", 0)),
+                    "source_sale_rows": int(bucket["source_counts"].get("sales_rows", 0)),
+                    "source_production_rows": int(bucket["source_counts"].get("production_rows", 0)),
+                    "source_waste_rows": int(bucket["source_counts"].get("waste_rows", 0)),
+                    "has_catalog_issue": bool(issues),
+                    "catalog_issue_note": " | ".join(sorted(issues))[:255],
+                    "metadata": metadata,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _conversion_origin_summary(*, origins, summaries) -> str:
+        if len(origins) == 1:
+            return origins[0]
+        if len(origins) > 1 or "MIXED" in summaries:
+            return "MIXED"
+        if len(summaries) == 1:
+            return next(iter(summaries))
+        return ""
+
+    @staticmethod
+    def _resolve_projected_recipe(receta, equivalence, derived_relation):
+        if receta.excluir_cierre:
+            return None, ZERO, "", False, "EXCLUIDA"
+        if equivalence is not None:
+            factor = Decimal(str(equivalence.factor_conversion or 0))
+            if factor <= ZERO:
+                return receta, Decimal("1"), f"Equivalencia de cierre sin factor valido para {receta.nombre}", False, "DIRECTA"
+            return equivalence.receta_padre, Decimal("1") / factor, "", equivalence.receta_padre_id != receta.id, "EQUIVALENCIA"
+        if derived_relation is None:
+            return receta, Decimal("1"), "", False, "DIRECTA"
+        units = Decimal(str(derived_relation.unidades_por_padre or 0))
+        if units <= ZERO:
+            return receta, Decimal("1"), f"Relacion derivada sin unidades_por_padre para {receta.nombre}", False, "DIRECTA"
+        return derived_relation.receta_padre, Decimal("1") / units, "", True, "PRESENTACION_DERIVADA"
+
+    @staticmethod
+    def _canonical_status(*, point_difference: Decimal | None, issues: set[str]) -> str:
+        if issues or point_difference is None:
+            return "REVISAR_FUENTE"
+        if abs(point_difference) <= Decimal("0.01"):
+            return "COINCIDE"
+        return "POINT_MAYOR" if point_difference > ZERO else "POINT_MENOR"
+
+    def _projected_point_status(self, *, point_statuses, point_difference, issues):
+        if issues:
+            return "REVISAR_FUENTE"
+        if len(point_statuses) == 1:
+            return next(iter(point_statuses))
+        return self._canonical_status(point_difference=point_difference, issues=issues)
+
+    def _canonical_audit_status(self, *, issues, closing_missing, point_difference, waste_total):
+        if closing_missing:
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
+                "El contrato canónico no tiene inventario final Point autoritativo.",
+            )
+        if issues:
+            return (
+                ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO,
+                "La línea conserva incidencias de fuente, catálogo o conversión del contrato canónico.",
+            )
+        return self._resolve_audit_status(
+            has_catalog_issue=False,
+            closing_inventory_available=True,
+            difference=-point_difference,
+            waste_total=waste_total,
+        )
 
     def build_bootstrap_seed(
         self,
@@ -363,25 +1014,35 @@ class ProductMonthClosureService:
     ) -> ProductoMonthClosure:
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
-        existing_closure = ProductoMonthClosure.objects.filter(month_start=month_start).order_by("-id").first()
-        if existing_closure is not None and existing_closure.is_locked:
-            if rebuild:
-                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild.")
-            raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
-
-        line_rows, opening_meta, validation = self._build_bootstrap_seed_rows(seed_rows=seed_rows)
-        notes = self._build_bootstrap_notes(
-            month_start=month_start,
-            source_label=source_label,
-            validation=validation,
-        )
-        now = timezone.now()
-
         with transaction.atomic():
-            closure, _ = ProductoMonthClosure.objects.get_or_create(
+            closure, created = ProductoMonthClosure.objects.get_or_create(
                 month_start=month_start,
                 defaults={"month_end": month_end},
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                if rebuild:
+                    raise ProductMonthClosureError(
+                        f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                    )
+                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
+            if not created and not rebuild:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} ya existe; se requiere rebuild para reemplazarlo."
+                )
+
+            line_rows, opening_meta, validation = self._build_bootstrap_seed_rows(seed_rows=seed_rows)
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                raise ProductMonthClosureError(
+                    f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                )
+            notes = self._build_bootstrap_notes(
+                month_start=month_start,
+                source_label=source_label,
+                validation=validation,
+            )
+            now = timezone.now()
             closure.lines.all().delete()
             closure.month_end = month_end
             closure.status = ProductoMonthClosure.STATUS_DRAFT
@@ -409,7 +1070,6 @@ class ProductMonthClosureService:
                 "recipe_count": len(line_rows),
                 "rebuild": bool(rebuild),
             }
-            closure.is_locked = False
             closure.save()
 
             for row in line_rows:
@@ -430,7 +1090,7 @@ class ProductMonthClosureService:
                     inventario_final_point_total=ZERO,
                     diferencia_teorico_vs_point=row["inventario_final_teorico"],
                     estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
-                    detalle_auditoria="Bootstrap histórico sin inventario físico Point del cierre.",
+                    detalle_auditoria="Bootstrap histórico sin saldo final Point del cierre.",
                     source_closing_snapshot_count=0,
                     source_snapshot_count=0,
                     source_sale_rows=0,
@@ -442,11 +1102,11 @@ class ProductMonthClosureService:
                 )
 
             closure.status = ProductoMonthClosure.STATUS_BUILT
-            closure.is_locked = False
-            closure.save(update_fields=["status", "is_locked", "updated_at"])
+            closure.save(update_fields=["status", "updated_at"])
 
         return closure
 
+    @transaction.atomic
     def lock(
         self,
         *,
@@ -456,6 +1116,7 @@ class ProductMonthClosureService:
         note: str = "",
         channel: str = "service",
     ) -> ProductoMonthClosure:
+        closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
         if closure.is_locked:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} ya esta bloqueado.")
         if closure.status != ProductoMonthClosure.STATUS_BUILT:
@@ -463,6 +1124,10 @@ class ProductMonthClosureService:
                 f"El cierre {closure.month_start:%Y-%m} debe estar construido antes de bloquearse."
             )
 
+        # El padre serializa build/lock. El trigger de líneas toma KEY SHARE
+        # sobre este padre antes de cada INSERT/UPDATE/DELETE, por lo que ningún
+        # DML puede confirmar mientras validamos y sellamos el cierre. Bloquear
+        # además las hijas formaría un ciclo con un writer que ya tomó su fila.
         lines = list(closure.lines.all())
         if not lines:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} no tiene lineas para bloquear.")
@@ -488,9 +1153,71 @@ class ProductMonthClosureService:
             raise ProductMonthClosureError(
                 f"El cierre {closure.month_start:%Y-%m} tiene incidencias activas y no puede bloquearse: {blocking_issues[0]}"
             )
+        if validation.get("lock_ready") is False:
+            raise ProductMonthClosureError(
+                f"El cierre {closure.month_start:%Y-%m} no esta listo para bloquearse segun su validacion."
+            )
+
+        metadata = dict(closure.metadata or {})
+        balance_contract = str((metadata.get("balance") or {}).get("contract") or "")
+        is_canonical = balance_contract == "POINT_PRODUCT_BALANCE_V1" or any(
+            str((line.metadata or {}).get("balance_contract") or "") == "POINT_PRODUCT_BALANCE_V1"
+            for line in lines
+        )
+        if is_canonical:
+            invalid_sources = []
+            for metadata_key, label in self.CANONICAL_LOCK_REQUIRED_SOURCES:
+                source = dict(metadata.get(metadata_key) or {})
+                if source.get("authoritative") is not True or source.get("source_present") is not True:
+                    invalid_sources.append(label)
+            if invalid_sources:
+                raise ProductMonthClosureError(
+                    f"El cierre {closure.month_start:%Y-%m} tiene una fuente requerida ausente o sin autoridad: "
+                    f"{invalid_sources[0]}."
+                )
+            stored_fingerprint = dict(metadata.get("source_fingerprint") or {})
+            if (
+                stored_fingerprint.get("algorithm") != "sha256"
+                or not stored_fingerprint.get("digest")
+                or not stored_fingerprint.get("metadata_digest")
+                or not stored_fingerprint.get("projected_lines_digest")
+                or not stored_fingerprint.get("raw_sources_digest")
+            ):
+                raise ProductMonthClosureError(
+                    f"El cierre {closure.month_start:%Y-%m} no tiene huella de fuentes Point; "
+                    "reconstruye el cierre antes de bloquearlo."
+                )
+            persisted_metadata_digest = self._canonical_source_metadata_digest(metadata)
+            if stored_fingerprint["metadata_digest"] != persisted_metadata_digest:
+                raise ProductMonthClosureError(
+                    "La metadata de fuentes del cierre cambió; reconstruye el cierre antes de bloquearlo."
+                )
+            if stored_fingerprint["projected_lines_digest"] != self._persisted_lines_digest(lines):
+                raise ProductMonthClosureError(
+                    "Las líneas persistidas cambiaron; reconstruye el cierre antes de bloquearlo."
+                )
+
+            # Serializa únicamente cierres del mismo periodo. La revalidación
+            # siguiente es deliberadamente corta: no congela las 16 tablas de
+            # ventas, movimientos, snapshots y catálogos durante toda la
+            # proyección.
+            self._lock_canonical_source_month(closure.month_start)
+            current_plan = self._fresh_canonical_preview(month=closure.month_start)
+            current_fingerprint = dict(current_plan["metadata"].get("source_fingerprint") or {})
+            if current_fingerprint.get("projected_lines_digest") != stored_fingerprint["projected_lines_digest"]:
+                raise ProductMonthClosureError(
+                    "La proyección actual cambió; reconstruye el cierre antes de bloquearlo."
+                )
+            if current_fingerprint.get("raw_sources_digest") != stored_fingerprint["raw_sources_digest"]:
+                raise ProductMonthClosureError(
+                    "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo."
+                )
+            if current_fingerprint.get("digest") != stored_fingerprint["digest"]:
+                raise ProductMonthClosureError(
+                    "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo."
+                )
 
         lock_time = timezone.now()
-        metadata = dict(closure.metadata or {})
         metadata["lock_event"] = {
             "locked_at": lock_time.isoformat(),
             "locked_by": getattr(locked_by, "username", "") if locked_by else "",
@@ -508,6 +1235,11 @@ class ProductMonthClosureService:
         closure.is_locked = True
         closure.save(update_fields=["metadata", "status", "is_locked", "updated_at"])
         return closure
+
+    @staticmethod
+    def _fresh_canonical_preview(*, month: date) -> dict[str, object]:
+        fresh_service = ProductMonthClosureService(refresh_official_sales=False)
+        return fresh_service.preview(month=month, refresh_official_sales=False)
 
     def _parse_month(self, month: str | date) -> date:
         if isinstance(month, date):
@@ -1159,26 +1891,29 @@ class ProductMonthClosureService:
         if not closing_inventory_available:
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO,
-                "No hay snapshot Point de inventario final para comparar contra el teórico.",
+                "No hay snapshot Point de inventario final para comparar contra el saldo calculado.",
             )
         if abs(difference) <= tolerance:
             if Decimal(str(waste_total or 0)) > tolerance:
                 return (
                     ProductoMonthClosureLine.AUDIT_STATUS_CUADRA_CON_MERMA,
-                    "El cierre cuadra después de descontar la merma registrada.",
+                    (
+                        "El saldo calculado coincide con el inventario final Point "
+                        "después de descontar la merma registrada."
+                    ),
                 )
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_CUADRA,
-                "El inventario teórico coincide con el inventario final Point.",
+                "El saldo calculado coincide con el inventario final Point.",
             )
         if difference < ZERO:
             return (
                 ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
-                "Point reporta más inventario físico que el inventario teórico.",
+                "Point reporta más inventario final que el saldo calculado.",
             )
         return (
             ProductoMonthClosureLine.AUDIT_STATUS_FALTANTE_NO_EXPLICADO,
-            "El inventario teórico es mayor al inventario físico Point.",
+            "El saldo calculado es mayor al inventario final Point.",
         )
 
     def _build_closing_inventory_validation(
@@ -1265,7 +2000,9 @@ class ProductMonthClosureService:
         if bootstrap_seeded:
             warnings.append("El opening proviene de un bootstrap historico aprobado.")
         if opening_meta.get("previous_closure_opening_basis") == "theoretical_closing":
-            warnings.append("El opening heredado usa cierre teorico previo porque no habia inventario fisico Point.")
+            warnings.append(
+                "El saldo inicial heredado usa el cierre calculado previo porque no había inventario final Point."
+            )
         if unmatched_products:
             blocking_issues.append("Existen productos del opening sin homologacion Point -> ERP.")
         if snapshot_missing_exact_day and not snapshot_within_tolerance:

@@ -24,9 +24,13 @@
 
   <section class="bi-hero">
     <div class="bi-hero-main">
-      <div class="bi-kicker">Point · Conciliación mensual</div>
-      <h1 class="bi-hero-title">Cierre teórico de producto terminado</h1>
-      <p class="bi-copy">Libro mensual bloqueable: inventario inicial + producción - venta - merma = inventario final teórico. La lectura operativa diaria queda en Producido vs Vendido.</p>
+      <div class="bi-kicker">{% if is_historical_inventory %}Histórico · Conteo físico{% else %}Point · Conciliación mensual{% endif %}</div>
+      <h1 class="bi-hero-title">Cierre mensual de producto terminado</h1>
+      {% if is_historical_inventory %}
+      <p class="bi-copy">Este mes conserva un conteo físico importado del archivo histórico. Diferencia histórica = saldo calculado − inventario histórico físico; se mantiene el signo legado sin atribuirlo a Point.</p>
+      {% else %}
+      <p class="bi-copy">Saldo calculado = saldo inicial + producción + conversión de entrada - venta - merma - conversión de salida. Dif. Point = Fin. Point - Saldo calculado; un valor positivo indica que Point cerró con más unidades.</p>
+      {% endif %}
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Mes visible</div>
@@ -39,9 +43,9 @@
           <div class="bi-hero-highlight-meta">{{ movement_source_label }}</div>
         </article>
         <article class="bi-hero-highlight">
-          <div class="bi-hero-highlight-label">Inventario final teórico</div>
-          <div class="bi-hero-highlight-value">{{ total_ending|floatformat:2|intcomma }}</div>
-          <div class="bi-hero-highlight-meta">Point físico {{ total_closing_point|floatformat:2|intcomma }} · Dif {{ total_closing_difference|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-label">Saldo calculado</div>
+          <div class="bi-hero-highlight-value">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+          <div class="bi-hero-highlight-meta">{{ inventory_balance_label }} {% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · {{ inventory_difference_label }} {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
         </article>
       </div>
     </div>
@@ -105,8 +109,8 @@
           <strong>{{ movement_source_label }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Opening</span>
-          <strong>{{ total_opening|floatformat:2|intcomma }}</strong>
+          <span>{{ opening_balance_label }}</span>
+          <strong>{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</strong>
         </div>
         <div class="bi-summary-chip">
           <span>Alcance</span>
@@ -125,29 +129,29 @@
   {% if closure %}
   <section class="bi-kpi-grid">
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{{ total_opening|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario inicial teórico</div>
-      <div class="bi-kpi-note">{% if closure.opening_reference_date %}Base de {{ closure.opening_reference_date|date:"Y-m-d" }}{% else %}Sin referencia{% endif %}</div>
+      <div class="bi-kpi-value">{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-label">{{ opening_balance_label }}</div>
+      <div class="bi-kpi-note">{{ closure.get_opening_source_display }}{% if closure.opening_reference_date %} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value success">{{ total_production|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value success">{% if total_production != None %}{{ total_production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Producción del mes</div>
       <div class="bi-kpi-note">Movimiento operativo consolidado desde Point</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value warning">{{ total_sales|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value warning">{% if total_sales != None %}{{ total_sales|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Venta equivalente</div>
-      <div class="bi-kpi-note">{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas</div>
+      <div class="bi-kpi-note">{% if total_derived_sales != None %}{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas{% else %}Fuente de venta no disponible{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if total_ending < 0 %}danger{% endif %}">{{ total_ending|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario final teórico</div>
-      <div class="bi-kpi-note">{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes</div>
+      <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-label">Saldo calculado</div>
+      <div class="bi-kpi-note">{% if total_waste != None %}{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes{% else %}Sin dato de merma autoritativa{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if total_closing_difference > 0 %}danger{% elif total_closing_difference < 0 %}warning{% else %}success{% endif %}">{{ total_closing_point|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Inventario final Point</div>
-      <div class="bi-kpi-note">CEDIS {{ total_closing_cedis|floatformat:2|intcomma }} · sucursales {{ total_closing_sucursales|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value">{% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-label">{{ inventory_balance_label }}</div>
+      <div class="bi-kpi-note">{{ inventory_difference_label }} {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · {% if is_historical_inventory %}saldo calculado menos conteo histórico{% else %}Point menos saldo calculado{% endif %}</div>
     </article>
   </section>
 
@@ -238,7 +242,7 @@
         <article class="bi-list-item {% if row.month_value == selected_month %}is-signal-success{% else %}is-signal-neutral{% endif %}">
           <strong>{{ row.month_label }}</strong>
           <div class="bi-subtle">{{ row.status }} · {{ row.line_count|intcomma }} recetas</div>
-          <div>{{ row.ending_inventory|floatformat:2|intcomma }} final · {{ row.sales_total|floatformat:2|intcomma }} venta</div>
+          <div>{% if row.ending_inventory != None %}{{ row.ending_inventory|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado · {% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} venta</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ row.month_value }}">Abrir mes</a>
           </div>
@@ -285,8 +289,8 @@
       <div class="bi-panel-head">
         <div>
           <div class="bi-kicker">Conversión</div>
-          <h2 class="bi-panel-title">Presentaciones derivadas consolidadas</h2>
-          <p class="bi-panel-copy">Top de recetas padre que absorbieron venta o merma proveniente de rebanadas u otras presentaciones derivadas.</p>
+          <h2 class="bi-panel-title">Conversión Point registrada</h2>
+          <p class="bi-panel-copy">Solo muestra entradas y salidas de conversión registradas por Point; ventas y mermas derivadas no se reinterpretan como conversión.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -294,25 +298,29 @@
           <thead>
             <tr>
               <th>Receta padre</th>
-              <th class="text-end">Venta derivada</th>
-              <th class="text-end">Merma derivada</th>
-              <th class="text-end">Final teórico</th>
+              <th class="text-end">Conv. entrada Point</th>
+              <th class="text-end">Conv. salida Point</th>
+              <th>Origen conversión</th>
+              <th>Proyección</th>
+              <th class="text-end">Saldo calculado</th>
             </tr>
           </thead>
           <tbody>
             {% for line in conversion_rows %}
             <tr>
               <td>
-                <strong>{{ line.receta_padre.nombre }}</strong>
-                {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+                <strong>{{ line.line.receta_padre.nombre }}</strong>
+                {% if line.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.line.receta_padre.codigo_point }}</div>{% endif %}
               </td>
-              <td class="text-end">{{ line.venta_derivada_equivalente|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ line.merma_derivada_equivalente|floatformat:2|intcomma }}</td>
-              <td class="text-end">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+              <td class="text-end">{% if line.point_conversion_in != None %}{{ line.point_conversion_in|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+              <td class="text-end">{% if line.point_conversion_out != None %}{{ line.point_conversion_out|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+              <td>{% if line.conversion_origin %}{{ line.conversion_origin|join:", " }}{% else %}Sin dato{% endif %}</td>
+              <td>{% if line.projection_sources %}{{ line.projection_sources|join:", " }}{% else %}Sin dato{% endif %}</td>
+              <td class="text-end">{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="4">No hubo conversiones derivadas visibles en este mes.</td>
+              <td colspan="6">No hubo conversiones Point registradas visibles en este mes.</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -331,9 +339,9 @@
       <div class="bi-list bi-list-dense">
         {% for line in catalog_issue_rows %}
         <article class="bi-list-item is-signal-warning">
-          <strong>{{ line.receta_padre.nombre }}</strong>
-          <div class="bi-subtle">{{ line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
-          <div>{{ line.inventario_final_teorico|floatformat:2|intcomma }} final teórico</div>
+          <strong>{{ line.line.receta_padre.nombre }}</strong>
+          <div class="bi-subtle">{{ line.line.catalog_issue_note|default:"Incidencia detectada en homologación." }}</div>
+          <div>{% if line.calculated_closing != None %}{{ line.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado</div>
         </article>
         {% empty %}
         <article class="bi-list-item is-signal-success">
@@ -351,7 +359,7 @@
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
         <h2 class="bi-panel-title">Detalle del cierre mensual {{ selected_month }}</h2>
-        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}: inventario inicial + producción - venta - merma = final teórico por receta padre.</p>
+        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}. La diferencia conserva el signo {% if is_historical_inventory %}Saldo calculado menos Inventario histórico físico{% else %}Fin. Point menos Saldo calculado{% endif %}.</p>
       </div>
       <div class="bi-panel-actions">
         <span class="bi-pill is-muted">Fuente: {{ movement_source_label }}</span>
@@ -364,34 +372,37 @@
         <colgroup>
           <col class="col-receta-padre">
           <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-metric">
-          <col class="col-metric"><col class="col-estado">
+          <col class="col-metric"><col class="col-metric"><col class="col-metric"><col class="col-estado">
         </colgroup>
         <thead>
           <tr>
             <th>Receta padre</th>
-            <th class="text-end">Inicial</th>
+            <th class="text-end">{{ opening_balance_label }}</th>
             <th class="text-end">Producción</th>
             <th class="text-end">Venta</th>
             <th class="text-end">Merma total</th>
-            <th class="text-end">Final teórico {{ selected_month }}</th>
-            <th>Lectura</th>
+            <th class="text-end">Saldo calculado</th>
+            <th class="text-end">{{ inventory_balance_label }}</th>
+            <th class="text-end">{{ inventory_difference_label }}</th>
+            <th>Estado</th>
           </tr>
         </thead>
         <tbody>
-          {% for line in closure_lines %}
+          {% for row in closure_display_rows %}
           <tr>
             <td class="bi-closure-name-cell">
-              <strong>{{ line.receta_padre.nombre }}</strong>
-              {% if line.receta_padre.codigo_point %}<div class="bi-subtle">{{ line.receta_padre.codigo_point }}</div>{% endif %}
+              <strong>{{ row.line.receta_padre.nombre }}</strong>
+              {% if row.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ row.line.receta_padre.codigo_point }}</div>{% endif %}
             </td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_inicial_teorico|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.produccion_mes|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.venta_total_equivalente|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.merma_total_equivalente|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ line.inventario_final_teorico|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.opening_balance != None %}{{ row.opening_balance|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.production != None %}{{ row.production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.waste_total != None %}{{ row.waste_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.calculated_closing != None %}{{ row.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.closing_point != None %}{{ row.closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.point_difference != None %}{{ row.point_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="bi-closure-reading-cell">
-              <span class="bi-tone {% if line.estado_auditoria == 'CUADRA' or line.estado_auditoria == 'CUADRA_CON_MERMA' %}success{% elif line.estado_auditoria == 'SOBRANTE_FISICO' %}warning{% else %}danger{% endif %}">{{ line.get_estado_auditoria_display }}</span>
-              <div class="bi-subtle">{{ line.detalle_auditoria }}</div>
+              <span class="bi-tone {{ row.point_status_tone }}">{{ row.point_status_label }}</span>
             </td>
           </tr>
           {% endfor %}

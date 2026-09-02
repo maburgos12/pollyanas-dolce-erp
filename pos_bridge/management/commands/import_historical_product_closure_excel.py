@@ -282,6 +282,13 @@ class Command(BaseCommand):
             if normalized == "producto":
                 continue
 
+            raw_values = {
+                "inventario_inicial": ws[f"D{row_idx}"].value,
+                "cedis": ws[f"I{row_idx}"].value,
+                "sucursales": ws[f"J{row_idx}"].value,
+                "fisico_total": ws[f"K{row_idx}"].value,
+            }
+            presence = {key: _has_value(value) for key, value in raw_values.items()}
             values = {
                 "inventario_inicial": _parse_decimal(ws[f"D{row_idx}"].value),
                 "cedis": _parse_decimal(ws[f"I{row_idx}"].value),
@@ -289,10 +296,12 @@ class Command(BaseCommand):
                 "fisico_total": _parse_decimal(ws[f"K{row_idx}"].value),
             }
             numeric_values = list(values.values())
-            if _is_category_row(product_name, numeric_values):
+            if _is_category_row(product_name, numeric_values) and (
+                any(value != 0 for value in numeric_values) or not any(presence.values())
+            ):
                 category = product_name.strip().title()
                 continue
-            if not any(value != 0 for value in numeric_values):
+            if not any(presence.values()):
                 continue
 
             receta = _resolve_receta(matcher=matcher, variant_map=recipe_variant_map, product_name=product_name)
@@ -301,6 +310,7 @@ class Command(BaseCommand):
                 "category": category,
                 "product_name": product_name,
                 "receta": receta,
+                "presence": presence,
                 **values,
             }
             rows.append(row_payload)
@@ -331,6 +341,7 @@ class Command(BaseCommand):
                 {
                     "receta": receta,
                     "source_rows": [],
+                    "presence": {key: False for key in decimal_keys},
                     **{key: Decimal("0") for key in decimal_keys},
                 },
             )
@@ -343,11 +354,15 @@ class Command(BaseCommand):
             )
             for key in decimal_keys:
                 bucket[key] += source_row[key]
+                bucket["presence"][key] = bucket["presence"][key] or source_row["presence"][key]
 
         matched_rows = list(grouped_rows.values())
-        sales_map, sales_source = _sales_map(month_start, month_end)
-        production_map, production_source = _production_map(month_start, month_end)
-        merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
+        sales_map = production_map = merma_map = merma_cost_map = None
+        sales_source = production_source = merma_source = ""
+        if options.get("dry_run"):
+            sales_map, sales_source = _sales_map(month_start, month_end)
+            production_map, production_source = _production_map(month_start, month_end)
+            merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
 
         payload = {
             "mode": "dry_run" if options.get("dry_run") else "import",
@@ -377,10 +392,22 @@ class Command(BaseCommand):
                     "opening_source": ProductoMonthClosure.OPENING_SOURCE_BOOTSTRAP_SEED,
                 },
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
             if closure.is_locked:
                 raise CommandError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
             if closure.lines.exists() and not options.get("rebuild"):
                 raise CommandError(f"El cierre {month_start:%Y-%m} ya tiene lineas. Usa --rebuild.")
+            # Las fuentes operativas también forman parte del estado mensual:
+            # leerlas bajo el mismo lock evita publicar un mapa calculado antes
+            # que otro importador del periodo.
+            sales_map, sales_source = _sales_map(month_start, month_end)
+            production_map, production_source = _production_map(month_start, month_end)
+            merma_map, merma_cost_map, merma_source = _merma_maps(month_start, month_end)
+            payload["operational_sources"] = {
+                "ventas": sales_source,
+                "produccion": production_source,
+                "merma": merma_source,
+            }
             closure.lines.all().delete()
             closure.month_end = month_end
             closure.status = ProductoMonthClosure.STATUS_BUILT
@@ -396,10 +423,10 @@ class Command(BaseCommand):
                     "source_sheet": sheet_name,
                     "scope": "inventory_only",
                     "imported_columns": [
-                        "inventario_inicial",
-                        "inventario_final_point_cedis",
-                        "inventario_final_point_sucursales",
-                        "inventario_final_point_total",
+                        "inventario_inicial_historico",
+                        "conteo_historico_cedis",
+                        "conteo_historico_sucursales",
+                        "inventario_historico_fisico_total",
                     ],
                     "excluded_columns": [
                         "produccion_mes_desde_excel",
@@ -412,22 +439,69 @@ class Command(BaseCommand):
                     "closure_lines": len(matched_rows),
                     "unmatched_rows": unmatched_rows[:50],
                     "stopped_at_conversion_helper": stopped_at_conversion_helper,
-                }
+                },
+                "opening_meta": {
+                    "source": f"Excel histórico: {input_path.name} / {sheet_name}",
+                    "source_present": True,
+                    "authoritative": True,
+                },
+                "sales_meta": {
+                    "source": sales_source,
+                    "source_present": bool(sales_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "production_meta": {
+                    "source": production_source,
+                    "source_present": bool(production_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "waste_meta": {
+                    "source": merma_source,
+                    "source_present": bool(merma_map),
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_OPERATIONAL_SOURCE_UNVALIDATED"],
+                },
+                "conversion_meta": {
+                    "source": "sin_datos",
+                    "source_present": False,
+                    "authoritative": False,
+                    "authority_issues": ["HISTORICAL_CONVERSION_SOURCE_MISSING"],
+                },
             }
             closure.save()
 
             for row in matched_rows:
                 receta = row["receta"]
+                movement_authority = {
+                    "sales": {
+                        "source": sales_source,
+                        "source_present": receta.id in sales_map,
+                        "authoritative": False,
+                    },
+                    "production": {
+                        "source": production_source,
+                        "source_present": receta.id in production_map,
+                        "authoritative": False,
+                    },
+                    "waste": {
+                        "source": merma_source,
+                        "source_present": receta.id in merma_map,
+                        "authoritative": False,
+                    },
+                    "conversions": {
+                        "source": "sin_datos",
+                        "source_present": False,
+                        "authoritative": False,
+                    },
+                }
                 producido = production_map.get(receta.id, Decimal("0"))
                 vendido = sales_map.get(receta.id, Decimal("0"))
                 merma = merma_map.get(receta.id, Decimal("0"))
                 inventario_teorico = row["inventario_inicial"] + producido - vendido - merma
                 diferencia_inventario = inventario_teorico - row["fisico_total"]
-                physical_cells_have_values = any(
-                    _has_value(ws[f"{column}{source_row['row_number']}"].value)
-                    for source_row in row["source_rows"]
-                    for column in ["I", "J", "K"]
-                )
+                physical_cells_have_values = row["presence"]["fisico_total"]
                 status = _audit_status(
                     final_difference=diferencia_inventario,
                     total_waste=merma,
@@ -455,11 +529,23 @@ class Command(BaseCommand):
                         "historical_excel": {
                             "scope": "inventory_only",
                             "source_rows": row["source_rows"],
-                            "inventario_inicial": str(row["inventario_inicial"]),
-                            "inventario_final_point_cedis": str(row["cedis"]),
-                            "inventario_final_point_sucursales": str(row["sucursales"]),
-                            "inventario_final_point_total": str(row["fisico_total"]),
+                            "inventario_inicial_historico": str(row["inventario_inicial"]),
+                            "conteo_historico_cedis": str(row["cedis"]),
+                            "conteo_historico_sucursales": str(row["sucursales"]),
+                            "inventario_historico_fisico_total": str(row["fisico_total"]),
+                            "inventory_presence": {
+                                "opening": row["presence"]["inventario_inicial"],
+                                "cedis": row["presence"]["cedis"],
+                                "sucursales": row["presence"]["sucursales"],
+                                "total": row["presence"]["fisico_total"],
+                            },
                             "operational_sources": payload["operational_sources"],
+                            "movement_authority": movement_authority,
+                            "observed_movements": {
+                                "production": str(producido) if receta.id in production_map else None,
+                                "sales": str(vendido) if receta.id in sales_map else None,
+                                "waste": str(merma) if receta.id in merma_map else None,
+                            },
                         }
                     },
                 )

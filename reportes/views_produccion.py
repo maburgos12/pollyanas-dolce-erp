@@ -12,7 +12,6 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models import Min, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -23,11 +22,17 @@ from openpyxl.utils import get_column_letter
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointProductionLine, PointSalesDailyProductFact
-from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaEquivalencia
+from pos_bridge.models import (
+    PointConversionLine,
+    PointInventorySnapshot,
+    PointProductionLine,
+    PointWasteLine,
+)
+from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
+from recetas.models import ProductoMonthClosure, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import FactProduccionDiaria
-from reportes.services_production_sales import build_sales_map
+from ventas.services.sales_canonical_source import canonical_sales_evidence_months
 
 
 ZERO = Decimal("0")
@@ -64,14 +69,15 @@ PRODUCTION_EXPORT_COLUMNS = [
     ("producido", "Producido", "number"),
     ("dif", "Dif. operativa", "number"),
     ("merma_reportada", "Merma", "number"),
-    ("conversion_entrada", "Conv.", "number"),
-    ("enteros_equivalentes", "Eq.", "number"),
+    ("conversion_entrada", "Conv. entrada Point", "number"),
+    ("conversion_salida", "Conv. salida Point", "number"),
+    ("conversion_provenance_label", "Procedencia conversión", "text"),
     ("costo_merma", "Costo merma", "currency"),
     ("pct_merma", "% merma", "percent"),
-    ("inventario_inicial", "Inv. inicial", "number"),
-    ("inventario_final_teorico", "Inv. final teórico", "number"),
-    ("inventario_final_point_total", "Inv. físico registrado", "number"),
-    ("diferencia_inventario", "Inv. Δ", "number"),
+    ("inventario_inicial", "Ini. Point", "number"),
+    ("inventario_final_teorico", "Saldo calculado", "number"),
+    ("inventario_final_point_total", "Fin. Point", "number"),
+    ("diferencia_inventario", "Dif. Point", "number"),
     ("estado_inventario", "Estado", "text"),
 ]
 
@@ -80,10 +86,13 @@ PDF_EXPORT_COLUMNS = [
     ("producido", "Prod."),
     ("dif", "Dif."),
     ("merma_reportada", "Merma"),
+    ("conversion_entrada", "Conv. entrada Point"),
+    ("conversion_salida", "Conv. salida Point"),
     ("pct_merma", "%"),
-    ("inventario_final_teorico", "Fin."),
-    ("inventario_final_point_total", "Físico"),
-    ("diferencia_inventario", "Inv. Δ"),
+    ("inventario_inicial", "Ini. Point"),
+    ("inventario_final_teorico", "Saldo calculado"),
+    ("inventario_final_point_total", "Fin. Point"),
+    ("diferencia_inventario", "Dif. Point"),
 ]
 
 
@@ -130,15 +139,6 @@ def _decimal(value: Any) -> Decimal:
     return Decimal(str(value or 0))
 
 
-def _aggregate_by_recipe(queryset, field_name: str, recipe_field: str = "receta_id") -> dict[int, Decimal]:
-    rows = queryset.values(recipe_field).annotate(total=Sum(field_name))
-    return {
-        int(row[recipe_field]): _decimal(row["total"])
-        for row in rows
-        if row.get(recipe_field)
-    }
-
-
 def _category_label(value: str | None) -> str:
     return (value or "").strip() or "Sin categoría"
 
@@ -153,31 +153,9 @@ def _is_production_reference_category(value: str | None) -> bool:
 
 
 def _sum_or_none(rows: list[dict[str, Any]], key: str) -> Decimal | None:
-    values = [row[key] for row in rows if row.get(key) is not None]
-    if not values:
+    if not rows or any(row.get(key) is None for row in rows):
         return None
-    return sum(values, ZERO)
-
-
-def _inventory_status(*, theoretical: Decimal | None, physical: Decimal | None) -> str:
-    if theoretical is None or physical is None:
-        return ""
-    difference = theoretical - physical
-    if abs(difference) <= Decimal("0.01"):
-        return "Cuadra"
-    if difference < ZERO:
-        return "Sobrante físico"
-    return "Faltante no explicado"
-
-
-def _first_available_date() -> dict[str, date | None]:
-    return {
-        "ventas": PointSalesDailyProductFact.objects.aggregate(min_date=Min("sale_date"))["min_date"],
-        "produccion": FactProduccionDiaria.objects.aggregate(min_date=Min("fecha"))["min_date"]
-        or PointProductionLine.objects.aggregate(min_date=Min("production_date"))["min_date"],
-        "merma": MermaMensualSucursal.objects.aggregate(min_date=Min("periodo"))["min_date"],
-        "cierre": ProductoMonthClosure.objects.aggregate(min_date=Min("month_start"))["min_date"],
-    }
+    return sum((row[key] for row in rows), ZERO)
 
 
 def _filename_period(context: dict[str, Any]) -> str:
@@ -214,7 +192,7 @@ def _export_raw_value(row: dict[str, Any], key: str) -> Any:
 def _export_display_value(row: dict[str, Any], key: str, kind: str) -> str:
     value = _export_raw_value(row, key)
     if value is None or value == "":
-        return ""
+        return "Sin dato"
     if kind == "currency":
         return f"${_format_decimal(value, places=2, trim=False)}"
     if kind == "percent":
@@ -382,10 +360,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         sheet["A1"] = f"Producido vs Vendido - {context.get('selected_period_label') or period}"
         sheet["A1"].font = title_font
         sheet["A2"] = (
-            f"Ventas: {context['fuentes']['ventas']} | "
-            f"Producción: {context['fuentes']['produccion']} | "
-            f"Merma: {context['fuentes']['merma']} | "
-            f"Inventario: {context['fuentes']['inventario']}"
+            f"Ventas: {context['fuentes']['ventas']['label']} | "
+            f"Producción: {context['fuentes']['produccion']['label']} | "
+            f"Merma: {context['fuentes']['merma']['label']} | "
+            f"Inventario: {context['fuentes']['inventario']['label']}"
         )
         sheet["A3"] = f"Categoría: {context.get('selected_categoria') or 'Todas'}"
 
@@ -401,7 +379,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 raw_value = _export_raw_value(row, key)
                 cell = sheet.cell(row=row_idx, column=col_idx)
                 if raw_value is None or raw_value == "":
-                    cell.value = None
+                    cell.value = "Sin dato"
                 elif kind == "currency":
                     cell.value = _decimal_or_none(raw_value)
                     cell.number_format = '$#,##0.00'
@@ -458,23 +436,32 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             f"Periodo: {context.get('selected_period_label') or period}",
             f"Categoria: {context.get('selected_categoria') or 'Todas'}",
             (
-                f"Fuentes - Ventas: {context['fuentes']['ventas']} | "
-                f"Produccion: {context['fuentes']['produccion']} | "
-                f"Merma: {context['fuentes']['merma']} | "
-                f"Inventario: {context['fuentes']['inventario']}"
+                f"Fuentes - Ventas: {context['fuentes']['ventas']['label']} | "
+                f"Produccion: {context['fuentes']['produccion']['label']} | "
+                f"Merma: {context['fuentes']['merma']['label']} | "
+                f"Inventario: {context['fuentes']['inventario']['label']}"
             ),
+            "Dif. Point = Fin. Point - Saldo calculado; positivo = Point mayor, negativo = Point menor.",
             "",
         ]
         for row in _export_rows(context):
             prefix = "TOTAL" if row.get("_row_type") == "total" else "SUBTOTAL" if row.get("_row_type") == "subtotal" else "RECETA"
             name_line = f"{prefix}: {row.get('categoria') or ''} - {row.get('receta') or ''}".strip()
             lines.extend(textwrap.wrap(name_line, width=118) or [""])
-            metrics = " | ".join(
+            operational_metrics = " | ".join(
                 f"{label} {_export_display_value(row, key, 'percent' if key == 'pct_merma' else 'number') or '-'}"
-                for key, label in PDF_EXPORT_COLUMNS
+                for key, label in PDF_EXPORT_COLUMNS[:7]
+            )
+            point_metrics = " | ".join(
+                f"{label} {_export_display_value(row, key, 'number') or '-'}"
+                for key, label in PDF_EXPORT_COLUMNS[7:]
             )
             status = _export_display_value(row, "estado_inventario", "text") or "-"
-            lines.extend(textwrap.wrap(f"{metrics} | Estado {status}", width=118, subsequent_indent="  "))
+            lines.extend(textwrap.wrap(operational_metrics, width=118, subsequent_indent="  "))
+            lines.extend(textwrap.wrap(f"{point_metrics} | Estado {status}", width=118, subsequent_indent="  "))
+            if row.get("_row_type") == "detail":
+                provenance = _export_display_value(row, "conversion_provenance_label", "text") or "Sin dato"
+                lines.append(f"Procedencia conversion: {provenance}")
             costo = _export_display_value(row, "costo_merma", "currency") or "$0.00"
             lines.append(f"Costo merma: {costo}")
             lines.append("")
@@ -486,27 +473,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
 
     def _build_context(self, request: HttpRequest) -> dict[str, Any]:
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
-        sucursal_id = None  # Producción es centralizada en CEDIS; no aplica filtro por sucursal
         categoria = (request.GET.get("categoria") or request.GET.get("familia") or "").strip()
 
-        sales_map, sales_source = self._sales_map(period, sucursal_id)
-        recipe_ids = set(sales_map)
-        production_map, production_source = self._production_map(period, sucursal_id)
-        merma_map, merma_cost_map, merma_source = self._merma_maps(period, sucursal_id)
-        closure_map = self._closure_map(period)
-        recipe_ids.update(recipe_id for recipe_id, value in production_map.items() if value)
-
-        if not sucursal_id and not recipe_ids:
-            recipe_ids.update(closure_map["inventario"])
-        recipe_ids.update(recipe_id for recipe_id, value in merma_map.items() if value)
-        conversion_map = self._conversion_map(sales_map, merma_map)
-        recipe_ids.update(
-            recipe_id
-            for recipe_id, value in conversion_map.items()
-            if value.get("conversion_entrada") or value.get("conversion_salida")
-        )
-        recipe_ids.update(closure_map["inventario"])
-        missing_slice_equivalences = self._missing_slice_equivalences(sales_map, merma_map)
+        # This report is deliberately read-only: the canonical balance service defaults
+        # to local facts/snapshots and never requests a Point refresh from this path.
+        balance = MonthlyPointProductBalanceService().build(month=period.value)
+        recipe_ids = set(balance.rows)
 
         recipes_qs = Receta.objects.filter(
             id__in=recipe_ids,
@@ -520,74 +492,14 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         )
 
         cost_map = get_total_cost_map([recipe.id for recipe in recipes])
-        rows = [self._build_row(recipe, sales_map, production_map, merma_map, merma_cost_map, cost_map) for recipe in recipes]
-        for row in rows:
-            conv = conversion_map.get(row["receta_id"]) or {}
-            row["convertido"] = conv.get("convertido", ZERO)
-            row["enteros_equivalentes"] = conv.get("enteros_equivalentes", ZERO)
-            row["conversion_entrada"] = conv.get("conversion_entrada", ZERO)
-            row["conversion_salida"] = conv.get("conversion_salida", ZERO)
-            row["conversion_factor"] = conv.get("factor", ZERO)
-            inventory = closure_map["inventario"].get(row["receta_id"]) or {}
-            if row["produccion_referencia"]:
-                row["inventario_inicial"] = None
-                row["inventario_final_point_total"] = None
-                row["inventario_final_teorico"] = None
-                row["diferencia_inventario"] = None
-                row["estado_inventario"] = "Referencia"
-            else:
-                row["inventario_inicial"] = inventory.get("inventario_inicial")
-                row["inventario_final_point_total"] = inventory.get("inventario_final_point_total")
-                row["inventario_final_teorico"] = self._theoretical_inventory(row)
-                row["diferencia_inventario"] = (
-                    row["inventario_final_teorico"] - row["inventario_final_point_total"]
-                    if row["inventario_final_teorico"] is not None and row["inventario_final_point_total"] is not None
-                    else None
-                )
-                row["estado_inventario"] = _inventory_status(
-                    theoretical=row["inventario_final_teorico"],
-                    physical=row["inventario_final_point_total"],
-                )
-            row["json"].update(
-                {
-                    "convertido": str(row["convertido"]),
-                    "enteros_equivalentes": str(row["enteros_equivalentes"]),
-                    "conversion_entrada": str(row["conversion_entrada"]),
-                    "conversion_salida": str(row["conversion_salida"]),
-                    "conversion_factor": str(row["conversion_factor"]),
-                    "inventario_inicial": str(row["inventario_inicial"] or ""),
-                    "inventario_final_teorico": str(row["inventario_final_teorico"] or ""),
-                    "inventario_final_point_total": str(row["inventario_final_point_total"] or ""),
-                    "diferencia_inventario": str(row["diferencia_inventario"] or ""),
-                    "estado_inventario": row["estado_inventario"],
-                }
-            )
+        rows = [
+            self._build_row(recipe, balance.rows[recipe.id], cost_map, balance.sources)
+            for recipe in recipes
+        ]
         groups, grand_total = self._group_rows(rows)
-
-        source_dates = _first_available_date()
-        banners = self._banners(
-            sales_source=sales_source,
-            production_source=production_source,
-            merma_source=merma_source,
-            source_dates=source_dates,
-        )
-        if missing_slice_equivalences:
-            names = ", ".join(item["receta"] for item in missing_slice_equivalences[:8])
-            extra = "" if len(missing_slice_equivalences) <= 8 else f" y {len(missing_slice_equivalences) - 8} más"
-            banners.append(
-                "Conversiones: hay recetas de rebanada con venta o merma sin equivalencia activa: "
-                f"{names}{extra}. Configurar RecetaEquivalencia para convertirlas a enteros."
-            )
-        periodos_qs = (
-            FactProduccionDiaria.objects.annotate(mes=TruncMonth("fecha"))
-            .values_list("mes", flat=True)
-            .distinct()
-            .order_by("-mes")
-        )
-        periodos = [d.strftime("%Y-%m") for d in periodos_qs if d]
-        current = date.today().strftime("%Y-%m")
-        if current not in periodos:
-            periodos.insert(0, current)
+        fuentes = self._canonical_sources(balance)
+        banners = self._canonical_banners(balance, fuentes)
+        periodos = self._available_periods(selected=period.value)
 
         return {
             "module_tabs": self._module_tabs("producido_vs_vendido"),
@@ -600,200 +512,24 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "familias": self._categories(),
             "groups": groups,
             "grand_total": grand_total,
-            "conversion_map": conversion_map,
-            "missing_slice_equivalences": missing_slice_equivalences,
             "json_rows": [row["json"] for row in rows],
-            "fuentes": {
-                "ventas": sales_source,
-                "produccion": production_source,
-                "merma": merma_source,
-                "inventario": closure_map["source"],
-            },
+            "fuentes": fuentes,
             "banners": banners,
-            "source_dates": source_dates,
+            "source_dates": balance.effective_snapshot_dates,
         }
-
-    def _conversion_map(
-        self,
-        sales_map: dict[int, Decimal],
-        merma_map: dict[int, Decimal] | None = None,
-    ) -> dict[int, dict[str, Decimal]]:
-        slice_activity = defaultdict(Decimal)
-        for receta_id, value in sales_map.items():
-            if value:
-                slice_activity[int(receta_id)] += _decimal(value)
-        for receta_id, value in (merma_map or {}).items():
-            if value:
-                slice_activity[int(receta_id)] += _decimal(value)
-
-        equivalences = {
-            equivalence.receta_porcion_id: equivalence
-            for equivalence in RecetaEquivalencia.objects.filter(
-                receta_porcion_id__in=slice_activity.keys(),
-                tipo_relacion="CONVERSION",
-                activo=True,
-            )
-        }
-        result = {}
-        for receta_id, unidades_rebanada in slice_activity.items():
-            equivalence = equivalences.get(receta_id)
-            if not equivalence:
-                continue
-            convertido = _decimal(unidades_rebanada)
-            if not convertido:
-                continue
-            factor = _decimal(equivalence.factor_conversion if equivalence else None) or Decimal("1")
-            enteros = (convertido / factor).quantize(Decimal("0.01")) if factor else ZERO
-            portion_data = result.setdefault(
-                int(receta_id),
-                {
-                    "convertido": ZERO,
-                    "enteros_equivalentes": ZERO,
-                    "conversion_entrada": ZERO,
-                    "conversion_salida": ZERO,
-                    "factor": factor,
-                },
-            )
-            portion_data["convertido"] += convertido
-            portion_data["enteros_equivalentes"] += enteros
-            portion_data["conversion_entrada"] += convertido
-            portion_data["factor"] = factor
-
-            if equivalence and equivalence.receta_padre_id:
-                parent_data = result.setdefault(
-                    int(equivalence.receta_padre_id),
-                    {
-                        "convertido": ZERO,
-                        "enteros_equivalentes": ZERO,
-                        "conversion_entrada": ZERO,
-                        "conversion_salida": ZERO,
-                        "factor": factor,
-                    },
-                )
-                parent_data["conversion_salida"] += enteros
-                parent_data["factor"] = factor
-        return result
-
-    def _missing_slice_equivalences(
-        self,
-        sales_map: dict[int, Decimal],
-        merma_map: dict[int, Decimal] | None = None,
-    ) -> list[dict[str, Any]]:
-        slice_activity = defaultdict(Decimal)
-        for receta_id, value in sales_map.items():
-            if value:
-                slice_activity[int(receta_id)] += _decimal(value)
-        for receta_id, value in (merma_map or {}).items():
-            if value:
-                slice_activity[int(receta_id)] += _decimal(value)
-
-        slice_recipes = Receta.objects.filter(
-            id__in=slice_activity.keys(),
-            categoria__iexact="Rebanada",
-            tipo=Receta.TIPO_PRODUCTO_FINAL,
-        ).order_by("nombre")
-        active_equivalence_ids = set(
-            RecetaEquivalencia.objects.filter(
-                receta_porcion_id__in=[recipe.id for recipe in slice_recipes],
-                activo=True,
-            ).values_list("receta_porcion_id", flat=True)
-        )
-        missing = []
-        for recipe in slice_recipes:
-            if recipe.id in active_equivalence_ids:
-                continue
-            unidades_rebanada = _decimal(slice_activity.get(recipe.id))
-            if not unidades_rebanada:
-                continue
-            missing.append(
-                {
-                    "receta_id": recipe.id,
-                    "receta": recipe.nombre,
-                    "vendido": _decimal(sales_map.get(recipe.id)),
-                    "merma_reportada": _decimal((merma_map or {}).get(recipe.id)),
-                    "unidades_rebanada": unidades_rebanada,
-                }
-            )
-        return missing
-
-    def _sales_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
-        return build_sales_map(period, sucursal_id)
-
-    def _production_map(self, period: PeriodSelection, sucursal_id: int | None) -> tuple[dict[int, Decimal], str]:
-        facts = FactProduccionDiaria.objects.filter(
-            fecha__gte=period.month_start,
-            fecha__lte=period.month_end,
-            receta_id__isnull=False,
-        )
-        if sucursal_id:
-            facts = facts.filter(sucursal_id=sucursal_id)
-        if facts.exists():
-            return _aggregate_by_recipe(facts, "producido"), "FactProduccionDiaria"
-
-        point_rows = PointProductionLine.objects.filter(
-            production_date__gte=period.month_start,
-            production_date__lte=period.month_end,
-            receta_id__isnull=False,
-            is_insumo=False,
-        )
-        if sucursal_id:
-            point_rows = point_rows.filter(erp_branch_id=sucursal_id)
-        if point_rows.exists():
-            return _aggregate_by_recipe(point_rows, "produced_quantity"), "PointProductionLine"
-        return {}, "sin_datos"
-
-    def _merma_maps(
-        self,
-        period: PeriodSelection,
-        sucursal_id: int | None,
-    ) -> tuple[dict[int, Decimal], dict[int, Decimal], str]:
-        fact_rows = FactProduccionDiaria.objects.filter(
-            fecha__gte=period.month_start,
-            fecha__lte=period.month_end,
-            receta_id__isnull=False,
-            merma__gt=0,
-        )
-        if sucursal_id:
-            fact_rows = fact_rows.filter(sucursal_id=sucursal_id)
-        if fact_rows.exists():
-            return _aggregate_by_recipe(fact_rows, "merma"), {}, "FactProduccionDiaria"
-
-        rows = MermaMensualSucursal.objects.filter(periodo=period.month_start, receta_id__isnull=False)
-        if sucursal_id:
-            rows = rows.filter(sucursal_id=sucursal_id)
-        if not rows.exists():
-            return {}, {}, "sin_datos"
-        return (
-            _aggregate_by_recipe(rows, "unidades_merma"),
-            _aggregate_by_recipe(rows, "costo_merma"),
-            "MermaMensualSucursal",
-        )
-
-    def _closure_map(self, period: PeriodSelection) -> dict[str, Any]:
-        closure = ProductoMonthClosure.objects.filter(month_start=period.month_start).first()
-        if closure is None:
-            return {"inventario": {}, "source": "sin_cierre"}
-        lines = ProductoMonthClosureLine.objects.filter(closure=closure)
-        inventory_map = {}
-        for line in lines:
-            inventory_map[line.receta_padre_id] = {
-                "inventario_inicial": _decimal(line.inventario_inicial_teorico),
-                "inventario_final_point_total": _decimal(line.inventario_final_point_total),
-            }
-        return {"inventario": inventory_map, "source": "ProductoMonthClosureLine"}
 
     def _build_row(
         self,
         recipe: Receta,
-        sales_map: dict[int, Decimal],
-        production_map: dict[int, Decimal],
-        merma_map: dict[int, Decimal],
-        merma_cost_map: dict[int, Decimal],
+        balance_row,
         cost_map: dict[int, Decimal],
+        sources: dict[str, Any],
     ) -> dict[str, Any]:
-        vendido = sales_map.get(recipe.id)
-        producido = production_map.get(recipe.id)
-        merma_reportada = merma_map.get(recipe.id)
+        vendido = self._movement_value(balance_row.sales, sources.get("sales"))
+        producido = self._movement_value(balance_row.production, sources.get("production"))
+        merma_reportada = self._movement_value(balance_row.waste, sources.get("waste"))
+        conversion_entrada = self._movement_value(balance_row.conversion_in, sources.get("conversions"))
+        conversion_salida = self._movement_value(balance_row.conversion_out, sources.get("conversions"))
         categoria = _category_label(recipe.categoria)
         produccion_referencia = not bool(recipe.pasa_modulo_produccion)
         dif = None
@@ -805,12 +541,14 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             else:
                 dif = raw_dif
         costo_unitario = cost_map.get(recipe.id, ZERO)
-        costo_merma = merma_cost_map.get(recipe.id)
-        if costo_merma is None and merma_reportada is not None and costo_unitario:
-            costo_merma = merma_reportada * costo_unitario
+        if merma_reportada == ZERO:
+            costo_merma = ZERO
+        else:
+            costo_merma = merma_reportada * costo_unitario if merma_reportada is not None and costo_unitario else None
         pct_merma = None
         if merma_reportada is not None and vendido and vendido > ZERO:
             pct_merma = (merma_reportada / vendido) * Decimal("100")
+        snapshots_authoritative = self._snapshots_are_authoritative(sources)
         row = {
             "receta_id": recipe.id,
             "receta": recipe.nombre,
@@ -824,6 +562,17 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "merma_reportada": merma_reportada,
             "costo_merma": costo_merma,
             "pct_merma": pct_merma,
+            "convertido": conversion_entrada,
+            "enteros_equivalentes": conversion_salida,
+            "conversion_entrada": conversion_entrada,
+            "conversion_salida": conversion_salida,
+            "conversion_provenance": balance_row.conversion_origin or "Sin dato",
+            "conversion_provenance_label": self._conversion_provenance_label(balance_row.conversion_origin),
+            "inventario_inicial": balance_row.opening_point if snapshots_authoritative else None,
+            "inventario_final_teorico": balance_row.calculated_closing if snapshots_authoritative else None,
+            "inventario_final_point_total": balance_row.closing_point if snapshots_authoritative else None,
+            "diferencia_inventario": balance_row.difference_point if snapshots_authoritative else None,
+            "estado_inventario": self._point_status_label(balance_row.status),
         }
         row["json"] = {
             key: (str(value) if isinstance(value, Decimal) else value)
@@ -832,17 +581,177 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         }
         return row
 
-    def _theoretical_inventory(self, row: dict[str, Any]) -> Decimal | None:
-        if row["inventario_inicial"] is None:
+    @staticmethod
+    def _movement_value(value: Decimal, source: dict[str, Any] | None) -> Decimal | None:
+        if source and source.get("source_present") is False:
             return None
-        return (
-            row["inventario_inicial"]
-            + (row["producido"] or ZERO)
-            + (row["conversion_entrada"] or ZERO)
-            - (row["vendido"] or ZERO)
-            - (row["merma_reportada"] or ZERO)
-            - (row["conversion_salida"] or ZERO)
+        return value
+
+    @staticmethod
+    def _snapshots_are_authoritative(sources: dict[str, Any]) -> bool:
+        return all(bool((sources.get(key) or {}).get("authoritative")) for key in ("opening_snapshot", "closing_snapshot"))
+
+    @staticmethod
+    def _point_status_label(status: str) -> str:
+        return {
+            "COINCIDE": "Coincide",
+            "POINT_MAYOR": "Point mayor",
+            "POINT_MENOR": "Point menor",
+            "REVISAR_FUENTE": "Revisar fuente",
+        }.get(status, "Revisar fuente")
+
+    @staticmethod
+    def _conversion_provenance_label(origin: str) -> str:
+        return {
+            "POINT": "Point",
+            "EQUIVALENCIA_CONFIGURADA": "equivalencia configurada",
+            "MIXED": "mixta",
+            "UNRESOLVED": "sin resolver",
+        }.get(origin, "Sin dato")
+
+    @staticmethod
+    def _source_descriptor(source: dict[str, Any] | None) -> dict[str, Any]:
+        source = dict(source or {})
+        return {
+            "source": source.get("source") or "Sin dato",
+            "selected_source": source.get("selected_source") or source.get("source") or "Sin dato",
+            "mode": source.get("mode") or source.get("configured_source_mode") or "Sin dato",
+            "authoritative": source.get("authoritative"),
+            "source_present": source.get("source_present"),
+            "effective_date": source.get("effective_date"),
+            "coverage": source.get("applied_coverage_key_count"),
+            "target_date": source.get("target_date"),
+            "selected_dates": source.get("selected_dates") or (),
+            "fallback_used": bool(source.get("fallback_used")),
+            "authority_issues": tuple(source.get("authority_issues") or ()),
+            "job_status": source.get("job_status"),
+            "selected_sync_job_ids": source.get("selected_sync_job_ids") or (),
+            "coverage_scope": source.get("coverage_scope"),
+            "coverage_start": source.get("coverage_start"),
+            "coverage_end": source.get("coverage_end"),
+        }
+
+    @staticmethod
+    def _authority_issue_label(issue: str) -> str:
+        suffix_labels = {
+            "SYNC_JOB_MISSING": "falta job Point del mes",
+            "SYNC_JOB_FAILED": "job Point fallido",
+            "SYNC_JOB_PARTIAL": "job Point parcial",
+            "SYNC_JOB_INCOMPLETE": "job Point incompleto",
+            "SYNC_RANGE_INCOMPLETE": "rango mensual incompleto",
+            "SYNC_JOB_RESTRICTED": "job Point filtrado por sucursal",
+            "SYNC_CONTRACT_INCOMPLETE": "contrato del job incompleto",
+            "SYNC_COUNT_MISMATCH": "conteo del job no reconcilia",
+            "SYNC_BRANCH_COVERAGE_INCOMPLETE": "cobertura de sucursales incompleta",
+            "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
+        }
+        issue = str(issue or "")
+        for suffix, label in suffix_labels.items():
+            if issue.endswith(suffix):
+                return label
+        return issue or "razón de autoridad no informada"
+
+    def _canonical_sources(self, balance) -> dict[str, Any]:
+        canonical = {
+            "opening": self._source_descriptor(balance.sources.get("opening_snapshot")),
+            "closing": self._source_descriptor(balance.sources.get("closing_snapshot")),
+            "production": self._source_descriptor(balance.sources.get("production")),
+            "sales": self._source_descriptor(balance.sources.get("sales")),
+            "waste": self._source_descriptor(balance.sources.get("waste")),
+            "conversions": self._source_descriptor(balance.sources.get("conversions")),
+            "snapshot_dates": dict(balance.effective_snapshot_dates),
+        }
+        canonical["authority"] = self._canonical_authority(balance, canonical)
+        return {
+            "ventas": {"label": canonical["sales"]["selected_source"], **canonical["sales"]},
+            "produccion": {"label": canonical["production"]["source"], **canonical["production"]},
+            "merma": {"label": canonical["waste"]["source"], **canonical["waste"]},
+            "inventario": {"label": "Snapshots Point", **canonical["closing"]},
+            "canonical": canonical,
+        }
+
+    @staticmethod
+    def _canonical_authority(balance, canonical: dict[str, Any]) -> dict[str, Any]:
+        reasons: list[str] = []
+        for key, label in (
+            ("opening", "Snapshot inicial Point"),
+            ("closing", "Snapshot final Point"),
+            ("sales", "Ventas"),
+            ("production", "Producción"),
+            ("waste", "Merma"),
+        ):
+            source = canonical[key]
+            if source["source_present"] is False:
+                reasons.append(f"{label}: {source['selected_source']} no disponible")
+            if not source["authoritative"]:
+                reasons.append(f"{label}: {source['selected_source']} sin autoridad")
+            reasons.extend(
+                f"{label}: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
+                for issue in source["authority_issues"]
+            )
+        conversions = canonical["conversions"]
+        if conversions["source_present"] is False:
+            reasons.append(f"Conversiones: {conversions['selected_source']} no disponible")
+        if not conversions["authoritative"]:
+            reasons.append(f"Conversiones: {conversions['selected_source']} sin autoridad")
+        reasons.extend(
+            f"Conversiones: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
+            for issue in conversions["authority_issues"]
         )
+
+        sales = canonical["sales"]
+        if sales["mode"] == "BRIDGE_HISTORY":
+            reasons.append("Ventas: BRIDGE_HISTORY")
+        if getattr(balance, "issues", ()):
+            reasons.append("Incidencias canónicas pendientes")
+        if getattr(balance, "unresolved_movements", ()) or getattr(balance, "unresolved_conversions", ()):
+            reasons.append("Movimientos Point pendientes de resolver")
+        if any(row.status == "REVISAR_FUENTE" for row in balance.rows.values()):
+            reasons.append("Filas Point en revisión")
+        return {
+            "verified": not reasons,
+            "label": "Verificada" if not reasons else "Revisar fuentes",
+            "reason": " · ".join(reasons),
+        }
+
+    def _canonical_banners(self, balance, fuentes: dict[str, Any]) -> list[str]:
+        sales = fuentes["canonical"]["sales"]
+        opening = fuentes["canonical"]["opening"]
+        closing = fuentes["canonical"]["closing"]
+        banners = [
+            "Fuente Point: ventas {sales}; inicial {opening}; final {closing}.".format(
+                sales=sales["selected_source"],
+                opening=opening["source"],
+                closing=closing["source"],
+            )
+        ]
+        if not self._snapshots_are_authoritative(balance.sources):
+            banners.append("Snapshots Point no autoritativos: los saldos y su diferencia se muestran como Sin dato.")
+        banners.extend(str(warning) for warning in balance.warnings)
+        banners.extend(str(issue) for issue in balance.issues)
+        return list(dict.fromkeys(banners))
+
+    def _available_periods(self, *, selected: str) -> list[str]:
+        months = {selected, *canonical_sales_evidence_months()}
+        for model, field in (
+            (ProductoMonthClosure, "month_start"),
+            (FactProduccionDiaria, "fecha"),
+            (PointProductionLine, "production_date"),
+            (PointConversionLine, "movement_at"),
+            (PointWasteLine, "movement_at"),
+            (MermaMensualSucursal, "periodo"),
+            (PointInventorySnapshot, "captured_at"),
+        ):
+            values = (
+                model.objects.annotate(report_month=TruncMonth(field))
+                .order_by()
+                .values_list("report_month", flat=True)
+                .distinct()
+            )
+            for value in values:
+                if value:
+                    months.add(value.strftime("%Y-%m"))
+        return sorted(months, reverse=True)
 
     def _group_rows(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -866,52 +775,35 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
 
     def _totals(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         totals = {
-            "vendido": sum((row["vendido"] for row in rows if row["vendido"] is not None), ZERO),
-            "producido": sum((row["producido"] for row in rows if row["producido"] is not None), ZERO),
-            "dif": sum((row["dif"] for row in rows if row["dif"] is not None), ZERO),
-            "merma_reportada": sum((row["merma_reportada"] for row in rows if row["merma_reportada"] is not None), ZERO),
-            "costo_merma": sum((row["costo_merma"] for row in rows if row["costo_merma"] is not None), ZERO),
-            "convertido": sum((row["convertido"] for row in rows if row["convertido"] is not None), ZERO),
-            "enteros_equivalentes": sum(
-                (row["enteros_equivalentes"] for row in rows if row["enteros_equivalentes"] is not None),
-                ZERO,
-            ),
-            "conversion_entrada": sum((row["conversion_entrada"] for row in rows if row["conversion_entrada"] is not None), ZERO),
-            "conversion_salida": sum((row["conversion_salida"] for row in rows if row["conversion_salida"] is not None), ZERO),
+            "vendido": _sum_or_none(rows, "vendido"),
+            "producido": _sum_or_none(rows, "producido"),
+            "dif": self._difference_total(rows),
+            "merma_reportada": _sum_or_none(rows, "merma_reportada"),
+            "costo_merma": _sum_or_none(rows, "costo_merma"),
+            "convertido": _sum_or_none(rows, "convertido"),
+            "enteros_equivalentes": _sum_or_none(rows, "enteros_equivalentes"),
+            "conversion_entrada": _sum_or_none(rows, "conversion_entrada"),
+            "conversion_salida": _sum_or_none(rows, "conversion_salida"),
             "inventario_inicial": _sum_or_none(rows, "inventario_inicial"),
             "inventario_final_teorico": _sum_or_none(rows, "inventario_final_teorico"),
             "inventario_final_point_total": _sum_or_none(rows, "inventario_final_point_total"),
             "diferencia_inventario": _sum_or_none(rows, "diferencia_inventario"),
             "produccion_referencia": bool(rows) and all(row.get("produccion_referencia") for row in rows),
-            "dif_referencia": sum((row["dif_referencia"] for row in rows if row.get("dif_referencia") is not None), ZERO),
+            "dif_referencia": _sum_or_none(rows, "dif_referencia"),
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")
-            if totals["vendido"]
+            if totals["merma_reportada"] is not None and totals["vendido"] is not None and totals["vendido"] > ZERO
             else None
         )
         return totals
 
-    def _banners(
-        self,
-        *,
-        sales_source: str,
-        production_source: str,
-        merma_source: str,
-        source_dates: dict[str, date | None],
-    ) -> list[str]:
-        banners = []
-        if sales_source == "ProductoMonthClosureLine":
-            banners.append("Ventas: sin registros diarios para este periodo; se usó cierre mensual consolidado.")
-        elif sales_source == "sin_datos":
-            banners.append("Ventas: sin registros para este periodo.")
-        if production_source == "ProductoMonthClosureLine":
-            banners.append("Producción: sin registros diarios para este periodo; se usó cierre mensual consolidado.")
-        elif production_source == "sin_datos":
-            banners.append("Producción: sin registros para este periodo.")
-        if merma_source == "sin_datos":
-            banners.append("Merma: sin registros consolidados para este periodo.")
-        return [banner for banner in banners if banner]
+    @staticmethod
+    def _difference_total(rows: list[dict[str, Any]]) -> Decimal | None:
+        non_reference_rows = [row for row in rows if not row.get("produccion_referencia")]
+        if not non_reference_rows or any(row.get("dif") is None for row in non_reference_rows):
+            return None
+        return sum((row["dif"] for row in non_reference_rows), ZERO)
 
     def _categories(self) -> list[str]:
         values = (

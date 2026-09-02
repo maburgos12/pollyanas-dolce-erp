@@ -26,9 +26,14 @@
       </div>
     </div>
     <div class="production-source-list" aria-label="Fuentes de datos">
-      <span class="badge bg-primary">Ventas: {{ fuentes.ventas }}</span>
-      <span class="badge bg-primary">Producción: {{ fuentes.produccion }}</span>
-      <span class="badge bg-primary">Merma: {{ fuentes.merma }}</span>
+      <span class="badge bg-primary">Ventas Point: {{ fuentes.ventas.label }}</span>
+      <span class="badge bg-primary">Producción: {{ fuentes.produccion.label }}</span>
+      <span class="badge bg-primary">Merma: {{ fuentes.merma.label }}</span>
+      <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
+      <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
+      <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
+      {% if not fuentes.canonical.authority.verified %}<span class="badge bg-warning">{{ fuentes.canonical.authority.reason }}</span>{% endif %}
+      <span class="badge bg-primary">Snapshots Point: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"Y-m-d" }}{% else %}Sin dato{% endif %} → {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"Y-m-d" }}{% else %}Sin dato{% endif %}{% if fuentes.canonical.opening.fallback_used or fuentes.canonical.closing.fallback_used %} (fecha cercana seleccionada){% endif %}</span>
     </div>
   </section>
 
@@ -78,40 +83,40 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number">{{ grand_total.vendido|floatformat:0|intcomma }}</div>
+          <div class="kpi-number{% if grand_total.vendido is None %} muted{% endif %}">{% if grand_total.vendido is None %}Sin dato{% else %}{{ grand_total.vendido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Vendido</div>
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
-        <div class="kpi-icon is-success">
+        <div class="kpi-icon{% if grand_total.producido is not None %} is-success{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number is-success">{{ grand_total.producido|floatformat:0|intcomma }}</div>
+          <div class="kpi-number{% if grand_total.producido is None %} muted{% else %} is-success{% endif %}">{% if grand_total.producido is None %}Sin dato{% else %}{{ grand_total.producido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Producido</div>
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
-        <div class="kpi-icon {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}">
+        <div class="kpi-icon{% if grand_total.dif is not None %} {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}">{{ grand_total.dif|floatformat:0|intcomma }}</div>
+          <div class="kpi-number{% if grand_total.dif is None %} muted{% else %} {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">{% if grand_total.dif is None %}Sin dato{% else %}{{ grand_total.dif|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Dif. operativa</div>
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card production-kpi-card-currency">
       <div class="kpi-card-inner">
-        <div class="kpi-icon {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}">
+        <div class="kpi-icon{% if grand_total.costo_merma is not None %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number kpi-number-currency production-kpi-number-currency {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}">${{ grand_total.costo_merma|floatformat:2|intcomma }}</div>
+          <div class="kpi-number kpi-number-currency production-kpi-number-currency{% if grand_total.costo_merma is None %} muted{% else %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">{% if grand_total.costo_merma is None %}Sin dato{% else %}${{ grand_total.costo_merma|floatformat:2|intcomma }}{% endif %}</div>
           <div class="kpi-label">Costo merma</div>
         </div>
       </div>
@@ -122,7 +127,9 @@
     <div class="section-header production-section-header">
       <div>
         <h2 class="section-header-title">Detalle operativo por categoría y receta</h2>
-        <p class="production-table-meta">Tabla completa con venta, producción, conversión, costo, inventario y estado.</p>
+        <p class="production-table-meta">Saldo calculado = inicial Point + producción + conversión de entrada − venta − merma − conversión de salida. Dif. Point = final Point − saldo calculado.</p>
+        <p class="production-table-meta">Lectura de Dif. Point: positivo = Point reporta más; negativo = Point reporta menos; cero = coincide; cualquier valor distinto de cero requiere revisión y no es por sí mismo bueno ni malo.</p>
+        <p class="production-table-meta">La Dif. Point no identifica ni explica por sí sola la causa y no atribuye responsabilidad.</p>
       </div>
     </div>
     {% if groups %}
@@ -153,14 +160,14 @@
             <th class="text-end" title="Producido">Prod.</th>
             <th class="text-end" title="Diferencia operativa producido menos vendido; excluye filas de referencia">Dif</th>
             <th class="text-end" title="Merma reportada">Merma</th>
-            <th class="text-end" title="Convertido">Conv.</th>
-            <th class="text-end" title="Enteros equivalentes">Eq.</th>
+            <th class="text-end" title="Conversión de entrada registrada en Point">Conv. entrada Point</th>
+            <th class="text-end" title="Conversión de salida registrada en Point">Conv. salida Point</th>
             <th class="text-end" title="Costo de merma">Costo</th>
             <th class="text-center" title="% merma">%</th>
-            <th class="text-end" title="Inventario inicial">Ini.</th>
-            <th class="text-end" title="Inventario final teórico">Fin.</th>
-            <th class="text-end" title="Inventario físico registrado">Físico</th>
-            <th class="text-end" title="Diferencia inventario">Inv Δ</th>
+            <th class="text-end" title="Saldo inicial registrado en Point">Ini. Point</th>
+            <th class="text-end" title="Saldo calculado por el contrato canónico de Point">Saldo calc.</th>
+            <th class="text-end" title="Saldo final registrado en Point">Fin. Point</th>
+            <th class="text-end" title="Final Point menos saldo calculado">Dif. Point</th>
             <th title="Estado">Est.</th>
           </tr>
         </thead>
@@ -168,35 +175,33 @@
           {% for group in groups %}
           <tr class="production-subtotal-row">
             <td colspan="2">{{ group.categoria }}</td>
-            <td class="text-end">{{ group.total.vendido|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end">{{ group.total.producido|floatformat:"-3"|intcomma }}</td>
+            <td class="text-end">{% if group.total.vendido is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.vendido|floatformat:"-3"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.producido is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.producido|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
               {% if group.total.produccion_referencia %}
               <span class="muted">Referencia</span>
+              {% elif group.total.dif is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
               <span class="{% if group.total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.dif|floatformat:"-3"|intcomma }}</span>
               {% endif %}
             </td>
-            <td class="text-end">{{ group.total.merma_reportada|floatformat:"-3"|intcomma }}</td>
+            <td class="text-end">{% if group.total.merma_reportada is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.merma_reportada|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
-              {% if group.total.conversion_entrada %}
-              {{ group.total.conversion_entrada|floatformat:0|intcomma }}
-              {% elif group.total.conversion_salida %}
-              <span class="text-danger">-{{ group.total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if group.total.conversion_entrada is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              {{ group.total.conversion_entrada|floatformat:"-1"|intcomma }}
               {% endif %}
             </td>
             <td class="text-end">
-              {% if group.total.enteros_equivalentes %}
-              {{ group.total.enteros_equivalentes|floatformat:"-1"|intcomma }}
-              {% elif group.total.conversion_salida %}
-              <span class="text-danger">-{{ group.total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if group.total.conversion_salida is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              {{ group.total.conversion_salida|floatformat:"-1"|intcomma }}
               {% endif %}
             </td>
-            <td class="text-end">${{ group.total.costo_merma|floatformat:2|intcomma }}</td>
+            <td class="text-end">{% if group.total.costo_merma is None %}<span class="muted">Sin dato</span>{% else %}${{ group.total.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
             <td class="text-center">
               {% if group.total.pct_merma is None %}
               <span class="muted">—</span>
@@ -208,10 +213,10 @@
               <span class="badge bg-success">{{ group.total.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
-            <td class="text-end">{% if group.total.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-danger{% elif group.total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-subtotal">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
@@ -231,22 +236,20 @@
             </td>
             <td class="text-end">{% if row.merma_reportada is None %}<span class="muted">—</span>{% else %}{{ row.merma_reportada|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
-              {% if row.conversion_entrada %}
-              {{ row.conversion_entrada|floatformat:0|intcomma }}
-              {% elif row.conversion_salida %}
-              <span class="text-danger">-{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if row.conversion_entrada is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              <span>{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span>
+              {% if row.conversion_entrada %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
               {% endif %}
             </td>
             <td class="text-end">
-              {% if row.enteros_equivalentes %}
-              {{ row.enteros_equivalentes|floatformat:"-1"|intcomma }}
-              {% elif row.conversion_salida %}
-              <span class="text-danger">-{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if row.conversion_salida is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              <span>{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
               {% endif %}
+              {% if not row.conversion_entrada and row.conversion_salida %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
             </td>
             <td class="text-end">{% if row.costo_merma is None %}<span class="muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
             <td class="text-center">
@@ -260,13 +263,13 @@
               <span class="badge bg-success">{{ row.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
-            <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-danger{% elif row.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
-              <span class="production-state-label {% if row.estado_inventario == 'Cuadra' %}is-success{% elif row.estado_inventario == 'Referencia' %}is-neutral{% elif 'Sobrante' in row.estado_inventario %}is-warning{% else %}is-danger{% endif %}">{{ row.estado_inventario }}</span>
+              <span class="production-state-label {% if row.estado_inventario == 'Coincide' %}is-success{% elif row.estado_inventario == 'Point mayor' %}is-warning{% elif row.estado_inventario == 'Point menor' %}is-danger{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
               {% else %}
               <span class="muted">—</span>
               {% endif %}
@@ -276,29 +279,25 @@
           {% endfor %}
           <tr class="production-grand-total-row">
             <td colspan="2">Gran total</td>
-            <td class="text-end">{{ grand_total.vendido|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end">{{ grand_total.producido|floatformat:"-3"|intcomma }}</td>
-            <td class="text-end"><span class="{% if grand_total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.dif|floatformat:"-3"|intcomma }}</span></td>
-            <td class="text-end">{{ grand_total.merma_reportada|floatformat:"-3"|intcomma }}</td>
+            <td class="text-end">{% if grand_total.vendido is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.vendido|floatformat:"-3"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.producido is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.producido|floatformat:"-3"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.dif is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if grand_total.dif < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.dif|floatformat:"-3"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if grand_total.merma_reportada is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.merma_reportada|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">
-              {% if grand_total.conversion_entrada %}
-              {{ grand_total.conversion_entrada|floatformat:0|intcomma }}
-              {% elif grand_total.conversion_salida %}
-              <span class="text-danger">-{{ grand_total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if grand_total.conversion_entrada is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              {{ grand_total.conversion_entrada|floatformat:"-1"|intcomma }}
               {% endif %}
             </td>
             <td class="text-end">
-              {% if grand_total.enteros_equivalentes %}
-              {{ grand_total.enteros_equivalentes|floatformat:"-1"|intcomma }}
-              {% elif grand_total.conversion_salida %}
-              <span class="text-danger">-{{ grand_total.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              {% if grand_total.conversion_salida is None %}
+              <span class="muted">Sin dato</span>
               {% else %}
-              <span class="muted">—</span>
+              {{ grand_total.conversion_salida|floatformat:"-1"|intcomma }}
               {% endif %}
             </td>
-            <td class="text-end">${{ grand_total.costo_merma|floatformat:2|intcomma }}</td>
+            <td class="text-end">{% if grand_total.costo_merma is None %}<span class="muted">Sin dato</span>{% else %}${{ grand_total.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
             <td class="text-center">
               {% if grand_total.pct_merma is None %}
               <span class="muted">—</span>
@@ -310,10 +309,10 @@
               <span class="badge bg-success">{{ grand_total.pct_merma|floatformat:2|intcomma }}%</span>
               {% endif %}
             </td>
-            <td class="text-end">{% if grand_total.inventario_inicial is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">—</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">—</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-danger{% elif grand_total.diferencia_inventario < 0 %}text-warning{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-total">Total</span></td>
           </tr>
         </tbody>

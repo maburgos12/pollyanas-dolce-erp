@@ -1,0 +1,87 @@
+# API de cierre mensual de producto Point
+
+Los endpoints `GET /api/pos-bridge/product-closures/` y
+`GET /api/pos-bridge/product-closures/{id}/` conservan los campos históricos y
+añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
+
+## Semántica de cantidades
+
+- Los decimales disponibles se serializan con seis posiciones.
+- `null` significa que la fuente no estaba disponible o no tenía autoridad; no
+  equivale a cero.
+- `0.000000` significa cero medido por una fuente disponible.
+- Una fuente `source_present=true` pero `authoritative=false` produce `null` en
+  todos sus campos dependientes; sólo una fuente autoritativa puede publicar cero.
+- En metadata canónica antigua, un flag de autoridad ausente se interpreta como
+  no autoritativo y el estado se publica como `REVISAR_FUENTE`.
+- Un total mensual es `null` cuando al menos una línea tiene ese dato faltante.
+
+Los aliases conservan nombres y formato de seis decimales, pero no exponen los
+decimales crudos del modelo: `inventario_inicial_teorico` usa `opening_balance`,
+`produccion_mes` usa `production`, `venta_directa_enteros`,
+`venta_derivada_equivalente` y `venta_total_equivalente` usan las ventas
+proyectadas, y `inventario_final_teorico` usa `calculated_closing`.
+`merma_directa_enteros`, `merma_derivada_equivalente` y
+`merma_total_equivalente` respetan la misma autoridad de merma. Estas reglas
+aplican a cierres canónicos y a importaciones históricas: ausencia o falta de
+autoridad producen `null`, incluso si el modelo almacena cero o una cantidad
+observada. La apertura histórica respeta la presencia del Excel.
+
+## Campos canónicos por línea
+
+`opening_point`, `historical_opening`, `opening_balance`, `opening_source`,
+`production`, `sales_direct`, `sales_derived`,
+`sales_total`, `waste_total`, `point_conversion_in`, `point_conversion_out`,
+`calculated_closing`, `closing_point_cedis`, `closing_point_sucursales`,
+`closing_point`, `point_difference`, `point_status`, `point_status_label`,
+`conversion_origin`, `conversion_origins`, `projection_sources`,
+`source_authority`, `source_issues`, `is_historical_inventory`,
+`historical_count_cedis`, `historical_count_sucursales` e `historical_count`.
+
+`source_authority` sólo expone la etiqueta de fuente, presencia, autoridad,
+estado/incidencias, identificadores de jobs y conteos/fechas de cobertura. No
+proyecta URLs de solicitud, rutas de reportes ni muestras crudas persistidas.
+
+Para importaciones históricas, por compatibilidad, `closing_point*` contienen
+únicamente los alcances del conteo histórico con presencia acreditada; los demás
+son `null`. No son snapshots Point y se distinguen con
+`is_historical_inventory=true`. `point_difference` usa en ese modo la diferencia
+histórica y es `null` si falta el conteo total, la apertura o autoridad de los
+movimientos. `historical_count_cedis`,
+`historical_count_sucursales`, `historical_count` y `historical_difference`
+separan explícitamente el conteo físico del cálculo. Una celda vacía produce
+`null` y un cero explícito produce `0.000000`, independientemente por alcance. El
+conteo importado puede existir aunque `historical_difference` sea `null`: la
+diferencia solo se publica cuando ventas, producción, merma y conversiones tienen
+autoridad mensual comprobada. Los decimales almacenados por compatibilidad cuando
+falta una fuente son placeholders internos y no se exponen como cero. Sus totales
+son `total_historical_count` y `total_historical_difference`.
+
+En importaciones históricas `opening_point` siempre es `null`:
+`historical_opening` identifica el saldo del Excel y `opening_balance` es el campo
+neutro compartido por reportes. Ambos respetan presencia por celda. Para metadata
+legada sin `inventory_presence`, las claves no bastan: el importador antiguo
+también las guardaba con cero para celdas vacías. Se conservan observaciones no
+cero; un cero sin evidencia explícita se publica como desconocido (`null`). El
+estado `SIN_INVENTARIO_FISICO` invalida los alcances físicos legacy. El mapa nuevo
+de presencia prevalece, por lo que un cero explícito nuevo sí se conserva.
+
+`historical_excel_import` identifica archivo/hoja únicamente como procedencia del
+conteo físico. Las etiquetas de movimientos nombran por separado las tablas
+operativas consultadas y las marcan como observadas no validadas; no atribuyen al
+Excel ventas, producción o merma que el archivo no importó.
+
+En cierres canónicos, `point_difference` usa el signo
+`Point final - final calculado`. La excepción de compatibilidad son los cierres
+importados de Excel: conservan el signo histórico
+`final calculado - conteo histórico`, igual que `historical_difference`, y se
+identifican con `is_historical_inventory=true`.
+
+## Campos de resumen y procedencia
+
+Además de los totales existentes, el resumen expone `total_direct_sales`,
+`total_derived_sales`, `total_conversion_in`, `total_conversion_out`,
+`total_closing_point`, `total_point_difference`, `source_authority` y
+`source_issues`. `source_authority` contiene la evidencia compactada de opening,
+ventas, producción, merma, conversiones y closing; `source_issues` reúne las
+guardas de autoridad sin duplicados.

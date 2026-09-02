@@ -23,6 +23,16 @@ def _env_int(name: str, default: int, *, minimum: int | None = None, maximum: in
 class Command(BaseCommand):
     help = "Registra los schedules periódicos operativos en django-celery-beat."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--enable-monthly-product-closure",
+            action="store_true",
+            help=(
+                "Habilita explícitamente la construcción mensual de cierres Point. "
+                "El schedule nunca bloquea cierres automáticamente."
+            ),
+        )
+
     def handle(self, *args, **options):
         from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
@@ -152,25 +162,24 @@ class Command(BaseCommand):
         )
 
         monthly_closure_cron, _ = CrontabSchedule.objects.get_or_create(
-            minute="30",
-            hour="5",
+            minute="0",
+            hour="4",
             day_of_week="*",
-            day_of_month="1",
+            day_of_month="5",
             month_of_year="*",
             timezone=timezone_name,
         )
+        PeriodicTask.objects.filter(task="pos_bridge.monthly_product_closure").exclude(
+            name="pos_bridge: cierre producto mensual"
+        ).update(enabled=False)
         PeriodicTask.objects.update_or_create(
             name="pos_bridge: cierre producto mensual",
             defaults={
                 "task": "pos_bridge.monthly_product_closure",
                 "crontab": monthly_closure_cron,
                 "interval": None,
-                "kwargs": json.dumps({
-                    "rebuild": False,
-                    "lock_after_build": False,
-                    "sync_inventory_before_build": True,
-                }),
-                "enabled": True,
+                "kwargs": json.dumps({"lock_after_build": False}),
+                "enabled": bool(options.get("enable_monthly_product_closure")),
             },
         )
 

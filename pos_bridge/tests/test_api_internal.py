@@ -16,6 +16,7 @@ from rest_framework.test import APITestCase
 from core.models import Sucursal
 from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.services.product_closure_projection import project_product_closure_line
 from recetas.models import LineaReceta, ProductoMonthClosure, ProductoMonthClosureLine, Receta
 
 
@@ -213,6 +214,427 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertEqual(len(response.data["lines"]), 1)
         self.assertEqual(response.data["lines"][0]["receta_padre"], self.receta.id)
 
+    def test_product_closure_detail_distinguishes_canonical_zero_from_missing_placeholder(self):
+        line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("0")
+        line.produccion_mes = Decimal("0")
+        line.venta_directa_enteros = Decimal("0")
+        line.venta_derivada_equivalente = Decimal("0")
+        line.venta_total_equivalente = Decimal("0")
+        line.merma_total_equivalente = Decimal("0")
+        line.inventario_final_teorico = Decimal("0")
+        line.inventario_final_point_total = Decimal("0")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "opening_source_authoritative": True,
+            "sales_source_authoritative": True,
+            "production_source_authoritative": True,
+            "waste_source_authoritative": True,
+            "conversion_source_authoritative": True,
+            "closing_source_authoritative": True,
+            "point_final_scopes_available": True,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "COINCIDE",
+            "conversion_origins": ["POINT"],
+            "projection_sources": ["DIRECTA"],
+        }
+        line.save()
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        row = response.data["lines"][0]
+        self.assertEqual(row["opening_point"], "0.000000")
+        self.assertEqual(row["sales_total"], "0.000000")
+        self.assertEqual(row["point_conversion_in"], "0.000000")
+        self.assertEqual(row["closing_point"], "0.000000")
+        self.assertEqual(row["point_difference"], "0.000000")
+        self.assertEqual(row["point_status"], "COINCIDE")
+        self.assertEqual(row["conversion_origins"], ["POINT"])
+        self.assertEqual(row["projection_sources"], ["DIRECTA"])
+
+        line.metadata = {
+            **line.metadata,
+            "issues": [
+                "OPENING_SNAPSHOT_MISSING",
+                "SALES_SOURCE_MISSING",
+                "CALCULATED_CLOSING_MISSING",
+                "CLOSING_SNAPSHOT_MISSING",
+            ],
+            "sales_source_available": False,
+        }
+        line.save(update_fields=["metadata", "updated_at"])
+        missing = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/").data["lines"][0]
+        self.assertIsNone(missing["opening_point"])
+        self.assertIsNone(missing["sales_total"])
+        self.assertIsNone(missing["calculated_closing"])
+        self.assertIsNone(missing["closing_point"])
+        self.assertIsNone(missing["point_difference"])
+        self.assertEqual(missing["point_status"], "REVISAR_FUENTE")
+
+    def test_product_closure_list_totals_are_none_when_any_canonical_line_is_missing(self):
+        line = self.product_closure.lines.get()
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "opening_source_authoritative": True,
+            "sales_source_authoritative": True,
+            "production_source_authoritative": True,
+            "waste_source_authoritative": True,
+            "conversion_source_authoritative": True,
+            "closing_source_authoritative": True,
+            "point_final_scopes_available": True,
+            "point_difference": "0",
+        }
+        line.save(update_fields=["metadata", "updated_at"])
+        missing_recipe = Receta.objects.create(
+            nombre="Pastel prueba faltante",
+            codigo_point="MISSING-1",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"hash-{uuid4()}",
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=self.product_closure,
+            receta_padre=missing_recipe,
+            produccion_mes=Decimal("0"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": ["PRODUCTION_SOURCE_MISSING", "CALCULATED_CLOSING_MISSING"],
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": False,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
+            },
+        )
+
+        response = self.client.get("/api/pos-bridge/product-closures/")
+
+        summary = response.data["results"][0]
+        self.assertIsNone(summary["total_production"])
+        self.assertIsNone(summary["total_ending_inventory"])
+        self.assertEqual(summary["total_sales"], "4.000000")
+
+    def test_product_closure_api_preserves_historical_inventory_semantics(self):
+        line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("9")
+        line.inventario_final_teorico = Decimal("21")
+        line.inventario_final_point_total = Decimal("18")
+        # The real historical importer persists theoretical - physical count.
+        line.diferencia_teorico_vs_point = (
+            line.inventario_final_teorico - line.inventario_final_point_total
+        )
+        line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO
+        line.metadata = {"historical_excel": {"inventory_presence": {"opening": False, "total": True}}}
+        line.save()
+        self.product_closure.metadata = {"historical_excel_import": {"source_file": "historico.xlsx"}}
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        row = response.data["lines"][0]
+        self.assertTrue(row["is_historical_inventory"])
+        self.assertIsNone(row["opening_point"])
+        self.assertIsNone(row["historical_opening"])
+        self.assertIsNone(row["opening_balance"])
+        self.assertIsNone(response.data["total_opening_inventory"])
+        self.assertEqual(row["closing_point"], "18.000000")
+        self.assertIsNone(row["point_difference"])
+        self.assertEqual(row["historical_count"], "18.000000")
+        self.assertIsNone(row["historical_difference"])
+        self.assertEqual(row["point_status"], "REVISAR_FUENTE")
+        self.assertEqual(response.data["total_closing_point"], "18.000000")
+        self.assertIsNone(response.data["total_point_difference"])
+        self.assertEqual(response.data["total_historical_count"], "18.000000")
+        self.assertIsNone(response.data["total_historical_difference"])
+        for field in ("production", "sales_total", "waste_total", "point_conversion_in", "calculated_closing"):
+            self.assertIsNone(row[field], field)
+        self.assertIsNone(response.data["total_production"])
+        self.assertIsNone(response.data["total_sales"])
+        self.assertIsNone(response.data["total_waste"])
+        self.assertIsNone(response.data["total_ending_inventory"])
+
+        line.inventario_inicial_teorico = Decimal("0")
+        line.metadata["historical_excel"]["inventory_presence"]["opening"] = True
+        line.save(update_fields=["inventario_inicial_teorico", "metadata", "updated_at"])
+        zero_row = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data["lines"][0]
+        self.assertIsNone(zero_row["opening_point"])
+        self.assertEqual(zero_row["historical_opening"], "0.000000")
+        self.assertEqual(zero_row["opening_balance"], "0.000000")
+        zero_response = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data
+        self.assertEqual(zero_response["total_opening_inventory"], "0.000000")
+
+    def test_product_closure_present_but_non_authoritative_sources_are_null_not_zero(self):
+        line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("12")
+        line.produccion_mes = Decimal("8")
+        line.venta_total_equivalente = Decimal("4")
+        line.merma_total_equivalente = Decimal("1")
+        line.inventario_final_teorico = Decimal("15")
+        line.inventario_final_point_total = Decimal("15")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": ["MONTH_SOURCE_INCOMPLETE"],
+            "sales_source_available": True,
+            "opening_source_authoritative": False,
+            "sales_source_authoritative": False,
+            "production_source_authoritative": False,
+            "waste_source_authoritative": False,
+            "conversion_source_authoritative": False,
+            "closing_source_authoritative": False,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "REVISAR_FUENTE",
+        }
+        line.save()
+
+        detail = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/").data
+        row = detail["lines"][0]
+
+        for field in (
+            "opening_point",
+            "production",
+            "sales_total",
+            "waste_total",
+            "point_conversion_in",
+            "point_conversion_out",
+            "calculated_closing",
+            "closing_point",
+            "point_difference",
+        ):
+            self.assertIsNone(row[field], field)
+        self.assertEqual(
+            row["source_authority"],
+            {
+                "opening": False,
+                "sales": False,
+                "production": False,
+                "waste": False,
+                "conversions": False,
+                "closing": False,
+            },
+        )
+        summary = self.client.get("/api/pos-bridge/product-closures/").data["results"][0]
+        self.assertIsNone(summary["total_opening_inventory"])
+        self.assertIsNone(summary["total_sales"])
+        self.assertIsNone(summary["total_ending_inventory"])
+
+    def test_product_closure_old_canonical_metadata_without_authority_flags_is_conservative(self):
+        line = self.product_closure.lines.get()
+        line.inventario_final_point_total = Decimal("15")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "COINCIDE",
+        }
+        line.save()
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+        row = response.data["lines"][0]
+
+        for field in (
+            "opening_point",
+            "production",
+            "sales_total",
+            "waste_total",
+            "point_conversion_in",
+            "point_conversion_out",
+            "calculated_closing",
+            "closing_point",
+            "point_difference",
+        ):
+            self.assertIsNone(row[field], field)
+        self.assertEqual(row["point_status"], "REVISAR_FUENTE")
+        self.assertEqual(row["point_status_label"], "Revisar fuente")
+        self.assertFalse(any(row["source_authority"].values()))
+
+    def test_product_closure_summary_projects_each_line_once_for_all_totals(self):
+        with patch(
+            "pos_bridge.api.serializers.closures.project_product_closure_line",
+            wraps=project_product_closure_line,
+        ) as projection:
+            response = self.client.get("/api/pos-bridge/product-closures/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(projection.call_count, self.product_closure.lines.count())
+
+    def test_product_closure_detail_reuses_total_projection_for_line_fields(self):
+        with patch(
+            "pos_bridge.api.serializers.closures.project_product_closure_line",
+            wraps=project_product_closure_line,
+        ) as projection:
+            response = self.client.get(
+                f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(projection.call_count, self.product_closure.lines.count())
+
+    def test_product_closure_legacy_aliases_hide_non_authoritative_values(self):
+        aliases = (
+            "inventario_inicial_teorico", "produccion_mes", "venta_directa_enteros",
+            "venta_derivada_equivalente", "venta_total_equivalente",
+            "merma_directa_enteros", "merma_derivada_equivalente",
+            "merma_total_equivalente", "inventario_final_teorico",
+        )
+        for mode in ("canonical", "historical"):
+            for stored in (Decimal("0"), Decimal("7.25")):
+                line = self.product_closure.lines.get()
+                for alias in aliases:
+                    setattr(line, alias, stored)
+                line.metadata = (
+                    {"balance_contract": "POINT_PRODUCT_BALANCE_V1", "sales_source_available": True}
+                    if mode == "canonical"
+                    else {"historical_excel": {"inventory_presence": {"opening": False}}}
+                )
+                line.save()
+                row = self.client.get(
+                    f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+                ).data["lines"][0]
+                for alias in aliases:
+                    with self.subTest(mode=mode, stored=stored, alias=alias):
+                        self.assertIsNone(row[alias])
+
+    def test_product_closure_legacy_aliases_preserve_authoritative_values_and_zero(self):
+        aliases = {
+            "inventario_inicial_teorico": "opening_balance",
+            "produccion_mes": "production",
+            "venta_directa_enteros": "sales_direct",
+            "venta_derivada_equivalente": "sales_derived",
+            "venta_total_equivalente": "sales_total",
+            "merma_total_equivalente": "waste_total",
+            "inventario_final_teorico": "calculated_closing",
+        }
+        for mode in ("canonical", "historical"):
+            for stored in (Decimal("0"), Decimal("7.25")):
+                line = self.product_closure.lines.get()
+                for alias in aliases:
+                    setattr(line, alias, stored)
+                line.merma_directa_enteros = stored * Decimal("0.6")
+                line.merma_derivada_equivalente = stored * Decimal("0.4")
+                line.metadata = (
+                    {
+                        "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                        "sales_source_available": True,
+                        **{f"{source}_source_authoritative": True for source in (
+                            "opening", "production", "sales", "waste", "conversion", "closing"
+                        )},
+                    }
+                    if mode == "canonical"
+                    else {"historical_excel": {
+                        "inventory_presence": {"opening": True},
+                        "movement_authority": {
+                            source: {"authoritative": True}
+                            for source in ("production", "sales", "waste", "conversions")
+                        },
+                    }}
+                )
+                line.save()
+                row = self.client.get(
+                    f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+                ).data["lines"][0]
+                for alias, canonical in aliases.items():
+                    with self.subTest(mode=mode, stored=stored, alias=alias):
+                        self.assertEqual(row[alias], f"{stored:.6f}")
+                        self.assertEqual(row[alias], row[canonical])
+                self.assertEqual(row["merma_directa_enteros"], f"{stored * Decimal('0.6'):.6f}")
+                self.assertEqual(row["merma_derivada_equivalente"], f"{stored * Decimal('0.4'):.6f}")
+
+    def test_product_closure_historical_opening_alias_requires_evidence_for_legacy_zero(self):
+        line = self.product_closure.lines.get()
+        for stored in (Decimal("0"), Decimal("12")):
+            line.inventario_inicial_teorico = stored
+            line.metadata = {"historical_excel": {"inventario_inicial_historico": str(stored)}}
+            line.save()
+            row = self.client.get(
+                f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+            ).data["lines"][0]
+            with self.subTest(stored=stored):
+                self.assertEqual(row["inventario_inicial_teorico"], None if stored == 0 else "12.000000")
+                self.assertEqual(row["inventario_inicial_teorico"], row["opening_balance"])
+
+    def test_product_closure_api_exposes_source_authority_and_issues(self):
+        self.product_closure.metadata = {
+            "opening_meta": {"authoritative": True, "effective_date": "2026-07-31"},
+            "sales_meta": {"authoritative": False, "authority_issues": ["SALES_SYNC_JOB_PARTIAL"]},
+            "production_meta": {"authoritative": True},
+            "waste_meta": {"authoritative": True},
+            "conversion_meta": {"authoritative": True},
+            "closing_inventory_meta": {"authoritative": True, "effective_date": "2026-08-31"},
+            "balance": {"issues": ["MONTH_SOURCE_INCOMPLETE"]},
+            "validation": {"blocking_issues": ["SALES_SYNC_JOB_PARTIAL"], "lock_ready": False},
+        }
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        self.assertTrue(response.data["source_authority"]["opening"]["authoritative"])
+        self.assertFalse(response.data["source_authority"]["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_JOB_PARTIAL", response.data["source_issues"])
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", response.data["source_issues"])
+
+    def test_product_closure_source_authority_never_exposes_private_source_metadata(self):
+        self.product_closure.metadata = {
+            "opening_meta": {
+                "source": "PointInventorySnapshot",
+                "source_present": True,
+                "authoritative": True,
+                "selected_sync_job_ids": [11],
+                "snapshot_rows": 9,
+                "effective_date": "2026-07-31",
+                "request_url": "https://point.invalid/private?token=secret",
+                "report_path": "/tmp/private-report.xlsx",
+                "raw_samples": [{"password": "secret"}],
+            },
+            "sales_meta": {
+                "selected_source": "official_point_daily_sales",
+                "authoritative": False,
+                "job_status": "PARTIAL",
+                "authority_issues": ["SALES_SYNC_JOB_PARTIAL"],
+                "job_id": 22,
+                "row_count": 31,
+                "request_url": "https://point.invalid/private-sales",
+                "nested": {"report_path": "/tmp/also-private.xlsx"},
+            },
+        }
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        authority = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data["source_authority"]
+
+        self.assertEqual(authority["opening"]["selected_sync_job_ids"], [11])
+        self.assertEqual(authority["sales"]["job_id"], 22)
+
+        def all_keys(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    yield key
+                    yield from all_keys(child)
+            elif isinstance(value, (list, tuple)):
+                for child in value:
+                    yield from all_keys(child)
+
+        exposed_keys = set(all_keys(authority))
+        self.assertTrue(
+            {"request_url", "report_path", "raw_samples", "password"}.isdisjoint(exposed_keys)
+        )
+
     def test_product_closures_build_endpoint_creates_month(self):
         PointInventorySnapshot.objects.create(
             branch=self.branch,
@@ -257,3 +679,68 @@ class PosBridgeInternalApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_product_closures_existing_month_requires_explicit_rebuild(self):
+        original_line = self.product_closure.lines.get()
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": self.product_closure.month_start.strftime("%Y-%m")},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("rebuild", response.data["detail"])
+        self.assertTrue(ProductoMonthClosureLine.objects.filter(pk=original_line.pk).exists())
+
+    def test_product_closures_production_operator_cannot_request_rebuild(self):
+        operator = get_user_model().objects.create_user(
+            username="product_closure_production",
+            email="product_closure_production@example.com",
+            password="test12345",
+        )
+        production_group, _ = Group.objects.get_or_create(name="PRODUCCION")
+        operator.groups.add(production_group)
+        self.client.force_authenticate(operator)
+
+        response = self.client.post(
+            "/api/pos-bridge/product-closures/build/",
+            {"month": self.product_closure.month_start.strftime("%Y-%m"), "rebuild": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_product_closures_production_operator_cannot_lock_after_build(self):
+        operator = get_user_model().objects.create_user(username="closure_builder_only", password="test12345")
+        production_group, _ = Group.objects.get_or_create(name="PRODUCCION")
+        operator.groups.add(production_group)
+        self.client.force_authenticate(operator)
+
+        with patch("pos_bridge.api.views.closures.ProductMonthClosureService.build") as build:
+            response = self.client.post(
+                "/api/pos-bridge/product-closures/build/",
+                {"month": "2025-09", "lock_after_build": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        build.assert_not_called()
+
+    def test_product_closures_dg_can_build_and_lock_in_one_request(self):
+        director = get_user_model().objects.create_user(username="closure_dg", password="test12345")
+        dg_group, _ = Group.objects.get_or_create(name="DG")
+        director.groups.add(dg_group)
+        self.client.force_authenticate(director)
+
+        with patch(
+            "pos_bridge.api.views.closures.ProductMonthClosureService.build",
+            return_value=self.product_closure,
+        ) as build:
+            response = self.client.post(
+                "/api/pos-bridge/product-closures/build/",
+                {"month": "2025-09", "lock_after_build": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(build.call_args.kwargs["lock_after_build"])

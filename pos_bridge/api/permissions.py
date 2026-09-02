@@ -32,9 +32,15 @@ class IsProductClosureUser(BasePermission):
         if action in {"list", "retrieve"}:
             return can_view_product_closure(user)
         if action == "build":
-            if bool((request.data or {}).get("rebuild")):
-                return can_rebuild_product_closure(user)
-            return can_build_product_closure(user)
+            payload = request.data or {}
+            may_build = (
+                can_rebuild_product_closure(user)
+                if bool(payload.get("rebuild"))
+                else can_build_product_closure(user)
+            )
+            if bool(payload.get("lock_after_build")):
+                return may_build and can_lock_product_closure(user)
+            return may_build
         if action == "lock":
             return can_lock_product_closure(user)
         return can_view_product_closure(user)

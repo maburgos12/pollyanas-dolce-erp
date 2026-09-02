@@ -74,6 +74,23 @@ Si existen lineas con derivadas sin relacion activa o catalogo pendiente:
 
 ## Flujo operativo
 
+### Contención del schedule mensual
+
+`setup_celery_schedules` registra `pos_bridge: cierre producto mensual` pausado y
+con `lock_after_build=false`. Por tanto, ejecutar el setup durante un deploy no
+refresca, reconstruye ni bloquea agosto ni ningún otro periodo. La tarea Celery y
+el comando manual permanecen disponibles para una corrida explícita.
+
+Solo una decisión operacional explícita puede habilitar la cadencia:
+
+```bash
+./.venv/bin/python manage.py setup_celery_schedules --enable-monthly-product-closure
+```
+
+Incluso habilitado, el schedule únicamente construye un borrador revisable; el
+bloqueo institucional sigue siendo una acción separada de DG/ADMIN. Una ejecución
+posterior de `setup_celery_schedules` sin el flag devuelve el schedule a pausado.
+
 ### 1. Vista operativa
 
 Ruta:
@@ -141,16 +158,50 @@ El bloqueo deja rastro en `metadata.lock_event` con:
 - motivo
 - nota
 
+La revalidación final usa un mutex transaccional por mes y vuelve a calcular la
+huella inmediatamente antes de sellar. El backfill oficial y legacy de ventas, producción,
+merma, conversiones y snapshots de inventario adquieren el mismo advisory mutex
+mensual, en orden cronológico cuando abarcan varios meses. Cada timestamp se
+asigna al día de negocio de Mazatlán. Un snapshot coordina los meses cuyo último
+día cae dentro de la tolerancia configurada respecto a la captura, más sus meses
+siguientes (apertura). Así una captura del 1–3 de septiembre también coordina el
+cierre de agosto, sin bloquear meses alejados.
+No toma locks `SHARE` sobre tablas completas: otros periodos continúan operando.
+Los catálogos globales no forman parte de la huella cruda mensual; su efecto se
+congela en el digest de líneas proyectadas, evitando prometer serialización que
+sus servicios globales no ofrecen.
+Las escrituras sobre líneas de un cierre ya bloqueado sí se rechazan por trigger
+de base de datos. Las fuentes Point conservan su huella inmutable en el cierre;
+una corrección histórica posterior exige un rebuild operacional explícito y un
+nuevo bloqueo, no la mutación silenciosa de las líneas selladas.
+
 ## Qué revisar antes de bloquear
 
 - opening source correcto
 - fecha de opening correcta
+
+En un import histórico, el archivo Excel acredita únicamente las columnas de
+inventario/conteo declaradas, preservando por alcance celda vacía frente a cero
+explícito. Ventas, producción y merma leídas de tablas
+operativas quedan como observaciones no validadas hasta acreditar cobertura; si
+falta una fuente, la pantalla, API, CSV y XLSX muestran `Sin dato`/`null`, nunca
+un cero autoritativo ni un saldo calculado aparentemente válido.
+El saldo inicial histórico se publica como `Saldo inicial`, nunca como inventario
+Point. La metadata antigua siempre escribía las claves, incluso para celdas
+vacías: sus ceros sin evidencia explícita son ambiguos y se muestran como `Sin dato`.
+Se preservan valores legacy no cero; `SIN_INVENTARIO_FISICO` mantiene nulos los
+alcances físicos. El mapa nuevo explícito prevalece sobre esta inferencia.
 - venta derivada coherente
 - merma derivada coherente
 - sin guardas activas en la vista
 - sin incidencias de catalogo
 
 ## Qué hacer si falla
+
+Las fuentes `FAILED` o `PARTIAL` con `retryable=true` difieren el build y Celery
+reintenta como máximo una vez. Un `PARTIAL` por cobertura/datos sin marca
+transitoria no se reintenta automáticamente. Al agotar el intento, el resultado
+queda para revisión sin construir sobre la fuente transitoriamente incompleta.
 
 ### Caso 1. No hay snapshot
 
