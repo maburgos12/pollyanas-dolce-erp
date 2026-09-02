@@ -11,7 +11,7 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_
 
 from pos_bridge.models import PointSyncJob
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError
-from pos_bridge.tasks.celery_tasks import task_visible_cut_refresh_cycle
+from pos_bridge.tasks.celery_tasks import task_monthly_product_closure, task_visible_cut_refresh_cycle
 from pos_bridge.tasks.run_monthly_product_closure import run_monthly_product_closure
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
 from pos_bridge.tasks.run_production_sync import run_production_sync
@@ -576,6 +576,134 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         conversions.assert_not_called()
         closure_service.assert_not_called()
         self.assertEqual(result["action"], "skipped_locked")
+
+    def test_monthly_source_refresh_holds_shared_point_session_lock_for_complete_cycle(self):
+        events = []
+
+        class TrackingLock:
+            def __enter__(self):
+                events.append("lock_enter")
+                return True
+
+            def __exit__(self, exc_type, exc, traceback):
+                events.append("lock_exit")
+
+        successful_job = SimpleNamespace(
+            id=1,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+            error_message="",
+        )
+        with (
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.point_account_session_lock",
+                return_value=TrackingLock(),
+            ) as session_lock,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync",
+                side_effect=lambda **kwargs: events.append("sales") or successful_job,
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                side_effect=lambda **kwargs: events.append("conversions") or {"status": PointSyncJob.STATUS_SUCCESS},
+            ),
+        ):
+            movements.return_value.run_production_sync.side_effect = (
+                lambda **kwargs: events.append("production") or successful_job
+            )
+            movements.return_value.run_waste_sync.side_effect = (
+                lambda **kwargs: events.append("waste") or successful_job
+            )
+            from pos_bridge.tasks.run_monthly_product_closure import _refresh_month_sources
+
+            result = _refresh_month_sources(
+                month_start=date(2026, 8, 1),
+                month_end=date(2026, 8, 31),
+            )
+
+        session_lock.assert_called_once_with(wait=True)
+        self.assertEqual(events, ["lock_enter", "sales", "production", "waste", "conversions", "lock_exit"])
+        self.assertFalse(any(step["retryable"] for step in result))
+
+    def test_monthly_source_refresh_releases_shared_lock_and_marks_timeout_retryable(self):
+        released = []
+
+        class TrackingLock:
+            def __enter__(self):
+                return True
+
+            def __exit__(self, exc_type, exc, traceback):
+                released.append(True)
+
+        successful_job = SimpleNamespace(
+            id=1,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+            error_message="",
+        )
+        with (
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.point_account_session_lock",
+                return_value=TrackingLock(),
+            ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync",
+                side_effect=TimeoutError("Point timeout"),
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS},
+            ),
+        ):
+            movements.return_value.run_production_sync.return_value = successful_job
+            movements.return_value.run_waste_sync.return_value = successful_job
+            from pos_bridge.tasks.run_monthly_product_closure import _refresh_month_sources
+
+            result = _refresh_month_sources(
+                month_start=date(2026, 8, 1),
+                month_end=date(2026, 8, 31),
+            )
+
+        self.assertEqual(released, [True])
+        self.assertTrue(result[0]["retryable"])
+        self.assertFalse(result[1]["retryable"])
+
+    def test_bound_monthly_task_retries_once_only_for_retryable_source_failure(self):
+        retryable_result = {"automation_status": "REVIEW", "retryable": True}
+        with (
+            patch("pos_bridge.tasks.celery_tasks.run_monthly_product_closure", return_value=retryable_result),
+            patch.object(task_monthly_product_closure, "retry", side_effect=RuntimeError("retry requested")) as retry,
+            patch.object(task_monthly_product_closure.request, "retries", 0),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "retry requested"):
+                task_monthly_product_closure.run(month="2026-08")
+
+        retry.assert_called_once()
+
+    def test_bound_monthly_task_returns_review_without_retry_for_partial_authority(self):
+        partial_result = {"automation_status": "REVIEW", "retryable": False}
+        with (
+            patch("pos_bridge.tasks.celery_tasks.run_monthly_product_closure", return_value=partial_result),
+            patch.object(task_monthly_product_closure, "retry") as retry,
+        ):
+            result = task_monthly_product_closure.run(month="2026-08")
+
+        self.assertEqual(result, partial_result)
+        retry.assert_not_called()
+
+    def test_bound_monthly_task_stops_retrying_after_single_retry(self):
+        retryable_result = {"automation_status": "REVIEW", "retryable": True}
+        with (
+            patch("pos_bridge.tasks.celery_tasks.run_monthly_product_closure", return_value=retryable_result),
+            patch.object(task_monthly_product_closure, "retry") as retry,
+            patch.object(task_monthly_product_closure.request, "retries", 1),
+        ):
+            result = task_monthly_product_closure.run(month="2026-08")
+
+        self.assertTrue(result["retry_exhausted"])
+        retry.assert_not_called()
 
 
 class MonthlyProductClosureMutexTests(TransactionTestCase):

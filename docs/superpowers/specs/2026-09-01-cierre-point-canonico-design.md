@@ -117,7 +117,13 @@ Se conservarán las prioridades actuales de fuentes oficiales y sus advertencias
 
 Para evitar una migración de esquema en esta corrección, los nuevos campos de conversión y procedencia se guardarán en el `metadata` JSON ya existente de cada línea. Los campos numéricos actuales seguirán representando los valores compatibles del cierre. Si durante la implementación se comprueba que esta compatibilidad altera el significado de un campo compartido, se detendrá el cambio y se propondrá una migración separada antes de modificar el contrato.
 
-No se reconstruirán cierres productivos automáticamente durante el deploy. Agosto se reconstruirá únicamente después de validar la nueva proyección y mediante una acción operacional explícita y auditable.
+No se reconstruirán cierres productivos automáticamente durante el deploy. El
+setup de Celery registra la tarea mensual pausada y con `lock_after_build=false`;
+no reactiva una tarea existente salvo el opt-in explícito
+`--enable-monthly-product-closure`. Aun con ese opt-in la automatización solo
+construye borradores y nunca bloquea. Agosto se reconstruirá únicamente después
+de validar la nueva proyección y mediante una acción operacional explícita y
+auditable.
 
 ### 6. Reporte y lenguaje visible
 

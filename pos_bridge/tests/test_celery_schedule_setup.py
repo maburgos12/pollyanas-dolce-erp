@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
-    def test_monthly_product_closure_uses_safe_canonical_orchestration(self):
+    def test_monthly_product_closure_is_paused_and_never_locks_by_default(self):
         from django.conf import settings
         from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
@@ -34,19 +34,34 @@ class SetupCelerySchedulesCommandTests(TestCase):
         task = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
         self.assertEqual(task.crontab.day_of_month, "5")
         self.assertEqual(task.crontab.hour, "4")
-        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": True})
+        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": False})
+        self.assertFalse(task.enabled)
         self.assertEqual(
             PeriodicTask.objects.filter(
                 task="pos_bridge.monthly_product_closure",
                 enabled=True,
             ).count(),
-            1,
+            0,
         )
         self.assertFalse(PeriodicTask.objects.get(name="legacy cierre producto mensual").enabled)
         self.assertNotIn(
             "pos_bridge.monthly_product_closure",
             [entry.get("task") for entry in settings.CELERY_BEAT_SCHEDULE.values()],
         )
+
+    def test_monthly_product_closure_requires_explicit_enable_flag(self):
+        from django_celery_beat.models import PeriodicTask
+
+        call_command("setup_celery_schedules", "--enable-monthly-product-closure")
+
+        task = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
+        self.assertTrue(task.enabled)
+        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": False})
+
+        # A normal deploy/setup run returns the high-risk schedule to containment.
+        call_command("setup_celery_schedules")
+        task.refresh_from_db()
+        self.assertFalse(task.enabled)
 
     @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
     @patch("crm.services.point_delivery_auto_sync.PointDeliveryAutoSyncService.run")

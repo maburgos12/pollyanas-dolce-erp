@@ -10,6 +10,7 @@ from django.utils import timezone
 from pos_bridge.models import PointSyncJob
 from pos_bridge.services.conversion_sync_service import sync_conversion_lines
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from recetas.models import ProductoMonthClosure
@@ -66,14 +67,21 @@ def _serialize_source_step(name: str, result) -> dict[str, object]:
             "status": status,
             "summary": result,
             "error": str(result.get("error") or ""),
+            "retryable": bool(result.get("retryable", False)),
         }
+    summary = dict(getattr(result, "result_summary", {}) or {})
     return {
         "name": name,
         "job_id": getattr(result, "id", None),
         "status": str(getattr(result, "status", "") or PointSyncJob.STATUS_FAILED),
-        "summary": dict(getattr(result, "result_summary", {}) or {}),
+        "summary": summary,
         "error": str(getattr(result, "error_message", "") or ""),
+        "retryable": bool(summary.get("retryable", False)),
     }
+
+
+def _is_transient_source_error(exc: Exception) -> bool:
+    return isinstance(exc, (TimeoutError, ConnectionError, OSError))
 
 
 def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=None) -> list[dict[str, object]]:
@@ -125,19 +133,24 @@ def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=N
             ),
         ),
     )
-    for name, operation in operations:
-        try:
-            steps.append(_serialize_source_step(name, operation()))
-        except Exception as exc:  # each official service persists its own failed job when available
-            steps.append(
-                {
-                    "name": name,
-                    "job_id": None,
-                    "status": PointSyncJob.STATUS_FAILED,
-                    "summary": {},
-                    "error": str(exc),
-                }
-            )
+    # One Point account invalidates its prior session on a new login. Keep the
+    # complete multi-report refresh inside the shared cross-service mutex so
+    # Domicilios cannot interrupt conversion polling or report downloads.
+    with point_account_session_lock(wait=True):
+        for name, operation in operations:
+            try:
+                steps.append(_serialize_source_step(name, operation()))
+            except Exception as exc:  # each official service persists its own failed job when available
+                steps.append(
+                    {
+                        "name": name,
+                        "job_id": None,
+                        "status": PointSyncJob.STATUS_FAILED,
+                        "summary": {},
+                        "error": str(exc),
+                        "retryable": _is_transient_source_error(exc),
+                    }
+                )
     return steps
 
 
@@ -190,6 +203,7 @@ def _run_monthly_product_closure_locked(
             "failed_or_partial_sources": [],
             "automation_status": "LOCKED",
             "automation_reviews": list(validation.get("automation_reviews") or []),
+            "retryable": False,
         }
 
     source_refresh = _refresh_month_sources(
@@ -202,6 +216,10 @@ def _run_monthly_product_closure_locked(
         for step in source_refresh
         if step["status"] != PointSyncJob.STATUS_SUCCESS
     ]
+    retryable = any(
+        bool(step.get("retryable")) and step.get("status") == PointSyncJob.STATUS_FAILED
+        for step in source_refresh
+    )
 
     service = ProductMonthClosureService()
     closure = service.build(
@@ -259,6 +277,7 @@ def _run_monthly_product_closure_locked(
         "failed_or_partial_sources": failed_or_partial_sources,
         "automation_status": automation_status,
         "automation_reviews": list(dict.fromkeys(automation_reviews)),
+        "retryable": retryable,
     }
 
 
@@ -289,6 +308,7 @@ def run_monthly_product_closure(
                 "failed_or_partial_sources": [],
                 "automation_status": "ALREADY_RUNNING",
                 "automation_reviews": ["Ya existe una orquestación activa para este mes."],
+                "retryable": False,
             }
         return _run_monthly_product_closure_locked(
             month=target_month,

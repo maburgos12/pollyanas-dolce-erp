@@ -303,13 +303,22 @@ def task_monthly_product_closure(
     triggered_by_id: int | None = None,
 ):
     user = _resolve_user(triggered_by_id)
-    return run_monthly_product_closure(
+    result = run_monthly_product_closure(
         month=month,
         triggered_by=user,
         rebuild=rebuild,
         lock_after_build=lock_after_build,
         sync_inventory_before_build=sync_inventory_before_build,
     )
+    if result.get("retryable"):
+        if self.request.retries < self.max_retries:
+            raise self.retry(
+                exc=RuntimeError(
+                    f"Fallo transitorio al refrescar fuentes Point del cierre {result.get('month') or month or ''}."
+                )
+            )
+        result = {**result, "retry_exhausted": True}
+    return result
 
 
 @shared_task(
