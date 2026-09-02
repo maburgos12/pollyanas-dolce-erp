@@ -1,3 +1,4 @@
+import csv
 from django.contrib.auth.models import Group, User
 from django.core.cache import cache
 from django.test import TestCase
@@ -5,7 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from openpyxl import load_workbook
@@ -3249,6 +3250,163 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
         self.assertIn("attachment; filename=\"cierre_producto_2025-12.csv\"", response["Content-Disposition"])
         self.assertIn("Pastel Export Cierre", response.content.decode("utf-8"))
+
+    def test_cierre_producto_exports_use_canonical_point_sign_labels_and_status(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Canonico",
+            codigo_point="EXPCAN001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-canonico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 7, 31),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_inicial_teorico=Decimal("10"),
+            inventario_final_teorico=Decimal("9"),
+            inventario_final_point_total=Decimal("11"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "POINT_MAYOR",
+                "issues": [],
+            },
+        )
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-08", "export": "csv"},
+        )
+        csv_body = csv_response.content.decode("utf-8")
+        self.assertIn("Saldo calculado", csv_body)
+        self.assertIn("Fin. Point", csv_body)
+        self.assertIn("Dif. Point", csv_body)
+        csv_rows = list(csv.reader(StringIO(csv_body)))
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        detail_values = csv_rows[csv_rows.index([]) + 2]
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Saldo calculado")]), Decimal("9"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Fin. Point")]), Decimal("11"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Dif. Point")]), Decimal("2"))
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "POINT_MAYOR")
+        self.assertNotIn("Diferencia teorico vs Point", csv_body)
+        self.assertNotIn("Sobrante físico", csv_body)
+        self.assertNotIn("Faltante no explicado", csv_body)
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-08", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        detail = workbook["Detalle"]
+        headers = [cell.value for cell in next(detail.iter_rows(min_row=1, max_row=1))]
+        values = next(detail.iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertIn("Saldo calculado", headers)
+        self.assertIn("Fin. Point", headers)
+        self.assertIn("Dif. Point", headers)
+        self.assertEqual(values[headers.index("Saldo calculado")], 9)
+        self.assertEqual(values[headers.index("Fin. Point")], 11)
+        self.assertEqual(values[headers.index("Dif. Point")], 2)
+        self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
+
+    def test_cierre_producto_exports_do_not_turn_missing_canonical_sources_into_zero(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Sin Fuente",
+            codigo_point="EXPMISS001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-sin-fuente-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 7, 1),
+            month_end=date(2026, 7, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 6, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("0"),
+            inventario_final_point_total=Decimal("0"),
+            diferencia_teorico_vs_point=Decimal("0"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "",
+                "point_status": "REVISAR_FUENTE",
+                "issues": ["CALCULATED_CLOSING_MISSING", "CLOSING_SNAPSHOT_MISSING"],
+            },
+        )
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "export": "csv"},
+        )
+        csv_body = csv_response.content.decode("utf-8")
+        csv_rows = list(csv.reader(StringIO(csv_body)))
+        detail_headers = csv_rows[csv_rows.index([]) + 1]
+        detail_values = csv_rows[csv_rows.index([]) + 2]
+        self.assertEqual(detail_values[detail_headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "REVISAR_FUENTE")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "export": "xlsx"},
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        detail = workbook["Detalle"]
+        headers = [cell.value for cell in next(detail.iter_rows(min_row=1, max_row=1))]
+        values = next(detail.iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(values[headers.index("Fin. Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
+        self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
+
+    def test_cierre_producto_historical_export_translates_legacy_sign_and_status_without_rewrite(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Historico",
+            codigo_point="EXPHIST001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-historico-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 6, 1),
+            month_end=date(2025, 6, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2025, 5, 31),
+        )
+        line = ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("7"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-3"),
+            estado_auditoria=ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO,
+            metadata={},
+        )
+
+        response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2025-06", "export": "csv"},
+        )
+        rows = list(csv.reader(StringIO(response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+
+        self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("3"))
+        self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
+        self.assertNotIn("Sobrante físico", response.content.decode("utf-8"))
+        line.refresh_from_db()
+        self.assertEqual(line.diferencia_teorico_vs_point, Decimal("-3"))
+        self.assertEqual(line.estado_auditoria, ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
 
     def test_cierre_producto_lock_requires_admin_or_dg(self):
         receta = Receta.objects.create(

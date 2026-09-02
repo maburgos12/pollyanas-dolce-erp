@@ -74,10 +74,10 @@ PRODUCTION_EXPORT_COLUMNS = [
     ("enteros_equivalentes", "Eq.", "number"),
     ("costo_merma", "Costo merma", "currency"),
     ("pct_merma", "% merma", "percent"),
-    ("inventario_inicial", "Inv. inicial", "number"),
-    ("inventario_final_teorico", "Inv. final teórico", "number"),
-    ("inventario_final_point_total", "Inv. físico registrado", "number"),
-    ("diferencia_inventario", "Inv. Δ", "number"),
+    ("inventario_inicial", "Ini. Point", "number"),
+    ("inventario_final_teorico", "Saldo calculado", "number"),
+    ("inventario_final_point_total", "Fin. Point", "number"),
+    ("diferencia_inventario", "Dif. Point", "number"),
     ("estado_inventario", "Estado", "text"),
 ]
 
@@ -87,9 +87,9 @@ PDF_EXPORT_COLUMNS = [
     ("dif", "Dif."),
     ("merma_reportada", "Merma"),
     ("pct_merma", "%"),
-    ("inventario_final_teorico", "Fin."),
-    ("inventario_final_point_total", "Físico"),
-    ("diferencia_inventario", "Inv. Δ"),
+    ("inventario_final_teorico", "Saldo calculado"),
+    ("inventario_final_point_total", "Fin. Point"),
+    ("diferencia_inventario", "Dif. Point"),
 ]
 
 
@@ -189,7 +189,7 @@ def _export_raw_value(row: dict[str, Any], key: str) -> Any:
 def _export_display_value(row: dict[str, Any], key: str, kind: str) -> str:
     value = _export_raw_value(row, key)
     if value is None or value == "":
-        return ""
+        return "Sin dato"
     if kind == "currency":
         return f"${_format_decimal(value, places=2, trim=False)}"
     if kind == "percent":
@@ -376,7 +376,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 raw_value = _export_raw_value(row, key)
                 cell = sheet.cell(row=row_idx, column=col_idx)
                 if raw_value is None or raw_value == "":
-                    cell.value = None
+                    cell.value = "Sin dato"
                 elif kind == "currency":
                     cell.value = _decimal_or_none(raw_value)
                     cell.number_format = '$#,##0.00'

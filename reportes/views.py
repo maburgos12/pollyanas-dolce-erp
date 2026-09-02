@@ -55,6 +55,7 @@ from maestros.models import CostoInsumo, Insumo
 from maestros.utils.canonical_catalog import canonicalized_active_insumos, enterprise_readiness_profile, latest_costo_canonico
 from recetas.models import (
     ProductoMonthClosure,
+    ProductoMonthClosureLine,
     Receta,
     LineaReceta,
     RecetaCostoSemanal,
@@ -5623,6 +5624,85 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     }
 
 
+_POINT_EXPORT_STATUSES = {"COINCIDE", "POINT_MAYOR", "POINT_MENOR", "REVISAR_FUENTE"}
+
+
+def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, object]:
+    """Project persisted closure fields into the public Point balance contract.
+
+    The database keeps the legacy difference sign (calculated - Point) for
+    compatibility. Exports always expose Point - calculated. Canonical metadata
+    also tells us when numeric zero is only the storage placeholder for a missing
+    source and must therefore be rendered as ``Sin dato``.
+    """
+    metadata = dict(line.metadata or {})
+    issues = {str(issue) for issue in metadata.get("issues") or []}
+    is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
+
+    calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
+    closing_missing = is_canonical and bool(
+        issues.intersection({"CLOSING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_SCOPE_MISSING"})
+    )
+    raw_point_difference = metadata.get("point_difference") if is_canonical else None
+    if is_canonical:
+        point_difference = _decimal_export_value(raw_point_difference)
+    elif line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
+        point_difference = None
+        closing_missing = True
+    else:
+        point_difference = -Decimal(str(line.diferencia_teorico_vs_point))
+
+    if calculated_missing or closing_missing:
+        point_difference = None
+
+    scopes_missing = closing_missing or (is_canonical and metadata.get("point_final_scopes_available") is False)
+    calculated_closing = None if calculated_missing else Decimal(str(line.inventario_final_teorico))
+    closing_point = None if closing_missing else Decimal(str(line.inventario_final_point_total))
+    point_status = str(metadata.get("point_status") or "") if is_canonical else ""
+    if point_status not in _POINT_EXPORT_STATUSES:
+        if point_difference is None or issues or line.has_catalog_issue:
+            point_status = "REVISAR_FUENTE"
+        elif abs(point_difference) <= Decimal("0.01"):
+            point_status = "COINCIDE"
+        elif point_difference > 0:
+            point_status = "POINT_MAYOR"
+        else:
+            point_status = "POINT_MENOR"
+
+    return {
+        "calculated_closing": calculated_closing,
+        "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
+        "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
+        "closing_point": closing_point,
+        "point_difference": point_difference,
+        "point_status": point_status,
+    }
+
+
+def _decimal_export_value(value: object) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _sum_available_export_values(rows: list[dict[str, object]], key: str) -> Decimal | None:
+    values = [row.get(key) for row in rows]
+    if not values or any(value is None for value in values):
+        return None
+    return sum((Decimal(str(value)) for value in values), Decimal("0"))
+
+
+def _closure_export_display(value: object) -> object:
+    return "Sin dato" if value is None else value
+
+
+def _closure_export_cell(value: object) -> object:
+    return "Sin dato" if value is None else float(Decimal(str(value)))
+
+
 def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="cierre_producto_{context["selected_month"]}.csv"'
@@ -5634,11 +5714,17 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     writer.writerow(["Produccion", context["total_production"]])
     writer.writerow(["Venta equivalente", context["total_sales"]])
     writer.writerow(["Merma equivalente", context["total_waste"]])
-    writer.writerow(["Inventario final", context["total_ending"]])
-    writer.writerow(["Inventario Point CEDIS", context["total_closing_cedis"]])
-    writer.writerow(["Inventario Point sucursales", context["total_closing_sucursales"]])
-    writer.writerow(["Inventario Point total", context["total_closing_point"]])
-    writer.writerow(["Diferencia teorico vs Point", context["total_closing_difference"]])
+    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
+    closing_total = _sum_available_export_values(export_rows, "closing_point")
+    closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
+    closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    difference_total = _sum_available_export_values(export_rows, "point_difference")
+    writer.writerow(["Saldo calculado", _closure_export_display(calculated_total)])
+    writer.writerow(["Inventario Point CEDIS", _closure_export_display(closing_cedis_total)])
+    writer.writerow(["Inventario Point sucursales", _closure_export_display(closing_sucursales_total)])
+    writer.writerow(["Fin. Point", _closure_export_display(closing_total)])
+    writer.writerow(["Dif. Point", _closure_export_display(difference_total)])
     writer.writerow([])
     writer.writerow(
         [
@@ -5649,17 +5735,17 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             "Venta directa",
             "Venta derivada",
             "Merma total",
-            "Final teorico",
+            "Saldo calculado",
             "Point CEDIS",
             "Point sucursales",
-            "Point total",
-            "Diferencia",
+            "Fin. Point",
+            "Dif. Point",
             "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
     )
-    for line in context.get("closure_lines") or []:
+    for line, export_row in zip(context.get("closure_lines") or [], export_rows):
         writer.writerow(
             [
                 line.receta_padre.nombre,
@@ -5669,12 +5755,12 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 line.venta_directa_enteros,
                 line.venta_derivada_equivalente,
                 line.merma_total_equivalente,
-                line.inventario_final_teorico,
-                line.inventario_final_point_cedis,
-                line.inventario_final_point_sucursales,
-                line.inventario_final_point_total,
-                line.diferencia_teorico_vs_point,
-                line.get_estado_auditoria_display(),
+                _closure_export_display(export_row["calculated_closing"]),
+                _closure_export_display(export_row["closing_point_cedis"]),
+                _closure_export_display(export_row["closing_point_sucursales"]),
+                _closure_export_display(export_row["closing_point"]),
+                _closure_export_display(export_row["point_difference"]),
+                export_row["point_status"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5693,11 +5779,17 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     summary_ws.append(["Produccion", float(context["total_production"])])
     summary_ws.append(["Venta equivalente", float(context["total_sales"])])
     summary_ws.append(["Merma equivalente", float(context["total_waste"])])
-    summary_ws.append(["Inventario final", float(context["total_ending"])])
-    summary_ws.append(["Inventario Point CEDIS", float(context["total_closing_cedis"])])
-    summary_ws.append(["Inventario Point sucursales", float(context["total_closing_sucursales"])])
-    summary_ws.append(["Inventario Point total", float(context["total_closing_point"])])
-    summary_ws.append(["Diferencia teorico vs Point", float(context["total_closing_difference"])])
+    export_rows = [_product_closure_export_row(line) for line in context.get("closure_lines") or []]
+    calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
+    closing_total = _sum_available_export_values(export_rows, "closing_point")
+    closing_cedis_total = _sum_available_export_values(export_rows, "closing_point_cedis")
+    closing_sucursales_total = _sum_available_export_values(export_rows, "closing_point_sucursales")
+    difference_total = _sum_available_export_values(export_rows, "point_difference")
+    summary_ws.append(["Saldo calculado", _closure_export_cell(calculated_total)])
+    summary_ws.append(["Inventario Point CEDIS", _closure_export_cell(closing_cedis_total)])
+    summary_ws.append(["Inventario Point sucursales", _closure_export_cell(closing_sucursales_total)])
+    summary_ws.append(["Fin. Point", _closure_export_cell(closing_total)])
+    summary_ws.append(["Dif. Point", _closure_export_cell(difference_total)])
 
     detail_ws = wb.create_sheet("Detalle")
     detail_ws.append(
@@ -5709,17 +5801,17 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             "Venta directa",
             "Venta derivada",
             "Merma total",
-            "Final teorico",
+            "Saldo calculado",
             "Point CEDIS",
             "Point sucursales",
-            "Point total",
-            "Diferencia",
+            "Fin. Point",
+            "Dif. Point",
             "Estado",
             "Catalog issue",
             "Catalog issue note",
         ]
     )
-    for line in context.get("closure_lines") or []:
+    for line, export_row in zip(context.get("closure_lines") or [], export_rows):
         detail_ws.append(
             [
                 line.receta_padre.nombre,
@@ -5729,12 +5821,12 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 float(line.venta_directa_enteros or 0),
                 float(line.venta_derivada_equivalente or 0),
                 float(line.merma_total_equivalente or 0),
-                float(line.inventario_final_teorico or 0),
-                float(line.inventario_final_point_cedis or 0),
-                float(line.inventario_final_point_sucursales or 0),
-                float(line.inventario_final_point_total or 0),
-                float(line.diferencia_teorico_vs_point or 0),
-                line.get_estado_auditoria_display(),
+                _closure_export_cell(export_row["calculated_closing"]),
+                _closure_export_cell(export_row["closing_point_cedis"]),
+                _closure_export_cell(export_row["closing_point_sucursales"]),
+                _closure_export_cell(export_row["closing_point"]),
+                _closure_export_cell(export_row["point_difference"]),
+                export_row["point_status"],
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]

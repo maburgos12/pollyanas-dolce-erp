@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from django.test import RequestFactory, TestCase
 from django.template.loader import render_to_string
 from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from pos_bridge.models import PointBranch, PointConversionLine, PointDailySale, PointProduct
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointBalanceRow
@@ -405,3 +407,92 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn("Sobrante físico", template)
         self.assertNotIn("Faltante no explicado", template)
         self.assertNotIn("Inventario físico", template)
+
+    def test_csv_export_uses_canonical_point_labels_sign_status_and_sin_dato(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=Decimal("10"),
+                    calculated_closing=Decimal("9"),
+                    closing_point=Decimal("11"),
+                    difference_point=Decimal("2"),
+                    status="POINT_MAYOR",
+                ),
+                MonthlyPointBalanceRow(
+                    receta_id=self.slice.id,
+                    opening_point=None,
+                    calculated_closing=None,
+                    closing_point=None,
+                    difference_point=None,
+                    status="REVISAR_FUENTE",
+                ),
+            )
+        )
+
+        response = ProducidoVsVendidoMermaView()._export_csv(context)
+        body = response.content.decode("utf-8")
+
+        self.assertIn("Saldo calculado", body)
+        self.assertIn("Fin. Point", body)
+        self.assertIn("Dif. Point", body)
+        self.assertIn("Point mayor", body)
+        self.assertIn(",9,11,2,Point mayor", body)
+        self.assertIn("Sin dato", body)
+        self.assertNotIn("Físico", body)
+        self.assertNotIn("Sobrante físico", body)
+        self.assertNotIn("Faltante no explicado", body)
+
+    def test_xlsx_export_uses_canonical_point_headers_and_preserves_missing_values(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=None,
+                    calculated_closing=None,
+                    closing_point=None,
+                    difference_point=None,
+                    status="REVISAR_FUENTE",
+                )
+            )
+        )
+
+        response = ProducidoVsVendidoMermaView()._export_xlsx(context)
+        workbook = load_workbook(BytesIO(response.content), data_only=True, read_only=True)
+        sheet = workbook["Producido vs Vendido"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=5, max_row=5))]
+        detail = next(sheet.iter_rows(min_row=7, max_row=7, values_only=True))
+
+        self.assertIn("Saldo calculado", headers)
+        self.assertIn("Fin. Point", headers)
+        self.assertIn("Dif. Point", headers)
+        self.assertNotIn("Inv. físico registrado", headers)
+        self.assertEqual(detail[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(detail[headers.index("Fin. Point")], "Sin dato")
+        self.assertEqual(detail[headers.index("Dif. Point")], "Sin dato")
+
+    def test_pdf_export_uses_canonical_point_labels_and_neutral_status(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=Decimal("10"),
+                    calculated_closing=Decimal("9"),
+                    closing_point=Decimal("11"),
+                    difference_point=Decimal("2"),
+                    status="POINT_MAYOR",
+                )
+            )
+        )
+
+        response = ProducidoVsVendidoMermaView()._export_pdf(context)
+        body = response.content.decode("latin-1")
+
+        self.assertIn("Saldo calculado 9", body)
+        self.assertIn("Fin. Point 11", body)
+        self.assertIn("Dif. Point 2", body)
+        self.assertIn("Estado Point)", body)
+        self.assertIn("(  mayor)", body)
+        self.assertNotIn("Físico", body)
+        self.assertNotIn("Sobrante físico", body)
+        self.assertNotIn("Faltante no explicado", body)
