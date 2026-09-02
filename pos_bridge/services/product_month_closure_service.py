@@ -148,6 +148,13 @@ class ProductMonthClosureService:
                 month_start=month_start,
                 defaults={"month_end": month_end},
             )
+            closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+            if closure.is_locked:
+                if rebuild:
+                    raise ProductMonthClosureError(
+                        f"El cierre {month_start:%Y-%m} esta bloqueado y no permite rebuild."
+                    )
+                raise ProductMonthClosureError(f"El cierre {month_start:%Y-%m} esta bloqueado.")
             closure.lines.all().delete()
 
             closure.month_end = month_end
@@ -162,7 +169,6 @@ class ProductMonthClosureService:
                 **dict(plan["metadata"]),
                 "rebuild": bool(rebuild),
             }
-            closure.is_locked = False
             closure.save()
 
             for row in plan["line_rows"]:
@@ -198,8 +204,7 @@ class ProductMonthClosureService:
                 )
 
             closure.status = ProductoMonthClosure.STATUS_BUILT
-            closure.is_locked = False
-            closure.save(update_fields=["status", "is_locked", "updated_at"])
+            closure.save(update_fields=["status", "updated_at"])
 
             if lock_after_build:
                 closure = self.lock(
@@ -387,7 +392,9 @@ class ProductMonthClosureService:
         raw_recipe_ids = set(recipes)
         equivalences = {}
         for item in RecetaEquivalencia.objects.select_related("receta_padre").filter(
-            receta_porcion_id__in=raw_recipe_ids, activo=True
+            receta_porcion_id__in=raw_recipe_ids,
+            activo=True,
+            tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
         ).order_by("id"):
             equivalences.setdefault(item.receta_porcion_id, item)
         derived_relations = {}
@@ -742,6 +749,7 @@ class ProductMonthClosureService:
 
         return closure
 
+    @transaction.atomic
     def lock(
         self,
         *,
@@ -751,6 +759,7 @@ class ProductMonthClosureService:
         note: str = "",
         channel: str = "service",
     ) -> ProductoMonthClosure:
+        closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
         if closure.is_locked:
             raise ProductMonthClosureError(f"El cierre {closure.month_start:%Y-%m} ya esta bloqueado.")
         if closure.status != ProductoMonthClosure.STATUS_BUILT:

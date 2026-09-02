@@ -6,6 +6,7 @@ from decimal import Decimal
 from io import StringIO
 from tempfile import NamedTemporaryFile
 from types import MappingProxyType
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -224,6 +225,49 @@ class ProductMonthClosureServiceTests(TestCase):
         rows = self.service._project_canonical_balance(balance=balance)
 
         self.assertEqual(rows[0]["metadata"]["projection_sources"], ["DIRECTA"])
+
+    def test_costing_equivalence_never_projects_or_scales_operational_balance(self):
+        costing_parent = Receta.objects.create(
+            nombre="Base de costeo",
+            codigo_point="COST-P",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cost-parent",
+        )
+        costing_child = Receta.objects.create(
+            nombre="Producto con complemento de costo",
+            codigo_point="COST-C",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-cost-child",
+        )
+        RecetaEquivalencia.objects.create(
+            receta_porcion=costing_child,
+            receta_padre=costing_parent,
+            factor_conversion=Decimal("8"),
+            tipo_relacion=RecetaEquivalencia.TIPO_COSTEO,
+            activo=True,
+        )
+        balance = self._canonical_balance(
+            {
+                costing_child.id: MonthlyPointBalanceRow(
+                    receta_id=costing_child.id,
+                    opening_point=Decimal("3"),
+                    sales=Decimal("8"),
+                    calculated_closing=Decimal("1"),
+                    closing_point=Decimal("1"),
+                    difference_point=Decimal("0"),
+                    status="COINCIDE",
+                )
+            }
+        )
+
+        rows = self.service._project_canonical_balance(balance=balance)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["receta"], costing_child)
+        self.assertEqual(rows[0]["inventario_inicial_teorico"], Decimal("3"))
+        self.assertEqual(rows[0]["venta_directa_enteros"], Decimal("8"))
+        self.assertEqual(rows[0]["venta_derivada_equivalente"], Decimal("0"))
+        self.assertEqual(rows[0]["metadata"]["projection_sources"], [])
 
     def test_new_canonical_audit_detail_names_point_balance_not_physical_inventory(self):
         missing_status, missing_detail = self.service._canonical_audit_status(
@@ -1130,6 +1174,67 @@ class ProductMonthClosureServiceTests(TestCase):
         )
         with self.assertRaisesMessage(ProductMonthClosureError, "bloqueado"):
             self.service.build(month="2025-09", rebuild=True)
+
+    def test_build_revalidates_locked_closure_after_preview_and_never_unlocks_it(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            is_locked=False,
+            metadata={"sentinel": "before-lock"},
+        )
+        original_updated_at = closure.updated_at
+
+        def preview_with_concurrent_lock(**kwargs):
+            ProductoMonthClosure.objects.filter(pk=closure.pk).update(
+                status=ProductoMonthClosure.STATUS_LOCKED,
+                is_locked=True,
+                metadata={"sentinel": "concurrent-lock"},
+            )
+            return {
+                "month_end": date(2025, 9, 30),
+                "notes": "plan obsoleto",
+                "opening_source": ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+                "opening_reference_date": date(2025, 8, 31),
+                "metadata": {},
+                "line_rows": [],
+            }
+
+        with patch.object(self.service, "preview", side_effect=preview_with_concurrent_lock):
+            with self.assertRaisesMessage(ProductMonthClosureError, "bloqueado"):
+                self.service.build(month="2025-09", rebuild=True)
+
+        closure.refresh_from_db()
+        self.assertTrue(closure.is_locked)
+        self.assertEqual(closure.status, ProductoMonthClosure.STATUS_LOCKED)
+        self.assertEqual(closure.metadata, {"sentinel": "concurrent-lock"})
+        self.assertEqual(closure.updated_at, original_updated_at)
+
+    def test_lock_reloads_and_rejects_a_stale_instance_locked_by_another_request(self):
+        stale = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 5, 1),
+            month_end=date(2026, 5, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            is_locked=False,
+            metadata={"sentinel": "stale"},
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=stale,
+            receta_padre=self.parent,
+        )
+        ProductoMonthClosure.objects.filter(pk=stale.pk).update(
+            status=ProductoMonthClosure.STATUS_LOCKED,
+            is_locked=True,
+            metadata={"sentinel": "concurrent-lock"},
+        )
+
+        with self.assertRaisesMessage(ProductMonthClosureError, "ya esta bloqueado"):
+            self.service.lock(closure=stale, reason="stale-request")
+
+        stale.refresh_from_db()
+        self.assertTrue(stale.is_locked)
+        self.assertEqual(stale.status, ProductoMonthClosure.STATUS_LOCKED)
+        self.assertEqual(stale.metadata, {"sentinel": "concurrent-lock"})
 
     def test_lock_marks_built_closure_as_locked_with_audit_metadata(self):
         closure = ProductoMonthClosure.objects.create(
