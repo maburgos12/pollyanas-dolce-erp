@@ -345,18 +345,18 @@ def sync_conversion_lines(
                 )
                 created += 1
 
-        result = {
-            "created": created,
-            "skipped": skipped,
-            "relinked": relinked,
-            "skipped_unmatched_branch": skipped_unmatched_branch,
-            "total_rows": len(rows),
-            "report_pk": pk_reporte,
-        }
-        job.status = PointSyncJob.STATUS_SUCCESS
-        job.finished_at = timezone.now()
-        job.result_summary = result
-        job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])
+            result = {
+                "created": created,
+                "skipped": skipped,
+                "relinked": relinked,
+                "skipped_unmatched_branch": skipped_unmatched_branch,
+                "total_rows": len(rows),
+                "report_pk": pk_reporte,
+            }
+            job.status = PointSyncJob.STATUS_SUCCESS
+            job.finished_at = timezone.now()
+            job.result_summary = result
+            job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])
         return result
     except Exception as exc:
         job.status = PointSyncJob.STATUS_FAILED

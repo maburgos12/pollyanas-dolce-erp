@@ -56,7 +56,14 @@ class PointConversionRerunAuthorityTests(TestCase):
             patch("pos_bridge.services.conversion_sync_service._build_recipe_map", return_value={}),
             patch("pos_bridge.services.conversion_sync_service._resolve_branch", return_value=self.branch),
             patch("pos_bridge.services.conversion_sync_service._resolve_recipe", return_value=self.recipe),
-            patch("pos_bridge.services.conversion_sync_service._make_hash", return_value="conversion-rerun-hash"),
+            patch(
+                "pos_bridge.services.conversion_sync_service._make_hash",
+                side_effect=lambda row: (
+                    "conversion-rerun-hash"
+                    if row["PK_Movimiento"] == "MOV-RERUN-001"
+                    else f"conversion-rerun-hash-{row['PK_Movimiento']}"
+                ),
+            ),
         ):
             return sync_conversion_lines(date_from=date(2026, 7, 1), date_to=date(2026, 7, 31))
 
@@ -116,3 +123,44 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(metadata["selected_sync_job_ids"], (latest.id,))
         self.assertFalse(metadata["authoritative"])
         self.assertIn("CONVERSION_SYNC_COUNT_MISMATCH", metadata["authority_issues"])
+
+    def test_failed_success_transition_rolls_back_relinks_and_new_rows(self):
+        first_result = self._sync()
+        first_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+        self.report_rows.append(
+            {
+                **self.report_rows[0],
+                "PK_Movimiento": "MOV-RERUN-NEW",
+                "Codigo": "CONV-RERUN-NEW",
+            }
+        )
+        original_save = PointSyncJob.save
+
+        def fail_success_save(instance, *args, **kwargs):
+            if instance.status == PointSyncJob.STATUS_SUCCESS:
+                raise RuntimeError("fallo inyectado al confirmar SUCCESS")
+            return original_save(instance, *args, **kwargs)
+
+        with patch.object(PointSyncJob, "save", new=fail_success_save):
+            with self.assertRaisesRegex(RuntimeError, "fallo inyectado"):
+                self._sync()
+
+        first_job.refresh_from_db()
+        original_line = PointConversionLine.objects.get(source_hash="conversion-rerun-hash")
+        failed_job = PointSyncJob.objects.exclude(pk=first_job.pk).get()
+
+        self.assertEqual(first_job.status, PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(first_job.result_summary, first_result)
+        self.assertEqual(original_line.sync_job_id, first_job.id)
+        self.assertFalse(
+            PointConversionLine.objects.filter(source_hash="conversion-rerun-hash-MOV-RERUN-NEW").exists()
+        )
+        self.assertEqual(PointConversionLine.objects.count(), 1)
+        self.assertEqual(failed_job.status, PointSyncJob.STATUS_FAILED)
+        self.assertEqual(failed_job.result_summary, {})
+        self.assertFalse(PointConversionLine.objects.filter(sync_job=failed_job).exists())
+
+        metadata = self._conversion_authority()
+        self.assertEqual(metadata["selected_sync_job_ids"], (failed_job.id,))
+        self.assertIn("CONVERSION_SYNC_JOB_FAILED", metadata["authority_issues"])
+        self.assertIn("CONVERSION_SYNC_JOB_MIXED", metadata["authority_issues"])
