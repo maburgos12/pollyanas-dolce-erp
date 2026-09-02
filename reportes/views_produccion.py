@@ -616,7 +616,33 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "target_date": source.get("target_date"),
             "selected_dates": source.get("selected_dates") or (),
             "fallback_used": bool(source.get("fallback_used")),
+            "authority_issues": tuple(source.get("authority_issues") or ()),
+            "job_status": source.get("job_status"),
+            "selected_sync_job_ids": source.get("selected_sync_job_ids") or (),
+            "coverage_scope": source.get("coverage_scope"),
+            "coverage_start": source.get("coverage_start"),
+            "coverage_end": source.get("coverage_end"),
         }
+
+    @staticmethod
+    def _authority_issue_label(issue: str) -> str:
+        suffix_labels = {
+            "SYNC_JOB_MISSING": "falta job Point del mes",
+            "SYNC_JOB_FAILED": "job Point fallido",
+            "SYNC_JOB_PARTIAL": "job Point parcial",
+            "SYNC_JOB_INCOMPLETE": "job Point incompleto",
+            "SYNC_RANGE_INCOMPLETE": "rango mensual incompleto",
+            "SYNC_JOB_RESTRICTED": "job Point filtrado por sucursal",
+            "SYNC_CONTRACT_INCOMPLETE": "contrato del job incompleto",
+            "SYNC_COUNT_MISMATCH": "conteo del job no reconcilia",
+            "SYNC_BRANCH_COVERAGE_INCOMPLETE": "cobertura de sucursales incompleta",
+            "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
+        }
+        issue = str(issue or "")
+        for suffix, label in suffix_labels.items():
+            if issue.endswith(suffix):
+                return label
+        return issue or "razón de autoridad no informada"
 
     def _canonical_sources(self, balance) -> dict[str, Any]:
         canonical = {
@@ -652,11 +678,19 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 reasons.append(f"{label}: {source['selected_source']} no disponible")
             if not source["authoritative"]:
                 reasons.append(f"{label}: {source['selected_source']} sin autoridad")
+            reasons.extend(
+                f"{label}: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
+                for issue in source["authority_issues"]
+            )
         conversions = canonical["conversions"]
         if conversions["source_present"] is False:
             reasons.append(f"Conversiones: {conversions['selected_source']} no disponible")
         if not conversions["authoritative"]:
             reasons.append(f"Conversiones: {conversions['selected_source']} sin autoridad")
+        reasons.extend(
+            f"Conversiones: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
+            for issue in conversions["authority_issues"]
+        )
 
         sales = canonical["sales"]
         if sales["mode"] == "BRIDGE_HISTORY":

@@ -5445,6 +5445,47 @@ def _product_closure_point_status_label(status: str) -> str:
     }.get(status, "Revisar fuente")
 
 
+_MOVEMENT_AUTHORITY_META = (
+    ("production_meta", "Producción"),
+    ("waste_meta", "Merma"),
+    ("conversion_meta", "Conversiones"),
+)
+
+
+def _movement_authority_issue_label(issue: str) -> str:
+    labels = {
+        "SYNC_JOB_MISSING": "falta job Point del mes",
+        "SYNC_JOB_FAILED": "job Point fallido",
+        "SYNC_JOB_PARTIAL": "job Point parcial",
+        "SYNC_JOB_INCOMPLETE": "job Point incompleto",
+        "SYNC_RANGE_INCOMPLETE": "rango mensual incompleto",
+        "SYNC_JOB_RESTRICTED": "job Point filtrado por sucursal",
+        "SYNC_CONTRACT_INCOMPLETE": "contrato del job incompleto",
+        "SYNC_COUNT_MISMATCH": "conteo del job no reconcilia",
+        "SYNC_BRANCH_COVERAGE_INCOMPLETE": "cobertura de sucursales incompleta",
+        "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
+    }
+    issue = str(issue or "")
+    for suffix, label in labels.items():
+        if issue.endswith(suffix):
+            return label
+    return issue or "razón de autoridad no informada"
+
+
+def _movement_authority_guards(metadata: dict[str, object]) -> list[dict[str, object]]:
+    guards: list[dict[str, object]] = []
+    for metadata_key, label in _MOVEMENT_AUTHORITY_META:
+        source = dict(metadata.get(metadata_key) or {})
+        if not source or source.get("authoritative") is True:
+            continue
+        issues = list(source.get("authority_issues") or [])
+        messages = [f"{label}: {_movement_authority_issue_label(issue)}" for issue in issues]
+        if not messages:
+            messages.append(f"{label}: fuente mensual sin autoridad comprobada")
+        guards.append({"label": label, "messages": messages, "source": source})
+    return guards
+
+
 def _build_product_closure_context(selected_month_start: date) -> dict[str, object]:
     closure = (
         ProductoMonthClosure.objects.select_related("built_by").prefetch_related("lines", "lines__receta_padre")
@@ -5524,13 +5565,14 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         )
 
     notes_rows = [row.strip() for row in (closure.notes or "").splitlines() if row.strip()] if closure else []
-    opening_meta = (closure.metadata or {}).get("opening_meta", {}) if closure else {}
-    sales_meta = (closure.metadata or {}).get("sales_meta", {}) if closure else {}
-    fact_meta = (closure.metadata or {}).get("fact_meta", {}) if closure else {}
-    validation = (closure.metadata or {}).get("validation", {}) if closure else {}
+    closure_metadata = dict(closure.metadata or {}) if closure else {}
+    opening_meta = closure_metadata.get("opening_meta", {})
+    sales_meta = closure_metadata.get("sales_meta", {})
+    fact_meta = closure_metadata.get("fact_meta", {})
+    validation = closure_metadata.get("validation", {})
     automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
-    lock_event = (closure.metadata or {}).get("lock_event", {}) if closure else {}
+    lock_event = closure_metadata.get("lock_event", {})
     fact_status = str(fact_meta.get("status") or "").strip()
     sales_mode = str(sales_meta.get("mode") or "").strip()
     if fact_status in {"existing", "generated"}:
@@ -5553,6 +5595,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         movement_source_label = "Sin fuente publicada"
         movement_source_detail = "Construye el cierre para resolver la fuente mensual."
     lock_guard_errors: list[str] = []
+    movement_authority_guards = _movement_authority_guards(closure_metadata)
     if closure:
         if closure.is_locked:
             lock_guard_errors.append("El cierre ya fue bloqueado.")
@@ -5564,6 +5607,13 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             lock_guard_errors.append("Existen incidencias de catalogo pendientes en las lineas del cierre.")
         if unmatched_products:
             lock_guard_errors.append("Existen productos del opening sin homologacion Point -> ERP.")
+        for issue in validation.get("blocking_issues") or []:
+            lock_guard_errors.append(f"Guarda de validación: {issue}")
+        if validation.get("lock_ready") is False and not validation.get("blocking_issues"):
+            lock_guard_errors.append("La validación del cierre indica que el mes no está listo para bloquearse.")
+        for guard in movement_authority_guards:
+            lock_guard_errors.extend(guard["messages"])
+    lock_guard_errors = list(dict.fromkeys(lock_guard_errors))
 
     exception_rows: list[dict[str, str]] = []
     if validation.get("snapshot_fallback_used"):
@@ -5589,6 +5639,22 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                 "tone": "danger",
                 "title": "Incidencias de catalogo en lineas",
                 "detail": f"El cierre tiene {len(catalog_issue_rows)} linea(s) con derivadas o catalogo pendientes.",
+            }
+        )
+    if validation.get("blocking_issues"):
+        exception_rows.append(
+            {
+                "tone": "danger",
+                "title": "Guardas de validación activas",
+                "detail": " · ".join(str(issue) for issue in validation["blocking_issues"]),
+            }
+        )
+    for guard in movement_authority_guards:
+        exception_rows.append(
+            {
+                "tone": "danger",
+                "title": f"{guard['label']} sin autoridad mensual",
+                "detail": " · ".join(guard["messages"]),
             }
         )
     for review in automation_reviews:

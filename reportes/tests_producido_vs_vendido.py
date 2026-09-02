@@ -306,6 +306,34 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn("Producción Point: FactProduccionDiaria", rendered)
         self.assertNotIn("Merma Point: MermaMensualSucursal", rendered)
 
+    def test_movement_authority_reasons_are_preserved_and_explained(self):
+        sources = canonical_balance().sources
+        sources["production"] = {
+            "source": "PointProductionLine",
+            "authoritative": False,
+            "source_present": True,
+            "job_status": "PARTIAL",
+            "authority_issues": (
+                "PRODUCTION_SYNC_JOB_PARTIAL",
+                "PRODUCTION_SYNC_RANGE_INCOMPLETE",
+            ),
+        }
+
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(receta_id=self.parent.id, status="REVISAR_FUENTE"),
+                sources=sources,
+            )
+        )
+        rendered = self._render(context)
+
+        self.assertEqual(
+            context["fuentes"]["canonical"]["production"]["authority_issues"],
+            ("PRODUCTION_SYNC_JOB_PARTIAL", "PRODUCTION_SYNC_RANGE_INCOMPLETE"),
+        )
+        self.assertIn("Producción: job Point parcial", rendered)
+        self.assertIn("Producción: rango mensual incompleto", rendered)
+
     def test_available_periods_include_months_with_only_point_sales_or_conversions(self):
         branch = PointBranch.objects.create(external_id="period-branch", name="Sucursal periodos")
         product = PointProduct.objects.create(external_id="period-product", name="Producto periodos")

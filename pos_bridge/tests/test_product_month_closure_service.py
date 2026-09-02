@@ -368,6 +368,81 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(validation["sales_official_rows"], 12)
         self.assertEqual(validation["sales_legacy_rows"], 7)
 
+    def test_preview_preserves_complete_compact_movement_authority_metadata(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        row = MonthlyPointBalanceRow(
+            receta_id=self.parent.id,
+            opening_point=Decimal("10"),
+            calculated_closing=None,
+            closing_point=Decimal("10"),
+            difference_point=None,
+            status="REVISAR_FUENTE",
+            issues=("CALCULATED_CLOSING_MISSING",),
+        )
+        movement_sources = {
+            "production": {
+                "source": "PointProductionLine",
+                "authoritative": False,
+                "source_present": True,
+                "job_status": "PARTIAL",
+                "selected_sync_job_ids": tuple(range(20, 40)),
+                "authority_issues": (
+                    "PRODUCTION_SYNC_JOB_PARTIAL",
+                    "PRODUCTION_SYNC_RANGE_INCOMPLETE",
+                    "PRODUCTION_SYNC_JOB_RESTRICTED",
+                    "PRODUCTION_SYNC_CONTRACT_INCOMPLETE",
+                    "PRODUCTION_SYNC_COUNT_MISMATCH",
+                    "PRODUCTION_SYNC_JOB_MIXED",
+                ),
+            },
+            "waste": {
+                "source": "PointWasteLine",
+                "authoritative": False,
+                "source_present": False,
+                "authority_issues": ("WASTE_SYNC_JOB_MISSING",),
+            },
+            "conversions": {
+                "source": "PointConversionLine",
+                "authoritative": False,
+                "source_present": True,
+                "authority_issues": ("CONVERSION_SYNC_BRANCH_COVERAGE_INCOMPLETE",),
+            },
+        }
+        sources = dict(self._canonical_balance({self.parent.id: row}).sources)
+        sources.update({key: MappingProxyType(value) for key, value in movement_sources.items()})
+        balance = MonthlyPointBalance(
+            month_start=date(2025, 9, 1),
+            month_end=date(2025, 9, 30),
+            rows=MappingProxyType({self.parent.id: row}),
+            issues=("MONTH_SOURCE_INCOMPLETE",),
+            sources=MappingProxyType(sources),
+            effective_snapshot_dates=MappingProxyType(
+                {"opening": date(2025, 8, 31), "closing": date(2025, 9, 30)}
+            ),
+            source_counts=MappingProxyType({}),
+        )
+
+        preview = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")
+
+        metadata = preview["metadata"]
+        self.assertEqual(
+            metadata["production_meta"]["authority_issues"],
+            list(movement_sources["production"]["authority_issues"]),
+        )
+        self.assertEqual(metadata["waste_meta"]["authority_issues"], ["WASTE_SYNC_JOB_MISSING"])
+        self.assertEqual(
+            metadata["conversion_meta"]["authority_issues"],
+            ["CONVERSION_SYNC_BRANCH_COVERAGE_INCOMPLETE"],
+        )
+        self.assertEqual(metadata["production_meta"]["selected_sync_job_ids"]["count"], 20)
+        self.assertEqual(metadata["production_meta"]["job_status"], "PARTIAL")
+
     def test_preview_recursively_compacts_large_source_metadata_with_stable_full_hashes(self):
         class CanonicalBalance:
             def __init__(self, balance):

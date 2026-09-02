@@ -83,7 +83,13 @@ class ProductMonthClosureService:
     METADATA_COMPACTION_SAMPLE_LIMIT = 5
     METADATA_COMPACTION_MAPPING_LIMIT = 12
     PUBLIC_SOURCE_METADATA_ARRAY_KEYS = frozenset(
-        {"blocking_issues", "fallback_chain_attempted", "selected_dates", "warnings"}
+        {
+            "authority_issues",
+            "blocking_issues",
+            "fallback_chain_attempted",
+            "selected_dates",
+            "warnings",
+        }
     )
 
     def __init__(
@@ -232,6 +238,10 @@ class ProductMonthClosureService:
         canonical_sales_meta = self._json_compatible(balance.sources.get("sales") or {})
         sales_meta = self._compact_source_metadata(canonical_sales_meta)
         sales_meta["mode"] = sales_meta.get("selected_source") or sales_meta.get("mode") or ""
+        movement_meta = {
+            family: self._compact_source_metadata(balance.sources.get(family) or {})
+            for family in ("production", "waste", "conversions")
+        }
         validation = {
             "warnings": self._json_compatible(balance.warnings),
             "blocking_issues": blocking_issues,
@@ -277,6 +287,9 @@ class ProductMonthClosureService:
             "metadata": {
                 "opening_meta": opening_meta,
                 "sales_meta": sales_meta,
+                "production_meta": movement_meta["production"],
+                "waste_meta": movement_meta["waste"],
+                "conversion_meta": movement_meta["conversions"],
                 "fact_meta": {"source": "MonthlyPointProductBalanceService", "status": "canonical"},
                 "closing_inventory_meta": closing_meta,
                 "recipe_count": len(line_rows),

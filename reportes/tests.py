@@ -1,4 +1,5 @@
 import csv
+import re
 from django.contrib.auth.models import Group, User
 from django.core.cache import cache
 from django.test import TestCase
@@ -3823,6 +3824,101 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(closure.is_locked)
         self.assertContains(response, "Solo Dirección General o Administración pueden bloquear cierres mensuales.")
+
+    def test_cierre_producto_disables_lock_and_explains_each_movement_authority_guard(self):
+        admin_user = User.objects.create_user(username="admin_cierre_fuentes", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        cases = (
+            (
+                "production",
+                date(2026, 1, 1),
+                ("PRODUCTION_SYNC_JOB_PARTIAL", "PRODUCTION_SYNC_RANGE_INCOMPLETE"),
+                ("Producción: job Point parcial", "Producción: rango mensual incompleto"),
+            ),
+            (
+                "waste",
+                date(2026, 2, 1),
+                ("WASTE_SYNC_JOB_MISSING", "WASTE_SYNC_JOB_RESTRICTED"),
+                ("Merma: falta job Point del mes", "Merma: job Point filtrado por sucursal"),
+            ),
+            (
+                "conversion",
+                date(2026, 3, 1),
+                (
+                    "CONVERSION_SYNC_CONTRACT_INCOMPLETE",
+                    "CONVERSION_SYNC_COUNT_MISMATCH",
+                    "CONVERSION_SYNC_JOB_MIXED",
+                ),
+                (
+                    "Conversiones: contrato del job incompleto",
+                    "Conversiones: conteo del job no reconcilia",
+                    "Conversiones: filas mezcladas entre jobs",
+                ),
+            ),
+        )
+        for family, month_start, authority_issues, expected_messages in cases:
+            with self.subTest(family=family):
+                receta = Receta.objects.create(
+                    nombre=f"Pastel guarda {family}",
+                    codigo_point=f"GUARD-{family.upper()}",
+                    tipo=Receta.TIPO_PRODUCTO_FINAL,
+                    hash_contenido=f"hash-guard-{family}",
+                )
+                metadata_key = f"{family}_meta"
+                closure = ProductoMonthClosure.objects.create(
+                    month_start=month_start,
+                    month_end=date(month_start.year, month_start.month, 28),
+                    status=ProductoMonthClosure.STATUS_BUILT,
+                    opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+                    metadata={
+                        "validation": {
+                            "lock_ready": False,
+                            "blocking_issues": ["MONTH_SOURCE_INCOMPLETE"],
+                        },
+                        metadata_key: {
+                            "source": {
+                                "production": "PointProductionLine",
+                                "waste": "PointWasteLine",
+                                "conversion": "PointConversionLine",
+                            }[family],
+                            "authoritative": False,
+                            "source_present": family != "waste",
+                            "job_status": "PARTIAL" if family == "production" else "SUCCESS",
+                            "authority_issues": list(authority_issues),
+                        },
+                    },
+                )
+                ProductoMonthClosureLine.objects.create(
+                    closure=closure,
+                    receta_padre=receta,
+                    metadata={
+                        "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                        "issues": ["MONTH_SOURCE_INCOMPLETE"],
+                    },
+                )
+
+                response = self.client.get(
+                    reverse("reportes:cierre_producto"),
+                    {"month": month_start.strftime("%Y-%m")},
+                )
+
+                self.assertTrue(response.context["can_lock_closure"])
+                button = re.search(r"<button[^>]*>Bloquear cierre</button>", response.content.decode("utf-8"))
+                self.assertIsNotNone(button)
+                self.assertIn("disabled", button.group(0))
+                self.assertIn(
+                    "Guarda de validación: MONTH_SOURCE_INCOMPLETE",
+                    response.context["lock_guard_errors"],
+                )
+                self.assertContains(response, "Guarda de validación: MONTH_SOURCE_INCOMPLETE")
+                for message in expected_messages:
+                    self.assertIn(message, response.context["lock_guard_errors"])
+                    self.assertContains(response, message)
+                details = " ".join(row["detail"] for row in response.context["exception_rows"])
+                for message in expected_messages:
+                    self.assertIn(message, details)
 
     def test_cierre_producto_lock_succeeds_for_admin_when_closure_is_clean(self):
         admin_user = User.objects.create_user(username="admin_cierre", password="pass123")
