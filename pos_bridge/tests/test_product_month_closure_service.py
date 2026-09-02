@@ -205,6 +205,26 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(rows[0]["metadata"]["conversion_origin"], "UNRESOLVED")
         self.assertEqual(rows[0]["metadata"]["conversion_origins"], ["UNRESOLVED"])
 
+    def test_projection_trace_only_includes_rows_with_conversion_movements(self):
+        balance = self._canonical_balance(
+            {
+                self.parent.id: MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    conversion_out=Decimal("1"),
+                    conversion_origin="POINT",
+                    conversion_origins=("POINT",),
+                ),
+                self.derived.id: MonthlyPointBalanceRow(
+                    receta_id=self.derived.id,
+                    sales=Decimal("10"),
+                ),
+            }
+        )
+
+        rows = self.service._project_canonical_balance(balance=balance)
+
+        self.assertEqual(rows[0]["metadata"]["projection_sources"], ["DIRECTA"])
+
     def test_new_canonical_audit_detail_names_point_balance_not_physical_inventory(self):
         missing_status, missing_detail = self.service._canonical_audit_status(
             issues=set(),

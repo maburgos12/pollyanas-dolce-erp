@@ -461,7 +461,11 @@ class ProductMonthClosureService:
                     "UNRESOLVED",
                 }:
                     bucket["origins"].add(raw_row.conversion_origin)
-            if projection_source:
+            contributes_conversion = (
+                Decimal(raw_row.conversion_in) != ZERO
+                or Decimal(raw_row.conversion_out) != ZERO
+            )
+            if projection_source and contributes_conversion:
                 bucket["projection_sources"].add(projection_source)
             for count_name, count in raw_row.source_counts.items():
                 bucket["source_counts"][count_name] = bucket["source_counts"].get(count_name, 0) + int(count)
