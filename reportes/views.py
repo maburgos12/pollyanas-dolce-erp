@@ -5726,8 +5726,8 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
 
 
 _POINT_EXPORT_STATUSES = {"COINCIDE", "POINT_MAYOR", "POINT_MENOR", "REVISAR_FUENTE"}
-_CONVERSION_ORIGIN_VALUES = {"POINT", "EQUIVALENCIA_CONFIGURADA"}
 _CONVERSION_PROJECTION_VALUES = {"DIRECTA", "EQUIVALENCIA", "PRESENTACION_DERIVADA"}
+_CONVERSION_ORIGIN_LABELS = {"MIXED": "Mixto", "UNRESOLVED": "Sin resolver"}
 
 
 def _closure_metadata_values(value: object) -> tuple[str, ...]:
@@ -5772,7 +5772,11 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
         point_difference = None
 
     stored_conversion_values = _closure_metadata_values(metadata.get("conversion_origin"))
-    conversion_origin = tuple(value for value in stored_conversion_values if value in _CONVERSION_ORIGIN_VALUES)
+    exact_conversion_origins = _closure_metadata_values(metadata.get("conversion_origins"))
+    origin_values = exact_conversion_origins or tuple(
+        value for value in stored_conversion_values if value not in _CONVERSION_PROJECTION_VALUES
+    )
+    conversion_origin = tuple(_CONVERSION_ORIGIN_LABELS.get(value, value) for value in origin_values)
     projection_sources = tuple(
         dict.fromkeys(
             list(_closure_metadata_values(metadata.get("projection_sources")))
@@ -5816,6 +5820,7 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
             None if conversion_missing else _decimal_export_value(metadata.get("point_conversion_out"))
         ),
         "conversion_origin": conversion_origin,
+        "conversion_origins": exact_conversion_origins,
         "projection_sources": projection_sources,
         "waste_total": None if waste_missing else Decimal(str(line.merma_total_equivalente)),
         "calculated_closing": calculated_closing,

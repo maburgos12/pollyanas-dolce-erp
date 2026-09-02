@@ -127,6 +127,7 @@ class MonthlyPointBalanceRow:
     difference_point: Decimal | None = None
     status: str = "REVISAR_FUENTE"
     conversion_origin: str = ""
+    conversion_origins: tuple[str, ...] = ()
     issues: tuple[str, ...] = ()
     source_counts: Mapping[str, int] = field(default_factory=_empty_counts)
 
@@ -248,6 +249,7 @@ class _MutableBalanceRow:
             difference_point=difference_point,
             status=status,
             conversion_origin=conversion_origin,
+            conversion_origins=tuple(sorted(self.origins)),
             issues=tuple(sorted(issues)),
             source_counts=MappingProxyType(default_counts),
         )

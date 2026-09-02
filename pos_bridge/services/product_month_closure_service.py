@@ -436,6 +436,7 @@ class ProductMonthClosureService:
                     "point_difference_missing": False,
                     "issues": set(),
                     "origins": set(),
+                    "origin_summaries": set(),
                     "projection_sources": set(),
                     "source_counts": {},
                     "raw_recipe_ids": [],
@@ -449,8 +450,17 @@ class ProductMonthClosureService:
             bucket["point_statuses"].add(raw_row.status)
             if equivalence_issue:
                 bucket["issues"].add(equivalence_issue)
-            if raw_row.conversion_origin in {ORIGIN_POINT, ORIGIN_CONFIGURED_EQUIVALENCE}:
-                bucket["origins"].add(raw_row.conversion_origin)
+            observed_origins = tuple(getattr(raw_row, "conversion_origins", ()) or ())
+            if observed_origins:
+                bucket["origins"].update(observed_origins)
+            if raw_row.conversion_origin:
+                bucket["origin_summaries"].add(raw_row.conversion_origin)
+                if not observed_origins and raw_row.conversion_origin in {
+                    ORIGIN_POINT,
+                    ORIGIN_CONFIGURED_EQUIVALENCE,
+                    "UNRESOLVED",
+                }:
+                    bucket["origins"].add(raw_row.conversion_origin)
             if projection_source:
                 bucket["projection_sources"].add(projection_source)
             for count_name, count in raw_row.source_counts.items():
@@ -510,12 +520,18 @@ class ProductMonthClosureService:
                 point_difference=point_difference,
                 waste_total=bucket["waste_direct"] + bucket["waste_derived"],
             )
+            conversion_origins = sorted(bucket["origins"])
+            conversion_origin = self._conversion_origin_summary(
+                origins=conversion_origins,
+                summaries=bucket["origin_summaries"],
+            )
             metadata = self._json_compatible(
                 {
                     "balance_contract": "POINT_PRODUCT_BALANCE_V1",
                     "point_conversion_in": self._decimal_text(bucket["conversion_in"]),
                     "point_conversion_out": self._decimal_text(bucket["conversion_out"]),
-                    "conversion_origin": sorted(bucket["origins"]),
+                    "conversion_origin": conversion_origin,
+                    "conversion_origins": conversion_origins,
                     "projection_sources": sorted(bucket["projection_sources"]),
                     "source_counts": bucket["source_counts"],
                     "issues": sorted(issues),
@@ -562,6 +578,16 @@ class ProductMonthClosureService:
                 }
             )
         return rows
+
+    @staticmethod
+    def _conversion_origin_summary(*, origins, summaries) -> str:
+        if len(origins) == 1:
+            return origins[0]
+        if len(origins) > 1 or "MIXED" in summaries:
+            return "MIXED"
+        if len(summaries) == 1:
+            return next(iter(summaries))
+        return ""
 
     @staticmethod
     def _resolve_projected_recipe(receta, equivalence, derived_relation):

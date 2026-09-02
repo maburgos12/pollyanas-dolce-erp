@@ -121,6 +121,8 @@ class ProductMonthClosureServiceTests(TestCase):
             closing_point_sucursales=Decimal("3"),
             difference_point=Decimal("0"),
             status="COINCIDE",
+            conversion_origin="POINT",
+            conversion_origins=("POINT",),
             source_counts=MappingProxyType({"opening_snapshot_rows": 1, "conversion_out_rows": 1}),
         )
         slice_row = MonthlyPointBalanceRow(
@@ -135,6 +137,7 @@ class ProductMonthClosureServiceTests(TestCase):
             difference_point=Decimal("0"),
             status="COINCIDE",
             conversion_origin="EQUIVALENCIA_CONFIGURADA",
+            conversion_origins=("EQUIVALENCIA_CONFIGURADA",),
             source_counts=MappingProxyType({"sales_rows": 1, "conversion_in_rows": 1}),
         )
         service = ProductMonthClosureService(
@@ -153,7 +156,11 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(row["diferencia_teorico_vs_point"], Decimal("0"))
         self.assertEqual(row["metadata"]["point_conversion_in"], "2")
         self.assertEqual(row["metadata"]["point_conversion_out"], "2")
-        self.assertEqual(row["metadata"]["conversion_origin"], ["EQUIVALENCIA_CONFIGURADA"])
+        self.assertEqual(row["metadata"]["conversion_origin"], "MIXED")
+        self.assertEqual(
+            row["metadata"]["conversion_origins"],
+            ["EQUIVALENCIA_CONFIGURADA", "POINT"],
+        )
         self.assertEqual(row["metadata"]["projection_sources"], ["DIRECTA", "EQUIVALENCIA"])
         self.assertEqual(row["metadata"]["balance_contract"], "POINT_PRODUCT_BALANCE_V1")
         self.assertTrue(row["metadata"]["point_final_scopes_available"])
@@ -171,6 +178,32 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(preview["totals"]["closing_cedis"], Decimal("6"))
         self.assertEqual(preview["totals"]["closing_sucursales"], Decimal("4"))
         self.assertEqual(preview["totals"]["closing_total"], Decimal("10"))
+
+    def test_canonical_closure_preserves_unresolved_origin_without_inference(self):
+        balance = self._canonical_balance(
+            {
+                self.parent.id: MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    opening_point=Decimal("1"),
+                    sales=Decimal("0"),
+                    conversion_in=Decimal("1"),
+                    calculated_closing=Decimal("2"),
+                    closing_point=Decimal("2"),
+                    closing_point_cedis=Decimal("2"),
+                    closing_point_sucursales=Decimal("0"),
+                    difference_point=Decimal("0"),
+                    conversion_origin="UNRESOLVED",
+                    conversion_origins=("UNRESOLVED",),
+                    issues=("CONVERSION_ORIGIN_UNRESOLVED",),
+                )
+            },
+            issues=("CONVERSION_ORIGIN_UNRESOLVED",),
+        )
+
+        rows = self.service._project_canonical_balance(balance=balance)
+
+        self.assertEqual(rows[0]["metadata"]["conversion_origin"], "UNRESOLVED")
+        self.assertEqual(rows[0]["metadata"]["conversion_origins"], ["UNRESOLVED"])
 
     def test_new_canonical_audit_detail_names_point_balance_not_physical_inventory(self):
         missing_status, missing_detail = self.service._canonical_audit_status(

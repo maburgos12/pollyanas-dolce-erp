@@ -3303,7 +3303,8 @@ class ReportesCanonicosTests(TestCase):
                 "conversion_source_authoritative": True,
                 "point_conversion_in": "8",
                 "point_conversion_out": "1",
-                "conversion_origin": ["POINT"],
+                "conversion_origin": "MIXED",
+                "conversion_origins": ["EQUIVALENCIA_CONFIGURADA", "POINT"],
                 "projection_sources": ["EQUIVALENCIA"],
             },
         )
@@ -3312,7 +3313,7 @@ class ReportesCanonicosTests(TestCase):
         html_body = html_response.content.decode("utf-8")
         self.assertIn("Origen conversión", html_body)
         self.assertIn("Proyección", html_body)
-        self.assertIn(">POINT<", html_body)
+        self.assertIn("EQUIVALENCIA_CONFIGURADA, POINT", html_body)
         self.assertIn(">EQUIVALENCIA<", html_body)
 
         csv_response = self.client.get(
@@ -3333,7 +3334,10 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(Decimal(detail_values[detail_headers.index("Venta derivada")]), Decimal("0"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. entrada Point")]), Decimal("8"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. salida Point")]), Decimal("1"))
-        self.assertEqual(detail_values[detail_headers.index("Origen conversión")], "POINT")
+        self.assertEqual(
+            detail_values[detail_headers.index("Origen conversión")],
+            "EQUIVALENCIA_CONFIGURADA | POINT",
+        )
         self.assertEqual(detail_values[detail_headers.index("Proyección")], "EQUIVALENCIA")
         self.assertEqual(detail_values[detail_headers.index("Estado")], "Point mayor")
         self.assertNotIn("Diferencia teorico vs Point", csv_body)
@@ -3358,7 +3362,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Venta derivada")], 0)
         self.assertEqual(values[headers.index("Conv. entrada Point")], 8)
         self.assertEqual(values[headers.index("Conv. salida Point")], 1)
-        self.assertEqual(values[headers.index("Origen conversión")], "POINT")
+        self.assertEqual(values[headers.index("Origen conversión")], "EQUIVALENCIA_CONFIGURADA | POINT")
         self.assertEqual(values[headers.index("Proyección")], "EQUIVALENCIA")
         self.assertEqual(values[headers.index("Estado")], "Point mayor")
 
@@ -3414,10 +3418,51 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Origen conversión")], "POINT")
         self.assertEqual(values[headers.index("Proyección")], "PRESENTACION_DERIVADA")
 
-        line.metadata = {**line.metadata, "conversion_origin": "POINT"}
+        line.metadata = {
+            key: value
+            for key, value in line.metadata.items()
+            if key != "conversion_origins"
+        }
+        line.metadata["conversion_origin"] = "MIXED"
         line.save(update_fields=["metadata", "updated_at"])
         scalar_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
-        self.assertEqual(scalar_response.context["conversion_rows"][0]["conversion_origin"], ("POINT",))
+        self.assertEqual(scalar_response.context["conversion_rows"][0]["conversion_origin"], ("Mixto",))
+
+    def test_unresolved_conversion_origin_is_visible_without_inventing_components(self):
+        receta = Receta.objects.create(
+            nombre="Conversión sin origen resuelto",
+            codigo_point="UNRESOLVED-CONV-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-unresolved-conversion-output",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 3, 1),
+            month_end=date(2026, 3, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_conversion_in": "1",
+                "point_conversion_out": "0",
+                "conversion_origin": "UNRESOLVED",
+                "conversion_origins": ["UNRESOLVED"],
+                "conversion_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "sales_source_available": True,
+                "issues": ["CONVERSION_ORIGIN_UNRESOLVED"],
+            },
+        )
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-03"})
+        conversion = response.context["conversion_rows"][0]
+        self.assertEqual(conversion["conversion_origin"], ("Sin resolver",))
+        self.assertNotIn("POINT", conversion["conversion_origin"])
+        self.assertNotIn("EQUIVALENCIA_CONFIGURADA", conversion["conversion_origin"])
 
     def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
         receta = Receta.objects.create(
