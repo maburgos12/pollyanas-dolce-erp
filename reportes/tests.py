@@ -3408,6 +3408,49 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(line.diferencia_teorico_vs_point, Decimal("-3"))
         self.assertEqual(line.estado_auditoria, ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
 
+    def test_cierre_producto_export_keeps_total_when_only_point_scope_split_is_missing(self):
+        receta = Receta.objects.create(
+            nombre="Pastel Export Scope Parcial",
+            codigo_point="EXPSCOPE001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-export-scope-parcial-001",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 5, 1),
+            month_end=date(2026, 5, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            opening_reference_date=date(2026, 4, 30),
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=receta,
+            inventario_final_teorico=Decimal("8"),
+            inventario_final_point_total=Decimal("10"),
+            diferencia_teorico_vs_point=Decimal("-2"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "2",
+                "point_status": "REVISAR_FUENTE",
+                "point_final_scopes_available": False,
+                "issues": ["CLOSING_SNAPSHOT_SCOPE_MISSING"],
+            },
+        )
+
+        response = self.client.get(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-05", "export": "csv"},
+        )
+        rows = list(csv.reader(StringIO(response.content.decode("utf-8"))))
+        headers = rows[rows.index([]) + 1]
+        values = rows[rows.index([]) + 2]
+
+        self.assertEqual(values[headers.index("Point CEDIS")], "Sin dato")
+        self.assertEqual(values[headers.index("Point sucursales")], "Sin dato")
+        self.assertEqual(Decimal(values[headers.index("Fin. Point")]), Decimal("10"))
+        self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("2"))
+        self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
+
     def test_cierre_producto_lock_requires_admin_or_dg(self):
         receta = Receta.objects.create(
             nombre="Pastel Lock Lectura",

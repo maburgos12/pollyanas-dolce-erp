@@ -5640,9 +5640,7 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
 
     calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
-    closing_missing = is_canonical and bool(
-        issues.intersection({"CLOSING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_SCOPE_MISSING"})
-    )
+    closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
     raw_point_difference = metadata.get("point_difference") if is_canonical else None
     if is_canonical:
         point_difference = _decimal_export_value(raw_point_difference)
@@ -5655,12 +5653,21 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     if calculated_missing or closing_missing:
         point_difference = None
 
-    scopes_missing = closing_missing or (is_canonical and metadata.get("point_final_scopes_available") is False)
+    scopes_missing = closing_missing or (
+        is_canonical
+        and (
+            "CLOSING_SNAPSHOT_SCOPE_MISSING" in issues
+            or metadata.get("point_final_scopes_available") is False
+        )
+    )
     calculated_closing = None if calculated_missing else Decimal(str(line.inventario_final_teorico))
     closing_point = None if closing_missing else Decimal(str(line.inventario_final_point_total))
     point_status = str(metadata.get("point_status") or "") if is_canonical else ""
-    if point_status not in _POINT_EXPORT_STATUSES:
-        if point_difference is None or issues or line.has_catalog_issue:
+    legacy_review = line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO
+    if issues or line.has_catalog_issue or legacy_review:
+        point_status = "REVISAR_FUENTE"
+    elif point_status not in _POINT_EXPORT_STATUSES:
+        if point_difference is None:
             point_status = "REVISAR_FUENTE"
         elif abs(point_difference) <= Decimal("0.01"):
             point_status = "COINCIDE"
