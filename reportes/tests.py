@@ -2047,9 +2047,9 @@ class ReportesBIUtilsTests(TestCase):
         self.assertEqual(snapshot["kpis"]["inventario_point_no_disponible"], 1)
 
     def test_compute_bi_snapshot_uses_prefer_complete_canonical_sales_range(self):
-        today = timezone.localdate()
-        first_day = today - timedelta(days=2)
-        second_day = today - timedelta(days=1)
+        today = date(2026, 8, 15)
+        first_day = date(2026, 8, 13)
+        second_day = date(2026, 8, 14)
 
         VentaAutoritativaPoint.objects.create(
             branch=self.sucursal,
@@ -2102,7 +2102,8 @@ class ReportesBIUtilsTests(TestCase):
             source_endpoint="/Report/VentasCategorias",
         )
 
-        snapshot = compute_bi_snapshot(period_days=7, months_window=3)
+        with patch("reportes.bi_utils.timezone.localdate", return_value=today):
+            snapshot = compute_bi_snapshot(period_days=7, months_window=3)
 
         self.assertEqual(snapshot["kpis"]["ventas_total"], Decimal("1200"))
         self.assertEqual(snapshot["kpis"]["pedidos_venta"], 2)

@@ -12,6 +12,8 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 - `0.000000` significa cero medido por una fuente disponible.
 - Una fuente `source_present=true` pero `authoritative=false` produce `null` en
   todos sus campos dependientes; sólo una fuente autoritativa puede publicar cero.
+- En metadata canónica antigua, un flag de autoridad ausente se interpreta como
+  no autoritativo y el estado se publica como `REVISAR_FUENTE`.
 - Un total mensual es `null` cuando al menos una línea tiene ese dato faltante.
 
 ## Campos canónicos por línea
@@ -22,6 +24,10 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 `closing_point`, `point_difference`, `point_status`, `point_status_label`,
 `conversion_origin`, `conversion_origins`, `projection_sources`,
 `source_authority`, `source_issues` e `is_historical_inventory`.
+
+`source_authority` sólo expone la etiqueta de fuente, presencia, autoridad,
+estado/incidencias, identificadores de jobs y conteos/fechas de cobertura. No
+proyecta URLs de solicitud, rutas de reportes ni muestras crudas persistidas.
 
 Para importaciones históricas, `closing_point*` y `point_difference` son `null`
 porque el conteo no proviene de Point. `historical_count` y

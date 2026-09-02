@@ -16,6 +16,7 @@ from rest_framework.test import APITestCase
 from core.models import Sucursal
 from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob
+from pos_bridge.services.product_closure_projection import project_product_closure_line
 from recetas.models import LineaReceta, ProductoMonthClosure, ProductoMonthClosureLine, Receta
 
 
@@ -404,6 +405,61 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertIsNone(summary["total_sales"])
         self.assertIsNone(summary["total_ending_inventory"])
 
+    def test_product_closure_old_canonical_metadata_without_authority_flags_is_conservative(self):
+        line = self.product_closure.lines.get()
+        line.inventario_final_point_total = Decimal("15")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "COINCIDE",
+        }
+        line.save()
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+        row = response.data["lines"][0]
+
+        for field in (
+            "opening_point",
+            "production",
+            "sales_total",
+            "waste_total",
+            "point_conversion_in",
+            "point_conversion_out",
+            "calculated_closing",
+            "closing_point",
+            "point_difference",
+        ):
+            self.assertIsNone(row[field], field)
+        self.assertEqual(row["point_status"], "REVISAR_FUENTE")
+        self.assertEqual(row["point_status_label"], "Revisar fuente")
+        self.assertFalse(any(row["source_authority"].values()))
+
+    def test_product_closure_summary_projects_each_line_once_for_all_totals(self):
+        with patch(
+            "pos_bridge.api.serializers.closures.project_product_closure_line",
+            wraps=project_product_closure_line,
+        ) as projection:
+            response = self.client.get("/api/pos-bridge/product-closures/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(projection.call_count, self.product_closure.lines.count())
+
+    def test_product_closure_detail_reuses_total_projection_for_line_fields(self):
+        with patch(
+            "pos_bridge.api.serializers.closures.project_product_closure_line",
+            wraps=project_product_closure_line,
+        ) as projection:
+            response = self.client.get(
+                f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(projection.call_count, self.product_closure.lines.count())
+
     def test_product_closure_api_exposes_source_authority_and_issues(self):
         self.product_closure.metadata = {
             "opening_meta": {"authoritative": True, "effective_date": "2026-07-31"},
@@ -423,6 +479,53 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertFalse(response.data["source_authority"]["sales"]["authoritative"])
         self.assertIn("SALES_SYNC_JOB_PARTIAL", response.data["source_issues"])
         self.assertIn("MONTH_SOURCE_INCOMPLETE", response.data["source_issues"])
+
+    def test_product_closure_source_authority_never_exposes_private_source_metadata(self):
+        self.product_closure.metadata = {
+            "opening_meta": {
+                "source": "PointInventorySnapshot",
+                "source_present": True,
+                "authoritative": True,
+                "selected_sync_job_ids": [11],
+                "snapshot_rows": 9,
+                "effective_date": "2026-07-31",
+                "request_url": "https://point.invalid/private?token=secret",
+                "report_path": "/tmp/private-report.xlsx",
+                "raw_samples": [{"password": "secret"}],
+            },
+            "sales_meta": {
+                "selected_source": "official_point_daily_sales",
+                "authoritative": False,
+                "job_status": "PARTIAL",
+                "authority_issues": ["SALES_SYNC_JOB_PARTIAL"],
+                "job_id": 22,
+                "row_count": 31,
+                "request_url": "https://point.invalid/private-sales",
+                "nested": {"report_path": "/tmp/also-private.xlsx"},
+            },
+        }
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        authority = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data["source_authority"]
+
+        self.assertEqual(authority["opening"]["selected_sync_job_ids"], [11])
+        self.assertEqual(authority["sales"]["job_id"], 22)
+
+        def all_keys(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    yield key
+                    yield from all_keys(child)
+            elif isinstance(value, (list, tuple)):
+                for child in value:
+                    yield from all_keys(child)
+
+        exposed_keys = set(all_keys(authority))
+        self.assertTrue(
+            {"request_url", "report_path", "raw_samples", "password"}.isdisjoint(exposed_keys)
+        )
 
     def test_product_closures_build_endpoint_creates_month(self):
         PointInventorySnapshot.objects.create(

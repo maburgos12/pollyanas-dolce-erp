@@ -70,16 +70,16 @@ def project_product_closure_line(
     opening_missing = is_canonical and "OPENING_SNAPSHOT_MISSING" in issues
     closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
     opening_authoritative = not opening_missing and (
-        not is_canonical or metadata.get("opening_source_authoritative", True) is True
+        not is_canonical or metadata.get("opening_source_authoritative") is True
     )
     sales_authoritative = not sales_missing and (
-        not is_canonical or metadata.get("sales_source_authoritative", True) is True
+        not is_canonical or metadata.get("sales_source_authoritative") is True
     )
     production_authoritative = not production_missing
     waste_authoritative = not waste_missing
     conversion_authoritative = not conversion_missing
     closing_authoritative = not closing_missing and (
-        not is_canonical or metadata.get("closing_source_authoritative", True) is True
+        not is_canonical or metadata.get("closing_source_authoritative") is True
     )
     calculated_authoritative = all(
         (
@@ -145,7 +145,12 @@ def project_product_closure_line(
     legacy_review = line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_REVISAR_CATALOGO
     if is_historical_excel:
         status_label = line.get_estado_auditoria_display()
-    elif issues or line.has_catalog_issue or legacy_review:
+    elif (
+        issues
+        or line.has_catalog_issue
+        or legacy_review
+        or (is_canonical and (not calculated_authoritative or not closing_authoritative))
+    ):
         point_status = "REVISAR_FUENTE"
         status_label = point_status_label(point_status)
     else:

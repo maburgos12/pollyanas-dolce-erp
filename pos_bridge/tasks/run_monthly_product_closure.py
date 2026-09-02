@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from contextlib import contextmanager
 from datetime import date, timedelta
 
+from django.db import connection
 from django.utils import timezone
 
 from pos_bridge.models import PointSyncJob
@@ -11,6 +13,32 @@ from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from recetas.models import ProductoMonthClosure
+
+
+MONTHLY_PRODUCT_CLOSURE_LOCK_NAMESPACE = 1_347_901_003
+
+
+@contextmanager
+def _monthly_product_closure_mutex(month_start: date):
+    """Hold one PostgreSQL session lock for a specific closure month."""
+    if connection.vendor != "postgresql":
+        raise RuntimeError("La orquestación mensual de Point requiere PostgreSQL.")
+    month_key = month_start.year * 100 + month_start.month
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_try_advisory_lock(%s, %s)",
+            [MONTHLY_PRODUCT_CLOSURE_LOCK_NAMESPACE, month_key],
+        )
+        acquired = bool(cursor.fetchone()[0])
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_advisory_unlock(%s, %s)",
+                    [MONTHLY_PRODUCT_CLOSURE_LOCK_NAMESPACE, month_key],
+                )
 
 
 def _resolve_target_month(*, month: str | date | None = None, anchor_date: date | None = None) -> date:
@@ -129,7 +157,7 @@ def _inventory_authority(
     }
 
 
-def run_monthly_product_closure(
+def _run_monthly_product_closure_locked(
     *,
     month: str | date | None = None,
     anchor_date: date | None = None,
@@ -232,3 +260,41 @@ def run_monthly_product_closure(
         "automation_status": automation_status,
         "automation_reviews": list(dict.fromkeys(automation_reviews)),
     }
+
+
+def run_monthly_product_closure(
+    *,
+    month: str | date | None = None,
+    anchor_date: date | None = None,
+    triggered_by=None,
+    rebuild: bool = False,
+    lock_after_build: bool = False,
+    sync_inventory_before_build: bool = False,
+) -> dict[str, object]:
+    target_month = _resolve_target_month(month=month, anchor_date=anchor_date)
+    with _monthly_product_closure_mutex(target_month) as acquired:
+        if not acquired:
+            return {
+                "action": "already_running",
+                "action_label": "Cierre mensual ya en ejecución",
+                "month": target_month.strftime("%Y-%m"),
+                "closure_id": None,
+                "closure_status": None,
+                "closure_status_label": "En ejecución",
+                "is_locked": False,
+                "lock_ready": False,
+                "inventory_sync": None,
+                "inventory_authority": {},
+                "source_refresh": [],
+                "failed_or_partial_sources": [],
+                "automation_status": "ALREADY_RUNNING",
+                "automation_reviews": ["Ya existe una orquestación activa para este mes."],
+            }
+        return _run_monthly_product_closure_locked(
+            month=target_month,
+            anchor_date=anchor_date,
+            triggered_by=triggered_by,
+            rebuild=rebuild,
+            lock_after_build=lock_after_build,
+            sync_inventory_before_build=sync_inventory_before_build,
+        )

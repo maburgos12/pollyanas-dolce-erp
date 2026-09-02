@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from django.db import close_old_connections
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
 from pos_bridge.models import PointSyncJob
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError
@@ -17,7 +19,7 @@ from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from pos_bridge.tasks.run_waste_sync import run_waste_sync
 
 
-class PointSalesSyncTaskRoutingTests(SimpleTestCase):
+class PointSalesSyncTaskRoutingTests(TestCase):
     def test_monthly_closure_is_not_duplicated_in_static_beat_schedule(self):
         from django.conf import settings
 
@@ -574,6 +576,106 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
         conversions.assert_not_called()
         closure_service.assert_not_called()
         self.assertEqual(result["action"], "skipped_locked")
+
+
+class MonthlyProductClosureMutexTests(TransactionTestCase):
+    reset_sequences = True
+
+    @staticmethod
+    def _closure():
+        return SimpleNamespace(
+            id=901,
+            status="BUILT",
+            is_locked=False,
+            metadata={"validation": {"lock_ready": True}},
+            get_status_display=lambda: "Construido",
+        )
+
+    @staticmethod
+    def _successful_refresh():
+        return [
+            {"name": name, "status": PointSyncJob.STATUS_SUCCESS}
+            for name in ("sales", "production", "waste", "conversions")
+        ]
+
+    def test_same_month_concurrent_redelivery_does_not_call_point_twice(self):
+        entered_refresh = threading.Event()
+        release_refresh = threading.Event()
+        refresh_calls = 0
+        refresh_calls_guard = threading.Lock()
+        worker_result = []
+        worker_errors = []
+
+        def overlapping_refresh(**_kwargs):
+            nonlocal refresh_calls
+            with refresh_calls_guard:
+                refresh_calls += 1
+                call_number = refresh_calls
+            if call_number == 1:
+                entered_refresh.set()
+                if not release_refresh.wait(timeout=10):
+                    raise TimeoutError("test did not release the first monthly refresh")
+            return self._successful_refresh()
+
+        def run_first():
+            close_old_connections()
+            try:
+                worker_result.append(run_monthly_product_closure(month="2026-08"))
+            except Exception as exc:  # pragma: no cover - asserted below
+                worker_errors.append(exc)
+            finally:
+                close_old_connections()
+
+        closure = self._closure()
+        with (
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources",
+                side_effect=overlapping_refresh,
+            ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter"
+            ) as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as service_cls,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            service_cls.return_value.build.return_value = closure
+            thread = threading.Thread(target=run_first, daemon=True)
+            thread.start()
+            self.assertTrue(entered_refresh.wait(timeout=10))
+            try:
+                redelivery = run_monthly_product_closure(month="2026-08")
+            finally:
+                release_refresh.set()
+                thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(worker_errors, [])
+        self.assertEqual(len(worker_result), 1)
+        self.assertEqual(refresh_calls, 1)
+        self.assertEqual(redelivery["action"], "already_running")
+        self.assertEqual(redelivery["automation_status"], "ALREADY_RUNNING")
+        self.assertEqual(redelivery["month"], "2026-08")
+
+    def test_monthly_mutex_is_released_when_orchestration_raises(self):
+        closure = self._closure()
+        with (
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter"
+            ) as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as service_cls,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources",
+                side_effect=[RuntimeError("refresh exploded"), self._successful_refresh()],
+            ) as refresh,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            service_cls.return_value.build.return_value = closure
+            with self.assertRaisesRegex(RuntimeError, "refresh exploded"):
+                run_monthly_product_closure(month="2026-08")
+            retry = run_monthly_product_closure(month="2026-08")
+
+        self.assertEqual(refresh.call_count, 2)
+        self.assertEqual(retry["action"], "built")
 
 
 class VisibleCutRefreshTaskTests(SimpleTestCase):

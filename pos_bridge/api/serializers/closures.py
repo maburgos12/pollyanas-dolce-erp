@@ -8,6 +8,54 @@ from pos_bridge.services.product_closure_projection import (
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine
 
 
+PUBLIC_SOURCE_AUTHORITY_FIELDS = (
+    "source",
+    "mode",
+    "selected_source",
+    "source_present",
+    "job_present",
+    "authoritative",
+    "status",
+    "job_status",
+    "within_tolerance",
+    "fallback_used",
+    "coverage_scope",
+    "authority_issues",
+    "snapshot_issues",
+    "blocking_issues",
+    "job_id",
+    "selected_sync_job_ids",
+    "restricted_sync_job_ids",
+    "restricted_row_sync_job_ids",
+    "target_date",
+    "effective_date",
+    "selected_dates",
+    "coverage_start",
+    "coverage_end",
+    "row_count",
+    "snapshot_rows",
+    "selected_rows",
+    "applied_rows",
+    "rows_bound_to_job",
+    "matched_recipe_count",
+    "unresolved_rows",
+    "official_daily_row_count",
+    "legacy_daily_row_count",
+    "legacy_bridge_row_count",
+    "selected_branch_count",
+    "expected_branch_count",
+    "applied_branch_count",
+    "expected_product_count",
+    "coverage_expected_branch_days",
+    "coverage_logged_branch_days",
+)
+
+
+def _public_source_authority(metadata: object) -> dict[str, object]:
+    source = dict(metadata or {}) if isinstance(metadata, dict) else {}
+    return {key: source[key] for key in PUBLIC_SOURCE_AUTHORITY_FIELDS if key in source}
+
+
 class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     receta_padre_nombre = serializers.CharField(source="receta_padre.nombre", read_only=True)
     receta_padre_codigo_point = serializers.CharField(source="receta_padre.codigo_point", read_only=True)
@@ -233,12 +281,21 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
         return obj.lines.count()
 
     def _projection_rows(self, obj):
+        cached = getattr(obj, "_canonical_api_projection_rows", None)
+        if cached is not None:
+            return cached
         lines = list(obj.lines.all())
         historical = is_historical_closure(obj, lines=lines)
-        return [
-            project_product_closure_line(line, historical_excel_import=historical)
-            for line in lines
-        ]
+        rows = []
+        for line in lines:
+            projection = project_product_closure_line(
+                line,
+                historical_excel_import=historical,
+            )
+            line._canonical_api_projection = projection
+            rows.append(projection)
+        obj._canonical_api_projection_rows = rows
+        return rows
 
     def _sum_projection(self, obj, field_name: str):
         value = sum_complete_values(self._projection_rows(obj), field_name)
@@ -289,12 +346,12 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
     def get_source_authority(self, obj):
         metadata = dict(obj.metadata or {})
         return {
-            "opening": dict(metadata.get("opening_meta") or {}),
-            "sales": dict(metadata.get("sales_meta") or {}),
-            "production": dict(metadata.get("production_meta") or {}),
-            "waste": dict(metadata.get("waste_meta") or {}),
-            "conversions": dict(metadata.get("conversion_meta") or {}),
-            "closing": dict(metadata.get("closing_inventory_meta") or {}),
+            "opening": _public_source_authority(metadata.get("opening_meta")),
+            "sales": _public_source_authority(metadata.get("sales_meta")),
+            "production": _public_source_authority(metadata.get("production_meta")),
+            "waste": _public_source_authority(metadata.get("waste_meta")),
+            "conversions": _public_source_authority(metadata.get("conversion_meta")),
+            "closing": _public_source_authority(metadata.get("closing_inventory_meta")),
         }
 
     def get_source_issues(self, obj):
