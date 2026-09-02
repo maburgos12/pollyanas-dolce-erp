@@ -3278,6 +3278,7 @@ class ReportesCanonicosTests(TestCase):
                 "point_difference": "2",
                 "point_status": "POINT_MAYOR",
                 "issues": [],
+                "sales_source_available": True,
             },
         )
 
@@ -3295,6 +3296,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(Decimal(detail_values[detail_headers.index("Saldo calculado")]), Decimal("9"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Fin. Point")]), Decimal("11"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Dif. Point")]), Decimal("2"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Venta directa")]), Decimal("0"))
+        self.assertEqual(Decimal(detail_values[detail_headers.index("Venta derivada")]), Decimal("0"))
         self.assertEqual(detail_values[detail_headers.index("Estado")], "POINT_MAYOR")
         self.assertNotIn("Diferencia teorico vs Point", csv_body)
         self.assertNotIn("Sobrante físico", csv_body)
@@ -3314,6 +3317,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Saldo calculado")], 9)
         self.assertEqual(values[headers.index("Fin. Point")], 11)
         self.assertEqual(values[headers.index("Dif. Point")], 2)
+        self.assertEqual(values[headers.index("Venta directa")], 0)
+        self.assertEqual(values[headers.index("Venta derivada")], 0)
         self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
 
     def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
@@ -3535,8 +3540,12 @@ class ReportesCanonicosTests(TestCase):
         line = closure.lines.get(receta_padre=receta)
 
         self.assertIn("CALCULATED_CLOSING_MISSING", line.metadata["issues"])
+        self.assertIn("SALES_SOURCE_MISSING", line.metadata["issues"])
+        self.assertIsNone(response.context["closure_display_rows"][0]["sales_total"])
+        self.assertIsNone(response.context["total_sales"])
         self.assertIsNone(response.context["total_ending"])
         self.assertIsNone(response.context["recent_closure_rows"][0]["ending_inventory"])
+        self.assertIsNone(response.context["recent_closure_rows"][0]["sales_total"])
         self.assertContains(response, "Sin dato")
 
         csv_response = self.client.get(
@@ -3545,6 +3554,10 @@ class ReportesCanonicosTests(TestCase):
         csv_rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
         headers = csv_rows[csv_rows.index([]) + 1]
         values = csv_rows[csv_rows.index([]) + 2]
+        summary = dict(row for row in csv_rows[: csv_rows.index([])] if len(row) == 2)
+        self.assertEqual(summary["Venta equivalente"], "Sin dato")
+        self.assertEqual(values[headers.index("Venta directa")], "Sin dato")
+        self.assertEqual(values[headers.index("Venta derivada")], "Sin dato")
         self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
 
@@ -3554,6 +3567,14 @@ class ReportesCanonicosTests(TestCase):
         workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
         xlsx_headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
         xlsx_values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        xlsx_summary = {
+            row[0]: row[1]
+            for row in workbook["Resumen"].iter_rows(min_col=1, max_col=2, values_only=True)
+            if row[0]
+        }
+        self.assertEqual(xlsx_summary["Venta equivalente"], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Venta directa")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Venta derivada")], "Sin dato")
         self.assertEqual(xlsx_values[xlsx_headers.index("Saldo calculado")], "Sin dato")
         self.assertEqual(xlsx_values[xlsx_headers.index("Dif. Point")], "Sin dato")
 

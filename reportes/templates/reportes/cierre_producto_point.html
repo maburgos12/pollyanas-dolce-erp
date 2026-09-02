@@ -135,9 +135,9 @@
       <div class="bi-kpi-note">Movimiento operativo consolidado desde Point</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value warning">{{ total_sales|floatformat:2|intcomma }}</div>
+      <div class="bi-kpi-value warning">{% if total_sales != None %}{{ total_sales|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
       <div class="bi-kpi-label">Venta equivalente</div>
-      <div class="bi-kpi-note">{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas</div>
+      <div class="bi-kpi-note">{% if total_derived_sales != None %}{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas{% else %}Fuente de venta no disponible{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
@@ -238,7 +238,7 @@
         <article class="bi-list-item {% if row.month_value == selected_month %}is-signal-success{% else %}is-signal-neutral{% endif %}">
           <strong>{{ row.month_label }}</strong>
           <div class="bi-subtle">{{ row.status }} · {{ row.line_count|intcomma }} recetas</div>
-          <div>{% if row.ending_inventory != None %}{{ row.ending_inventory|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado · {{ row.sales_total|floatformat:2|intcomma }} venta</div>
+          <div>{% if row.ending_inventory != None %}{{ row.ending_inventory|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado · {% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} venta</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ row.month_value }}">Abrir mes</a>
           </div>
@@ -388,7 +388,7 @@
             </td>
             <td class="text-end bi-closure-metric-cell">{% if row.opening_point != None %}{{ row.opening_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{{ row.line.produccion_mes|floatformat:2|intcomma }}</td>
-            <td class="text-end bi-closure-metric-cell">{{ row.line.venta_total_equivalente|floatformat:2|intcomma }}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{{ row.line.merma_total_equivalente|floatformat:2|intcomma }}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.calculated_closing != None %}{{ row.calculated_closing|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.closing_point != None %}{{ row.closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>

@@ -5471,11 +5471,11 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
 
     total_opening = _sum_available_export_values(export_rows, "opening_point")
     total_production = sum((Decimal(str(line.produccion_mes or 0)) for line in lines), Decimal("0"))
-    total_sales = sum((Decimal(str(line.venta_total_equivalente or 0)) for line in lines), Decimal("0"))
+    total_sales = _sum_available_export_values(export_rows, "sales_total")
     total_waste = sum((Decimal(str(line.merma_total_equivalente or 0)) for line in lines), Decimal("0"))
     total_ending = _sum_available_export_values(export_rows, "calculated_closing")
-    total_direct_sales = sum((Decimal(str(line.venta_directa_enteros or 0)) for line in lines), Decimal("0"))
-    total_derived_sales = sum((Decimal(str(line.venta_derivada_equivalente or 0)) for line in lines), Decimal("0"))
+    total_direct_sales = _sum_available_export_values(export_rows, "sales_direct")
+    total_derived_sales = _sum_available_export_values(export_rows, "sales_derived")
     total_direct_waste = sum((Decimal(str(line.merma_directa_enteros or 0)) for line in lines), Decimal("0"))
     total_derived_waste = sum((Decimal(str(line.merma_derivada_equivalente or 0)) for line in lines), Decimal("0"))
     total_closing_cedis = _sum_available_export_values(export_rows, "closing_point_cedis")
@@ -5518,10 +5518,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                     recent_export_rows,
                     "calculated_closing",
                 ),
-                "sales_total": sum(
-                    (Decimal(str(line.venta_total_equivalente or 0)) for line in recent_lines),
-                    Decimal("0"),
-                ),
+                "sales_total": _sum_available_export_values(recent_export_rows, "sales_total"),
             }
         )
 
@@ -5668,6 +5665,9 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
 
     calculated_missing = is_canonical and "CALCULATED_CLOSING_MISSING" in issues
+    sales_missing = is_canonical and (
+        "SALES_SOURCE_MISSING" in issues or metadata.get("sales_source_available") is not True
+    )
     opening_missing = is_canonical and "OPENING_SNAPSHOT_MISSING" in issues
     closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
     raw_point_difference = metadata.get("point_difference") if is_canonical else None
@@ -5707,6 +5707,9 @@ def _product_closure_export_row(line: ProductoMonthClosureLine) -> dict[str, obj
 
     return {
         "opening_point": None if opening_missing else Decimal(str(line.inventario_inicial_teorico)),
+        "sales_direct": None if sales_missing else Decimal(str(line.venta_directa_enteros)),
+        "sales_derived": None if sales_missing else Decimal(str(line.venta_derivada_equivalente)),
+        "sales_total": None if sales_missing else Decimal(str(line.venta_total_equivalente)),
         "calculated_closing": calculated_closing,
         "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
         "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
@@ -5752,7 +5755,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
     writer.writerow([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
     writer.writerow([opening_balance_label, _closure_export_display(opening_total)])
     writer.writerow(["Produccion", context["total_production"]])
-    writer.writerow(["Venta equivalente", context["total_sales"]])
+    writer.writerow(["Venta equivalente", _closure_export_display(context["total_sales"])])
     writer.writerow(["Merma equivalente", context["total_waste"]])
     calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
     closing_total = _sum_available_export_values(export_rows, "closing_point")
@@ -5791,8 +5794,8 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 line.receta_padre.codigo_point,
                 _closure_export_display(export_row["opening_point"]),
                 line.produccion_mes,
-                line.venta_directa_enteros,
-                line.venta_derivada_equivalente,
+                _closure_export_display(export_row["sales_direct"]),
+                _closure_export_display(export_row["sales_derived"]),
                 line.merma_total_equivalente,
                 _closure_export_display(export_row["calculated_closing"]),
                 _closure_export_display(export_row["closing_point_cedis"]),
@@ -5819,7 +5822,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
     summary_ws.append([opening_source_label, context["closure"].get_opening_source_display() if context.get("closure") else ""])
     summary_ws.append([opening_balance_label, _closure_export_cell(opening_total)])
     summary_ws.append(["Produccion", float(context["total_production"])])
-    summary_ws.append(["Venta equivalente", float(context["total_sales"])])
+    summary_ws.append(["Venta equivalente", _closure_export_cell(context["total_sales"])])
     summary_ws.append(["Merma equivalente", float(context["total_waste"])])
     calculated_total = _sum_available_export_values(export_rows, "calculated_closing")
     closing_total = _sum_available_export_values(export_rows, "closing_point")
@@ -5859,8 +5862,8 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 line.receta_padre.codigo_point,
                 _closure_export_cell(export_row["opening_point"]),
                 float(line.produccion_mes or 0),
-                float(line.venta_directa_enteros or 0),
-                float(line.venta_derivada_equivalente or 0),
+                _closure_export_cell(export_row["sales_direct"]),
+                _closure_export_cell(export_row["sales_derived"]),
                 float(line.merma_total_equivalente or 0),
                 _closure_export_cell(export_row["calculated_closing"]),
                 _closure_export_cell(export_row["closing_point_cedis"]),
