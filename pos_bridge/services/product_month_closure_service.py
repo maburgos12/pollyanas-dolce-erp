@@ -7,8 +7,10 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 
+from django.apps import apps
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import connection, models, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -16,6 +18,7 @@ from pos_bridge.models import (
     PointBranch,
     PointConversionLine,
     PointDailySale,
+    PointExtractionLog,
     PointInventorySnapshot,
     PointProduct,
     PointProductionLine,
@@ -33,6 +36,7 @@ from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
     Receta,
+    RecetaCodigoPointAlias,
     RecetaEquivalencia,
     RecetaPresentacionDerivada,
     VentaHistorica,
@@ -116,6 +120,30 @@ class ProductMonthClosureService:
     CANONICAL_FINGERPRINT_METADATA_KEYS = tuple(
         key for key, _label in CANONICAL_LOCK_REQUIRED_SOURCES
     ) + ("balance",)
+    CANONICAL_LINE_DIGEST_FIELDS = (
+        "inventario_inicial_teorico",
+        "produccion_mes",
+        "venta_directa_enteros",
+        "venta_derivada_equivalente",
+        "venta_total_equivalente",
+        "merma_directa_enteros",
+        "merma_derivada_equivalente",
+        "merma_total_equivalente",
+        "inventario_final_teorico",
+        "inventario_final_point_cedis",
+        "inventario_final_point_sucursales",
+        "inventario_final_point_total",
+        "diferencia_teorico_vs_point",
+        "estado_auditoria",
+        "detalle_auditoria",
+        "source_closing_snapshot_count",
+        "source_snapshot_count",
+        "source_sale_rows",
+        "source_production_rows",
+        "source_waste_rows",
+        "has_catalog_issue",
+        "catalog_issue_note",
+    )
 
     def __init__(
         self,
@@ -343,6 +371,8 @@ class ProductMonthClosureService:
         metadata["source_fingerprint"] = self._build_source_fingerprint(
             balance=balance,
             persisted_metadata=metadata,
+            line_rows=line_rows,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
         )
         return {
             "month_start": month_start,
@@ -355,7 +385,15 @@ class ProductMonthClosureService:
             "totals": totals,
         }
 
-    def _build_source_fingerprint(self, *, balance, persisted_metadata: dict[str, object]) -> dict[str, str]:
+    def _build_source_fingerprint(
+        self,
+        *,
+        balance,
+        persisted_metadata: dict[str, object],
+        line_rows: list[dict[str, object]],
+        opening_source: str,
+    ) -> dict[str, str]:
+        raw_sources = self._raw_source_evidence(month_start=balance.month_start)
         payload = {
             "contract": "POINT_PRODUCT_BALANCE_V1",
             "month_start": balance.month_start,
@@ -419,11 +457,203 @@ class ProductMonthClosureService:
                 }
                 for row in balance.unresolved_conversions
             ],
+            "raw_sources": raw_sources,
         }
         return {
             "algorithm": "sha256",
             "digest": self._metadata_digest(payload),
             "metadata_digest": self._canonical_source_metadata_digest(persisted_metadata),
+            "projected_lines_digest": self._projected_lines_digest(
+                line_rows,
+                opening_source=opening_source,
+            ),
+            "raw_sources_digest": self._metadata_digest(raw_sources),
+        }
+
+    @classmethod
+    def _line_payload_from_projection(
+        cls,
+        row: dict[str, object],
+        *,
+        opening_source: str,
+    ) -> dict[str, object]:
+        return {
+            "receta_padre_id": row["receta"].pk,
+            **{
+                key: cls._canonical_line_value(row[key])
+                for key in cls.CANONICAL_LINE_DIGEST_FIELDS
+            },
+            "metadata": {
+                **dict(row["metadata"]),
+                "opening_source": opening_source,
+            },
+        }
+
+    @classmethod
+    def _line_payload_from_model(cls, line: ProductoMonthClosureLine) -> dict[str, object]:
+        return {
+            "receta_padre_id": line.receta_padre_id,
+            **{
+                field_name: cls._canonical_line_value(getattr(line, field_name))
+                for field_name in cls.CANONICAL_LINE_DIGEST_FIELDS
+            },
+            "metadata": dict(line.metadata or {}),
+        }
+
+    @classmethod
+    def _canonical_line_value(cls, value):
+        if isinstance(value, Decimal):
+            return cls._decimal_text(value)
+        return value
+
+    @classmethod
+    def _projected_lines_digest(cls, line_rows, *, opening_source: str) -> str:
+        payload = [
+            cls._line_payload_from_projection(row, opening_source=opening_source)
+            for row in line_rows
+        ]
+        return cls._metadata_digest(sorted(payload, key=lambda row: row["receta_padre_id"]))
+
+    @classmethod
+    def _persisted_lines_digest(cls, lines: list[ProductoMonthClosureLine]) -> str:
+        payload = [cls._line_payload_from_model(line) for line in lines]
+        return cls._metadata_digest(sorted(payload, key=lambda row: row["receta_padre_id"]))
+
+    @classmethod
+    def _queryset_evidence(cls, queryset: models.QuerySet) -> dict[str, object]:
+        model = queryset.model
+        field_names = tuple(field.attname for field in model._meta.concrete_fields)
+        digest = sha256()
+        row_count = 0
+        for values in queryset.order_by(model._meta.pk.attname).values_list(*field_names).iterator(chunk_size=2000):
+            row_count += 1
+            encoded = json.dumps(
+                cls._json_compatible(dict(zip(field_names, values))),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return {
+            "model": model._meta.label_lower,
+            "fields": field_names,
+            "row_count": row_count,
+            "digest": digest.hexdigest(),
+        }
+
+    @classmethod
+    def _raw_source_evidence(cls, *, month_start: date) -> dict[str, object]:
+        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        next_month = month_end + timedelta(days=1)
+        current_timezone = timezone.get_current_timezone()
+        lower_bound = timezone.make_aware(datetime.combine(month_start, time.min), current_timezone)
+        upper_bound = timezone.make_aware(datetime.combine(next_month, time.min), current_timezone)
+        tolerance_days = int(
+            getattr(
+                settings,
+                "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS",
+                cls.DEFAULT_SNAPSHOT_TOLERANCE_DAYS,
+            )
+        )
+        opening_target = month_start - timedelta(days=1)
+        opening_snapshot_start = timezone.make_aware(
+            datetime.combine(opening_target - timedelta(days=tolerance_days), time.min),
+            current_timezone,
+        )
+        opening_snapshot_end = timezone.make_aware(
+            datetime.combine(opening_target + timedelta(days=tolerance_days + 1), time.min),
+            current_timezone,
+        )
+        closing_snapshot_start = timezone.make_aware(
+            datetime.combine(month_end - timedelta(days=tolerance_days), time.min),
+            current_timezone,
+        )
+        closing_snapshot_end = timezone.make_aware(
+            datetime.combine(month_end + timedelta(days=tolerance_days + 1), time.min),
+            current_timezone,
+        )
+
+        snapshot_qs = PointInventorySnapshot.objects.filter(
+            Q(
+                captured_at__gte=opening_snapshot_start,
+                captured_at__lt=opening_snapshot_end,
+            )
+            | Q(
+                captured_at__gte=closing_snapshot_start,
+                captured_at__lt=closing_snapshot_end,
+            )
+        )
+        production_qs = PointProductionLine.objects.filter(
+            production_date__gte=month_start,
+            production_date__lte=month_end,
+        )
+        waste_qs = PointWasteLine.objects.filter(
+            movement_at__gte=lower_bound,
+            movement_at__lt=upper_bound,
+        )
+        conversion_qs = PointConversionLine.objects.filter(
+            movement_at__gte=lower_bound,
+            movement_at__lt=upper_bound,
+        )
+        daily_sales_qs = PointDailySale.objects.filter(
+            sale_date__gte=month_start,
+            sale_date__lte=month_end,
+        )
+        historical_sales_qs = VentaHistorica.objects.filter(
+            fecha__gte=month_start,
+            fecha__lte=month_end,
+            fuente=POINT_BRIDGE_SALES_SOURCE,
+        )
+        fact_qs = FactProduccionDiaria.objects.filter(
+            fecha__gte=month_start,
+            fecha__lte=month_end,
+        )
+        monthly_waste_model = apps.get_model("control", "MermaMensualSucursal")
+        monthly_waste_qs = monthly_waste_model.objects.filter(periodo=month_start)
+
+        referenced_job_ids: set[int] = set()
+        for queryset in (snapshot_qs, production_qs, waste_qs, conversion_qs, daily_sales_qs):
+            referenced_job_ids.update(
+                queryset.exclude(sync_job_id=None).values_list("sync_job_id", flat=True)
+            )
+        jobs_qs = PointSyncJob.objects.filter(
+            Q(id__in=referenced_job_ids)
+            | Q(
+                parameters__start_date=month_start.isoformat(),
+                parameters__end_date=month_end.isoformat(),
+            )
+            | Q(
+                parameters__date_from=month_start.isoformat(),
+                parameters__date_to=month_end.isoformat(),
+            )
+        )
+        logs_qs = PointExtractionLog.objects.filter(sync_job_id__in=jobs_qs.values("id"))
+
+        querysets = {
+            "opening_and_closing_snapshot_candidates": snapshot_qs,
+            "sales_point_daily": daily_sales_qs,
+            "sales_historical_fallback": historical_sales_qs,
+            "production_point": production_qs,
+            "waste_point": waste_qs,
+            "waste_monthly_fallback": monthly_waste_qs,
+            "conversion_point": conversion_qs,
+            "fact_operational_fallback": fact_qs,
+            "sync_jobs": jobs_qs,
+            "extraction_logs": logs_qs,
+            "point_branches": PointBranch.objects.all(),
+            "point_products": PointProduct.objects.filter(
+                Q(snapshots__in=snapshot_qs) | Q(daily_sales__in=daily_sales_qs)
+            ).distinct(),
+            "erp_branches": Sucursal.objects.all(),
+            "recipes": Receta.objects.all(),
+            "recipe_point_aliases": RecetaCodigoPointAlias.objects.all(),
+            "recipe_equivalences": RecetaEquivalencia.objects.all(),
+            "derived_presentations": RecetaPresentacionDerivada.objects.all(),
+        }
+        return {
+            name: cls._queryset_evidence(queryset)
+            for name, queryset in sorted(querysets.items())
         }
 
     @classmethod
@@ -441,6 +671,7 @@ class ProductMonthClosureService:
             raise ProductMonthClosureError("El bloqueo canónico de fuentes requiere PostgreSQL.")
         source_models = (
             PointSyncJob,
+            PointExtractionLog,
             PointInventorySnapshot,
             PointDailySale,
             PointProductionLine,
@@ -452,8 +683,10 @@ class ProductMonthClosureService:
             PointProduct,
             Sucursal,
             Receta,
+            RecetaCodigoPointAlias,
             RecetaEquivalencia,
             RecetaPresentacionDerivada,
+            apps.get_model("control", "MermaMensualSucursal"),
         )
         quoted_tables = ", ".join(
             connection.ops.quote_name(model._meta.db_table)
@@ -964,6 +1197,8 @@ class ProductMonthClosureService:
                 stored_fingerprint.get("algorithm") != "sha256"
                 or not stored_fingerprint.get("digest")
                 or not stored_fingerprint.get("metadata_digest")
+                or not stored_fingerprint.get("projected_lines_digest")
+                or not stored_fingerprint.get("raw_sources_digest")
             ):
                 raise ProductMonthClosureError(
                     f"El cierre {closure.month_start:%Y-%m} no tiene huella de fuentes Point; "
@@ -974,16 +1209,25 @@ class ProductMonthClosureService:
                 raise ProductMonthClosureError(
                     "La metadata de fuentes del cierre cambió; reconstruye el cierre antes de bloquearlo."
                 )
+            if stored_fingerprint["projected_lines_digest"] != self._persisted_lines_digest(lines):
+                raise ProductMonthClosureError(
+                    "Las líneas persistidas cambiaron; reconstruye el cierre antes de bloquearlo."
+                )
 
             # El lock de tablas espera a escritores ya iniciados y evita que una
             # venta, merma, producción, conversión, snapshot o job cambie entre
             # la relectura y el commit del bloqueo institucional.
             self._lock_canonical_source_tables()
-            current_plan = self.preview(
-                month=closure.month_start,
-                refresh_official_sales=False,
-            )
+            current_plan = self._fresh_canonical_preview(month=closure.month_start)
             current_fingerprint = dict(current_plan["metadata"].get("source_fingerprint") or {})
+            if current_fingerprint.get("projected_lines_digest") != stored_fingerprint["projected_lines_digest"]:
+                raise ProductMonthClosureError(
+                    "La proyección actual cambió; reconstruye el cierre antes de bloquearlo."
+                )
+            if current_fingerprint.get("raw_sources_digest") != stored_fingerprint["raw_sources_digest"]:
+                raise ProductMonthClosureError(
+                    "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo."
+                )
             if current_fingerprint.get("digest") != stored_fingerprint["digest"]:
                 raise ProductMonthClosureError(
                     "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo."
@@ -1007,6 +1251,11 @@ class ProductMonthClosureService:
         closure.is_locked = True
         closure.save(update_fields=["metadata", "status", "is_locked", "updated_at"])
         return closure
+
+    @staticmethod
+    def _fresh_canonical_preview(*, month: date) -> dict[str, object]:
+        fresh_service = ProductMonthClosureService(refresh_official_sales=False)
+        return fresh_service.preview(month=month, refresh_official_sales=False)
 
     def _parse_month(self, month: str | date) -> date:
         if isinstance(month, date):

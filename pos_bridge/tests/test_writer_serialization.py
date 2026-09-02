@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from threading import Barrier, Event, Thread
 from unittest.mock import patch
 
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.test import TransactionTestCase
+from django.utils import timezone
 
-from pos_bridge.models import PointBranch, PointDailySale, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailySale, PointExtractionLog, PointSyncJob
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
-from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta
+from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaCodigoPointAlias
 
 
 class WriterSerializationTests(TransactionTestCase):
@@ -54,6 +55,34 @@ class WriterSerializationTests(TransactionTestCase):
         thread = Thread(target=run, daemon=True)
         thread.start()
         return thread
+
+    def _assert_source_writer_waits(self, writer):
+        source_locked = Event()
+        release_source_lock = Event()
+        writer_finished = Event()
+        errors = []
+
+        def hold_source_lock():
+            with transaction.atomic():
+                ProductMonthClosureService._lock_canonical_source_tables()
+                source_locked.set()
+                self.assertTrue(release_source_lock.wait(5))
+
+        lock_thread = self._thread(hold_source_lock, errors)
+        self.assertTrue(source_locked.wait(5))
+
+        def run_writer():
+            writer()
+            writer_finished.set()
+
+        writer_thread = self._thread(run_writer, errors)
+        self.assertFalse(writer_finished.wait(0.25))
+        release_source_lock.set()
+        lock_thread.join(5)
+        writer_thread.join(5)
+        self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(writer_finished.is_set())
 
     def test_two_rebuilds_and_following_lock_serialize_on_month_row(self):
         closure = ProductoMonthClosure.objects.create(
@@ -183,6 +212,55 @@ class WriterSerializationTests(TransactionTestCase):
         rows = list(PointDailySale.objects.filter(sale_date=date(2026, 8, 2)).order_by("branch_id"))
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0].product_id, rows[1].product_id)
+
+    def test_source_lock_blocks_extraction_log_insert_and_following_fingerprint_sees_it(self):
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.make_aware(datetime(2026, 8, 15, 12, 0)),
+            parameters={"start_date": "2026-08-01", "end_date": "2026-08-31"},
+        )
+        before = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
+
+        self._assert_source_writer_waits(
+            lambda: PointExtractionLog.objects.create(
+                sync_job=job,
+                level=PointExtractionLog.LEVEL_INFO,
+                message="Backfill oficial branch 2026-08-15",
+                context={"branch_external_id": "branch", "sale_date": "2026-08-15"},
+            )
+        )
+
+        after = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
+        self.assertNotEqual(before["extraction_logs"]["digest"], after["extraction_logs"]["digest"])
+
+    def test_source_lock_blocks_alias_remap_and_fresh_fingerprint_sees_it(self):
+        first = Receta.objects.create(
+            nombre="Alias origen",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="alias-lock-origin",
+        )
+        second = Receta.objects.create(
+            nombre="Alias destino",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="alias-lock-destination",
+        )
+        alias = RecetaCodigoPointAlias.objects.create(
+            receta=first,
+            codigo_point="ALIAS-LOCK",
+            nombre_point="Alias lock",
+        )
+        before = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
+
+        self._assert_source_writer_waits(
+            lambda: RecetaCodigoPointAlias.objects.filter(pk=alias.pk).update(receta=second)
+        )
+
+        after = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
+        self.assertNotEqual(
+            before["recipe_point_aliases"]["digest"],
+            after["recipe_point_aliases"]["digest"],
+        )
 
     def test_lock_waits_for_rebuild_and_never_gets_overwritten_or_unlocked(self):
         recipe = Receta.objects.create(

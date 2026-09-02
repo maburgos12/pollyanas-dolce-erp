@@ -5696,7 +5696,15 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         )
         if is_canonical_closure:
             fingerprint = dict(closure_metadata.get("source_fingerprint") or {})
-            if not fingerprint.get("digest") or not fingerprint.get("metadata_digest"):
+            if any(
+                not fingerprint.get(key)
+                for key in (
+                    "digest",
+                    "metadata_digest",
+                    "projected_lines_digest",
+                    "raw_sources_digest",
+                )
+            ):
                 lock_guard_errors.append(
                     "El cierre no tiene huella de fuentes Point; las fuentes deben reconstruirse antes de bloquear."
                 )

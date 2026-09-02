@@ -19,7 +19,11 @@ from openpyxl import Workbook
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob, PointWasteLine
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
-from pos_bridge.services.monthly_product_balance_service import MonthlyPointBalance, MonthlyPointBalanceRow
+from pos_bridge.services.monthly_product_balance_service import (
+    MonthlyPointBalance,
+    MonthlyPointBalanceRow,
+    MonthlyPointProductBalanceService,
+)
 from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
@@ -1564,9 +1568,140 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(fingerprint["algorithm"], "sha256")
         self.assertEqual(len(fingerprint["digest"]), 64)
         self.assertEqual(len(fingerprint["metadata_digest"]), 64)
-        locked = service.lock(closure=closure, reason="fuentes sin cambios")
+        self.assertEqual(len(fingerprint["projected_lines_digest"]), 64)
+        self.assertEqual(len(fingerprint["raw_sources_digest"]), 64)
+        with patch.object(
+            service,
+            "_fresh_canonical_preview",
+            side_effect=lambda *, month: service.preview(month=month, refresh_official_sales=False),
+        ):
+            locked = service.lock(closure=closure, reason="fuentes sin cambios")
         self.assertTrue(locked.is_locked)
         self.assertIs(balance_service.refresh_values[-1], False)
+
+    def test_canonical_lock_rejects_tampered_persisted_line(self):
+        class BalanceService:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        service = ProductMonthClosureService(
+            balance_service=BalanceService(self._lockable_fingerprint_balance())
+        )
+        closure = service.build(month="2025-09")
+        closure.lines.update(venta_total_equivalente=Decimal("999"))
+
+        with self.assertRaisesMessage(ProductMonthClosureError, "líneas persistidas cambiaron"):
+            service.lock(closure=closure)
+
+        closure.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+
+    def test_line_digest_covers_metadata_identity_and_distinguishes_none_from_zero(self):
+        class BalanceService:
+            def build(_self, month, **kwargs):
+                return self._lockable_fingerprint_balance()
+
+        service = ProductMonthClosureService(balance_service=BalanceService())
+        plan = service.preview(month="2025-09")
+        baseline = plan["metadata"]["source_fingerprint"]["projected_lines_digest"]
+        row = {**plan["line_rows"][0], "metadata": dict(plan["line_rows"][0]["metadata"])}
+
+        row["metadata"]["issues"] = ["TAMPERED"]
+        metadata_digest = service._projected_lines_digest(
+            [row],
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        self.assertNotEqual(metadata_digest, baseline)
+
+        row = {**plan["line_rows"][0], "receta": self.derived}
+        identity_digest = service._projected_lines_digest(
+            [row],
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        self.assertNotEqual(identity_digest, baseline)
+
+        row = {**plan["line_rows"][0], "inventario_final_point_total": None}
+        none_digest = service._projected_lines_digest(
+            [row],
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        row["inventario_final_point_total"] = Decimal("0")
+        zero_digest = service._projected_lines_digest(
+            [row],
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        self.assertNotEqual(none_digest, zero_digest)
+
+    def test_compensating_raw_sales_edits_change_fingerprint_even_when_total_is_equal(self):
+        product = PointProduct.objects.create(external_id="raw-sales", sku="RAW", name="Raw")
+        first = PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=product,
+            receta=self.parent,
+            sale_date=date(2025, 9, 10),
+            quantity=Decimal("4"),
+        )
+        second = PointDailySale.objects.create(
+            branch=self.point_branch,
+            product=product,
+            receta=self.parent,
+            sale_date=date(2025, 9, 11),
+            quantity=Decimal("6"),
+        )
+
+        class BalanceService:
+            def build(_self, month, **kwargs):
+                return self._lockable_fingerprint_balance()
+
+        service = ProductMonthClosureService(balance_service=BalanceService())
+        closure = service.build(month="2025-09")
+        fingerprint = closure.metadata["source_fingerprint"]
+        original_digest = fingerprint["raw_sources_digest"]
+        raw_sales = ProductMonthClosureService._raw_source_evidence(
+            month_start=date(2025, 9, 1)
+        )["sales_point_daily"]
+        self.assertEqual(raw_sales["row_count"], 2)
+        self.assertTrue(
+            {"id", "branch_id", "product_id", "sync_job_id", "sale_date", "quantity", "updated_at"}
+            <= set(raw_sales["fields"])
+        )
+
+        PointDailySale.objects.filter(pk=first.pk).update(quantity=Decimal("5"))
+        PointDailySale.objects.filter(pk=second.pk).update(quantity=Decimal("5"))
+
+        current = service.preview(month="2025-09", refresh_official_sales=False)
+        self.assertNotEqual(
+            current["metadata"]["source_fingerprint"]["raw_sources_digest"],
+            original_digest,
+        )
+
+    def test_fresh_canonical_preview_does_not_reuse_cached_matcher_or_balance_service(self):
+        class StaleBalanceService:
+            def build(self, month, **kwargs):
+                raise AssertionError("must not reuse the service cached at build time")
+
+        service = ProductMonthClosureService(balance_service=StaleBalanceService())
+        service.matcher._point_code_index_built = True
+        service.matcher._point_code_to_receta = {"stale": self.parent}
+        balance = self._lockable_fingerprint_balance()
+        fresh_matcher = type(service.matcher)()
+
+        with (
+            patch(
+                "pos_bridge.services.product_month_closure_service.PointSalesMatchingService",
+                return_value=fresh_matcher,
+            ) as matcher_factory,
+            patch.object(MonthlyPointProductBalanceService, "build", return_value=balance),
+        ):
+            plan = service._fresh_canonical_preview(month=date(2025, 9, 1))
+
+        self.assertEqual(plan["month_start"], date(2025, 9, 1))
+        matcher_factory.assert_called_once_with()
+        self.assertIsNot(service.matcher, fresh_matcher)
+        self.assertFalse(fresh_matcher._point_code_index_built)
 
     def test_canonical_lock_rejects_when_current_source_fingerprint_changed(self):
         class MutableBalanceService:
@@ -1581,11 +1716,16 @@ class ProductMonthClosureServiceTests(TestCase):
         closure = service.build(month="2025-09")
         balance_service.balance = self._lockable_fingerprint_balance(sales_job_id=202)
 
-        with self.assertRaisesMessage(
-            ProductMonthClosureError,
-            "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo.",
+        with patch.object(
+            service,
+            "_fresh_canonical_preview",
+            side_effect=lambda *, month: service.preview(month=month, refresh_official_sales=False),
         ):
-            service.lock(closure=closure, reason="fuente nueva")
+            with self.assertRaisesMessage(
+                ProductMonthClosureError,
+                "Las fuentes cambiaron; reconstruye el cierre antes de bloquearlo.",
+            ):
+                service.lock(closure=closure, reason="fuente nueva")
 
         closure.refresh_from_db()
         self.assertFalse(closure.is_locked)
