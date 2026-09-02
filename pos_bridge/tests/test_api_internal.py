@@ -213,6 +213,142 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertEqual(len(response.data["lines"]), 1)
         self.assertEqual(response.data["lines"][0]["receta_padre"], self.receta.id)
 
+    def test_product_closure_detail_distinguishes_canonical_zero_from_missing_placeholder(self):
+        line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("0")
+        line.produccion_mes = Decimal("0")
+        line.venta_directa_enteros = Decimal("0")
+        line.venta_derivada_equivalente = Decimal("0")
+        line.venta_total_equivalente = Decimal("0")
+        line.merma_total_equivalente = Decimal("0")
+        line.inventario_final_teorico = Decimal("0")
+        line.inventario_final_point_total = Decimal("0")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "production_source_authoritative": True,
+            "waste_source_authoritative": True,
+            "conversion_source_authoritative": True,
+            "point_final_scopes_available": True,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "COINCIDE",
+            "conversion_origins": ["POINT"],
+            "projection_sources": ["DIRECTA"],
+        }
+        line.save()
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        row = response.data["lines"][0]
+        self.assertEqual(row["opening_point"], "0.000000")
+        self.assertEqual(row["sales_total"], "0.000000")
+        self.assertEqual(row["point_conversion_in"], "0.000000")
+        self.assertEqual(row["closing_point"], "0.000000")
+        self.assertEqual(row["point_difference"], "0.000000")
+        self.assertEqual(row["point_status"], "COINCIDE")
+        self.assertEqual(row["conversion_origins"], ["POINT"])
+        self.assertEqual(row["projection_sources"], ["DIRECTA"])
+
+        line.metadata = {
+            **line.metadata,
+            "issues": [
+                "OPENING_SNAPSHOT_MISSING",
+                "SALES_SOURCE_MISSING",
+                "CALCULATED_CLOSING_MISSING",
+                "CLOSING_SNAPSHOT_MISSING",
+            ],
+            "sales_source_available": False,
+        }
+        line.save(update_fields=["metadata", "updated_at"])
+        missing = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/").data["lines"][0]
+        self.assertIsNone(missing["opening_point"])
+        self.assertIsNone(missing["sales_total"])
+        self.assertIsNone(missing["calculated_closing"])
+        self.assertIsNone(missing["closing_point"])
+        self.assertIsNone(missing["point_difference"])
+        self.assertEqual(missing["point_status"], "REVISAR_FUENTE")
+
+    def test_product_closure_list_totals_are_none_when_any_canonical_line_is_missing(self):
+        line = self.product_closure.lines.get()
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": [],
+            "sales_source_available": True,
+            "production_source_authoritative": True,
+            "waste_source_authoritative": True,
+            "conversion_source_authoritative": True,
+            "point_final_scopes_available": True,
+            "point_difference": "0",
+        }
+        line.save(update_fields=["metadata", "updated_at"])
+        missing_recipe = Receta.objects.create(
+            nombre="Pastel prueba faltante",
+            codigo_point="MISSING-1",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido=f"hash-{uuid4()}",
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=self.product_closure,
+            receta_padre=missing_recipe,
+            produccion_mes=Decimal("0"),
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": ["PRODUCTION_SOURCE_MISSING", "CALCULATED_CLOSING_MISSING"],
+                "sales_source_available": True,
+                "production_source_authoritative": False,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+            },
+        )
+
+        response = self.client.get("/api/pos-bridge/product-closures/")
+
+        summary = response.data["results"][0]
+        self.assertIsNone(summary["total_production"])
+        self.assertIsNone(summary["total_ending_inventory"])
+        self.assertEqual(summary["total_sales"], "4.000000")
+
+    def test_product_closure_api_preserves_historical_inventory_semantics(self):
+        line = self.product_closure.lines.get()
+        line.inventario_final_point_total = Decimal("18")
+        line.diferencia_teorico_vs_point = Decimal("3")
+        line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO
+        line.metadata = {"historical_excel": True}
+        line.save()
+        self.product_closure.metadata = {"historical_excel_import": {"source_file": "historico.xlsx"}}
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        row = response.data["lines"][0]
+        self.assertTrue(row["is_historical_inventory"])
+        self.assertEqual(row["closing_point"], "18.000000")
+        self.assertEqual(row["point_difference"], "3.000000")
+        self.assertEqual(row["point_status"], ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
+
+    def test_product_closure_api_exposes_source_authority_and_issues(self):
+        self.product_closure.metadata = {
+            "opening_meta": {"authoritative": True, "effective_date": "2026-07-31"},
+            "sales_meta": {"authoritative": False, "authority_issues": ["SALES_SYNC_JOB_PARTIAL"]},
+            "production_meta": {"authoritative": True},
+            "waste_meta": {"authoritative": True},
+            "conversion_meta": {"authoritative": True},
+            "closing_inventory_meta": {"authoritative": True, "effective_date": "2026-08-31"},
+            "balance": {"issues": ["MONTH_SOURCE_INCOMPLETE"]},
+            "validation": {"blocking_issues": ["SALES_SYNC_JOB_PARTIAL"], "lock_ready": False},
+        }
+        self.product_closure.save(update_fields=["metadata", "updated_at"])
+
+        response = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/")
+
+        self.assertTrue(response.data["source_authority"]["opening"]["authoritative"])
+        self.assertFalse(response.data["source_authority"]["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_JOB_PARTIAL", response.data["source_issues"])
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", response.data["source_issues"])
+
     def test_product_closures_build_endpoint_creates_month(self):
         PointInventorySnapshot.objects.create(
             branch=self.branch,

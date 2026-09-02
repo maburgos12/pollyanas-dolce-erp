@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -9,6 +10,16 @@ from django.test import TestCase, override_settings
 
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
+    def test_monthly_product_closure_uses_safe_canonical_orchestration(self):
+        from django_celery_beat.models import PeriodicTask
+
+        call_command("setup_celery_schedules")
+
+        task = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
+        self.assertEqual(task.crontab.day_of_month, "5")
+        self.assertEqual(task.crontab.hour, "4")
+        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": True})
+
     @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
     @patch("crm.services.point_delivery_auto_sync.PointDeliveryAutoSyncService.run")
     def test_delivery_task_is_fail_closed_when_feature_flag_is_off(self, run):
@@ -149,8 +160,8 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(close_email.crontab.hour, "1")
         self.assertEqual(close_email.crontab.minute, "0")
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
-        self.assertEqual(monthly.crontab.day_of_month, "1")
-        self.assertEqual(monthly.crontab.hour, "5")
+        self.assertEqual(monthly.crontab.day_of_month, "5")
+        self.assertEqual(monthly.crontab.hour, "4")
         product_prices = PeriodicTask.objects.get(name="pos_bridge: sync precios catalogo semanal")
         self.assertEqual(product_prices.task, "pos_bridge.sync_product_prices_task")
         self.assertEqual(product_prices.crontab.day_of_week, "1")

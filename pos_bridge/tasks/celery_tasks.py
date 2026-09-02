@@ -290,7 +290,8 @@ def task_ecommerce_webhook_delivery(self, *, webhook_url: str, payload: dict):
     max_retries=1,
     default_retry_delay=900,
     acks_late=True,
-    time_limit=1800,
+    time_limit=7200,
+    soft_time_limit=6900,
 )
 def task_monthly_product_closure(
     self,

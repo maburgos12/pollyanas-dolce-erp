@@ -75,6 +75,10 @@ from pos_bridge.models import (
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.tasks.celery_tasks import task_operations_automation_cycle, task_visible_cut_refresh_cycle
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
+from pos_bridge.services.product_closure_projection import (
+    project_product_closure_line as canonical_product_closure_row,
+    sum_complete_values as canonical_sum_complete_values,
+)
 from ventas.services.sales_canonical_source import (
     OFFICIAL_POINT_SOURCE as CANONICAL_OFFICIAL_POINT_SOURCE,
     POINT_BRIDGE_SALES_SOURCE as CANONICAL_POINT_BRIDGE_SALES_SOURCE,
@@ -5847,6 +5851,13 @@ def _product_closure_export_row(
     also tells us when numeric zero is only the storage placeholder for a missing
     source and must therefore be rendered as ``Sin dato``.
     """
+    return canonical_product_closure_row(
+        line,
+        historical_excel_import=historical_excel_import,
+    )
+
+    # Kept below temporarily as executable-history context for this long-lived
+    # report module; the canonical implementation above now lives in pos_bridge.
     metadata = dict(line.metadata or {})
     issues = {str(issue) for issue in metadata.get("issues") or []}
     is_canonical = metadata.get("balance_contract") == "POINT_PRODUCT_BALANCE_V1"
@@ -5962,10 +5973,7 @@ def _decimal_export_value(value: object) -> Decimal | None:
 
 
 def _sum_available_export_values(rows: list[dict[str, object]], key: str) -> Decimal | None:
-    values = [row.get(key) for row in rows]
-    if not values or any(value is None for value in values):
-        return None
-    return sum((Decimal(str(value)) for value in values), Decimal("0"))
+    return canonical_sum_complete_values(rows, key)
 
 
 def _closure_export_display(value: object) -> object:

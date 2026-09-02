@@ -152,10 +152,10 @@ class Command(BaseCommand):
         )
 
         monthly_closure_cron, _ = CrontabSchedule.objects.get_or_create(
-            minute="30",
-            hour="5",
+            minute="0",
+            hour="4",
             day_of_week="*",
-            day_of_month="1",
+            day_of_month="5",
             month_of_year="*",
             timezone=timezone_name,
         )
@@ -165,11 +165,7 @@ class Command(BaseCommand):
                 "task": "pos_bridge.monthly_product_closure",
                 "crontab": monthly_closure_cron,
                 "interval": None,
-                "kwargs": json.dumps({
-                    "rebuild": False,
-                    "lock_after_build": False,
-                    "sync_inventory_before_build": True,
-                }),
+                "kwargs": json.dumps({"lock_after_build": True}),
                 "enabled": True,
             },
         )

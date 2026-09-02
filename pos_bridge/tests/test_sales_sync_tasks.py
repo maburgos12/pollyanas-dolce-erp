@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from pos_bridge.models import PointSyncJob
+from pos_bridge.services.product_month_closure_service import ProductMonthClosureError
 from pos_bridge.tasks.celery_tasks import task_visible_cut_refresh_cycle
 from pos_bridge.tasks.run_monthly_product_closure import run_monthly_product_closure
 from pos_bridge.tasks.run_daily_sales_sync import run_daily_sales_sync
@@ -17,6 +18,14 @@ from pos_bridge.tasks.run_waste_sync import run_waste_sync
 
 
 class PointSalesSyncTaskRoutingTests(SimpleTestCase):
+    def test_monthly_closure_is_scheduled_after_source_month_end_syncs(self):
+        from django.conf import settings
+
+        schedule = settings.CELERY_BEAT_SCHEDULE["pos_bridge: cierre producto mensual canonico"]
+
+        self.assertEqual(schedule["task"], "pos_bridge.monthly_product_closure")
+        self.assertEqual(schedule["kwargs"], {"lock_after_build": True})
+
     def test_pos_bridge_tasks_exports_dashboard_refresh_tasks_for_celery_autodiscovery(self):
         import pos_bridge.tasks as tasks
 
@@ -335,6 +344,13 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
         with (
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as service_cls,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources",
+                return_value=[
+                    {"name": name, "status": PointSyncJob.STATUS_SUCCESS}
+                    for name in ("sales", "production", "waste", "conversions")
+                ],
+            ),
         ):
             filter_mock.return_value.order_by.return_value.first.return_value = None
             service_cls.return_value.build.return_value = fake_closure
@@ -350,6 +366,201 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
             approval_reason="scheduled_monthly_automation",
             approval_channel="celery_monthly_product_closure",
         )
+
+    def test_monthly_closure_refreshes_exact_official_month_before_build_and_locks_when_ready(self):
+        fake_job = lambda job_id: SimpleNamespace(  # noqa: E731
+            id=job_id,
+            status=PointSyncJob.STATUS_SUCCESS,
+            result_summary={},
+            error_message="",
+        )
+        built = SimpleNamespace(
+            id=101,
+            status="BUILT",
+            is_locked=False,
+            metadata={
+                "validation": {"lock_ready": True},
+                "opening_meta": {"authoritative": True, "effective_date": "2026-07-31"},
+                "closing_inventory_meta": {"authoritative": True, "effective_date": "2026-08-31"},
+            },
+            get_status_display=lambda: "Construido",
+        )
+        locked = SimpleNamespace(**{**built.__dict__, "status": "LOCKED", "is_locked": True})
+        locked.get_status_display = lambda: "Bloqueado"
+
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync", return_value=fake_job(1)) as sales,
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "job_id": 4, "issues": []},
+            ) as conversions,
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            movements.return_value.run_production_sync.return_value = fake_job(2)
+            movements.return_value.run_waste_sync.return_value = fake_job(3)
+            closure_service.return_value.build.return_value = built
+            closure_service.return_value.lock.return_value = locked
+
+            result = run_monthly_product_closure(month="2026-08", lock_after_build=True)
+
+        exact_range = {"start_date": date(2026, 8, 1), "end_date": date(2026, 8, 31)}
+        sales.assert_called_once_with(
+            **exact_range,
+            excluded_ranges=None,
+            triggered_by=None,
+            branch_filter=None,
+            max_days=None,
+            source_mode="OFFICIAL",
+        )
+        movements.return_value.run_production_sync.assert_called_once_with(
+            **exact_range, branch_filter=None, triggered_by=None
+        )
+        movements.return_value.run_waste_sync.assert_called_once_with(
+            **exact_range, branch_filter=None, triggered_by=None
+        )
+        conversions.assert_called_once_with(
+            date_from=date(2026, 8, 1), date_to=date(2026, 8, 31), branch_filter=None
+        )
+        closure_service.return_value.build.assert_called_once_with(
+            month=date(2026, 8, 1),
+            rebuild=False,
+            lock_after_build=False,
+            built_by=None,
+            approval_reason="scheduled_monthly_automation",
+            approval_channel="celery_monthly_product_closure",
+        )
+        closure_service.return_value.lock.assert_called_once()
+        self.assertEqual(result["action"], "built")
+        self.assertTrue(result["is_locked"])
+        self.assertTrue(result["inventory_authority"]["opening"]["authoritative"])
+        self.assertEqual(result["inventory_authority"]["opening"]["target_date"], "2026-07-31")
+        self.assertEqual(result["inventory_authority"]["closing"]["target_date"], "2026-08-31")
+        self.assertEqual([step["name"] for step in result["source_refresh"]], ["sales", "production", "waste", "conversions"])
+
+    def test_monthly_closure_partial_source_builds_reviewable_draft_without_lock(self):
+        success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")
+        partial = SimpleNamespace(
+            id=2,
+            status=PointSyncJob.STATUS_PARTIAL,
+            result_summary={"issues": ["PRODUCTION_BRANCH_COVERAGE_INCOMPLETE"]},
+            error_message="",
+        )
+        closure = SimpleNamespace(
+            id=102,
+            status="BUILT",
+            is_locked=False,
+            metadata={"validation": {"lock_ready": False, "blocking_issues": ["MONTH_SOURCE_INCOMPLETE"]}},
+            get_status_display=lambda: "Construido",
+        )
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync", return_value=success),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            movements.return_value.run_production_sync.return_value = partial
+            movements.return_value.run_waste_sync.return_value = success
+            closure_service.return_value.build.return_value = closure
+
+            result = run_monthly_product_closure(month="2026-08", lock_after_build=True)
+
+        closure_service.return_value.lock.assert_not_called()
+        self.assertFalse(result["is_locked"])
+        self.assertEqual(result["automation_status"], "REVIEW")
+        self.assertIn("production", result["failed_or_partial_sources"])
+
+    def test_monthly_closure_lock_guard_failure_keeps_built_closure_for_review(self):
+        success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")
+        closure = SimpleNamespace(
+            id=103,
+            status="BUILT",
+            is_locked=False,
+            metadata={"validation": {"lock_ready": True}},
+            get_status_display=lambda: "Construido",
+        )
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync", return_value=success),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            movements.return_value.run_production_sync.return_value = success
+            movements.return_value.run_waste_sync.return_value = success
+            closure_service.return_value.build.return_value = closure
+            closure_service.return_value.lock.side_effect = ProductMonthClosureError("source fingerprint changed")
+
+            result = run_monthly_product_closure(month="2026-08", lock_after_build=True)
+
+        self.assertFalse(result["is_locked"])
+        self.assertEqual(result["automation_status"], "REVIEW")
+        self.assertIn("lock", result["failed_or_partial_sources"])
+        self.assertIn("source fingerprint changed", result["automation_reviews"])
+
+    def test_monthly_closure_rebuilds_existing_unlocked_draft_after_refresh(self):
+        existing = SimpleNamespace(id=77, is_locked=False, status="DRAFT")
+        success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")
+        closure = SimpleNamespace(
+            id=77,
+            status="BUILT",
+            is_locked=False,
+            metadata={"validation": {"lock_ready": True}},
+            get_status_display=lambda: "Construido",
+        )
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync", return_value=success),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = existing
+            movements.return_value.run_production_sync.return_value = success
+            movements.return_value.run_waste_sync.return_value = success
+            closure_service.return_value.build.return_value = closure
+            result = run_monthly_product_closure(month="2026-08")
+
+        self.assertEqual(result["action"], "rebuilt")
+        self.assertTrue(closure_service.return_value.build.call_args.kwargs["rebuild"])
+
+    def test_monthly_closure_skips_locked_month_without_refresh_or_mutation(self):
+        locked = SimpleNamespace(
+            id=88,
+            is_locked=True,
+            status="LOCKED",
+            metadata={"validation": {"lock_ready": True}},
+            get_status_display=lambda: "Bloqueado",
+        )
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync") as sales,
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch("pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines") as conversions,
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = locked
+            result = run_monthly_product_closure(month="2026-08", rebuild=True, lock_after_build=True)
+
+        sales.assert_not_called()
+        movements.assert_not_called()
+        conversions.assert_not_called()
+        closure_service.assert_not_called()
+        self.assertEqual(result["action"], "skipped_locked")
 
 
 class VisibleCutRefreshTaskTests(SimpleTestCase):
