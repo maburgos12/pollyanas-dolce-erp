@@ -542,6 +542,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "conversion_entrada": balance_row.conversion_in,
             "conversion_salida": balance_row.conversion_out,
             "conversion_provenance": balance_row.conversion_origin or "Sin dato",
+            "conversion_provenance_label": self._conversion_provenance_label(balance_row.conversion_origin),
             "inventario_inicial": balance_row.opening_point if snapshots_authoritative else None,
             "inventario_final_teorico": balance_row.calculated_closing if snapshots_authoritative else None,
             "inventario_final_point_total": balance_row.closing_point if snapshots_authoritative else None,
@@ -575,6 +576,15 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         }.get(status, "Revisar fuente")
 
     @staticmethod
+    def _conversion_provenance_label(origin: str) -> str:
+        return {
+            "POINT": "Point",
+            "EQUIVALENCIA_CONFIGURADA": "equivalencia configurada",
+            "MIXED": "orígenes mixtos",
+            "UNRESOLVED": "Revisar fuente",
+        }.get(origin, "Sin dato")
+
+    @staticmethod
     def _source_descriptor(source: dict[str, Any] | None) -> dict[str, Any]:
         source = dict(source or {})
         return {
@@ -599,12 +609,35 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "conversions": self._source_descriptor(balance.sources.get("conversions")),
             "snapshot_dates": dict(balance.effective_snapshot_dates),
         }
+        canonical["authority"] = self._canonical_authority(balance, canonical)
         return {
             "ventas": {"label": canonical["sales"]["selected_source"], **canonical["sales"]},
             "produccion": {"label": canonical["production"]["source"], **canonical["production"]},
             "merma": {"label": canonical["waste"]["source"], **canonical["waste"]},
             "inventario": {"label": "Snapshots Point", **canonical["closing"]},
             "canonical": canonical,
+        }
+
+    @staticmethod
+    def _canonical_authority(balance, canonical: dict[str, Any]) -> dict[str, Any]:
+        reasons: list[str] = []
+        if not canonical["opening"]["authoritative"] or not canonical["closing"]["authoritative"]:
+            reasons.append("Snapshots Point sin autoridad completa")
+        sales = canonical["sales"]
+        if sales["mode"] == "BRIDGE_HISTORY":
+            reasons.append("Ventas: BRIDGE_HISTORY")
+        elif not sales["authoritative"]:
+            reasons.append(f"Ventas: {sales['selected_source']} sin autoridad")
+        if getattr(balance, "issues", ()):
+            reasons.append("Incidencias canónicas pendientes")
+        if getattr(balance, "unresolved_movements", ()) or getattr(balance, "unresolved_conversions", ()):
+            reasons.append("Movimientos Point pendientes de resolver")
+        if any(row.status == "REVISAR_FUENTE" for row in balance.rows.values()):
+            reasons.append("Filas Point en revisión")
+        return {
+            "verified": not reasons,
+            "label": "Verificada" if not reasons else "Revisar fuentes",
+            "reason": " · ".join(reasons),
         }
 
     def _canonical_banners(self, balance, fuentes: dict[str, Any]) -> list[str]:

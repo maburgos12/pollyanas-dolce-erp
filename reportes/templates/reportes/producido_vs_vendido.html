@@ -31,7 +31,8 @@
       <span class="badge bg-primary">Merma Point: {{ fuentes.merma.label }}</span>
       <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
       <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
-      <span class="badge {% if fuentes.canonical.opening.authoritative and fuentes.canonical.closing.authoritative %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {% if fuentes.canonical.opening.authoritative and fuentes.canonical.closing.authoritative %}Verificada{% else %}Revisar fuente{% endif %}</span>
+      <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
+      {% if not fuentes.canonical.authority.verified %}<span class="badge bg-warning">{{ fuentes.canonical.authority.reason }}</span>{% endif %}
       <span class="badge bg-primary">Snapshots Point: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"Y-m-d" }}{% else %}Sin dato{% endif %} → {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"Y-m-d" }}{% else %}Sin dato{% endif %}{% if fuentes.canonical.opening.fallback_used or fuentes.canonical.closing.fallback_used %} (fecha cercana seleccionada){% endif %}</span>
     </div>
   </section>
@@ -236,14 +237,14 @@
               {% if row.conversion_entrada is None %}
               <span class="muted">Sin dato</span>
               {% else %}
-              <span title="Origen de conversión: {{ row.conversion_provenance }}">{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span>
+              <span>{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span><small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>
               {% endif %}
             </td>
             <td class="text-end">
               {% if row.conversion_salida is None %}
               <span class="muted">Sin dato</span>
               {% else %}
-              <span title="Origen de conversión: {{ row.conversion_provenance }}">{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
+              <span>{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span><small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>
               {% endif %}
             </td>
             <td class="text-end">{% if row.costo_merma is None %}<span class="muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>

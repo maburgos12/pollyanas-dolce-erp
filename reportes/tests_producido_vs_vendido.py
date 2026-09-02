@@ -37,7 +37,7 @@ def canonical_balance(*rows, sources=None, warnings=(), issues=()):
             "sales": {
                 "source": "PointDailySale",
                 "authoritative": True,
-                "mode": "BRIDGE_HISTORY",
+                "mode": "OFFICIAL_DAILY",
                 "selected_source": "PointDailySale",
             },
             "waste": {"source": "PointWasteLine", "authoritative": True},
@@ -237,8 +237,8 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
                 MonthlyPointBalanceRow(
                     receta_id=self.parent.id,
                     conversion_in=Decimal("2"),
-                    conversion_origin="point_conversion_line",
-                    status="REVISAR_FUENTE",
+                    conversion_origin="POINT",
+                    status="COINCIDE",
                 )
             )
         )
@@ -246,7 +246,27 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Conversiones Point: PointConversionLine", rendered)
         self.assertIn("Autoridad Point: Verificada", rendered)
         self.assertIn("Snapshots Point: 2026-07-31 → 2026-08-31", rendered)
-        self.assertIn("Origen de conversión: point_conversion_line", rendered)
+        self.assertIn("Origen: Point", rendered)
+        self.assertNotIn('title="Origen de conversión:', rendered)
+
+    def test_bridge_history_or_non_authoritative_sales_never_verify_point_authority(self):
+        sources = canonical_balance().sources
+        sources["sales"] = {
+            "source": "PointDailySale",
+            "selected_source": "PointDailySale",
+            "mode": "BRIDGE_HISTORY",
+            "authoritative": False,
+        }
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(receta_id=self.parent.id, status="COINCIDE"),
+                sources=sources,
+            )
+        )
+        rendered = self._render(context)
+        self.assertIn("Autoridad Point: Revisar fuentes", rendered)
+        self.assertIn("Ventas: BRIDGE_HISTORY", rendered)
+        self.assertNotIn("Autoridad Point: Verificada", rendered)
 
     def test_sources_and_issues_become_concise_traceable_banners(self):
         context, _ = self._context(
