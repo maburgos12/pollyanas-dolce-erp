@@ -264,6 +264,8 @@ def project_product_closure_line(
         "conversion_origins": exact_conversion_origins,
         "projection_sources": projection_sources,
         "waste_total": None if not waste_authoritative else Decimal(str(line.merma_total_equivalente)),
+        "waste_direct": None if not waste_authoritative else Decimal(str(line.merma_directa_enteros)),
+        "waste_derived": None if not waste_authoritative else Decimal(str(line.merma_derivada_equivalente)),
         "calculated_closing": None if calculated_missing else Decimal(str(line.inventario_final_teorico)),
         "closing_point_cedis": historical_count_cedis
         if is_historical_excel

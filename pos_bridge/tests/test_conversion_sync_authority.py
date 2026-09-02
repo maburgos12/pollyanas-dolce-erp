@@ -1,8 +1,10 @@
 from datetime import date, datetime
 from decimal import Decimal
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 from django.test import TestCase
 from django.utils import timezone
 
@@ -12,6 +14,7 @@ from pos_bridge.services.conversion_sync_service import (
     _created_report_pk,
     _normalize_inventory_report_rows,
     _poll_report,
+    _read_report_rows,
     sync_conversion_lines,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
@@ -48,7 +51,7 @@ class PointConversionRerunAuthorityTests(TestCase):
             }
         ]
 
-    def _sync(self, *, branch_filter=None, resolve_branch=None, resolve_recipe=None):
+    def _sync(self, *, branch_filter=None, resolve_branch=None, resolve_recipe=None, report_content=None):
         client_context = MagicMock()
         client_context.return_value.__enter__.return_value = MagicMock()
         with (
@@ -61,8 +64,16 @@ class PointConversionRerunAuthorityTests(TestCase):
                 "pos_bridge.services.conversion_sync_service._poll_report",
                 return_value={"PK_Reporte": "REPORT-RERUN"},
             ),
-            patch("pos_bridge.services.conversion_sync_service._download_report", return_value=b"report"),
-            patch("pos_bridge.services.conversion_sync_service._read_report_rows", return_value=self.report_rows),
+            patch(
+                "pos_bridge.services.conversion_sync_service._download_report",
+                return_value=b"report" if report_content is None else report_content,
+            ),
+            patch(
+                "pos_bridge.services.conversion_sync_service._read_report_rows",
+                side_effect=(
+                    (lambda content: self.report_rows) if report_content is None else _read_report_rows
+                ),
+            ),
             patch("pos_bridge.services.conversion_sync_service._build_branch_map", return_value={}),
             patch("pos_bridge.services.conversion_sync_service._build_recipe_map", return_value={}),
             patch(
@@ -334,6 +345,93 @@ class PointConversionRerunAuthorityTests(TestCase):
         )
         self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
         self.assertFalse(self._conversion_authority()["authoritative"])
+
+    def test_empty_or_malformed_download_fails_without_certifying_zero_conversions(self):
+        for content in (
+            b"",
+            b" \n\t ",
+            b"<html><body>Login required</body></html>",
+            b"<table><tr><th>Error</th></tr></table>",
+        ):
+            with self.subTest(content=content):
+                with self.assertRaises(ValueError):
+                    self._sync(report_content=content)
+
+                job = PointSyncJob.objects.latest("id")
+                self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
+                self.assertEqual(job.result_summary, {})
+                self.assertFalse(PointConversionLine.objects.exists())
+                self.assertFalse(self._conversion_authority()["authoritative"])
+
+    def test_valid_header_only_download_certifies_zero_conversions(self):
+        headers = ["Sucursal", "Producto", "Cantidad", "Fecha", "PK_Movimiento"]
+        frame = pd.DataFrame(columns=headers)
+        workbook = BytesIO()
+        frame.to_excel(workbook, index=False)
+        embedded_headers = BytesIO()
+        pd.DataFrame([headers]).to_excel(embedded_headers, index=False)
+        for content in (frame.to_html(index=False).encode(), workbook.getvalue(), embedded_headers.getvalue()):
+            with self.subTest(format="xlsx" if content.startswith(b"PK") else "html"):
+                result = self._sync(report_content=content)
+
+                self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
+                self.assertEqual(result["total_rows"], 0)
+                self.assertEqual(result["created"], 0)
+                self.assertTrue(self._conversion_authority()["authoritative"])
+
+    def test_out_of_range_dates_are_invalid_before_resolving_or_persisting(self):
+        self.report_rows = [
+            {**self.report_rows[0], "PK_Movimiento": f"OUTSIDE-{index}", "Fecha": value}
+            for index, value in enumerate((
+                "2026-06-30 23:59:59",
+                "2026-08-15 10:00:00",
+                "2026-07-01T00:00:00+00:00",
+                "2026-08-01T07:00:00+00:00",
+            ))
+        ]
+        resolver = MagicMock(return_value=self.branch)
+
+        result = self._sync(resolve_branch=resolver)
+
+        self.assertEqual(result["status"], PointSyncJob.STATUS_PARTIAL)
+        self.assertEqual(result["invalid_date_rows"], 4)
+        self.assertEqual(result["invalid_rows"], 4)
+        self.assertIn("CONVERSION_INVALID_DATE", result["issues"])
+        self.assertFalse(PointConversionLine.objects.exists())
+        resolver.assert_not_called()
+        self.assertFalse(self._conversion_authority()["authoritative"])
+
+    def test_out_of_range_duplicate_does_not_rebind_existing_line(self):
+        original = self._sync()
+        self.report_rows[0]["Fecha"] = "2026-08-15 10:00:00"
+
+        result = self._sync()
+
+        line = PointConversionLine.objects.get()
+        self.assertEqual(result["status"], PointSyncJob.STATUS_PARTIAL)
+        self.assertEqual(result["invalid_rows"], 1)
+        self.assertEqual(result["skipped"], 0)
+        self.assertEqual(result["relinked"], 0)
+        self.assertEqual(line.sync_job_id, original["job_id"])
+        self.assertEqual(timezone.localtime(line.movement_at).date(), date(2026, 7, 15))
+
+    def test_inclusive_local_date_boundaries_are_valid(self):
+        self.report_rows = [
+            {**self.report_rows[0], "PK_Movimiento": f"BOUNDARY-{index}", "Fecha": value}
+            for index, value in enumerate((
+                "2026-07-01 00:00:00",
+                "2026-07-31 23:59:59",
+                "2026-07-01T07:00:00+00:00",
+                "2026-08-01T06:59:59+00:00",
+            ))
+        ]
+
+        result = self._sync()
+
+        self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(result["created"], 4)
+        self.assertEqual(result["invalid_rows"], 0)
+        self.assertTrue(self._conversion_authority()["authoritative"])
 
     def test_report_normalization_preserves_blank_quantity_for_validation(self):
         records = [

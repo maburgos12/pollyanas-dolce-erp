@@ -159,18 +159,27 @@ def _coerce_datetime(value, *, default_date: date):
 
 
 def _read_report_rows(content: bytes) -> list[dict]:
-    if not content:
-        return []
+    if not content.strip():
+        raise ValueError("Point devolvió una descarga de conversiones vacía.")
     try:
         frame = pd.read_excel(BytesIO(content), dtype=object)
     except Exception:  # noqa: BLE001
         try:
             tables = pd.read_html(StringIO(content.decode("utf-8", errors="ignore")))
-        except ValueError:
-            tables = []
-        frame = tables[0] if tables else pd.DataFrame()
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("Point devolvió un reporte de conversiones ilegible.") from exc
+        if not tables:
+            raise ValueError("Point devolvió un reporte de conversiones sin tabla.")
+        frame = tables[0]
     frame = frame.dropna(how="all")
     rows = frame.where(pd.notnull(frame), None).to_dict(orient="records")
+    required_headers = {"SUCURSAL", "PRODUCTO", "CANTIDAD"}
+    header_candidates = [frame.columns, *(row.values() for row in rows)]
+    if not any(
+        required_headers.issubset({str(value).strip().upper() for value in candidate})
+        for candidate in header_candidates
+    ):
+        raise ValueError("Point devolvió un reporte de conversiones sin cabeceras válidas.")
     return _normalize_inventory_report_rows([dict(row) for row in rows])
 
 
@@ -353,7 +362,7 @@ def sync_conversion_lines(
                 )
                 quantity = _required_decimal(_first_value(row, "Cantidad", "Qty", "Unidades"))
                 row_invalid = False
-                if movement_at is None:
+                if movement_at is None or not date_from <= timezone.localtime(movement_at).date() <= date_to:
                     invalid_date_rows += 1
                     row_invalid = True
                 if quantity is None:

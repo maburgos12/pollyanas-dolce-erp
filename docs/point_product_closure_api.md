@@ -16,6 +16,17 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
   no autoritativo y el estado se publica como `REVISAR_FUENTE`.
 - Un total mensual es `null` cuando al menos una línea tiene ese dato faltante.
 
+Los aliases conservan nombres y formato de seis decimales, pero no exponen los
+decimales crudos del modelo: `inventario_inicial_teorico` usa `opening_balance`,
+`produccion_mes` usa `production`, `venta_directa_enteros`,
+`venta_derivada_equivalente` y `venta_total_equivalente` usan las ventas
+proyectadas, y `inventario_final_teorico` usa `calculated_closing`.
+`merma_directa_enteros`, `merma_derivada_equivalente` y
+`merma_total_equivalente` respetan la misma autoridad de merma. Estas reglas
+aplican a cierres canónicos y a importaciones históricas: ausencia o falta de
+autoridad producen `null`, incluso si el modelo almacena cero o una cantidad
+observada. La apertura histórica respeta la presencia del Excel.
+
 ## Campos canónicos por línea
 
 `opening_point`, `historical_opening`, `opening_balance`, `opening_source`,
@@ -31,10 +42,12 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 estado/incidencias, identificadores de jobs y conteos/fechas de cobertura. No
 proyecta URLs de solicitud, rutas de reportes ni muestras crudas persistidas.
 
-Para importaciones históricas, `closing_point*` contienen únicamente los alcances
-del conteo histórico que estuvieron presentes y se distinguen con
-`is_historical_inventory=true`; `point_difference` usa en ese modo la diferencia
-histórica y sólo existe cuando los movimientos tienen autoridad. `historical_count_cedis`,
+Para importaciones históricas, por compatibilidad, `closing_point*` contienen
+únicamente los alcances del conteo histórico con presencia acreditada; los demás
+son `null`. No son snapshots Point y se distinguen con
+`is_historical_inventory=true`. `point_difference` usa en ese modo la diferencia
+histórica y es `null` si falta el conteo total, la apertura o autoridad de los
+movimientos. `historical_count_cedis`,
 `historical_count_sucursales`, `historical_count` y `historical_difference`
 separan explícitamente el conteo físico del cálculo. Una celda vacía produce
 `null` y un cero explícito produce `0.000000`, independientemente por alcance. El
@@ -58,9 +71,11 @@ conteo físico. Las etiquetas de movimientos nombran por separado las tablas
 operativas consultadas y las marcan como observadas no validadas; no atribuyen al
 Excel ventas, producción o merma que el archivo no importó.
 
-`point_difference` siempre usa el signo `Point final - final calculado`. Los
-cierres importados de Excel conservan su semántica histórica y la identifican
-con `is_historical_inventory=true`.
+En cierres canónicos, `point_difference` usa el signo
+`Point final - final calculado`. La excepción de compatibilidad son los cierres
+importados de Excel: conservan el signo histórico
+`final calculado - conteo histórico`, igual que `historical_difference`, y se
+identifican con `is_historical_inventory=true`.
 
 ## Campos de resumen y procedencia
 

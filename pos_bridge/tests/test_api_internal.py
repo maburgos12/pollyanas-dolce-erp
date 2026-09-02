@@ -485,6 +485,89 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(projection.call_count, self.product_closure.lines.count())
 
+    def test_product_closure_legacy_aliases_hide_non_authoritative_values(self):
+        aliases = (
+            "inventario_inicial_teorico", "produccion_mes", "venta_directa_enteros",
+            "venta_derivada_equivalente", "venta_total_equivalente",
+            "merma_directa_enteros", "merma_derivada_equivalente",
+            "merma_total_equivalente", "inventario_final_teorico",
+        )
+        for mode in ("canonical", "historical"):
+            for stored in (Decimal("0"), Decimal("7.25")):
+                line = self.product_closure.lines.get()
+                for alias in aliases:
+                    setattr(line, alias, stored)
+                line.metadata = (
+                    {"balance_contract": "POINT_PRODUCT_BALANCE_V1", "sales_source_available": True}
+                    if mode == "canonical"
+                    else {"historical_excel": {"inventory_presence": {"opening": False}}}
+                )
+                line.save()
+                row = self.client.get(
+                    f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+                ).data["lines"][0]
+                for alias in aliases:
+                    with self.subTest(mode=mode, stored=stored, alias=alias):
+                        self.assertIsNone(row[alias])
+
+    def test_product_closure_legacy_aliases_preserve_authoritative_values_and_zero(self):
+        aliases = {
+            "inventario_inicial_teorico": "opening_balance",
+            "produccion_mes": "production",
+            "venta_directa_enteros": "sales_direct",
+            "venta_derivada_equivalente": "sales_derived",
+            "venta_total_equivalente": "sales_total",
+            "merma_total_equivalente": "waste_total",
+            "inventario_final_teorico": "calculated_closing",
+        }
+        for mode in ("canonical", "historical"):
+            for stored in (Decimal("0"), Decimal("7.25")):
+                line = self.product_closure.lines.get()
+                for alias in aliases:
+                    setattr(line, alias, stored)
+                line.merma_directa_enteros = stored * Decimal("0.6")
+                line.merma_derivada_equivalente = stored * Decimal("0.4")
+                line.metadata = (
+                    {
+                        "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                        "sales_source_available": True,
+                        **{f"{source}_source_authoritative": True for source in (
+                            "opening", "production", "sales", "waste", "conversion", "closing"
+                        )},
+                    }
+                    if mode == "canonical"
+                    else {"historical_excel": {
+                        "inventory_presence": {"opening": True},
+                        "movement_authority": {
+                            source: {"authoritative": True}
+                            for source in ("production", "sales", "waste", "conversions")
+                        },
+                    }}
+                )
+                line.save()
+                row = self.client.get(
+                    f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+                ).data["lines"][0]
+                for alias, canonical in aliases.items():
+                    with self.subTest(mode=mode, stored=stored, alias=alias):
+                        self.assertEqual(row[alias], f"{stored:.6f}")
+                        self.assertEqual(row[alias], row[canonical])
+                self.assertEqual(row["merma_directa_enteros"], f"{stored * Decimal('0.6'):.6f}")
+                self.assertEqual(row["merma_derivada_equivalente"], f"{stored * Decimal('0.4'):.6f}")
+
+    def test_product_closure_historical_opening_alias_requires_evidence_for_legacy_zero(self):
+        line = self.product_closure.lines.get()
+        for stored in (Decimal("0"), Decimal("12")):
+            line.inventario_inicial_teorico = stored
+            line.metadata = {"historical_excel": {"inventario_inicial_historico": str(stored)}}
+            line.save()
+            row = self.client.get(
+                f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+            ).data["lines"][0]
+            with self.subTest(stored=stored):
+                self.assertEqual(row["inventario_inicial_teorico"], None if stored == 0 else "12.000000")
+                self.assertEqual(row["inventario_inicial_teorico"], row["opening_balance"])
+
     def test_product_closure_api_exposes_source_authority_and_issues(self):
         self.product_closure.metadata = {
             "opening_meta": {"authoritative": True, "effective_date": "2026-07-31"},

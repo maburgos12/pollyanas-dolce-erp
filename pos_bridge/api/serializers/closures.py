@@ -87,6 +87,17 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     historical_difference = serializers.SerializerMethodField()
     historical_opening = serializers.SerializerMethodField()
     opening_balance = serializers.SerializerMethodField()
+    # Compatibility names use the same authority/presence projection, never raw
+    # model decimals that may only contain unavailable-source placeholders.
+    inventario_inicial_teorico = serializers.SerializerMethodField(method_name="get_opening_balance")
+    produccion_mes = serializers.SerializerMethodField(method_name="get_production")
+    venta_directa_enteros = serializers.SerializerMethodField(method_name="get_sales_direct")
+    venta_derivada_equivalente = serializers.SerializerMethodField(method_name="get_sales_derived")
+    venta_total_equivalente = serializers.SerializerMethodField(method_name="get_sales_total")
+    merma_directa_enteros = serializers.SerializerMethodField(method_name="get_waste_direct")
+    merma_derivada_equivalente = serializers.SerializerMethodField(method_name="get_waste_derived")
+    merma_total_equivalente = serializers.SerializerMethodField(method_name="get_waste_total")
+    inventario_final_teorico = serializers.SerializerMethodField(method_name="get_calculated_closing")
 
     class Meta:
         model = ProductoMonthClosureLine
@@ -182,6 +193,12 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
 
     def get_waste_total(self, obj):
         return self._decimal(self._projection(obj)["waste_total"])
+
+    def get_waste_direct(self, obj):
+        return self._decimal(self._projection(obj)["waste_direct"])
+
+    def get_waste_derived(self, obj):
+        return self._decimal(self._projection(obj)["waste_derived"])
 
     def get_point_conversion_in(self, obj):
         return self._decimal(self._projection(obj)["point_conversion_in"])
