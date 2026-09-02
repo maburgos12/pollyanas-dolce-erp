@@ -492,6 +492,36 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         self.assertEqual(result["automation_status"], "REVIEW")
         self.assertIn("production", result["failed_or_partial_sources"])
 
+    def test_monthly_closure_transient_source_failure_defers_build_and_returns_retryable(self):
+        source_refresh = [
+            {
+                "name": "sales",
+                "status": PointSyncJob.STATUS_FAILED,
+                "retryable": True,
+                "error": "Point timeout",
+            },
+            *[
+                {"name": name, "status": PointSyncJob.STATUS_SUCCESS, "retryable": False}
+                for name in ("production", "waste", "conversions")
+            ],
+        ]
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._refresh_month_sources",
+                return_value=source_refresh,
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            result = run_monthly_product_closure(month="2026-08")
+
+        closure_service.assert_not_called()
+        self.assertEqual(result["action"], "source_refresh_failed")
+        self.assertEqual(result["automation_status"], "RETRY")
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["failed_or_partial_sources"], ["sales"])
+
     def test_monthly_closure_lock_guard_failure_keeps_built_closure_for_review(self):
         success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")
         closure = SimpleNamespace(

@@ -220,6 +220,30 @@ def _run_monthly_product_closure_locked(
         bool(step.get("retryable")) and step.get("status") == PointSyncJob.STATUS_FAILED
         for step in source_refresh
     )
+    if retryable:
+        return {
+            "action": "source_refresh_failed",
+            "action_label": "Fuentes Point con fallo transitorio; build diferido",
+            "month": target_month.strftime("%Y-%m"),
+            "closure_id": getattr(existing, "id", None),
+            "closure_status": getattr(existing, "status", None),
+            "closure_status_label": (
+                existing.get_status_display() if existing is not None else "Sin construir"
+            ),
+            "is_locked": False,
+            "lock_ready": False,
+            "inventory_sync": None,
+            "inventory_authority": {},
+            "source_refresh": source_refresh,
+            "failed_or_partial_sources": failed_or_partial_sources,
+            "automation_status": "RETRY",
+            "automation_reviews": [
+                str(step.get("error") or f"{step['name']}: fallo transitorio")
+                for step in source_refresh
+                if step.get("retryable")
+            ],
+            "retryable": True,
+        }
 
     service = ProductMonthClosureService()
     closure = service.build(
