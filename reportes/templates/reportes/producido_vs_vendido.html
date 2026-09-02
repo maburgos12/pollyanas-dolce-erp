@@ -27,8 +27,8 @@
     </div>
     <div class="production-source-list" aria-label="Fuentes de datos">
       <span class="badge bg-primary">Ventas Point: {{ fuentes.ventas.label }}</span>
-      <span class="badge bg-primary">Producción Point: {{ fuentes.produccion.label }}</span>
-      <span class="badge bg-primary">Merma Point: {{ fuentes.merma.label }}</span>
+      <span class="badge bg-primary">Producción: {{ fuentes.produccion.label }}</span>
+      <span class="badge bg-primary">Merma: {{ fuentes.merma.label }}</span>
       <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
       <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
       <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
@@ -128,6 +128,7 @@
       <div>
         <h2 class="section-header-title">Detalle operativo por categoría y receta</h2>
         <p class="production-table-meta">Saldo calculado = inicial Point + producción + conversión de entrada − venta − merma − conversión de salida. Dif. Point = final Point − saldo calculado.</p>
+        <p class="production-table-meta">Lectura de Dif. Point: positivo = Point reporta más; negativo = Point reporta menos; cero = coincide; cualquier valor distinto de cero requiere revisión y no es por sí mismo bueno ni malo.</p>
       </div>
     </div>
     {% if groups %}
@@ -237,15 +238,16 @@
               {% if row.conversion_entrada is None %}
               <span class="muted">Sin dato</span>
               {% else %}
-              <span>{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span><small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>
+              <span>{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span>
               {% endif %}
             </td>
             <td class="text-end">
               {% if row.conversion_salida is None %}
               <span class="muted">Sin dato</span>
               {% else %}
-              <span>{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span><small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>
+              <span>{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
               {% endif %}
+              {% if row.conversion_entrada or row.conversion_salida %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
             </td>
             <td class="text-end">{% if row.costo_merma is None %}<span class="muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
             <td class="text-center">

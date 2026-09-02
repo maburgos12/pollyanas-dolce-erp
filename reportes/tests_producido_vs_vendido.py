@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +7,9 @@ from unittest.mock import call, patch
 from django.test import RequestFactory, TestCase
 from django.template.loader import render_to_string
 from django.contrib.auth.models import AnonymousUser
+from django.utils import timezone
 
+from pos_bridge.models import PointBranch, PointConversionLine, PointDailySale, PointProduct
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointBalanceRow
 from recetas.models import Receta
 from reportes.views_produccion import ProducidoVsVendidoMermaView
@@ -267,6 +269,81 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Autoridad Point: Revisar fuentes", rendered)
         self.assertIn("Ventas: BRIDGE_HISTORY", rendered)
         self.assertNotIn("Autoridad Point: Verificada", rendered)
+
+    def test_required_source_present_false_blocks_authority_and_uses_honest_fallback_labels(self):
+        sources = canonical_balance().sources
+        sources["opening_snapshot"]["source_present"] = False
+        sources["closing_snapshot"]["source_present"] = False
+        sources["sales"]["source_present"] = False
+        sources["production"] = {
+            "source": "FactProduccionDiaria",
+            "authoritative": True,
+            "source_present": False,
+        }
+        sources["waste"] = {
+            "source": "MermaMensualSucursal",
+            "authoritative": True,
+            "source_present": False,
+        }
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(receta_id=self.parent.id, status="COINCIDE"),
+                sources=sources,
+            )
+        )
+        rendered = self._render(context)
+        self.assertIn("Autoridad Point: Revisar fuentes", rendered)
+        self.assertIn("Snapshot inicial Point: PointInventorySnapshot no disponible", rendered)
+        self.assertIn("Snapshot final Point: PointInventorySnapshot no disponible", rendered)
+        self.assertIn("Ventas: PointDailySale no disponible", rendered)
+        self.assertIn("Producción: FactProduccionDiaria no disponible", rendered)
+        self.assertIn("Merma: MermaMensualSucursal no disponible", rendered)
+        self.assertIn("Producción: FactProduccionDiaria", rendered)
+        self.assertIn("Merma: MermaMensualSucursal", rendered)
+        self.assertNotIn("Producción Point: FactProduccionDiaria", rendered)
+        self.assertNotIn("Merma Point: MermaMensualSucursal", rendered)
+
+    def test_available_periods_include_months_with_only_point_sales_or_conversions(self):
+        branch = PointBranch.objects.create(external_id="period-branch", name="Sucursal periodos")
+        product = PointProduct.objects.create(external_id="period-product", name="Producto periodos")
+        PointDailySale.objects.create(
+            branch=branch,
+            product=product,
+            sale_date=date(2026, 7, 15),
+            quantity=Decimal("1"),
+        )
+        PointConversionLine.objects.create(
+            branch=branch,
+            movement_external_id="period-conversion",
+            source_hash="period-conversion-hash",
+            movement_at=timezone.make_aware(datetime(2026, 6, 20, 10, 0)),
+            item_name="Conversión periodos",
+            quantity=Decimal("1"),
+        )
+
+        periodos = ProducidoVsVendidoMermaView()._available_periods(selected="2026-01")
+
+        self.assertIn("2026-07", periodos)
+        self.assertIn("2026-06", periodos)
+
+    def test_template_explains_difference_sign_and_only_shows_conversion_origin_for_activity(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(receta_id=self.parent.id, status="COINCIDE"),
+                MonthlyPointBalanceRow(
+                    receta_id=self.slice.id,
+                    conversion_in=Decimal("1"),
+                    conversion_origin="EQUIVALENCIA_CONFIGURADA",
+                    status="COINCIDE",
+                ),
+            )
+        )
+        rendered = self._render(context)
+        self.assertIn("positivo = Point reporta más", rendered)
+        self.assertIn("negativo = Point reporta menos", rendered)
+        self.assertIn("cualquier valor distinto de cero requiere revisión", rendered)
+        self.assertIn("Origen: equivalencia configurada", rendered)
+        self.assertNotIn("Origen: Sin dato", rendered)
 
     def test_sources_and_issues_become_concise_traceable_banners(self):
         context, _ = self._context(

@@ -12,6 +12,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
@@ -21,7 +22,14 @@ from openpyxl.utils import get_column_letter
 
 from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import PointInventorySnapshot, PointProductionLine, PointSalesDailyProductFact, PointWasteLine
+from pos_bridge.models import (
+    PointConversionLine,
+    PointDailySale,
+    PointInventorySnapshot,
+    PointProductionLine,
+    PointSalesDailyProductFact,
+    PointWasteLine,
+)
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from recetas.models import ProductoMonthClosure, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
@@ -592,6 +600,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "selected_source": source.get("selected_source") or source.get("source") or "Sin dato",
             "mode": source.get("mode") or source.get("configured_source_mode") or "Sin dato",
             "authoritative": source.get("authoritative"),
+            "source_present": source.get("source_present"),
             "effective_date": source.get("effective_date"),
             "coverage": source.get("applied_coverage_key_count"),
             "target_date": source.get("target_date"),
@@ -621,13 +630,22 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     @staticmethod
     def _canonical_authority(balance, canonical: dict[str, Any]) -> dict[str, Any]:
         reasons: list[str] = []
-        if not canonical["opening"]["authoritative"] or not canonical["closing"]["authoritative"]:
-            reasons.append("Snapshots Point sin autoridad completa")
+        for key, label in (
+            ("opening", "Snapshot inicial Point"),
+            ("closing", "Snapshot final Point"),
+            ("sales", "Ventas"),
+            ("production", "Producción"),
+            ("waste", "Merma"),
+        ):
+            source = canonical[key]
+            if source["source_present"] is False:
+                reasons.append(f"{label}: {source['selected_source']} no disponible")
+            if key in {"opening", "closing", "sales"} and not source["authoritative"]:
+                reasons.append(f"{label}: {source['selected_source']} sin autoridad")
+
         sales = canonical["sales"]
         if sales["mode"] == "BRIDGE_HISTORY":
             reasons.append("Ventas: BRIDGE_HISTORY")
-        elif not sales["authoritative"]:
-            reasons.append(f"Ventas: {sales['selected_source']} sin autoridad")
         if getattr(balance, "issues", ()):
             reasons.append("Incidencias canónicas pendientes")
         if getattr(balance, "unresolved_movements", ()) or getattr(balance, "unresolved_conversions", ()):
@@ -664,11 +682,19 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             (FactProduccionDiaria, "fecha"),
             (PointProductionLine, "production_date"),
             (PointSalesDailyProductFact, "sale_date"),
+            (PointDailySale, "sale_date"),
+            (PointConversionLine, "movement_at"),
             (PointWasteLine, "movement_at"),
             (MermaMensualSucursal, "periodo"),
             (PointInventorySnapshot, "captured_at"),
         ):
-            for value in model.objects.values_list(field, flat=True).distinct():
+            values = (
+                model.objects.annotate(report_month=TruncMonth(field))
+                .order_by()
+                .values_list("report_month", flat=True)
+                .distinct()
+            )
+            for value in values:
                 if value:
                     months.add(value.strftime("%Y-%m"))
         return sorted(months, reverse=True)
