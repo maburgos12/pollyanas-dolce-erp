@@ -3886,6 +3886,7 @@ class ReportesCanonicosTests(TestCase):
 
         html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})
         html_body = html_response.content.decode("utf-8")
+        self.assertIsNone(html_response.context["closure_display_rows"][0]["opening_balance"])
         self.assertIn("Inventario histórico físico", html_body)
         self.assertIn("Diferencia histórica", html_body)
         self.assertIn("Revisar fuente", html_body)
@@ -3908,6 +3909,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertNotIn("Dif. Point", headers)
         self.assertEqual(Decimal(values[headers.index("Inventario histórico físico")]), Decimal("10"))
         self.assertEqual(values[headers.index("Diferencia histórica")], "Sin dato")
+        self.assertEqual(values[headers.index("Saldo inicial")], "Sin dato")
         self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
         for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
             self.assertEqual(values[headers.index(header)], "Sin dato", header)
@@ -3923,8 +3925,29 @@ class ReportesCanonicosTests(TestCase):
         self.assertIn("Diferencia histórica", xlsx_headers)
         self.assertNotIn("Fin. Point", xlsx_headers)
         self.assertEqual(xlsx_values[xlsx_headers.index("Diferencia histórica")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Saldo inicial")], "Sin dato")
         for header in ("Produccion", "Venta directa", "Venta derivada", "Merma total", "Saldo calculado"):
             self.assertEqual(xlsx_values[xlsx_headers.index(header)], "Sin dato", header)
+
+        line.metadata["historical_excel"]["inventory_presence"]["opening"] = True
+        line.inventario_inicial_teorico = Decimal("0")
+        line.save(update_fields=["metadata", "inventario_inicial_teorico", "updated_at"])
+        zero_html = self.client.get(reverse("reportes:cierre_producto"), {"month": "2025-06"})
+        self.assertEqual(zero_html.context["closure_display_rows"][0]["opening_balance"], Decimal("0"))
+        zero_csv = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-06", "export": "csv"}
+        )
+        zero_rows = list(csv.reader(StringIO(zero_csv.content.decode("utf-8"))))
+        zero_headers = zero_rows[zero_rows.index([]) + 1]
+        zero_values = zero_rows[zero_rows.index([]) + 2]
+        self.assertEqual(Decimal(zero_values[zero_headers.index("Saldo inicial")]), Decimal("0"))
+        zero_xlsx = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2025-06", "export": "xlsx"}
+        )
+        zero_workbook = load_workbook(BytesIO(zero_xlsx.content), data_only=True, read_only=True)
+        zero_xlsx_headers = [cell.value for cell in next(zero_workbook["Detalle"].iter_rows(max_row=1))]
+        zero_xlsx_values = next(zero_workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(zero_xlsx_values[zero_xlsx_headers.index("Saldo inicial")], 0)
 
         canonical = ProductoMonthClosure.objects.create(
             month_start=date(2026, 6, 1),

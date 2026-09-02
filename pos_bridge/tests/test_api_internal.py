@@ -323,6 +323,7 @@ class PosBridgeInternalApiTests(APITestCase):
 
     def test_product_closure_api_preserves_historical_inventory_semantics(self):
         line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("9")
         line.inventario_final_teorico = Decimal("21")
         line.inventario_final_point_total = Decimal("18")
         # The real historical importer persists theoretical - physical count.
@@ -330,7 +331,7 @@ class PosBridgeInternalApiTests(APITestCase):
             line.inventario_final_teorico - line.inventario_final_point_total
         )
         line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO
-        line.metadata = {"historical_excel": {"inventory_presence": {"total": True}}}
+        line.metadata = {"historical_excel": {"inventory_presence": {"opening": False, "total": True}}}
         line.save()
         self.product_closure.metadata = {"historical_excel_import": {"source_file": "historico.xlsx"}}
         self.product_closure.save(update_fields=["metadata", "updated_at"])
@@ -339,6 +340,10 @@ class PosBridgeInternalApiTests(APITestCase):
 
         row = response.data["lines"][0]
         self.assertTrue(row["is_historical_inventory"])
+        self.assertIsNone(row["opening_point"])
+        self.assertIsNone(row["historical_opening"])
+        self.assertIsNone(row["opening_balance"])
+        self.assertIsNone(response.data["total_opening_inventory"])
         self.assertEqual(row["closing_point"], "18.000000")
         self.assertIsNone(row["point_difference"])
         self.assertEqual(row["historical_count"], "18.000000")
@@ -354,6 +359,20 @@ class PosBridgeInternalApiTests(APITestCase):
         self.assertIsNone(response.data["total_sales"])
         self.assertIsNone(response.data["total_waste"])
         self.assertIsNone(response.data["total_ending_inventory"])
+
+        line.inventario_inicial_teorico = Decimal("0")
+        line.metadata["historical_excel"]["inventory_presence"]["opening"] = True
+        line.save(update_fields=["inventario_inicial_teorico", "metadata", "updated_at"])
+        zero_row = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data["lines"][0]
+        self.assertIsNone(zero_row["opening_point"])
+        self.assertEqual(zero_row["historical_opening"], "0.000000")
+        self.assertEqual(zero_row["opening_balance"], "0.000000")
+        zero_response = self.client.get(
+            f"/api/pos-bridge/product-closures/{self.product_closure.id}/"
+        ).data
+        self.assertEqual(zero_response["total_opening_inventory"], "0.000000")
 
     def test_product_closure_present_but_non_authoritative_sources_are_null_not_zero(self):
         line = self.product_closure.lines.get()

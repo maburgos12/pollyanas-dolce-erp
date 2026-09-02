@@ -18,7 +18,8 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 
 ## Campos canónicos por línea
 
-`opening_point`, `opening_source`, `production`, `sales_direct`, `sales_derived`,
+`opening_point`, `historical_opening`, `opening_balance`, `opening_source`,
+`production`, `sales_direct`, `sales_derived`,
 `sales_total`, `waste_total`, `point_conversion_in`, `point_conversion_out`,
 `calculated_closing`, `closing_point_cedis`, `closing_point_sucursales`,
 `closing_point`, `point_difference`, `point_status`, `point_status_label`,
@@ -42,6 +43,12 @@ diferencia solo se publica cuando ventas, producción, merma y conversiones tien
 autoridad mensual comprobada. Los decimales almacenados por compatibilidad cuando
 falta una fuente son placeholders internos y no se exponen como cero. Sus totales
 son `total_historical_count` y `total_historical_difference`.
+
+En importaciones históricas `opening_point` siempre es `null`:
+`historical_opening` identifica el saldo del Excel y `opening_balance` es el campo
+neutro compartido por reportes. Ambos respetan presencia por celda. Para metadata
+legada sin `inventory_presence`, la presencia sólo se infiere si existe la clave
+histórica específica del alcance, incluso cuando su valor guardado es cero.
 
 `historical_excel_import` identifica archivo/hoja únicamente como procedencia del
 conteo físico. Las etiquetas de movimientos nombran por separado las tablas

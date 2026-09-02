@@ -394,7 +394,7 @@
               <strong>{{ row.line.receta_padre.nombre }}</strong>
               {% if row.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ row.line.receta_padre.codigo_point }}</div>{% endif %}
             </td>
-            <td class="text-end bi-closure-metric-cell">{% if row.opening_point != None %}{{ row.opening_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
+            <td class="text-end bi-closure-metric-cell">{% if row.opening_balance != None %}{{ row.opening_balance|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.production != None %}{{ row.production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.sales_total != None %}{{ row.sales_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.waste_total != None %}{{ row.waste_total|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>

@@ -5571,7 +5571,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
             }
         )
 
-    total_opening = _sum_available_export_values(export_rows, "opening_point")
+    total_opening = _sum_available_export_values(export_rows, "opening_balance")
     total_production = _sum_available_export_values(export_rows, "production")
     total_sales = _sum_available_export_values(export_rows, "sales_total")
     total_waste = _sum_available_export_values(export_rows, "waste_total")
@@ -6008,7 +6008,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
         )
         for line in context.get("closure_lines") or []
     ]
-    opening_total = _sum_available_export_values(export_rows, "opening_point")
+    opening_total = _sum_available_export_values(export_rows, "opening_balance")
     writer.writerow(["Mes", context["selected_month"]])
     writer.writerow(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
     opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
@@ -6056,7 +6056,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                _closure_export_display(export_row["opening_point"]),
+                _closure_export_display(export_row["opening_balance"]),
                 _closure_export_display(export_row["production"]),
                 _closure_export_display(export_row["sales_direct"]),
                 _closure_export_display(export_row["sales_derived"]),
@@ -6093,7 +6093,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
         )
         for line in context.get("closure_lines") or []
     ]
-    opening_total = _sum_available_export_values(export_rows, "opening_point")
+    opening_total = _sum_available_export_values(export_rows, "opening_balance")
     summary_ws.append(["Mes", context["selected_month"]])
     summary_ws.append(["Estado", context["closure"].get_status_display() if context.get("closure") else ""])
     opening_balance_label, opening_source_label = _product_closure_opening_labels(context.get("closure"))
@@ -6142,7 +6142,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
             [
                 line.receta_padre.nombre,
                 line.receta_padre.codigo_point,
-                _closure_export_cell(export_row["opening_point"]),
+                _closure_export_cell(export_row["opening_balance"]),
                 _closure_export_cell(export_row["production"]),
                 _closure_export_cell(export_row["sales_direct"]),
                 _closure_export_cell(export_row["sales_derived"]),

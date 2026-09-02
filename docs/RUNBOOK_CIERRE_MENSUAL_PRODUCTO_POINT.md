@@ -183,6 +183,9 @@ explícito. Ventas, producción y merma leídas de tablas
 operativas quedan como observaciones no validadas hasta acreditar cobertura; si
 falta una fuente, la pantalla, API, CSV y XLSX muestran `Sin dato`/`null`, nunca
 un cero autoritativo ni un saldo calculado aparentemente válido.
+El saldo inicial histórico se publica como `Saldo inicial`, nunca como inventario
+Point. En metadata antigua sólo cuenta como presente si conserva la clave histórica
+del alcance; el decimal placeholder por sí solo no acredita disponibilidad.
 - venta derivada coherente
 - merma derivada coherente
 - sin guardas activas en la vista

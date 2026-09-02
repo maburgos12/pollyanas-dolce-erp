@@ -85,6 +85,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     historical_count_cedis = serializers.SerializerMethodField()
     historical_count_sucursales = serializers.SerializerMethodField()
     historical_difference = serializers.SerializerMethodField()
+    historical_opening = serializers.SerializerMethodField()
+    opening_balance = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductoMonthClosureLine
@@ -94,6 +96,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
             "receta_padre_nombre",
             "receta_padre_codigo_point",
             "opening_point",
+            "historical_opening",
+            "opening_balance",
             "opening_source",
             "production",
             "sales_direct",
@@ -154,6 +158,12 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
 
     def get_opening_point(self, obj):
         return self._decimal(self._projection(obj)["opening_point"])
+
+    def get_historical_opening(self, obj):
+        return self._decimal(self._projection(obj)["historical_opening"])
+
+    def get_opening_balance(self, obj):
+        return self._decimal(self._projection(obj)["opening_balance"])
 
     def get_opening_source(self, obj):
         return (obj.metadata or {}).get("opening_source") or obj.closure.opening_source
@@ -312,7 +322,7 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
         return None if value is None else f"{value:.6f}"
 
     def get_total_opening_inventory(self, obj):
-        return self._sum_projection(obj, "opening_point")
+        return self._sum_projection(obj, "opening_balance")
 
     def get_total_production(self, obj):
         return self._sum_projection(obj, "production")

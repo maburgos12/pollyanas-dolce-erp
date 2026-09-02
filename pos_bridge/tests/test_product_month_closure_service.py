@@ -1614,7 +1614,36 @@ class ProductMonthClosureServiceTests(TestCase):
         from pos_bridge.services.product_closure_projection import project_product_closure_line
 
         projected = project_product_closure_line(line, historical_excel_import=True)
+        self.assertIsNone(projected["historical_opening"])
+        self.assertIsNone(projected["opening_balance"])
         self.assertIsNone(projected["historical_count_cedis"])
+        self.assertIsNone(projected["historical_count_sucursales"])
+        self.assertEqual(projected["historical_count"], Decimal("0"))
+
+    def test_legacy_historical_presence_is_inferred_only_from_metadata_keys(self):
+        line = ProductoMonthClosureLine.objects.create(
+            closure=ProductoMonthClosure.objects.create(
+                month_start=date(2025, 4, 1),
+                month_end=date(2025, 4, 30),
+                status=ProductoMonthClosure.STATUS_BUILT,
+            ),
+            receta_padre=self.parent,
+            inventario_inicial_teorico=Decimal("0"),
+            inventario_final_point_cedis=Decimal("0"),
+            inventario_final_point_sucursales=Decimal("7"),
+            inventario_final_point_total=Decimal("0"),
+            metadata={"historical_excel": {
+                "inventario_inicial_historico": "0",
+                "conteo_historico_cedis": "0",
+                "inventario_historico_fisico_total": "0",
+            }},
+        )
+        from pos_bridge.services.product_closure_projection import project_product_closure_line
+
+        projected = project_product_closure_line(line, historical_excel_import=True)
+        self.assertIsNone(projected["opening_point"])
+        self.assertEqual(projected["historical_opening"], Decimal("0"))
+        self.assertEqual(projected["historical_count_cedis"], Decimal("0"))
         self.assertIsNone(projected["historical_count_sucursales"])
         self.assertEqual(projected["historical_count"], Decimal("0"))
 
