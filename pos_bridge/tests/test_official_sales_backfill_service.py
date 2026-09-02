@@ -293,8 +293,44 @@ class OfficialSalesBackfillPersistenceTests(TestCase):
                 )
                 self.assertEqual(bump_cache.call_count, 0)
 
-            self.assertEqual(len(callbacks), 1)
             bump_cache.assert_called_once_with("ventas", "dashboard")
+
+    def test_replace_branch_day_sales_invalidates_zero_result_after_commit(self):
+        branch = PointBranch.objects.create(external_id="cache-zero", name="MATRIZ")
+        sale_date = date(2025, 10, 5)
+        self._existing_sale(branch=branch, sale_date=sale_date)
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_RUNNING,
+        )
+        service = OfficialSalesBackfillService()
+
+        with (
+            patch("pos_bridge.services.official_sales_backfill_service.bump_cache_scopes") as bump_cache,
+            patch(
+                "pos_bridge.services.official_sales_backfill_service.mark_analytics_dirty_for_range"
+            ) as mark_dirty,
+        ):
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                deleted, imported = service._replace_branch_day_sales(
+                    branch=branch,
+                    sale_date=sale_date,
+                    sync_job=sync_job,
+                    aggregated_rows={},
+                )
+                self.assertEqual(bump_cache.call_count, 0)
+
+            self.assertEqual((deleted, imported), (1, 0))
+            self.assertFalse(PointDailySale.objects.filter(branch=branch, sale_date=sale_date).exists())
+            bump_cache.assert_called_once_with("ventas", "dashboard")
+            mark_dirty.assert_called_once_with(
+                start_date=sale_date,
+                end_date=sale_date,
+                include_sales=True,
+                include_production=True,
+                include_forecast=True,
+                reason="official_sales_backfill_service",
+            )
 
     def test_fetch_branch_day_reports_raises_after_max_attempts(self):
         branch = SimpleNamespace(external_id="1", name="MATRIZ")

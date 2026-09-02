@@ -298,9 +298,10 @@ class OfficialSalesBackfillService:
 
         if rows_to_create:
             PointDailySale.objects.bulk_create(rows_to_create, batch_size=500)
+        if deleted or rows_to_create:
             mark_analytics_dirty_for_range(
-                start_date=min(row.sale_date for row in rows_to_create),
-                end_date=max(row.sale_date for row in rows_to_create),
+                start_date=sale_date,
+                end_date=sale_date,
                 include_sales=True,
                 include_production=True,
                 include_forecast=True,
