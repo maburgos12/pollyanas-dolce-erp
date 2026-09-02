@@ -373,6 +373,89 @@ class WriterSerializationTests(TransactionTestCase):
             ),
         )
 
+    def test_writer_started_first_does_not_deadlock_with_closure_lock(self):
+        target_recipe = Receta.objects.create(
+            nombre="Línea objetivo sin deadlock",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="line-lock-target-no-deadlock",
+        )
+        target, _line, current_plan = self._canonical_closure_for_line_race(
+            month_start=date(2026, 4, 1),
+            recipe=target_recipe,
+        )
+        other = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 3, 1),
+            month_end=date(2026, 3, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+        )
+        first_insert_recipe = Receta.objects.create(
+            nombre="Línea que toma ROW EXCLUSIVE primero",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="line-lock-row-exclusive-first",
+        )
+        target_insert_recipe = Receta.objects.create(
+            nombre="Línea tardía del cierre objetivo",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="line-lock-target-late-insert",
+        )
+        first_inserted = Event()
+        attempt_target_insert = Event()
+        validation_inside = Event()
+        release_validation = Event()
+        writer_finished = Event()
+        lock_finished = Event()
+        errors = []
+        service = ProductMonthClosureService()
+
+        def writer():
+            with transaction.atomic():
+                ProductoMonthClosureLine.objects.create(
+                    closure=other,
+                    receta_padre=first_insert_recipe,
+                )
+                first_inserted.set()
+                self.assertTrue(attempt_target_insert.wait(5))
+                ProductoMonthClosureLine.objects.create(
+                    closure=target,
+                    receta_padre=target_insert_recipe,
+                    metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1", "issues": []},
+                )
+            writer_finished.set()
+
+        def fresh_preview(**kwargs):
+            validation_inside.set()
+            self.assertTrue(release_validation.wait(5))
+            return current_plan
+
+        def locker():
+            service.lock(closure=target)
+            lock_finished.set()
+
+        writer_thread = self._thread(writer, errors)
+        self.assertTrue(first_inserted.wait(5))
+        with patch.object(service, "_fresh_canonical_preview", side_effect=fresh_preview):
+            lock_thread = self._thread(locker, errors)
+            # Sin un lock global de la tabla hija, el locker puede avanzar a la
+            # revalidación aunque el writer ya tenga ROW EXCLUSIVE por otro INSERT.
+            validation_inside.wait(0.3)
+            attempt_target_insert.set()
+            self.assertTrue(validation_inside.wait(5), errors)
+            self.assertFalse(writer_finished.wait(0.25))
+            release_validation.set()
+            lock_thread.join(5)
+            writer_thread.join(5)
+
+        self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(lock_finished.is_set())
+        self.assertTrue(writer_finished.is_set())
+        target.refresh_from_db()
+        self.assertTrue(target.is_locked)
+        self.assertNotEqual(
+            ProductMonthClosureService._persisted_lines_digest(list(target.lines.all())),
+            target.metadata["source_fingerprint"]["projected_lines_digest"],
+        )
+
     def test_lock_waits_for_rebuild_and_never_gets_overwritten_or_unlocked(self):
         recipe = Receta.objects.create(
             nombre="Producto lock versus rebuild", tipo=Receta.TIPO_PRODUCTO_FINAL, hash_contenido="lock-v-rebuild"
