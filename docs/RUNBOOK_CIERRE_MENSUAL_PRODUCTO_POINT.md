@@ -158,6 +158,14 @@ El bloqueo deja rastro en `metadata.lock_event` con:
 - motivo
 - nota
 
+La revalidación final usa un mutex transaccional por mes y vuelve a calcular la
+huella inmediatamente antes de sellar. No toma locks `SHARE` sobre tablas
+completas: ventas, movimientos y catálogos de otros periodos continúan operando.
+Las escrituras sobre líneas de un cierre ya bloqueado sí se rechazan por trigger
+de base de datos. Las fuentes Point conservan su huella inmutable en el cierre;
+una corrección histórica posterior exige un rebuild operacional explícito y un
+nuevo bloqueo, no la mutación silenciosa de las líneas selladas.
+
 ## Qué revisar antes de bloquear
 
 - opening source correcto

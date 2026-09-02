@@ -97,6 +97,7 @@ class _AggregateBucket:
 
 
 class ProductMonthClosureService:
+    MONTH_SOURCE_LOCK_NAMESPACE = 1_347_901_004
     DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
     METADATA_COMPACTION_SAMPLE_LIMIT = 5
     METADATA_COMPACTION_MAPPING_LIMIT = 12
@@ -665,35 +666,16 @@ class ProductMonthClosureService:
             }
         )
 
-    @staticmethod
-    def _lock_canonical_source_tables() -> None:
+    @classmethod
+    def _lock_canonical_source_month(cls, month_start: date) -> None:
         if connection.vendor != "postgresql":
-            raise ProductMonthClosureError("El bloqueo canónico de fuentes requiere PostgreSQL.")
-        source_models = (
-            PointSyncJob,
-            PointExtractionLog,
-            PointInventorySnapshot,
-            PointDailySale,
-            PointProductionLine,
-            PointWasteLine,
-            PointConversionLine,
-            VentaHistorica,
-            FactProduccionDiaria,
-            PointBranch,
-            PointProduct,
-            Sucursal,
-            Receta,
-            RecetaCodigoPointAlias,
-            RecetaEquivalencia,
-            RecetaPresentacionDerivada,
-            apps.get_model("control", "MermaMensualSucursal"),
-        )
-        quoted_tables = ", ".join(
-            connection.ops.quote_name(model._meta.db_table)
-            for model in source_models
-        )
+            raise ProductMonthClosureError("El mutex canónico mensual requiere PostgreSQL.")
+        month_key = month_start.year * 100 + month_start.month
         with connection.cursor() as cursor:
-            cursor.execute(f"LOCK TABLE {quoted_tables} IN SHARE MODE")
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s, %s)",
+                [cls.MONTH_SOURCE_LOCK_NAMESPACE, month_key],
+            )
 
     @staticmethod
     def _json_compatible(value):
@@ -1228,10 +1210,11 @@ class ProductMonthClosureService:
                     "Las líneas persistidas cambiaron; reconstruye el cierre antes de bloquearlo."
                 )
 
-            # El lock de tablas espera a escritores ya iniciados y evita que una
-            # venta, merma, producción, conversión, snapshot o job cambie entre
-            # la relectura y el commit del bloqueo institucional.
-            self._lock_canonical_source_tables()
+            # Serializa únicamente cierres del mismo periodo. La revalidación
+            # siguiente es deliberadamente corta: no congela las 16 tablas de
+            # ventas, movimientos, snapshots y catálogos durante toda la
+            # proyección.
+            self._lock_canonical_source_month(closure.month_start)
             current_plan = self._fresh_canonical_preview(month=closure.month_start)
             current_fingerprint = dict(current_plan["metadata"].get("source_fingerprint") or {})
             if current_fingerprint.get("projected_lines_digest") != stored_fingerprint["projected_lines_digest"]:

@@ -56,28 +56,28 @@ class WriterSerializationTests(TransactionTestCase):
         thread.start()
         return thread
 
-    def _assert_source_writer_waits(self, writer):
-        source_locked = Event()
-        release_source_lock = Event()
+    def _assert_month_mutex_does_not_block_uncoordinated_writer(self, writer):
+        month_locked = Event()
+        release_month_lock = Event()
         writer_finished = Event()
         errors = []
 
-        def hold_source_lock():
+        def hold_month_lock():
             with transaction.atomic():
-                ProductMonthClosureService._lock_canonical_source_tables()
-                source_locked.set()
-                self.assertTrue(release_source_lock.wait(5))
+                ProductMonthClosureService._lock_canonical_source_month(date(2026, 8, 1))
+                month_locked.set()
+                self.assertTrue(release_month_lock.wait(5))
 
-        lock_thread = self._thread(hold_source_lock, errors)
-        self.assertTrue(source_locked.wait(5))
+        lock_thread = self._thread(hold_month_lock, errors)
+        self.assertTrue(month_locked.wait(5))
 
         def run_writer():
             writer()
             writer_finished.set()
 
         writer_thread = self._thread(run_writer, errors)
-        self.assertFalse(writer_finished.wait(0.25))
-        release_source_lock.set()
+        self.assertTrue(writer_finished.wait(2), errors)
+        release_month_lock.set()
         lock_thread.join(5)
         writer_thread.join(5)
         self.assertFalse(lock_thread.is_alive() or writer_thread.is_alive())
@@ -357,7 +357,7 @@ class WriterSerializationTests(TransactionTestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0].product_id, rows[1].product_id)
 
-    def test_source_lock_blocks_extraction_log_insert_and_following_fingerprint_sees_it(self):
+    def test_month_mutex_does_not_block_extraction_log_insert_and_fingerprint_sees_it(self):
         job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_SALES,
             status=PointSyncJob.STATUS_SUCCESS,
@@ -366,7 +366,7 @@ class WriterSerializationTests(TransactionTestCase):
         )
         before = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
 
-        self._assert_source_writer_waits(
+        self._assert_month_mutex_does_not_block_uncoordinated_writer(
             lambda: PointExtractionLog.objects.create(
                 sync_job=job,
                 level=PointExtractionLog.LEVEL_INFO,
@@ -378,7 +378,7 @@ class WriterSerializationTests(TransactionTestCase):
         after = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
         self.assertNotEqual(before["extraction_logs"]["digest"], after["extraction_logs"]["digest"])
 
-    def test_source_lock_blocks_alias_remap_and_fresh_fingerprint_sees_it(self):
+    def test_month_mutex_does_not_block_alias_remap_and_fresh_fingerprint_sees_it(self):
         first = Receta.objects.create(
             nombre="Alias origen",
             tipo=Receta.TIPO_PRODUCTO_FINAL,
@@ -396,7 +396,7 @@ class WriterSerializationTests(TransactionTestCase):
         )
         before = ProductMonthClosureService._raw_source_evidence(month_start=date(2026, 8, 1))
 
-        self._assert_source_writer_waits(
+        self._assert_month_mutex_does_not_block_uncoordinated_writer(
             lambda: RecetaCodigoPointAlias.objects.filter(pk=alias.pk).update(receta=second)
         )
 
