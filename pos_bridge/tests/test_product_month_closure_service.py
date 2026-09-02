@@ -201,7 +201,7 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
         self.assertFalse(row["metadata"]["point_final_scopes_available"])
         self.assertEqual(
-            preview["metadata"]["balance"]["sources"]["opening_snapshot"]["selected_dates"],
+            preview["metadata"]["opening_meta"]["selected_dates"],
             ["2025-09-29", "2025-09-30"],
         )
 

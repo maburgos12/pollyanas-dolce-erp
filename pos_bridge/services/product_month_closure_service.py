@@ -4,6 +4,7 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from hashlib import sha256
 
 from django.conf import settings
 from django.db import connection, transaction
@@ -17,6 +18,8 @@ from recetas.models import (
     ProductoMonthClosure,
     ProductoMonthClosureLine,
     Receta,
+    RecetaEquivalencia,
+    RecetaPresentacionDerivada,
     VentaHistorica,
 )
 from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
@@ -211,9 +214,9 @@ class ProductMonthClosureService:
                 f"No hay productos terminados elegibles para construir el cierre mensual {month_start:%Y-%m}."
             )
         blocking_issues = sorted(source_issues | {issue for row in line_rows for issue in row["metadata"]["issues"]})
-        opening_meta = self._json_compatible(balance.sources.get("opening_snapshot") or {})
-        closing_meta = self._json_compatible(balance.sources.get("closing_snapshot") or {})
-        sales_meta = self._json_compatible(balance.sources.get("sales") or {})
+        opening_meta = self._compact_source_metadata(balance.sources.get("opening_snapshot") or {})
+        closing_meta = self._compact_source_metadata(balance.sources.get("closing_snapshot") or {})
+        sales_meta = self._compact_source_metadata(balance.sources.get("sales") or {})
         sales_meta["mode"] = sales_meta.get("selected_source") or sales_meta.get("mode") or ""
         validation = {
             "warnings": self._json_compatible(balance.warnings),
@@ -266,7 +269,7 @@ class ProductMonthClosureService:
                         "contract": "POINT_PRODUCT_BALANCE_V1",
                         "issues": balance.issues,
                         "warnings": balance.warnings,
-                        "sources": balance.sources,
+                        "source_names": sorted(balance.sources),
                         "effective_snapshot_dates": balance.effective_snapshot_dates,
                         "source_counts": balance.source_counts,
                     }
@@ -289,20 +292,45 @@ class ProductMonthClosureService:
             return [ProductMonthClosureService._json_compatible(item) for item in sorted(value, key=str)]
         return value
 
+    def _compact_source_metadata(self, source):
+        raw = self._json_compatible(source)
+        compact = {}
+        coverage_keys = ("coverage_keys", "mapped_recipe_keys", "branch_ids", "branch_codes")
+        for key, value in raw.items():
+            if any(token in key for token in coverage_keys) and isinstance(value, list):
+                digest = sha256(repr(value).encode()).hexdigest()[:16]
+                compact[f"{key}_count"] = len(value)
+                compact[f"{key}_hash"] = digest
+                compact[f"{key}_sample"] = value[:5]
+                continue
+            compact[key] = value
+        return compact
+
     @staticmethod
     def _decimal_text(value: Decimal) -> str:
         return format(Decimal(value).normalize(), "f")
 
     def _project_canonical_balance(self, *, balance, global_issues=None):
         recipes = Receta.objects.in_bulk(balance.rows.keys())
+        raw_recipe_ids = set(recipes)
+        equivalences = {}
+        for item in RecetaEquivalencia.objects.select_related("receta_padre").filter(
+            receta_porcion_id__in=raw_recipe_ids, activo=True
+        ).order_by("id"):
+            equivalences.setdefault(item.receta_porcion_id, item)
+        derived_relations = {}
+        for item in RecetaPresentacionDerivada.objects.select_related("receta_padre").filter(
+            receta_derivada_id__in=raw_recipe_ids, activo=True
+        ).order_by("id"):
+            derived_relations.setdefault(item.receta_derivada_id, item)
         global_issues = set(balance.issues if global_issues is None else global_issues)
         buckets: dict[int, dict[str, object]] = {}
         for receta_id, raw_row in sorted(balance.rows.items()):
             receta = recipes.get(receta_id)
             if receta is None:
                 continue
-            parent, _converted_one, equivalence_issue, is_derived, conversion_source = resolve_closure_recipe_quantity(
-                receta, Decimal("1")
+            parent, _converted_one, equivalence_issue, is_derived, conversion_source = self._resolve_projected_recipe(
+                receta, equivalences.get(receta.id), derived_relations.get(receta.id)
             )
             if parent is None or not self._is_recipe_eligible_for_closure(parent):
                 continue
@@ -445,6 +473,22 @@ class ProductMonthClosureService:
                 }
             )
         return rows
+
+    @staticmethod
+    def _resolve_projected_recipe(receta, equivalence, derived_relation):
+        if receta.excluir_cierre:
+            return None, ZERO, "", False, "EXCLUIDA"
+        if equivalence is not None:
+            factor = Decimal(str(equivalence.factor_conversion or 0))
+            if factor <= ZERO:
+                return receta, Decimal("1"), f"Equivalencia de cierre sin factor valido para {receta.nombre}", False, "DIRECTA"
+            return equivalence.receta_padre, Decimal("1") / factor, "", equivalence.receta_padre_id != receta.id, "EQUIVALENCIA"
+        if derived_relation is None:
+            return receta, Decimal("1"), "", False, "DIRECTA"
+        units = Decimal(str(derived_relation.unidades_por_padre or 0))
+        if units <= ZERO:
+            return receta, Decimal("1"), f"Relacion derivada sin unidades_por_padre para {receta.nombre}", False, "DIRECTA"
+        return derived_relation.receta_padre, Decimal("1") / units, "", True, "PRESENTACION_DERIVADA"
 
     @staticmethod
     def _canonical_status(*, point_difference: Decimal | None, issues: set[str]) -> str:
