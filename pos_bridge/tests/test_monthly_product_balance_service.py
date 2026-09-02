@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection
+from django.db.models.signals import post_init
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -837,6 +838,76 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.effective_snapshot_dates["closing"], date(2026, 7, 30))
         self.assertTrue(any("alternativa" in warning.lower() for warning in balance.warnings))
 
+    def test_snapshot_history_and_job_manifest_hydrate_only_selected_rows(self):
+        captured_at = timezone.make_aware(datetime(2026, 6, 30, 12))
+        PointInventorySnapshot.objects.bulk_create([
+            PointInventorySnapshot(
+                branch=self.branch, product=product, sync_job=self.sync_job,
+                stock=Decimal(index), captured_at=captured_at + timedelta(seconds=index),
+            )
+            for product in (self.parent_product, self.slice_product)
+            for index in range(128)
+        ])
+        self._seal_inventory_job()
+        service, _official = self._service()
+        hydrated = []
+        service._build_match_cache = {}
+
+        def record_snapshot(sender, instance, **kwargs):
+            hydrated.append(instance.pk)
+
+        post_init.connect(record_snapshot, sender=PointInventorySnapshot)
+        try:
+            values, metadata, unresolved = service._load_snapshot(
+                snapshot_date=date(2026, 6, 30), source="opening_snapshot",
+            )
+        finally:
+            post_init.disconnect(record_snapshot, sender=PointInventorySnapshot)
+
+        self.assertEqual(values[self.parent.id], (Decimal("127"), 1))
+        self.assertEqual(values[self.slice.id], (Decimal("127"), 1))
+        self.assertEqual(metadata["selected_rows"], 2)
+        self.assertEqual(metadata["job_count_mismatches"], {})
+        self.assertTrue(metadata["authoritative"])
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(hydrated), 2, "Historical candidates and job manifest must stay in PostgreSQL")
+
+    def test_snapshot_database_selection_preserves_calendar_rank_and_ties(self):
+        target = date(2026, 6, 30)
+        cases = (
+            # Exact day beats a more recent adjacent date; latest timestamp wins.
+            (3, (datetime(2026, 7, 1, 23), datetime(2026, 6, 30, 8), datetime(2026, 6, 30, 23))),
+            # Equally distant days prefer the earlier day, not the newest capture.
+            (3, (datetime(2026, 6, 29, 1), datetime(2026, 7, 1, 23))),
+            # A nearer later day beats a more distant earlier day.
+            (3, (datetime(2026, 6, 28, 23), datetime(2026, 7, 1, 1))),
+            # Identical timestamps prefer the largest id.
+            (3, (datetime(2026, 6, 30, 23), datetime(2026, 6, 30, 23))),
+            # Local midnight and both tolerance boundaries, including an excluded day.
+            (3, (datetime(2026, 6, 26, 23, 59), datetime(2026, 6, 27), datetime(2026, 7, 3, 23, 59), datetime(2026, 7, 4))),
+            (0, (datetime(2026, 6, 29, 23, 59), datetime(2026, 6, 30), datetime(2026, 7, 1))),
+            (5, (datetime(2026, 6, 25), datetime(2026, 7, 5, 23, 59))),
+        )
+        for tolerance, times in cases:
+            with self.subTest(tolerance=tolerance, times=times), override_settings(
+                PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS=tolerance,
+            ):
+                PointInventorySnapshot.objects.all().delete()
+                candidates = [self._snapshot(self.parent_product, str(index), when) for index, when in enumerate(times)]
+                eligible = [item for item in candidates if abs((timezone.localdate(item.captured_at) - target).days) <= tolerance]
+                expected = min(eligible, key=lambda item: (
+                    timezone.localdate(item.captured_at) != target,
+                    abs((timezone.localdate(item.captured_at) - target).days),
+                    timezone.localdate(item.captured_at) > target,
+                    -item.captured_at.timestamp(), -item.pk,
+                ))
+                service, _official = self._service()
+                service._build_match_cache = {}
+                values, metadata, _unresolved = service._load_snapshot(snapshot_date=target, source="opening_snapshot")
+                self.assertEqual(values[self.parent.id], (expected.stock, 1))
+                self.assertEqual(metadata["effective_date"], timezone.localdate(expected.captured_at))
+                self.assertEqual(metadata["selected_rows"], 1)
+
     def test_exact_snapshot_calendar_day_wins_over_adjacent_late_timestamp(self):
         self._snapshot(self.parent_product, "99", datetime(2026, 6, 29, 23))
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -856,6 +927,24 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(balance.sources["opening_snapshot"]["authoritative"])
         self.assertEqual(balance.sources["opening_snapshot"]["selected_rows"], 2)
         self.assertEqual(balance.sources["opening_snapshot"]["applied_rows"], 2)
+
+    @override_settings(PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS=0)
+    def test_snapshot_local_calendar_day_preserves_dst_fold_timestamp_order(self):
+        with timezone.override("America/Mazatlan"):
+            # Mazatlan still observed DST in 2022: these wall times are one hour apart.
+            first = self._snapshot(self.parent_product, "1", datetime(2022, 10, 30, 1, 30, fold=0))
+            second = self._snapshot(self.parent_product, "2", datetime(2022, 10, 30, 1, 30, fold=1))
+            self._snapshot(self.parent_product, "99", datetime(2022, 10, 31))
+            self.assertEqual(second.captured_at.timestamp() - first.captured_at.timestamp(), 3600)
+            service, _official = self._service()
+            service._build_match_cache = {}
+
+            values, metadata, _unresolved = service._load_snapshot(
+                snapshot_date=date(2022, 10, 30), source="opening_snapshot",
+            )
+
+            self.assertEqual(values[self.parent.id], (Decimal("2"), 1))
+            self.assertEqual(metadata["effective_date"], date(2022, 10, 30))
 
     def test_snapshot_branch_coverage_is_distinct_from_product_rows_and_respects_tolerance(self):
         second_branch = PointBranch.objects.create(

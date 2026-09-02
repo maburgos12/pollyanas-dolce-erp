@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
-from django.db.models import Q
+from django.db.models import Case, Count, IntegerField, Q, Subquery, Value, When
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -526,8 +526,28 @@ class MonthlyPointProductBalanceService:
             datetime.combine(snapshot_date + timedelta(days=tolerance_days + 1), time.min),
             current_timezone,
         )
-        candidates = list(
+        # Preserve the calendar-day rank: exact, nearest (earlier on ties),
+        # latest timestamp, largest id. Rank in PostgreSQL before hydrating
+        # related objects: a seven-day window can contain millions of captures.
+        day_ranks = []
+        for offset in range(-tolerance_days, tolerance_days + 1):
+            day = snapshot_date + timedelta(days=offset)
+            day_ranks.append(When(
+                captured_at__gte=timezone.make_aware(datetime.combine(day, time.min), current_timezone),
+                captured_at__lt=timezone.make_aware(
+                    datetime.combine(day + timedelta(days=1), time.min), current_timezone,
+                ),
+                then=Value(2 * abs(offset) - int(offset < 0)),
+            ))
+        selected_ids = (
             PointInventorySnapshot.objects.filter(captured_at__gte=window_start, captured_at__lt=window_end)
+            .alias(_snapshot_day_rank=Case(*day_ranks, output_field=IntegerField()))
+            .order_by("branch_id", "product_id", "_snapshot_day_rank", "-captured_at", "-id")
+            .distinct("branch_id", "product_id")
+            .values("id")
+        )
+        snapshots = list(
+            PointInventorySnapshot.objects.filter(id__in=Subquery(selected_ids))
             .select_related("product", "branch", "branch__erp_branch")
             .only(
                 "id",
@@ -544,34 +564,8 @@ class MonthlyPointProductBalanceService:
                 "stock",
                 "captured_at",
             )
-            .order_by("branch_id", "product_id", "captured_at", "id")
+            .order_by("branch_id", "product_id")
         )
-        selected_by_key: dict[tuple[int, int], PointInventorySnapshot] = {}
-        for candidate in candidates:
-            key = (candidate.branch_id, candidate.product_id)
-            candidate_date = timezone.localtime(candidate.captured_at, current_timezone).date()
-            current = selected_by_key.get(key)
-            if current is None:
-                selected_by_key[key] = candidate
-                continue
-            current_date = timezone.localtime(current.captured_at, current_timezone).date()
-            candidate_rank = (
-                candidate_date != snapshot_date,
-                abs((candidate_date - snapshot_date).days),
-                candidate_date > snapshot_date,
-                -candidate.captured_at.timestamp(),
-                -candidate.id,
-            )
-            current_rank = (
-                current_date != snapshot_date,
-                abs((current_date - snapshot_date).days),
-                current_date > snapshot_date,
-                -current.captured_at.timestamp(),
-                -current.id,
-            )
-            if candidate_rank < current_rank:
-                selected_by_key[key] = candidate
-        snapshots = list(selected_by_key.values())
         if not snapshots:
             return {}, self._empty_snapshot_meta(snapshot_date, tolerance_days), []
 
@@ -634,21 +628,23 @@ class MonthlyPointProductBalanceService:
         )
         job_rows = []
         if selected_sync_job is not None:
+            # Counts still include every original row; only the manifest keys
+            # are grouped, so repeated captures do not become Python objects.
             job_rows = list(
                 PointInventorySnapshot.objects.filter(sync_job_id=selected_sync_job.id)
-                .select_related("branch")
-                .only("id", "branch_id", "branch__erp_branch_id", "product_id")
+                .order_by()
+                .values_list("branch_id", "branch__erp_branch_id", "product_id")
+                .annotate(row_count=Count("id"))
             )
         job_point_branches_by_erp: dict[int, set[int]] = {}
         job_products_by_erp: dict[int, set[int]] = {}
         unmapped_job_branch_ids: set[int] = set()
-        for job_row in job_rows:
-            erp_branch_id = job_row.branch.erp_branch_id
+        for branch_id, erp_branch_id, product_id, _row_count in job_rows:
             if erp_branch_id is None:
-                unmapped_job_branch_ids.add(job_row.branch_id)
+                unmapped_job_branch_ids.add(branch_id)
                 continue
-            job_point_branches_by_erp.setdefault(erp_branch_id, set()).add(job_row.branch_id)
-            job_products_by_erp.setdefault(erp_branch_id, set()).add(job_row.product_id)
+            job_point_branches_by_erp.setdefault(erp_branch_id, set()).add(branch_id)
+            job_products_by_erp.setdefault(erp_branch_id, set()).add(product_id)
         job_ambiguous_erp_branch_ids = {
             erp_branch_id
             for erp_branch_id, point_branch_ids in job_point_branches_by_erp.items()
@@ -677,9 +673,9 @@ class MonthlyPointProductBalanceService:
         missing_expected_product_coverage_keys = expected_product_coverage_keys - selected_erp_product_keys
         result_summary = dict(selected_sync_job.result_summary or {}) if selected_sync_job is not None else {}
         count_checks = {
-            "branches_processed": len({job_row.branch_id for job_row in job_rows}),
-            "snapshots_created": len(job_rows),
-            "products_seen": len(job_rows),
+            "branches_processed": len({row[0] for row in job_rows}),
+            "snapshots_created": sum(row[3] for row in job_rows),
+            "products_seen": sum(row[3] for row in job_rows),
         }
         count_mismatches = {
             key: {"reported": result_summary.get(key), "observed": observed}
