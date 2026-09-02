@@ -472,6 +472,7 @@ def sync_conversion_lines(
                 created += 1
 
             result = {
+                "job_id": job.id,
                 "created": created,
                 "skipped": skipped,
                 "relinked": relinked,
@@ -492,12 +493,20 @@ def sync_conversion_lines(
                 ],
                 "total_rows": len(rows),
                 "report_pk": pk_reporte,
+                "provenance": {
+                    "source": "point_conversion_lines",
+                    "date_from": date_from.isoformat(),
+                    "date_to": date_to.isoformat(),
+                    "branch_filter": branch_filter or "",
+                    "report_pk": pk_reporte,
+                },
             }
             job.status = (
                 PointSyncJob.STATUS_PARTIAL
                 if invalid_rows or skipped_unmatched_branch
                 else PointSyncJob.STATUS_SUCCESS
             )
+            result["status"] = job.status
             job.finished_at = timezone.now()
             job.result_summary = result
             job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])

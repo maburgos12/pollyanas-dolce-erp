@@ -402,13 +402,6 @@ CELERY_BEAT_SCHEDULE = {
         "task": "pos_bridge.conversion_sync",
         "schedule": crontab(hour=4, minute=0, day_of_month="1"),
     },
-    # --- Cierre mensual canónico de producto (fuentes exactas + lock seguro) ---
-    "pos_bridge: cierre producto mensual canonico": {
-        "task": "pos_bridge.monthly_product_closure",
-        "schedule": crontab(hour=4, minute=0, day_of_month="5"),
-        "kwargs": {"lock_after_build": True},
-        "options": {"timezone": TIME_ZONE},
-    },
     # --- Alerta diaria: producción sin registros en Point ---
     "reportes: alerta produccion sin registros": {
         "task": "reportes.alerta_produccion_sin_registros",

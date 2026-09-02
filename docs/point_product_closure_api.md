@@ -10,6 +10,8 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 - `null` significa que la fuente no estaba disponible o no tenía autoridad; no
   equivale a cero.
 - `0.000000` significa cero medido por una fuente disponible.
+- Una fuente `source_present=true` pero `authoritative=false` produce `null` en
+  todos sus campos dependientes; sólo una fuente autoritativa puede publicar cero.
 - Un total mensual es `null` cuando al menos una línea tiene ese dato faltante.
 
 ## Campos canónicos por línea
@@ -20,6 +22,12 @@ añaden la proyección canónica `POINT_PRODUCT_BALANCE_V1`.
 `closing_point`, `point_difference`, `point_status`, `point_status_label`,
 `conversion_origin`, `conversion_origins`, `projection_sources`,
 `source_authority`, `source_issues` e `is_historical_inventory`.
+
+Para importaciones históricas, `closing_point*` y `point_difference` son `null`
+porque el conteo no proviene de Point. `historical_count` y
+`historical_difference` conservan explícitamente el conteo físico y el contrato
+del importador (`final calculado - conteo físico`); sus totales son `total_historical_count` y
+`total_historical_difference`.
 
 `point_difference` siempre usa el signo `Point final - final calculado`. Los
 cierres importados de Excel conservan su semántica histórica y la identifican

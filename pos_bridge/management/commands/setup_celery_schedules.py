@@ -159,6 +159,9 @@ class Command(BaseCommand):
             month_of_year="*",
             timezone=timezone_name,
         )
+        PeriodicTask.objects.filter(task="pos_bridge.monthly_product_closure").exclude(
+            name="pos_bridge: cierre producto mensual"
+        ).update(enabled=False)
         PeriodicTask.objects.update_or_create(
             name="pos_bridge: cierre producto mensual",
             defaults={

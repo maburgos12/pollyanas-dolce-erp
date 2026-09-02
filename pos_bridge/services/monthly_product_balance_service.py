@@ -994,10 +994,10 @@ class MonthlyPointProductBalanceService:
             return not str((job.parameters or {}).get("branch_filter") or "").strip()
 
         if family == "conversions":
-            unrestricted_success_jobs = [
-                job for job in jobs if unrestricted(job) and job.status == PointSyncJob.STATUS_SUCCESS
-            ]
-            selected = unrestricted_success_jobs[0] if unrestricted_success_jobs else jobs[0]
+            unrestricted_jobs = [job for job in jobs if unrestricted(job)]
+            # A newer exact full-network attempt supersedes older evidence even
+            # when it is partial/failed. Filtered retries remain non-competing.
+            selected = unrestricted_jobs[0] if unrestricted_jobs else jobs[0]
             restricted_job_ids = {job.id for job in jobs if not unrestricted(job)}
         else:
             selected = jobs[0]

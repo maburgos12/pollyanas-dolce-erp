@@ -69,7 +69,32 @@ def project_product_closure_line(
     waste_missing = is_canonical and metadata.get("waste_source_authoritative") is not True
     opening_missing = is_canonical and "OPENING_SNAPSHOT_MISSING" in issues
     closing_missing = is_canonical and "CLOSING_SNAPSHOT_MISSING" in issues
+    opening_authoritative = not opening_missing and (
+        not is_canonical or metadata.get("opening_source_authoritative", True) is True
+    )
+    sales_authoritative = not sales_missing and (
+        not is_canonical or metadata.get("sales_source_authoritative", True) is True
+    )
+    production_authoritative = not production_missing
+    waste_authoritative = not waste_missing
+    conversion_authoritative = not conversion_missing
+    closing_authoritative = not closing_missing and (
+        not is_canonical or metadata.get("closing_source_authoritative", True) is True
+    )
+    calculated_authoritative = all(
+        (
+            opening_authoritative,
+            sales_authoritative,
+            production_authoritative,
+            waste_authoritative,
+            conversion_authoritative,
+        )
+    )
+    calculated_missing = calculated_missing or not calculated_authoritative
+    closing_missing = closing_missing or not closing_authoritative
 
+    historical_count = None
+    historical_difference = None
     if is_canonical:
         point_difference = decimal_value(metadata.get("point_difference"))
     elif is_historical_excel:
@@ -77,7 +102,11 @@ def project_product_closure_line(
             point_difference = None
             closing_missing = True
         else:
-            point_difference = Decimal(str(line.diferencia_teorico_vs_point))
+            historical_count = Decimal(str(line.inventario_final_point_total))
+            historical_difference = Decimal(str(line.diferencia_teorico_vs_point))
+            point_difference = None
+            closing_missing = True
+            closing_authoritative = False
     elif line.estado_auditoria == ProductoMonthClosureLine.AUDIT_STATUS_SIN_INVENTARIO_FISICO:
         point_difference = None
         closing_missing = True
@@ -132,17 +161,17 @@ def project_product_closure_line(
         status_label = point_status_label(point_status)
 
     return {
-        "opening_point": None if opening_missing else Decimal(str(line.inventario_inicial_teorico)),
-        "production": None if production_missing else Decimal(str(line.produccion_mes)),
-        "sales_direct": None if sales_missing else Decimal(str(line.venta_directa_enteros)),
-        "sales_derived": None if sales_missing else Decimal(str(line.venta_derivada_equivalente)),
-        "sales_total": None if sales_missing else Decimal(str(line.venta_total_equivalente)),
+        "opening_point": None if not opening_authoritative else Decimal(str(line.inventario_inicial_teorico)),
+        "production": None if not production_authoritative else Decimal(str(line.produccion_mes)),
+        "sales_direct": None if not sales_authoritative else Decimal(str(line.venta_directa_enteros)),
+        "sales_derived": None if not sales_authoritative else Decimal(str(line.venta_derivada_equivalente)),
+        "sales_total": None if not sales_authoritative else Decimal(str(line.venta_total_equivalente)),
         "point_conversion_in": None if conversion_missing else decimal_value(metadata.get("point_conversion_in")),
         "point_conversion_out": None if conversion_missing else decimal_value(metadata.get("point_conversion_out")),
         "conversion_origin": conversion_origin,
         "conversion_origins": exact_conversion_origins,
         "projection_sources": projection_sources,
-        "waste_total": None if waste_missing else Decimal(str(line.merma_total_equivalente)),
+        "waste_total": None if not waste_authoritative else Decimal(str(line.merma_total_equivalente)),
         "calculated_closing": None if calculated_missing else Decimal(str(line.inventario_final_teorico)),
         "closing_point_cedis": None if scopes_missing else Decimal(str(line.inventario_final_point_cedis)),
         "closing_point_sucursales": None if scopes_missing else Decimal(str(line.inventario_final_point_sucursales)),
@@ -151,14 +180,16 @@ def project_product_closure_line(
         "point_status": point_status,
         "status_label": status_label,
         "is_historical_inventory": is_historical_excel,
+        "historical_count": historical_count,
+        "historical_difference": historical_difference,
         "source_issues": tuple(sorted(issues)),
         "source_authority": {
-            "opening": not opening_missing,
-            "sales": not sales_missing,
-            "production": not production_missing,
-            "waste": not waste_missing,
-            "conversions": not conversion_missing,
-            "closing": not closing_missing,
+            "opening": opening_authoritative,
+            "sales": sales_authoritative,
+            "production": production_authoritative,
+            "waste": waste_authoritative,
+            "conversions": conversion_authoritative,
+            "closing": closing_authoritative,
         },
     }
 

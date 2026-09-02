@@ -5851,10 +5851,16 @@ def _product_closure_export_row(
     also tells us when numeric zero is only the storage placeholder for a missing
     source and must therefore be rendered as ``Sin dato``.
     """
-    return canonical_product_closure_row(
+    projected = canonical_product_closure_row(
         line,
         historical_excel_import=historical_excel_import,
     )
+    if projected["is_historical_inventory"]:
+        projected["closing_point_cedis"] = Decimal(str(line.inventario_final_point_cedis))
+        projected["closing_point_sucursales"] = Decimal(str(line.inventario_final_point_sucursales))
+        projected["closing_point"] = projected["historical_count"]
+        projected["point_difference"] = projected["historical_difference"]
+    return projected
 
     # Kept below temporarily as executable-history context for this long-lived
     # report module; the canonical implementation above now lives in pos_bridge.

@@ -3201,7 +3201,7 @@ class ReportesCanonicosTests(TestCase):
         line = closure.lines.get(receta_padre=receta)
         self.assertEqual(line.inventario_inicial_teorico, Decimal("9"))
         self.assertContains(response, "Pastel Build Cierre")
-        self.assertContains(response, "9.00")
+        self.assertContains(response, "Sin dato")
 
     def test_cierre_producto_build_rejects_lectura_user(self):
         sucursal = self._create_sucursal("CLOSE-02", "Sucursal Cierre 02")
@@ -3296,6 +3296,13 @@ class ReportesCanonicosTests(TestCase):
                 "balance_contract": "POINT_PRODUCT_BALANCE_V1",
                 "point_difference": "2",
                 "point_status": "POINT_MAYOR",
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
                 "issues": [],
                 "sales_source_available": True,
                 "production_source_authoritative": True,
@@ -3490,6 +3497,13 @@ class ReportesCanonicosTests(TestCase):
                 "balance_contract": "POINT_PRODUCT_BALANCE_V1",
                 "point_difference": "2",
                 "point_status": "POINT_MAYOR",
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
                 "issues": [],
             },
         )
@@ -3959,6 +3973,13 @@ class ReportesCanonicosTests(TestCase):
                 "point_difference": "2",
                 "point_status": "REVISAR_FUENTE",
                 "point_final_scopes_available": False,
+                "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
                 "issues": ["CLOSING_SNAPSHOT_SCOPE_MISSING"],
             },
         )

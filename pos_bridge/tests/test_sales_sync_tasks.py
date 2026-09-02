@@ -18,13 +18,13 @@ from pos_bridge.tasks.run_waste_sync import run_waste_sync
 
 
 class PointSalesSyncTaskRoutingTests(SimpleTestCase):
-    def test_monthly_closure_is_scheduled_after_source_month_end_syncs(self):
+    def test_monthly_closure_is_not_duplicated_in_static_beat_schedule(self):
         from django.conf import settings
 
-        schedule = settings.CELERY_BEAT_SCHEDULE["pos_bridge: cierre producto mensual canonico"]
-
-        self.assertEqual(schedule["task"], "pos_bridge.monthly_product_closure")
-        self.assertEqual(schedule["kwargs"], {"lock_after_build": True})
+        self.assertNotIn(
+            "pos_bridge.monthly_product_closure",
+            [entry.get("task") for entry in settings.CELERY_BEAT_SCHEDULE.values()],
+        )
 
     def test_pos_bridge_tasks_exports_dashboard_refresh_tasks_for_celery_autodiscovery(self):
         import pos_bridge.tasks as tasks
@@ -394,7 +394,17 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
             patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
             patch(
                 "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
-                return_value={"status": PointSyncJob.STATUS_SUCCESS, "job_id": 4, "issues": []},
+                return_value={
+                    "status": PointSyncJob.STATUS_SUCCESS,
+                    "job_id": 4,
+                    "issues": [],
+                    "provenance": {
+                        "source": "point_conversion_lines",
+                        "date_from": "2026-08-01",
+                        "date_to": "2026-08-31",
+                        "branch_filter": "",
+                    },
+                },
             ) as conversions,
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
         ):
@@ -439,6 +449,9 @@ class PointSalesSyncTaskRoutingTests(SimpleTestCase):
         self.assertEqual(result["inventory_authority"]["opening"]["target_date"], "2026-07-31")
         self.assertEqual(result["inventory_authority"]["closing"]["target_date"], "2026-08-31")
         self.assertEqual([step["name"] for step in result["source_refresh"]], ["sales", "production", "waste", "conversions"])
+        conversion_step = result["source_refresh"][-1]
+        self.assertEqual(conversion_step["job_id"], 4)
+        self.assertEqual(conversion_step["summary"]["provenance"]["date_from"], "2026-08-01")
 
     def test_monthly_closure_partial_source_builds_reviewable_draft_without_lock(self):
         success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")

@@ -33,6 +33,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     source_authority = serializers.SerializerMethodField()
     source_issues = serializers.SerializerMethodField()
     is_historical_inventory = serializers.SerializerMethodField()
+    historical_count = serializers.SerializerMethodField()
+    historical_difference = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductoMonthClosureLine
@@ -63,6 +65,8 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
             "source_authority",
             "source_issues",
             "is_historical_inventory",
+            "historical_count",
+            "historical_difference",
             "inventario_inicial_teorico",
             "produccion_mes",
             "venta_directa_enteros",
@@ -162,6 +166,12 @@ class ProductMonthClosureLineSerializer(serializers.ModelSerializer):
     def get_is_historical_inventory(self, obj):
         return self._projection(obj)["is_historical_inventory"]
 
+    def get_historical_count(self, obj):
+        return self._decimal(self._projection(obj)["historical_count"])
+
+    def get_historical_difference(self, obj):
+        return self._decimal(self._projection(obj)["historical_difference"])
+
 
 class ProductMonthClosureSerializer(serializers.ModelSerializer):
     month = serializers.SerializerMethodField()
@@ -180,6 +190,8 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
     total_conversion_out = serializers.SerializerMethodField()
     total_closing_point = serializers.SerializerMethodField()
     total_point_difference = serializers.SerializerMethodField()
+    total_historical_count = serializers.SerializerMethodField()
+    total_historical_difference = serializers.SerializerMethodField()
 
     class Meta:
         model = ProductoMonthClosure
@@ -206,6 +218,8 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
             "total_conversion_out",
             "total_closing_point",
             "total_point_difference",
+            "total_historical_count",
+            "total_historical_difference",
             "validation",
             "source_authority",
             "source_issues",
@@ -262,6 +276,12 @@ class ProductMonthClosureSerializer(serializers.ModelSerializer):
 
     def get_total_point_difference(self, obj):
         return self._sum_projection(obj, "point_difference")
+
+    def get_total_historical_count(self, obj):
+        return self._sum_projection(obj, "historical_count")
+
+    def get_total_historical_difference(self, obj):
+        return self._sum_projection(obj, "historical_difference")
 
     def get_validation(self, obj):
         return (obj.metadata or {}).get("validation", {})

@@ -227,9 +227,12 @@ class PosBridgeInternalApiTests(APITestCase):
             "balance_contract": "POINT_PRODUCT_BALANCE_V1",
             "issues": [],
             "sales_source_available": True,
+            "opening_source_authoritative": True,
+            "sales_source_authoritative": True,
             "production_source_authoritative": True,
             "waste_source_authoritative": True,
             "conversion_source_authoritative": True,
+            "closing_source_authoritative": True,
             "point_final_scopes_available": True,
             "point_conversion_in": "0",
             "point_conversion_out": "0",
@@ -277,9 +280,12 @@ class PosBridgeInternalApiTests(APITestCase):
             "balance_contract": "POINT_PRODUCT_BALANCE_V1",
             "issues": [],
             "sales_source_available": True,
+            "opening_source_authoritative": True,
+            "sales_source_authoritative": True,
             "production_source_authoritative": True,
             "waste_source_authoritative": True,
             "conversion_source_authoritative": True,
+            "closing_source_authoritative": True,
             "point_final_scopes_available": True,
             "point_difference": "0",
         }
@@ -298,9 +304,12 @@ class PosBridgeInternalApiTests(APITestCase):
                 "balance_contract": "POINT_PRODUCT_BALANCE_V1",
                 "issues": ["PRODUCTION_SOURCE_MISSING", "CALCULATED_CLOSING_MISSING"],
                 "sales_source_available": True,
+                "opening_source_authoritative": True,
+                "sales_source_authoritative": True,
                 "production_source_authoritative": False,
                 "waste_source_authoritative": True,
                 "conversion_source_authoritative": True,
+                "closing_source_authoritative": True,
             },
         )
 
@@ -313,8 +322,12 @@ class PosBridgeInternalApiTests(APITestCase):
 
     def test_product_closure_api_preserves_historical_inventory_semantics(self):
         line = self.product_closure.lines.get()
+        line.inventario_final_teorico = Decimal("21")
         line.inventario_final_point_total = Decimal("18")
-        line.diferencia_teorico_vs_point = Decimal("3")
+        # The real historical importer persists theoretical - physical count.
+        line.diferencia_teorico_vs_point = (
+            line.inventario_final_teorico - line.inventario_final_point_total
+        )
         line.estado_auditoria = ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO
         line.metadata = {"historical_excel": True}
         line.save()
@@ -325,9 +338,71 @@ class PosBridgeInternalApiTests(APITestCase):
 
         row = response.data["lines"][0]
         self.assertTrue(row["is_historical_inventory"])
-        self.assertEqual(row["closing_point"], "18.000000")
-        self.assertEqual(row["point_difference"], "3.000000")
+        self.assertIsNone(row["closing_point"])
+        self.assertIsNone(row["point_difference"])
+        self.assertEqual(row["historical_count"], "18.000000")
+        self.assertEqual(row["historical_difference"], "3.000000")
         self.assertEqual(row["point_status"], ProductoMonthClosureLine.AUDIT_STATUS_SOBRANTE_FISICO)
+        self.assertIsNone(response.data["total_closing_point"])
+        self.assertIsNone(response.data["total_point_difference"])
+        self.assertEqual(response.data["total_historical_count"], "18.000000")
+        self.assertEqual(response.data["total_historical_difference"], "3.000000")
+
+    def test_product_closure_present_but_non_authoritative_sources_are_null_not_zero(self):
+        line = self.product_closure.lines.get()
+        line.inventario_inicial_teorico = Decimal("12")
+        line.produccion_mes = Decimal("8")
+        line.venta_total_equivalente = Decimal("4")
+        line.merma_total_equivalente = Decimal("1")
+        line.inventario_final_teorico = Decimal("15")
+        line.inventario_final_point_total = Decimal("15")
+        line.metadata = {
+            "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+            "issues": ["MONTH_SOURCE_INCOMPLETE"],
+            "sales_source_available": True,
+            "opening_source_authoritative": False,
+            "sales_source_authoritative": False,
+            "production_source_authoritative": False,
+            "waste_source_authoritative": False,
+            "conversion_source_authoritative": False,
+            "closing_source_authoritative": False,
+            "point_conversion_in": "0",
+            "point_conversion_out": "0",
+            "point_difference": "0",
+            "point_status": "REVISAR_FUENTE",
+        }
+        line.save()
+
+        detail = self.client.get(f"/api/pos-bridge/product-closures/{self.product_closure.id}/").data
+        row = detail["lines"][0]
+
+        for field in (
+            "opening_point",
+            "production",
+            "sales_total",
+            "waste_total",
+            "point_conversion_in",
+            "point_conversion_out",
+            "calculated_closing",
+            "closing_point",
+            "point_difference",
+        ):
+            self.assertIsNone(row[field], field)
+        self.assertEqual(
+            row["source_authority"],
+            {
+                "opening": False,
+                "sales": False,
+                "production": False,
+                "waste": False,
+                "conversions": False,
+                "closing": False,
+            },
+        )
+        summary = self.client.get("/api/pos-bridge/product-closures/").data["results"][0]
+        self.assertIsNone(summary["total_opening_inventory"])
+        self.assertIsNone(summary["total_sales"])
+        self.assertIsNone(summary["total_ending_inventory"])
 
     def test_product_closure_api_exposes_source_authority_and_issues(self):
         self.product_closure.metadata = {

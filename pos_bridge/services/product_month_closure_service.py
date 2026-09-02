@@ -775,7 +775,14 @@ class ProductMonthClosureService:
         global_issues = set(balance.issues if global_issues is None else global_issues)
         source_authority = {
             family: bool((balance.sources.get(family) or {}).get("authoritative"))
-            for family in ("production", "waste", "conversions")
+            for family in (
+                "opening_snapshot",
+                "sales",
+                "production",
+                "waste",
+                "conversions",
+                "closing_snapshot",
+            )
         }
         buckets: dict[int, dict[str, object]] = {}
         for receta_id, raw_row in sorted(balance.rows.items()):
@@ -925,9 +932,12 @@ class ProductMonthClosureService:
                     "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
                     "point_final_scopes_available": scopes_available,
                     "sales_source_available": not bool(bucket["sales_missing"]),
+                    "opening_source_authoritative": source_authority["opening_snapshot"],
+                    "sales_source_authoritative": source_authority["sales"],
                     "production_source_authoritative": source_authority["production"],
                     "waste_source_authoritative": source_authority["waste"],
                     "conversion_source_authoritative": source_authority["conversions"],
+                    "closing_source_authoritative": source_authority["closing_snapshot"],
                 }
             )
             rows.append(

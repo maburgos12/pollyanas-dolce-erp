@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal
 from io import StringIO
@@ -175,6 +176,34 @@ class ProductMonthClosureServiceTests(TestCase):
                 }
             ),
         )
+
+    def test_projection_persists_each_source_authority_even_when_source_is_present(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        balance = self._lockable_fingerprint_balance()
+        sources = dict(balance.sources)
+        sources["sales"] = MappingProxyType(
+            {**dict(sources["sales"]), "source_present": True, "authoritative": False}
+        )
+        sources["closing_snapshot"] = MappingProxyType(
+            {**dict(sources["closing_snapshot"]), "source_present": True, "authoritative": False}
+        )
+        balance = replace(balance, sources=MappingProxyType(sources), issues=("MONTH_SOURCE_INCOMPLETE",))
+
+        preview = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")
+
+        metadata = preview["line_rows"][0]["metadata"]
+        self.assertTrue(metadata["opening_source_authoritative"])
+        self.assertFalse(metadata["sales_source_authoritative"])
+        self.assertTrue(metadata["production_source_authoritative"])
+        self.assertTrue(metadata["waste_source_authoritative"])
+        self.assertTrue(metadata["conversion_source_authoritative"])
+        self.assertFalse(metadata["closing_source_authoritative"])
 
     def test_preview_projects_canonical_rows_to_parent_and_preserves_json_metadata(self):
         class CanonicalBalance:

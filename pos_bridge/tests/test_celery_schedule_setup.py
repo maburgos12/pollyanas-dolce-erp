@@ -11,7 +11,23 @@ from django.test import TestCase, override_settings
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
     def test_monthly_product_closure_uses_safe_canonical_orchestration(self):
-        from django_celery_beat.models import PeriodicTask
+        from django.conf import settings
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        legacy_cron = CrontabSchedule.objects.create(
+            minute="30",
+            hour="5",
+            day_of_week="*",
+            day_of_month="1",
+            month_of_year="*",
+            timezone="America/Mazatlan",
+        )
+        PeriodicTask.objects.create(
+            name="legacy cierre producto mensual",
+            task="pos_bridge.monthly_product_closure",
+            crontab=legacy_cron,
+            enabled=True,
+        )
 
         call_command("setup_celery_schedules")
 
@@ -19,6 +35,18 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(task.crontab.day_of_month, "5")
         self.assertEqual(task.crontab.hour, "4")
         self.assertEqual(json.loads(task.kwargs), {"lock_after_build": True})
+        self.assertEqual(
+            PeriodicTask.objects.filter(
+                task="pos_bridge.monthly_product_closure",
+                enabled=True,
+            ).count(),
+            1,
+        )
+        self.assertFalse(PeriodicTask.objects.get(name="legacy cierre producto mensual").enabled)
+        self.assertNotIn(
+            "pos_bridge.monthly_product_closure",
+            [entry.get("task") for entry in settings.CELERY_BEAT_SCHEDULE.values()],
+        )
 
     @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
     @patch("crm.services.point_delivery_auto_sync.PointDeliveryAutoSyncService.run")

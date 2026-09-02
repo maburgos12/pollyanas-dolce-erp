@@ -15,6 +15,7 @@ from pos_bridge.services.conversion_sync_service import (
     sync_conversion_lines,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
+from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from recetas.models import Receta
 
 
@@ -93,6 +94,28 @@ class PointConversionRerunAuthorityTests(TestCase):
         _rows, _unresolved, _movements, _counts, metadata = service._load_conversions(month_start=date(2026, 7, 1))
         return metadata
 
+    def _empty_unrestricted_attempt(self, status):
+        return PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=status,
+            started_at=timezone.now(),
+            parameters={
+                "source": "point_conversion_lines",
+                "date_from": "2026-07-01",
+                "date_to": "2026-07-31",
+                "branch_filter": "",
+            },
+            result_summary={
+                "created": 0,
+                "skipped": 0,
+                "relinked": 0,
+                "skipped_unmatched_branch": 0,
+                "invalid_rows": 0,
+                "total_rows": 0,
+                "report_pk": "REPORT-EMPTY-LATEST",
+            },
+        )
+
     def test_complete_duplicate_rerun_relinks_observed_rows_and_remains_authoritative(self):
         first = self._sync()
         first_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
@@ -100,6 +123,12 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertEqual(first["created"], 1)
         self.assertEqual(first["skipped"], 0)
         self.assertEqual(first["relinked"], 0)
+        self.assertEqual(first["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(first["job_id"], first_job.id)
+        self.assertEqual(first["provenance"]["source"], "point_conversion_lines")
+        self.assertEqual(first["provenance"]["date_from"], "2026-07-01")
+        self.assertEqual(first["provenance"]["date_to"], "2026-07-31")
+        self.assertEqual(first["provenance"]["branch_filter"], "")
         first_authority = self._conversion_authority()
         self.assertTrue(first_authority["authoritative"])
         self.assertEqual(first_authority["selected_sync_job_ids"], (first_job.id,))
@@ -116,6 +145,43 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertTrue(second_authority["authoritative"])
         self.assertEqual(second_authority["selected_sync_job_ids"], (second_job.id,))
         self.assertNotIn("CONVERSION_SYNC_JOB_MIXED", second_authority["authority_issues"])
+
+    def test_latest_unrestricted_partial_attempt_invalidates_older_success_until_successful_retry(self):
+        self._sync()
+        latest = self._empty_unrestricted_attempt(PointSyncJob.STATUS_PARTIAL)
+
+        partial_authority = self._conversion_authority()
+
+        self.assertFalse(partial_authority["authoritative"])
+        self.assertEqual(partial_authority["selected_sync_job_ids"], (latest.id,))
+        self.assertIn("CONVERSION_SYNC_JOB_PARTIAL", partial_authority["authority_issues"])
+
+        self._sync()
+        restored = self._conversion_authority()
+        self.assertTrue(restored["authoritative"])
+        self.assertEqual(restored["job_status"], PointSyncJob.STATUS_SUCCESS)
+
+    def test_latest_partial_conversion_attempt_blocks_build_lock_and_manual_lock(self):
+        self._sync()
+        latest = self._empty_unrestricted_attempt(PointSyncJob.STATUS_PARTIAL)
+
+        closure = ProductMonthClosureService().build(month="2026-07")
+
+        self.assertFalse(closure.metadata["validation"]["lock_ready"])
+        self.assertEqual(closure.metadata["conversion_meta"]["job_status"], PointSyncJob.STATUS_PARTIAL)
+        self.assertEqual(closure.metadata["conversion_meta"]["selected_sync_job_ids"], [latest.id])
+        with self.assertRaises(ProductMonthClosureError):
+            ProductMonthClosureService().lock(closure=closure)
+
+    def test_latest_unrestricted_failed_attempt_invalidates_older_success(self):
+        self._sync()
+        latest = self._empty_unrestricted_attempt(PointSyncJob.STATUS_FAILED)
+
+        authority = self._conversion_authority()
+
+        self.assertFalse(authority["authoritative"])
+        self.assertEqual(authority["selected_sync_job_ids"], (latest.id,))
+        self.assertIn("CONVERSION_SYNC_JOB_FAILED", authority["authority_issues"])
 
     def test_duplicate_rerun_refreshes_recipe_when_previously_unresolved(self):
         first = self._sync(resolve_recipe=lambda row, recipe_map: None)
@@ -442,7 +508,7 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertFalse(PointConversionLine.objects.filter(sync_job=failed_job).exists())
 
         metadata = self._conversion_authority()
-        self.assertEqual(metadata["selected_sync_job_ids"], (first_job.id,))
-        self.assertTrue(metadata["authoritative"])
-        self.assertNotIn("CONVERSION_SYNC_JOB_FAILED", metadata["authority_issues"])
-        self.assertNotIn("CONVERSION_SYNC_JOB_MIXED", metadata["authority_issues"])
+        self.assertEqual(metadata["selected_sync_job_ids"], (failed_job.id,))
+        self.assertFalse(metadata["authoritative"])
+        self.assertIn("CONVERSION_SYNC_JOB_FAILED", metadata["authority_issues"])
+        self.assertIn("CONVERSION_SYNC_JOB_MIXED", metadata["authority_issues"])
