@@ -1072,6 +1072,76 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertIn("lock_event", locked.metadata)
         self.assertEqual(locked.metadata["lock_event"]["line_count"], 1)
 
+    def test_lock_rejects_validation_not_ready_without_blocking_issues(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 4, 1),
+            month_end=date(2026, 4, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            metadata={
+                "validation": {"lock_ready": False, "blocking_issues": []},
+                "balance": {"contract": "POINT_PRODUCT_BALANCE_V1"},
+                "opening_meta": {"authoritative": True, "source_present": True},
+                "sales_meta": {"authoritative": True, "source_present": True},
+                "production_meta": {"authoritative": True, "source_present": True},
+                "waste_meta": {"authoritative": True, "source_present": True},
+                "conversion_meta": {"authoritative": True, "source_present": True},
+                "closing_inventory_meta": {"authoritative": True, "source_present": True},
+            },
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=self.parent,
+            metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1"},
+        )
+
+        with self.assertRaisesMessage(ProductMonthClosureError, "no esta listo para bloquearse"):
+            self.service.lock(closure=closure)
+
+    def test_lock_rejects_each_required_canonical_source_without_authority(self):
+        required_sources = (
+            "opening_meta",
+            "sales_meta",
+            "production_meta",
+            "waste_meta",
+            "conversion_meta",
+            "closing_inventory_meta",
+        )
+        case_index = 0
+        for source_key in required_sources:
+            for source_state in ("absent", "non_authoritative"):
+                case_index += 1
+                with self.subTest(source_key=source_key, source_state=source_state):
+                    month = ((case_index - 1) % 12) + 1
+                    year = 2027 + ((case_index - 1) // 12)
+                    sources = {
+                        key: {"authoritative": True, "source_present": True}
+                        for key in required_sources
+                    }
+                    if source_state == "absent":
+                        sources.pop(source_key)
+                    else:
+                        sources[source_key] = {"authoritative": False, "source_present": False}
+                    closure = ProductoMonthClosure.objects.create(
+                        month_start=date(year, month, 1),
+                        month_end=date(year, month, 28),
+                        status=ProductoMonthClosure.STATUS_BUILT,
+                        opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+                        metadata={
+                            "validation": {"lock_ready": True, "blocking_issues": []},
+                            "balance": {"contract": "POINT_PRODUCT_BALANCE_V1"},
+                            **sources,
+                        },
+                    )
+                    ProductoMonthClosureLine.objects.create(
+                        closure=closure,
+                        receta_padre=self.parent,
+                        metadata={"balance_contract": "POINT_PRODUCT_BALANCE_V1"},
+                    )
+
+                    with self.assertRaisesMessage(ProductMonthClosureError, "fuente requerida"):
+                        self.service.lock(closure=closure)
+
     def test_lock_rejects_closure_with_catalog_issues(self):
         closure = ProductoMonthClosure.objects.create(
             month_start=date(2025, 9, 1),

@@ -3983,6 +3983,16 @@ class ReportesCanonicosTests(TestCase):
             self.assertContains(response, message)
         rendered_exceptions = " ".join(row["detail"] for row in response.context["exception_rows"])
         self.assertNotIn("SALES_SYNC_JOB_MISSING", rendered_exceptions)
+
+        post_response = self.client.post(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-04", "action": "lock"},
+            follow=True,
+        )
+
+        closure.refresh_from_db()
+        self.assertFalse(closure.is_locked)
+        self.assertContains(post_response, "no esta listo para bloquearse")
         self.assertNotIn("OFFICIAL_SALES_REFRESH_REQUIRED", rendered_exceptions)
 
     def test_cierre_producto_lock_succeeds_for_admin_when_closure_is_clean(self):

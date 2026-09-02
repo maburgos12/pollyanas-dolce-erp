@@ -91,6 +91,14 @@ class ProductMonthClosureService:
             "warnings",
         }
     )
+    CANONICAL_LOCK_REQUIRED_SOURCES = (
+        ("opening_meta", "inventario inicial Point"),
+        ("sales_meta", "ventas Point"),
+        ("production_meta", "produccion Point"),
+        ("waste_meta", "merma Point"),
+        ("conversion_meta", "conversiones Point"),
+        ("closing_inventory_meta", "inventario final Point"),
+    )
 
     def __init__(
         self,
@@ -739,9 +747,30 @@ class ProductMonthClosureService:
             raise ProductMonthClosureError(
                 f"El cierre {closure.month_start:%Y-%m} tiene incidencias activas y no puede bloquearse: {blocking_issues[0]}"
             )
+        if validation.get("lock_ready") is False:
+            raise ProductMonthClosureError(
+                f"El cierre {closure.month_start:%Y-%m} no esta listo para bloquearse segun su validacion."
+            )
+
+        metadata = dict(closure.metadata or {})
+        balance_contract = str((metadata.get("balance") or {}).get("contract") or "")
+        is_canonical = balance_contract == "POINT_PRODUCT_BALANCE_V1" or any(
+            str((line.metadata or {}).get("balance_contract") or "") == "POINT_PRODUCT_BALANCE_V1"
+            for line in lines
+        )
+        if is_canonical:
+            invalid_sources = []
+            for metadata_key, label in self.CANONICAL_LOCK_REQUIRED_SOURCES:
+                source = dict(metadata.get(metadata_key) or {})
+                if source.get("authoritative") is not True or source.get("source_present") is not True:
+                    invalid_sources.append(label)
+            if invalid_sources:
+                raise ProductMonthClosureError(
+                    f"El cierre {closure.month_start:%Y-%m} tiene una fuente requerida ausente o sin autoridad: "
+                    f"{invalid_sources[0]}."
+                )
 
         lock_time = timezone.now()
-        metadata = dict(closure.metadata or {})
         metadata["lock_event"] = {
             "locked_at": lock_time.isoformat(),
             "locked_by": getattr(locked_by, "username", "") if locked_by else "",
