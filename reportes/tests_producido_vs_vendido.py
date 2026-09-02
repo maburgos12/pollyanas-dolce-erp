@@ -236,6 +236,22 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn('class="text-success"></span>', rendered)
         self.assertNotIn('>$</div>', rendered)
 
+    def test_authoritative_zero_waste_has_zero_cost_even_without_known_unit_cost(self):
+        context, _ = self._context(
+            canonical_balance(
+                MonthlyPointBalanceRow(
+                    receta_id=self.parent.id,
+                    waste=ZERO,
+                    status="COINCIDE",
+                )
+            )
+        )
+
+        row = context["groups"][0]["rows"][0]
+        self.assertEqual(row["merma_reportada"], ZERO)
+        self.assertEqual(row["costo_merma"], ZERO)
+        self.assertEqual(context["grand_total"]["costo_merma"], ZERO)
+
     def test_html_exposes_point_authority_snapshots_and_conversion_source(self):
         context, _ = self._context(
             canonical_balance(

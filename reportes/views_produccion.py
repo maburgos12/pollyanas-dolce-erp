@@ -537,7 +537,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             else:
                 dif = raw_dif
         costo_unitario = cost_map.get(recipe.id, ZERO)
-        costo_merma = merma_reportada * costo_unitario if merma_reportada is not None and costo_unitario else None
+        if merma_reportada == ZERO:
+            costo_merma = ZERO
+        else:
+            costo_merma = merma_reportada * costo_unitario if merma_reportada is not None and costo_unitario else None
         pct_merma = None
         if merma_reportada is not None and vendido and vendido > ZERO:
             pct_merma = (merma_reportada / vendido) * Decimal("100")

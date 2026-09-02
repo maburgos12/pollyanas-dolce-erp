@@ -5394,15 +5394,14 @@ def _normalize_product_closure_month(raw_value: str | None) -> date:
 
 def _product_closure_month_options(selected_month_start: date, months_back: int = 10) -> list[dict[str, str]]:
     month_candidates: list[date] = [selected_month_start]
-    latest_month = ProductoMonthClosure.objects.order_by("-month_start").values_list("month_start", flat=True).first()
-    if latest_month:
-        month_candidates.append(latest_month)
+    month_candidates.extend(
+        ProductoMonthClosure.objects.order_by().values_list("month_start", flat=True).distinct()
+    )
 
     anchor = timezone.localdate().replace(day=1)
     for offset in range(months_back):
-        candidate_month_end = anchor - timedelta(days=offset * 31)
-        candidate_month_start = date(candidate_month_end.year, candidate_month_end.month, 1)
-        month_candidates.append(candidate_month_start)
+        month_index = anchor.year * 12 + anchor.month - 1 - offset
+        month_candidates.append(date(month_index // 12, month_index % 12 + 1, 1))
 
     unique_months: list[date] = []
     seen: set[str] = set()
@@ -5446,6 +5445,7 @@ def _product_closure_point_status_label(status: str) -> str:
 
 
 _MOVEMENT_AUTHORITY_META = (
+    ("sales_meta", "Ventas"),
     ("production_meta", "Producción"),
     ("waste_meta", "Merma"),
     ("conversion_meta", "Conversiones"),
@@ -5453,6 +5453,13 @@ _MOVEMENT_AUTHORITY_META = (
 
 
 def _movement_authority_issue_label(issue: str) -> str:
+    exact_labels = {
+        "OFFICIAL_SALES_REFRESH_REQUIRED": "falta actualizar el reporte oficial de Point",
+        "SALES_SOURCE_REQUIRES_REVIEW": "fuente mensual requiere revisión",
+        "SALES_SOURCE_MIXED": "fuentes de venta mezcladas",
+        "SALES_SYNC_COVERAGE_UNPROVEN": "cobertura mensual no comprobada",
+        "BRIDGE_UNRESOLVED": "ventas legacy pendientes de resolver",
+    }
     labels = {
         "SYNC_JOB_MISSING": "falta job Point del mes",
         "SYNC_JOB_FAILED": "job Point fallido",
@@ -5466,6 +5473,8 @@ def _movement_authority_issue_label(issue: str) -> str:
         "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
     }
     issue = str(issue or "")
+    if issue in exact_labels:
+        return exact_labels[issue]
     for suffix, label in labels.items():
         if issue.endswith(suffix):
             return label
@@ -5476,7 +5485,7 @@ def _movement_authority_guards(metadata: dict[str, object]) -> list[dict[str, ob
     guards: list[dict[str, object]] = []
     for metadata_key, label in _MOVEMENT_AUTHORITY_META:
         source = dict(metadata.get(metadata_key) or {})
-        if not source or source.get("authoritative") is True:
+        if not source or (source.get("authoritative") is True and source.get("source_present") is not False):
             continue
         issues = list(source.get("authority_issues") or [])
         messages = [f"{label}: {_movement_authority_issue_label(issue)}" for issue in issues]
@@ -5887,7 +5896,7 @@ def _export_product_closure_csv(context: dict[str, object]) -> HttpResponse:
                 _closure_export_display(export_row["closing_point_sucursales"]),
                 _closure_export_display(export_row["closing_point"]),
                 _closure_export_display(export_row["point_difference"]),
-                export_row["point_status"],
+                _product_closure_point_status_label(str(export_row["point_status"])),
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]
@@ -5961,7 +5970,7 @@ def _export_product_closure_xlsx(context: dict[str, object]) -> HttpResponse:
                 _closure_export_cell(export_row["closing_point_sucursales"]),
                 _closure_export_cell(export_row["closing_point"]),
                 _closure_export_cell(export_row["point_difference"]),
-                export_row["point_status"],
+                _product_closure_point_status_label(str(export_row["point_status"])),
                 "SI" if line.has_catalog_issue else "NO",
                 line.catalog_issue_note,
             ]

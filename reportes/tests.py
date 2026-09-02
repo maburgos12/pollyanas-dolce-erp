@@ -61,6 +61,7 @@ from reportes.views import (
     _sales_previous_dates,
     _sales_source_context,
     _ventas_historicas_bi_summary,
+    _product_closure_month_options,
 )
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from reportes.models import (
@@ -3137,6 +3138,23 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.context["total_sales"], Decimal("10"))
         self.assertEqual(response.context["total_ending"], Decimal("14"))
 
+    @patch("reportes.views.timezone.localdate", return_value=date(2026, 9, 1))
+    def test_cierre_producto_month_options_use_calendar_months_and_include_all_historical_closures(self, _localdate):
+        for month_start in (date(2024, 1, 1), date(2025, 12, 1)):
+            ProductoMonthClosure.objects.create(
+                month_start=month_start,
+                month_end=date(month_start.year, month_start.month, 28),
+                status=ProductoMonthClosure.STATUS_BUILT,
+                opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            )
+
+        with self.assertNumQueries(1):
+            values = [option["value"] for option in _product_closure_month_options(date(2026, 9, 1))]
+
+        self.assertEqual(values[:4], ["2026-09", "2026-08", "2026-07", "2026-06"])
+        self.assertIn("2025-12", values)
+        self.assertIn("2024-01", values)
+
     def test_cierre_producto_post_builds_month_if_missing(self):
         admin_user = User.objects.create_user(username="admin_build_cierre", password="pass123")
         admin_group, _ = Group.objects.get_or_create(name="ADMIN")
@@ -3308,7 +3326,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. entrada Point")]), Decimal("8"))
         self.assertEqual(Decimal(detail_values[detail_headers.index("Conv. salida Point")]), Decimal("1"))
         self.assertEqual(detail_values[detail_headers.index("Origen conversión")], "POINT")
-        self.assertEqual(detail_values[detail_headers.index("Estado")], "POINT_MAYOR")
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "Point mayor")
         self.assertNotIn("Diferencia teorico vs Point", csv_body)
         self.assertNotIn("Sobrante físico", csv_body)
         self.assertNotIn("Faltante no explicado", csv_body)
@@ -3332,7 +3350,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Conv. entrada Point")], 8)
         self.assertEqual(values[headers.index("Conv. salida Point")], 1)
         self.assertEqual(values[headers.index("Origen conversión")], "POINT")
-        self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
+        self.assertEqual(values[headers.index("Estado")], "Point mayor")
 
     def test_cierre_producto_html_uses_neutral_point_balance_and_canonical_sign(self):
         receta = Receta.objects.create(
@@ -3484,7 +3502,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(detail_values[detail_headers.index("Conv. salida Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(detail_values[detail_headers.index("Dif. Point")], "Sin dato")
-        self.assertEqual(detail_values[detail_headers.index("Estado")], "REVISAR_FUENTE")
+        self.assertEqual(detail_values[detail_headers.index("Estado")], "Revisar fuente")
 
         html_response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-07"})
         self.assertIsNone(html_response.context["total_opening"])
@@ -3518,7 +3536,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Conv. salida Point")], "Sin dato")
         self.assertEqual(values[headers.index("Fin. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
-        self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
 
     def test_real_missing_sales_propagates_sin_dato_through_closure_and_recent_card(self):
         admin_user = User.objects.create_user(username="admin_missing_sales", password="pass123")
@@ -3744,7 +3762,7 @@ class ReportesCanonicosTests(TestCase):
         values = rows[rows.index([]) + 2]
 
         self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("3"))
-        self.assertEqual(values[headers.index("Estado")], "POINT_MAYOR")
+        self.assertEqual(values[headers.index("Estado")], "Point mayor")
         self.assertNotIn("Sobrante físico", response.content.decode("utf-8"))
         line.refresh_from_db()
         self.assertEqual(line.diferencia_teorico_vs_point, Decimal("-3"))
@@ -3791,7 +3809,7 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Point sucursales")], "Sin dato")
         self.assertEqual(Decimal(values[headers.index("Fin. Point")]), Decimal("10"))
         self.assertEqual(Decimal(values[headers.index("Dif. Point")]), Decimal("2"))
-        self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
+        self.assertEqual(values[headers.index("Estado")], "Revisar fuente")
 
     def test_cierre_producto_lock_requires_admin_or_dg(self):
         receta = Receta.objects.create(
@@ -3919,6 +3937,53 @@ class ReportesCanonicosTests(TestCase):
                 details = " ".join(row["detail"] for row in response.context["exception_rows"])
                 for message in expected_messages:
                     self.assertIn(message, details)
+
+    def test_cierre_producto_sales_authority_guard_is_human_readable_and_disables_lock(self):
+        admin_user = User.objects.create_user(username="admin_cierre_ventas", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        receta = Receta.objects.create(
+            nombre="Pastel guarda ventas",
+            codigo_point="GUARD-SALES",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-guard-sales",
+        )
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 4, 1),
+            month_end=date(2026, 4, 30),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+            metadata={
+                "validation": {"lock_ready": False, "blocking_issues": []},
+                "sales_meta": {
+                    "source": "PointDailySale",
+                    "authoritative": False,
+                    "source_present": True,
+                    "authority_issues": [
+                        "SALES_SYNC_JOB_MISSING",
+                        "OFFICIAL_SALES_REFRESH_REQUIRED",
+                    ],
+                },
+            },
+        )
+        ProductoMonthClosureLine.objects.create(closure=closure, receta_padre=receta)
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-04"})
+
+        expected = (
+            "Ventas: falta job Point del mes",
+            "Ventas: falta actualizar el reporte oficial de Point",
+        )
+        button = re.search(r"<button[^>]*>Bloquear cierre</button>", response.content.decode("utf-8"))
+        self.assertIsNotNone(button)
+        self.assertIn("disabled", button.group(0))
+        for message in expected:
+            self.assertIn(message, response.context["lock_guard_errors"])
+            self.assertContains(response, message)
+        rendered_exceptions = " ".join(row["detail"] for row in response.context["exception_rows"])
+        self.assertNotIn("SALES_SYNC_JOB_MISSING", rendered_exceptions)
+        self.assertNotIn("OFFICIAL_SALES_REFRESH_REQUIRED", rendered_exceptions)
 
     def test_cierre_producto_lock_succeeds_for_admin_when_closure_is_clean(self):
         admin_user = User.objects.create_user(username="admin_cierre", password="pass123")
