@@ -1218,6 +1218,28 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(fact_balance.rows[self.parent.id].sales, Decimal("2"))
         self.assertEqual(fact_balance.sources["sales"]["mode"], "production_facts")
 
+    def test_fact_sales_are_informative_only_without_point_provenance(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "8", datetime(2026, 7, 31, 8))
+        FactProduccionDiaria.objects.create(
+            fecha=date(2026, 7, 4),
+            sucursal=self.sucursal,
+            receta=self.parent,
+            vendido=Decimal("2"),
+        )
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("2"))
+        self.assertEqual(balance.sources["sales"]["mode"], "production_facts")
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn(
+            "SALES_SOURCE_REQUIRES_REVIEW",
+            balance.sources["sales"]["authority_issues"],
+        )
+        self.assertIn("SALES_SOURCE_REQUIRES_REVIEW", balance.issues)
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
     def test_auto_sales_mode_uses_persisted_daily_until_remote_refresh_is_requested(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
@@ -1266,6 +1288,7 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertIsNone(sales["job_id"])
         self.assertFalse(sales["authoritative"])
         self.assertIn("SALES_SYNC_JOB_MISSING", balance.issues)
+        self.assertIn("SALES_SYNC_JOB_MISSING", sales["authority_issues"])
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
     def test_official_daily_sales_partial_and_failed_jobs_are_non_authoritative(self):
@@ -1308,6 +1331,54 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(sales["authoritative"])
         self.assertEqual(sales["official_daily_row_count"], 1)
         self.assertEqual(balance.rows[self.parent.id].status, "COINCIDE")
+
+    def test_complete_official_daily_job_proves_an_authoritative_zero_month_without_rows(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        job.result_summary = {**job.result_summary, "rows_imported": 0}
+        job.save(update_fields=["result_summary", "updated_at"])
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        sales = balance.sources["sales"]
+        self.assertTrue(sales["source_present"])
+        self.assertTrue(sales["authoritative"])
+        self.assertEqual(sales["job_id"], job.id)
+        self.assertEqual(sales["official_daily_row_count"], 0)
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("0"))
+        self.assertNotIn("SALES_SOURCE_MISSING", balance.issues)
+
+    def test_zero_month_requires_explicit_writer_row_count(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        summary = dict(job.result_summary)
+        summary.pop("rows_imported")
+        job.result_summary = summary
+        job.save(update_fields=["result_summary", "updated_at"])
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_COVERAGE_UNPROVEN", balance.issues)
+        self.assertIn(
+            "SALES_SYNC_COVERAGE_UNPROVEN",
+            balance.sources["sales"]["authority_issues"],
+        )
+
+    def test_official_daily_writer_count_must_match_persisted_rows(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        job.result_summary = {**job.result_summary, "rows_imported": 2}
+        job.save(update_fields=["result_summary", "updated_at"])
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "count-mismatch", sync_job=job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertFalse(balance.sources["sales"]["authoritative"])
+        self.assertIn("SALES_SYNC_COVERAGE_UNPROVEN", balance.issues)
 
     def test_official_daily_sales_require_unrestricted_writer_contract_and_proven_coverage(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
@@ -1521,6 +1592,8 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "0", datetime(2026, 7, 31, 8))
         job = self._official_sales_job()
+        job.result_summary = {**job.result_summary, "rows_imported": 31}
+        job.save(update_fields=["result_summary", "updated_at"])
         for day in range(1, 32):
             product = PointProduct.objects.create(
                 external_id=f"daily-query-{day}",

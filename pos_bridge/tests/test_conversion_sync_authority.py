@@ -1,12 +1,18 @@
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointConversionLine, PointSyncJob
-from pos_bridge.services.conversion_sync_service import sync_conversion_lines
+from pos_bridge.services.conversion_sync_service import (
+    _created_report_pk,
+    _normalize_inventory_report_rows,
+    _poll_report,
+    sync_conversion_lines,
+)
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from recetas.models import Receta
 
@@ -37,7 +43,7 @@ class PointConversionRerunAuthorityTests(TestCase):
             }
         ]
 
-    def _sync(self):
+    def _sync(self, *, branch_filter=None):
         client_context = MagicMock()
         client_context.return_value.__enter__.return_value = MagicMock()
         with (
@@ -65,7 +71,11 @@ class PointConversionRerunAuthorityTests(TestCase):
                 ),
             ),
         ):
-            return sync_conversion_lines(date_from=date(2026, 7, 1), date_to=date(2026, 7, 31))
+            return sync_conversion_lines(
+                date_from=date(2026, 7, 1),
+                date_to=date(2026, 7, 31),
+                branch_filter=branch_filter,
+            )
 
     def _conversion_authority(self):
         service = MonthlyPointProductBalanceService()
@@ -124,6 +134,136 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertFalse(metadata["authoritative"])
         self.assertIn("CONVERSION_SYNC_COUNT_MISMATCH", metadata["authority_issues"])
 
+    def test_filtered_retry_does_not_rebind_full_month_rows_or_replace_its_authority(self):
+        self._sync()
+        full_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+
+        filtered = self._sync(branch_filter=self.branch.external_id)
+        filtered_job = PointSyncJob.objects.order_by("-id").first()
+        line = PointConversionLine.objects.get(source_hash="conversion-rerun-hash")
+        metadata = self._conversion_authority()
+
+        self.assertEqual(filtered["created"], 0)
+        self.assertEqual(filtered["relinked"], 0)
+        self.assertEqual(line.sync_job_id, full_job.id)
+        self.assertNotEqual(filtered_job.id, full_job.id)
+        self.assertTrue(metadata["authoritative"])
+        self.assertEqual(metadata["selected_sync_job_ids"], (full_job.id,))
+        self.assertEqual(metadata["coverage_scope"], "all_branches")
+
+    def test_filtered_rows_after_full_month_are_informative_and_do_not_change_canonical_total(self):
+        self._sync()
+        full_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+        self.report_rows = [
+            {
+                **self.report_rows[0],
+                "PK_Movimiento": "MOV-RERUN-FILTERED-ONLY",
+                "Cantidad": "9",
+            }
+        ]
+
+        self._sync(branch_filter=self.branch.external_id)
+        filtered_job = PointSyncJob.objects.order_by("-id").first()
+        service = MonthlyPointProductBalanceService()
+        service._build_conversion_cache = {}
+        rows, _unresolved, _movements, _counts, metadata = service._load_conversions(
+            month_start=date(2026, 7, 1)
+        )
+
+        self.assertTrue(metadata["authoritative"])
+        self.assertEqual(metadata["selected_sync_job_ids"], (full_job.id,))
+        self.assertIn(filtered_job.id, metadata["ignored_restricted_sync_job_ids"])
+        self.assertEqual(rows[self.recipe.id].conversion_in, 4)
+
+    def test_invalid_quantity_and_date_are_omitted_and_make_job_partial(self):
+        self.report_rows = [
+            {**self.report_rows[0], "PK_Movimiento": "BAD-QTY", "Cantidad": "no-es-numero"},
+            {**self.report_rows[0], "PK_Movimiento": "BAD-DATE", "Fecha": "fecha-imposible"},
+        ]
+
+        result = self._sync()
+        job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+
+        self.assertEqual(PointConversionLine.objects.count(), 0)
+        self.assertEqual(result["invalid_rows"], 2)
+        self.assertEqual(result["invalid_quantity_rows"], 1)
+        self.assertEqual(result["invalid_date_rows"], 1)
+        self.assertEqual(
+            result["issues"],
+            ["CONVERSION_INVALID_QUANTITY", "CONVERSION_INVALID_DATE"],
+        )
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
+        self.assertFalse(self._conversion_authority()["authoritative"])
+
+    def test_report_normalization_preserves_blank_quantity_for_validation(self):
+        records = [
+            {"A": "SUCURSAL", "B": "PRODUCTO", "C": "CANTIDAD", "D": "FECHA"},
+            {"A": self.branch.name, "B": self.recipe.nombre, "C": None, "D": "2026-07-15"},
+        ]
+
+        rows = _normalize_inventory_report_rows(records)
+
+        self.assertEqual(len(rows), 1)
+        self.assertIn("CANTIDAD", rows[0])
+        self.assertIsNone(rows[0]["CANTIDAD"])
+
+    def test_poll_report_never_falls_back_to_historical_generic_report(self):
+        created_after = timezone.make_aware(datetime(2026, 7, 1, 12, 0, 0))
+        response = MagicMock()
+        response.json.return_value = [
+            {
+                "PK_Reporte": "STALE",
+                "Nombre_reporte": "MOVIMIENTOS DE INVENTARIOS",
+                "Modulo": "movimientos",
+                "Status": 1,
+                "Fecha_creacion": "2026-06-30 10:00:00",
+            }
+        ]
+        client = MagicMock()
+        client._request.return_value = response
+
+        with (
+            patch("pos_bridge.services.conversion_sync_service.POLL_MAX_ATTEMPTS", 1),
+            patch("pos_bridge.services.conversion_sync_service.POLL_INTERVAL_SECONDS", 0),
+            self.assertRaises(TimeoutError),
+        ):
+            _poll_report(client, created_after=created_after)
+
+    def test_poll_report_accepts_the_exact_report_id_returned_by_creation(self):
+        created_after = timezone.make_aware(datetime(2026, 7, 1, 12, 0, 0))
+        requested = {
+            "PK_Reporte": "REQUESTED",
+            "Nombre_reporte": "MOVIMIENTOS DE INVENTARIOS",
+            "Modulo": "movimientos",
+            "Status": 1,
+            "Fecha_creacion": "2026-06-30 10:00:00",
+        }
+        response = MagicMock()
+        response.json.return_value = [
+            {**requested, "PK_Reporte": "OTHER"},
+            requested,
+        ]
+        client = MagicMock()
+        client._request.return_value = response
+
+        with (
+            patch("pos_bridge.services.conversion_sync_service.POLL_MAX_ATTEMPTS", 1),
+            patch("pos_bridge.services.conversion_sync_service.POLL_INTERVAL_SECONDS", 0),
+        ):
+            selected = _poll_report(
+                client,
+                created_after=created_after,
+                expected_report_pk="REQUESTED",
+            )
+
+        self.assertEqual(selected["PK_Reporte"], "REQUESTED")
+
+    def test_create_report_pk_accepts_scalar_json_response(self):
+        response = MagicMock()
+        response.json.return_value = "REQUESTED"
+
+        self.assertEqual(_created_report_pk(response), "REQUESTED")
+
     def test_failed_success_transition_rolls_back_relinks_and_new_rows(self):
         first_result = self._sync()
         first_job = PointSyncJob.objects.get(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
@@ -161,6 +301,7 @@ class PointConversionRerunAuthorityTests(TestCase):
         self.assertFalse(PointConversionLine.objects.filter(sync_job=failed_job).exists())
 
         metadata = self._conversion_authority()
-        self.assertEqual(metadata["selected_sync_job_ids"], (failed_job.id,))
-        self.assertIn("CONVERSION_SYNC_JOB_FAILED", metadata["authority_issues"])
-        self.assertIn("CONVERSION_SYNC_JOB_MIXED", metadata["authority_issues"])
+        self.assertEqual(metadata["selected_sync_job_ids"], (first_job.id,))
+        self.assertTrue(metadata["authoritative"])
+        self.assertNotIn("CONVERSION_SYNC_JOB_FAILED", metadata["authority_issues"])
+        self.assertNotIn("CONVERSION_SYNC_JOB_MIXED", metadata["authority_issues"])

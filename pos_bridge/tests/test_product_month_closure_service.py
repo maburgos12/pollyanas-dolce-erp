@@ -1591,6 +1591,10 @@ class ProductMonthClosureServiceTests(TestCase):
                 "source": "POINT_OFFICIAL_REPORT",
                 "start_date": "2025-09-01",
                 "end_date": "2025-09-30",
+                "branch_filter": "",
+                "credito_scopes": ["null"],
+                "excluded_ranges": [],
+                "max_days": None,
             },
             error_message="Backfill oficial completado con 1 branch-day(s) omitidos por error.",
         )
@@ -1624,7 +1628,9 @@ class ProductMonthClosureServiceTests(TestCase):
         closure = self.service.build(month="2025-09")
 
         validation = dict((closure.metadata or {}).get("validation") or {})
+        sales_meta = dict((closure.metadata or {}).get("sales_meta") or {})
         self.assertFalse(validation.get("lock_ready"))
         self.assertIn("MONTH_SOURCE_INCOMPLETE", validation.get("blocking_issues") or [])
+        self.assertIn("SALES_SYNC_JOB_PARTIAL", sales_meta.get("authority_issues") or [])
         with self.assertRaises(ProductMonthClosureError):
             self.service.lock(closure=closure, reason="test")

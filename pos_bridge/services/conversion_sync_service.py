@@ -43,6 +43,27 @@ def _parse_json_response(response, *, default):
             return default
 
 
+def _created_report_pk(response) -> str:
+    try:
+        payload = response.json()
+    except (AttributeError, TypeError, ValueError):
+        try:
+            payload = json.loads(str(getattr(response, "text", "") or ""))
+        except (TypeError, ValueError):
+            return ""
+    if isinstance(payload, (str, int)):
+        return str(payload).strip()
+    candidates = payload if isinstance(payload, list) else [payload]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("PK_Reporte", "pkReporte", "pk_reporte", "id"):
+            value = str(candidate.get(key) or "").strip()
+            if value:
+                return value
+    return ""
+
+
 def _first_value(row: dict, *names: str):
     normalized = {normalize_text(str(key)): value for key, value in row.items()}
     for name in names:
@@ -67,6 +88,18 @@ def _decimal(value) -> Decimal:
         return Decimal("0")
 
 
+def _required_decimal(value) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, Decimal):
+        return value
+    raw = str(value).strip().replace("$", "").replace(",", "")
+    try:
+        return Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None
+
+
 def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
     header_index = None
     for index, record in enumerate(records):
@@ -85,17 +118,17 @@ def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
     }
     rows = []
     for record in records[header_index + 1 :]:
-        row = {
-            label: record.get(column)
-            for column, label in column_labels.items()
-            if record.get(column) is not None and str(record.get(column)).strip()
-        }
-        if not row:
+        row = {label: record.get(column) for column, label in column_labels.items()}
+        if not any(value is not None and str(value).strip() for value in row.values()):
             continue
-        marker = " ".join(str(value).strip().upper() for value in row.values())
+        marker = " ".join(
+            str(value).strip().upper()
+            for value in row.values()
+            if value is not None
+        )
         if "TOTAL POR" in marker or marker.startswith("TOTAL"):
             continue
-        if not row.get("SUCURSAL") or not row.get("PRODUCTO") or row.get("CANTIDAD") is None:
+        if not row.get("SUCURSAL") or not row.get("PRODUCTO"):
             continue
         rows.append(row)
     return rows
@@ -103,7 +136,7 @@ def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
 
 def _coerce_datetime(value, *, default_date: date):
     if value in (None, ""):
-        dt = datetime.combine(default_date, datetime_time.min)
+        return None
     elif isinstance(value, datetime):
         dt = value
     elif isinstance(value, date):
@@ -113,7 +146,7 @@ def _coerce_datetime(value, *, default_date: date):
         if pd.isna(parsed):
             parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
         if pd.isna(parsed):
-            dt = datetime.combine(default_date, datetime_time.min)
+            return None
         else:
             dt = parsed.to_pydatetime()
     if timezone.is_naive(dt):
@@ -219,7 +252,13 @@ def _report_is_ready(report: dict) -> bool:
     return status in {True, 1, 2}
 
 
-def _poll_report(client: PointHttpSessionClient, *, created_after) -> dict:
+def _poll_report(
+    client: PointHttpSessionClient,
+    *,
+    created_after,
+    expected_report_pk: str = "",
+) -> dict:
+    freshness_floor = created_after.replace(microsecond=0)
     for attempt in range(POLL_MAX_ATTEMPTS):
         time.sleep(POLL_INTERVAL_SECONDS)
         response = client._request("GET", "/Report/get_ReporteLargobyFecha")
@@ -229,13 +268,17 @@ def _poll_report(client: PointHttpSessionClient, *, created_after) -> dict:
             name = str(report.get("Nombre_reporte") or "").upper()
             module = str(report.get("Modulo") or "").lower()
             if "movimiento" in module and "MOVIMIENTOS" in name and _report_is_ready(report):
+                report_pk = str(report.get("PK_Reporte") or "").strip()
+                if expected_report_pk and report_pk == expected_report_pk:
+                    logger.info("Reporte conversion solicitado listo en intento %s: %s", attempt + 1, report_pk)
+                    return report
                 created_at = _coerce_datetime(report.get("Fecha_creacion"), default_date=created_after.date())
-                candidates.append((created_at, report))
-        recent = [item for item in candidates if item[0] >= created_after]
-        selected = (recent or candidates)
-        if selected:
-            selected.sort(key=lambda item: item[0], reverse=True)
-            report = selected[0][1]
+                if created_at is not None:
+                    candidates.append((created_at, report))
+        recent = [item for item in candidates if not expected_report_pk and item[0] >= freshness_floor]
+        if recent:
+            recent.sort(key=lambda item: item[0], reverse=True)
+            report = recent[0][1]
             logger.info("Reporte conversion listo en intento %s: %s", attempt + 1, report.get("PK_Reporte"))
             return report
     raise TimeoutError(f"Reporte de conversión no estuvo listo tras {POLL_MAX_ATTEMPTS} intentos")
@@ -275,7 +318,11 @@ def sync_conversion_lines(
             created_after = timezone.now()
             create_response = _create_report(client, date_from=date_from, date_to=date_to)
             logger.info("Reporte conversion disparado: %s", create_response.text[:200])
-            report = _poll_report(client, created_after=created_after)
+            report = _poll_report(
+                client,
+                created_after=created_after,
+                expected_report_pk=_created_report_pk(create_response),
+            )
             pk_reporte = str(report.get("PK_Reporte") or "").strip()
             if not pk_reporte:
                 raise ValueError("Point no devolvió PK_Reporte para descargar conversiones.")
@@ -288,9 +335,28 @@ def sync_conversion_lines(
         skipped = 0
         relinked = 0
         skipped_unmatched_branch = 0
+        invalid_rows = 0
+        invalid_quantity_rows = 0
+        invalid_date_rows = 0
 
         with transaction.atomic():
             for row in rows:
+                movement_at = _coerce_datetime(
+                    _first_value(row, "Fecha", "FechaMovimiento", "Fecha Movimiento", "Fecha_creacion"),
+                    default_date=date_from,
+                )
+                quantity = _required_decimal(_first_value(row, "Cantidad", "Qty", "Unidades"))
+                row_invalid = False
+                if movement_at is None:
+                    invalid_date_rows += 1
+                    row_invalid = True
+                if quantity is None:
+                    invalid_quantity_rows += 1
+                    row_invalid = True
+                if row_invalid:
+                    invalid_rows += 1
+                    continue
+
                 branch = _resolve_branch(row, branch_map)
                 if branch is None:
                     skipped_unmatched_branch += 1
@@ -314,7 +380,7 @@ def sync_conversion_lines(
                 if existing is not None:
                     skipped += 1
                     movement_date = timezone.localtime(existing.movement_at).date()
-                    if existing.branch_id == branch.id and date_from <= movement_date <= date_to:
+                    if not branch_filter_norm and existing.branch_id == branch.id and date_from <= movement_date <= date_to:
                         existing.sync_job = job
                         existing.save(update_fields=["sync_job", "updated_at"])
                         relinked += 1
@@ -327,13 +393,10 @@ def sync_conversion_lines(
                     sync_job=job,
                     movement_external_id=str(_first_value(row, "PK_Movimiento", "Movimiento", "id", "ID") or "")[:40],
                     source_hash=source_hash,
-                    movement_at=_coerce_datetime(
-                        _first_value(row, "Fecha", "FechaMovimiento", "Fecha Movimiento", "Fecha_creacion"),
-                        default_date=date_from,
-                    ),
+                    movement_at=movement_at,
                     item_name=str(_first_value(row, "Producto", "Articulo", "Artículo", "Descripcion", "Descripción") or "")[:250],
                     item_code=str(_first_value(row, "Codigo", "Código", "CodigoProducto", "Código Producto", "Clave") or "")[:80],
-                    quantity=_decimal(_first_value(row, "Cantidad", "Qty", "Unidades")),
+                    quantity=quantity,
                     unit=str(_first_value(row, "Unidad", "UM", "Medida") or "")[:40],
                     unit_cost=_decimal(_first_value(row, "CostoUnitario", "Costo Unitario", "Costo")),
                     total_cost=_decimal(_first_value(row, "CostoTotal", "Costo Total", "Importe", "Total")),
@@ -350,10 +413,21 @@ def sync_conversion_lines(
                 "skipped": skipped,
                 "relinked": relinked,
                 "skipped_unmatched_branch": skipped_unmatched_branch,
+                "invalid_rows": invalid_rows,
+                "invalid_quantity_rows": invalid_quantity_rows,
+                "invalid_date_rows": invalid_date_rows,
+                "issues": [
+                    issue
+                    for issue, count in (
+                        ("CONVERSION_INVALID_QUANTITY", invalid_quantity_rows),
+                        ("CONVERSION_INVALID_DATE", invalid_date_rows),
+                    )
+                    if count
+                ],
                 "total_rows": len(rows),
                 "report_pk": pk_reporte,
             }
-            job.status = PointSyncJob.STATUS_SUCCESS
+            job.status = PointSyncJob.STATUS_PARTIAL if invalid_rows else PointSyncJob.STATUS_SUCCESS
             job.finished_at = timezone.now()
             job.result_summary = result
             job.save(update_fields=["status", "finished_at", "result_summary", "updated_at"])

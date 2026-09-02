@@ -980,7 +980,15 @@ class MonthlyPointProductBalanceService:
         def unrestricted(job):
             return not str((job.parameters or {}).get("branch_filter") or "").strip()
 
-        selected = jobs[0]
+        if family == "conversions":
+            unrestricted_success_jobs = [
+                job for job in jobs if unrestricted(job) and job.status == PointSyncJob.STATUS_SUCCESS
+            ]
+            selected = unrestricted_success_jobs[0] if unrestricted_success_jobs else jobs[0]
+            restricted_job_ids = {job.id for job in jobs if not unrestricted(job)}
+        else:
+            selected = jobs[0]
+            restricted_job_ids = set()
         issues: list[str] = []
         if selected.status == PointSyncJob.STATUS_FAILED:
             issues.append(f"{prefix}_SYNC_JOB_FAILED")
@@ -1007,7 +1015,8 @@ class MonthlyPointProductBalanceService:
                     skipped = summary.get("skipped")
                     relinked = summary.get("relinked", 0 if summary.get("skipped") in (0, "0") else None)
                     unmatched = summary.get("skipped_unmatched_branch")
-                    if any(value is None for value in (created, skipped, relinked, unmatched)) or not summary.get(
+                    invalid = summary.get("invalid_rows", 0)
+                    if any(value is None for value in (created, skipped, relinked, unmatched, invalid)) or not summary.get(
                         "report_pk"
                     ):
                         issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
@@ -1017,6 +1026,7 @@ class MonthlyPointProductBalanceService:
                             skipped = int(skipped)
                             relinked = int(relinked)
                             unmatched = int(unmatched)
+                            invalid = int(invalid)
                         except (TypeError, ValueError):
                             issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
                         else:
@@ -1024,7 +1034,7 @@ class MonthlyPointProductBalanceService:
                                 relinked < 0
                                 or relinked > skipped
                                 or skipped != relinked
-                                or expected_count != created + skipped + unmatched
+                                or expected_count != created + skipped + unmatched + invalid
                                 or bound_count != created + relinked
                             ):
                                 issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
@@ -1033,7 +1043,11 @@ class MonthlyPointProductBalanceService:
                 elif expected_count != bound_count:
                     issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
 
-        foreign_job_ids = {job_id for job_id in row_job_ids if job_id != selected.id}
+        foreign_job_ids = {
+            job_id
+            for job_id in row_job_ids
+            if job_id != selected.id and job_id not in restricted_job_ids
+        }
         if foreign_job_ids:
             issues.append(f"{prefix}_SYNC_JOB_MIXED")
         issues = list(dict.fromkeys(issues))
@@ -1047,6 +1061,7 @@ class MonthlyPointProductBalanceService:
             "coverage_start": parameters.get(config["start_key"]),
             "coverage_end": parameters.get(config["end_key"]),
             "rows_bound_to_job": sum(job_id == selected.id for job_id in row_job_ids),
+            "ignored_restricted_sync_job_ids": tuple(sorted(restricted_job_ids)),
             "authority_issues": tuple(issues),
         }
 
@@ -1395,18 +1410,19 @@ class MonthlyPointProductBalanceService:
         selection_reason: str = "",
         authoritative: bool = True,
     ):
+        daily_authority_unresolved: list[MonthlyPointUnresolvedMovement] = []
         if include_daily:
             daily, daily_unresolved, daily_rows_read, daily_rows = self._load_daily_sales(
                 month_start=month_start,
                 month_end=month_end,
             )
-            if daily_rows_read:
-                daily_authoritative, daily_evidence, daily_authority_unresolved = self._validate_official_daily_sales_authority(
-                    month_start=month_start,
-                    month_end=month_end,
-                    official_daily_row_count=daily_rows_read,
-                    daily_rows=daily_rows,
-                )
+            daily_authoritative, daily_evidence, daily_authority_unresolved = self._validate_official_daily_sales_authority(
+                month_start=month_start,
+                month_end=month_end,
+                official_daily_row_count=daily_rows_read,
+                daily_rows=daily_rows,
+            )
+            if daily_rows_read or daily_authoritative:
                 return daily, self._sales_meta(
                     {
                         "source": OFFICIAL_POINT_DAILY_SOURCE,
@@ -1423,6 +1439,10 @@ class MonthlyPointProductBalanceService:
                     authoritative=authoritative and daily_authoritative,
                 ), daily_unresolved + daily_authority_unresolved
 
+        daily_authority_issues = tuple(
+            dict.fromkeys(item.issue for item in daily_authority_unresolved)
+        )
+
         facts, facts_present, fact_unresolved, fact_rows_read = self._load_fact_values(
             month_start=month_start,
             month_end=month_end,
@@ -1430,6 +1450,15 @@ class MonthlyPointProductBalanceService:
             source="fact_sales",
         )
         if facts_present:
+            fact_review = MonthlyPointUnresolvedMovement(
+                source="sales_authority",
+                movement_id=f"{month_start:%Y-%m}",
+                item_code="",
+                item_name="FactProduccionDiaria es referencia operativa y no prueba ventas Point.",
+                quantity=ZERO,
+                issue=ISSUE_SALES_SOURCE_REQUIRES_REVIEW,
+                movement_date=month_start,
+            )
             return facts, self._sales_meta(
                 {
                     "source": "FactProduccionDiaria",
@@ -1437,13 +1466,18 @@ class MonthlyPointProductBalanceService:
                     "source_present": True,
                     "row_count": fact_rows_read,
                     "unresolved_rows": len(fact_unresolved),
+                    "authority_issues": tuple(
+                        dict.fromkeys(
+                            (*daily_authority_issues, ISSUE_SALES_SOURCE_REQUIRES_REVIEW)
+                        )
+                    ),
                 },
                 configured_source_mode=configured_source_mode,
                 fallback_chain=fallback_chain,
                 selection_reason=selection_reason or "persisted_production_facts",
                 remote_refresh_requested=remote_refresh_requested,
-                authoritative=authoritative,
-            ), fact_unresolved
+                authoritative=False,
+            ), daily_authority_unresolved + [fact_review] + fact_unresolved
 
         rows = list(
             VentaHistorica.objects.filter(
@@ -1482,6 +1516,19 @@ class MonthlyPointProductBalanceService:
             movement_date=month_start,
         )
         bridge_present = bool(rows)
+        bridge_authority_issues = tuple(
+            dict.fromkeys(
+                (
+                    *daily_authority_issues,
+                    *(
+                        (ISSUE_SALES_SOURCE_REQUIRES_REVIEW,)
+                        if bridge_present
+                        else ()
+                    ),
+                    *(item.issue for item in unresolved),
+                )
+            )
+        )
         return values, self._sales_meta(
             {
                 "source": POINT_BRIDGE_SALES_SOURCE,
@@ -1490,13 +1537,14 @@ class MonthlyPointProductBalanceService:
                 "row_count": len(matched_rows),
                 "raw_row_count": len(rows),
                 "unresolved_rows": len(unresolved),
+                "authority_issues": bridge_authority_issues,
             },
             configured_source_mode=configured_source_mode,
             fallback_chain=fallback_chain,
             selection_reason=(selection_reason or "bridge_history_requires_manual_review") if bridge_present else "no_persisted_sales",
             remote_refresh_requested=remote_refresh_requested,
             authoritative=False,
-        ), ([bridge_review] if bridge_present else []) + unresolved
+        ), daily_authority_unresolved + ([bridge_review] if bridge_present else []) + unresolved
 
     @staticmethod
     def _expected_official_sales_branch_days(*, month_start: date, month_end: date) -> set[tuple[str, date]]:
@@ -1564,9 +1612,36 @@ class MonthlyPointProductBalanceService:
         )
         legacy_bridge_row_count = len(bridge_rows)
         selected_row_job_ids = tuple(sorted({row.sync_job_id for row in daily_rows if row.sync_job_id is not None}))
-        jobs_by_id = PointSyncJob.objects.filter(id__in=selected_row_job_ids).only(
-            "id", "job_type", "status", "parameters", "result_summary"
-        ).in_bulk()
+        if selected_row_job_ids:
+            jobs_by_id = PointSyncJob.objects.filter(id__in=selected_row_job_ids).only(
+                "id", "job_type", "status", "parameters", "result_summary"
+            ).in_bulk()
+        else:
+            zero_candidates = list(
+                PointSyncJob.objects.filter(
+                    job_type=PointSyncJob.JOB_TYPE_SALES,
+                    parameters__source="POINT_OFFICIAL_REPORT",
+                    parameters__start_date=month_start.isoformat(),
+                    parameters__end_date=month_end.isoformat(),
+                )
+                .only("id", "job_type", "status", "parameters", "result_summary")
+                .order_by("-started_at", "-id")
+            )
+            zero_job = next(
+                (
+                    candidate
+                    for candidate in zero_candidates
+                    if self._official_sales_job_is_unrestricted(
+                        candidate,
+                        month_start=month_start,
+                        month_end=month_end,
+                    )
+                ),
+                zero_candidates[0] if zero_candidates else None,
+            )
+            jobs_by_id = {zero_job.id: zero_job} if zero_job is not None else {}
+            if zero_job is not None:
+                selected_row_job_ids = (zero_job.id,)
         rejected_provenance: list[dict[str, object]] = []
         issues: list[str] = []
         expected_branch_days = self._expected_official_sales_branch_days(
@@ -1608,9 +1683,14 @@ class MonthlyPointProductBalanceService:
             issues.append(ISSUE_SALES_SYNC_JOB_MIXED)
             rejected_provenance.append({"job_ids": selected_row_job_ids, "reason": "mixed_sync_jobs"})
         job = jobs_by_id.get(selected_row_job_ids[0]) if len(selected_row_job_ids) == 1 else None
-        if job is None and selected_row_job_ids:
+        if job is None:
             issues.append(ISSUE_SALES_SYNC_JOB_MISSING)
-            rejected_provenance.append({"job_ids": selected_row_job_ids, "reason": "unavailable_sync_job"})
+            rejected_provenance.append(
+                {
+                    "job_ids": selected_row_job_ids,
+                    "reason": "unavailable_sync_job" if selected_row_job_ids else "missing_month_job",
+                }
+            )
         elif job is not None:
             if not self._official_sales_job_has_month_contract(job, month_start=month_start, month_end=month_end):
                 issues.append(ISSUE_SALES_SYNC_JOB_MISSING)
@@ -1643,6 +1723,21 @@ class MonthlyPointProductBalanceService:
                             "logged_branch_days": len(logged_branch_days),
                             "summary_branch_days": summary_branch_days,
                             "failed_branch_days": failed_branch_days,
+                        }
+                    )
+                rows_imported_raw = summary.get("rows_imported")
+                try:
+                    rows_imported = int(rows_imported_raw)
+                except (TypeError, ValueError):
+                    rows_imported = None
+                if rows_imported is None or rows_imported != official_daily_row_count:
+                    issues.append(ISSUE_SALES_SYNC_COVERAGE_UNPROVEN)
+                    rejected_provenance.append(
+                        {
+                            "job_id": job.id,
+                            "reason": "writer_row_count_missing_or_mismatch",
+                            "summary_rows_imported": rows_imported_raw,
+                            "persisted_rows": official_daily_row_count,
                         }
                     )
         materialized_bridge_reconciled = False
@@ -1709,6 +1804,7 @@ class MonthlyPointProductBalanceService:
             ),
             "materialized_bridge_reconciled": materialized_bridge_reconciled,
             "bridge_unresolved_row_count": bridge_unresolved_count,
+            "authority_issues": tuple(dict.fromkeys(issues)),
             "rejected_provenance": tuple(rejected_provenance),
         }, unresolved
 
@@ -1830,7 +1926,7 @@ class MonthlyPointProductBalanceService:
     def _load_conversions(self, *, month_start: date):
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)
         month_end = (upper_bound - timedelta(days=1)).date()
-        conversions = list(
+        all_conversions = list(
             PointConversionLine.objects.filter(movement_at__gte=lower_bound, movement_at__lt=upper_bound)
             .only(
                 "id",
@@ -1847,6 +1943,18 @@ class MonthlyPointProductBalanceService:
             )
             .order_by("movement_at", "id")
         )
+        authority = self._validate_month_movement_job(
+            family="conversions",
+            month_start=month_start,
+            month_end=month_end,
+            row_job_ids=[conversion.sync_job_id for conversion in all_conversions],
+        )
+        ignored_restricted_job_ids = set(authority.get("ignored_restricted_sync_job_ids") or ())
+        conversions = [
+            conversion
+            for conversion in all_conversions
+            if conversion.sync_job_id not in ignored_restricted_job_ids
+        ]
         destination_ids = {row.receta_id for row in conversions if row.receta_id is not None}
         equivalences = {
             equivalence.receta_porcion_id: equivalence
@@ -1915,17 +2023,12 @@ class MonthlyPointProductBalanceService:
             source = result.setdefault(source_recipe_id, _MutableBalanceRow())
             source.add("conversion_out", quantity / factor, count_name="conversion_out_rows")
             source.record_origin(origin)
-        authority = self._validate_month_movement_job(
-            family="conversions",
-            month_start=month_start,
-            month_end=month_end,
-            row_job_ids=[conversion.sync_job_id for conversion in conversions],
-        )
         metadata = {
             "source": "PointConversionLine",
             "priority": "point_primary",
             "source_present": bool(conversions) or bool(authority["authoritative"]),
             "rows_read": len(conversions),
+            "raw_rows_read": len(all_conversions),
             "unresolved_rows": len(unresolved_movements) + len(unresolved_conversions),
             **authority,
         }
