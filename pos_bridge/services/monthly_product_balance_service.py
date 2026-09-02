@@ -58,6 +58,7 @@ ISSUE_SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE = "SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE
 ISSUE_SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE = "SNAPSHOT_PRODUCT_COVERAGE_INCOMPLETE"
 ISSUE_SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS = "SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS"
 ISSUE_SNAPSHOT_BRANCH_UNMAPPED = "SNAPSHOT_BRANCH_UNMAPPED"
+ISSUE_SNAPSHOT_BRANCH_OUT_OF_SCOPE = "SNAPSHOT_BRANCH_OUT_OF_SCOPE"
 ISSUE_OFFICIAL_SALES_REFRESH_REQUIRED = "OFFICIAL_SALES_REFRESH_REQUIRED"
 ISSUE_SALES_SOURCE_REQUIRES_REVIEW = "SALES_SOURCE_REQUIRES_REVIEW"
 ISSUE_SALES_SYNC_JOB_MISSING = "SALES_SYNC_JOB_MISSING"
@@ -71,6 +72,7 @@ ISSUE_BRIDGE_UNRESOLVED = "BRIDGE_UNRESOLVED"
 ISSUE_OPENING_MISSING = "OPENING_SNAPSHOT_MISSING"
 ISSUE_CLOSING_MISSING = "CLOSING_SNAPSHOT_MISSING"
 ISSUE_CALCULATED_CLOSING_MISSING = "CALCULATED_CLOSING_MISSING"
+ISSUE_SALES_SOURCE_MISSING = "SALES_SOURCE_MISSING"
 
 OFFICIAL_CATEGORY_REPORT_SOURCE = "POINT_OFFICIAL_MONTHLY_CATEGORY_REPORT"
 OFFICIAL_POINT_DAILY_SOURCE = "/Report/PrintReportes?idreporte=3"
@@ -110,7 +112,7 @@ class MonthlyPointBalanceRow:
     receta_id: int
     opening_point: Decimal | None = None
     production: Decimal = ZERO
-    sales: Decimal = ZERO
+    sales: Decimal | None = None
     waste: Decimal = ZERO
     conversion_in: Decimal = ZERO
     conversion_out: Decimal = ZERO
@@ -171,7 +173,7 @@ class MonthlyPointBalance:
 class _MutableBalanceRow:
     opening_point: Decimal | None = None
     production: Decimal = ZERO
-    sales: Decimal = ZERO
+    sales: Decimal | None = ZERO
     waste: Decimal = ZERO
     conversion_in: Decimal = ZERO
     conversion_out: Decimal = ZERO
@@ -339,6 +341,8 @@ class MonthlyPointProductBalanceService:
                 row.issues.add(ISSUE_MONTH_SOURCE_INCOMPLETE)
         if sales_meta.get("source_present") is False:
             for row in rows.values():
+                row.sales = None
+                row.issues.add(ISSUE_SALES_SOURCE_MISSING)
                 row.issues.add(ISSUE_CALCULATED_CLOSING_MISSING)
 
         frozen_rows = MappingProxyType({receta_id: rows[receta_id].freeze(receta_id) for receta_id in sorted(rows)})
@@ -537,6 +541,25 @@ class MonthlyPointProductBalanceService:
         missing_expected_branches = [
             branch for branch in expected_branches if branch.erp_branch_id not in selected_erp_branch_ids
         ]
+        selected_point_branches_by_erp: dict[int, set[int]] = {}
+        selected_unmapped_branch_ids: set[int] = set()
+        for snapshot in snapshots:
+            erp_branch_id = snapshot.branch.erp_branch_id
+            if erp_branch_id is None:
+                selected_unmapped_branch_ids.add(snapshot.branch_id)
+                continue
+            selected_point_branches_by_erp.setdefault(erp_branch_id, set()).add(snapshot.branch_id)
+        selected_ambiguous_erp_branch_ids = {
+            erp_branch_id
+            for erp_branch_id, point_branch_ids in selected_point_branches_by_erp.items()
+            if len(point_branch_ids) > 1
+        }
+        selected_out_of_scope_branch_ids = {
+            snapshot.branch_id
+            for snapshot in snapshots
+            if snapshot.branch.erp_branch_id is not None
+            and snapshot.branch.erp_branch_id not in expected_erp_branch_ids
+        }
         selected_sync_job_ids = tuple(
             sorted(
                 {snapshot.sync_job_id for snapshot in snapshots},
@@ -550,11 +573,13 @@ class MonthlyPointProductBalanceService:
             selected_sync_jobs.get(selected_sync_job_ids[0]) if len(selected_sync_job_ids) == 1 else None
         )
         sync_parameters = dict(selected_sync_job.parameters or {}) if selected_sync_job is not None else {}
-        sync_job_verified = bool(
+        sync_job_identity_verified = bool(
             selected_sync_job is not None
             and selected_sync_job.job_type == PointSyncJob.JOB_TYPE_INVENTORY
             and selected_sync_job.status == PointSyncJob.STATUS_SUCCESS
+            and "branch_filter" in sync_parameters
             and not str(sync_parameters.get("branch_filter") or "").strip()
+            and "limit_branches" in sync_parameters
             and sync_parameters.get("limit_branches") is None
         )
         job_rows = []
@@ -574,11 +599,13 @@ class MonthlyPointProductBalanceService:
                 continue
             job_point_branches_by_erp.setdefault(erp_branch_id, set()).add(job_row.branch_id)
             job_products_by_erp.setdefault(erp_branch_id, set()).add(job_row.product_id)
-        ambiguous_erp_branch_ids = {
+        job_ambiguous_erp_branch_ids = {
             erp_branch_id
             for erp_branch_id, point_branch_ids in job_point_branches_by_erp.items()
             if len(point_branch_ids) > 1
         }
+        ambiguous_erp_branch_ids = job_ambiguous_erp_branch_ids | selected_ambiguous_erp_branch_ids
+        unmapped_branch_ids = unmapped_job_branch_ids | selected_unmapped_branch_ids
         manifest_sets = [
             job_products_by_erp.get(erp_branch_id, set())
             for erp_branch_id in sorted(expected_erp_branch_ids)
@@ -600,7 +627,7 @@ class MonthlyPointProductBalanceService:
         missing_expected_product_coverage_keys = expected_product_coverage_keys - selected_erp_product_keys
         result_summary = dict(selected_sync_job.result_summary or {}) if selected_sync_job is not None else {}
         count_checks = {
-            "branches_processed": len(expected_erp_branch_ids),
+            "branches_processed": len({job_row.branch_id for job_row in job_rows}),
             "snapshots_created": len(job_rows),
             "products_seen": len(job_rows),
         }
@@ -609,12 +636,20 @@ class MonthlyPointProductBalanceService:
             for key, observed in count_checks.items()
             if key in result_summary and result_summary.get(key) != observed
         }
+        required_count_fields = frozenset(count_checks)
+        missing_count_fields = required_count_fields - result_summary.keys()
+        sync_job_verified = bool(
+            sync_job_identity_verified
+            and not missing_count_fields
+            and not count_mismatches
+        )
         product_manifest_verified = bool(
             sync_job_verified
             and expected_erp_branch_ids
             and not missing_expected_branches
-            and not unmapped_job_branch_ids
+            and not unmapped_branch_ids
             and not ambiguous_erp_branch_ids
+            and not selected_out_of_scope_branch_ids
             and manifest_product_ids
             and identical_product_sets
             and not missing_expected_product_coverage_keys
@@ -623,8 +658,10 @@ class MonthlyPointProductBalanceService:
         snapshot_issues: set[str] = set()
         if ambiguous_erp_branch_ids:
             snapshot_issues.add(ISSUE_SNAPSHOT_BRANCH_ALIAS_AMBIGUOUS)
-        if unmapped_job_branch_ids:
+        if unmapped_branch_ids:
             snapshot_issues.add(ISSUE_SNAPSHOT_BRANCH_UNMAPPED)
+        if selected_out_of_scope_branch_ids:
+            snapshot_issues.add(ISSUE_SNAPSHOT_BRANCH_OUT_OF_SCOPE)
         snapshot_total_ambiguous = bool(snapshot_issues)
         applied_branch_ids: set[int] = set()
         selected_coverage_keys: set[tuple[int, int]] = set()
@@ -699,9 +736,11 @@ class MonthlyPointProductBalanceService:
             "manifest_product_ids": tuple(sorted(manifest_product_ids)),
             "product_manifest_verified": product_manifest_verified,
             "job_count_mismatches": count_mismatches,
+            "job_missing_count_fields": tuple(sorted(missing_count_fields)),
             "snapshot_issues": tuple(sorted(snapshot_issues)),
             "ambiguous_erp_branch_ids": tuple(sorted(ambiguous_erp_branch_ids)),
-            "unmapped_branch_ids": tuple(sorted(unmapped_job_branch_ids)),
+            "unmapped_branch_ids": tuple(sorted(unmapped_branch_ids)),
+            "out_of_scope_branch_ids": tuple(sorted(selected_out_of_scope_branch_ids)),
             "authoritative": bool(
                 snapshots
                 and expected_branches
@@ -760,9 +799,11 @@ class MonthlyPointProductBalanceService:
             "manifest_product_ids": (),
             "product_manifest_verified": False,
             "job_count_mismatches": {},
+            "job_missing_count_fields": ("branches_processed", "products_seen", "snapshots_created"),
             "snapshot_issues": (),
             "ambiguous_erp_branch_ids": (),
             "unmapped_branch_ids": (),
+            "out_of_scope_branch_ids": (),
             "days_from_target": None,
             "snapshot_rows": 0,
             "selected_rows": 0,

@@ -383,6 +383,7 @@ class ProductMonthClosureService:
                     "production": ZERO,
                     "sales_direct": ZERO,
                     "sales_derived": ZERO,
+                    "sales_missing": False,
                     "waste_direct": ZERO,
                     "waste_derived": ZERO,
                     "conversion_in": ZERO,
@@ -432,7 +433,11 @@ class ProductMonthClosureService:
             bucket["production"] += Decimal(raw_row.production) * factor
             bucket["conversion_in"] += Decimal(raw_row.conversion_in) * factor
             bucket["conversion_out"] += Decimal(raw_row.conversion_out) * factor
-            sales = Decimal(raw_row.sales) * factor
+            sales = ZERO
+            if raw_row.sales is None:
+                bucket["sales_missing"] = True
+            else:
+                sales = Decimal(raw_row.sales) * factor
             waste = Decimal(raw_row.waste) * factor
             if is_derived:
                 bucket["sales_derived"] += sales
@@ -456,6 +461,8 @@ class ProductMonthClosureService:
                 issues.add("CLOSING_SNAPSHOT_SCOPE_MISSING")
             if bucket["calculated_missing"]:
                 issues.add("CALCULATED_CLOSING_MISSING")
+            if bucket["sales_missing"]:
+                issues.add("SALES_SOURCE_MISSING")
             if bucket["point_difference_missing"]:
                 issues.add("POINT_DIFFERENCE_MISSING")
             point_difference = None if bucket["point_difference_missing"] else bucket["point_difference"]
@@ -482,6 +489,7 @@ class ProductMonthClosureService:
                     ),
                     "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
                     "point_final_scopes_available": scopes_available,
+                    "sales_source_available": not bool(bucket["sales_missing"]),
                 }
             )
             rows.append(
