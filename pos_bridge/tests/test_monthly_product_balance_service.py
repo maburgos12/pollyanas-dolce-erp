@@ -1682,6 +1682,18 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertIn("SNAPSHOT_BRANCH_COVERAGE_INCOMPLETE", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
 
+    def test_snapshot_without_canonical_branch_manifest_is_not_authoritative(self):
+        self.branch.erp_branch = None
+        self.branch.save(update_fields=["erp_branch"])
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
+
+        balance = self._service()[0].build("2026-07")
+
+        self.assertEqual(balance.sources["opening_snapshot"]["expected_branch_count"], 0)
+        self.assertFalse(balance.sources["opening_snapshot"]["authoritative"])
+        self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
+
     def test_explicit_empty_remote_report_is_blocking_and_falls_back(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
