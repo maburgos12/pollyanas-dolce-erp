@@ -5506,6 +5506,7 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     recent_rows: list[dict[str, object]] = []
     for recent in recent_closures:
         recent_lines = list(recent.lines.all())
+        recent_export_rows = [_product_closure_export_row(line) for line in recent_lines]
         recent_rows.append(
             {
                 "month_label": recent.month_start.strftime("%b %Y").capitalize(),
@@ -5513,9 +5514,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
                 "status": recent.get_status_display(),
                 "tone": _product_closure_status_tone(recent.status),
                 "line_count": len(recent_lines),
-                "ending_inventory": sum(
-                    (Decimal(str(line.inventario_final_teorico or 0)) for line in recent_lines),
-                    Decimal("0"),
+                "ending_inventory": _sum_available_export_values(
+                    recent_export_rows,
+                    "calculated_closing",
                 ),
                 "sales_total": sum(
                     (Decimal(str(line.venta_total_equivalente or 0)) for line in recent_lines),

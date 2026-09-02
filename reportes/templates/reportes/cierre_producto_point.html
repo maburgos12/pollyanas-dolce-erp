@@ -238,7 +238,7 @@
         <article class="bi-list-item {% if row.month_value == selected_month %}is-signal-success{% else %}is-signal-neutral{% endif %}">
           <strong>{{ row.month_label }}</strong>
           <div class="bi-subtle">{{ row.status }} · {{ row.line_count|intcomma }} recetas</div>
-          <div>{{ row.ending_inventory|floatformat:2|intcomma }} final · {{ row.sales_total|floatformat:2|intcomma }} venta</div>
+          <div>{% if row.ending_inventory != None %}{{ row.ending_inventory|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} saldo calculado · {{ row.sales_total|floatformat:2|intcomma }} venta</div>
           <div class="bi-inline-actions">
             <a class="bi-inline-link" href="{% url 'reportes:cierre_producto' %}?month={{ row.month_value }}">Abrir mes</a>
           </div>

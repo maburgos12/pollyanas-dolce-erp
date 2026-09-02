@@ -3494,6 +3494,69 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
         self.assertEqual(values[headers.index("Estado")], "REVISAR_FUENTE")
 
+    def test_real_missing_sales_propagates_sin_dato_through_closure_and_recent_card(self):
+        admin_user = User.objects.create_user(username="admin_missing_sales", password="pass123")
+        admin_group, _ = Group.objects.get_or_create(name="ADMIN")
+        admin_user.groups.add(admin_group)
+        self.client.force_login(admin_user)
+        sucursal = self._create_sucursal("NO-SALES", "Sucursal sin ventas")
+        branch = PointBranch.objects.create(external_id="NO-SALES", name="Sucursal sin ventas", erp_branch=sucursal)
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        receta = Receta.objects.create(
+            nombre="Pastel sin fuente venta",
+            codigo_point="NO-SALES-001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-no-sales-001",
+        )
+        product = PointProduct.objects.create(
+            external_id="NO-SALES-PRODUCT",
+            sku=receta.codigo_point,
+            name=receta.nombre,
+            active=True,
+        )
+        for captured_at in (datetime(2026, 6, 30, 8), datetime(2026, 7, 31, 8)):
+            PointInventorySnapshot.objects.create(
+                branch=branch,
+                product=product,
+                stock=Decimal("5"),
+                captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
+                sync_job=job,
+            )
+
+        response = self.client.post(
+            reverse("reportes:cierre_producto"),
+            {"month": "2026-07", "action": "build"},
+            follow=True,
+        )
+        closure = ProductoMonthClosure.objects.get(month_start=date(2026, 7, 1))
+        line = closure.lines.get(receta_padre=receta)
+
+        self.assertIn("CALCULATED_CLOSING_MISSING", line.metadata["issues"])
+        self.assertIsNone(response.context["total_ending"])
+        self.assertIsNone(response.context["recent_closure_rows"][0]["ending_inventory"])
+        self.assertContains(response, "Sin dato")
+
+        csv_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-07", "export": "csv"}
+        )
+        csv_rows = list(csv.reader(StringIO(csv_response.content.decode("utf-8"))))
+        headers = csv_rows[csv_rows.index([]) + 1]
+        values = csv_rows[csv_rows.index([]) + 2]
+        self.assertEqual(values[headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(values[headers.index("Dif. Point")], "Sin dato")
+
+        xlsx_response = self.client.get(
+            reverse("reportes:cierre_producto"), {"month": "2026-07", "export": "xlsx"}
+        )
+        workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True, read_only=True)
+        xlsx_headers = [cell.value for cell in next(workbook["Detalle"].iter_rows(min_row=1, max_row=1))]
+        xlsx_values = next(workbook["Detalle"].iter_rows(min_row=2, max_row=2, values_only=True))
+        self.assertEqual(xlsx_values[xlsx_headers.index("Saldo calculado")], "Sin dato")
+        self.assertEqual(xlsx_values[xlsx_headers.index("Dif. Point")], "Sin dato")
+
     def test_cierre_producto_historical_export_translates_legacy_sign_and_status_without_rewrite(self):
         receta = Receta.objects.create(
             nombre="Pastel Export Historico",
