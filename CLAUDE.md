@@ -1,4 +1,4 @@
-# CLAUDE.md — Pollyana's Dolce ERP
+# Instrucciones de agentes — Pollyana's Dolce ERP
 
 ## Identidad del proyecto
 Sistema ERP operativo para Pollyana's Dolce, cadena de pastelerías con 9 sucursales en
@@ -83,68 +83,43 @@ cuando el VPS aún corre el código anterior.
 
 ---
 
-## División de trabajo Claude / Codex (regla permanente)
+## Responsabilidad integral de Codex (regla vigente)
 
-Combinación deliberada por costo: Codex (plan alto) absorbe los tokens caros;
-Claude (plan limitado) se reserva para el criterio. Codex está integrado vía el
-plugin `codex@openai-codex` (comandos `/codex:rescue`, `/codex:review`,
-`/codex:adversarial-review`). Requisito: Codex CLI instalado y autenticado
-(`/codex:setup` debe reportar `ready: true`).
+Mauricio trabaja con Codex como agente responsable de principio a fin. Claude ya
+no participa en el flujo y no es un requisito para revisar, aprobar o publicar
+una tarea. No bloquear una entrega por esperar a Claude ni exigir el plugin
+`codex@openai-codex` o sus comandos de delegación.
 
-### Claude = cerebro / orquestador
-- Diseño, decisiones de arquitectura y lógica de negocio (costeo, márgenes,
-  nómina, bonos, MRP — todo lo delicado o irreversible).
-- Preparar rama limpia desde `origin/main`, definir el contrato/approach.
-- Validación final: `check`, `migrate --check`, tests, navegador, deploy en VPS.
-- Commit / PR / deploy SIEMPRE los hace Claude siguiendo el protocolo de abajo.
+### Responsabilidades de Codex
 
-### Codex = talacha pesada (lo que más consume tokens)
-Delegar a Codex cuando el trabajo sea: implementación mecánica repetida, refactor
-masivo en muchos archivos, baterías de tests, migración de patrones, normalización
-de datos, o debugging largo. Codex trabaja sobre el working tree real → SIEMPRE en
-rama aislada, nunca directo sobre algo que pueda tocar producción sin revisar.
+- Diagnosticar, diseñar y ejecutar los cambios autorizados por Mauricio.
+- Preparar una rama y un worktree limpios mediante el ciclo de vida del proyecto.
+- Revisar el diff completo y realizar las pruebas, checks de Django, verificación
+  de migraciones y validación en navegador que correspondan.
+- Realizar commit, PR, merge y despliegue por el flujo oficial cuando estén dentro
+  del alcance autorizado y se hayan satisfecho las validaciones obligatorias.
+- Verificar el resultado en producción antes de declarar terminado un cambio que
+  requiera despliegue; documentar faltantes y bloqueos reales.
+- Si se usan subagentes para implementación o revisión, Codex conserva la
+  responsabilidad de verificar sus resultados. La delegación no sustituye la
+  revisión ni concede permisos adicionales.
 
-**Cómo delega Claude (mecanismo real — esto es lo que de verdad dispara Codex):**
-- Claude NO "teclea" `/codex:rescue`. Esos slash-commands los escribe Mauricio.
-- Cuando Claude decide delegar por su cuenta, invoca la herramienta **Agent** con
-  `subagent_type: "codex:codex-rescue"` y le pasa la tarea como prompt. Ese
-  subagente reenvía el trabajo al runtime de Codex (write-capable por defecto).
-- Si Claude solo describe el reparto pero hace el trabajo él mismo, NO está
-  cumpliendo esta regla. El acto de delegar = una llamada a Agent(codex:codex-rescue).
+### Límites que permanecen vigentes
 
-**Cómo lo dispara Mauricio (garantizado, sin depender del criterio de Claude):**
-- `/codex:rescue <tarea>` → Codex implementa. `/codex:review` → Codex revisa (read-only).
-
-**Trampas que impiden que la regla aplique (verificar si "no funciona"):**
-- El plugin `codex@openai-codex` debe estar instalado y cargado en ESA sesión
-  (`/codex:setup` → `ready: true`; si se acaba de instalar, `/reload-plugins`).
-- Claude debe haberse abierto en un checkout de este repo (cualquier worktree lo
-  trae vía git). Otro repo/carpeta no tiene esta regla.
-- Esta regla debe estar mergeada en `main`; si solo vive en una rama, otras
-  sesiones no la ven.
-
-**Reglas de aislamiento y aviso (aprendidas en producción — NO ignorar):**
-- **Nunca cambiar de rama en el working tree donde Codex está corriendo.** Codex
-  lee/edita esos archivos en vivo; un `git checkout` le quita el piso y el job
-  muere huérfano (estado `running` falso, reporte perdido). Delegar SIEMPRE en un
-  `git worktree` dedicado y no tocar esa carpeta hasta que Codex termine. Ojo:
-  este repo tiene muchas sesiones/worktrees en paralelo que pueden mover la rama
-  del working tree principal solas.
-- **Los jobs en `--background` NO avisan al terminar.** Se consultan a mano con
-  `/codex:status` y se traen con `/codex:result` (o `codex-companion.mjs
-  status|result`). Para tener aviso automático + reporte completo, correr Codex
-  en `--wait` dentro de un background task del harness (ese sí notifica al salir),
-  o montar un poller. Si un job quedó huérfano, limpiarlo con `/codex:cancel`.
-
-### Lo que NO se delega a Codex
-- Lógica que pisa datos de nómina/RRHH/ventas (ver "Datos de usuarios — NUNCA pisar").
-- Migraciones, `.env`, puertos, `settings.py`, push a `main`.
-- La decisión de commitear/mergear/deployar: ese filtro final es de Claude.
-
-### Criterio de enrutamiento
-Tarea acotada y rápida → la hace Claude. Tarea voluminosa, repetitiva o de
-iteración larga → se delega a Codex. Ante la duda sobre algo delicado, lo
-diseña Claude y Codex solo ejecuta la parte mecánica.
+- El cambio de responsable no amplía la autorización de Mauricio ni permite
+  modificar datos operativos, nómina, RRHH, ventas, configuración o producción
+  fuera del alcance solicitado.
+- Se mantienen la aprobación previa para cambios delicados, las reglas de
+  protección de datos, el aislamiento de worktrees y todas las validaciones
+  descritas en este documento.
+- Las migraciones y cambios de configuración siguen sujetos a inspección,
+  autorización y verificación según el protocolo; no se permiten atajos con
+  `.env`, puertos, `settings.py` o push directo a `main`.
+- Nunca cambiar de rama ni reemplazar archivos en el worktree de un agente que
+  siga trabajando. Una tarea mantiene su rama y worktree dedicados.
+- Los trabajos en segundo plano deben supervisarse con el mecanismo disponible y
+  recuperarse sus resultados; no suponer que terminaron ni prometer avisos que el
+  mecanismo no emite.
 
 ---
 
@@ -496,8 +471,8 @@ api/                 → Endpoints REST centralizados (80+)
 
 ## Verificación en navegador
 Cuando la tarea afecte UI, flujos web, formularios, navegación o autenticación,
-validar en navegador real antes de cerrar (Chrome DevTools MCP desde Codex,
-`claude-in-chrome` desde Claude):
+validar en navegador real antes de cerrar con las herramientas de navegador
+disponibles en Codex:
 - Pantallas principales del módulo modificado
 - Formularios: envío, validación, respuesta
 - Errores de consola JavaScript
