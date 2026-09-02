@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
@@ -339,6 +340,17 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
             )
         )
         rendered = self._render(context)
+        slice_row = re.search(
+            r'<tr>\s*<td class="cell-wrap">Rebanada canónica</td>(.*?)</tr>',
+            rendered,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(slice_row)
+        conversion_cells = re.findall(
+            r'<td class="text-end">(.*?)</td>',
+            slice_row.group(1),
+            flags=re.DOTALL,
+        )
         self.assertIn("positivo = Point reporta más", rendered)
         self.assertIn("negativo = Point reporta menos", rendered)
         self.assertIn("cualquier valor distinto de cero requiere revisión", rendered)
@@ -347,6 +359,8 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
             rendered,
         )
         self.assertIn("Origen: equivalencia configurada", rendered)
+        self.assertIn("Origen: equivalencia configurada", conversion_cells[4])
+        self.assertNotIn("Origen: equivalencia configurada", conversion_cells[5])
         self.assertNotIn("Origen: Sin dato", rendered)
 
     def test_sources_and_issues_become_concise_traceable_banners(self):

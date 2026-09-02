@@ -240,6 +240,7 @@
               <span class="muted">Sin dato</span>
               {% else %}
               <span>{{ row.conversion_entrada|floatformat:"-1"|intcomma }}</span>
+              {% if row.conversion_entrada %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
               {% endif %}
             </td>
             <td class="text-end">
@@ -248,7 +249,7 @@
               {% else %}
               <span>{{ row.conversion_salida|floatformat:"-1"|intcomma }}</span>
               {% endif %}
-              {% if row.conversion_entrada or row.conversion_salida %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
+              {% if not row.conversion_entrada and row.conversion_salida %}<small class="muted d-block">Origen: {{ row.conversion_provenance_label }}</small>{% endif %}
             </td>
             <td class="text-end">{% if row.costo_merma is None %}<span class="muted">—</span>{% else %}${{ row.costo_merma|floatformat:2|intcomma }}{% endif %}</td>
             <td class="text-center">
