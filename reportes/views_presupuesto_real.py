@@ -619,6 +619,16 @@ def _entero_post(request: HttpRequest, campo: str, *, default=None):
         raise ValidationError(f"Captura un número válido para {campo.replace('_', ' ')}.") from exc
 
 
+def _mes_cobertura_post(request, campo):
+    valor = (request.POST.get(campo) or "").strip()
+    if not valor:
+        return None
+    try:
+        return date.fromisoformat(valor + "-01")
+    except ValueError as exc:
+        raise ValidationError("Captura los meses de cobertura con formato AAAA-MM.") from exc
+
+
 def _respuesta_gasto(request: HttpRequest, ok: bool, mensaje: str, *, status=200, fragmento="gastos-area"):
     if _wants_json(request):
         payload = {
@@ -676,6 +686,8 @@ def presupuesto_gasto_variable_crear(request: HttpRequest) -> HttpResponse:
             numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
             archivo_soporte=request.POST.get("archivo_soporte") or "",
             notas=request.POST.get("notas") or "",
+            cobertura_mes_inicio=_mes_cobertura_post(request, "cobertura_mes_inicio"),
+            cobertura_mes_fin=_mes_cobertura_post(request, "cobertura_mes_fin"),
         )
     except ValidationError as exc:
         return _error_gasto(request, exc)
@@ -703,6 +715,7 @@ def presupuesto_gasto_recurrente_crear(request: HttpRequest) -> HttpResponse:
             vigencia_inicio=_fecha_post(request, "vigencia_inicio"),
             monto=request.POST.get("monto"),
             dia_vencimiento=_entero_post(request, "dia_vencimiento", default=1),
+            periodicidad_meses=_entero_post(request, "periodicidad_meses", default=1),
             condicion_pago=request.POST.get("condicion_pago") or ObligacionGasto.CONDICION_CONTADO,
             metodo_pago_previsto=request.POST.get("metodo_pago_previsto") or "",
             tipo_credito=request.POST.get("tipo_credito") or "",
@@ -727,6 +740,7 @@ def presupuesto_gasto_recurrente_editar(request: HttpRequest, recurrente_id: int
             vigencia_inicio=_fecha_post(request, "vigencia_inicio"),
             monto=request.POST.get("monto"),
             dia_vencimiento=_entero_post(request, "dia_vencimiento", default=1),
+            periodicidad_meses=_entero_post(request, "periodicidad_meses"),
             condicion_pago=request.POST.get("condicion_pago") or ObligacionGasto.CONDICION_CONTADO,
             metodo_pago_previsto=request.POST.get("metodo_pago_previsto") or "",
             tipo_credito=request.POST.get("tipo_credito") or "",

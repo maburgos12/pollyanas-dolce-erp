@@ -39,6 +39,10 @@
     </div>
   </section>
 
+  {% if not rent.gastos_mensuales.completo %}
+  <p role="status"><strong>Resultado provisional.</strong> Faltan gastos o asignaciones por confirmar. La utilidad, recuperación y ROI mostrados no son definitivos.</p>
+  {% endif %}
+
   <section class="kpi-grid">
     <article class="kpi-card">
       <div class="label">Ventas netas</div>
@@ -65,8 +69,8 @@
         {% if rent.punto_equilibrio_mensual <= 0 %}No calculable{% else %}${{ rent.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}
       </div>
       <div class="sub">
-        {% if rent.gasto_fijo_total <= 0 %}
-        Pendiente: gastos reales no cargados para el periodo.
+        {% if not rent.gastos_mensuales.completo %}
+        Pendiente: fuentes de gastos o costo de personal incompletas.
         {% else %}
         {{ rent.porcentaje_avance_pe }}% cubierto; brecha de ${{ rent.brecha_pe|floatformat:0|intcomma }}.
         {% endif %}
@@ -207,11 +211,11 @@
           <dd>${{ rent.renta|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
-          <dt>Nómina directa</dt>
+          <dt>Personal: nómina y cargas patronales</dt>
           <dd>${{ rent.nomina_directa|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
-          <dt>Servicios luz y agua</dt>
+          <dt>Electricidad y teléfono/internet</dt>
           <dd>${{ rent.servicios_luz_agua|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
@@ -253,6 +257,8 @@
       </dl>
     </article>
   </section>
+
+  {% include "rentabilidad/_gastos_mensuales.html" with gastos=rent.gastos_mensuales %}
 
   <section class="history-table-wrap">
     <div class="history-head">

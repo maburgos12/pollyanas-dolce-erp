@@ -60,16 +60,13 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     from pos_bridge.models.sales import PointDailySale
     from recetas.models import RecetaCostoVersion
     from reportes.models import (
-        GastoOperativoMensual,
-        CentroCosto,
-        CategoriaGasto,
         ProductBusinessRule,
         ProductoReventaCosto,
         ProductoReventaCostoHistoricoMensual,
         ProyectoInversion,
         ProyectoInversionGasto,
     )
-    from rrhh.models import NominaLinea, NominaPeriodo
+    from reportes.services_rentabilidad_mensual import leer_costos_mensuales, aplicar_costos_en_memoria
     from rentabilidad.models_rentabilidad import SucursalRentabilidad
 
     import calendar
@@ -80,6 +77,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     fecha_fin_mes = date(year, month, ultimo_dia)
 
     sucursales = Sucursal.objects.filter(activa=True)
+    costos_mensuales = leer_costos_mensuales(periodo)
 
     for suc in sucursales:
 
@@ -91,41 +89,6 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
         )
         ventas_brutas = ventas_qs.aggregate(t=Sum("gross_amount"))["t"] or Decimal("0")
         descuentos = ventas_qs.aggregate(t=Sum("discount_amount"))["t"] or Decimal("0")
-
-        # ---- GASTOS OPERATIVOS (renta, servicios, mantenimiento) ----
-        # Gastos del centro de costo de esta sucursal, tipo REAL
-        centros_suc = CentroCosto.objects.filter(sucursal=suc)
-        gastos_qs = GastoOperativoMensual.objects.filter(
-            centro_costo__in=centros_suc,
-            periodo__year=year,
-            periodo__month=month,
-            tipo_dato="REAL",
-        )
-        gastos_suc_disponibles = gastos_qs.exists()
-
-        # Clasificar por categoría (ajusta los nombres según tus CategoriaGasto reales)
-        def suma_categoria(keyword):
-            return gastos_qs.filter(
-                categoria_gasto__nombre__icontains=keyword
-            ).aggregate(t=Sum("monto"))["t"] or Decimal("0")
-
-        renta = suma_categoria("renta")
-        servicios = suma_categoria("servicio") + suma_categoria("luz") + suma_categoria("agua")
-        mantenimiento = suma_categoria("mantenimiento")
-        otros_fijos = gastos_qs.exclude(
-            Q(categoria_gasto__nombre__icontains="renta") |
-            Q(categoria_gasto__nombre__icontains="servicio") |
-            Q(categoria_gasto__nombre__icontains="luz") |
-            Q(categoria_gasto__nombre__icontains="agua") |
-            Q(categoria_gasto__nombre__icontains="mantenimiento") |
-            Q(categoria_gasto__nombre__icontains="nomina") |
-            Q(categoria_gasto__nombre__icontains="nómina")
-        ).aggregate(t=Sum("monto"))["t"] or Decimal("0")
-
-        # ---- NÓMINA desde GastoOperativoMensual categoría NOMINA ----
-        nomina_directa = gastos_qs.filter(
-            categoria_gasto__codigo="NOMINA"
-        ).aggregate(t=Sum("monto"))["t"] or Decimal("0")
 
         # ---- COSTO MATERIA PRIMA (historico mensual si existe, fallback por fecha) ----
         from datetime import timedelta
@@ -226,17 +189,6 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
 
         costo_reventa = costo_reventa.quantize(Decimal("0.01"))
 
-        # ---- GASTOS CORPORATIVOS PRORRATEADOS ----
-        # Tomamos gastos de centros de costo CORPORATIVO y los dividimos entre 9 sucursales
-        centros_corp = CentroCosto.objects.filter(tipo="CORPORATIVO")
-        gasto_corp_total = GastoOperativoMensual.objects.filter(
-            centro_costo__in=centros_corp,
-            periodo__year=year,
-            periodo__month=month,
-            tipo_dato="REAL",
-        ).aggregate(t=Sum("monto"))["t"] or Decimal("0")
-        admin_prorrateado = (gasto_corp_total / Decimal("9")).quantize(Decimal("0.01"))
-
         # ---- INVERSIÓN INICIAL Y FECHA DE APERTURA DESDE PROYECTOS ----
         inversion_total = ProyectoInversionGasto.objects.filter(
             proyecto__sucursal_relacionada=suc,
@@ -267,30 +219,14 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             "inversion_inicial": inversion_total,
             "fecha_apertura": fecha_apertura_suc,
         }
-        if gastos_suc_disponibles:
-            defaults.update({
-                "renta": renta,
-                "nomina_directa": nomina_directa,
-                "servicios_luz_agua": servicios,
-                "mantenimiento": mantenimiento,
-                "gastos_admin_prorrateados": admin_prorrateado,
-                "otros_gastos_fijos": otros_fijos,
-            })
-        else:
-            logger.warning(
-                "[Rentabilidad] %s %s sin GastoOperativoMensual REAL; "
-                "se preservan gastos fijos previos si existen",
-                suc.nombre,
-                periodo,
+        with transaction.atomic():
+            obj, created = SucursalRentabilidad.objects.update_or_create(
+                sucursal=suc, periodo=fecha_inicio_mes, defaults=defaults,
             )
-
-        obj, created = SucursalRentabilidad.objects.update_or_create(
-            sucursal=suc,
-            periodo=fecha_inicio_mes,
-            defaults=defaults,
-        )
-        obj.calcular_estado()
-        obj.save()
+            resumen_gastos = aplicar_costos_en_memoria(obj, costos_mensuales)
+            obj.save()
+        if not resumen_gastos["completo"]:
+            logger.warning("[Rentabilidad] %s %s: fuentes incompletas; PE no calculable", suc.nombre, periodo)
         logger.info(f"[Rentabilidad] {suc.nombre} {periodo} — {obj.estado}")
 
     logger.info(f"[RentabilidadTask] Completado periodo {periodo.strftime('%B %Y')}")

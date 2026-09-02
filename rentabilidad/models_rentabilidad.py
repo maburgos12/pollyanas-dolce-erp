@@ -125,6 +125,8 @@ class SucursalRentabilidad(models.Model):
         PE = Gastos Fijos / (1 - (Costos Variables / Ventas Netas))
         Cuánto hay que vender para cubrir todos los costos.
         """
+        if self.fuente_gastos_incompleta:
+            return Decimal("0")
         if self.ventas_netas == 0:
             return Decimal("0")
         ratio_cv = self.costo_variable_total / self.ventas_netas
@@ -280,11 +282,22 @@ class SucursalRentabilidad(models.Model):
     def __str__(self):
         return f"{self.sucursal} — {self.periodo.strftime('%b %Y')} — {self.get_estado_display()}"
 
+    @property
+    def fuente_gastos_incompleta(self):
+        verificada = getattr(self, "_fuente_gastos_completa", None)
+        return verificada is False or (
+            verificada is None and self.pk is not None and self.estado == EstadoRentabilidad.SIN_DATOS
+        )
+
     def calcular_estado(self):
         """
         Clasificación por reglas deterministas.
         El agente IA complementa con contexto cualitativo.
         """
+        if self.fuente_gastos_incompleta:
+            self.estado = EstadoRentabilidad.SIN_DATOS
+            self.alerta_nivel = 2
+            return self.estado
         pct = float(self.porcentaje_avance_pe)
         util = float(self.utilidad_operativa)
         roi  = float(self.roi_anualizado or 0)

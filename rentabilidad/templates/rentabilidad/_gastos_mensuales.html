@@ -1,0 +1,45 @@
+{% load humanize %}
+<section class="panel" aria-labelledby="gastos-mensuales-titulo">
+  <div class="panel-header">
+    <div>
+      <h2 class="panel-title" id="gastos-mensuales-titulo">Gastos recurrentes y personal</h2>
+      <p class="panel-subtitle">Costo del mes por fuente ERP. El cargo original y sus pagos se conservan por separado.</p>
+    </div>
+  </div>
+  <div class="ia-box">
+  {% if not gastos.completo %}
+  <p role="status"><strong>Cobertura incompleta · punto de equilibrio no calculable.</strong> Los importes disponibles son parciales; no representan todavía el costo completo de la sucursal.</p>
+  {% endif %}
+  {% if gastos.campos_previos_conservados %}
+  <p>Hay importes previos conservados porque falta su fuente actual. No se consideran confirmados para este mes.</p>
+  {% endif %}
+  </div>
+  <div class="history-table-wrap" role="region" tabindex="0" aria-label="Desglose mensual de gastos; tabla desplazable">
+    <table class="history-table">
+      <caption>Importes mensuales identificados: ${{ gastos.total|floatformat:2|intcomma }}</caption>
+      <thead><tr><th scope="col">Concepto y origen</th><th scope="col">Cargo y cobertura</th><th scope="col">Costo del mes</th><th scope="col">Estado</th></tr></thead>
+      <tbody>
+        {% for fila in gastos.filas %}
+        <tr>
+          <td><strong>{{ fila.familia_display }}</strong><div>{{ fila.concepto }}</div><small>{{ fila.origen }} #{{ fila.registro_id }}{% if fila.regla_id %} · regla #{{ fila.regla_id }}{% endif %}</small></td>
+          <td>${{ fila.monto_original|floatformat:2|intcomma }}<div>{{ fila.cobertura_inicio|date:"Y-m" }} a {{ fila.cobertura_fin|date:"Y-m" }}</div>{% if fila.porcentaje %}<small>Asignación: {{ fila.porcentaje|floatformat:2 }}%</small>{% endif %}</td>
+          <td class="num">${{ fila.monto_mensual|floatformat:2|intcomma }}</td>
+          <td>{{ fila.estado }}{% if fila.detalle %}<div>{{ fila.detalle }}</div>{% endif %}
+            {% if fila.soporte_url %}<div><a href="{{ fila.soporte_url }}" rel="noopener noreferrer">Ver soporte original</a></div>{% elif fila.soporte_referencia %}<small>Soporte registrado: {{ fila.soporte_referencia }}</small>{% endif %}
+            {% if fila.version_recurrente_id %}<div><small>Versión recurrente #{{ fila.version_recurrente_id }}</small></div>{% endif %}
+            {% if fila.vigencia_inicio %}<div><small>Vigencia: {{ fila.vigencia_inicio|date:"Y-m-d" }}{% if fila.vigencia_fin %} a {{ fila.vigencia_fin|date:"Y-m-d" }}{% endif %}</small></div>{% endif %}
+            {% if fila.soporte.obligacion_id %}<small>Obligación #{{ fila.soporte.obligacion_id }} · {{ fila.soporte.estado_pago }}</small>{% endif %}
+            {% if fila.soporte.pagos %}<details><summary>Pagos del cargo (no se suman al costo)</summary><ul>{% for pago in fila.soporte.pagos %}<li>{{ pago.fecha_pago }} · ${{ pago.monto|floatformat:2|intcomma }}</li>{% endfor %}</ul></details>{% endif %}
+          </td>
+        </tr>
+        {% empty %}<tr><td colspan="4">No hay importes mensuales trazables. Revisa los pendientes; no equivale a gasto cero.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if gastos.pendientes %}
+  <details open>
+    <summary>Falta confirmar · {{ gastos.pendientes|length }} pendiente{{ gastos.pendientes|length|pluralize:"s" }}</summary>
+    <ul>{% for pendiente in gastos.pendientes %}<li><strong>{{ pendiente.concepto }}</strong>: {{ pendiente.detalle }}{% if pendiente.registro_id %} <small>({{ pendiente.origen }} #{{ pendiente.registro_id }})</small>{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>
