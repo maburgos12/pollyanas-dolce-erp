@@ -335,9 +335,59 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         rendered = self._render(context)
         self.assertIn("Conversiones Point: PointConversionLine", rendered)
         self.assertIn("Autoridad Point: Verificada", rendered)
-        self.assertIn("Cierres operativos Point: 2026-07-31 → 2026-08-31", rendered)
+        self.assertIn("Cierres Point · Inicial: 31/07/2026 · Final: 31/08/2026", rendered)
         self.assertIn("Origen: Point", rendered)
         self.assertNotIn('title="Origen de conversión:', rendered)
+
+    def test_period_selector_applies_immediately_and_names_the_loaded_period(self):
+        context, _ = self._context(
+            canonical_balance(MonthlyPointBalanceRow(receta_id=self.parent.id, status="COINCIDE"))
+        )
+
+        rendered = self._render(context)
+
+        self.assertIn('data-period-autosubmit', rendered)
+        self.assertIn('Periodo mostrado: Agosto 2026', rendered)
+        self.assertIn('requestSubmit()', rendered)
+        self.assertIn('styles.css?v=20260903-report-point-v1', rendered)
+
+    def test_partial_point_data_is_summarized_without_exposing_technical_wall(self):
+        sources = canonical_balance().sources
+        sources["opening_snapshot"].update({
+            "authoritative": False,
+            "source_present": False,
+            "effective_date": None,
+            "target_date": date(2026, 7, 31),
+            "authority_issues": ("SNAPSHOT_SYNC_JOB_MISSING",),
+        })
+        sources["closing_snapshot"].update({
+            "authoritative": False,
+            "source_present": True,
+            "effective_date": date(2026, 8, 31),
+            "target_date": date(2026, 8, 31),
+            "authority_issues": ("SNAPSHOT_SYNC_JOB_MISSING",),
+        })
+        balance = canonical_balance(
+            MonthlyPointBalanceRow(
+                receta_id=self.parent.id,
+                closing_point=Decimal("22"),
+                status="REVISAR_FUENTE",
+            ),
+            sources=sources,
+            warnings=("No hay cierre Point acreditado para inicial del 2026-07-31.",),
+            issues=("MONTH_SOURCE_INCOMPLETE",),
+        )
+        balance.effective_snapshot_dates = {"opening": None, "closing": date(2026, 8, 31)}
+        context, _ = self._context(balance)
+
+        rendered = self._render(context)
+
+        self.assertIn("Información parcial", rendered)
+        self.assertIn("Falta recuperar el cierre Point del 31/07/2026", rendered)
+        self.assertIn("El cierre Point del 31/08/2026 sí está disponible", rendered)
+        self.assertNotIn('class="badge bg-warning">Snapshot inicial Point:', rendered)
+        self.assertIn("Ver diagnóstico técnico", rendered)
+        self.assertIn("falta job Point del mes", rendered)
 
     def test_bridge_history_or_non_authoritative_sales_never_verify_point_authority(self):
         sources = canonical_balance().sources
