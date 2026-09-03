@@ -168,7 +168,8 @@ def _crear_parcialidades(obligacion: ObligacionGasto) -> None:
     ParcialidadObligacionGasto.objects.bulk_create(filas)
 
 
-def _reconocer_gasto(obligacion: ObligacionGasto) -> GastoOperativoMensual:
+def _reconocer_gasto(obligacion: ObligacionGasto, *, cobertura_mes_inicio=None,
+                     cobertura_mes_fin=None) -> GastoOperativoMensual:
     gasto = GastoOperativoMensual.objects.create(
         periodo=obligacion.periodo,
         centro_costo=obligacion.centro_costo,
@@ -180,6 +181,8 @@ def _reconocer_gasto(obligacion: ObligacionGasto) -> GastoOperativoMensual:
         comentario=f"{obligacion.concepto} · obligación #{obligacion.pk}",
         archivo_soporte=obligacion.archivo_soporte,
         capturado_por=obligacion.creado_por,
+        cobertura_mes_inicio=cobertura_mes_inicio,
+        cobertura_mes_fin=cobertura_mes_fin,
     )
     obligacion.gasto_operativo = gasto
     obligacion.save(update_fields=["gasto_operativo", "actualizado_en"])
@@ -190,8 +193,12 @@ def _crear_obligacion(*, usuario, origen, area, rubro, centro_costo, categoria_g
                       fecha_gasto, fecha_vencimiento, monto, proveedor="", condicion_pago=ObligacionGasto.CONDICION_CONTADO,
                       metodo_pago_previsto="", tipo_credito="", plazo_cantidad=None, plazo_unidad="",
                       numero_parcialidades=1, gasto_recurrente=None, version_recurrente=None,
-                      archivo_soporte="", notas="") -> ObligacionGasto:
+                      archivo_soporte="", notas="", cobertura_mes_inicio=None,
+                      cobertura_mes_fin=None) -> ObligacionGasto:
     _autorizar_area(usuario, area)
+    GastoOperativoMensual(
+        cobertura_mes_inicio=cobertura_mes_inicio, cobertura_mes_fin=cobertura_mes_fin,
+    ).clean()
     tipo_credito, plazo_cantidad, plazo_unidad, numero_parcialidades = _validar_clasificacion(
         area=area,
         rubro=rubro,
@@ -235,7 +242,9 @@ def _crear_obligacion(*, usuario, origen, area, rubro, centro_costo, categoria_g
         creado_por=usuario,
     )
     _crear_parcialidades(obligacion)
-    _reconocer_gasto(obligacion)
+    _reconocer_gasto(
+        obligacion, cobertura_mes_inicio=cobertura_mes_inicio, cobertura_mes_fin=cobertura_mes_fin,
+    )
     return obligacion
 
 
@@ -249,8 +258,10 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
                            vigencia_inicio, monto, dia_vencimiento, condicion_pago,
                            metodo_pago_previsto="", proveedor="", tipo_credito="",
                            plazo_cantidad=None, plazo_unidad="", numero_parcialidades=1,
-                           motivo="") -> GastoRecurrente:
+                           motivo="", periodicidad_meses=1) -> GastoRecurrente:
     _autorizar_area(usuario, area)
+    periodicidad_meses = _validar_periodicidad(periodicidad_meses)
+    _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses)
     tipo_credito, plazo_cantidad, plazo_unidad, numero_parcialidades = _validar_clasificacion(
         area=area,
         rubro=rubro,
@@ -276,6 +287,7 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
     GastoRecurrenteVersion.objects.create(
         gasto_recurrente=recurrente,
         vigencia_inicio=vigencia_inicio,
+        periodicidad_meses=periodicidad_meses,
         monto=_monto(monto),
         dia_vencimiento=int(dia_vencimiento),
         condicion_pago=condicion_pago,
@@ -294,8 +306,9 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
 def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_vencimiento,
                             condicion_pago, metodo_pago_previsto="", tipo_credito="",
                             plazo_cantidad=None, plazo_unidad="", numero_parcialidades=1,
-                            motivo="") -> GastoRecurrenteVersion:
+                            motivo="", periodicidad_meses=None) -> GastoRecurrenteVersion:
     _autorizar_area(usuario, recurrente.area)
+    GastoRecurrente.objects.select_for_update().get(pk=recurrente.pk)
     if not motivo.strip():
         raise ValidationError("Explica el motivo de la modificación.")
     if not 1 <= int(dia_vencimiento) <= 31:
@@ -308,8 +321,16 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
     )
     if actual is None:
         raise ValidationError("El gasto fijo no tiene una versión vigente.")
+    periodicidad_meses = _validar_periodicidad(
+        actual.periodicidad_meses if periodicidad_meses is None else periodicidad_meses
+    )
+    _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses)
     if vigencia_inicio <= actual.vigencia_inicio:
         raise ValidationError("La nueva vigencia debe ser posterior a la versión actual.")
+    meses_desde_inicio = (vigencia_inicio.year - actual.vigencia_inicio.year) * 12 + vigencia_inicio.month - actual.vigencia_inicio.month
+    if actual.periodicidad_meses == 2 and (vigencia_inicio.day != 1 or meses_desde_inicio % 2):
+        raise ValidationError("La nueva vigencia no puede cortar un ciclo bimestral de la versión anterior.")
+    _validar_cobertura_sin_solapamiento(recurrente, vigencia_inicio.replace(day=1))
     tipo_credito, plazo_cantidad, plazo_unidad, numero_parcialidades = _validar_clasificacion(
         area=recurrente.area,
         rubro=recurrente.rubro,
@@ -324,6 +345,7 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
     return GastoRecurrenteVersion.objects.create(
         gasto_recurrente=recurrente,
         vigencia_inicio=vigencia_inicio,
+        periodicidad_meses=periodicidad_meses,
         monto=_monto(monto),
         dia_vencimiento=int(dia_vencimiento),
         condicion_pago=condicion_pago,
@@ -337,9 +359,41 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
     )
 
 
+def _validar_periodicidad(valor):
+    if str(valor) not in {"1", "2"}:
+        raise ValidationError("La periodicidad debe ser mensual o bimestral.")
+    return int(valor)
+
+
+def _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses):
+    if periodicidad_meses == 2 and vigencia_inicio.day != 1:
+        raise ValidationError("La vigencia bimestral debe comenzar el primer día del mes de cobertura.")
+
+
+def _validar_cobertura_sin_solapamiento(recurrente, inicio, fin=None):
+    fin = fin or inicio
+    obligaciones = ObligacionGasto.objects.filter(gasto_recurrente=recurrente).exclude(
+        estado=ObligacionGasto.ESTADO_CANCELADO,
+    ).select_related("gasto_operativo", "version_recurrente")
+    for obligacion in obligaciones:
+        gasto = obligacion.gasto_operativo
+        cobertura_inicio = gasto.cobertura_mes_inicio if gasto else None
+        cobertura_fin = gasto.cobertura_mes_fin if gasto else None
+        cobertura_inicio = cobertura_inicio or obligacion.periodo
+        if cobertura_fin is None:
+            frecuencia = obligacion.version_recurrente.periodicidad_meses if obligacion.version_recurrente else 1
+            indice = cobertura_inicio.year * 12 + cobertura_inicio.month - 1 + frecuencia - 1
+            cobertura_fin = date(indice // 12, indice % 12 + 1, 1)
+        if cobertura_inicio <= fin and inicio <= cobertura_fin:
+            raise ValidationError(
+                f"La obligación #{obligacion.pk} ya cubre ese mes. No se solapan cargos ni se alteran pagos existentes."
+            )
+
+
 @transaction.atomic
 def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, periodo: date):
     _autorizar_area(usuario, recurrente.area)
+    GastoRecurrente.objects.select_for_update().get(pk=recurrente.pk)
     periodo = periodo.replace(day=1)
     existente = ObligacionGasto.objects.filter(gasto_recurrente=recurrente, periodo=periodo).first()
     if existente:
@@ -352,6 +406,12 @@ def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, perio
     )
     if version is None:
         raise ValidationError("No existe una versión vigente para el periodo solicitado.")
+    meses = (periodo.year - version.vigencia_inicio.year) * 12 + periodo.month - version.vigencia_inicio.month
+    if meses % version.periodicidad_meses:
+        raise ValidationError("Este mes está cubierto por el ciclo bimestral anterior; no genera otro cargo.")
+    siguiente = periodo.year * 12 + periodo.month - 1 + version.periodicidad_meses - 1
+    cobertura_fin = date(siguiente // 12, siguiente % 12 + 1, 1)
+    _validar_cobertura_sin_solapamiento(recurrente, periodo, cobertura_fin)
     dia = min(version.dia_vencimiento, calendar.monthrange(periodo.year, periodo.month)[1])
     obligacion = _crear_obligacion(
         usuario=usuario,
@@ -374,6 +434,8 @@ def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, perio
         plazo_cantidad=version.plazo_cantidad,
         plazo_unidad=version.plazo_unidad,
         numero_parcialidades=version.numero_parcialidades,
+        cobertura_mes_inicio=periodo,
+        cobertura_mes_fin=cobertura_fin,
     )
     return obligacion, True
 

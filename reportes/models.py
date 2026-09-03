@@ -159,6 +159,8 @@ class GastoOperativoMensual(models.Model):
     ]
 
     periodo = models.DateField(db_index=True)
+    cobertura_mes_inicio = models.DateField(null=True, blank=True)
+    cobertura_mes_fin = models.DateField(null=True, blank=True)
     centro_costo = models.ForeignKey(
         CentroCosto,
         on_delete=models.PROTECT,
@@ -198,6 +200,29 @@ class GastoOperativoMensual(models.Model):
         indexes = [
             models.Index(fields=["periodo", "centro_costo"], name="rgasto_periodo_centro_idx"),
         ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(cobertura_mes_inicio__isnull=True, cobertura_mes_fin__isnull=True)
+                    | models.Q(
+                        cobertura_mes_inicio__isnull=False, cobertura_mes_fin__isnull=False,
+                        cobertura_mes_inicio__day=1, cobertura_mes_fin__day=1,
+                        cobertura_mes_fin__gte=models.F("cobertura_mes_inicio"),
+                    )
+                ),
+                name="gasto_cobertura_mensual_valida",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        inicio, fin = self.cobertura_mes_inicio, self.cobertura_mes_fin
+        if inicio is None and fin is None:
+            return
+        if inicio is None or fin is None or inicio.day != 1 or fin.day != 1 or inicio > fin:
+            raise ValidationError(
+                "La cobertura requiere inicio y fin en el primer día del mes, en orden cronológico."
+            )
 
     def __str__(self) -> str:
         return f"{self.periodo:%Y-%m} · {self.centro_costo.codigo} · {self.categoria_gasto.codigo}"
@@ -2681,6 +2706,9 @@ class GastoRecurrenteVersion(models.Model):
     )
     vigencia_inicio = models.DateField(db_index=True)
     vigencia_fin = models.DateField(null=True, blank=True, db_index=True)
+    periodicidad_meses = models.PositiveSmallIntegerField(
+        choices=[(1, "Mensual"), (2, "Bimestral")], default=1,
+    )
     monto = models.DecimalField(max_digits=18, decimal_places=2)
     dia_vencimiento = models.PositiveSmallIntegerField(default=1)
     condicion_pago = models.CharField(max_length=10, choices=CONDICION_CHOICES, default=CONDICION_CONTADO)
@@ -2712,6 +2740,10 @@ class GastoRecurrenteVersion(models.Model):
             models.CheckConstraint(
                 check=models.Q(dia_vencimiento__gte=1, dia_vencimiento__lte=31),
                 name="gasto_rec_dia_vencimiento_valido",
+            ),
+            models.CheckConstraint(
+                check=models.Q(periodicidad_meses__in=(1, 2)),
+                name="gasto_rec_periodicidad_valida",
             ),
         ]
 

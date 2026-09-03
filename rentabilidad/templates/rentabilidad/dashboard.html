@@ -62,6 +62,9 @@
     <a class="rent-tab {% if active_tab == 'alertas' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=alertas">Alertas {{ alertas_panel|length }}</a>
   </nav>
 
+  {% if not totales.gastos_completos %}
+  <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Los totales de utilidad no son definitivos y el punto de equilibrio permanece no calculable.</p>
+  {% endif %}
   <section class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-label">Ventas totales</div>
@@ -276,8 +279,9 @@
     <article class="rent-panel">
       <div class="panel-head">
         <div>
-          <h2>Gasto real por categoría</h2>
-          <p>Solo registros REAL del periodo. Fuente: GastoOperativoMensual manual o importado.</p>
+          <h2>Gastos recurrentes y personal por concepto</h2>
+          <p>Lectura mensual de gastos, obligaciones y nómina ERP. Los pagos no se suman de nuevo.</p>
+          {% if not gastos_panel.completo %}<p><strong>Cobertura incompleta.</strong> Los importes son parciales; revisa el detalle de cada sucursal antes de interpretar utilidad o punto de equilibrio.</p>{% endif %}
         </div>
         <div class="kpi-value pd-u-ae01fa962b">${{ gastos_panel.total|floatformat:0|intcomma }}</div>
       </div>
@@ -304,7 +308,7 @@
       <div class="rank-list">
         {% for row in gastos_panel.por_sucursal %}
         <div class="rank-item">
-          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros|intcomma }} registros</div></div>
+          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros|intcomma }} registros · {% if row.completo %}Completo{% else %}Parcial / pendiente{% endif %}</div></div>
           <strong>${{ row.total|floatformat:0|intcomma }}</strong>
         </div>
         {% empty %}

@@ -20,6 +20,9 @@ import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
+from reportes.services_rentabilidad_mensual import (
+    aplicar_costos_en_memoria, leer_costos_mensuales, costos_de_sucursal, ETIQUETAS,
+)
 from ventas.services.sales_read_service import (
     get_point_sales_period_summary,
     get_point_sales_product_panel_rows,
@@ -225,32 +228,32 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
     }
 
 
-def _build_gastos_panel(periodo):
-    from reportes.models import GastoOperativoMensual
+def _build_gastos_panel(periodo, resultado=None):
+    from collections import defaultdict
+    from core.models import Sucursal
 
-    gastos = (
-        GastoOperativoMensual.objects
-        .filter(periodo=periodo, tipo_dato="REAL")
-        .select_related("centro_costo", "categoria_gasto")
-    )
-    por_categoria = (
-        gastos
-        .values("categoria_gasto__codigo", "categoria_gasto__nombre")
-        .annotate(total=Sum("monto"), registros=Count("id"))
-        .order_by("-total")
-    )
-    por_sucursal = (
-        gastos
-        .filter(centro_costo__sucursal__isnull=False)
-        .values("centro_costo__sucursal__nombre")
-        .annotate(total=Sum("monto"), registros=Count("id"))
-        .order_by("-total")
-    )
+    resultado = resultado if resultado is not None else leer_costos_mensuales(periodo)
+    por_categoria = defaultdict(lambda: {"total": Decimal("0"), "registros": 0})
+    por_sucursal, pendientes = [], []
+    for sucursal in Sucursal.objects.filter(activa=True):
+        resumen = costos_de_sucursal(resultado, sucursal.pk)
+        por_sucursal.append({
+            "centro_costo__sucursal__nombre": sucursal.nombre, "total": resumen["total"],
+            "registros": len(resumen["filas"]), "completo": resumen["completo"],
+        })
+        pendientes.extend(resumen["pendientes"])
+        for fila in resumen["filas"]:
+            categoria = por_categoria[fila["familia"]]
+            categoria.update(categoria_gasto__codigo=fila["familia"], categoria_gasto__nombre=ETIQUETAS[fila["familia"]])
+            categoria["total"] += fila["monto_mensual"]
+            categoria["registros"] += 1
     return {
-        "total": gastos.aggregate(t=Sum("monto"))["t"] or Decimal("0"),
-        "registros": gastos.count(),
-        "por_categoria": list(por_categoria[:16]),
-        "por_sucursal": list(por_sucursal[:12]),
+        "total": sum((f["total"] for f in por_sucursal), Decimal("0")),
+        "registros": sum(f["registros"] for f in por_sucursal),
+        "por_categoria": sorted(por_categoria.values(), key=lambda f: f["total"], reverse=True),
+        "por_sucursal": sorted(por_sucursal, key=lambda f: f["total"], reverse=True),
+        "pendientes": pendientes,
+        "completo": bool(por_sucursal) and all(f["completo"] for f in por_sucursal),
     }
 
 
@@ -307,7 +310,7 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
         alertas.append({
             "nivel": "medio",
             "titulo": "Sin gastos reales cargados",
-            "detalle": "El periodo no tiene registros REAL en GastoOperativoMensual; el punto de equilibrio puede aparecer en cero.",
+            "detalle": "Faltan fuentes ERP trazables del mes; el punto de equilibrio no es calculable.",
         })
     if max_sale_date and max_sale_date < periodo:
         alertas.append({
@@ -327,6 +330,7 @@ def dashboard_rentabilidad(request):
     if active_tab not in tabs_validos:
         active_tab = "resumen"
     fecha_inicio, fecha_fin = _periodo_bounds(periodo)
+    costos_mensuales = leer_costos_mensuales(periodo)
 
     # Periodos disponibles para el selector
     periodos_disponibles = (
@@ -351,7 +355,7 @@ def dashboard_rentabilidad(request):
         # Recalcular en memoria para que snapshots históricos creados antes de
         # las guardas de integridad no se presenten como rentables si carecen
         # de gastos reales. No modifica la base durante una consulta.
-        r.calcular_estado()
+        aplicar_costos_en_memoria(r, costos_mensuales)
         colores = _colores_estado(r.estado)
         costo_variable_pct = _pct(r.costo_variable_total, r.ventas_netas)
         gasto_fijo_pct = _pct(r.gasto_fijo_total, r.ventas_netas)
@@ -432,7 +436,8 @@ def dashboard_rentabilidad(request):
         ],
     }
     productos_panel = _build_productos_panel(periodo, fecha_inicio, fecha_fin)
-    gastos_panel = _build_gastos_panel(periodo)
+    gastos_panel = _build_gastos_panel(periodo, costos_mensuales)
+    totales["gastos_completos"] = gastos_panel["completo"]
     alertas_panel = _build_alertas_panel(
         sucursales_data,
         productos_panel,
@@ -463,7 +468,8 @@ def dashboard_rentabilidad(request):
 def detalle_sucursal(request, pk):
     _require_view_rentabilidad(request.user)
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
-    rent.calcular_estado()
+    costos_por_mes = {rent.periodo: leer_costos_mensuales(rent.periodo)}
+    aplicar_costos_en_memoria(rent, costos_por_mes[rent.periodo])
 
     # Historial de los últimos 12 meses para gráfica de tendencia
     historial = list(
@@ -472,7 +478,9 @@ def detalle_sucursal(request, pk):
         .order_by("-periodo")[:12]
     )
     for item in historial:
-        item.calcular_estado()
+        if item.periodo not in costos_por_mes:
+            costos_por_mes[item.periodo] = leer_costos_mensuales(item.periodo)
+        aplicar_costos_en_memoria(item, costos_por_mes[item.periodo])
 
     context = {
         "rent":     rent,
