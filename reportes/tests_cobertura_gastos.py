@@ -177,9 +177,12 @@ class CoberturaGastosTests(TestCase):
             "centro_costo_id": self.centro.pk, "categoria_gasto_id": self.categoria.pk,
             "concepto": "CFE", "vigencia_inicio": "2026-01-01", "monto": "100.01",
             "dia_vencimiento": "5", "periodicidad_meses": "2",
+            "archivo_soporte": "CFDI:CFE-PRUEBA-2026",
         }, HTTP_ACCEPT="application/json")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.rubro.gastos_recurrentes.get().versiones.get().periodicidad_meses, 2)
+        version = self.rubro.gastos_recurrentes.get().versiones.get()
+        self.assertEqual(version.periodicidad_meses, 2)
+        self.assertEqual(version.archivo_soporte, "CFDI:CFE-PRUEBA-2026")
 
     def test_formulario_muestra_cobertura_y_periodicidad(self):
         from django.urls import reverse
@@ -188,3 +191,4 @@ class CoberturaGastosTests(TestCase):
         self.assertContains(response, 'name="cobertura_mes_inicio"')
         self.assertContains(response, 'name="cobertura_mes_fin"')
         self.assertContains(response, 'name="periodicidad_meses"')
+        self.assertContains(response, 'name="archivo_soporte"')

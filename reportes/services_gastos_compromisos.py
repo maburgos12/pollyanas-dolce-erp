@@ -258,7 +258,7 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
                            vigencia_inicio, monto, dia_vencimiento, condicion_pago,
                            metodo_pago_previsto="", proveedor="", tipo_credito="",
                            plazo_cantidad=None, plazo_unidad="", numero_parcialidades=1,
-                           motivo="", periodicidad_meses=1) -> GastoRecurrente:
+                           motivo="", periodicidad_meses=1, archivo_soporte="") -> GastoRecurrente:
     _autorizar_area(usuario, area)
     periodicidad_meses = _validar_periodicidad(periodicidad_meses)
     _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses)
@@ -297,6 +297,7 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
         plazo_unidad=plazo_unidad,
         numero_parcialidades=numero_parcialidades,
         motivo=motivo.strip(),
+        archivo_soporte=archivo_soporte.strip(),
         creado_por=usuario,
     )
     return recurrente
@@ -306,7 +307,7 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
 def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_vencimiento,
                             condicion_pago, metodo_pago_previsto="", tipo_credito="",
                             plazo_cantidad=None, plazo_unidad="", numero_parcialidades=1,
-                            motivo="", periodicidad_meses=None) -> GastoRecurrenteVersion:
+                            motivo="", periodicidad_meses=None, archivo_soporte="") -> GastoRecurrenteVersion:
     _autorizar_area(usuario, recurrente.area)
     GastoRecurrente.objects.select_for_update().get(pk=recurrente.pk)
     if not motivo.strip():
@@ -355,6 +356,7 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
         plazo_unidad=plazo_unidad,
         numero_parcialidades=numero_parcialidades,
         motivo=motivo.strip(),
+        archivo_soporte=archivo_soporte.strip(),
         creado_por=usuario,
     )
 
@@ -436,6 +438,7 @@ def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, perio
         numero_parcialidades=version.numero_parcialidades,
         cobertura_mes_inicio=periodo,
         cobertura_mes_fin=cobertura_fin,
+        archivo_soporte=version.archivo_soporte,
     )
     return obligacion, True
 

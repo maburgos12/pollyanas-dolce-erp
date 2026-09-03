@@ -2718,6 +2718,7 @@ class GastoRecurrenteVersion(models.Model):
     plazo_unidad = models.CharField(max_length=10, choices=PLAZO_CHOICES, blank=True, default="")
     numero_parcialidades = models.PositiveSmallIntegerField(default=1)
     motivo = models.CharField(max_length=300, blank=True, default="")
+    archivo_soporte = models.CharField(max_length=300, blank=True, default="")
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

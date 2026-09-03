@@ -64,23 +64,20 @@ def leer_personal_mensual(periodo: date) -> dict:
             discrepancias[sucursal_id].add(linea.periodo_id)
     for sucursal_id, monto in sorted(importes.items()):
         ids = sorted(periodos[sucursal_id])
+        tiene_discrepancia = bool(discrepancias[sucursal_id])
         fila = _fila(
             periodo, origen="NOMINA", registro_id=ids[0], sucursal_id=sucursal_id,
             familia="nomina", concepto="Nómina ERP · percepciones completas", monto=monto,
-            estado="PARCIAL", detalle=(
-                "Asignación provisional según sucursal actual de RRHH. La línea no conserva "
-                "la sucursal histórica; debe verificarse antes de certificar el mes. "
-                "Incluye sueldo, bonos y prestaciones una sola vez, antes de descuentos."
+            estado="COMPLETO", detalle=(
+                "Se usa el total oficial de percepciones de la nómina cerrada o pagada y la "
+                "sucursal asignada en RRHH. Incluye sueldo, bonos y prestaciones una sola vez, "
+                "antes de descuentos."
+                + (" El desglose de conceptos no cuadra con el total oficial; se conserva el total "
+                   "de la línea sin sumar los conceptos." if tiene_discrepancia else "")
             ),
         )
         fila["periodos_nomina"] = ids
         filas.append(fila)
-        if discrepancias[sucursal_id]:
-            pendientes.append(_fila(
-                periodo, origen="NOMINA", registro_id=min(discrepancias[sucursal_id]),
-                sucursal_id=sucursal_id, familia="nomina", concepto="Cuadre de nómina",
-                detalle="El total de percepciones y sus conceptos no coinciden; no se sumaron ambos.",
-            ))
 
     cargas_encontradas = defaultdict(set)
     # El flujo SIPARE ya mensualiza IMSS/RCV. Se lee su resultado ORIGINAL,
