@@ -106,6 +106,27 @@ class PointHttpSessionClientTests(SimpleTestCase):
         self.assertEqual(stock[0]["Cantidad"], 18)
         request.assert_called_once_with("GET", "/Stock/get_productos_existencia", params={"pk": 2}, timeout=2)
 
+    def test_get_stock_history_uses_complete_point_filter_contract(self):
+        client = PointHttpSessionClient(self._settings())
+        response = Mock()
+        response.json.return_value = [{"FK_Movimiento": 123, "Existencia_nueva": 3}]
+
+        with patch.object(client, "_request", return_value=response) as request:
+            history = client.get_stock_history("857", "1")
+
+        self.assertEqual(history[0]["FK_Movimiento"], 123)
+        request.assert_called_once_with(
+            "GET",
+            "/Stock/GetHistorial",
+            params={
+                "tipo": "false",
+                "almacen": "1",
+                "pkproducto": "857",
+                "movimientos": "500",
+                "tipoMovimiento": "",
+            },
+        )
+
     def test_get_insumo_categories_uses_official_stock_catalog(self):
         client = PointHttpSessionClient(self._settings())
         response = Mock()
