@@ -1,7 +1,7 @@
 """Lectura del costo laboral, sin modificar nóminas ni asignaciones de RRHH.
 
-La ubicación actual del expediente NO constituye una asignación histórica.
-Los importes agrupados con ella son provisionales y nunca certifican un PE.
+Las nóminas cerradas o pagadas usan el total oficial de percepciones y la
+sucursal vigente del expediente de RRHH, tal como se capturó en el ERP.
 """
 from collections import defaultdict
 from datetime import date
