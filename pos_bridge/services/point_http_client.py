@@ -300,6 +300,32 @@ class PointHttpSessionClient:
             )
         return payload
 
+    def get_stock_history(
+        self,
+        product_id: int | str,
+        branch_id: int | str,
+        *,
+        movements: int = 500,
+    ) -> list[dict]:
+        response = self._request(
+            "GET",
+            "/Stock/GetHistorial",
+            params={
+                "tipo": "false",
+                "almacen": str(branch_id),
+                "pkproducto": str(product_id),
+                "movimientos": str(movements),
+                "tipoMovimiento": "",
+            },
+        )
+        payload = self._parse_json(response, label="historial de existencias Point")
+        if not isinstance(payload, list):
+            raise ExtractionError(
+                "Point devolvió un historial de existencias con formato inesperado.",
+                context={"product_id": product_id, "branch_id": branch_id},
+            )
+        return payload
+
     def get_insumo_categories(self, *, timeout: int | float | None = None) -> list[dict]:
         response = self._request(
             "GET",
