@@ -87,9 +87,10 @@ class HistoricalStockResolutionTests(SimpleTestCase):
 
 
 class _FakePointClient:
-    def __init__(self, history_by_key, current_by_product):
+    def __init__(self, history_by_key, current_by_product, *, current_failures=0):
         self.history_by_key = history_by_key
         self.current_by_product = current_by_product
+        self.current_failures = current_failures
         self.login_calls = 0
 
     def login(self):
@@ -99,6 +100,9 @@ class _FakePointClient:
         return self.history_by_key[(str(branch_id), str(product_id))]
 
     def get_product_stock(self, product_id):
+        if self.current_failures:
+            self.current_failures -= 1
+            raise HistoricalInventoryCaptureError("respuesta de sesión inesperada")
         return self.current_by_product[str(product_id)]
 
 
@@ -145,6 +149,38 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(result.closing.lines.count(), 0)
         self.assertEqual(result.unresolved_count, 1)
         self.assertEqual(result.closing.metadata["unresolved"][0]["branch_external_id"], "1")
+
+    def test_relogs_once_when_point_session_expires_mid_capture(self):
+        client = _FakePointClient(
+            history_by_key={("1", "857"): [
+                {"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 123,
+                 "Existencia_anterior": 4, "Existencia_nueva": 3, "Cancelado": False}
+            ]},
+            current_by_product={"857": [{"PK_Sucursal": 1, "Cantidad": 2}]},
+            current_failures=1,
+        )
+
+        result = HistoricalPointInventoryClosingCapture(client=client).capture(
+            operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product]
+        )
+
+        self.assertEqual(result.closing.status, PointHistoricalInventoryClosing.STATUS_VERIFIED)
+        self.assertEqual(client.login_calls, 2)
+
+    def test_persistent_product_stock_failure_creates_draft_instead_of_aborting(self):
+        client = _FakePointClient(
+            history_by_key={},
+            current_by_product={},
+            current_failures=2,
+        )
+
+        result = HistoricalPointInventoryClosingCapture(client=client).capture(
+            operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product]
+        )
+
+        self.assertEqual(result.closing.status, PointHistoricalInventoryClosing.STATUS_DRAFT)
+        self.assertEqual(result.unresolved_count, 1)
+        self.assertIn("respuesta de sesión", result.closing.metadata["unresolved"][0]["reason"])
 
 
 class HistoricalInventoryCaptureManifestTests(TestCase):
