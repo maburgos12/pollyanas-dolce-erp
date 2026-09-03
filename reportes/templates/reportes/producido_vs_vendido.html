@@ -32,15 +32,26 @@
       <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
       <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
       <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
-      {% if not fuentes.canonical.authority.verified %}<span class="badge bg-warning">{{ fuentes.canonical.authority.reason }}</span>{% endif %}
-      <span class="badge bg-primary">Cierres operativos Point: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"Y-m-d" }}{% else %}Sin cierre acreditado{% endif %} → {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"Y-m-d" }}{% else %}Sin cierre acreditado{% endif %}</span>
+      <span class="badge bg-primary">Periodo mostrado: {{ selected_period_label }}</span>
+      <span class="badge bg-primary">Cierres Point · Inicial: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"d/m/Y" }}{% else %}Pendiente{% endif %} · Final: {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"d/m/Y" }}{% else %}Pendiente{% endif %}</span>
     </div>
     <p class="executive-section-copy">La fecha operativa determina el mes: el inicial corresponde al cierre del último día del mes anterior y el final al último día del mes seleccionado. Recibir el correo al día siguiente no cambia esas fechas. Son saldos de Point, no conteos físicos.</p>
+    <div class="production-source-summary is-{{ operational_summary.tone }}" role="status">
+      <strong>{{ operational_summary.title }}</strong>
+      <span>{{ operational_summary.message }}</span>
+    </div>
+    {% if not fuentes.canonical.authority.verified or banners %}
+    <details class="production-source-diagnostics">
+      <summary>Ver diagnóstico técnico</summary>
+      <p>{{ fuentes.canonical.authority.reason }}</p>
+      {% for banner in banners %}<p>{{ banner }}</p>{% endfor %}
+    </details>
+    {% endif %}
   </section>
 
   <section class="card">
     <div class="card-header">Filtros</div>
-    <form class="recipes-filters" method="get">
+    <form class="recipes-filters" method="get" data-period-autosubmit>
       <div>
         <label class="form-label" for="periodo">Periodo</label>
         <select class="form-select" id="periodo" name="periodo">
@@ -65,17 +76,6 @@
       </div>
     </form>
   </section>
-
-  {% if banners %}
-  <section class="card">
-    <div class="card-header">Avisos</div>
-    <div class="production-banner-list">
-      {% for banner in banners %}
-      <div class="alert alert-warning">{{ banner }}</div>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
 
   <section class="kpi-grid production-kpi-grid">
     <article class="kpi-card production-kpi-card">
@@ -324,4 +324,20 @@
     {% endif %}
   </section>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var form = document.querySelector('[data-period-autosubmit]');
+  var period = form && form.querySelector('[name="periodo"]');
+  if (!form || !period) return;
+  period.addEventListener('change', function () {
+    form.setAttribute('aria-busy', 'true');
+    var button = form.querySelector('[type="submit"]');
+    if (button) button.textContent = 'Aplicando…';
+    form.requestSubmit();
+  });
+})();
+</script>
 {% endblock %}

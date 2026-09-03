@@ -107,7 +107,11 @@ class PeriodSelection:
 
     @property
     def label(self) -> str:
-        return self.month_start.strftime("%B %Y").title()
+        months = (
+            "enero", "febrero", "marzo", "abril", "mayo", "junio",
+            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+        )
+        return f"{months[self.month_start.month - 1].title()} {self.month_start.year}"
 
 
 def _parse_period(raw_value: str | None) -> PeriodSelection:
@@ -499,6 +503,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         groups, grand_total = self._group_rows(rows)
         fuentes = self._canonical_sources(balance)
         banners = self._canonical_banners(balance, fuentes)
+        operational_summary = self._operational_summary(balance)
         periodos = self._available_periods(selected=period.value)
 
         return {
@@ -515,6 +520,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "json_rows": [row["json"] for row in rows],
             "fuentes": fuentes,
             "banners": banners,
+            "operational_summary": operational_summary,
             "source_dates": balance.effective_snapshot_dates,
         }
 
@@ -729,6 +735,51 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         banners.extend(str(warning) for warning in balance.warnings)
         banners.extend(str(issue) for issue in balance.issues)
         return list(dict.fromkeys(banners))
+
+    @staticmethod
+    def _operational_summary(balance) -> dict[str, str]:
+        opening_meta = balance.sources.get("opening_snapshot") or {}
+        closing_meta = balance.sources.get("closing_snapshot") or {}
+        opening_target = opening_meta.get("target_date")
+        closing_target = closing_meta.get("target_date")
+        opening_date = balance.effective_snapshot_dates.get("opening")
+        closing_date = balance.effective_snapshot_dates.get("closing")
+
+        def display(value):
+            return value.strftime("%d/%m/%Y") if value else "la fecha requerida"
+
+        if opening_date and closing_date:
+            return {
+                "tone": "success",
+                "title": "Cierres Point disponibles",
+                "message": f"Inicial del {display(opening_date)} y final del {display(closing_date)}.",
+            }
+        if not opening_date and closing_date:
+            return {
+                "tone": "warning",
+                "title": "Información parcial",
+                "message": (
+                    f"Falta recuperar el cierre Point del {display(opening_target)}. "
+                    f"El cierre Point del {display(closing_date)} sí está disponible y se muestra."
+                ),
+            }
+        if opening_date and not closing_date:
+            return {
+                "tone": "warning",
+                "title": "Información parcial",
+                "message": (
+                    f"El cierre inicial del {display(opening_date)} sí está disponible. "
+                    f"Falta recuperar el cierre Point final del {display(closing_target)}."
+                ),
+            }
+        return {
+            "tone": "warning",
+            "title": "Cierres Point pendientes",
+            "message": (
+                f"Falta recuperar el cierre inicial del {display(opening_target)} "
+                f"y el cierre final del {display(closing_target)}."
+            ),
+        }
 
     def _available_periods(self, *, selected: str) -> list[str]:
         months = {selected, *canonical_sales_evidence_months()}

@@ -1,5 +1,9 @@
 from pos_bridge.models.branch import PointBranch
 from pos_bridge.models.insumo_inventory import PointInsumoInventorySnapshot
+from pos_bridge.models.historical_inventory import (
+    PointHistoricalInventoryClosing,
+    PointHistoricalInventoryClosingLine,
+)
 from pos_bridge.models.movements import PointConversionLine, PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.models.product import PointProduct, PointProductCategory
 from pos_bridge.models.product_history import (
@@ -46,6 +50,8 @@ __all__ = [
     "PointRecipeNode",
     "PointRecipeNodeLine",
     "PointInventorySnapshot",
+    "PointHistoricalInventoryClosing",
+    "PointHistoricalInventoryClosingLine",
     "PointInsumoInventorySnapshot",
     "PointWasteLine",
     "PointConversionLine",

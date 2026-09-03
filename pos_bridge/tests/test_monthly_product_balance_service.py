@@ -1827,6 +1827,58 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertFalse(balance.sources["sales"]["authoritative"])
         self.assertIn("SALES_SYNC_JOB_MIXED", balance.issues)
 
+    def test_daily_sales_accept_complete_overlapping_rolling_job_manifest(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        first_days = list(iter_business_dates(date(2026, 7, 1), date(2026, 7, 15)))
+        second_days = list(iter_business_dates(date(2026, 7, 14), date(2026, 7, 31)))
+        first_job = self._official_sales_job(
+            parameters={
+                "source": "POINT_OFFICIAL_REPORT", "start_date": "2026-07-01", "end_date": "2026-07-15",
+                "branch_filter": "", "credito_scopes": ["null"], "excluded_ranges": [], "max_days": 15,
+            },
+            covered_days=first_days,
+        )
+        second_job = self._official_sales_job(
+            parameters={
+                "source": "POINT_OFFICIAL_REPORT", "start_date": "2026-07-14", "end_date": "2026-07-31",
+                "branch_filter": "", "credito_scopes": ["null"], "excluded_ranges": [], "max_days": 18,
+            },
+            covered_days=second_days,
+        )
+        for job, days in ((first_job, first_days), (second_job, second_days)):
+            job.result_summary["branch_days_processed"] = len(days)
+            job.result_summary["rows_imported"] = 1
+            job.save(update_fields=["result_summary"])
+        first_job.logs.filter(context__sale_date="2026-07-03").update(context={
+            "branch": self.branch.name,
+            "branch_external_id": self.branch.external_id,
+            "sale_date": "2026-07-03",
+            "rows_imported": 1,
+            "rows_deleted": 0,
+            "reports_downloaded": 1,
+        })
+        second_job.logs.filter(context__sale_date="2026-07-20").update(context={
+            "branch": self.branch.name,
+            "branch_external_id": self.branch.external_id,
+            "sale_date": "2026-07-20",
+            "rows_imported": 1,
+            "rows_deleted": 0,
+            "reports_downloaded": 1,
+        })
+        self._daily_sale(self.parent, self.parent_product, "1", date(2026, 7, 3), "rolling-job-one", sync_job=first_job)
+        self._daily_sale(self.parent, self.parent_product, "2", date(2026, 7, 20), "rolling-job-two", sync_job=second_job)
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertEqual(
+            balance.sources["sales"]["selected_row_job_ids"],
+            tuple(sorted((first_job.id, second_job.id))),
+        )
+        self.assertEqual(balance.sources["sales"]["coverage_logged_branch_days"], 31)
+        self.assertNotIn("SALES_SYNC_JOB_MIXED", balance.issues)
+
     def test_linked_old_month_job_is_found_beyond_fifty_newer_unrelated_jobs(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))

@@ -7150,6 +7150,31 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   flex-wrap: wrap;
   gap: 8px;
 }
+.production-source-summary {
+  display: grid;
+  gap: 2px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #ead7df;
+  border-radius: var(--radius-md);
+  background: #fff9fb;
+  color: var(--texto);
+}
+.production-source-summary.is-success {
+  border-color: #bad8c4;
+  background: #f3faf5;
+}
+.production-source-summary span { line-height: 1.45; }
+.production-source-diagnostics { margin-top: 10px; color: var(--texto-light); }
+.production-source-diagnostics summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--vino);
+  font-weight: 800;
+  cursor: pointer;
+}
+.production-source-diagnostics p { margin: 6px 0; line-height: 1.45; overflow-wrap: anywhere; }
 .production-filter-action { align-self: end; }
 .production-kpi-card .kpi-card-inner {
   display: grid;
