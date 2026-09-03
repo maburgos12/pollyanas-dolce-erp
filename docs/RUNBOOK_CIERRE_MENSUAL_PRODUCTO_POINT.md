@@ -48,17 +48,23 @@ No incluye:
 
 Orden de resolucion:
 
-1. cierre del mes anterior
-2. snapshot Point del ultimo dia del mes anterior
-3. snapshot Point mas reciente dentro de tolerancia
+1. cierre del mes anterior con contrato `POINT_PRODUCT_BALANCE_V1`, fecha efectiva exacta y desglose `closing_by_recipe` de cantidades Point por receta;
+2. captura Point del ultimo dia del mes anterior, sin sustituirla por otro dia.
 
-Tolerancia oficial:
+La tolerancia de fechas es cero para todos los meses. Las lineas historicas
+proyectadas a enteros equivalentes no sustituyen el desglose por receta.
+El desglose conserva tambien la cobertura por sucursal y producto.
 
-- `3` dias calendario
+La fecha operativa no es la fecha de envio: el cierre del 31 de julio recibido
+el 1 de agosto alimenta el inicial de agosto. Los movimientos de agosto abarcan
+del 1 al 31 y su final corresponde al 31 de agosto, aunque se envie en septiembre.
+Las capturas en vivo conservan su fecha real; no se les resta un dia automaticamente.
 
-Si no existe snapshot exacto ni dentro de tolerancia:
-
-- no construir el mes
+Sin cierre exacto acreditado, el inicial permanece no calculable. Se muestran
+los demas saldos disponibles con sus incidencias de cobertura, sin afirmar que
+coinciden ni inventar un inicial. Un correo vacio no acredita un cierre.
+El bloqueo del mes sigue sujeto a las guardas de integridad. Esta correccion
+no reconstruye ni altera automaticamente cierres historicos.
 
 ### Catalogo incompleto
 

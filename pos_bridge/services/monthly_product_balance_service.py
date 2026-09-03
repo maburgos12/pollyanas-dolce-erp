@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
-from django.db.models import Case, Count, IntegerField, Q, Subquery, Value, When
+from django.db.models import Count, Q, Subquery
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -26,7 +26,7 @@ from pos_bridge.services.sales_category_report_service import PointSalesCategory
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.utils.dates import iter_business_dates
-from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
+from recetas.models import ProductoMonthClosure, Receta, RecetaEquivalencia, VentaHistorica
 from recetas.utils.normalizacion import normalizar_nombre
 from ventas.services.sales_canonical_source import (
     legacy_point_sales_row_count_for_range,
@@ -269,7 +269,7 @@ class _MutableBalanceRow:
 class MonthlyPointProductBalanceService:
     """Build an exact-recipe monthly Point ledger without parent-equivalence collapsing."""
 
-    DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 3
+    DEFAULT_SNAPSHOT_TOLERANCE_DAYS = 0
 
     def __init__(
         self,
@@ -319,7 +319,7 @@ class MonthlyPointProductBalanceService:
         )
         opening_target = month_start - timedelta(days=1)
 
-        opening, opening_meta, opening_unresolved = self._load_snapshot(snapshot_date=opening_target, source="opening_snapshot")
+        opening, opening_meta, opening_unresolved = self._load_opening(snapshot_date=opening_target)
         closing, closing_meta, closing_unresolved = self._load_snapshot(snapshot_date=month_end, source="closing_snapshot")
         coverage_issues = self._compare_snapshot_coverage(opening_meta=opening_meta, closing_meta=closing_meta)
         production, production_meta, production_unresolved = self._load_production(
@@ -430,7 +430,7 @@ class MonthlyPointProductBalanceService:
         )
         source_counts = {
             "opening_snapshot_rows": int(opening_meta.get("snapshot_rows") or 0),
-            "opening_snapshot_unresolved": len(opening_unresolved),
+            "opening_snapshot_unresolved": int(opening_meta.get("unresolved_rows") or 0),
             "closing_snapshot_rows": int(closing_meta.get("snapshot_rows") or 0),
             "closing_snapshot_unresolved": len(closing_unresolved),
             "production_rows": sum(value[1] for value in production.values()),
@@ -513,36 +513,70 @@ class MonthlyPointProductBalanceService:
             row.closing_point_cedis = Decimal(scopes["cedis"])
             row.closing_point_sucursales = Decimal(scopes["sucursales"])
 
+    def _load_opening(self, *, snapshot_date: date):
+        # A generated-at timestamp (including the next day's 01:00 email) is
+        # not the operational closing date. Carry only exact-product closings
+        # whose source explicitly proves the previous month's final day.
+        previous = ProductoMonthClosure.objects.filter(
+            month_start=snapshot_date.replace(day=1), month_end=snapshot_date,
+            status__in=(ProductoMonthClosure.STATUS_BUILT, ProductoMonthClosure.STATUS_LOCKED),
+        ).first()
+        if previous is not None:
+            metadata = previous.metadata or {}
+            closing = metadata.get("closing_inventory_meta") or {}
+            contract = (metadata.get("balance") or {}).get("contract")
+            if contract == "POINT_PRODUCT_BALANCE_V1" and str(closing.get("effective_date")) == snapshot_date.isoformat():
+                values = {}
+                # Closure lines are parent-equivalent projections, even in V1.
+                # Only the original recipe ledger can feed the exact-product report.
+                ledger = (metadata.get("balance") or {}).get("closing_by_recipe") or {}
+                for recipe_id, entry in ledger.items():
+                    if entry.get("quantity") is None or not entry.get("snapshot_rows"):
+                        continue
+                    values[int(recipe_id)] = (Decimal(entry["quantity"]), int(entry["snapshot_rows"]))
+                if values:
+                    unresolved_rows = int(closing.get("unresolved_rows") or 0)
+                    meta = self._empty_snapshot_meta(snapshot_date, 0)
+                    meta.update({
+                        "source": "ProductoMonthClosure",
+                        "previous_closure_id": previous.pk,
+                        "previous_closure_month": previous.month_start,
+                        "previous_closure_built_at": previous.built_at,
+                        "effective_date": snapshot_date,
+                        "selected_dates": (snapshot_date,),
+                        "source_present": True,
+                        "within_tolerance": True,
+                        "authoritative": closing.get("authoritative") is True and not unresolved_rows,
+                        "unresolved_rows": unresolved_rows,
+                        "snapshot_rows": sum(count for _, count in values.values()),
+                        "matched_recipe_count": len(values),
+                    })
+                    # Compacted metadata can contain a hash/sample instead of
+                    # full coverage arrays. Never compare those as actual keys.
+                    coverage = (metadata.get("balance") or {}).get("closing_coverage") or closing
+                    for key in ("applied_branch_ids", "applied_coverage_keys", "snapshot_issues"):
+                        value = coverage.get(key)
+                        if isinstance(value, (list, tuple)):
+                            meta[key] = tuple(tuple(item) if isinstance(item, list) else item for item in value)
+                    return values, meta, []
+        return self._load_snapshot(snapshot_date=snapshot_date, source="opening_snapshot")
+
     def _load_snapshot(self, *, snapshot_date: date, source: str):
-        tolerance_days = int(
-            getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
-        )
+        # Monthly balances never borrow inventory from neighbouring days. Raw
+        # inventory captures are live readings; shifting all timestamps back a
+        # day would corrupt them. The daily email already labels its own day.
+        tolerance_days = 0
         current_timezone = timezone.get_current_timezone()
         window_start = timezone.make_aware(
-            datetime.combine(snapshot_date - timedelta(days=tolerance_days), time.min),
-            current_timezone,
+            datetime.combine(snapshot_date, time.min), current_timezone,
         )
         window_end = timezone.make_aware(
-            datetime.combine(snapshot_date + timedelta(days=tolerance_days + 1), time.min),
+            datetime.combine(snapshot_date + timedelta(days=1), time.min),
             current_timezone,
         )
-        # Preserve the calendar-day rank: exact, nearest (earlier on ties),
-        # latest timestamp, largest id. Rank in PostgreSQL before hydrating
-        # related objects: a seven-day window can contain millions of captures.
-        day_ranks = []
-        for offset in range(-tolerance_days, tolerance_days + 1):
-            day = snapshot_date + timedelta(days=offset)
-            day_ranks.append(When(
-                captured_at__gte=timezone.make_aware(datetime.combine(day, time.min), current_timezone),
-                captured_at__lt=timezone.make_aware(
-                    datetime.combine(day + timedelta(days=1), time.min), current_timezone,
-                ),
-                then=Value(2 * abs(offset) - int(offset < 0)),
-            ))
         selected_ids = (
             PointInventorySnapshot.objects.filter(captured_at__gte=window_start, captured_at__lt=window_end)
-            .alias(_snapshot_day_rank=Case(*day_ranks, output_field=IntegerField()))
-            .order_by("branch_id", "product_id", "_snapshot_day_rank", "-captured_at", "-id")
+            .order_by("branch_id", "product_id", "-captured_at", "-id")
             .distinct("branch_id", "product_id")
             .values("id")
         )
@@ -902,7 +936,10 @@ class MonthlyPointProductBalanceService:
     def _snapshot_warnings(meta: Mapping[str, object], *, label: str) -> list[str]:
         selected_dates = tuple(meta.get("selected_dates") or ())
         if not selected_dates:
-            return [f"No existe snapshot Point para {label}; el balance no es autoritativo."]
+            return [
+                f"No hay cierre Point acreditado para {label} del {meta.get('target_date')}. "
+                "No se sustituye por otro día; la fecha de envío del reporte no cambia su fecha operativa."
+            ]
         if len(selected_dates) != 1 or meta.get("effective_date") is None:
             selected_label = ", ".join(str(selected_date) for selected_date in selected_dates)
             return [
@@ -915,6 +952,8 @@ class MonthlyPointProductBalanceService:
             if not meta.get("within_tolerance"):
                 warning += " La fecha queda fuera de la tolerancia configurada."
             return [warning]
+        if meta.get("unresolved_rows"):
+            return [f"El cierre Point de {label} contiene {meta['unresolved_rows']} registro(s) sin homologar; se conservan los saldos conocidos, pero la fuente está incompleta."]
         return []
 
     def _validate_month_movement_job(

@@ -89,7 +89,7 @@ Los consumidores no recalcularán la fórmula. Recibirán valores ya calculados 
 
 Los snapshots Point se mantendrán por producto/receta, sin convertir porciones a “pasteles enteros equivalentes” para la tabla operativa. Esto permite comparar el producto que Point vende y almacena con sus propios movimientos.
 
-El snapshot inicial provendrá del cierre del mes anterior. El final provendrá del último snapshot válido del último día del mes, aplicando la tolerancia ya existente y mostrando una advertencia si no corresponde al día exacto.
+El inicial provendrá del cierre acreditado del último día del mes anterior, con cantidades Point por receta, o de la captura de ese mismo día. El final provendrá de la última captura válida del último día del mes. No se permiten fechas cercanas: la tolerancia de fechas es cero para todos los meses. La fecha operativa del cierre no cambia porque el correo llegue de madrugada al día siguiente; tampoco se resta un día a las capturas en vivo. Se muestran los saldos disponibles independientemente de las advertencias de cobertura, sin inventar cantidades ausentes ni compararlas con un físico no capturado.
 
 Una receta no homologada quedará como incidencia visible; no se omitirá silenciosamente ni se sumará a otro producto.
 

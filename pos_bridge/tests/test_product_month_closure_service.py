@@ -280,8 +280,12 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertEqual(row["inventario_final_point_cedis"], Decimal("6"))
         self.assertEqual(row["inventario_final_point_sucursales"], Decimal("4"))
         self.assertEqual(row["inventario_final_point_total"], Decimal("10"))
+        ledger = preview["metadata"]["balance"]["closing_by_recipe"]
+        self.assertEqual(ledger[str(self.parent.pk)]["quantity"], str(parent_row.closing_point))
+        self.assertEqual(ledger[str(self.derived.pk)]["quantity"], "16")
 
         closure = service.build(month="2025-09")
+        self.assertEqual(closure.metadata["balance"]["closing_by_recipe"], ledger)
         persisted = closure.lines.get(receta_padre=self.parent)
         self.assertEqual(persisted.metadata["source_counts"]["conversion_in_rows"], 1)
         self.assertEqual(
@@ -2016,7 +2020,7 @@ class ProductMonthClosureServiceTests(TestCase):
             self.service.lock(closure=closure)
 
     @override_settings(PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS=3)
-    def test_preview_uses_snapshot_fallback_within_tolerance_and_marks_warning(self):
+    def test_preview_rejects_nearby_snapshot_without_exact_month_data(self):
         point_parent = PointProduct.objects.create(external_id="point-parent-fallback", sku="SNK-M", name=self.parent.nombre)
         PointInventorySnapshot.objects.create(
             branch=self.point_branch,
@@ -2026,11 +2030,8 @@ class ProductMonthClosureServiceTests(TestCase):
             captured_at=timezone.make_aware(datetime(2025, 8, 29, 12, 0, 0), timezone.get_current_timezone()),
         )
 
-        preview = self.service.preview(month="2025-09")
-
-        self.assertEqual(preview["opening_reference_date"], date(2025, 8, 29))
-        self.assertIn("2025-08-29", preview["metadata"]["opening_meta"]["selected_dates"])
-        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
+        with self.assertRaisesMessage(ProductMonthClosureError, "No hay datos"):
+            self.service.preview(month="2025-09")
 
     def test_lock_rejects_closure_with_unmatched_opening_products(self):
         closure = ProductoMonthClosure.objects.create(

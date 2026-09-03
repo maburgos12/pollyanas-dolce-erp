@@ -33,8 +33,9 @@
       <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
       <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
       {% if not fuentes.canonical.authority.verified %}<span class="badge bg-warning">{{ fuentes.canonical.authority.reason }}</span>{% endif %}
-      <span class="badge bg-primary">Snapshots Point: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"Y-m-d" }}{% else %}Sin dato{% endif %} → {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"Y-m-d" }}{% else %}Sin dato{% endif %}{% if fuentes.canonical.opening.fallback_used or fuentes.canonical.closing.fallback_used %} (fecha cercana seleccionada){% endif %}</span>
+      <span class="badge bg-primary">Cierres operativos Point: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"Y-m-d" }}{% else %}Sin cierre acreditado{% endif %} → {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"Y-m-d" }}{% else %}Sin cierre acreditado{% endif %}</span>
     </div>
+    <p class="executive-section-copy">La fecha operativa determina el mes: el inicial corresponde al cierre del último día del mes anterior y el final al último día del mes seleccionado. Recibir el correo al día siguiente no cambia esas fechas. Son saldos de Point, no conteos físicos.</p>
   </section>
 
   <section class="card">

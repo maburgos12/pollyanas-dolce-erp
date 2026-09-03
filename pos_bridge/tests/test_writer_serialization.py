@@ -584,8 +584,9 @@ class WriterSerializationTests(TransactionTestCase):
             recipe=target_recipe,
         )
         other = ProductoMonthClosure.objects.create(
-            month_start=date(2026, 3, 1),
-            month_end=date(2026, 3, 31),
+            # Marzo es fuente del inicial de abril y ya no es independiente.
+            month_start=date(2026, 2, 1),
+            month_end=date(2026, 2, 28),
             status=ProductoMonthClosure.STATUS_BUILT,
         )
         first_insert_recipe = Receta.objects.create(
@@ -660,6 +661,69 @@ class WriterSerializationTests(TransactionTestCase):
             ProductMonthClosureService._persisted_lines_digest(list(target.lines.all())),
             target.metadata["source_fingerprint"]["projected_lines_digest"],
         )
+
+    def test_previous_month_writer_finishes_before_lock_rechecks_target_lines(self):
+        recipe = Receta.objects.create(
+            nombre="Cierre con fuente anterior concurrente",
+            hash_contenido="previous-month-writer-race",
+        )
+        target, _line, current_plan = self._canonical_closure_for_line_race(
+            month_start=date(2026, 4, 1), recipe=recipe,
+        )
+        previous = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 3, 1), month_end=date(2026, 3, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+        )
+        inserted_recipe = Receta.objects.create(
+            nombre="Línea modificada mientras termina el mes anterior",
+            hash_contenido="previous-month-late-target-line",
+        )
+        previous_locked = Event()
+        release_writer = Event()
+        lock_finished = Event()
+        writer_errors, locker_errors = [], []
+
+        def writer():
+            with transaction.atomic():
+                # El INSERT toma el lock del padre mediante el trigger real.
+                ProductoMonthClosureLine.objects.create(
+                    closure=previous, receta_padre=recipe,
+                )
+                previous_locked.set()
+                self.assertTrue(release_writer.wait(5))
+                ProductoMonthClosureLine.objects.create(
+                    closure=target, receta_padre=inserted_recipe,
+                )
+
+        service = ProductMonthClosureService()
+
+        def locker():
+            try:
+                service.lock(closure=target)
+            finally:
+                lock_finished.set()
+
+        writer_thread = self._thread(writer, writer_errors)
+        self.assertTrue(previous_locked.wait(5), writer_errors)
+        with patch.object(service, "_fresh_canonical_preview", return_value=current_plan) as preview:
+            lock_thread = self._thread(locker, locker_errors)
+            try:
+                self.assertFalse(lock_finished.wait(0.25))
+            finally:
+                release_writer.set()
+                writer_thread.join(5)
+                lock_thread.join(5)
+            preview.assert_not_called()
+
+        self.assertFalse(writer_thread.is_alive() or lock_thread.is_alive())
+        self.assertEqual(writer_errors, [])
+        self.assertEqual(len(locker_errors), 1)
+        self.assertIsInstance(locker_errors[0], ProductMonthClosureError)
+        self.assertIn("líneas persistidas cambiaron", str(locker_errors[0]).lower())
+        target.refresh_from_db()
+        self.assertFalse(target.is_locked)
+        self.assertEqual(target.lines.count(), 2)
+        self.assertEqual(previous.lines.count(), 1)
 
     def test_database_rejects_direct_insert_update_and_delete_on_locked_closure(self):
         locked = ProductoMonthClosure.objects.create(

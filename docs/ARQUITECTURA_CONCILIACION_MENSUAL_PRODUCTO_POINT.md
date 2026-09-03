@@ -39,13 +39,15 @@ Excluye en v1:
 
 Fuente objetivo:
 
-1. cierre mensual canonicamente guardado del mes anterior
-2. si no existe cierre previo, snapshot Point del ultimo dia del mes anterior
-3. si tampoco existe, ultimo snapshot disponible dentro de ventana de tolerancia con bandera de excepcion
+1. cierre mensual canonico del mes anterior con fecha efectiva exacta y cantidades
+   Point por receta en `metadata.balance.closing_by_recipe` (no lineas proyectadas);
+2. si no existe ese cierre acreditado, captura Point del ultimo dia del mes anterior.
 
-Tolerancia oficial v1:
-
-- `3` dias calendario
+Contrato vigente: cero dias de tolerancia para todos los meses. Sustituye la
+ventana historica de tres dias; no se utiliza un dia cercano para completar saldos.
+La fecha de envio del correo no cambia la fecha operativa del cierre.
+El final de mes sigue la misma regla de fecha exacta. La ausencia del inicial
+no oculta un final Point disponible y no autoriza reconstrucciones historicas.
 
 Notas:
 
