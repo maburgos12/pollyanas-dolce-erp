@@ -33,7 +33,7 @@ class PersonalMensualTests(TestCase):
         from reportes.services_rentabilidad_personal import leer_personal_mensual
         return leer_personal_mensual(date(2026, 6, 1))
 
-    def test_total_no_suma_componentes_ni_descuentos_y_advierte_asignacion_historica(self):
+    def test_nomina_cerrada_usa_total_oficial_y_sucursal_erp_como_fuente_completa(self):
         linea = self.nomina()
         NominaConceptoLinea.objects.create(linea=linea, tipo="PERCEPCION", nombre="Sueldo", importe=1000)
         NominaConceptoLinea.objects.create(linea=linea, tipo="PERCEPCION", nombre="Bono", importe=200)
@@ -42,8 +42,8 @@ class PersonalMensualTests(TestCase):
         filas = [f for f in resultado["filas"] if f["familia"] == "nomina"]
         self.assertEqual(sum(f["monto_mensual"] for f in filas), Decimal("1200"))
         self.assertEqual(filas[0]["sucursal_id"], self.sucursal.pk)
-        self.assertEqual(filas[0]["estado"], "PARCIAL")
-        self.assertIn("histórica", filas[0]["detalle"])
+        self.assertEqual(filas[0]["estado"], "COMPLETO")
+        self.assertIn("sucursal asignada en RRHH", filas[0]["detalle"])
         self.assertNotIn(linea.empleado.nombre, str(resultado))
 
     def test_borrador_y_produccion_no_suman_al_costo_de_ventas(self):
@@ -57,12 +57,14 @@ class PersonalMensualTests(TestCase):
         self.assertFalse(resultado["filas"])
         self.assertTrue(any(p["sucursal_id"] is None and "sucursal" in p["detalle"] for p in resultado["pendientes"]))
 
-    def test_conceptos_en_desacuerdo_se_reportan_sin_sumarlos(self):
+    def test_conceptos_en_desacuerdo_no_invalidan_total_oficial_de_nomina(self):
         linea = self.nomina()
         NominaConceptoLinea.objects.create(linea=linea, tipo="PERCEPCION", nombre="Sueldo", importe=1500)
         resultado = self.leer()
         self.assertEqual(resultado["filas"][0]["monto_mensual"], Decimal("1200"))
-        self.assertTrue(any("conceptos" in p["detalle"] for p in resultado["pendientes"]))
+        self.assertEqual(resultado["filas"][0]["estado"], "COMPLETO")
+        self.assertIn("conceptos", resultado["filas"][0]["detalle"])
+        self.assertFalse(any(p["familia"] == "nomina" for p in resultado["pendientes"]))
 
     def test_sipare_mensual_no_se_divide_y_no_duplica_version(self):
         rubro = RubroPresupuesto.objects.create(

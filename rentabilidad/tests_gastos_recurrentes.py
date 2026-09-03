@@ -68,7 +68,7 @@ class IntegracionGastosRecurrentesTests(TestCase):
         self.assertContains(response, "No calculable")
         self.assertContains(response, "Nómina ERP")
         self.assertNotContains(response, "Nombre privado")
-        self.assertContains(response, "histórica")
+        self.assertContains(response, "sucursal asignada en RRHH")
         self.assertFalse([q["sql"] for q in queries if q["sql"].lstrip().split()[0] in {"INSERT", "UPDATE", "DELETE"}])
 
     def test_nomina_sola_no_habilita_punto_de_equilibrio(self):

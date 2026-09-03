@@ -167,6 +167,7 @@
           <div class="form-group"><label for="fijo-inicio">Vigente desde</label><input class="input-field" id="fijo-inicio" name="vigencia_inicio" type="date" value="{{ selected_period_iso }}" required></div>
           <div class="form-group"><label for="fijo-dia">Día de vencimiento</label><input class="input-field" id="fijo-dia" name="dia_vencimiento" type="number" min="1" max="31" value="1" required></div>
           <div class="form-group"><label for="fijo-periodicidad">Frecuencia del cargo</label><select class="input-field" id="fijo-periodicidad" name="periodicidad_meses"><option value="1">Mensual</option><option value="2">Bimestral</option></select></div>
+          <div class="form-group"><label for="fijo-soporte">Referencia de soporte</label><input class="input-field" id="fijo-soporte" name="archivo_soporte" maxlength="300" placeholder="CFDI, recibo o expediente de OneDrive" aria-describedby="fijo-soporte-ayuda"><span id="fijo-soporte-ayuda" class="prc-help">Se copiará a cada obligación para conservar la evidencia del importe.</span></div>
           <div class="form-group"><label for="fijo-condicion">Condición</label><select class="input-field" id="fijo-condicion" name="condicion_pago" data-credit-toggle>{% for value,label in condiciones_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
           <div class="form-group"><label for="fijo-metodo">Medio previsto</label><select class="input-field" id="fijo-metodo" name="metodo_pago_previsto"><option value="">Por definir</option>{% for value,label in metodos_pago %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
         </div>
@@ -205,6 +206,7 @@
             <div class="form-group"><label>Nuevo monto</label><input class="input-field" name="monto" value="{{ gasto.version_actual.monto|floatformat:2 }}" required></div>
             <div class="form-group"><label>Día de vencimiento</label><input class="input-field" name="dia_vencimiento" type="number" min="1" max="31" value="{{ gasto.version_actual.dia_vencimiento }}" required></div>
             <div class="form-group"><label for="periodicidad-{{ gasto.id }}">Frecuencia del cargo</label><select class="input-field" id="periodicidad-{{ gasto.id }}" name="periodicidad_meses"><option value="1" {% if gasto.version_actual.periodicidad_meses == 1 %}selected{% endif %}>Mensual</option><option value="2" {% if gasto.version_actual.periodicidad_meses == 2 %}selected{% endif %}>Bimestral</option></select></div>
+            <div class="form-group"><label for="soporte-{{ gasto.id }}">Referencia de soporte</label><input class="input-field" id="soporte-{{ gasto.id }}" name="archivo_soporte" maxlength="300" value="{{ gasto.version_actual.archivo_soporte }}" placeholder="CFDI, recibo o expediente de OneDrive"></div>
             <div class="form-group"><label>Condición</label><select class="input-field" name="condicion_pago">{% for value,label in condiciones_pago %}<option value="{{ value }}" {% if value == gasto.version_actual.condicion_pago %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             <div class="form-group"><label>Medio previsto</label><select class="input-field" name="metodo_pago_previsto"><option value="">Por definir</option>{% for value,label in metodos_pago %}<option value="{{ value }}" {% if value == gasto.version_actual.metodo_pago_previsto %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             <div class="form-group"><label>Tipo de crédito</label><select class="input-field" name="tipo_credito"><option value="">No aplica</option>{% for value,label in tipos_credito %}<option value="{{ value }}" {% if value == gasto.version_actual.tipo_credito %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -217,7 +219,7 @@
         </form>
       </details>
     </div>
-    <details style="margin-top:10px"><summary class="prc-help">Ver historial de {{ gasto.versiones.count }} versión(es)</summary><ul>{% for version in gasto.versiones.all %}<li>{{ version.vigencia_inicio }} a {{ version.vigencia_fin|default:"vigente" }} · ${{ version.monto|floatformat:2|intcomma }}{% if version.motivo %} · {{ version.motivo }}{% endif %}</li>{% endfor %}</ul></details>
+    <details style="margin-top:10px"><summary class="prc-help">Ver historial de {{ gasto.versiones.count }} versión(es)</summary><ul>{% for version in gasto.versiones.all %}<li>{{ version.vigencia_inicio }} a {{ version.vigencia_fin|default:"vigente" }} · ${{ version.monto|floatformat:2|intcomma }}{% if version.motivo %} · {{ version.motivo }}{% endif %}{% if version.archivo_soporte %} · Soporte: {{ version.archivo_soporte }}{% endif %}</li>{% endfor %}</ul></details>
     {% endif %}
   </article>
   {% empty %}<p class="muted">Todavía no hay gastos fijos configurados para esta área.</p>{% endfor %}

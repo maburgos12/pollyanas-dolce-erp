@@ -357,6 +357,31 @@ class GastosCompromisosServiceTests(TestCase):
         self.assertEqual(primera.pk, segunda.pk)
         self.assertEqual(GastoOperativoMensual.objects.filter(external_key=f"OBLIGACION-GASTO-{primera.pk}").count(), 1)
 
+    def test_gasto_fijo_propaga_referencia_de_soporte_al_gasto_real(self):
+        recurrente = crear_gasto_recurrente(
+            usuario=self.responsable,
+            area=self.area,
+            rubro=self.rubro,
+            centro_costo=self.centro,
+            categoria_gasto=self.categoria,
+            concepto="Renta local Centro",
+            vigencia_inicio=date(2026, 1, 1),
+            monto=Decimal("18000.00"),
+            dia_vencimiento=5,
+            condicion_pago=ObligacionGasto.CONDICION_CONTADO,
+            archivo_soporte="CFDI:11111111-2222-3333-4444-555555555555",
+        )
+
+        obligacion, _ = generar_obligacion_recurrente(
+            usuario=self.responsable, recurrente=recurrente, periodo=date(2026, 7, 1)
+        )
+
+        self.assertEqual(
+            obligacion.archivo_soporte,
+            "CFDI:11111111-2222-3333-4444-555555555555",
+        )
+        self.assertEqual(obligacion.gasto_operativo.archivo_soporte, obligacion.archivo_soporte)
+
     def test_pagos_guardan_medio_y_actualizan_saldo_sin_sobregiro(self):
         obligacion = crear_gasto_variable(
             usuario=self.responsable,

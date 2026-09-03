@@ -723,6 +723,7 @@ def presupuesto_gasto_recurrente_crear(request: HttpRequest) -> HttpResponse:
             plazo_unidad=request.POST.get("plazo_unidad") or "",
             numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
             motivo=request.POST.get("motivo") or "",
+            archivo_soporte=request.POST.get("archivo_soporte") or "",
         )
     except ValidationError as exc:
         return _error_gasto(request, exc)
@@ -748,6 +749,7 @@ def presupuesto_gasto_recurrente_editar(request: HttpRequest, recurrente_id: int
             plazo_unidad=request.POST.get("plazo_unidad") or "",
             numero_parcialidades=_entero_post(request, "numero_parcialidades", default=1),
             motivo=request.POST.get("motivo") or "",
+            archivo_soporte=request.POST.get("archivo_soporte") or "",
         )
     except ValidationError as exc:
         return _error_gasto(request, exc)
