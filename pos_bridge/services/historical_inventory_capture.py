@@ -137,6 +137,13 @@ class HistoricalPointInventoryClosingCapture:
             result[branch_id] = _decimal(row.get("Cantidad"), field="Cantidad")
         return result
 
+    def _call_point(self, operation):
+        try:
+            return operation()
+        except Exception:
+            self.client.login()
+            return operation()
+
     def capture(
         self,
         *,
@@ -158,13 +165,29 @@ class HistoricalPointInventoryClosingCapture:
         resolved = []
         unresolved = []
         for product in products:
-            current = self._current_stock_by_branch(self.client.get_product_stock(product.external_id))
+            try:
+                current_rows = self._call_point(
+                    lambda: self.client.get_product_stock(product.external_id)
+                )
+                current = self._current_stock_by_branch(current_rows)
+            except Exception as exc:
+                for branch in branches:
+                    unresolved.append({
+                        "branch_id": branch.id,
+                        "branch_external_id": branch.external_id,
+                        "product_id": product.id,
+                        "product_external_id": product.external_id,
+                        "reason": str(exc),
+                    })
+                continue
             for branch in branches:
                 try:
-                    history = self.client.get_stock_history(
-                        product.external_id,
-                        branch.external_id,
-                        movements=HISTORY_LIMIT,
+                    history = self._call_point(
+                        lambda: self.client.get_stock_history(
+                            product.external_id,
+                            branch.external_id,
+                            movements=HISTORY_LIMIT,
+                        )
                     )
                     resolution = resolve_stock_at_close(
                         history,
