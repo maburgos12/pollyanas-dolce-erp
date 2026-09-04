@@ -877,7 +877,7 @@ def task_conversion_sync(
     from pos_bridge.services.conversion_sync_service import sync_conversion_lines
 
     today = timezone.localdate()
-    df = date.fromisoformat(date_from) if date_from else today.replace(day=1)
+    df = date.fromisoformat(date_from) if date_from else today - timedelta(days=1)
     dt = date.fromisoformat(date_to) if date_to else today - timedelta(days=1)
     if date_to is None and date_from is None and today.day == 1:
         df = dt.replace(day=1)

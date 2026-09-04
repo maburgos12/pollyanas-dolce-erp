@@ -4,7 +4,8 @@ import hashlib
 import json
 import logging
 import time
-from datetime import date, datetime, time as datetime_time
+from calendar import monthrange
+from datetime import date, datetime, time as datetime_time, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
 from urllib.parse import urljoin
@@ -123,10 +124,18 @@ def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
         if label is not None and str(label).strip()
     }
     rows = []
+    carried_dimensions: dict[str, object] = {}
     for record in records[header_index + 1 :]:
-        row = {label: record.get(column) for column, label in column_labels.items()}
-        if not any(value is not None and str(value).strip() for value in row.values()):
+        if not any(value is not None and str(value).strip() for value in record.values()):
             continue
+        row = {label: record.get(column) for column, label in column_labels.items()}
+        for label in row:
+            if normalize_text(label) not in {"plaza", "sucursal", "categoria"}:
+                continue
+            if row[label] not in (None, ""):
+                carried_dimensions[label] = row[label]
+            elif label in carried_dimensions:
+                row[label] = carried_dimensions[label]
         marker = " ".join(
             str(value).strip().upper()
             for value in row.values()
@@ -140,7 +149,7 @@ def _normalize_inventory_report_rows(records: list[dict]) -> list[dict]:
 
 def _coerce_datetime(value, *, default_date: date):
     if value in (None, ""):
-        return None
+        dt = datetime.combine(default_date, datetime_time.min)
     elif isinstance(value, datetime):
         dt = value
     elif isinstance(value, date):
@@ -356,8 +365,15 @@ def sync_conversion_lines(
         with transaction.atomic():
             lock_product_month_sources(months_in_range(date_from, date_to))
             for row in rows:
+                raw_movement_date = _first_value(
+                    row,
+                    "Fecha",
+                    "FechaMovimiento",
+                    "Fecha Movimiento",
+                    "Fecha_creacion",
+                )
                 movement_at = _coerce_datetime(
-                    _first_value(row, "Fecha", "FechaMovimiento", "Fecha Movimiento", "Fecha_creacion"),
+                    raw_movement_date,
                     default_date=date_from,
                 )
                 quantity = _required_decimal(_first_value(row, "Cantidad", "Qty", "Unidades"))
@@ -394,12 +410,34 @@ def sync_conversion_lines(
                 movement_external_id = str(
                     _first_value(row, "PK_Movimiento", "Movimiento", "id", "ID") or ""
                 )[:40]
-                if (not item_name and not item_code) or not movement_external_id:
+                if not item_name and not item_code:
                     invalid_identity_rows += 1
                     invalid_rows += 1
                     continue
 
-                source_hash = _make_hash(row)
+                if not movement_external_id and raw_movement_date in (None, ""):
+                    aggregate_identity = "|".join(
+                        (
+                            date_from.isoformat(),
+                            date_to.isoformat(),
+                            str(branch.external_id),
+                            item_code,
+                            item_name,
+                        )
+                    )
+                    movement_external_id = f"AGG-{hashlib.sha256(aggregate_identity.encode()).hexdigest()[:32]}"
+                if not movement_external_id:
+                    invalid_identity_rows += 1
+                    invalid_rows += 1
+                    continue
+
+                source_hash = _make_hash(
+                    {
+                        **row,
+                        "_requested_date_from": date_from.isoformat(),
+                        "_requested_date_to": date_to.isoformat(),
+                    }
+                )
                 existing = (
                     PointConversionLine.objects.select_for_update()
                     .filter(source_hash=source_hash)
@@ -481,6 +519,29 @@ def sync_conversion_lines(
                     raw_payload=row,
                 )
                 created += 1
+
+            full_month_end = date(
+                date_from.year,
+                date_from.month,
+                monthrange(date_from.year, date_from.month)[1],
+            )
+            if (
+                not branch_filter_norm
+                and not invalid_rows
+                and not skipped_unmatched_branch
+                and date_from.day == 1
+                and date_to == full_month_end
+            ):
+                current_timezone = timezone.get_current_timezone()
+                range_start = timezone.make_aware(datetime.combine(date_from, datetime_time.min), current_timezone)
+                range_end = timezone.make_aware(
+                    datetime.combine(date_to + timedelta(days=1), datetime_time.min),
+                    current_timezone,
+                )
+                PointConversionLine.objects.filter(
+                    movement_at__gte=range_start,
+                    movement_at__lt=range_end,
+                ).exclude(sync_job=job).delete()
 
             result = {
                 "job_id": job.id,

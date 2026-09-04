@@ -2200,6 +2200,7 @@ class MonthlyPointProductBalanceService:
                 "product_id",
                 "product__sku",
                 "product__name",
+                "product__category",
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
@@ -2223,6 +2224,13 @@ class MonthlyPointProductBalanceService:
             )
             for row in rows
             if row.receta_id is None
+            and not self.matcher.is_non_recipe_sale_row(
+                {
+                    "sku": row.product.sku,
+                    "name": row.product.name,
+                    "category": row.product.category,
+                }
+            )
         ]
         return self._aggregate_rows(matched_rows, "quantity"), unresolved, len(rows), rows
 
