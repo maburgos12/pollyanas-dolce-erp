@@ -602,6 +602,32 @@ class PointConversionRerunAuthorityTests(TestCase):
 
         self.assertEqual(selected["PK_Reporte"], "REQUESTED")
 
+    def test_poll_report_ignores_non_mapping_entries_from_point(self):
+        created_after = timezone.make_aware(datetime(2026, 7, 1, 12, 0, 0))
+        requested = {
+            "PK_Reporte": "REQUESTED",
+            "Nombre_reporte": "MOVIMIENTOS DE INVENTARIOS",
+            "Modulo": "movimientos",
+            "Status": 1,
+            "Fecha_creacion": "2026-07-01 12:00:01",
+        }
+        response = MagicMock()
+        response.json.return_value = ["respuesta-temporal", None, requested]
+        client = MagicMock()
+        client._request.return_value = response
+
+        with (
+            patch("pos_bridge.services.conversion_sync_service.POLL_MAX_ATTEMPTS", 1),
+            patch("pos_bridge.services.conversion_sync_service.POLL_INTERVAL_SECONDS", 0),
+        ):
+            selected = _poll_report(
+                client,
+                created_after=created_after,
+                expected_report_pk="REQUESTED",
+            )
+
+        self.assertEqual(selected["PK_Reporte"], "REQUESTED")
+
     def test_create_report_pk_accepts_scalar_json_response(self):
         response = MagicMock()
         response.json.return_value = "REQUESTED"
