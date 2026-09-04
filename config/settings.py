@@ -397,10 +397,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "reportes.cierre_produccion_nocturno",
         "schedule": crontab(hour=3, minute=15),
     },
-    # --- Sync mensual de conversiones (rebanadas) ---
+    # --- Sync diario de conversiones Point hasta el último día cerrado ---
     "pos_bridge: sync conversiones mensual": {
         "task": "pos_bridge.conversion_sync",
-        "schedule": crontab(hour=4, minute=0, day_of_month="1"),
+        "schedule": crontab(hour=4, minute=0),
     },
     # --- Alerta diaria: producción sin registros en Point ---
     "reportes: alerta produccion sin registros": {

@@ -389,6 +389,46 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Ver diagnóstico técnico", rendered)
         self.assertIn("falta job Point del mes", rendered)
 
+    def test_current_month_does_not_report_the_future_closing_as_missing(self):
+        sources = canonical_balance().sources
+        sources["opening_snapshot"].update({
+            "effective_date": date(2026, 8, 31),
+            "target_date": date(2026, 8, 31),
+        })
+        sources["closing_snapshot"].update({
+            "authoritative": False,
+            "source_present": False,
+            "effective_date": None,
+            "target_date": date(2026, 9, 30),
+            "not_due": True,
+            "authority_issues": (),
+        })
+        balance = canonical_balance(
+            MonthlyPointBalanceRow(
+                receta_id=self.parent.id,
+                opening_point=Decimal("10"),
+                production=Decimal("3"),
+                sales=Decimal("2"),
+                calculated_closing=Decimal("11"),
+                closing_point=None,
+                difference_point=None,
+                status="EN_CURSO",
+            ),
+            sources=sources,
+        )
+        balance.effective_snapshot_dates = {"opening": date(2026, 8, 31), "closing": None}
+
+        with patch("reportes.views_produccion.timezone.localdate", return_value=date(2026, 9, 4)):
+            context, _ = self._context(balance, period="2026-09")
+            rendered = self._render(context)
+
+        self.assertIn("Periodo en curso", rendered)
+        self.assertIn("Final: Al cierre del 30/09/2026", rendered)
+        self.assertIn("movimientos Point del 01/09/2026 al 03/09/2026", rendered)
+        self.assertNotIn("Falta recuperar el cierre Point final del 30/09/2026", rendered)
+        self.assertNotIn("Final: Pendiente", rendered)
+        self.assertEqual(context["groups"][0]["rows"][0]["estado_inventario"], "Periodo en curso")
+
     def test_bridge_history_or_non_authoritative_sales_never_verify_point_authority(self):
         sources = canonical_balance().sources
         sources["sales"] = {

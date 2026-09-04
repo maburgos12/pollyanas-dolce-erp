@@ -198,7 +198,7 @@ class _MutableBalanceRow:
     def record_origin(self, origin: str) -> None:
         self.origins.add(origin)
 
-    def freeze(self, receta_id: int) -> MonthlyPointBalanceRow:
+    def freeze(self, receta_id: int, *, closing_required: bool = True) -> MonthlyPointBalanceRow:
         if len(self.origins) == 1:
             conversion_origin = next(iter(self.origins))
         elif self.origins:
@@ -220,11 +220,15 @@ class _MutableBalanceRow:
                 - self.waste
                 - self.conversion_out
             )
-        if self.closing_point is None:
+        if self.closing_point is None and closing_required:
             issues.add(ISSUE_CLOSING_MISSING)
         if calculated_closing is not None and self.closing_point is not None:
             difference_point = self.closing_point - calculated_closing
-        status = self._status(difference=difference_point, issues=issues)
+        status = self._status(
+            difference=difference_point,
+            issues=issues,
+            in_progress=not closing_required,
+        )
 
         default_counts = {
             "opening_snapshot_rows": 0,
@@ -257,8 +261,12 @@ class _MutableBalanceRow:
         )
 
     @staticmethod
-    def _status(*, difference: Decimal | None, issues: set[str]) -> str:
-        if issues or difference is None:
+    def _status(*, difference: Decimal | None, issues: set[str], in_progress: bool = False) -> str:
+        if issues:
+            return "REVISAR_FUENTE"
+        if in_progress and difference is None:
+            return "EN_CURSO"
+        if difference is None:
             return "REVISAR_FUENTE"
         if abs(difference) <= DIFFERENCE_TOLERANCE:
             return "COINCIDE"
@@ -296,25 +304,28 @@ class MonthlyPointProductBalanceService:
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        today = timezone.localdate()
+        is_open_period = month_start <= today <= month_end
+        data_through = min(month_end, today - timedelta(days=1)) if is_open_period else month_end
         month_start_text = month_start.isoformat()
-        month_end_text = month_end.isoformat()
+        data_through_text = data_through.isoformat()
         self._build_movement_jobs = list(
             PointSyncJob.objects.filter(
                 Q(
                     job_type=PointSyncJob.JOB_TYPE_PRODUCTION,
                     parameters__start_date=month_start_text,
-                    parameters__end_date=month_end_text,
+                    parameters__end_date=data_through_text,
                 )
                 | Q(
                     job_type=PointSyncJob.JOB_TYPE_WASTE,
                     parameters__start_date=month_start_text,
-                    parameters__end_date=month_end_text,
+                    parameters__end_date=data_through_text,
                 )
                 | Q(
                     job_type=PointSyncJob.JOB_TYPE_INVENTORY,
                     parameters__source="point_conversion_lines",
                     parameters__date_from=month_start_text,
-                    parameters__date_to=month_end_text,
+                    parameters__date_to=data_through_text,
                 )
             )
             .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
@@ -323,18 +334,25 @@ class MonthlyPointProductBalanceService:
         opening_target = month_start - timedelta(days=1)
 
         opening, opening_meta, opening_unresolved = self._load_opening(snapshot_date=opening_target)
-        closing, closing_meta, closing_unresolved = self._load_month_end_closing(
-            snapshot_date=month_end,
-            source="closing_snapshot",
-        )
-        coverage_issues = self._compare_snapshot_coverage(opening_meta=opening_meta, closing_meta=closing_meta)
+        if is_open_period:
+            closing = {}
+            closing_meta = self._empty_snapshot_meta(month_end, self.DEFAULT_SNAPSHOT_TOLERANCE_DAYS)
+            closing_meta["not_due"] = True
+            closing_unresolved = []
+            coverage_issues = set()
+        else:
+            closing, closing_meta, closing_unresolved = self._load_month_end_closing(
+                snapshot_date=month_end,
+                source="closing_snapshot",
+            )
+            coverage_issues = self._compare_snapshot_coverage(opening_meta=opening_meta, closing_meta=closing_meta)
         production, production_meta, production_unresolved = self._load_production(
             month_start=month_start,
-            month_end=month_end,
+            month_end=data_through,
         )
         sales, sales_meta, sales_unresolved = self._load_sales(
             month_start=month_start,
-            month_end=month_end,
+            month_end=data_through,
             refresh_official_sales=(
                 self.refresh_official_sales
                 if refresh_official_sales is None
@@ -343,7 +361,7 @@ class MonthlyPointProductBalanceService:
         )
         waste, waste_meta, waste_unresolved = self._load_waste(
             month_start=month_start,
-            month_end=month_end,
+            month_end=data_through,
         )
         (
             conversion_rows,
@@ -351,7 +369,7 @@ class MonthlyPointProductBalanceService:
             conversion_unresolved,
             conversion_counts,
             conversion_meta,
-        ) = self._load_conversions(month_start=month_start)
+        ) = self._load_conversions(month_start=month_start, month_end=data_through)
 
         receta_ids = set(opening) | set(closing) | set(production) | set(sales) | set(waste) | set(conversion_rows)
         rows: dict[int, _MutableBalanceRow] = {
@@ -374,7 +392,8 @@ class MonthlyPointProductBalanceService:
         )
         month_source_incomplete = bool(unresolved_movements or unresolved_conversions)
         month_source_incomplete = month_source_incomplete or not bool(opening_meta.get("authoritative"))
-        month_source_incomplete = month_source_incomplete or not bool(closing_meta.get("authoritative"))
+        if not is_open_period:
+            month_source_incomplete = month_source_incomplete or not bool(closing_meta.get("authoritative"))
         month_source_incomplete = month_source_incomplete or bool(coverage_issues)
         month_source_incomplete = month_source_incomplete or not bool(sales_meta.get("authoritative", True))
         required_movement_sources = {
@@ -385,7 +404,7 @@ class MonthlyPointProductBalanceService:
         month_source_incomplete = month_source_incomplete or any(
             not bool(meta.get("authoritative")) for meta, _issue in required_movement_sources.values()
         )
-        if month_source_incomplete:
+        if month_source_incomplete and not is_open_period:
             for row in rows.values():
                 row.issues.add(ISSUE_MONTH_SOURCE_INCOMPLETE)
         if sales_meta.get("source_present") is False:
@@ -394,26 +413,22 @@ class MonthlyPointProductBalanceService:
                 row.issues.add(ISSUE_SALES_SOURCE_MISSING)
                 row.issues.add(ISSUE_CALCULATED_CLOSING_MISSING)
         for _family, (meta, missing_issue) in required_movement_sources.items():
-            if meta.get("authoritative"):
+            if meta.get("authoritative") or (is_open_period and meta.get("source_present") is not False):
                 continue
             for row in rows.values():
                 if meta.get("source_present") is False:
                     row.issues.add(missing_issue)
                 row.issues.add(ISSUE_CALCULATED_CLOSING_MISSING)
 
-        frozen_rows = MappingProxyType({receta_id: rows[receta_id].freeze(receta_id) for receta_id in sorted(rows)})
+        frozen_rows = MappingProxyType(
+            {
+                receta_id: rows[receta_id].freeze(receta_id, closing_required=not is_open_period)
+                for receta_id in sorted(rows)
+            }
+        )
         warnings = self._snapshot_warnings(opening_meta, label="inventario inicial")
-        warnings.extend(self._snapshot_warnings(closing_meta, label="inventario final"))
-        missing_opening_rows = sum(row.opening_point is None for row in frozen_rows.values())
-        missing_closing_rows = sum(row.closing_point is None for row in frozen_rows.values())
-        if missing_opening_rows and opening_meta.get("within_tolerance"):
-            warnings.append(
-                f"{missing_opening_rows} receta(s) no tienen inventario inicial en el snapshot seleccionado."
-            )
-        if missing_closing_rows and closing_meta.get("within_tolerance"):
-            warnings.append(
-                f"{missing_closing_rows} receta(s) no tienen inventario final en el snapshot seleccionado."
-            )
+        if not is_open_period:
+            warnings.extend(self._snapshot_warnings(closing_meta, label="inventario final"))
         warnings.extend(sales_meta.get("warnings") or [])
         issues = tuple(
             sorted(
@@ -432,6 +447,14 @@ class MonthlyPointProductBalanceService:
                 "sales": sales_meta,
                 "waste": waste_meta,
                 "conversions": conversion_meta,
+                "period": {
+                    "source": "calendar",
+                    "month_start": month_start,
+                    "month_end": month_end,
+                    "data_through": data_through,
+                    "is_open": is_open_period,
+                    "closing_due": not is_open_period,
+                },
             }
         )
         source_counts = {
@@ -1311,7 +1334,7 @@ class MonthlyPointProductBalanceService:
         }, fact_unresolved
 
     def _load_waste(self, *, month_start: date, month_end: date):
-        lower_bound, upper_bound = self._month_datetime_bounds(month_start)
+        lower_bound, upper_bound = self._date_datetime_bounds(month_start, month_end)
         point_rows = list(
             PointWasteLine.objects.filter(
                 movement_at__gte=lower_bound,
@@ -2203,9 +2226,12 @@ class MonthlyPointProductBalanceService:
         ]
         return self._aggregate_rows(matched_rows, "quantity"), unresolved, len(rows), rows
 
-    def _load_conversions(self, *, month_start: date):
-        lower_bound, upper_bound = self._month_datetime_bounds(month_start)
-        month_end = (upper_bound - timedelta(days=1)).date()
+    def _load_conversions(self, *, month_start: date, month_end: date | None = None):
+        if month_end is None:
+            lower_bound, upper_bound = self._month_datetime_bounds(month_start)
+            month_end = (upper_bound - timedelta(days=1)).date()
+        else:
+            lower_bound, upper_bound = self._date_datetime_bounds(month_start, month_end)
         all_conversions = list(
             PointConversionLine.objects.filter(movement_at__gte=lower_bound, movement_at__lt=upper_bound)
             .only(
@@ -2354,6 +2380,14 @@ class MonthlyPointProductBalanceService:
         return (
             timezone.make_aware(datetime.combine(month_start, time.min), current_timezone),
             timezone.make_aware(datetime.combine(next_month, time.min), current_timezone),
+        )
+
+    @staticmethod
+    def _date_datetime_bounds(start_date: date, end_date: date):
+        current_timezone = timezone.get_current_timezone()
+        return (
+            timezone.make_aware(datetime.combine(start_date, time.min), current_timezone),
+            timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min), current_timezone),
         )
 
     @staticmethod

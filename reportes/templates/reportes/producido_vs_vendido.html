@@ -31,9 +31,9 @@
       <span class="badge bg-primary">Merma: {{ fuentes.merma.label }}</span>
       <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
       <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
-      <span class="badge {% if fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
+      <span class="badge {% if fuentes.canonical.authority.in_progress %}bg-primary{% elif fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
       <span class="badge bg-primary">Periodo mostrado: {{ selected_period_label }}</span>
-      <span class="badge bg-primary">Cierres Point · Inicial: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"d/m/Y" }}{% else %}Pendiente{% endif %} · Final: {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"d/m/Y" }}{% else %}Pendiente{% endif %}</span>
+      <span class="badge bg-primary">Cierres Point · Inicial: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"d/m/Y" }}{% else %}Pendiente{% endif %} · Final: {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"d/m/Y" }}{% else %}{{ operational_summary.closing_label }}{% endif %}</span>
     </div>
     <p class="executive-section-copy">La fecha operativa determina el mes: el inicial corresponde al cierre del último día del mes anterior y el final al último día del mes seleccionado. Recibir el correo al día siguiente no cambia esas fechas. Son saldos de Point, no conteos físicos.</p>
     <div class="production-source-summary is-{{ operational_summary.tone }}" role="status">
@@ -216,8 +216,8 @@
             </td>
             <td class="text-end">{% if group.total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-subtotal">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
@@ -266,8 +266,8 @@
             </td>
             <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Coincide' %}is-success{% elif row.estado_inventario == 'Point mayor' %}is-warning{% elif row.estado_inventario == 'Point menor' %}is-danger{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
@@ -312,8 +312,8 @@
             </td>
             <td class="text-end">{% if grand_total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">Sin dato</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-total">Total</span></td>
           </tr>
         </tbody>
