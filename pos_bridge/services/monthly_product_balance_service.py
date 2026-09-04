@@ -27,7 +27,13 @@ from pos_bridge.services.sales_category_report_service import PointSalesCategory
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.utils.dates import iter_business_dates
-from recetas.models import ProductoMonthClosure, Receta, RecetaEquivalencia, VentaHistorica
+from recetas.models import (
+    ProductoMonthClosure,
+    Receta,
+    RecetaEquivalencia,
+    RecetaPresentacionDerivada,
+    VentaHistorica,
+)
 from recetas.utils.normalizacion import normalizar_nombre
 from ventas.services.sales_canonical_source import (
     legacy_point_sales_row_count_for_range,
@@ -111,6 +117,12 @@ class _OfficialSalesReportError(RuntimeError):
     def __init__(self, issue: str, message: str):
         super().__init__(message)
         self.issue = issue
+
+
+@dataclass(frozen=True, slots=True)
+class _ConfiguredConversionRelation:
+    receta_padre_id: int
+    factor_conversion: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -2274,18 +2286,37 @@ class MonthlyPointProductBalanceService:
         conversions = all_conversions
         destination_ids = {row.receta_id for row in conversions if row.receta_id is not None}
         equivalences = {
-            equivalence.receta_porcion_id: equivalence
+            equivalence.receta_porcion_id: _ConfiguredConversionRelation(
+                receta_padre_id=equivalence.receta_padre_id,
+                factor_conversion=Decimal(equivalence.factor_conversion),
+            )
             for equivalence in RecetaEquivalencia.objects.filter(
                 receta_porcion_id__in=destination_ids,
                 tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
                 activo=True,
             ).only("receta_porcion_id", "receta_padre_id", "factor_conversion")
         }
+        for presentation in RecetaPresentacionDerivada.objects.filter(
+            receta_derivada_id__in=destination_ids,
+            tipo_derivado=RecetaPresentacionDerivada.TIPO_REBANADA,
+            activo=True,
+        ).only("receta_derivada_id", "receta_padre_id", "unidades_por_padre"):
+            equivalences.setdefault(
+                presentation.receta_derivada_id,
+                _ConfiguredConversionRelation(
+                    receta_padre_id=presentation.receta_padre_id,
+                    factor_conversion=Decimal(presentation.unidades_por_padre),
+                ),
+            )
 
         result: dict[int, _MutableBalanceRow] = {}
         unresolved_conversions: list[MonthlyPointUnresolvedConversion] = []
         unresolved_movements: list[MonthlyPointUnresolvedMovement] = []
-        source_counts = {"conversion_rows_read": len(conversions), "conversion_destination_rows_applied": 0}
+        source_counts = {
+            "conversion_rows_read": len(conversions),
+            "conversion_destination_rows_applied": 0,
+            "conversion_rows_ignored_non_derived": 0,
+        }
         for conversion in conversions:
             quantity = Decimal(conversion.quantity)
             if conversion.receta_id is None:
@@ -2313,14 +2344,19 @@ class MonthlyPointProductBalanceService:
             if quantity == ZERO:
                 continue
 
+            equivalence = equivalences.get(conversion.receta_id)
+            source_recipe_id, factor, origin, issue = self._resolve_source(
+                conversion,
+                equivalence,
+                self._build_conversion_cache,
+            )
+            if equivalence is None and origin == ORIGIN_UNRESOLVED:
+                source_counts["conversion_rows_ignored_non_derived"] += 1
+                continue
+
             source_counts["conversion_destination_rows_applied"] += 1
             destination = result.setdefault(conversion.receta_id, _MutableBalanceRow())
             destination.add("conversion_in", quantity, count_name="conversion_in_rows")
-            source_recipe_id, factor, origin, issue = self._resolve_source(
-                conversion,
-                equivalences.get(conversion.receta_id),
-                self._build_conversion_cache,
-            )
             destination.record_origin(origin)
             if issue:
                 destination.issues.add(issue)
