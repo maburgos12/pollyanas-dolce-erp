@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    MermaEvidencia, MermaInsumo, MermaInsumoEvento, MermaProducto, MermaRegistro,
+    MermaEvidencia, MermaInsumo, MermaInsumoEvento, MermaProducto, MermaRegistro, MermaSucursalAcceso,
     OrdenAjustePoint, PersonalEnviosSucursal,
 )
 
@@ -30,6 +30,13 @@ class MermaRegistroAdmin(admin.ModelAdmin):
 class MermaProductoAdmin(admin.ModelAdmin):
     list_display = ("registro", "nombre_producto", "cantidad_enviada", "cantidad_recibida", "conforme")
     search_fields = ("registro__folio", "producto_texto", "receta__nombre")
+
+
+@admin.register(MermaSucursalAcceso)
+class MermaSucursalAccesoAdmin(admin.ModelAdmin):
+    list_display = ("user", "sucursal", "activo", "actualizado_en")
+    list_filter = ("activo", "sucursal")
+    search_fields = ("user__username", "user__first_name", "user__last_name", "sucursal__nombre")
 
 
 @admin.register(MermaEvidencia)

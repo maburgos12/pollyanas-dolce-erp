@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from activos.models import Activo
-from core.access import can_manage_submodule, is_admin_or_dg, is_mermas_only, is_repartidor_only
+from core.access import can_manage_submodule, is_admin_or_dg, is_repartidor_only
 from fallas.models import CategoriaFalla, ReporteFalla
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 
@@ -27,7 +27,7 @@ def puede_supervisar_higiene(user) -> bool:
 
 
 def puede_capturar_higiene(user) -> bool:
-    if not user or not user.is_authenticated or is_repartidor_only(user) or is_mermas_only(user):
+    if not user or not user.is_authenticated or is_repartidor_only(user):
         return False
     return bool(sucursal_higiene_usuario(user))
 

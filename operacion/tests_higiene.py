@@ -93,6 +93,23 @@ class HigieneDiariaTests(TestCase):
         self.assertNotContains(captura, ">H₂O<")
         self.assertNotContains(captura, ">WC<")
 
+    def test_usuario_solo_mermas_tambien_puede_abrir_higiene(self):
+        solo_mermas = User.objects.create_user(username="mermas.higiene", password="test12345")
+        UserProfile.objects.create(user=solo_mermas, sucursal=self.payan)
+        UserModuleAccess.objects.create(
+            user=solo_mermas,
+            module="mermas.captura",
+            access=ACCESS_MANAGE,
+        )
+        self.client.force_login(solo_mermas)
+
+        home = self.client.get(reverse("operacion:app_home"))
+        captura = self.client.get(reverse("operacion:higiene_home"))
+
+        self.assertContains(home, "Higiene y limpieza")
+        self.assertEqual(captura.status_code, 200)
+        self.assertContains(captura, "Historial de Payán")
+
     def test_cloro_y_ph_se_guardan_estructurados_y_sin_duplicar_el_dia(self):
         self.client.force_login(self.operadora)
         respuestas = [

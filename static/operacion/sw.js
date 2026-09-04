@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-app-operativa-pwa-v35-lucide-compartido";
+const CACHE_NAME = "pollyanas-app-operativa-pwa-v36-mermas-bitacoras";
 const SHELL_ASSETS = [
   "/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",

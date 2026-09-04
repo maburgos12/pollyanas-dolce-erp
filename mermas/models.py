@@ -140,6 +140,37 @@ class MermaRegistro(models.Model):
         )
 
 
+class MermaSucursalAcceso(models.Model):
+    """Sucursales adicionales donde una persona puede capturar merma de producto."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mermas_sucursales_adicionales",
+    )
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.CASCADE,
+        related_name="usuarios_captura_mermas",
+    )
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "sucursal"),
+                name="mermas_acceso_usuario_sucursal_unico",
+            )
+        ]
+        verbose_name = "Sucursal adicional para captura de merma"
+        verbose_name_plural = "Sucursales adicionales para captura de merma"
+
+    def __str__(self):
+        return f"{self.user.username} · {self.sucursal.nombre}"
+
+
 class MermaProducto(models.Model):
     registro = models.ForeignKey(MermaRegistro, on_delete=models.CASCADE, related_name="productos")
     receta = models.ForeignKey("recetas.Receta", on_delete=models.PROTECT, null=True, blank=True)

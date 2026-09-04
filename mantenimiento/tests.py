@@ -1319,9 +1319,9 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
-        # El shell global se versionó a v24 para restaurar las gráficas;
+        # El shell global se versionó a v25 para actualizar el periodo Point;
         # la URL de registro no cambia al actualizar su contenido.
         self.assertIn("20260724-superuser-preview-v23", base)
-        self.assertIn("pollyanas-erp-shell-v24-reportes-charts", service_worker)
+        self.assertIn("pollyanas-erp-shell-v25-point-periodo-en-curso", service_worker)
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)

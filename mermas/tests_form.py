@@ -1,3 +1,4 @@
+import json
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
@@ -7,7 +8,7 @@ from django.urls import reverse
 
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess, UserProfile
-from mermas.models import MermaProducto, MermaRegistro
+from mermas.models import MermaProducto, MermaRegistro, MermaSucursalAcceso
 from recetas.models import Receta
 
 
@@ -51,6 +52,25 @@ class MermaProductoFormularioTests(TestCase):
 
         self.assertContains(response, '"X-Requested-With": "XMLHttpRequest"')
         self.assertContains(response, "payload.error")
+        self.assertContains(response, 'formData.set("productos_json", JSON.stringify(productRows))')
+
+    def test_post_acepta_respaldo_json_de_productos_para_safari(self):
+        receta = Receta.objects.create(nombre="Producto Safari", codigo_point="SAF-1")
+
+        response = self.client.post(
+            reverse("mermas:app"),
+            {
+                "sucursal": self.sucursal.pk,
+                "productos_json": json.dumps(
+                    [{"receta_id": str(receta.pk), "producto_texto": receta.nombre, "cantidad": "1"}]
+                ),
+                "ticket_fotos": [SimpleUploadedFile("ticket.jpg", b"ticket", content_type="image/jpeg")],
+                "producto_fotos": [SimpleUploadedFile("producto.jpg", b"producto", content_type="image/jpeg")],
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MermaProducto.objects.get().receta, receta)
 
     def test_formulario_usa_selector_nativo_de_producto_en_moviles(self):
         receta = Receta.objects.create(
@@ -175,3 +195,18 @@ class MermaProductoFormularioTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(MermaRegistro.objects.exists())
+
+    def test_acceso_adicional_limita_captura_a_sucursales_asignadas(self):
+        permitida = Sucursal.objects.create(codigo="PERMITIDA-UI", nombre="Permitida", activa=True)
+        no_permitida = Sucursal.objects.create(codigo="NO-PERMITIDA-UI", nombre="No permitida", activa=True)
+        user = self._branch_user("perla.prueba")
+        MermaSucursalAcceso.objects.create(user=user, sucursal=permitida)
+        self.client.force_login(user)
+
+        form = self.client.get(reverse("mermas:app"), {"modo": "captura"})
+
+        self.assertEqual(
+            set(form.context["sucursales"].values_list("pk", flat=True)),
+            {self.sucursal.pk, permitida.pk},
+        )
+        self.assertNotContains(form, no_permitida.nombre)
