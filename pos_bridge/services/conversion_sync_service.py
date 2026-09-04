@@ -287,6 +287,8 @@ def _poll_report(
         reportes = _parse_json_response(response, default=[])
         candidates = []
         for report in reportes:
+            if not isinstance(report, dict):
+                continue
             name = str(report.get("Nombre_reporte") or "").upper()
             module = str(report.get("Modulo") or "").lower()
             if "movimiento" in module and "MOVIMIENTOS" in name and _report_is_ready(report):
