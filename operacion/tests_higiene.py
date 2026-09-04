@@ -68,7 +68,7 @@ class HigieneDiariaTests(TestCase):
         home = self.client.get(reverse("operacion:app_home"))
         captura = self.client.get(reverse("operacion:higiene_home"))
 
-        self.assertContains(home, "Bitácoras de higiene y limpieza")
+        self.assertContains(home, "Higiene y limpieza")
         self.assertContains(home, reverse("operacion:higiene_home"))
         self.assertEqual(captura.status_code, 200)
         self.assertContains(captura, "Niveles de cloro y pH")
@@ -106,7 +106,7 @@ class HigieneDiariaTests(TestCase):
         home = self.client.get(reverse("operacion:app_home"))
         captura = self.client.get(reverse("operacion:higiene_home"))
 
-        self.assertContains(home, "Bitácoras de higiene y limpieza")
+        self.assertContains(home, "Higiene y limpieza")
         self.assertEqual(captura.status_code, 200)
         self.assertContains(captura, "Historial de Payán")
 

@@ -176,13 +176,13 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v24-reportes-charts"', sw)
+        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-v25-point-periodo-en-curso"', sw)
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
         response = self.client.get("/erp-sw.js")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"pollyanas-erp-shell-v24-reportes-charts", b"".join(response.streaming_content))
+        self.assertIn(b"pollyanas-erp-shell-v25-point-periodo-en-curso", b"".join(response.streaming_content))
 
     def test_guardrails_define_global_erp_scope(self):
         css = (Path(settings.BASE_DIR) / "static" / "css" / "hallmark_guardrails.css").read_text()

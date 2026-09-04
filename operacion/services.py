@@ -195,7 +195,7 @@ def build_operacion_context(user) -> dict:
             tiles.append(
                 OperacionTile(
                     key="higiene_diaria",
-                    title="Bitácoras de higiene y limpieza",
+                    title="Higiene y limpieza",
                     detail="Cloro y pH, programa de limpieza, baños e historial diario.",
                     href="/app/higiene/",
                     icon="checklist",
