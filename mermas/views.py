@@ -1,3 +1,4 @@
+import json
 from calendar import monthrange
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -20,7 +21,7 @@ from logistica.models import Repartidor
 from recetas.models import Receta
 
 from .models import (
-    MermaEvidencia, MermaInsumo, MermaProducto, MermaRegistro,
+    MermaEvidencia, MermaInsumo, MermaProducto, MermaRegistro, MermaSucursalAcceso,
     PersonalEnviosSucursal,
 )
 
@@ -70,6 +71,19 @@ def _can_capture_any_sucursal(user) -> bool:
         _explicit_access(user, "captura") == ACCESS_MANAGE
         and get_submodule_access(user, "ventas", "visitas_sucursal") == ACCESS_MANAGE
     )
+
+
+def _sucursales_captura_producto(user):
+    if _can_capture_any_sucursal(user):
+        return sucursales_operativas()
+
+    sucursal_usuario = _sucursal_usuario(user)
+    ids = list(
+        MermaSucursalAcceso.objects.filter(user=user, activo=True).values_list("sucursal_id", flat=True)
+    )
+    if sucursal_usuario:
+        ids.append(sucursal_usuario.pk)
+    return sucursales_operativas().filter(pk__in=set(ids))
 
 
 def _require_dashboard(user):
@@ -286,10 +300,24 @@ def exportar_insumos(request):
 
 
 def _producto_rows_from_post(post):
+    raw_json = (post.get("productos_json") or "").strip()
+    if raw_json:
+        try:
+            payload = json.loads(raw_json)
+        except (TypeError, ValueError):
+            raise ValidationError("No se pudo leer la selección de productos. Vuelve a seleccionarlos.")
+        if not isinstance(payload, list):
+            raise ValidationError("No se pudo leer la selección de productos. Vuelve a seleccionarlos.")
+        items = [item for item in payload if isinstance(item, dict)]
+        receta_ids = [str(item.get("receta_id") or "") for item in items]
+        textos = [str(item.get("producto_texto") or "") for item in items]
+        cantidades = [str(item.get("cantidad") or "") for item in items]
+    else:
+        receta_ids = post.getlist("receta_id[]") or post.getlist("receta_id")
+        textos = post.getlist("producto_texto[]") or post.getlist("producto_texto")
+        cantidades = post.getlist("cantidad[]") or post.getlist("cantidad")
+
     rows = []
-    receta_ids = post.getlist("receta_id[]")
-    textos = post.getlist("producto_texto[]")
-    cantidades = post.getlist("cantidad[]")
     max_len = max(len(receta_ids), len(textos), len(cantidades), 0)
     for idx in range(max_len):
         receta_id = receta_ids[idx].strip() if idx < len(receta_ids) else ""
@@ -350,11 +378,7 @@ def app_home(request):
 @login_required
 def crear_registro(request):
     _require_capture(request.user)
-    sucursal_usuario = _sucursal_usuario(request.user)
-    sucursales = sucursales_operativas()
-    can_capture_any_sucursal = _can_capture_any_sucursal(request.user)
-    if sucursal_usuario and not can_capture_any_sucursal:
-        sucursales = Sucursal.objects.filter(pk=sucursal_usuario.pk)
+    sucursales = _sucursales_captura_producto(request.user)
 
     if request.method == "POST":
         try:
@@ -366,7 +390,7 @@ def crear_registro(request):
                 raise ValidationError("Toma o sube la foto del ticket Point.")
             if not producto_files:
                 raise ValidationError("Toma o sube al menos una foto del producto.")
-            if sucursal_usuario and not can_capture_any_sucursal and sucursal != sucursal_usuario:
+            if not sucursales.filter(pk=sucursal.pk).exists():
                 raise PermissionDenied("No puedes registrar merma de otra sucursal.")
             with transaction.atomic():
                 registro = MermaRegistro.objects.create(

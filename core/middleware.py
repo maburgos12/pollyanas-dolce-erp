@@ -259,6 +259,7 @@ class MermasOnlyMiddleware:
         "/erp-sw.js",
     )
     ALLOWED_PREFIXES = (
+        "/app/higiene/",
         "/app/api/fallas/",
         "/app/api/mermas-insumos/",
         "/merma/",

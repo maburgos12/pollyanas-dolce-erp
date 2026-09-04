@@ -125,6 +125,21 @@
         event.preventDefault();
         const submitButton = form.querySelector('button[type="submit"]');
         const originalLabel = submitButton.textContent;
+        const productRows = Array.from(wrapper.querySelectorAll(".product-row")).map((row) => {
+            syncProductText(row);
+            return {
+                receta_id: row.querySelector('select[name="receta_id[]"]')?.value || "",
+                producto_texto: row.querySelector('input[name="producto_texto[]"]')?.value || "",
+                cantidad: row.querySelector('input[name="cantidad[]"]')?.value || "",
+            };
+        }).filter((row) => row.receta_id || row.producto_texto || row.cantidad);
+        if (!productRows.length || productRows.some((row) => !row.receta_id || !row.cantidad)) {
+            window.ERPActionUI?.showToast({
+                type: "error",
+                message: "Selecciona cada producto y captura una cantidad mayor a cero.",
+            });
+            return;
+        }
         const cookieToken = document.cookie
             .split("; ")
             .find((row) => row.startsWith("csrftoken="))
@@ -134,6 +149,7 @@
         const fieldToken = form.querySelector('[name="csrfmiddlewaretoken"]')?.value;
         const token = cookieToken ? decodeURIComponent(cookieToken) : fieldToken;
         const formData = new FormData(form);
+        formData.set("productos_json", JSON.stringify(productRows));
         if (token) {
             formData.set("csrfmiddlewaretoken", token);
         }
