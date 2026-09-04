@@ -5,7 +5,7 @@ import textwrap
 from calendar import monthrange
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
@@ -521,6 +521,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "fuentes": fuentes,
             "banners": banners,
             "operational_summary": operational_summary,
+            "is_open_period": bool((balance.sources.get("period") or {}).get("is_open")),
             "source_dates": balance.effective_snapshot_dates,
         }
 
@@ -602,6 +603,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "COINCIDE": "Coincide",
             "POINT_MAYOR": "Point mayor",
             "POINT_MENOR": "Point menor",
+            "EN_CURSO": "Periodo en curso",
             "REVISAR_FUENTE": "Revisar fuente",
         }.get(status, "Revisar fuente")
 
@@ -634,6 +636,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "coverage_scope": source.get("coverage_scope"),
             "coverage_start": source.get("coverage_start"),
             "coverage_end": source.get("coverage_end"),
+            "not_due": bool(source.get("not_due")),
         }
 
     @staticmethod
@@ -664,6 +667,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "sales": self._source_descriptor(balance.sources.get("sales")),
             "waste": self._source_descriptor(balance.sources.get("waste")),
             "conversions": self._source_descriptor(balance.sources.get("conversions")),
+            "period": dict(balance.sources.get("period") or {}),
             "snapshot_dates": dict(balance.effective_snapshot_dates),
         }
         canonical["authority"] = self._canonical_authority(balance, canonical)
@@ -678,6 +682,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
     @staticmethod
     def _canonical_authority(balance, canonical: dict[str, Any]) -> dict[str, Any]:
         reasons: list[str] = []
+        in_progress = bool(canonical.get("period", {}).get("is_open"))
         for key, label in (
             ("opening", "Snapshot inicial Point"),
             ("closing", "Snapshot final Point"),
@@ -686,6 +691,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             ("waste", "Merma"),
         ):
             source = canonical[key]
+            if key == "closing" and source.get("not_due"):
+                continue
+            if in_progress and key in {"sales", "production", "waste"} and source["source_present"] is not False:
+                continue
             if source["source_present"] is False:
                 reasons.append(f"{label}: {source['selected_source']} no disponible")
             if not source["authoritative"]:
@@ -697,17 +706,21 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         conversions = canonical["conversions"]
         if conversions["source_present"] is False:
             reasons.append(f"Conversiones: {conversions['selected_source']} no disponible")
-        if not conversions["authoritative"]:
+        if not conversions["authoritative"] and not (in_progress and conversions["source_present"] is not False):
             reasons.append(f"Conversiones: {conversions['selected_source']} sin autoridad")
-        reasons.extend(
-            f"Conversiones: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
-            for issue in conversions["authority_issues"]
-        )
+        if not (in_progress and conversions["source_present"] is not False):
+            reasons.extend(
+                f"Conversiones: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
+                for issue in conversions["authority_issues"]
+            )
 
         sales = canonical["sales"]
         if sales["mode"] == "BRIDGE_HISTORY":
             reasons.append("Ventas: BRIDGE_HISTORY")
-        if getattr(balance, "issues", ()):
+        material_issues = set(getattr(balance, "issues", ()))
+        if in_progress:
+            material_issues.discard("MONTH_SOURCE_INCOMPLETE")
+        if material_issues:
             reasons.append("Incidencias canónicas pendientes")
         if getattr(balance, "unresolved_movements", ()) or getattr(balance, "unresolved_conversions", ()):
             reasons.append("Movimientos Point pendientes de resolver")
@@ -715,7 +728,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             reasons.append("Filas Point en revisión")
         return {
             "verified": not reasons,
-            "label": "Verificada" if not reasons else "Revisar fuentes",
+            "in_progress": in_progress,
+            "label": "Periodo en curso" if in_progress and not reasons else ("Verificada" if not reasons else "Revisar fuentes"),
             "reason": " · ".join(reasons),
         }
 
@@ -730,10 +744,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 closing=closing["source"],
             )
         ]
-        if not self._snapshots_are_authoritative(balance.sources):
+        closing_not_due = bool((balance.sources.get("closing_snapshot") or {}).get("not_due"))
+        opening_authoritative = bool((balance.sources.get("opening_snapshot") or {}).get("authoritative"))
+        if not opening_authoritative or (not closing_not_due and not self._snapshots_are_authoritative(balance.sources)):
             banners.append("Se muestran los saldos Point disponibles. Las incidencias de cobertura se indican aparte; no equivalen a ausencia del dato.")
         banners.extend(str(warning) for warning in balance.warnings)
-        banners.extend(str(issue) for issue in balance.issues)
+        banners.extend(
+            str(issue)
+            for issue in balance.issues
+            if not (closing_not_due and issue == "MONTH_SOURCE_INCOMPLETE")
+        )
         return list(dict.fromkeys(banners))
 
     @staticmethod
@@ -744,15 +764,30 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         closing_target = closing_meta.get("target_date")
         opening_date = balance.effective_snapshot_dates.get("opening")
         closing_date = balance.effective_snapshot_dates.get("closing")
+        period_meta = balance.sources.get("period") or {}
 
         def display(value):
             return value.strftime("%d/%m/%Y") if value else "la fecha requerida"
+
+        if closing_meta.get("not_due"):
+            month_start = period_meta.get("month_start") or closing_target.replace(day=1)
+            data_through = period_meta.get("data_through") or min(closing_target, timezone.localdate() - timedelta(days=1))
+            return {
+                "tone": "info",
+                "title": "Periodo en curso",
+                "message": (
+                    f"Se muestran movimientos Point del {display(month_start)} al {display(data_through)}. "
+                    f"El cierre Point final del {display(closing_target)} se obtiene al terminar el mes."
+                ),
+                "closing_label": f"Al cierre del {display(closing_target)}",
+            }
 
         if opening_date and closing_date:
             return {
                 "tone": "success",
                 "title": "Cierres Point disponibles",
                 "message": f"Inicial del {display(opening_date)} y final del {display(closing_date)}.",
+                "closing_label": display(closing_date),
             }
         if not opening_date and closing_date:
             return {
@@ -762,6 +797,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                     f"Falta recuperar el cierre Point del {display(opening_target)}. "
                     f"El cierre Point del {display(closing_date)} sí está disponible y se muestra."
                 ),
+                "closing_label": display(closing_date),
             }
         if opening_date and not closing_date:
             return {
@@ -771,6 +807,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                     f"El cierre inicial del {display(opening_date)} sí está disponible. "
                     f"Falta recuperar el cierre Point final del {display(closing_target)}."
                 ),
+                "closing_label": "Pendiente",
             }
         return {
             "tone": "warning",
@@ -779,6 +816,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 f"Falta recuperar el cierre inicial del {display(opening_target)} "
                 f"y el cierre final del {display(closing_target)}."
             ),
+            "closing_label": "Pendiente",
         }
 
     def _available_periods(self, *, selected: str) -> list[str]:

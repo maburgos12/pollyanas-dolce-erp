@@ -7164,6 +7164,10 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   border-color: #bad8c4;
   background: #f3faf5;
 }
+.production-source-summary.is-info {
+  border-color: #c8d8e8;
+  background: #f4f8fc;
+}
 .production-source-summary span { line-height: 1.45; }
 .production-source-diagnostics { margin-top: 10px; color: var(--texto-light); }
 .production-source-diagnostics summary {

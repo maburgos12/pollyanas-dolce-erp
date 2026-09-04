@@ -811,17 +811,54 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(row.status, "REVISAR_FUENTE")
         self.assertTrue(any("final" in warning.lower() for warning in balance.warnings))
 
-    def test_recipe_missing_from_selected_snapshot_emits_warning(self):
+    def test_movement_only_recipe_does_not_claim_the_erp_recipe_is_missing(self):
         self._snapshot(self.parent_product, "3", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "3", datetime(2026, 7, 31, 8))
-        self._production(self.slice, "1", date(2026, 7, 10), "slice-without-snapshot")
+        preparation = Receta.objects.create(
+            nombre="Masa Hojaldre Empanadas",
+            codigo_point="01MEEH",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="ledger-preparacion-point",
+        )
+        self._production(preparation, "1", date(2026, 7, 10), "preparation-without-snapshot")
         service, _official = self._service()
 
         balance = service.build("2026-07")
 
-        self.assertEqual(balance.rows[self.slice.id].status, "REVISAR_FUENTE")
-        self.assertTrue(any("receta" in warning.lower() and "inicial" in warning.lower() for warning in balance.warnings))
-        self.assertTrue(any("receta" in warning.lower() and "final" in warning.lower() for warning in balance.warnings))
+        self.assertIn(preparation.id, balance.rows)
+        self.assertFalse(any("receta" in warning.lower() for warning in balance.warnings))
+
+    def test_current_month_uses_only_closed_days_and_keeps_final_point_not_due(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 8, 31, 8))
+        self._seal_inventory_job()
+        production_job = self._movement_job(
+            "production", start="2026-09-01", end="2026-09-03", rows_seen=1
+        )
+        waste_job = self._movement_job(
+            "waste", start="2026-09-01", end="2026-09-03", rows_seen=1
+        )
+        self._movement_job("conversions", start="2026-09-01", end="2026-09-03")
+        self._production(self.parent, "3", date(2026, 9, 3), "current", sync_job=production_job)
+        self._production(self.parent, "99", date(2026, 9, 4), "today-in-progress", sync_job=production_job)
+        self._waste(self.parent, "1", datetime(2026, 9, 3, 12), "current", sync_job=waste_job)
+        service, official = self._service(
+            [{"Codigo": self.parent.codigo_point, "Nombre": self.parent.nombre, "Cantidad": Decimal("2")}]
+        )
+
+        with patch(
+            "pos_bridge.services.monthly_product_balance_service.timezone.localdate",
+            return_value=date(2026, 9, 4),
+        ):
+            balance = service.build("2026-09")
+
+        row = balance.rows[self.parent.id]
+        self.assertEqual(row.production, Decimal("3"))
+        self.assertEqual(row.calculated_closing, Decimal("10"))
+        self.assertIsNone(row.closing_point)
+        self.assertEqual(row.status, "EN_CURSO")
+        self.assertTrue(balance.sources["closing_snapshot"]["not_due"])
+        self.assertEqual(balance.sources["period"]["data_through"], date(2026, 9, 3))
+        self.assertEqual(official.calls[0]["end_date"], date(2026, 9, 3))
 
     def test_nearby_snapshot_days_are_not_substituted_for_month_boundaries(self):
         self._snapshot(self.parent_product, "1", datetime(2026, 6, 29, 8))
