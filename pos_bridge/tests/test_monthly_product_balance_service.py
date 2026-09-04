@@ -26,7 +26,7 @@ from pos_bridge.models import (
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from pos_bridge.utils.dates import iter_business_dates
-from recetas.models import Receta, RecetaEquivalencia, VentaHistorica
+from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada, VentaHistorica
 from reportes.models import FactProduccionDiaria
 
 
@@ -99,6 +99,34 @@ class MonthlyProductBalanceConversionTests(TestCase):
         self.assertEqual(balance.source_counts["conversion_rows_read"], 2)
         self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 2)
 
+    def test_grouped_point_row_without_erp_conversion_relation_is_not_counted_as_conversion(self):
+        self._conversion(quantity="1", when=datetime(2026, 8, 15, 12, 0))
+
+        balance = self._service().build("2026-08")
+
+        self.assertNotIn(self.slice.id, balance.rows)
+        self.assertEqual(balance.source_counts["conversion_rows_read"], 1)
+        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 0)
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
+        self.assertFalse(any(item.source == "conversion_source" for item in balance.unresolved_movements))
+
+    def test_derived_slice_rule_projects_grouped_point_conversion(self):
+        RecetaPresentacionDerivada.objects.create(
+            receta_derivada=self.slice,
+            receta_padre=self.parent,
+            codigo_point_derivado=self.slice.codigo_point,
+            nombre_derivado=self.slice.nombre,
+            unidades_por_padre=Decimal("10"),
+            activo=True,
+        )
+        self._conversion(quantity="10", when=datetime(2026, 8, 15, 12, 0))
+
+        balance = self._service().build("2026-08")
+
+        self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("10"))
+        self.assertEqual(balance.rows[self.parent.id].conversion_out, Decimal("1"))
+        self.assertEqual(balance.rows[self.slice.id].conversion_origin, "EQUIVALENCIA_CONFIGURADA")
+
     def test_mixed_conversion_origins_preserve_exact_observed_collection(self):
         RecetaEquivalencia.objects.create(
             receta_porcion=self.slice,
@@ -127,15 +155,14 @@ class MonthlyProductBalanceConversionTests(TestCase):
             ("EQUIVALENCIA_CONFIGURADA", "POINT"),
         )
 
-    def test_unresolved_conversion_origin_is_preserved_without_inferred_components(self):
+    def test_unconfigured_grouped_conversion_is_ignored_without_affecting_inventory(self):
         self._conversion(quantity="8", when=datetime(2026, 8, 10, 12, 0))
 
         balance = self._service().build("2026-08")
 
-        row = balance.rows[self.slice.id]
-        self.assertEqual(row.conversion_origin, "UNRESOLVED")
-        self.assertEqual(row.conversion_origins, ("UNRESOLVED",))
-        self.assertIn("CONVERSION_ORIGIN_UNRESOLVED", row.issues)
+        self.assertNotIn(self.slice.id, balance.rows)
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
+        self.assertNotIn("CONVERSION_ORIGIN_UNRESOLVED", balance.issues)
 
     def test_sales_without_point_conversion_do_not_create_conversion_movements(self):
         product = PointProduct.objects.create(
@@ -174,17 +201,14 @@ class MonthlyProductBalanceConversionTests(TestCase):
         with self.assertRaises(TypeError):
             balance.rows[self.slice.id] = None
 
-    def test_unresolved_origin_preserves_destination_entry_and_records_issue(self):
+    def test_unresolved_origin_does_not_create_false_destination_entry(self):
         self._conversion(quantity="16", when=datetime(2026, 8, 15, 12, 0))
 
         balance = self._service().build("2026-08")
 
-        slice_row = balance.rows[self.slice.id]
-        self.assertEqual(slice_row.conversion_in, Decimal("16"))
-        self.assertEqual(slice_row.conversion_out, Decimal("0"))
-        self.assertIn("CONVERSION_ORIGIN_UNRESOLVED", slice_row.issues)
-        self.assertEqual(slice_row.source_counts["conversion_in_rows"], 1)
-        self.assertEqual(slice_row.source_counts["conversion_out_rows"], 0)
+        self.assertNotIn(self.slice.id, balance.rows)
+        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 0)
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
         self.assertEqual(sum(row.conversion_out for row in balance.rows.values()), Decimal("0"))
 
     def test_explicit_point_source_uses_factor_only_for_same_configured_parent(self):
@@ -381,16 +405,13 @@ class MonthlyProductBalanceConversionTests(TestCase):
                 captured_at=timezone.make_aware(captured_at, timezone.get_current_timezone()),
                 sync_job=self.sync_job,
             )
-        scenarios = (
-            ({}, "CONVERSION_ORIGIN_UNRESOLVED"),
-            (
-                {
-                    "source_item_code": self.parent.codigo_point,
-                    "source_item_name": self.parent.nombre,
-                },
-                "CONVERSION_FACTOR_MISSING",
-            ),
-        )
+        scenarios = ((
+            {
+                "source_item_code": self.parent.codigo_point,
+                "source_item_name": self.parent.nombre,
+            },
+            "CONVERSION_FACTOR_MISSING",
+        ),)
 
         for index, (overrides, expected_issue) in enumerate(scenarios, start=1):
             with self.subTest(issue=expected_issue):
@@ -403,11 +424,15 @@ class MonthlyProductBalanceConversionTests(TestCase):
                     **overrides,
                 )
 
-                row = self._service().build("2026-08").rows[self.slice.id]
+                balance = self._service().build("2026-08")
+                row = balance.rows[self.slice.id]
 
                 self.assertIsNone(row.difference_point)
                 self.assertIn("CALCULATED_CLOSING_MISSING", row.issues)
-                self.assertIn(expected_issue, row.issues)
+                observed_issues = set(row.issues) | {
+                    movement.issue for movement in balance.unresolved_movements
+                }
+                self.assertIn(expected_issue, observed_issues)
                 self.assertEqual(row.status, "REVISAR_FUENTE")
 
     def test_complete_snapshots_with_factor_mismatch_force_review_status(self):
