@@ -2044,6 +2044,20 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertFalse(any(item.item_code == "TOPPING-FRESA-M" for item in balance.unresolved_movements))
         self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 0)
 
+    def test_daily_sale_without_link_uses_existing_erp_recipe_code(self):
+        topping_recipe = self._recipe("TOPPING FRESA M", "TOPPING-FRESA-M")
+        topping_product = self._product(topping_recipe, "topping-existing-recipe")
+        self._snapshot(topping_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(topping_product, "6", datetime(2026, 7, 31, 8))
+        self._daily_sale(None, topping_product, "4", date(2026, 7, 4), "topping-unlinked")
+
+        balance = MonthlyPointProductBalanceService(
+            official_sales_report_service=_FailingOfficialSalesReportService()
+        ).build("2026-07")
+
+        self.assertEqual(balance.rows[topping_recipe.id].sales, Decimal("4"))
+        self.assertFalse(any(item.item_code == "TOPPING-FRESA-M" for item in balance.unresolved_movements))
+
     def test_all_unmatched_official_daily_sales_do_not_fall_through_to_facts(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
