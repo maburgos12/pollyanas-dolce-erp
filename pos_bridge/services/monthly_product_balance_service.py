@@ -2209,30 +2209,38 @@ class MonthlyPointProductBalanceService:
             )
             .order_by("id")
         )
-        matched_rows = [row for row in rows if row.receta_id is not None]
-        unresolved = [
-            MonthlyPointUnresolvedMovement(
-                source="official_daily_sales",
-                movement_id=str(row.id),
-                item_code=row.product.sku,
-                item_name=row.product.name,
-                quantity=Decimal(row.quantity),
-                issue=ISSUE_DAILY_SALE_UNRESOLVED,
-                branch_external_id=row.branch.external_id,
-                branch_name=row.branch.name,
-                movement_date=row.sale_date,
+        values: dict[int, tuple[Decimal, int]] = {}
+        unresolved: list[MonthlyPointUnresolvedMovement] = []
+        for row in rows:
+            receta_id = row.receta_id
+            if receta_id is None:
+                receta = self._match_recipe(code=row.product.sku, name=row.product.name)
+                receta_id = receta.id if receta is not None else None
+            if receta_id is not None:
+                current, count = values.get(receta_id, (ZERO, 0))
+                values[receta_id] = (current + Decimal(row.quantity), count + 1)
+                continue
+            payload = {
+                "sku": row.product.sku,
+                "name": row.product.name,
+                "category": row.product.category,
+            }
+            if self.matcher.is_non_recipe_sale_row(payload):
+                continue
+            unresolved.append(
+                MonthlyPointUnresolvedMovement(
+                    source="official_daily_sales",
+                    movement_id=str(row.id),
+                    item_code=row.product.sku,
+                    item_name=row.product.name,
+                    quantity=Decimal(row.quantity),
+                    issue=ISSUE_DAILY_SALE_UNRESOLVED,
+                    branch_external_id=row.branch.external_id,
+                    branch_name=row.branch.name,
+                    movement_date=row.sale_date,
+                )
             )
-            for row in rows
-            if row.receta_id is None
-            and not self.matcher.is_non_recipe_sale_row(
-                {
-                    "sku": row.product.sku,
-                    "name": row.product.name,
-                    "category": row.product.category,
-                }
-            )
-        ]
-        return self._aggregate_rows(matched_rows, "quantity"), unresolved, len(rows), rows
+        return values, unresolved, len(rows), rows
 
     def _load_conversions(self, *, month_start: date, month_end: date | None = None):
         if month_end is None:
