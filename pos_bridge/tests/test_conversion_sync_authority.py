@@ -88,8 +88,8 @@ class PointConversionRerunAuthorityTests(TestCase):
                 "pos_bridge.services.conversion_sync_service._make_hash",
                 side_effect=lambda row: (
                     "conversion-rerun-hash"
-                    if row["PK_Movimiento"] == "MOV-RERUN-001"
-                    else f"conversion-rerun-hash-{row['PK_Movimiento']}"
+                    if row.get("PK_Movimiento") in {None, "MOV-RERUN-001"}
+                    else f"conversion-rerun-hash-{row.get('PK_Movimiento')}"
                 ),
             ),
         ):
@@ -345,6 +345,61 @@ class PointConversionRerunAuthorityTests(TestCase):
         )
         self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
         self.assertFalse(self._conversion_authority()["authoritative"])
+
+    def test_aggregate_report_rows_without_date_or_id_use_requested_period(self):
+        self.report_rows = [
+            {
+                "Sucursal": self.branch.name,
+                "Producto": self.recipe.nombre,
+                "Codigo": self.recipe.codigo_point,
+                "Cantidad": "4",
+                "Unidad": "PZA",
+            }
+        ]
+
+        result = self._sync()
+
+        line = PointConversionLine.objects.get()
+        self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(timezone.localtime(line.movement_at).date(), date(2026, 7, 1))
+        self.assertTrue(line.movement_external_id.startswith("AGG-"))
+
+    def test_full_month_aggregate_replaces_older_daily_rows(self):
+        old_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        PointConversionLine.objects.create(
+            branch=self.branch,
+            erp_branch=self.sucursal,
+            receta=self.recipe,
+            sync_job=old_job,
+            movement_external_id="OLD-DAILY",
+            source_hash="old-daily-conversion",
+            movement_at=timezone.make_aware(datetime(2026, 7, 10, 8)),
+            item_name=self.recipe.nombre,
+            item_code=self.recipe.codigo_point,
+            quantity=Decimal("2"),
+        )
+
+        result = self._sync()
+
+        self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(PointConversionLine.objects.count(), 1)
+        self.assertFalse(PointConversionLine.objects.filter(movement_external_id="OLD-DAILY").exists())
+
+    def test_report_normalization_forward_fills_merged_branch_cells(self):
+        records = [
+            {"A": "SUCURSAL", "B": "PRODUCTO", "C": "CANTIDAD"},
+            {"A": self.branch.name, "B": "Pastel uno", "C": "1"},
+            {"A": None, "B": "Pastel dos", "C": "2"},
+        ]
+
+        rows = _normalize_inventory_report_rows(records)
+
+        self.assertEqual(rows[0]["SUCURSAL"], self.branch.name)
+        self.assertEqual(rows[1]["SUCURSAL"], self.branch.name)
 
     def test_empty_or_malformed_download_fails_without_certifying_zero_conversions(self):
         for content in (

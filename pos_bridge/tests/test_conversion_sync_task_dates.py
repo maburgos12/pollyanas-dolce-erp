@@ -21,6 +21,6 @@ class ConversionSyncTaskDateTests(SimpleTestCase):
         task_conversion_sync()
 
         sync_conversion_lines.assert_called_once_with(
-            date_from=date(2026, 9, 1),
+            date_from=date(2026, 9, 3),
             date_to=date(2026, 9, 3),
         )

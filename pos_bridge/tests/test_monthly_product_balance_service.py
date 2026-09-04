@@ -2024,6 +2024,26 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertEqual(balance.rows[self.parent.id].status, "REVISAR_FUENTE")
         self.assertIn("MONTH_SOURCE_INCOMPLETE", balance.rows[self.parent.id].issues)
 
+    def test_non_recipe_sales_do_not_create_false_recipe_issues(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "matched")
+        topping = PointProduct.objects.create(
+            external_id="daily-topping",
+            sku="TOPPING-FRESA-M",
+            name="TOPPING FRESA M",
+            category="Pastel Mediano",
+        )
+        self._daily_sale(None, topping, "4", date(2026, 7, 4), "topping")
+
+        balance = MonthlyPointProductBalanceService(
+            official_sales_report_service=_FailingOfficialSalesReportService()
+        ).build("2026-07")
+
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+        self.assertFalse(any(item.item_code == "TOPPING-FRESA-M" for item in balance.unresolved_movements))
+        self.assertEqual(balance.source_counts["official_daily_sales_unresolved"], 0)
+
     def test_all_unmatched_official_daily_sales_do_not_fall_through_to_facts(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "10", datetime(2026, 7, 31, 8))
