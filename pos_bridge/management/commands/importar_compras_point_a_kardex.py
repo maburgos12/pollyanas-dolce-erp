@@ -82,7 +82,10 @@ class Command(BaseCommand):
         # insumo (medido 2026-09: SUSTITUTO DE CREMA se ajustó +6.4M y sus compras
         # suman +8.5M; MEDIA CREMA se ajustó +663K contra +12.2M de compras).
         baseline = latest_point_almacen_baseline_run()
-        corte = getattr(baseline, "finished_at", None) if baseline else None
+        corte_at = getattr(baseline, "finished_at", None) if baseline else None
+        # CostoInsumo.fecha es un día natural de Mazatlán; el corte es UTC. Comparar sin
+        # convertir corre el límite un día cuando el corte cae de madrugada.
+        corte = timezone.localtime(corte_at).date() if corte_at else None
         if corte and not ignorar_baseline:
             self.stdout.write(
                 f"Último corte de Point ALMACÉN: {corte:%Y-%m-%d}. "
@@ -112,7 +115,7 @@ class Command(BaseCommand):
             insumo = costo.insumo
             etiqueta = f"{raw.get('article_name') or insumo.nombre} ({costo.fecha})"
 
-            if corte and not ignorar_baseline and costo.fecha <= corte.date():
+            if corte and not ignorar_baseline and costo.fecha <= corte:
                 blockers.append({"razon": "ANTERIOR_A_BASELINE", "detalle": f"{etiqueta}: corte {corte:%Y-%m-%d}"})
                 continue
 
