@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -216,3 +217,42 @@ class SyncInventarioDesdePointCommandTests(TestCase):
         self.assertEqual(existencia.stock_actual, Decimal("8"))
         self.assertFalse(AlmacenSyncRun.objects.filter(message__startswith="POINT_ALMACEN_BASELINE|").exists())
         self.assertFalse(MovimientoInventario.objects.filter(insumo=insumo).exists())
+
+
+class SyncInventarioCandadoSesionPointTests(TestCase):
+    """La captura debe correr bajo el candado de cuenta Point.
+
+    Point invalida la sesión anterior cuando la misma cuenta entra de nuevo, y
+    "domicilios Point automatico" corre cada 60 s: sin candado el corte pierde la
+    carrera y muere con "No se detectaron tarjetas de sucursal en Point".
+    """
+
+    @patch("pos_bridge.management.commands.sync_inventario_desde_point.PointInventoryCostCaptureService")
+    def test_captura_ocurre_dentro_del_candado(self, capture_class):
+        eventos = []
+
+        @contextmanager
+        def candado_espia(*, wait):
+            eventos.append(("candado", wait))
+            try:
+                yield True
+            finally:
+                eventos.append(("liberado", wait))
+
+        def captura_espia(*, branch_hint):
+            eventos.append(("captura", branch_hint))
+            return []
+
+        capture_class.return_value.capture_all_rows.side_effect = captura_espia
+
+        with patch(
+            "pos_bridge.management.commands.sync_inventario_desde_point.point_account_session_lock",
+            candado_espia,
+        ):
+            with self.assertRaises(CommandError):  # sin filas, aborta después de liberar
+                call_command("sync_inventario_desde_point")
+
+        self.assertEqual(
+            eventos,
+            [("candado", True), ("captura", "ALMACEN"), ("liberado", True)],
+        )

@@ -24,6 +24,7 @@ from pos_bridge.services.inventory_baseline import (
     POINT_ALMACEN_BASELINE_PREFIX,
     TRUSTED_INSUMO_MATCH_METHODS,
 )
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
 from pos_bridge.services.unidades import cantidad_en_unidad_erp as _cantidad_compartida
@@ -63,7 +64,12 @@ class Command(BaseCommand):
         service = PointInventoryCostCaptureService()
         identity = PointRecipeIdentityService()
 
-        rows = service.capture_all_rows(branch_hint=branch_hint)
+        # Point invalida la sesión anterior cuando la misma cuenta entra de nuevo, y
+        # "domicilios Point automatico" corre cada 60 s. Sin el candado esta captura
+        # compite con ese job y falla con "No se detectaron tarjetas de sucursal":
+        # por eso el corte de ALMACÉN solo se había logrado dos veces desde mayo.
+        with point_account_session_lock(wait=True):
+            rows = service.capture_all_rows(branch_hint=branch_hint)
         supply_rows = [row for row in rows if getattr(row, "kind", "supply") == "supply"]
         product_rows = len(rows) - len(supply_rows)
         self.stdout.write(
