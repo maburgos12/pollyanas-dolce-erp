@@ -21,6 +21,10 @@ CAMPO_FAMILIA = {
     "mantenimiento": "mantenimiento",
 }
 REQUERIDAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina", "cargas_patronales"}
+# Familias sin fuente automatizada en el ERP: se siguen reportando como pendientes,
+# pero no cuentan en el denominador de cobertura ni apagan el punto de equilibrio.
+# Retirar de aquí en cuanto SIPARE alimente monto_real/cedula_imss por sucursal.
+SIN_FUENTE_ACTIVA = {"cargas_patronales"}
 AREAS_EXCLUIDAS = {"produccion", "nomina", "resultados", "logistica"}
 
 
@@ -41,10 +45,17 @@ def leer_costos_mensuales(periodo):
 
 
 def costos_de_sucursal(resultado, sucursal_id):
+    """Cobertura por sucursal: mide qué se pudo cargar en vez de aprobar o reprobar.
+
+    Un pendiente sin sucursal asignada es un problema del catálogo, no de esta
+    sucursal: se informa aparte y no reduce su cobertura.
+    """
     filas = [dict(f) for f in resultado["filas"]
              if f["sucursal_id"] == sucursal_id and f["area"] not in AREAS_EXCLUIDAS]
     pendientes = [dict(f) for f in resultado["pendientes"]
-                  if f["sucursal_id"] in (sucursal_id, None) and f["area"] not in AREAS_EXCLUIDAS]
+                  if f["sucursal_id"] == sucursal_id and f["area"] not in AREAS_EXCLUIDAS]
+    pendientes_globales = [dict(f) for f in resultado["pendientes"]
+                           if f["sucursal_id"] is None and f["area"] not in AREAS_EXCLUIDAS]
     presentes = {f["familia"] for f in filas}
     faltantes = REQUERIDAS - presentes
     ya_pendientes = {f["familia"] for f in pendientes}
@@ -71,10 +82,20 @@ def costos_de_sucursal(resultado, sucursal_id):
         campo = _campo(fila)
         if campo:
             campos[campo] += fila["monto_mensual"]
+    exigibles = REQUERIDAS - SIN_FUENTE_ACTIVA
+    cubiertas = exigibles & presentes
+    faltantes_exigibles = exigibles - presentes
+    bloqueantes = [p for p in pendientes if p["familia"] not in SIN_FUENTE_ACTIVA]
     return {
-        "filas": filas, "pendientes": pendientes, "totales": dict(totales), "campos": dict(campos),
-        "total": sum(totales.values(), ZERO), "completo": bool(filas) and not pendientes
-        and not faltantes and all(f["estado"] == "COMPLETO" for f in filas),
+        "filas": filas, "pendientes": pendientes, "pendientes_globales": pendientes_globales,
+        "totales": dict(totales), "campos": dict(campos), "total": sum(totales.values(), ZERO),
+        "familias_cubiertas": sorted(cubiertas),
+        "familias_faltantes": sorted(faltantes_exigibles),
+        "familias_faltantes_display": [ETIQUETAS[f] for f in sorted(faltantes_exigibles)],
+        "familias_sin_fuente": sorted(SIN_FUENTE_ACTIVA & faltantes),
+        "cobertura_pct": int(round(100 * len(cubiertas) / len(exigibles))) if exigibles else 0,
+        "completo": bool(filas) and not bloqueantes and not faltantes_exigibles
+        and all(f["estado"] == "COMPLETO" for f in filas),
     }
 
 

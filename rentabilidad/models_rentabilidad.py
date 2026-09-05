@@ -124,9 +124,12 @@ class SucursalRentabilidad(models.Model):
         """
         PE = Gastos Fijos / (1 - (Costos Variables / Ventas Netas))
         Cuánto hay que vender para cubrir todos los costos.
+
+        Se calcula con los gastos que sí están cargados. Cuando la cobertura es
+        parcial el PE queda subestimado: `cobertura_gastos_pct` dice con cuánto
+        se calculó y la pantalla lo rotula como parcial. Apagarlo por completo
+        dejaba la métrica en cero todos los meses.
         """
-        if self.fuente_gastos_incompleta:
-            return Decimal("0")
         if self.ventas_netas == 0:
             return Decimal("0")
         ratio_cv = self.costo_variable_total / self.ventas_netas
@@ -284,20 +287,23 @@ class SucursalRentabilidad(models.Model):
 
     @property
     def fuente_gastos_incompleta(self):
-        verificada = getattr(self, "_fuente_gastos_completa", None)
-        return verificada is False or (
-            verificada is None and self.pk is not None and self.estado == EstadoRentabilidad.SIN_DATOS
-        )
+        """Rotula la cobertura; no anula métricas. Ver `punto_equilibrio_mensual`."""
+        return getattr(self, "_fuente_gastos_completa", None) is False
+
+    @property
+    def cobertura_gastos_pct(self):
+        """% de familias de gasto exigibles con importe del mes, 0 si no se leyó."""
+        return (getattr(self, "gastos_mensuales", None) or {}).get("cobertura_pct", 0)
+
+    @property
+    def gastos_faltantes_display(self):
+        return (getattr(self, "gastos_mensuales", None) or {}).get("familias_faltantes_display", [])
 
     def calcular_estado(self):
         """
         Clasificación por reglas deterministas.
         El agente IA complementa con contexto cualitativo.
         """
-        if self.fuente_gastos_incompleta:
-            self.estado = EstadoRentabilidad.SIN_DATOS
-            self.alerta_nivel = 2
-            return self.estado
         pct = float(self.porcentaje_avance_pe)
         util = float(self.utilidad_operativa)
         roi  = float(self.roi_anualizado or 0)
@@ -327,6 +333,10 @@ class SucursalRentabilidad(models.Model):
         elif util >= 0 and inv >= 100 and roi >= 20:
             self.estado = EstadoRentabilidad.ESTRELLA
             self.alerta_nivel = 0
+        # Un resultado favorable calculado con gastos parciales está subestimado:
+        # nunca se presenta como "sin nada que revisar".
+        if self.fuente_gastos_incompleta and self.alerta_nivel == 0:
+            self.alerta_nivel = 1
         return self.estado
 
     def save(self, *args, **kwargs):
