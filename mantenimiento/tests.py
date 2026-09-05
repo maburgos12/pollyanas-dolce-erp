@@ -1322,6 +1322,6 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         # El shell global se versionó a v25 para actualizar el periodo Point;
         # la URL de registro no cambia al actualizar su contenido.
         self.assertIn("20260724-superuser-preview-v23", base)
-        self.assertIn("pollyanas-erp-shell-v25-point-periodo-en-curso", service_worker)
+        self.assertIn("pollyanas-erp-shell-v26-recetas-sync", service_worker)
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)
