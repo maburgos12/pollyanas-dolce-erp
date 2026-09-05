@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v25-point-periodo-en-curso";
+const CACHE_NAME = "pollyanas-erp-shell-v26-recetas-sync";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

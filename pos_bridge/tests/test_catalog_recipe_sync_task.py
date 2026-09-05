@@ -9,6 +9,19 @@ from pos_bridge.tasks.celery_tasks import task_catalog_recipe_sync
 
 
 class CatalogRecipeSyncTaskTests(TestCase):
+    @patch("pos_bridge.tasks.celery_tasks.run_weekly_cost_snapshot")
+    @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
+    def test_incomplete_recipes_are_partial_not_success(self, service_cls, snapshot):
+        job = PointSyncJob.objects.create(parameters={"action": "SYNC_ALL_RECIPES"})
+        service_cls.return_value.sync.return_value = SimpleNamespace(
+            summary={"products_selected": 2, "recipes_completed_successfully": 1, "recipes_with_unresolved_inputs": 1},
+            raw_export_path="/tmp/recipes.json",
+        )
+        snapshot.return_value = {}
+        task_catalog_recipe_sync(job_id=job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
+
     def setUp(self):
         self.user = get_user_model().objects.create_user(
             username="catalog_recipe_sync",
@@ -110,7 +123,7 @@ class CatalogRecipeSyncTaskTests(TestCase):
         task_catalog_recipe_sync(job_id=job.id)
 
         job.refresh_from_db()
-        self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(job.status, PointSyncJob.STATUS_PARTIAL)
         self.assertEqual(job.result_summary["discovery"]["blocked_candidates_count"], 1)
         self.assertEqual(
             job.result_summary["discovery"]["blocked_candidates"][0]["codigo_point"],

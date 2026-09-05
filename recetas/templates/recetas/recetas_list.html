@@ -100,7 +100,7 @@
           {% if point_recipe_sync_panel.finished_at %} · Terminó {{ point_recipe_sync_panel.finished_at|date:"d/m/Y H:i" }}{% endif %}
         </small>
       </div>
-      {% if point_recipe_sync_panel.job_status == "SUCCESS" %}
+      {% if point_recipe_sync_panel.job_status == "SUCCESS" or point_recipe_sync_panel.job_status == "PARTIAL" %}
       <dl class="point-sync-status__summary">
         <div><dt>Productos procesados</dt><dd>{{ point_recipe_sync_panel.summary.products_selected|default:0 }}</dd></div>
         <div><dt>Recetas completas</dt><dd>{{ point_recipe_sync_panel.summary.recipes_completed_successfully|default:0 }}</dd></div>

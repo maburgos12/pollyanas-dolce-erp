@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import json
 
 import requests
 from django.test import SimpleTestCase
@@ -11,6 +12,83 @@ from pos_bridge.utils.exceptions import ExtractionError
 
 
 class PointHttpSessionClientTests(SimpleTestCase):
+    def test_full_catalog_uses_families_without_losing_products_above_150(self):
+        client = PointHttpSessionClient(self._settings())
+        client._ENUM_SEEDS = "x"
+        client._ENUM_REFINE = "x"
+        catalog = [{"PK_Producto": i, "ID_Familia": 1 if i < 100 else 2} for i in range(220)]
+        def request(method, path, **kwargs):
+            if path == "/Catalogos/get_familias":
+                data = [{"ID_Familia": 1}, {"ID_Familia": 2}]
+            else:
+                params = kwargs.get("params", {})
+                family = params.get("familia")
+                data = [r for r in catalog if family is None or str(r["ID_Familia"]) == str(family)][:150]
+            response = requests.Response()
+            response.status_code = 200
+            response._content = json.dumps(data).encode()
+            return response
+        with patch.object(client, "_request", side_effect=request) as fetch:
+            rows = client.get_all_products()
+            self.assertEqual(len(rows), 220)
+            self.assertLessEqual(fetch.call_count, 4)
+            self.assertEqual(client.get_all_products(), rows)
+            self.assertLessEqual(fetch.call_count, 4)
+
+    def test_product_catalog_recovers_expired_session_in_same_workspace(self):
+        client = PointHttpSessionClient(self._settings())
+        client._last_branch_hint = "MATRIZ"
+        expired = requests.Response()
+        expired.status_code = 200
+        expired._content = b"<title>Session Expired</title>"
+        valid = requests.Response()
+        valid.status_code = 200
+        valid._content = b'[{"PK_Producto": 7}]'
+        with patch.object(client, "_request", side_effect=[expired, valid]), patch.object(client, "login") as login:
+            self.assertEqual(client.get_products(text_art="NUEVO"), [{"PK_Producto": 7}])
+        login.assert_called_once_with(branch_hint="MATRIZ")
+
+    def test_product_catalog_rejects_json_error_object(self):
+        client = PointHttpSessionClient(self._settings(retry_attempts=1))
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b'{"error":"session expired"}'
+        with patch.object(client, "_request", return_value=response), self.assertRaises(ExtractionError):
+            client.get_products()
+
+    def test_catalog_recovery_has_bounded_attempts(self):
+        client = PointHttpSessionClient(self._settings(retry_attempts=2))
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b""
+        with patch.object(client, "_request", return_value=response) as request, patch.object(client, "login"):
+            with self.assertRaises(ExtractionError):
+                client.get_products()
+        self.assertEqual(request.call_count, 2)
+
+    def test_saturated_family_keeps_initial_rows_when_refining(self):
+        client = PointHttpSessionClient(self._settings())
+        initial = [{"PK_Producto": i, "ID_Familia": 1} for i in range(150)]
+        second = [{"PK_Producto": i, "ID_Familia": 2} for i in range(150, 300)]
+        extra = {"PK_Producto": 300, "ID_Familia": 2}
+        def products(**kwargs):
+            return second if kwargs.get("familia") == "2" else initial
+        def enumerate_rows(fetch, **kwargs):
+            return initial if kwargs["label"].endswith("1") else [extra]
+        with patch.object(client, "get_products", side_effect=products), patch.object(client, "_catalog_rows", return_value=[{"ID_Familia": 1}, {"ID_Familia": 2}]), patch.object(client, "_enumerate_catalog", side_effect=enumerate_rows):
+            self.assertEqual(len(client.get_all_products()), 301)
+
+    def test_product_bom_recovers_session_without_treating_html_as_empty(self):
+        client = PointHttpSessionClient(self._settings(retry_attempts=2))
+        expired = requests.Response()
+        expired.status_code = 200
+        expired._content = b"<html>Session Expired</html>"
+        valid = requests.Response()
+        valid.status_code = 200
+        valid._content = b'[{"PK_Articulo": 1, "Cantidad": 2}]'
+        with patch.object(client, "_request", side_effect=[expired, valid]), patch.object(client, "login"):
+            self.assertEqual(client.get_product_bom(7), [{"PK_Articulo": 1, "Cantidad": 2}])
+
     def _settings(self, *, retry_attempts: int = 3):
         return SimpleNamespace(
             base_url="https://app.pointmeup.com",
