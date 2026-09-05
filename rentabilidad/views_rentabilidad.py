@@ -234,14 +234,18 @@ def _build_gastos_panel(periodo, resultado=None):
 
     resultado = resultado if resultado is not None else leer_costos_mensuales(periodo)
     por_categoria = defaultdict(lambda: {"total": Decimal("0"), "registros": 0})
-    por_sucursal, pendientes = [], []
+    por_sucursal, pendientes, globales = [], [], []
     for sucursal in Sucursal.objects.filter(activa=True):
         resumen = costos_de_sucursal(resultado, sucursal.pk)
         por_sucursal.append({
             "centro_costo__sucursal__nombre": sucursal.nombre, "total": resumen["total"],
             "registros": len(resumen["filas"]), "completo": resumen["completo"],
+            "cobertura_pct": resumen["cobertura_pct"],
+            "faltantes": resumen["familias_faltantes_display"],
         })
         pendientes.extend(resumen["pendientes"])
+        # Los pendientes sin sucursal son los mismos para todas: se listan una vez.
+        globales = resumen["pendientes_globales"]
         for fila in resumen["filas"]:
             categoria = por_categoria[fila["familia"]]
             categoria.update(categoria_gasto__codigo=fila["familia"], categoria_gasto__nombre=ETIQUETAS[fila["familia"]])
@@ -252,7 +256,12 @@ def _build_gastos_panel(periodo, resultado=None):
         "registros": sum(f["registros"] for f in por_sucursal),
         "por_categoria": sorted(por_categoria.values(), key=lambda f: f["total"], reverse=True),
         "por_sucursal": sorted(por_sucursal, key=lambda f: f["total"], reverse=True),
-        "pendientes": pendientes,
+        "pendientes": pendientes + globales,
+        "pendientes_globales": globales,
+        "cobertura_pct": (
+            int(round(sum(f["cobertura_pct"] for f in por_sucursal) / len(por_sucursal)))
+            if por_sucursal else 0
+        ),
         "completo": bool(por_sucursal) and all(f["completo"] for f in por_sucursal),
     }
 
@@ -272,6 +281,16 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
                 "nivel": "alto",
                 "titulo": f"{r.sucursal.nombre}: margen bruto bajo",
                 "detalle": f"Margen bruto {r.porcentaje_margen_bruto}%. Revisar mezcla de venta, costos de producción/reventa y descuentos.",
+            })
+        if r.gasto_fijo_total > 0 and r.fuente_gastos_incompleta:
+            faltan = ", ".join(r.gastos_faltantes_display) or "algunas fuentes"
+            alertas.append({
+                "nivel": "medio",
+                "titulo": f"{r.sucursal.nombre}: gastos parciales ({r.cobertura_gastos_pct}% cargado)",
+                "detalle": (
+                    f"El punto de equilibrio y la utilidad se calculan solo con lo confirmado, "
+                    f"así que el PE está subestimado. Falta: {faltan}."
+                ),
             })
         if r.punto_equilibrio_mensual > 0 and r.porcentaje_avance_pe < 100:
             alertas.append({

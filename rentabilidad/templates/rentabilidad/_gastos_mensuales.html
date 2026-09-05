@@ -8,7 +8,12 @@
   </div>
   <div class="ia-box">
   {% if not gastos.completo %}
-  <p role="status"><strong>Cobertura incompleta · punto de equilibrio no calculable.</strong> Los importes disponibles son parciales; no representan todavía el costo completo de la sucursal.</p>
+  <p role="status"><strong>Cobertura {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
+    Se calcula con los importes ya confirmados, así que el PE está subestimado.
+    {% if gastos.familias_faltantes_display %}Falta cargar: {{ gastos.familias_faltantes_display|join:", " }}.{% endif %}</p>
+  {% endif %}
+  {% if gastos.familias_sin_fuente %}
+  <p>Cargas patronales (IMSS/RCV) no tienen fuente automatizada en el ERP: no se suman al gasto fijo ni cuentan en la cobertura hasta que SIPARE las alimente por sucursal.</p>
   {% endif %}
   {% if gastos.campos_previos_conservados %}
   <p>Hay importes previos conservados porque falta su fuente actual. No se consideran confirmados para este mes.</p>
@@ -38,8 +43,15 @@
   </div>
   {% if gastos.pendientes %}
   <details open>
-    <summary>Falta confirmar · {{ gastos.pendientes|length }} pendiente{{ gastos.pendientes|length|pluralize:"s" }}</summary>
+    <summary>Falta confirmar en esta sucursal · {{ gastos.pendientes|length }} pendiente{{ gastos.pendientes|length|pluralize:"s" }}</summary>
     <ul>{% for pendiente in gastos.pendientes %}<li><strong>{{ pendiente.concepto }}</strong>: {{ pendiente.detalle }}{% if pendiente.registro_id %} <small>({{ pendiente.origen }} #{{ pendiente.registro_id }})</small>{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% if gastos.pendientes_globales %}
+  <details>
+    <summary>Sin sucursal asignada · {{ gastos.pendientes_globales|length }} pendiente{{ gastos.pendientes_globales|length|pluralize:"s" }} del catálogo</summary>
+    <p>Son gastos o líneas de nómina que no tienen sucursal en su origen. Se corrigen en el catálogo, no aquí, y no reducen la cobertura de esta sucursal.</p>
+    <ul>{% for pendiente in gastos.pendientes_globales %}<li><strong>{{ pendiente.concepto }}</strong>: {{ pendiente.detalle }}{% if pendiente.registro_id %} <small>({{ pendiente.origen }} #{{ pendiente.registro_id }})</small>{% endif %}</li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>

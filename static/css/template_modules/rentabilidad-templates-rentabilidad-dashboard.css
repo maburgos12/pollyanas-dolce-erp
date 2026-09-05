@@ -561,6 +561,7 @@
 
   .positive { color: var(--rent-green); }
   .negative { color: var(--rent-red); }
+  .parcial { color: var(--rent-amber); }
   .muted { color: var(--rent-muted); }
 
   .product-list,

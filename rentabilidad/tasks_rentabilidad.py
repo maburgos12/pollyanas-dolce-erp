@@ -226,7 +226,11 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             resumen_gastos = aplicar_costos_en_memoria(obj, costos_mensuales)
             obj.save()
         if not resumen_gastos["completo"]:
-            logger.warning("[Rentabilidad] %s %s: fuentes incompletas; PE no calculable", suc.nombre, periodo)
+            logger.warning(
+                "[Rentabilidad] %s %s: cobertura %s%%; PE parcial, falta %s",
+                suc.nombre, periodo, resumen_gastos["cobertura_pct"],
+                ", ".join(resumen_gastos["familias_faltantes"]) or "confirmar importes",
+            )
         logger.info(f"[Rentabilidad] {suc.nombre} {periodo} — {obj.estado}")
 
     logger.info(f"[RentabilidadTask] Completado periodo {periodo.strftime('%B %Y')}")

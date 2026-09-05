@@ -63,7 +63,7 @@
   </nav>
 
   {% if not totales.gastos_completos %}
-  <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Los totales de utilidad no son definitivos y el punto de equilibrio permanece no calculable.</p>
+  <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Utilidad y punto de equilibrio se calculan con los gastos ya cargados, así que el PE está subestimado y la utilidad sobreestimada. Revisa la pestaña Gastos para ver qué falta por sucursal.</p>
   {% endif %}
   <section class="kpi-grid">
     <article class="kpi-card">
@@ -213,7 +213,7 @@
           <div>
             <strong>{{ r.sucursal.nombre }}</strong>
             <div class="muted">
-              {% if r.punto_equilibrio_mensual <= 0 %}PE no calculable{% else %}PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}
+              {% if r.punto_equilibrio_mensual <= 0 %}Sin gasto fijo cargado{% else %}PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% if r.fuente_gastos_incompleta %} · parcial {{ r.cobertura_gastos_pct }}%{% endif %}{% endif %}
             </div>
           </div>
           <strong>{% if r.punto_equilibrio_mensual <= 0 %}Pendiente{% elif r.porcentaje_avance_pe >= 100 %}Cubierto{% else %}{{ r.porcentaje_avance_pe }}%{% endif %}</strong>
@@ -281,7 +281,7 @@
         <div>
           <h2>Gastos recurrentes y personal por concepto</h2>
           <p>Lectura mensual de gastos, obligaciones y nómina ERP. Los pagos no se suman de nuevo.</p>
-          {% if not gastos_panel.completo %}<p><strong>Cobertura incompleta.</strong> Los importes son parciales; revisa el detalle de cada sucursal antes de interpretar utilidad o punto de equilibrio.</p>{% endif %}
+          {% if not gastos_panel.completo %}<p><strong>Cobertura promedio {{ gastos_panel.cobertura_pct }}%.</strong> Los importes son parciales: el punto de equilibrio sale subestimado y la utilidad sobreestimada. Revisa abajo qué falta por sucursal.</p>{% endif %}
         </div>
         <div class="kpi-value pd-u-ae01fa962b">${{ gastos_panel.total|floatformat:0|intcomma }}</div>
       </div>
@@ -308,7 +308,7 @@
       <div class="rank-list">
         {% for row in gastos_panel.por_sucursal %}
         <div class="rank-item">
-          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros|intcomma }} registros · {% if row.completo %}Completo{% else %}Parcial / pendiente{% endif %}</div></div>
+          <div><strong>{{ row.centro_costo__sucursal__nombre }}</strong><div class="muted">{{ row.registros|intcomma }} registros · {% if row.completo %}Completo{% else %}{{ row.cobertura_pct }}% cargado{% if row.faltantes %} · falta {{ row.faltantes|join:", " }}{% endif %}{% endif %}</div></div>
           <strong>${{ row.total|floatformat:0|intcomma }}</strong>
         </div>
         {% empty %}
@@ -389,7 +389,9 @@
                   <strong>{% if r.punto_equilibrio_mensual <= 0 %}No calculable{% else %}${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}</strong>
                   <span class="cell-note">
                     {% if r.punto_equilibrio_mensual <= 0 %}
-                    PE pendiente
+                    Sin gasto fijo cargado
+                    {% elif r.fuente_gastos_incompleta %}
+                    PE parcial · {{ r.cobertura_gastos_pct }}% de gastos
                     {% elif r.porcentaje_avance_pe >= 100 %}
                     PE cubierto
                     {% else %}
@@ -402,10 +404,15 @@
                   <span class="negative">gastos no cargados</span>
                   {% elif r.brecha_pe > 0 %}
                   <span class="negative">${{ r.brecha_pe|floatformat:0|intcomma }}</span>
+                  {% elif r.fuente_gastos_incompleta %}
+                  <span class="parcial">cubierto (parcial)</span>
                   {% else %}
                   <span class="positive">cubierto</span>
                   {% endif %}
                 </div>
+                {% if r.gastos_faltantes_display %}
+                <div class="cell-note">Faltan: {{ r.gastos_faltantes_display|join:", " }}</div>
+                {% endif %}
                 <div class="bar-track"><div class="bar-fill pd-js-width" data-pd-width="{{ r.porcentaje_avance_pe|floatformat:0 }}%"></div></div>
               </div>
             </td>

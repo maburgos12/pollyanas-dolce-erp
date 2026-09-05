@@ -40,7 +40,9 @@
   </section>
 
   {% if not rent.gastos_mensuales.completo %}
-  <p role="status"><strong>Resultado provisional.</strong> Faltan gastos o asignaciones por confirmar. La utilidad, recuperación y ROI mostrados no son definitivos.</p>
+  <p role="status"><strong>Resultado provisional · {{ rent.cobertura_gastos_pct }}% de los gastos cargados.</strong>
+    Utilidad, punto de equilibrio, recuperación y ROI se calculan solo con lo confirmado: el PE queda subestimado y la utilidad sobreestimada.
+    {% if rent.gastos_faltantes_display %}Falta: {{ rent.gastos_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}
 
   <section class="kpi-grid">
@@ -69,10 +71,9 @@
         {% if rent.punto_equilibrio_mensual <= 0 %}No calculable{% else %}${{ rent.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}
       </div>
       <div class="sub">
-        {% if not rent.gastos_mensuales.completo %}
-        Pendiente: fuentes de gastos o costo de personal incompletas.
-        {% else %}
         {{ rent.porcentaje_avance_pe }}% cubierto; brecha de ${{ rent.brecha_pe|floatformat:0|intcomma }}.
+        {% if not rent.gastos_mensuales.completo %}
+        Calculado con {{ rent.cobertura_gastos_pct }}% de los gastos; el PE real es mayor.
         {% endif %}
       </div>
     </article>

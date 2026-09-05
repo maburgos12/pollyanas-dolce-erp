@@ -12,6 +12,9 @@ from reportes.models import CategoriaGasto, CentroCosto, GastoOperativoMensual
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 from rentabilidad.models_rentabilidad import EstadoRentabilidad, SucursalRentabilidad
 from rentabilidad.tasks_rentabilidad import recalcular_rentabilidad_mensual
+from reportes.services_rentabilidad_mensual import (
+    aplicar_costos_en_memoria, costos_de_sucursal, leer_costos_mensuales,
+)
 
 
 class IntegracionGastosRecurrentesTests(TestCase):
@@ -41,7 +44,11 @@ class IntegracionGastosRecurrentesTests(TestCase):
         rent = SucursalRentabilidad.objects.get(sucursal=self.sucursal, periodo=date(2026, 6, 1))
         self.assertEqual(rent.renta, Decimal("13242.00"))
         self.assertEqual(rent.nomina_directa, Decimal("1200.00"))
-        self.assertEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+        # La cobertura parcial se rotula, ya no vacía el estado ni el PE.
+        self.assertNotEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+        resumen = costos_de_sucursal(leer_costos_mensuales(rent.periodo), self.sucursal.pk)
+        self.assertFalse(resumen["completo"])
+        self.assertLess(resumen["cobertura_pct"], 100)
         recalcular_rentabilidad_mensual(year=2026, month=6)
         rent.refresh_from_db()
         self.assertEqual(rent.nomina_directa, Decimal("1200.00"))
@@ -52,7 +59,9 @@ class IntegracionGastosRecurrentesTests(TestCase):
         recalcular_rentabilidad_mensual(year=2026, month=6)
         rent.refresh_from_db()
         self.assertEqual(rent.renta, Decimal("800"))
-        self.assertEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+        aplicar_costos_en_memoria(rent, leer_costos_mensuales(rent.periodo))
+        self.assertTrue(rent.fuente_gastos_incompleta)
+        self.assertIn("Nómina ERP", rent.gastos_faltantes_display)
 
     def test_get_y_tarea_coinciden_sin_escribir_ni_mostrar_nomina_individual(self):
         self.gasto()
@@ -71,25 +80,58 @@ class IntegracionGastosRecurrentesTests(TestCase):
         self.assertContains(response, "sucursal asignada en RRHH")
         self.assertFalse([q["sql"] for q in queries if q["sql"].lstrip().split()[0] in {"INSERT", "UPDATE", "DELETE"}])
 
-    def test_nomina_sola_no_habilita_punto_de_equilibrio(self):
+    def test_nomina_sola_calcula_pe_parcial_y_lo_rotula(self):
+        """Con una sola familia cargada el PE se publica, pero marcado como parcial."""
         self.nomina()
         rent = SucursalRentabilidad.objects.create(sucursal=self.sucursal, periodo=date(2026, 6, 1), ventas_brutas=Decimal("2000"))
         self.client.force_login(self.usuario)
         response = self.client.get(reverse("rentabilidad_detalle", kwargs={"pk": rent.pk}))
-        self.assertEqual(response.context["rent"].estado, EstadoRentabilidad.SIN_DATOS)
-        self.assertEqual(response.context["rent"].punto_equilibrio_mensual, Decimal("0"))
+        leido = response.context["rent"]
+        self.assertEqual(leido.punto_equilibrio_mensual, Decimal("1200.00"))
+        self.assertTrue(leido.fuente_gastos_incompleta)
+        # 1 de 6 familias exigibles: cargas patronales no cuenta, no tiene fuente.
+        self.assertEqual(leido.cobertura_gastos_pct, 17)
+        self.assertContains(response, "17% de los gastos cargados")
         self.assertContains(response, "Falta confirmar")
 
-    def test_snapshot_parcial_releido_no_expone_pe_valido(self):
+    def test_snapshot_releido_recalcula_estado_desde_sus_importes(self):
+        """Un SIN_DATOS heredado deja de ser pegajoso: manda la aritmética."""
         rent = SucursalRentabilidad.objects.create(
             sucursal=self.sucursal, periodo=date(2026, 6, 1),
             ventas_brutas=Decimal("2000"), renta=Decimal("100"),
         )
         SucursalRentabilidad.objects.filter(pk=rent.pk).update(estado=EstadoRentabilidad.SIN_DATOS)
         rent.refresh_from_db()
-        self.assertEqual(rent.punto_equilibrio_mensual, Decimal("0"))
+        self.assertEqual(rent.punto_equilibrio_mensual, Decimal("100.00"))
         rent.calcular_estado()
-        self.assertEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+        self.assertNotEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+
+    def test_pendiente_sin_sucursal_no_baja_la_cobertura_de_la_sucursal(self):
+        """Un origen sin sucursal es un problema del catálogo, no de esta sucursal."""
+        resumen = costos_de_sucursal({
+            "filas": [{"sucursal_id": self.sucursal.pk, "area": "gastos-venta", "familia": f,
+                       "estado": "COMPLETO", "monto_mensual": Decimal("10")}
+                      for f in ("renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina")],
+            "pendientes": [{"sucursal_id": None, "area": "gastos-venta", "familia": "electricidad",
+                            "concepto": "Energía eléctrica", "estado": "PENDIENTE", "detalle": "sin sucursal"}],
+        }, self.sucursal.pk)
+        self.assertEqual(resumen["cobertura_pct"], 100)
+        self.assertTrue(resumen["completo"])
+        self.assertEqual(len(resumen["pendientes_globales"]), 1)
+        # Lo único propio es el aviso de cargas patronales, que no bloquea.
+        self.assertEqual([p["familia"] for p in resumen["pendientes"]], ["cargas_patronales"])
+
+    def test_cargas_patronales_sin_fuente_no_bloquean_la_cobertura(self):
+        """IMSS/RCV no tienen fuente automatizada: se informan, no reprueban."""
+        resumen = costos_de_sucursal({
+            "filas": [{"sucursal_id": self.sucursal.pk, "area": "gastos-venta", "familia": f,
+                       "estado": "COMPLETO", "monto_mensual": Decimal("10")}
+                      for f in ("renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina")],
+            "pendientes": [],
+        }, self.sucursal.pk)
+        self.assertEqual(resumen["familias_sin_fuente"], ["cargas_patronales"])
+        self.assertEqual(resumen["cobertura_pct"], 100)
+        self.assertTrue(resumen["completo"])
 
     def test_componente_ausente_no_borra_total_laboral_previo(self):
         from reportes.services_rentabilidad_mensual import aplicar_costos_en_memoria, leer_costos_mensuales
