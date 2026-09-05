@@ -409,6 +409,7 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
         PointSyncJob.STATUS_RUNNING: "PROCESSING",
         PointSyncJob.STATUS_SUCCESS: "COMPLETED",
         PointSyncJob.STATUS_FAILED: "FAILED",
+        PointSyncJob.STATUS_PARTIAL: "PARTIAL",
     }.get(job.status, "PROCESSING")
     stage = progress.get("stage") or fallback_stage
     stage_map = {
@@ -435,6 +436,7 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
         ),
         "COMPLETED": ("Actualización terminada", "Point y el ERP quedaron sincronizados.", "success"),
         "FAILED": ("Actualización detenida", "El trabajo terminó con un error.", "danger"),
+        "PARTIAL": ("Actualización con pendientes", "Revisa las recetas e insumos pendientes antes de dar por terminada la actualización.", "warning"),
     }
     stage_label, stage_detail, stage_tone = stage_map.get(stage, stage_map["PROCESSING"])
     job_status_label = {
@@ -442,6 +444,7 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
         PointSyncJob.STATUS_RUNNING: "En proceso",
         PointSyncJob.STATUS_SUCCESS: "Terminado",
         PointSyncJob.STATUS_FAILED: "Con error",
+        PointSyncJob.STATUS_PARTIAL: "Con pendientes",
     }.get(job.status, job.get_status_display())
     imported_products = list(summary.get("imported_products_status") or [])
     status_label_map = {
@@ -5517,16 +5520,30 @@ def _point_sync_response(
 
 
 def _queue_catalog_recipe_sync(request: HttpRequest, *, action_label: str) -> PointSyncJob:
-    job = PointSyncJob.objects.create(
-        job_type=PointSyncJob.JOB_TYPE_RECIPES,
-        status=PointSyncJob.STATUS_PENDING,
-        parameters={
-            "action": action_label,
-            "branch_hint": "MATRIZ",
-            "include_without_recipe": False,
-        },
-        triggered_by=request.user,
-    )
+    with transaction.atomic():
+        # Serializa comprobación y creación entre usuarios, incluso sin filas.
+        # Este candado es independiente de la sesión de Point.
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [7_532_026_090_500_001])
+        job = PointSyncJob.objects.filter(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status__in=[PointSyncJob.STATUS_PENDING, PointSyncJob.STATUS_RUNNING],
+            parameters__action__in=["SYNC_ALL_RECIPES", "SYNC_ONLY_NEW_PRODUCTS"],
+        ).order_by("created_at", "id").first()
+        if job is not None:
+            request.session["recetas_last_point_sync_job_id"] = job.id
+            job.catalog_sync_reused = True
+            return job
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_PENDING,
+            parameters={
+                "action": action_label,
+                "branch_hint": "MATRIZ",
+                "include_without_recipe": False,
+            },
+            triggered_by=request.user,
+        )
     try:
         task_catalog_recipe_sync.delay(job_id=job.id)
     except Exception as exc:
@@ -5558,6 +5575,8 @@ def recetas_sync_all(request: HttpRequest) -> HttpResponse:
             next_url=next_url,
             toast_type="info",
             message=(
+                f"Ya existe una sincronización activa (trabajo #{job.id}); consulta su avance."
+                if getattr(job, "catalog_sync_reused", False) else
                 "La actualización completa quedó en cola. Puedes seguir usando el ERP; "
                 "el estado aparecerá en este catálogo cuando termine."
             ),
@@ -5625,6 +5644,8 @@ def recetas_sync_new(request: HttpRequest) -> HttpResponse:
             next_url=next_url,
             toast_type="info",
             message=(
+                f"Ya existe una sincronización activa (trabajo #{job.id}); consulta su avance."
+                if getattr(job, "catalog_sync_reused", False) else
                 "La búsqueda quedó en cola. Point incorporará automáticamente los productos "
                 "nuevos que tengan receta/BOM."
             ),

@@ -512,6 +512,26 @@ class RecetasListCatalogFiltersTests(TestCase):
         delay.assert_called_once_with(job_id=job.id)
 
     @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    def test_recetas_sync_repeated_submission_reuses_active_job(self, delay):
+        endpoint = reverse("recetas:recetas_sync_new")
+        first = self.client.post(endpoint, HTTP_ACCEPT="application/json")
+        second = self.client.post(endpoint, HTTP_ACCEPT="application/json")
+        self.assertEqual(first.json()["job_id"], second.json()["job_id"])
+        self.assertEqual(delay.call_count, 1)
+
+    def test_partial_recipe_sync_is_visible_as_pending_review(self):
+        PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_PARTIAL,
+            triggered_by=self.user,
+            parameters={"action": "SYNC_ALL_RECIPES", "progress": {"stage": "PARTIAL"}},
+            result_summary={"products_selected": 2, "recipes_completed_successfully": 1, "unresolved_inputs_count": 1},
+        )
+        response = self.client.get(reverse("recetas:recetas_list"))
+        self.assertContains(response, "Actualización con pendientes")
+        self.assertContains(response, "Recetas completas")
+
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
     def test_recetas_sync_all_queues_progressive_background_job(self, delay):
 
         response = self.client.post(

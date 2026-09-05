@@ -58,6 +58,18 @@ class FakePointHttpClient:
 
 
 class PointProductRecipeSyncServiceTests(TestCase):
+    def test_discovery_coordinates_its_point_session_with_other_imports(self):
+        from django.db import connection
+        from unittest.mock import patch
+        client = FakePointHttpClient({"products": []})
+        def login(**kwargs):
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()")
+                self.assertGreater(cursor.fetchone()[0], 0)
+            return {"branch_name": "Matriz"}
+        with patch.object(client, "login", side_effect=login):
+            PointProductRecipeSyncService(http_client_factory=lambda: client).discover_new_product_codes()
+
     def setUp(self):
         self.unit_pza = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
         self.insumo = Insumo.objects.create(
@@ -237,6 +249,38 @@ class PointProductRecipeSyncServiceTests(TestCase):
         self.assertEqual(result["blocked_codes"], [])
         self.assertEqual(result["new_candidates"][0]["detection_reason"], "BOM_PROBE_POSITIVE")
         self.assertEqual(result["new_candidates"][0]["bom_lines"], 1)
+
+        payload["details"][910] = {"Codigo": "TOP-FRESA-C", "Nombre": "Topping Fresa Chico"}
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_RECIPES)
+        imported = service.sync(product_codes=result["new_codes"], sync_job=job)
+        self.assertEqual(imported.summary["products_selected"], 1)
+        self.assertTrue(Receta.objects.filter(codigo_point="TOP-FRESA-C").exists())
+        job.refresh_from_db()
+        self.assertEqual(job.parameters.get("progress", {}).get("products_processed"), 1)
+
+    def test_failed_discovery_bom_read_is_not_reported_as_no_recipe(self):
+        from unittest.mock import patch
+        from pos_bridge.utils.exceptions import ExtractionError
+        client = FakePointHttpClient({"products": [{"PK_Producto": 910, "Codigo": "NUEVO", "Nombre": "Pastel Nuevo", "Familia": "Pastel", "hasReceta": False}]})
+        service = PointProductRecipeSyncService(http_client_factory=lambda: client)
+        with patch.object(client, "get_product_bom", side_effect=ExtractionError("Point no disponible")):
+            with self.assertRaises(ExtractionError):
+                service.discover_new_product_codes()
+
+    def test_requested_product_missing_from_point_cannot_finish_as_empty_success(self):
+        from pos_bridge.utils.exceptions import ExtractionError
+        service = PointProductRecipeSyncService(http_client_factory=lambda: FakePointHttpClient({"products": []}))
+        with self.assertRaises(ExtractionError):
+            service.sync(product_codes=["NO-DEVUELTO"])
+
+    def test_requested_product_search_failure_is_not_silently_ignored(self):
+        from unittest.mock import patch
+        from pos_bridge.utils.exceptions import ExtractionError
+        client = FakePointHttpClient({"products": []})
+        service = PointProductRecipeSyncService(http_client_factory=lambda: client)
+        with patch.object(client, "get_products", side_effect=ExtractionError("Point no disponible")):
+            with self.assertRaises(ExtractionError):
+                service.sync(product_codes=["NUEVO"])
 
     def test_discover_new_product_codes_reports_blocked_recipe_like_candidate_without_bom(self):
         payload = {

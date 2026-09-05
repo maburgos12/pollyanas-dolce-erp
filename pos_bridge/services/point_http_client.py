@@ -250,8 +250,7 @@ class PointHttpSessionClient:
         subcategorias: str | None = None,
         activo: bool = True,
     ) -> list[dict]:
-        response = self._request(
-            "GET",
+        return self._catalog_rows(
             "/Catalogos/get_productos",
             params={
                 "categoria": categoria,
@@ -261,13 +260,27 @@ class PointHttpSessionClient:
                 "activo": str(bool(activo)).lower(),
             },
         )
-        try:
-            return json.loads(response.text)
-        except ValueError as exc:
-            raise ExtractionError(
-                "Point devolvió un catálogo de productos inválido.",
-                context={"body_preview": response.text[:500]},
-            ) from exc
+
+    def _catalog_rows(self, path: str, *, params: dict | None = None) -> list[dict]:
+        """Lectura con recuperación acotada de sesiones que devuelven HTML con HTTP 200."""
+        attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                response = self._request("GET", path, params=params or {})
+                rows = self._parse_json(response, label=path)
+                if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                    raise ExtractionError("Point devolvió un catálogo con formato inesperado.", context={"path": path})
+                return rows
+            except (ExtractionError, requests.RequestException):
+                if attempt == attempts:
+                    raise
+                self._audit(
+                    "point_catalog_relogin",
+                    message="Respuesta de catálogo inválida; recuperando la sesión de Point.",
+                    context={"path": path, "attempt": attempt},
+                )
+                self._reset_session()
+                self.login(branch_hint=getattr(self, "_last_branch_hint", None))
 
     def get_product_detail(self, product_id: int | str) -> dict:
         response = self._request("GET", "/Catalogos/get_producto_byID", params={"id_producto": product_id})
@@ -367,17 +380,7 @@ class PointHttpSessionClient:
         return payload
 
     def get_product_bom(self, product_id: int | str) -> list[dict]:
-        response = self._request("GET", "/Catalogos/getBomsByProducts", params={"pkProducto": product_id})
-        try:
-            data = json.loads(response.text)
-        except ValueError as exc:
-            raise ExtractionError(
-                "Point devolvió un BOM inválido.",
-                context={"product_id": product_id, "body_preview": response.text[:500]},
-            ) from exc
-        if not isinstance(data, list):
-            raise ExtractionError("Point devolvió un BOM con formato inesperado.", context={"product_id": product_id})
-        return data
+        return self._catalog_rows("/Catalogos/getBomsByProducts", params={"pkProducto": product_id})
 
     def get_articulos(self, *, search: str = "", category: int | str | None = None) -> list[dict]:
         response = self._request(
@@ -419,21 +422,43 @@ class PointHttpSessionClient:
     _ENUM_REFINE = "abcdefghijklmnopqrstuvwxyz0123456789 "
 
     def get_all_products(self, **kwargs) -> list[dict]:
-        """Catálogo completo de productos (rodea el tope de 150 filas).
-
-        Cacheado por instancia: la enumeración cuesta ~1,500 consultas, así
-        que dentro de una misma sesión de sync nunca se repite.
-        """
+        """Catálogo por familias oficiales; solo refina familias que saturen el tope."""
         cache = getattr(self, "_catalog_cache", None)
         if cache is None:
             cache = self._catalog_cache = {}
         cache_key = ("productos", tuple(sorted(kwargs.items())))
         if cache_key not in cache:
-            cache[cache_key] = self._enumerate_catalog(
-                lambda term: self.get_products(text_art=term, **kwargs),
-                pk_field="PK_Producto",
-                label="productos",
-            )
+            rows = self.get_products(**kwargs)
+            if len(rows) >= self.CATALOG_PAGE_LIMIT:
+                families = self._catalog_rows("/Catalogos/get_familias")
+                family_ids = {str(row["ID_Familia"]) for row in families if row.get("ID_Familia") is not None}
+                if len(family_ids) != len(families) or not family_ids:
+                    raise ExtractionError("Point no devolvió un catálogo de familias válido.")
+                found = {row["PK_Producto"]: row for row in rows}
+                if kwargs.get("familia") is not None:
+                    family_ids = {str(kwargs["familia"])}
+                for family_id in sorted(family_ids):
+                    filters = {**kwargs, "familia": family_id}
+                    family_rows = self.get_products(**filters)
+                    if any(str(row.get("ID_Familia")) != family_id for row in family_rows):
+                        raise ExtractionError("Point no respetó el filtro de familia; no se confirmó el catálogo completo.")
+                    found.update({row["PK_Producto"]: row for row in family_rows})
+                    if len(family_rows) >= self.CATALOG_PAGE_LIMIT:
+                        family_rows = self._enumerate_catalog(
+                            lambda term: self.get_products(text_art=term, **filters),
+                            pk_field="PK_Producto", label=f"productos de familia {family_id}",
+                        )
+                    found.update({row["PK_Producto"]: row for row in family_rows})
+                # Si Point admite productos sin familia, conservar el recorrido
+                # general para no descartarlos al particionar el catálogo.
+                if any(str(row.get("ID_Familia")) not in family_ids for row in rows):
+                    found.update({row["PK_Producto"]: row for row in self._enumerate_catalog(
+                        lambda term: self.get_products(text_art=term, **kwargs),
+                        pk_field="PK_Producto", label="productos sin familia",
+                    )})
+                rows = list(found.values())
+            cache[cache_key] = rows
+            self._audit("catalog_enumeration", message="Catálogo de productos consultado.", context={"total": len(rows)})
         return list(cache[cache_key])
 
     def get_all_articulos(self, *, category: int | str | None = None) -> list[dict]:

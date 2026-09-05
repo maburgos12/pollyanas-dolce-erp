@@ -14,8 +14,10 @@ from maestros.models import Insumo, UnidadMedida, seed_unidades_basicas
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine, PointSyncJob
 from pos_bridge.services.point_http_client import PointHttpSessionClient
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService, ResolvedInsumo
 from pos_bridge.utils.helpers import sanitize_sensitive_data
+from pos_bridge.utils.exceptions import ExtractionError
 from pos_bridge.utils.logger import get_job_logger
 from reportes.analytics_service import mark_analytics_dirty_for_range
 from recetas.models import LineaReceta, Receta
@@ -141,7 +143,7 @@ class PointProductRecipeSyncService:
         }
         node_outcomes: dict[str, dict[str, object]] = {}
 
-        with self._build_http_client(sync_job=sync_job) as client:
+        with point_account_session_lock(wait=True), self._build_http_client(sync_job=sync_job) as client:
             workspace = client.login(branch_hint=branch_hint)
             summary["workspace"] = workspace["branch_name"]
             run = PointRecipeExtractionRun.objects.create(
@@ -167,7 +169,13 @@ class PointProductRecipeSyncService:
                 if selected_codes and code_norm not in selected_codes:
                     continue
                 if not include_without_recipe and not product.get("hasReceta"):
-                    continue
+                    if code_norm not in selected_codes:
+                        continue
+                    # El descubrimiento puede confirmar BOM aunque hasReceta
+                    # venga en falso. Verificar la composición real antes de omitir.
+                    if not client.get_product_bom(product["PK_Producto"]):
+                        continue
+                    product = {**product, "hasReceta": True}
                 self._upsert_point_product_catalog_signal(product)
                 summary["products_selected"] += 1
                 self._extract_product_node(
@@ -196,6 +204,17 @@ class PointProductRecipeSyncService:
                     else:
                         summary["recipes_with_unresolved_inputs"] += 1
                     summary["unresolved_inputs_count"] += len(product_status["unresolved_inputs"])
+                if sync_job is not None:
+                    sync_job.parameters = {
+                        **(sync_job.parameters or {}),
+                        "progress": {
+                            "stage": "IMPORTING",
+                            "detail": f"Procesados {summary['products_selected']} productos. Último: {product.get('Nombre') or code_norm}.",
+                            "products_processed": summary["products_selected"],
+                        },
+                    }
+                    sync_job.result_summary = summary
+                    sync_job.save(update_fields=["parameters", "result_summary", "updated_at"])
                 if limit and summary["products_selected"] >= limit:
                     break
 
@@ -257,7 +276,7 @@ class PointProductRecipeSyncService:
         branch_hint: str | None = None,
         include_without_recipe: bool = False,
     ) -> dict[str, object]:
-        with self._build_http_client() as client:
+        with point_account_session_lock(wait=True), self._build_http_client() as client:
             workspace = client.login(branch_hint=branch_hint)
             products = client.get_all_products()
             discovery_baseline_at = self._discovery_baseline_at()
@@ -307,10 +326,7 @@ class PointProductRecipeSyncService:
                     continue
 
                 if should_probe_bom and product.get("PK_Producto"):
-                    try:
-                        bom_rows = client.get_product_bom(product.get("PK_Producto"))
-                    except Exception:
-                        bom_rows = []
+                    bom_rows = client.get_product_bom(product.get("PK_Producto"))
 
                 if bom_rows:
                     new_candidates.append(
@@ -461,16 +477,17 @@ class PointProductRecipeSyncService:
         for code in sorted(selected_codes):
             if not code:
                 continue
-            try:
-                rows = client.get_products(text_art=code)
-            except Exception:
-                rows = []
+            rows = client.get_products(text_art=code)
             for row in rows:
                 norm = self._norm_code(row.get("Codigo") or "")
                 if norm == code and norm not in seen:
                     seen.add(norm)
                     found.append(row)
-        return self._hydrate_selected_products(client=client, products=found, selected_codes=selected_codes)
+        products = self._hydrate_selected_products(client=client, products=found, selected_codes=selected_codes)
+        missing = selected_codes - {self._norm_code(row.get("Codigo") or "") for row in products}
+        if missing:
+            raise ExtractionError(f"Point no devolvió los productos solicitados: {', '.join(sorted(missing))}.")
+        return products
 
     def _upsert_point_product_catalog_signal(self, product: dict) -> PointProduct | None:
         external_id = str(product.get("PK_Producto") or "").strip()

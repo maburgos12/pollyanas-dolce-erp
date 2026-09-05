@@ -359,7 +359,7 @@ def task_product_recipe_sync(
 )
 def task_catalog_recipe_sync(self, *, job_id: int):
     job = PointSyncJob.objects.select_related("triggered_by").get(id=job_id)
-    if job.status == PointSyncJob.STATUS_SUCCESS:
+    if job.status in {PointSyncJob.STATUS_SUCCESS, PointSyncJob.STATUS_PARTIAL}:
         return _serialize_job(job)
     parameters = dict(job.parameters or {})
     action = parameters.get("action")
@@ -397,6 +397,7 @@ def task_catalog_recipe_sync(self, *, job_id: int):
             discovery = service.discover_new_product_codes(branch_hint=branch_hint)
             product_codes = list(discovery.get("new_codes") or [])
             if not product_codes:
+                incomplete = bool(discovery.get("blocked_candidates_count"))
                 summary = {
                     "products_selected": 0,
                     "recipes_completed_successfully": 0,
@@ -407,11 +408,14 @@ def task_catalog_recipe_sync(self, *, job_id: int):
                     "discovery": discovery,
                 }
                 parameters["progress"] = {
-                    "stage": "COMPLETED",
-                    "detail": "La revisión terminó; Point no reportó productos nuevos importables.",
+                    "stage": "PARTIAL" if incomplete else "COMPLETED",
+                    "detail": (
+                        "La revisión terminó con productos pendientes: Point no confirmó su receta/BOM."
+                        if incomplete else "La revisión terminó; Point no reportó productos nuevos importables."
+                    ),
                 }
                 job.parameters = parameters
-                job.status = PointSyncJob.STATUS_SUCCESS
+                job.status = PointSyncJob.STATUS_PARTIAL if incomplete else PointSyncJob.STATUS_SUCCESS
                 job.finished_at = timezone.now()
                 job.result_summary = summary
                 job.save(
@@ -459,13 +463,21 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         if discovery is not None:
             summary["discovery"] = discovery
         summary["weekly_cost_snapshot"] = snapshot
+        incomplete = bool(
+            summary.get("recipes_with_unresolved_inputs")
+            or summary.get("unresolved_inputs_count")
+            or (discovery or {}).get("blocked_candidates_count")
+        )
         parameters["progress"] = {
-            "stage": "COMPLETED",
-            "detail": "Catálogo, recetas/BOM y corte semanal de costos actualizados.",
+            "stage": "PARTIAL" if incomplete else "COMPLETED",
+            "detail": (
+                "La actualización terminó con pendientes; revisa las recetas señaladas."
+                if incomplete else "Catálogo, recetas/BOM y corte semanal de costos actualizados."
+            ),
             "products_processed": int(summary.get("products_selected") or 0),
         }
         job.parameters = parameters
-        job.status = PointSyncJob.STATUS_SUCCESS
+        job.status = PointSyncJob.STATUS_PARTIAL if incomplete else PointSyncJob.STATUS_SUCCESS
         job.finished_at = timezone.now()
         job.result_summary = summary
         job.artifacts = {"raw_export_path": result.raw_export_path}
