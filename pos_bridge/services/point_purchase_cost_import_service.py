@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from maestros.models import CostoInsumo, Insumo, Proveedor
 from pos_bridge.utils.exceptions import ExtractionError
@@ -82,22 +82,51 @@ class PointPurchaseCostImportService:
         except Exception as exc:  # noqa: BLE001
             raise ExtractionError("Formato inválido en detalle de compras Point.") from exc
 
+        purchases = []
+        for purchase in purchase_rows:
+            purchase_id = str(purchase.get("purchase_id") or "").strip()
+            purchase_meta = summary_index.get(purchase_id)
+            if not purchase_id or not purchase_meta:
+                continue
+            purchases.append(
+                {
+                    "purchase_id": purchase_id,
+                    "folio": purchase_meta["folio"],
+                    "branch": purchase_meta["branch"],
+                    "supplier": purchase_meta["supplier"],
+                    "purchase_date": self._parse_date(purchase_meta["purchase_date"]),
+                    "lines": purchase.get("matches") or [],
+                }
+            )
+        return self.persist_purchases(purchases)
+
+    def persist_purchases(self, purchases: Iterable[dict]) -> PointPurchaseCostImportResult:
+        """Persiste compras Point como CostoInsumo, vengan de un export o de la API en vivo.
+
+        El formato de ``raw`` y la llave de idempotencia viven aquí y solo aquí: el puente
+        al kardex (importar_compras_point_a_kardex) deriva su propio source_hash del de
+        CostoInsumo, así que si las dos rutas de entrada divergieran se duplicarían las
+        entradas de inventario.
+
+        Cada compra: ``{purchase_id, folio, branch, supplier, purchase_date, lines}``, donde
+        cada línea trae ``articulo``, ``cantidad``, ``unidad``, ``costo_unitario`` y
+        opcionalmente ``costo_total`` y ``raw``.
+        """
         created = 0
         existing = 0
         unresolved = 0
         imported_articles: set[str] = set()
         unresolved_articles: set[str] = set()
 
-        for purchase in purchase_rows:
+        for purchase in purchases:
             purchase_id = str(purchase.get("purchase_id") or "").strip()
-            purchase_meta = summary_index.get(purchase_id)
-            if not purchase_id or not purchase_meta:
+            if not purchase_id:
                 continue
-            purchase_date = self._parse_date(purchase_meta["purchase_date"])
-            supplier_name = purchase_meta["supplier"] or "POINT COMPRAS"
+            purchase_date = purchase.get("purchase_date")
+            supplier_name = purchase.get("supplier") or "POINT COMPRAS"
             supplier, _ = Proveedor.objects.get_or_create(nombre=supplier_name, defaults={"activo": True})
 
-            for match in purchase.get("matches") or []:
+            for match in purchase.get("lines") or []:
                 article_name = str(match.get("articulo") or "").strip()
                 insumo = self._resolve_insumo(article_name)
                 if insumo is None:
@@ -121,8 +150,8 @@ class PointPurchaseCostImportService:
                         "raw": {
                             "source": "POINT_COMPRAS_HISTORICAS",
                             "purchase_id": purchase_id,
-                            "folio": purchase_meta["folio"],
-                            "branch": purchase_meta["branch"],
+                            "folio": purchase.get("folio"),
+                            "branch": purchase.get("branch"),
                             "supplier": supplier_name,
                             "article_name": article_name,
                             "quantity": match.get("cantidad"),
