@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from celery import shared_task
@@ -987,3 +987,46 @@ def _run_with_optional_user(func, *, triggered_by_id: int | None = None, return_
     if return_jobs:
         return result or []
     return _serialize_job(result)
+
+
+@shared_task(
+    name="pos_bridge.purchase_kardex_sync",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+    acks_late=True,
+)
+def task_purchase_kardex_sync(self, *, dias: int = 7):
+    """Trae las compras recientes de Point y las convierte en entradas del kardex.
+
+    Sin esta tarea el kardex vuelve a quedarse sin compras: el ledger descuenta
+    consumo por receta contra un inventario que nunca recibió la materia prima, que
+    es lo que llevó el saldo teórico a -14.5M de unidades base.
+
+    Ventana de varios días a propósito: Point registra compras con fecha posterior a
+    la de la compra (Fecha_registro contra Fecha_compra), y así una corrida caída se
+    recupera sola. Ambos pasos son idempotentes, así que repetir no duplica.
+    """
+    from io import StringIO
+
+    hasta = timezone.localdate()
+    desde = hasta - timedelta(days=max(int(dias), 1))
+
+    extraccion = StringIO()
+    call_command(
+        "extraer_compras_point",
+        desde=desde.isoformat(),
+        hasta=hasta.isoformat(),
+        apply=True,
+        stdout=extraccion,
+    )
+
+    kardex = StringIO()
+    call_command("importar_compras_point_a_kardex", apply=True, stdout=kardex)
+
+    return {
+        "desde": desde.isoformat(),
+        "hasta": hasta.isoformat(),
+        "extraccion": extraccion.getvalue()[-1500:],
+        "kardex": kardex.getvalue()[-1500:],
+    }
