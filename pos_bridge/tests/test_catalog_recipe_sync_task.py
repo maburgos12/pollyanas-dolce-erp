@@ -37,7 +37,17 @@ class CatalogRecipeSyncTaskTests(TestCase):
             parameters={"action": "SYNC_ALL_RECIPES", "branch_hint": "MATRIZ"},
             triggered_by=self.user,
         )
+        from recetas.models import Receta, LineaReceta
+        from maestros.models import Insumo, UnidadMedida, CostoInsumo
+        from pos_bridge.models import PointRecipeExtractionRun, PointRecipeNode
+        unit = UnidadMedida.objects.get_or_create(codigo="pza", defaults={"nombre":"Pieza"})[0]
+        recipe = Receta.objects.create(nombre="Costed recipe", hash_contenido="costed-test")
+        insumo = Insumo.objects.create(nombre="Costed input", unidad_base=unit)
+        CostoInsumo.objects.create(insumo=insumo, fecha="2026-09-05", costo_unitario=1)
+        LineaReceta.objects.create(receta=recipe, insumo=insumo, cantidad=1, unidad=unit)
         def sync_with_progress(**kwargs):
+            run = PointRecipeExtractionRun.objects.create(sync_job=job)
+            PointRecipeNode.objects.create(run=run, identity_key="test", point_name="Costed recipe", erp_recipe=recipe)
             job.refresh_from_db()
             self.assertEqual(job.parameters["progress"]["stage"], "IMPORTING")
             self.assertIsNotNone(job.started_at)

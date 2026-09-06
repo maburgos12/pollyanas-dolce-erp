@@ -381,6 +381,8 @@ def _format_point_recipe_discovery_blocked_message(discovery: dict[str, Any]) ->
 
 
 def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
+    from pos_bridge.services.catalog_recipe_execution import recover_abandoned_catalog_jobs
+    recover_abandoned_catalog_jobs()
     job_qs = PointSyncJob.objects.filter(
         Q(parameters__mode__isnull=True) | ~Q(parameters__mode="recipe_gap_audit"),
         job_type=PointSyncJob.JOB_TYPE_RECIPES,
@@ -424,6 +426,7 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
             "Creando o actualizando productos, recetas, preparaciones e insumos internos.",
             "info",
         ),
+        "PURCHASES": ("Verificando compras y costos", "Consultando los costos faltantes en Point.", "info"),
         "COSTING": (
             "Recalculando costos",
             "Las recetas ya se incorporaron; se está actualizando el corte semanal.",
@@ -5519,21 +5522,51 @@ def _point_sync_response(
     return redirect(next_url)
 
 
-def _queue_catalog_recipe_sync(request: HttpRequest, *, action_label: str) -> PointSyncJob:
+def _queue_catalog_recipe_sync(
+    request: HttpRequest, *, action_label: str
+) -> PointSyncJob:
+    from pos_bridge.services.catalog_recipe_execution import (
+        recover_abandoned_catalog_jobs,
+        ACTIONS,
+    )
+
+    recover_abandoned_catalog_jobs()
     with transaction.atomic():
         # Serializa comprobación y creación entre usuarios, incluso sin filas.
         # Este candado es independiente de la sesión de Point.
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", [7_532_026_090_500_001])
-        job = PointSyncJob.objects.filter(
-            job_type=PointSyncJob.JOB_TYPE_RECIPES,
-            status__in=[PointSyncJob.STATUS_PENDING, PointSyncJob.STATUS_RUNNING],
-            parameters__action__in=["SYNC_ALL_RECIPES", "SYNC_ONLY_NEW_PRODUCTS"],
-        ).order_by("created_at", "id").first()
+        job = (
+            PointSyncJob.objects.filter(
+                job_type=PointSyncJob.JOB_TYPE_RECIPES,
+                status__in=[PointSyncJob.STATUS_PENDING, PointSyncJob.STATUS_RUNNING],
+                parameters__action__in=["SYNC_ALL_RECIPES", "SYNC_ONLY_NEW_PRODUCTS"],
+            )
+            .order_by("created_at", "id")
+            .first()
+        )
         if job is not None:
             request.session["recetas_last_point_sync_job_id"] = job.id
             job.catalog_sync_reused = True
             return job
+        previous = (
+            PointSyncJob.objects.filter(
+                job_type=PointSyncJob.JOB_TYPE_RECIPES,
+                parameters__action__in=ACTIONS,
+            )
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        resume_codes = []
+        if previous and previous.status in {"FAILED", "PARTIAL"}:
+            resume_codes = list(previous.parameters.get("resume_codes") or [])
+            resume_codes += list(
+                previous.recipe_runs.values_list("nodes__point_code", flat=True).filter(
+                    nodes__depth=0,
+                    nodes__source_type="PRODUCT",
+                )
+            )
+            resume_codes = sorted({code for code in resume_codes if code})
         job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,
             status=PointSyncJob.STATUS_PENDING,
@@ -5541,11 +5574,14 @@ def _queue_catalog_recipe_sync(request: HttpRequest, *, action_label: str) -> Po
                 "action": action_label,
                 "branch_hint": "MATRIZ",
                 "include_without_recipe": False,
+                "resume_codes": resume_codes,
             },
             triggered_by=request.user,
         )
     try:
-        task_catalog_recipe_sync.delay(job_id=job.id)
+        task_catalog_recipe_sync.apply_async(
+            kwargs={"job_id": job.id}, retry=False, ignore_result=True
+        )
     except Exception as exc:
         job.status = PointSyncJob.STATUS_FAILED
         job.finished_at = timezone.now()
@@ -5576,8 +5612,8 @@ def recetas_sync_all(request: HttpRequest) -> HttpResponse:
             toast_type="info",
             message=(
                 f"Ya existe una sincronización activa (trabajo #{job.id}); consulta su avance."
-                if getattr(job, "catalog_sync_reused", False) else
-                "La actualización completa quedó en cola. Puedes seguir usando el ERP; "
+                if getattr(job, "catalog_sync_reused", False)
+                else "La actualización completa quedó en cola. Puedes seguir usando el ERP; "
                 "el estado aparecerá en este catálogo cuando termine."
             ),
             status=202,

@@ -64,7 +64,11 @@ class PointHttpSessionClient:
         attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
         last_error: Exception | None = None
 
+        from pos_bridge.services.catalog_recipe_execution import remaining_seconds
         for attempt in range(1, attempts + 1):
+            remaining = remaining_seconds()
+            if remaining is not None:
+                timeout = min(float(timeout), 30, remaining)
             try:
                 response = self.session.request(method, self._url(path), timeout=timeout, **kwargs)
                 if response.status_code >= 500 and attempt < attempts:

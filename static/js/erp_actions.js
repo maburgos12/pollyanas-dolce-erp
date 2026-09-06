@@ -108,6 +108,9 @@
     form.dataset.confirmed = "false";
     var originalLabel = submitter ? submitter.textContent : "";
     var navigating = false;
+    var timeoutMs = Number(form.dataset.timeoutMs || 0);
+    var controller = timeoutMs > 0 ? new AbortController() : null;
+    var timeoutId = controller ? window.setTimeout(function () { controller.abort(); }, timeoutMs) : null;
     form.dataset.actionPending = "true";
     if (submitter) {
       submitter.disabled = true;
@@ -121,7 +124,8 @@
         method: (form.method || "POST").toUpperCase(),
         body: formData,
         headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
-        credentials: "same-origin"
+        credentials: "same-origin",
+        signal: controller ? controller.signal : undefined
       });
       var contentType = response.headers && response.headers.get("content-type") || "";
       if (contentType.indexOf("application/json") === -1) {
@@ -170,6 +174,9 @@
       }
       showToast(payload.toast || { type: "success", message: "Acción completada." });
     } catch (error) {
+      if (error && error.name === "AbortError") {
+        error = { toast: { type: "warning", message: "No se recibió respuesta a tiempo. Recarga para consultar si el trabajo inició; puedes reintentar sin duplicarlo.", persistent: true } };
+      }
       var toast = error && error.toast ? error.toast : {
         type: "error",
         message: "No se pudo completar la acción. Revisa tu conexión e inténtalo de nuevo.",
@@ -177,6 +184,7 @@
       };
       showToast(toast);
     } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (!navigating) {
         form.dataset.actionPending = "false";
         if (submitter && document.contains(submitter)) {

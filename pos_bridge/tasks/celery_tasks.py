@@ -11,7 +11,9 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from core.audit import log_event
-from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob, PointRecipeNode
+from pos_bridge.services.catalog_recipe_execution import guarded_catalog_execution
+from pos_bridge.services.catalog_recipe_costs import complete_recipe_costs
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.canonical_insumo_inventory_capture_service import CanonicalInsumoInventoryCaptureService
 from pos_bridge.services.open_transfer_sync_service import OpenTransferSyncService
@@ -354,9 +356,10 @@ def task_product_recipe_sync(
     max_retries=2,
     default_retry_delay=600,
     acks_late=True,
-    soft_time_limit=14100,
-    time_limit=14400,
+    soft_time_limit=900,
+    time_limit=960,
 )
+@guarded_catalog_execution
 def task_catalog_recipe_sync(self, *, job_id: int):
     job = PointSyncJob.objects.select_related("triggered_by").get(id=job_id)
     if job.status in {PointSyncJob.STATUS_SUCCESS, PointSyncJob.STATUS_PARTIAL}:
@@ -395,7 +398,13 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         product_codes = None
         if action == "SYNC_ONLY_NEW_PRODUCTS":
             discovery = service.discover_new_product_codes(branch_hint=branch_hint)
-            product_codes = list(discovery.get("new_codes") or [])
+            product_codes = sorted(
+                set(discovery.get("new_codes") or [])
+                | set(parameters.get("resume_codes") or [])
+            )
+            parameters["resume_codes"] = product_codes
+            job.parameters = parameters
+            job.save(update_fields=["parameters", "updated_at"])
             if not product_codes:
                 incomplete = bool(discovery.get("blocked_candidates_count"))
                 summary = {
@@ -411,11 +420,16 @@ def task_catalog_recipe_sync(self, *, job_id: int):
                     "stage": "PARTIAL" if incomplete else "COMPLETED",
                     "detail": (
                         "La revisión terminó con productos pendientes: Point no confirmó su receta/BOM."
-                        if incomplete else "La revisión terminó; Point no reportó productos nuevos importables."
+                        if incomplete
+                        else "La revisión terminó; Point no reportó productos nuevos importables."
                     ),
                 }
                 job.parameters = parameters
-                job.status = PointSyncJob.STATUS_PARTIAL if incomplete else PointSyncJob.STATUS_SUCCESS
+                job.status = (
+                    PointSyncJob.STATUS_PARTIAL
+                    if incomplete
+                    else PointSyncJob.STATUS_SUCCESS
+                )
                 job.finished_at = timezone.now()
                 job.result_summary = summary
                 job.save(
@@ -451,33 +465,71 @@ def task_catalog_recipe_sync(self, *, job_id: int):
             include_without_recipe=include_without_recipe,
             sync_job=job,
         )
+        summary = dict(result.summary or {})
+        recipe_ids = list(
+            PointRecipeNode.objects.filter(
+                run__sync_job=job,
+                erp_recipe__isnull=False,
+            )
+            .values_list("erp_recipe_id", flat=True)
+            .distinct()
+        )
+        parameters["progress"] = {
+            "stage": "PURCHASES",
+            "detail": "Verificando costos de los ingredientes y sus preparaciones en Point.",
+        }
+        job.parameters = parameters
+        job.result_summary = summary
+        job.artifacts = {"raw_export_path": result.raw_export_path}
+        job.save(
+            update_fields=["parameters", "result_summary", "artifacts", "updated_at"]
+        )
+        validation = complete_recipe_costs(recipe_ids=recipe_ids, job=job)
+        summary["cost_validation"] = validation
+        scope_missing = bool(summary.get("products_selected")) and not recipe_ids
+        parameters = dict(job.parameters)
         parameters["progress"] = {
             "stage": "COSTING",
-            "detail": "Las recetas ya se incorporaron; recalculando el corte semanal de costos.",
-            "products_processed": int((result.summary or {}).get("products_selected") or 0),
+            "detail": "Actualizando el costo de las recetas verificadas.",
         }
         job.parameters = parameters
         job.save(update_fields=["parameters", "updated_at"])
-        snapshot = run_weekly_cost_snapshot(triggered_by=job.triggered_by)
-        summary = dict(result.summary or {})
+        # [] means all recipes in the legacy snapshot API. Never send an empty scope.
+        snapshot = (
+            run_weekly_cost_snapshot(
+                receta_ids=validation["recipe_ids"],
+                include_addons=False,
+                triggered_by=job.triggered_by,
+            )
+            if validation["recipe_ids"]
+            and not validation["missing_count"]
+            and not validation["search_error"]
+            else {"total_items": 0}
+        )
         if discovery is not None:
             summary["discovery"] = discovery
         summary["weekly_cost_snapshot"] = snapshot
         incomplete = bool(
-            summary.get("recipes_with_unresolved_inputs")
+            scope_missing
+            or validation["missing_count"]
+            or validation["search_error"]
+            or summary.get("recipes_with_unresolved_inputs")
             or summary.get("unresolved_inputs_count")
             or (discovery or {}).get("blocked_candidates_count")
         )
         parameters["progress"] = {
             "stage": "PARTIAL" if incomplete else "COMPLETED",
             "detail": (
-                "La actualización terminó con pendientes; revisa las recetas señaladas."
-                if incomplete else "Catálogo, recetas/BOM y corte semanal de costos actualizados."
+                "La actualización tiene pendientes de composición o costo. Pulsa de nuevo para retomar; revisa el detalle."
+                if incomplete
+                else "Composiciones y costos verificados; corte de las recetas afectadas actualizado."
             ),
             "products_processed": int(summary.get("products_selected") or 0),
         }
         job.parameters = parameters
-        job.status = PointSyncJob.STATUS_PARTIAL if incomplete else PointSyncJob.STATUS_SUCCESS
+        job.status = (
+            PointSyncJob.STATUS_PARTIAL if incomplete else PointSyncJob.STATUS_SUCCESS
+        )
         job.finished_at = timezone.now()
         job.result_summary = summary
         job.artifacts = {"raw_export_path": result.raw_export_path}
@@ -513,7 +565,15 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         job.status = PointSyncJob.STATUS_FAILED
         job.finished_at = timezone.now()
         job.error_message = str(exc)
-        job.save(update_fields=["parameters", "status", "finished_at", "error_message", "updated_at"])
+        job.save(
+            update_fields=[
+                "parameters",
+                "status",
+                "finished_at",
+                "error_message",
+                "updated_at",
+            ]
+        )
         log_event(
             job.triggered_by,
             "SYNC_POINT_RECIPES_FAILED",
