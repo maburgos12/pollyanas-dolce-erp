@@ -122,6 +122,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: cierre producto mensual",
                 "pos_bridge: inventario completo diario",
                 "pos_bridge: costos reventa desde compras Point",
+                "pos_bridge: compras Point al kardex",
                 "pos_bridge: inventario cierre diario",
                 "pos_bridge: mermas diario",
                 "pos_bridge: produccion diario",
@@ -156,7 +157,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 41)
+        self.assertEqual(PeriodicTask.objects.count(), 42)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")

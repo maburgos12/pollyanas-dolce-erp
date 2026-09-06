@@ -221,6 +221,28 @@ class Command(BaseCommand):
             },
         )
 
+        # 3:30: después de transferencias (3:15) y antes de conversiones (4:00). Todas
+        # las tareas Point comparten una sola cuenta y se serializan con
+        # point_account_session_lock, así que el hueco evita esperas largas.
+        purchase_kardex_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="30",
+            hour="3",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: compras Point al kardex",
+            defaults={
+                "task": "pos_bridge.purchase_kardex_sync",
+                "crontab": purchase_kardex_cron,
+                "interval": None,
+                "kwargs": json.dumps({"dias": 7}),
+                "enabled": True,
+            },
+        )
+
         inventory_close_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
             hour="23",
