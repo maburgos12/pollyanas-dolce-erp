@@ -11,7 +11,7 @@ function element(tag) {
   };
 }
 
-async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true) {
+async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true, timeoutMs = 0) {
   const events = [];
   const region = element("region");
   region.appendChild = function (child) { this.children.push(child); events.push("toast"); };
@@ -22,8 +22,9 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   otherButton.textContent = "Rechazar";
   const field = { value: "dato sin perder" };
   let listener;
+  let timeoutCallback;
   const form = {
-    dataset: {}, method: "post", reportValidity: () => true,
+    dataset: {timeoutMs: String(timeoutMs)}, method: "post", reportValidity: () => true,
     getAttribute: () => "/accion/", querySelector: () => submitter,
     addEventListener: (name, fn) => { if (name === "submit") listener = fn; }, field
   };
@@ -43,10 +44,10 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   const context = {
     document,
     FormData: function () { this.set = function () {}; },
-    URL,
-    fetch: async () => {
+    URL, AbortController,
+    fetch: async (url, options) => {
       fetchCount += 1;
-      return fetchImpl ? fetchImpl() : {
+      return fetchImpl ? fetchImpl(options) : {
         ok: true, redirected: false, url: "https://erp.local/accion/",
         headers: { get: () => "application/json; charset=utf-8" }, json: async () => payload
       };
@@ -56,13 +57,13 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
         href: "https://erp.local/lista/", origin: "https://erp.local", hash: "",
         assign: () => events.push("navigate"), reload: () => events.push("reload")
       },
-      setTimeout(fn) { fn(); }, sessionStorage, ERPActionUI: null
+      setTimeout(fn, ms) { if (ms === 20000) timeoutCallback = fn; else fn(); return 1; }, clearTimeout() {}, sessionStorage, ERPActionUI: null
     },
     console
   };
   vm.runInNewContext(fs.readFileSync("static/js/erp_actions.js", "utf8"), context);
   const event = { currentTarget: form, submitter, preventDefault() {} };
-  return { events, form, submitter, otherButton, field, listener, event, storage, getFetchCount: () => fetchCount };
+  return { events, form, submitter, otherButton, field, listener, event, storage, getFetchCount: () => fetchCount, fireTimeout: () => timeoutCallback() };
 }
 
 (async () => {
@@ -120,6 +121,17 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   assert.strictEqual(failed.submitter.disabled, false);
   assert.strictEqual(failed.submitter.textContent, "Aprobar y aplicar");
   assert.strictEqual(failed.field.value, "dato sin perder");
+
+  const timedOut = await scenario(null, ({signal}) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(Object.assign(new Error("timeout"), {name:"AbortError"})));
+  }), null, true, 20000);
+  const waiting = timedOut.listener(timedOut.event);
+  assert.strictEqual(timedOut.submitter.disabled, true);
+  timedOut.fireTimeout();
+  await waiting;
+  assert.strictEqual(timedOut.submitter.disabled, false);
+  assert.strictEqual(timedOut.field.value, "dato sin perder");
+  assert.deepStrictEqual(timedOut.events, ["toast"]);
 
   let release;
   const pending = await scenario(null, () => new Promise((resolve) => { release = resolve; }));

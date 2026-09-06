@@ -491,7 +491,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertNotContains(response, "Incorporar productos nuevos")
         self.assertNotContains(response, "Actualizar todas las recetas")
 
-    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     def test_recetas_sync_new_queues_progressive_background_job(self, delay):
         response = self.client.post(
             reverse("recetas:recetas_sync_new"),
@@ -509,9 +509,9 @@ class RecetasListCatalogFiltersTests(TestCase):
         job = PointSyncJob.objects.get(id=payload["job_id"])
         self.assertEqual(job.status, PointSyncJob.STATUS_PENDING)
         self.assertEqual(job.parameters["action"], "SYNC_ONLY_NEW_PRODUCTS")
-        delay.assert_called_once_with(job_id=job.id)
+        delay.assert_called_once_with(kwargs={"job_id":job.id}, retry=False, ignore_result=True)
 
-    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     def test_recetas_sync_repeated_submission_reuses_active_job(self, delay):
         endpoint = reverse("recetas:recetas_sync_new")
         first = self.client.post(endpoint, HTTP_ACCEPT="application/json")
@@ -529,9 +529,9 @@ class RecetasListCatalogFiltersTests(TestCase):
         )
         response = self.client.get(reverse("recetas:recetas_list"))
         self.assertContains(response, "Actualización con pendientes")
-        self.assertContains(response, "Recetas completas")
+        self.assertContains(response, "Composiciones completas")
 
-    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     def test_recetas_sync_all_queues_progressive_background_job(self, delay):
 
         response = self.client.post(
@@ -550,9 +550,9 @@ class RecetasListCatalogFiltersTests(TestCase):
         job = PointSyncJob.objects.get(id=payload["job_id"])
         self.assertEqual(job.status, PointSyncJob.STATUS_PENDING)
         self.assertEqual(job.parameters["action"], "SYNC_ALL_RECIPES")
-        delay.assert_called_once_with(job_id=job.id)
+        delay.assert_called_once_with(kwargs={"job_id":job.id}, retry=False, ignore_result=True)
 
-    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     def test_recetas_sync_all_rejects_external_next_redirect(self, delay):
         response = self.client.post(
             reverse("recetas:recetas_sync_all"),
@@ -566,7 +566,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         delay.assert_called_once()
 
     @patch(
-        "recetas.views.recetas.task_catalog_recipe_sync.delay",
+        "recetas.views.recetas.task_catalog_recipe_sync.apply_async",
         side_effect=RuntimeError("broker unavailable"),
     )
     def test_recetas_sync_all_reports_queue_failure_and_marks_job_failed(self, delay):
@@ -583,7 +583,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         job = PointSyncJob.objects.latest("id")
         self.assertEqual(job.status, PointSyncJob.STATUS_FAILED)
         self.assertIn("broker unavailable", job.error_message)
-        delay.assert_called_once_with(job_id=job.id)
+        delay.assert_called_once_with(kwargs={"job_id":job.id}, retry=False, ignore_result=True)
 
     def test_recetas_list_shows_latest_point_recipe_import_panel(self):
         job = PointSyncJob.objects.create(
@@ -626,7 +626,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn("point_recipe_sync_panel", response.context)
         self.assertContains(response, "Actualización terminada")
         self.assertContains(response, "Productos procesados")
-        self.assertContains(response, "Recetas completas")
+        self.assertContains(response, "Composiciones completas")
         self.assertContains(response, 'data-point-sync-active="false"', html=False)
         panel = response.context["point_recipe_sync_panel"]
         self.assertEqual(panel["job_id"], job.id)
@@ -683,7 +683,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertIn(self.receta_producto.nombre, nombres)
         self.assertNotIn(self.receta_preparacion.nombre, nombres)
 
-    @patch("recetas.views.recetas.task_catalog_recipe_sync.delay")
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     def test_recetas_sync_new_traditional_post_confirms_background_queue(self, delay):
         response = self.client.post(reverse("recetas:recetas_sync_new"), follow=True)
 
@@ -691,7 +691,7 @@ class RecetasListCatalogFiltersTests(TestCase):
         messages = [str(message) for message in response.context["messages"]]
         self.assertTrue(any("búsqueda quedó en cola" in message.lower() for message in messages))
         job = PointSyncJob.objects.latest("id")
-        delay.assert_called_once_with(job_id=job.id)
+        delay.assert_called_once_with(kwargs={"job_id":job.id}, retry=False, ignore_result=True)
 
     def test_recetas_list_quick_view_subinsumos(self):
         response = self.client.get(reverse("recetas:recetas_list"), {"vista": "subinsumos", "_debug_chain_focus": "1"})
