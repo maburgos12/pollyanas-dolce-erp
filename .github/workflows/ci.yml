@@ -14,6 +14,56 @@ on:
       - "scripts/git_workspace_preflight.sh"
 
 jobs:
+  recipe-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: recipe_recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/recipe_recovery
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-recipe-recovery-isolated-key
+      APP_ENV: development
+      CATALOG_WORKER_PROOF: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Prepare isolated PostgreSQL
+        run: python manage.py migrate --noinput
+      - name: Prove recipe crash recovery and queue isolation
+        run: python scripts/verify_catalog_worker_recovery.py
+      - name: Preserve worker failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-worker-failure
+          path: /tmp/recipe-proof-*.log
+
   test:
     runs-on: ubuntu-latest
     services:

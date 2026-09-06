@@ -55,3 +55,5 @@ avance de la cola general. Nunca importar el módulo de prueba en producción.
 Las pruebas Django en `test_catalog_watchdog.py` y `test_catalog_recipe_recovery.py`
 cubren publicación perdida, agotamiento, exclusión entre ejecutores y el caso
 de un trabajo que termina justo antes de adquirir el candado de recuperación.
+El trabajo CI `recipe-recovery` ejecuta la prueba Linux en cada PR con PostgreSQL
+16 y Redis efímeros. Si falla, conserva los logs de los workers como evidencia.
