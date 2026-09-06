@@ -334,6 +334,9 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TASK_ROUTES = {
+    "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
+}
 CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
     "logistica-alertar-documentos-por-vencer": {

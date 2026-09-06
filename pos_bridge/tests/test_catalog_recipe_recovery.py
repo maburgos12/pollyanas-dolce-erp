@@ -78,9 +78,10 @@ class CatalogRecoveryTests(TestCase):
         req.user = self.user
         req.session = {}
         new = _queue_catalog_recipe_sync(req, action_label="SYNC_ONLY_NEW_PRODUCTS")
-        self.assertNotEqual(old.id, new.id)
+        self.assertEqual(old.id, new.id)
         old.refresh_from_db()
-        self.assertEqual(old.status, "FAILED")
+        self.assertEqual(old.status, "PENDING")
+        delay.assert_called_once()
 
     @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
     def test_cancelled_queued_delivery_cannot_restart(self, svc):
@@ -256,7 +257,8 @@ import threading
 
 
 class CatalogExecutorOwnershipTests(TransactionTestCase):
-    def test_live_executor_is_not_reclaimed(self):
+    @patch("pos_bridge.tasks.celery_tasks.task_catalog_recipe_sync.apply_async")
+    def test_live_executor_is_not_reclaimed(self, publish):
         from pos_bridge.services.catalog_recipe_execution import (
             execution_lock,
             recover_abandoned_catalog_jobs,
@@ -300,7 +302,8 @@ class CatalogExecutorOwnershipTests(TransactionTestCase):
             thread.join(10)
         recover_abandoned_catalog_jobs()
         job.refresh_from_db()
-        self.assertEqual(job.status, "FAILED")
+        self.assertEqual(job.status, "PENDING")
+        publish.assert_called_once()
 
     def test_recovery_does_not_overwrite_a_job_that_just_finished(self):
         from contextlib import contextmanager

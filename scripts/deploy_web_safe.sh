@@ -6,6 +6,10 @@ requires_process_restart() {
   grep -Eq '(^|/)[^/]+\.py$|(^|/)(requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$' <<<"$changed_files"
 }
 
+requires_compose_recreate() {
+  grep -Eq '(^|/)docker-compose[^/]*\.ya?ml$' <<<"${1:-}"
+}
+
 main() {
   local app_dir="${APP_DIR:-/opt/pastelerias-erp}"
   local compose_file="${COMPOSE_FILE:-$app_dir/docker-compose.yml}"
@@ -22,10 +26,13 @@ main() {
   "${compose[@]}" exec -T web python manage.py check
   "${compose[@]}" exec -T web python manage.py collectstatic --noinput
 
-  if requires_process_restart "$changed_files"; then
+  if requires_compose_recreate "$changed_files"; then
+    # restart does not apply changed commands or create new services.
+    "${compose[@]}" up -d --no-deps --build --force-recreate worker beat worker_recetas recetas_watchdog web
+  elif requires_process_restart "$changed_files"; then
     # Gunicorn runs with preload, so HUP forks workers from the master's stale
     # Python memory. Celery processes also retain imported task code.
-    "${compose[@]}" restart worker beat
+    "${compose[@]}" restart worker beat worker_recetas recetas_watchdog
     "${compose[@]}" restart web
   else
     "${compose[@]}" exec -T web sh -lc 'kill -HUP 1'

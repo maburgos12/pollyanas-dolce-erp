@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
@@ -557,13 +558,17 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         )
         return _serialize_job(job)
     except Exception as exc:
+        interrupted = isinstance(exc, (SoftTimeLimitExceeded, TimeoutError))
         parameters["progress"] = {
-            "stage": "FAILED",
-            "detail": "La actualización se detuvo; revisa el error antes de volver a intentarlo.",
+            "stage": "QUEUED" if interrupted else "FAILED",
+            "detail": (
+                "Se alcanzó el límite de espera; el supervisor intentará la recuperación automática."
+                if interrupted else "La actualización se detuvo; revisa el error antes de volver a intentarlo."
+            ),
         }
         job.parameters = parameters
-        job.status = PointSyncJob.STATUS_FAILED
-        job.finished_at = timezone.now()
+        job.status = PointSyncJob.STATUS_PENDING if interrupted else PointSyncJob.STATUS_FAILED
+        job.finished_at = None if interrupted else timezone.now()
         job.error_message = str(exc)
         job.save(
             update_fields=[
