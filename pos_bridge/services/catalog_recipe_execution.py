@@ -52,6 +52,11 @@ def recover_abandoned_catalog_jobs():
         with execution_lock(job.id) as acquired:
             if not acquired:
                 continue  # A live executor owns it; never start a competing writer.
+            # The executor may have finished between the candidate query and
+            # acquiring its lock. Re-read under ownership before changing state.
+            job.refresh_from_db()
+            if job.status not in {"PENDING", "RUNNING"} or job.updated_at >= cutoff:
+                continue
             job.status = "FAILED"
             job.finished_at = timezone.now()
             job.error_message = "El procesador no inició o se interrumpió. Pulsa nuevamente para retomar sin duplicar."

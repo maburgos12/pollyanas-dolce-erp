@@ -301,3 +301,33 @@ class CatalogExecutorOwnershipTests(TransactionTestCase):
         recover_abandoned_catalog_jobs()
         job.refresh_from_db()
         self.assertEqual(job.status, "FAILED")
+
+    def test_recovery_does_not_overwrite_a_job_that_just_finished(self):
+        from contextlib import contextmanager
+        from pos_bridge.services.catalog_recipe_execution import (
+            recover_abandoned_catalog_jobs,
+        )
+
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status="RUNNING",
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"},
+        )
+        PointSyncJob.objects.filter(id=job.id).update(
+            updated_at=timezone.now() - timedelta(minutes=10)
+        )
+
+        @contextmanager
+        def completed_before_lock(job_id):
+            PointSyncJob.objects.filter(id=job_id).update(
+                status="SUCCESS", updated_at=timezone.now()
+            )
+            yield True
+
+        with patch(
+            "pos_bridge.services.catalog_recipe_execution.execution_lock",
+            completed_before_lock,
+        ):
+            recover_abandoned_catalog_jobs()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "SUCCESS")
