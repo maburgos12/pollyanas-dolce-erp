@@ -623,6 +623,7 @@ class PointProductRecipeSyncService:
             "items": items,
         }
 
+    @transaction.atomic
     def _extract_product_node(
         self,
         *,
@@ -761,6 +762,7 @@ class PointProductRecipeSyncService:
         )
         return node
 
+    @transaction.atomic
     def _extract_insumo_node(
         self,
         *,
@@ -885,9 +887,6 @@ class PointProductRecipeSyncService:
         summary: dict,
         node_outcomes: dict[str, dict[str, object]],
     ) -> None:
-        receta.lineas.all().delete()
-        node.lines.all().delete()
-
         recipe_lines: list[LineaReceta] = []
         graph_lines: list[PointRecipeNodeLine] = []
         for position, row in enumerate(bom_rows, start=1):
@@ -950,9 +949,17 @@ class PointProductRecipeSyncService:
                 )
             )
 
+        # Preserve the previous composition until every replacement is ready.
+        # A worker termination rolls back the complete product/preparation.
+        with transaction.atomic():
+            receta.lineas.all().delete()
+            node.lines.all().delete()
+            if recipe_lines:
+                LineaReceta.objects.bulk_create(recipe_lines, batch_size=200)
+            if graph_lines:
+                PointRecipeNodeLine.objects.bulk_create(graph_lines, batch_size=200)
         if recipe_lines:
-            LineaReceta.objects.bulk_create(recipe_lines, batch_size=200)
-            bump_cache_scopes("dashboard")
+            transaction.on_commit(lambda: bump_cache_scopes("dashboard"))
             today = timezone.localdate()
             mark_analytics_dirty_for_range(
                 start_date=today,
@@ -960,8 +967,6 @@ class PointProductRecipeSyncService:
                 include_production=True,
                 reason="product_recipe_sync_service",
             )
-        if graph_lines:
-            PointRecipeNodeLine.objects.bulk_create(graph_lines, batch_size=200)
         summary["lineas_created"] += len(recipe_lines)
         summary["graph_lines"] += len(graph_lines)
 
