@@ -308,7 +308,7 @@
 {% block extra_js %}
 {{ block.super }}
 <script>
-  (() => {
+  document.addEventListener("DOMContentLoaded", () => {
     const savedScroll = Number(sessionStorage.getItem("recetasPointSyncScrollY"));
     if (Number.isFinite(savedScroll) && savedScroll > 0) {
       sessionStorage.removeItem("recetasPointSyncScrollY");
@@ -337,7 +337,7 @@
       window.location.reload();
     };
     window.setTimeout(refreshWhenIdle, 15000);
-  })();
+  });
 </script>
 <script>
   (() => {
