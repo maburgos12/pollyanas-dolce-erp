@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
-from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.utils.exceptions import ExtractionError
 
 # El kardex de insumos es el de ALMACEN_1: las compras de otras sucursales no entran.
@@ -72,88 +71,86 @@ class PointPurchaseExtractionService:
         result = PurchaseExtractionResult()
         purchases: list[dict] = []
 
-        # Point invalida la sesión anterior cuando la misma cuenta entra de nuevo y
-        # "domicilios Point automatico" corre cada 60 s: sin candado esta extracción
-        # pierde la sesión a media iteración.
-        with point_account_session_lock(wait=True):
-            with self._BrowserSessionManager(client) as session:
-                auth_service.login(session, branch_hint=None)
-                page = session.page
-                page.goto(f"{base}/InventoryPurchases/Index", wait_until="domcontentloaded")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=self.settings.timeout_ms)
-                except Exception:  # noqa: BLE001 - la carga diferida no es crítica aquí
-                    pass
+        # El candado de cuenta Point lo toma BrowserSessionManager: la extracción itera
+        # una compra por request y necesita la sesión viva durante todo el rango.
+        with self._BrowserSessionManager(client) as session:
+            auth_service.login(session, branch_hint=None)
+            page = session.page
+            page.goto(f"{base}/InventoryPurchases/Index", wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=self.settings.timeout_ms)
+            except Exception:  # noqa: BLE001 - la carga diferida no es crítica aquí
+                pass
 
-                compras_resp = page.request.get(
-                    f"{base}/InventoryPurchases/GetCompras"
-                    f"?fechaInicio={_epoch_ms(desde)}&fechaFin={_epoch_ms(hasta)}"
-                    "&fkproveedor=&fkSucursal=null"
+            compras_resp = page.request.get(
+                f"{base}/InventoryPurchases/GetCompras"
+                f"?fechaInicio={_epoch_ms(desde)}&fechaFin={_epoch_ms(hasta)}"
+                "&fkproveedor=&fkSucursal=null"
+            )
+            if compras_resp.status != 200:
+                raise ExtractionError(
+                    f"Point respondió {compras_resp.status} al listar compras.",
+                    context={"desde": desde.isoformat(), "hasta": hasta.isoformat()},
                 )
-                if compras_resp.status != 200:
-                    raise ExtractionError(
-                        f"Point respondió {compras_resp.status} al listar compras.",
-                        context={"desde": desde.isoformat(), "hasta": hasta.isoformat()},
+            compras = compras_resp.json()
+            if not isinstance(compras, list):
+                raise ExtractionError("Formato inesperado en el listado de compras Point.")
+
+            result.purchases_seen = len(compras)
+
+            for compra in compras:
+                branch = str(compra.get("Sucursal") or "").strip()
+                if solo_almacen and branch.lower() != ALMACEN_BRANCH:
+                    result.branches_skipped[branch or "(sin sucursal)"] = (
+                        result.branches_skipped.get(branch or "(sin sucursal)", 0) + 1
                     )
-                compras = compras_resp.json()
-                if not isinstance(compras, list):
-                    raise ExtractionError("Formato inesperado en el listado de compras Point.")
+                    continue
 
-                result.purchases_seen = len(compras)
+                fk = compra.get("FK_Movimiento")
+                if not fk:
+                    continue
 
-                for compra in compras:
-                    branch = str(compra.get("Sucursal") or "").strip()
-                    if solo_almacen and branch.lower() != ALMACEN_BRANCH:
-                        result.branches_skipped[branch or "(sin sucursal)"] = (
-                            result.branches_skipped.get(branch or "(sin sucursal)", 0) + 1
-                        )
-                        continue
+                detail_resp = page.request.get(
+                    f"{base}/InventoryPurchases/GetComprabyId?fkCompra={fk}"
+                )
+                if detail_resp.status != 200:
+                    continue
+                try:
+                    detalles = detail_resp.json()
+                except Exception:  # noqa: BLE001 - una compra ilegible no aborta el rango
+                    continue
+                if not isinstance(detalles, list) or not detalles:
+                    continue
 
-                    fk = compra.get("FK_Movimiento")
-                    if not fk:
+                lines = []
+                for detalle in detalles:
+                    articulo = str(detalle.get("Articulo") or "").strip()
+                    if not articulo:
                         continue
-
-                    detail_resp = page.request.get(
-                        f"{base}/InventoryPurchases/GetComprabyId?fkCompra={fk}"
-                    )
-                    if detail_resp.status != 200:
-                        continue
-                    try:
-                        detalles = detail_resp.json()
-                    except Exception:  # noqa: BLE001 - una compra ilegible no aborta el rango
-                        continue
-                    if not isinstance(detalles, list) or not detalles:
-                        continue
-
-                    lines = []
-                    for detalle in detalles:
-                        articulo = str(detalle.get("Articulo") or "").strip()
-                        if not articulo:
-                            continue
-                        lines.append(
-                            {
-                                "articulo": articulo,
-                                "cantidad": detalle.get("Cantidad"),
-                                "unidad": detalle.get("Unidad"),
-                                "costo_unitario": detalle.get("Costo_unitario"),
-                                "costo_total": detalle.get("Costo_total"),
-                                "raw": detalle,
-                            }
-                        )
-                    if not lines:
-                        continue
-
-                    purchases.append(
+                    lines.append(
                         {
-                            "purchase_id": str(fk),
-                            "folio": str(compra.get("Folio") or "").strip(),
-                            "branch": branch,
-                            "supplier": str(compra.get("Proveedor") or "").strip(),
-                            "purchase_date": _parse_purchase_date(compra.get("Fecha_compra")),
-                            "lines": lines,
+                            "articulo": articulo,
+                            "cantidad": detalle.get("Cantidad"),
+                            "unidad": detalle.get("Unidad"),
+                            "costo_unitario": detalle.get("Costo_unitario"),
+                            "costo_total": detalle.get("Costo_total"),
+                            "raw": detalle,
                         }
                     )
-                    result.purchases_kept += 1
-                    result.lines_kept += len(lines)
+                if not lines:
+                    continue
+
+                purchases.append(
+                    {
+                        "purchase_id": str(fk),
+                        "folio": str(compra.get("Folio") or "").strip(),
+                        "branch": branch,
+                        "supplier": str(compra.get("Proveedor") or "").strip(),
+                        "purchase_date": _parse_purchase_date(compra.get("Fecha_compra")),
+                        "lines": lines,
+                    }
+                )
+                result.purchases_kept += 1
+                result.lines_kept += len(lines)
 
         return purchases, result
