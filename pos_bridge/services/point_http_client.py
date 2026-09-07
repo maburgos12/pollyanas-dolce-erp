@@ -266,15 +266,27 @@ class PointHttpSessionClient:
         )
 
     def _catalog_rows(self, path: str, *, params: dict | None = None) -> list[dict]:
-        """Lectura con recuperación acotada de sesiones que devuelven HTML con HTTP 200."""
+        return self._catalog_read(path, params=params, expected_type=list)
+
+    def _catalog_read(self, path: str, *, params: dict | None = None, expected_type: type) -> Any:
+        """Reingresa y repite únicamente lecturas; nunca reenvía escrituras a Point."""
         attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
         for attempt in range(1, attempts + 1):
             try:
                 response = self._request("GET", path, params=params or {})
-                rows = self._parse_json(response, label=path)
-                if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                payload = self._parse_json(response, label=path)
+                invalid = not isinstance(payload, expected_type)
+                if isinstance(payload, list):
+                    invalid = invalid or any(not isinstance(row, dict) for row in payload)
+                elif isinstance(payload, dict):
+                    # Una respuesta JSON de autenticación tampoco es un detalle.
+                    invalid = invalid or bool(
+                        payload.get("error") or payload.get("Error")
+                        or payload.get("redirectToUrl") or payload.get("HasError")
+                    )
+                if invalid:
                     raise ExtractionError("Point devolvió un catálogo con formato inesperado.", context={"path": path})
-                return rows
+                return payload
             except (ExtractionError, requests.RequestException):
                 if attempt == attempts:
                     raise
@@ -287,8 +299,9 @@ class PointHttpSessionClient:
                 self.login(branch_hint=getattr(self, "_last_branch_hint", None))
 
     def get_product_detail(self, product_id: int | str) -> dict:
-        response = self._request("GET", "/Catalogos/get_producto_byID", params={"id_producto": product_id})
-        return self._parse_json(response, label="detalle de producto Point")
+        return self._catalog_read(
+            "/Catalogos/get_producto_byID", params={"id_producto": product_id}, expected_type=dict,
+        )
 
     def get_stock_products(self, *, text: str, timeout: int | float | None = None) -> list[dict]:
         response = self._request(
@@ -387,28 +400,18 @@ class PointHttpSessionClient:
         return self._catalog_rows("/Catalogos/getBomsByProducts", params={"pkProducto": product_id})
 
     def get_articulos(self, *, search: str = "", category: int | str | None = None) -> list[dict]:
-        response = self._request(
-            "GET",
+        return self._catalog_rows(
             "/Catalogos/get_articulos",
             params={
                 "art": search,
                 "cat": category,
             },
         )
-        try:
-            data = json.loads(response.text)
-        except ValueError as exc:
-            raise ExtractionError(
-                "Point devolvió un catálogo de insumos inválido.",
-                context={"body_preview": response.text[:500], "search": search},
-            ) from exc
-        if not isinstance(data, list):
-            raise ExtractionError("Point devolvió un catálogo de insumos con formato inesperado.", context={"search": search})
-        return data
 
     def get_articulo_detail(self, articulo_id: int | str) -> dict:
-        response = self._request("GET", "/Catalogos/ArticuloGetbyid", params={"pkArticulo": articulo_id})
-        return self._parse_json(response, label="detalle de insumo Point")
+        return self._catalog_read(
+            "/Catalogos/ArticuloGetbyid", params={"pkArticulo": articulo_id}, expected_type=dict,
+        )
 
     # ------------------------------------------------------------------
     # Catálogo completo — Point corta CADA respuesta de catálogo a 150

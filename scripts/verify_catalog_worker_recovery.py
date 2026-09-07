@@ -89,6 +89,14 @@ def stop(worker):
         worker.wait(timeout=10)
 
 
+def executor_released(job_id):
+    # SIGKILL of the process group can return before PostgreSQL observes the
+    # child's disconnected socket. A single watchdog scan must wait for that
+    # release; production keeps scanning and safely skips a still-owned job.
+    with execution_lock(job_id) as acquired:
+        return acquired
+
+
 try:
     assert connections["default"].vendor == "postgresql"
     unit, _ = UnidadMedida.objects.get_or_create(
@@ -143,6 +151,7 @@ try:
         else:
             # Let the real soft/hard limit or child crash complete.
             time.sleep(6)
+        wait_for(lambda: executor_released(job.id))
         assert LineaReceta.objects.filter(pk=previous.pk).exists(), (
             f"{mode}: lost previous recipe"
         )
