@@ -260,6 +260,7 @@ class MermasOnlyMiddleware:
     )
     ALLOWED_PREFIXES = (
         "/app/higiene/",
+        "/app/conteos/",
         "/app/api/fallas/",
         "/app/api/mermas-insumos/",
         "/merma/",

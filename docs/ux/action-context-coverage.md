@@ -5,6 +5,7 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Módulo / pantalla | Acciones | Async | Fallback con ancla | Pruebas | Estado |
 | --- | --- | --- | --- | --- | --- |
 | Global / `base.html` | Toast, bloqueo del submitter, doble envío, modal opt-in | Sí | N/A | `core.tests_actions` | Cubierto etapa 1 |
+| Inventario / Conteos de sucursales / App y ERP | Preparar, iniciar, guardar, enviar, reconteo, aceptar, referencia, evidencia y cancelar | Sí, servicio común, UUID/versión y reemplazo contextual; borradores por documento | Sí, `#conteo-detail` y `#evidencias`; conserva captura en error | `inventario.tests_conteos_*` + navegador local móvil/escritorio, offline, ventana duplicada y almacenamiento bloqueado | Validado localmente; piloto físico con personal pendiente |
 | Logística / detalle de ruta / Revisión administrativa | Autorizar, Rechazar, Marcar corregida | Sí, reemplazo de una fila | Sí, `#revision-entrega-<id>` | `LogisticaRevisionEntregaTests` + Chromium local | Cubierto etapa 1 |
 | Logística / PWA / Carga por sucursal | Guardar todas las cantidades y justificar diferencias | Sí, guardado atómico con botón bloqueado | Borrador conservado y reintento en la misma sucursal | `tests_carga_sucursal` + `RutaJourneyInvariantTests` | Cubierto |
 | Logística / PWA / Tutorial de carga | Confirmar una sola vez la explicación del flujo | Sí, botón bloqueado e idempotencia por repartidor | Si falla, conserva el popup y permite reintentar | `tests_tutorial_carga` | Cubierto |

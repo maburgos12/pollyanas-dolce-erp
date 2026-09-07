@@ -1,10 +1,11 @@
-from django.urls import path
+from django.urls import include, path
 
 from . import views
 
 app_name = "inventario"
 
 urlpatterns = [
+    path("conteos-sucursales/", include("inventario.urls_conteos", namespace="conteos_erp")),
     path("", views.dashboard, name="home"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("existencias/", views.existencias, name="existencias"),

@@ -219,6 +219,7 @@ NAV_GROUPS = [
                 "/inventario/dashboard/",
                 ["/inventario/"],
             ),
+            ("inventario", "conteos_sucursales", "Conteos de sucursales", "/inventario/conteos-sucursales/", ["/inventario/conteos-sucursales/"]),
             (
                 "maestros",
                 "point",

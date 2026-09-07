@@ -142,6 +142,7 @@ ACCESS_SUBMODULES = {
         ("ajustes", "Ajustes"),
         ("alertas", "Alertas"),
         ("conteo_fisico", "Conteo físico"),
+        ("conteos_sucursales", "Conteos de sucursales"),
     ],
     "recetas": [
         ("catalogo", "Catálogo de recetas"),

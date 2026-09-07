@@ -1,10 +1,11 @@
-from django.urls import path
+from django.urls import include, path
 
 from . import views
 
 app_name = "operacion"
 
 urlpatterns = [
+    path("conteos/", include("inventario.urls_conteos", namespace="conteos_app")),
     path("", views.app_home, name="app_home"),
     path("sucursal/", views.sucursal_tools, name="sucursal_tools"),
     path("sw.js", views.app_sw, name="app_sw"),

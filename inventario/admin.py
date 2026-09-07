@@ -1,4 +1,5 @@
 from django.contrib import admin
+from .models_conteos import AccesoConteoSucursal
 
 from .models import (
     AjusteInventario,
@@ -33,6 +34,15 @@ admin.site.register(MovimientoInventario)
 admin.site.register(AjusteInventario)
 admin.site.register(AlmacenSyncRun)
 admin.site.register(InventarioConfig)
+
+
+@admin.register(AccesoConteoSucursal)
+class AccesoConteoSucursalAdmin(admin.ModelAdmin):
+    """Explicit branch grants; Django admin records each change in its audit log."""
+    list_display = ('user', 'sucursal', 'activo', 'capturar', 'revisar')
+    list_filter = ('sucursal', 'activo', 'capturar', 'revisar')
+    search_fields = ('user__username', 'sucursal__nombre')
+    raw_id_fields = ('user',)
 
 
 class LineaConteoFisicoInline(admin.TabularInline):
