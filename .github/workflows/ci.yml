@@ -104,6 +104,9 @@ jobs:
       - name: Django checks
         run: python manage.py check
 
+      - name: Verify database and count evidence backup contract
+        run: python -m unittest discover -s scripts/tests -p test_backup_db.py
+
       - name: Verify migrations are committed
         run: python manage.py makemigrations --check --dry-run
 

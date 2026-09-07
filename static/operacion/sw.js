@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-app-operativa-pwa-v36-mermas-bitacoras";
+const CACHE_NAME = "pollyanas-app-operativa-pwa-v37-conteos-sucursales";
 const SHELL_ASSETS = [
   "/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
@@ -14,13 +14,14 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith("pollyanas-app-operativa-pwa-") && key !== CACHE_NAME).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/app/conteos/") || url.pathname.startsWith("/inventario/conteos-sucursales/")) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/app/api/")) return;
   if (event.request.mode === "navigate") {
     event.respondWith(fetch(event.request));

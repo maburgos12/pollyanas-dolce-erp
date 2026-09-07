@@ -341,6 +341,11 @@ def build_operacion_context(user) -> dict:
             scope_label = "Accesos permitidos"
         location = getattr(getattr(profile, "sucursal", None), "nombre", "") or role_label
 
+    from inventario.conteos_access import conteos_visibles, puede_coordinar
+    if not is_repartidor_only(user) and (puede_coordinar(user) or conteos_visibles(user).exists()):
+        tiles.append(OperacionTile(key="conteos_sucursales", title="Conteos físicos",
+            detail="Captura, reconteos e historial de tu sucursal.", href="/app/conteos/",
+            icon="checklist", area="Sucursal"))
     tiles_dict = [asdict(tile) for tile in tiles]
     return {
         "app_title": "App Operativa",
