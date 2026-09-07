@@ -146,7 +146,7 @@ def _dashboard_cached_value(
     parts: tuple[object, ...] = (),
 ):
     return get_or_set_versioned_cache(
-        key_parts=("erp", "dashboard", section, *parts),
+        key_parts=("erp", "dashboard", "closed-sales-v1", section, *parts),
         scopes=("dashboard",),
         builder=builder,
         runtime_cache=runtime_cache,
@@ -1607,13 +1607,14 @@ def _build_dashboard_daily_sales_snapshot() -> dict[str, object]:
     latest_date = snapshot.get("date")
     if not latest_date:
         return {
-            "status": "Sin cortes",
+            "status": "Cierre pendiente",
+            "date": None,
             "tone": "warning",
             "detail": "No hay ventas cargadas para lectura operativa.",
             "date_label": "Sin fecha",
             "source_label": "Sin fuente",
             "total_units": Decimal("0"),
-            "total_amount": Decimal("0"),
+            "total_amount": None,
             "total_tickets": 0,
             "branch_count": 0,
             "recipe_count": 0,
@@ -1632,8 +1633,6 @@ def _build_dashboard_daily_sales_snapshot() -> dict[str, object]:
     snapshot["mapped_units"] = snapshot.get("total_units") or Decimal("0")
     snapshot["unmapped_amount"] = Decimal("0")
     snapshot["unmapped_units"] = Decimal("0")
-    if snapshot.get("raw_total_amount") is not None:
-        snapshot["total_amount"] = snapshot.get("raw_total_amount") or Decimal("0")
     snapshot["top_branches"] = [
         {
             **row,

@@ -816,12 +816,11 @@ class DashboardHomologacionContextTests(TestCase):
             source_endpoint="/Report/VentasCategorias",
         )
 
-    def _visible_cutoff_dos_dias_atras(self):
-        # Ancla el corte visible a hoy-2 para que el fallback canónico dispare
-        # sin depender de la hora local (corte real: 03:35 America/Mazatlan).
+    def _closed_cutoff_yesterday(self):
+        # These tests exercise source selection after a complete day is resolved.
         return patch(
-            "reportes.dashboard_sales_dataset._expected_operational_visible_cutoff",
-            return_value=timezone.localdate() - timedelta(days=2),
+            "reportes.dashboard_sales_dataset.latest_closed_sales_date",
+            return_value=timezone.localdate() - timedelta(days=1),
         )
 
     def test_dashboard_executive_template_for_reportes_users(self):
@@ -1455,7 +1454,7 @@ class DashboardHomologacionContextTests(TestCase):
         self.assertContains(response, "Pulso operativo del día")
         self.assertContains(response, "Resumen ejecutivo del corte")
         self.assertContains(response, "Ticket promedio")
-        self.assertContains(response, "Venta último corte")
+        self.assertContains(response, "Venta último cierre")
         self.assertContains(response, "Ventas recientes")
         self.assertContains(response, "Ranking comercial del corte")
         self.assertContains(response, "Producción CEDIS y cobertura")
@@ -1512,13 +1511,13 @@ class DashboardHomologacionContextTests(TestCase):
             total_tickets=3,
         )
 
-        with self._visible_cutoff_dos_dias_atras():
+        with self._closed_cutoff_yesterday():
             snapshot = _build_dashboard_daily_sales_snapshot()
 
         self.assertEqual(snapshot["source_label"], "Point directo")
         self.assertEqual(snapshot["date_label"], latest_day.isoformat())
         self.assertEqual(snapshot["total_units"], Decimal("6"))
-        self.assertEqual(snapshot["total_amount"], Decimal("600"))
+        self.assertEqual(snapshot["total_amount"], Decimal("610"))
         self.assertEqual(snapshot["total_tickets"], 3)
         self.assertEqual(snapshot["branch_count"], 1)
         self.assertEqual(snapshot["recipe_count"], 1)
@@ -1554,7 +1553,7 @@ class DashboardHomologacionContextTests(TestCase):
             total_venta_neta=Decimal("800"),
         )
 
-        with self._visible_cutoff_dos_dias_atras():
+        with self._closed_cutoff_yesterday():
             snapshot = _build_dashboard_daily_sales_snapshot()
 
         self.assertEqual(snapshot["comparison_label"], "Arriba")

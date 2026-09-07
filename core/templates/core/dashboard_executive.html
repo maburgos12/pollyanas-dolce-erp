@@ -127,8 +127,8 @@
 
   <section class="home-exec-grid-top">
     <article class="home-exec-card home-exec-kpi is-hero">
-      <div class="home-exec-kpi-value">${{ daily_sales_snapshot.total_amount|default:0|floatformat:2|intcomma }}</div>
-      <div class="home-exec-kpi-label">Venta último corte</div>
+      <div class="home-exec-kpi-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
+      <div class="home-exec-kpi-label">Venta último cierre</div>
       <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
       {% if can_manage_orquestacion %}
       <div class="home-exec-kpi-actions">
@@ -136,7 +136,7 @@
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
           <input type="hidden" name="refresh_scope" value="cutoff">
-          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.visible_cut_date_iso %}{{ sales_refresh_status.visible_cut_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
+          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
           <input type="hidden" name="lookback_days" value="1">
           <button
             type="submit"
@@ -178,11 +178,12 @@
       <div class="home-exec-note">{{ forecast_panel.forecast_quantity|floatformat:0|intcomma }} piezas · {{ forecast_panel.target_week_label }}</div>
     </article>
     <article class="home-exec-card home-exec-kpi is-hero">
-      <div class="home-exec-kpi-value {% if yoy_panel.hero_row and yoy_panel.hero_row.amount_delta_pct is not None and yoy_panel.hero_row.amount_delta_pct < 0 %}is-warning{% else %}is-success{% endif %}">
-        {% if yoy_panel.hero_row and yoy_panel.hero_row.amount_delta_pct is not None %}{{ yoy_panel.hero_row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+      <div class="home-exec-kpi-value is-{{ yoy_panel.hero_row.comparison_tone|default:'warning' }}">
+        {{ yoy_panel.hero_row.comparison_label|default:"Comparativo pendiente" }}
       </div>
       <div class="home-exec-kpi-label">Mes vs año anterior</div>
       <div class="home-exec-note">{{ yoy_panel.hero_note|default:"Sin mes" }}</div>
+      {% if yoy_panel.coverage_note %}<div class="home-exec-note">{{ yoy_panel.coverage_note }}</div>{% endif %}
     </article>
   </section>
 
@@ -232,7 +233,7 @@
       {% with hero=yoy_panel.hero_row %}
       <div class="home-exec-insight-grid">
         <article class="home-exec-insight">
-          <strong>{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
+          <strong>{% if hero and hero.amount is not None %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong>
           <span>mes visible {{ hero.month_label|slice:":4"|default:"2026" }}</span>
         </article>
         <article class="home-exec-insight">
@@ -322,7 +323,7 @@
           <div>
             <strong>{{ row.month_label }}</strong>
             <div class="home-exec-subtle">
-              {{ row.month_label|slice:":4" }} ${{ row.amount|floatformat:2|intcomma }} · {{ row.month_label|slice:":4"|add:"-1" }} ${{ row.prev_amount|floatformat:2|intcomma }}
+              {{ row.month_label|slice:":4" }} {% if row.amount is not None %}${{ row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %} · {{ row.month_label|slice:":4"|add:"-1" }} {% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}
               {% if row.is_partial %}· corte parcial{% endif %}
             </div>
           </div>
@@ -612,7 +613,7 @@
     const seriesPrevYear = [];
     for (const row of yoyWindowRows) {
       const rowYear = Number(String(row.month_label || "").slice(0, 4));
-      const amount = Number(row.amount || 0);
+      const amount = row.amount == null ? null : Number(row.amount);
       const prevAmount = row.prev_amount === null || row.prev_amount === undefined ? null : Number(row.prev_amount || 0);
       if (rowYear === currentYear) {
         seriesCurrentYear.push(amount);

@@ -31,12 +31,12 @@
       <div class="bi-hero-highlights">
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Último corte</div>
-          <div class="bi-hero-highlight-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
+          <div class="bi-hero-highlight-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
           <div class="bi-hero-highlight-meta">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas</div>
         </article>
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">MTD visible</div>
-          <div class="bi-hero-highlight-value">{% if yoy_panel.hero_row %}${{ yoy_panel.hero_row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+          <div class="bi-hero-highlight-value">{% if yoy_panel.hero_row.amount is not None %}${{ yoy_panel.hero_row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
           <div class="bi-hero-highlight-meta">{{ yoy_panel.hero_note }}</div>
         </article>
         <article class="bi-hero-highlight">
@@ -119,8 +119,8 @@
 
   <section class="bi-kpi-grid">
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}</div>
-      <div class="bi-kpi-label">Venta último corte</div>
+      <div class="bi-kpi-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
+      <div class="bi-kpi-label">Venta último cierre</div>
       <div class="bi-kpi-note">{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }} piezas · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias · {{ daily_sales_snapshot.source_label }}</div>
     </article>
     <article class="bi-kpi-card">
@@ -143,15 +143,12 @@
     </article>
     <article class="bi-kpi-card">
       {% with hero=yoy_panel.hero_row %}
-      <div class="bi-kpi-value {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}danger{% elif hero and hero.amount_delta_pct is not None %}success{% else %}warning{% endif %}">
-        {% if hero and hero.amount_delta_pct is not None %}
-          {{ hero.amount_delta_pct|floatformat:1 }}%
-        {% else %}
-          N/D
-        {% endif %}
+      <div class="bi-kpi-value {{ hero.comparison_tone|default:'warning' }}">
+        {{ hero.comparison_label|default:"Comparativo pendiente" }}
       </div>
       <div class="bi-kpi-label">Mes vs año anterior</div>
       <div class="bi-kpi-note">{{ yoy_panel.hero_note }}</div>
+      {% if yoy_panel.coverage_note %}<div class="bi-kpi-note">{{ yoy_panel.coverage_note }}</div>{% endif %}
       {% endwith %}
     </article>
   </section>
@@ -1131,7 +1128,7 @@
           </div>
           <div class="bi-metric">
             <div class="bi-metric-label">Venta actual</div>
-            <div class="bi-metric-value">{% if hero %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
+            <div class="bi-metric-value">{% if hero and hero.amount is not None %}${{ hero.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
             <div class="bi-subtle">{% if hero %}{{ hero.quantity|floatformat:0|intcomma }} piezas{% else %}Sin fila{% endif %}</div>
           </div>
           <div class="bi-metric">
@@ -1170,7 +1167,7 @@
                       <div class="bi-subtle">Mes parcial</div>
                     {% endif %}
                   </td>
-                  <td class="text-end">${{ row.amount|floatformat:2|intcomma }}</td>
+                  <td class="text-end">{% if row.amount is not None %}${{ row.amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.prev_amount is not None %}${{ row.prev_amount|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.amount_delta_pct is not None %}{{ row.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
                   <td class="text-end">{{ row.quantity|floatformat:0|intcomma }}</td>
@@ -1790,7 +1787,7 @@
           datasets: [
             {
               label: String(currentYear),
-              data: yoyRows.map((row) => Number(row.year) === currentYear ? asNumber(row.amount) : null),
+              data: yoyRows.map((row) => Number(row.year) === currentYear && row.amount != null ? asNumber(row.amount) : null),
               backgroundColor: theme.blush,
               borderColor: theme.wine,
               borderWidth: 1.2
@@ -1798,8 +1795,8 @@
             {
               label: String(prevYear),
               data: yoyRows.map((row) => {
-                if (Number(row.year) === currentYear) return asNumber(row.prev_amount);
-                if (Number(row.year) === prevYear) return asNumber(row.amount);
+                if (Number(row.year) === currentYear) return row.prev_amount == null ? null : asNumber(row.prev_amount);
+                if (Number(row.year) === prevYear) return row.amount == null ? null : asNumber(row.amount);
                 return null;
               }),
               backgroundColor: theme.greenSoft,
@@ -1809,9 +1806,9 @@
             {
               label: String(prev2Year),
               data: yoyRows.map((row) => {
-                if (Number(row.year) === currentYear) return asNumber(row.prev2_amount);
-                if (Number(row.year) === prevYear) return asNumber(row.prev_amount);
-                if (Number(row.year) === prev2Year) return asNumber(row.amount);
+                if (Number(row.year) === currentYear) return row.prev2_amount == null ? null : asNumber(row.prev2_amount);
+                if (Number(row.year) === prevYear) return row.prev_amount == null ? null : asNumber(row.prev_amount);
+                if (Number(row.year) === prev2Year) return row.amount == null ? null : asNumber(row.amount);
                 return null;
               }),
               backgroundColor: theme.amberSoft,
@@ -1848,10 +1845,10 @@
         }
       });
     } else if (yoyCtx && yoyRows.length) {
-      renderFallbackBarList(yoyCtx, yoyRows.map((row) => ({
+      renderFallbackBarList(yoyCtx, yoyRows.filter((row) => row.amount != null).map((row) => ({
         label: row.month_label,
         value: asNumber(row.amount),
-        display: `${moneyTick(asNumber(row.amount))} vs ${row.prev_amount ? moneyTick(asNumber(row.prev_amount)) : "N/D"}`,
+        display: `${moneyTick(asNumber(row.amount))} vs ${row.prev_amount != null ? moneyTick(asNumber(row.prev_amount)) : "N/D"}`,
         tone: (row.amount_delta_pct || 0) >= 0 ? "is-green" : "is-red",
       })));
     }
