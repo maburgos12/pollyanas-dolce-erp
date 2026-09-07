@@ -69,7 +69,7 @@ Los archivos están fuera de `MEDIA_URL`, en `storage/conteos_evidencias`. Solo 
 
 `backup_db.sh` conserva la programación y defaults anteriores. Los respaldos nuevos publican una pareja SQL + TAR de evidencias y un manifiesto SHA-256 común. Primero extrae PostgreSQL; después los archivos inmutables. El manifiesto se publica al terminar ambos; ante fallo no publica éxito ni rota conjuntos completos. Linux utiliza `flock`, liberado por el kernel. El fallback para sistemas sin flock requiere revisión manual si un SIGKILL deja su directorio de bloqueo.
 
-Retiene siete conjuntos nuevos completos y conserva los respaldos SQL históricos durante la transición. No borrar esos históricos automáticamente por edad. Vigilar espacio al pasar del esquema antiguo al nuevo.
+Mantiene la política anterior de siete respaldos en total, contando SQL históricos válidos y parejas nuevas completas. Rota los archivos asociados juntos únicamente después de publicar un respaldo completo. Los parciales identificados no se consideran restaurables ni se eliminan como históricos. No se duplica la retención durante la transición.
 
 Para restaurar: detener escrituras, verificar el manifiesto con `sha256sum -c`, restaurar SQL y TAR del mismo identificador en un entorno aislado, comprobar tamaño y SHA-256 de cada evento de evidencia contra su archivo, revisar permisos de lectura/escritura y probar descarga autenticada antes de habilitar usuarios. Nunca descomprimir bajo una ruta pública. Archivos adicionales posteriores al snapshot SQL pueden conservarse; no inventar eventos para asociarlos.
 

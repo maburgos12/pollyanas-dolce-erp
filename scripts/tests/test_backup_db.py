@@ -50,11 +50,19 @@ class BackupTests(unittest.TestCase):
     def seed(self, number=8):
         for day in range(1, number + 1):
             prefix = f'backup_202001{day:02d}_010101'
-            for suffix in ('.sql.gz', '.conteos.tar.gz', '.manifest'):
-                (self.backups / (prefix + suffix)).write_text('historical')
+            self.seed_pair(prefix)
         legacy = self.backups / 'backup_20100101_010101.sql.gz'
-        legacy.write_text('legacy')
+        legacy.write_bytes(gzip.compress(b'legacy SQL'))
         return set(p.name for p in self.backups.iterdir())
+
+    def seed_pair(self, prefix):
+        entries = []
+        for suffix in ('.sql.gz', '.conteos.tar.gz'):
+            name = prefix + suffix
+            data = gzip.compress(b'historical fixture')
+            (self.backups / name).write_bytes(data)
+            entries.append(hashlib.sha256(data).hexdigest() + '  ' + name)
+        (self.backups / (prefix + '.manifest')).write_text('\n'.join(entries) + '\n')
 
     def test_restorable_pair_and_checksums(self):
         (self.evidence / 'proof.pdf').write_bytes(b'%PDF-1.4 evidence')
@@ -87,15 +95,59 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(set(p.name for p in self.backups.iterdir()), original)
         self.assertNotIn('Backup completado', result.stdout)
 
-    def test_retains_seven_complete_pairs_and_legacy(self):
+    def test_retains_seven_total_and_rotates_legacy(self):
         self.seed()
         result = self.run_backup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(list(self.backups.glob('*.manifest'))), 7)
         self.assertEqual(len(list(self.backups.glob('*.conteos.tar.gz'))), 7)
-        self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 8)
-        self.assertTrue((self.backups / 'backup_20100101_010101.sql.gz').exists())
+        self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 7)
+        self.assertFalse((self.backups / 'backup_20100101_010101.sql.gz').exists())
         self.assertFalse((self.backups / 'backup_20200101_010101.sql.gz').exists())
+
+    def test_transition_keeps_only_seven_legacy_plus_new_total(self):
+        for day in range(1, 8):
+            (self.backups / f'backup_202001{day:02d}_010101.sql.gz').write_bytes(gzip.compress(b'legacy SQL'))
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 7)
+        self.assertEqual(len(list(self.backups.glob('*.manifest'))), 1)
+        self.assertFalse((self.backups / 'backup_20200101_010101.sql.gz').exists())
+
+    def test_incomplete_and_invalid_backups_never_count_or_rotate(self):
+        self.seed(number=6)
+        # Both marked SQL-only and an interrupted pair are not legacy backups.
+        partials = {}
+        for day, suffixes in [(1, ['.sql.gz', '.incomplete']), (2, ['.sql.gz', '.conteos.tar.gz']),
+                              (3, ['.sql.gz', '.conteos.tar.gz', '.manifest']), (4, ['.sql.gz'])]:
+            for suffix in suffixes:
+                path = self.backups / f'backup_200001{day:02d}_010101{suffix}'
+                path.write_bytes(gzip.compress(b'partial') if suffix == '.sql.gz' and day != 4 else b'invalid')
+                partials[path.name] = path.read_bytes()
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, content in partials.items():
+            self.assertTrue((self.backups / name).exists(), name)
+            self.assertEqual((self.backups / name).read_bytes(), content)
+        self.assertFalse((self.backups / 'backup_20100101_010101.sql.gz').exists())
+        self.assertTrue((self.backups / 'backup_20200101_010101.sql.gz').exists())
+
+    def test_complete_manifest_overrides_stale_incomplete_marker(self):
+        self.seed(number=7)
+        prefix = 'backup_20000101_010101'
+        self.seed_pair(prefix)
+        (self.backups / (prefix + '.incomplete')).touch()
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(self.backups.glob(prefix + '.*')), [])
+        self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 7)
+
+    def test_incomplete_marker_exists_before_first_publication(self):
+        real_mv = shutil.which('mv')
+        self.stub('mv', 'test -f "$BACKUP_DIR/backup_' + STAMP + '.incomplete" || exit 29\nexec ' + real_mv + ' "$@"\n')
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.backups / f'backup_{STAMP}.incomplete').exists())
 
     def test_missing_source_archives_empty_without_creating_source(self):
         self.evidence.rmdir()
