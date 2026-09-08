@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
+from django.utils import timezone
 
 from core.access import ROLE_ADMIN, ROLE_DG, group_name_variants
 from core.models import Notificacion
@@ -43,7 +44,7 @@ def _cuerpo_correo_seguimiento(item, *, encabezado: str, actor=None, extra: str 
     actor_nombre = ""
     if actor:
         actor_nombre = actor.get_full_name() or actor.username
-    fecha_limite = item.fecha_limite.strftime("%d/%m/%Y %H:%M") if item.fecha_limite else "Sin fecha"
+    fecha_limite = timezone.localtime(item.fecha_limite).strftime("%d/%m/%Y %H:%M") + f" ({timezone.get_current_timezone_name()})" if item.fecha_limite else "Sin fecha"
     lineas = [
         encabezado,
         "",
