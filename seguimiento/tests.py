@@ -144,7 +144,7 @@ class SeguimientoColaboradorTests(TestCase):
         response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], f"/seguimiento/{self.item.pk}/")
+        self.assertEqual(response["Location"], f"/seguimiento/{self.item.pk}/#seg-revision")
         self.check.refresh_from_db()
         self.assertFalse(self.check.completado)
         self.assertFalse(Notificacion.objects.filter(objeto_id=str(self.item.pk), tipo=Notificacion.TIPO_SEGUIMIENTO).exists())

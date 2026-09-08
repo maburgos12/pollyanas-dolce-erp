@@ -151,3 +151,15 @@ def patch_commitment_status(commitment_id: int, *, status: str, comment: str = "
     if resp.status_code >= 400:
         raise AgenteDGError(f"PATCH commitment {commitment_id} status falló: {resp.status_code} {resp.text[:200]}")
     return resp.json()
+
+
+def get_minute_agreement(minuta_id: int) -> dict:
+    """La API de minutas solo expone lectura por lista; seleccionar el ID exacto."""
+    resp = _request('GET', '/api/minutas/', params={'include_archived': 'true'})
+    if resp.status_code >= 400:
+        raise AgenteDGError(f'No se pudo consultar la minuta: HTTP {resp.status_code}')
+    rows = resp.json()
+    matches = [row for row in rows if row.get('id') == minuta_id] if isinstance(rows, list) else []
+    if len(matches) != 1:
+        raise AgenteDGError('No se encontró la minuta exacta en origen.')
+    return matches[0]

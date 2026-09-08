@@ -43,6 +43,7 @@ MINUTE_QUERY = """
         m.title AS titulo,
         m.agreement_text AS descripcion,
         m.checklist_items_json,
+        m.updated_at,
         m.status,
         m.archived_at,
         m.due_at,
