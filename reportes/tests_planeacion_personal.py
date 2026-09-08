@@ -98,10 +98,22 @@ class PersonnelPlanTests(TestCase):
             '<c:Concepto Descripcion="SERVICIO NUEVO" Importe="100"/>'
             '</c:Conceptos></c:Comprobante>',
             tipo_cfdi='recibido', tipo_comprobante='I', rfc_emisor='EDENRED',
-            nombre_emisor='EDENRED MEXICO', rfc_receptor=RFC)
+            nombre_emisor='EDENRED MEXICO', rfc_receptor=RFC,
+            fecha_emision=datetime(2026, 8, 15, tzinfo=tz.utc))
         result = build_personnel_plan()
         self.assertEqual(result['unparsed'], [invoice.pk])
         self.assertIsNone(result['months'][-1]['documented'])
+
+    def test_zero_despensa_complement_is_not_a_service_charge(self, _):
+        self.invoice('informative',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4" '
+            'xmlns:v="http://www.sat.gob.mx/valesdedespensa"><c:Conceptos>'
+            '<c:Concepto Descripcion="S E R V I C I O" Importe="0.01"/>'
+            '</c:Conceptos><c:Complemento><v:ValesDeDespensa/></c:Complemento></c:Comprobante>',
+            tipo_cfdi='recibido', tipo_comprobante='I', rfc_emisor='EDENRED', total=0,
+            nombre_emisor='EDENRED MEXICO', rfc_receptor=RFC,
+            fecha_emision=datetime(2026, 8, 15, tzinfo=tz.utc))
+        self.assertEqual(build_personnel_plan()['unparsed'], [])
 
     def test_sipare_corporate_not_department_double_count(self, _):
         for area_code in ('nomina', 'gastos-venta'):

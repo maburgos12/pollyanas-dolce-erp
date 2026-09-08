@@ -118,6 +118,16 @@ def build_personnel_plan(cutoff=None):
                     key, detail = 'isn', 'Impuesto sobre nómina · periodo del concepto'
                 else:
                     # No sumar cargas de saldo: los vales ya están en percepciones.
+                    issued = root.attrib.get('Fecha', '')[:10]
+                    month = (date.fromisoformat(issued) if issued else
+                             timezone.localtime(invoice.fecha_emision).date()).replace(day=1)
+                    if month not in rows:
+                        continue
+                    if invoice.total == ZERO and root.find(
+                        './/{http://www.sat.gob.mx/valesdedespensa}ValesDeDespensa'
+                    ) is not None:
+                        # CFDI informativo de dispersiones, con total cero; no es comisión.
+                        continue
                     descriptions = [c.attrib.get('Descripcion', '').upper() for c in concepts]
                     if not descriptions or not all(
                         any(service in d for service in (
@@ -131,9 +141,6 @@ def build_personnel_plan(cutoff=None):
                             for d in descriptions):
                             continue
                         raise ValueError('Conceptos de Edenred sin clasificación inequívoca')
-                    issued = root.attrib.get('Fecha', '')[:10]
-                    month = (date.fromisoformat(issued) if issued else
-                             timezone.localtime(invoice.fecha_emision).date()).replace(day=1)
                     amount = invoice.total  # IVA incluido, sin netear créditos fiscales.
                     key, detail = 'fees', 'Servicio de vales · total con IVA'
                 if month not in rows:
