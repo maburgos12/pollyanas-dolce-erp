@@ -3,15 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - ".gitignore"
-      - "scripts/git_workspace_preflight.sh"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - ".gitignore"
-      - "scripts/git_workspace_preflight.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only superseded versions of the SAME PR are cancelled. Each main run is unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   recipe-recovery:
@@ -51,6 +52,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Prepare isolated PostgreSQL
@@ -64,11 +66,12 @@ jobs:
           name: recipe-worker-failure
           path: /tmp/recipe-proof-*.log
 
-  test:
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -77,9 +80,56 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_erp
+      SECRET_KEY: ci-secret-key-temporal
+      APP_ENV: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Django checks
+        run: python manage.py check
+      - name: Verify backup and full-suite partition contracts
+        run: |
+          python -m unittest discover -s scripts/tests -p test_backup_db.py
+          python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
+          cmp AGENTS.md CLAUDE.md
+      - name: Verify migrations are committed and applicable
+        run: |
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate --noinput
+          python manage.py migrate --check
+
+  suite:
+    name: suite (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_erp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_erp
       SECRET_KEY: ci-secret-key-temporal
@@ -88,47 +138,54 @@ jobs:
       ALLOWED_HOSTS: localhost,127.0.0.1
       TIME_ZONE: America/Mazatlan
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
+          cache: pip
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Django checks
-        run: python manage.py check
-
-      - name: Verify database and count evidence backup contract
-        run: python -m unittest discover -s scripts/tests -p test_backup_db.py
-
-      - name: Verify migrations are committed
-        run: python manage.py makemigrations --check --dry-run
-
-      - name: Run focused cierre inventario tests
-        run: |
-          python manage.py test \
-            pos_bridge.tests.test_product_month_closure_service \
-            pos_bridge.tests.test_movement_sync_service.PointMovementSyncServiceTests \
-            pos_bridge.tests.test_sales_sync_tasks.PointSalesSyncTaskRoutingTests.test_run_monthly_product_closure_targets_previous_month_by_default
-
-      - name: Enforce critical page query budgets
+        run: pip install -r requirements.txt
+      # Full discovery includes cierre inventario and performance-tagged tests.
+      # One database setup per job; keepdb avoids legacy open-connection DROP errors.
+      - name: Run full-suite shard (bloqueante)
         run: >-
-          python manage.py test
-          logistica.tests.LogisticaViewsTests
-          --tag=performance
-          --verbosity=2
+          python manage.py test --keepdb --noinput --timing
+          --testrunner scripts.ci_test_runner.ShardedDiscoverRunner
+          --shard-count 4 --shard-index ${{ matrix.shard }}
+          --shard-manifest shard-${{ matrix.shard }}.json
+      - name: Preserve discovered and assigned test inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-inventory-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Run full test suite (bloqueante)
-        # Deuda legacy saneada al 100% en la auditoría 2026-07-25 (PRs #1136 y
-        # ronda 2); desde entonces la suite completa bloquea el merge.
-        # --keepdb: el contenedor de Postgres es efímero y el DROP final truena
-        # cuando algún test deja conexiones abiertas (ObjectInUse) aunque la
-        # suite esté en OK. ponytail: si el leak de conexiones causa flakes
-        # entre tests, cazarlo en vez de ampliar este workaround.
-        run: python manage.py test --keepdb
+  # Stable required check. always() prevents a skipped dependency from allowing merge.
+  test:
+    if: always()
+    needs: [checks, recipe-recovery, suite]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every check and shard to succeed
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          RECOVERY_RESULT: ${{ needs.recipe-recovery.result }}
+          SUITE_RESULT: ${{ needs.suite.result }}
+        run: |
+          test "$CHECKS_RESULT" = success
+          test "$RECOVERY_RESULT" = success
+          test "$SUITE_RESULT" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-inventory-*
+          path: test-inventory
+          merge-multiple: true
+      - name: Prove complete coverage without omissions or duplicates
+        run: python scripts/ci_test_shards.py test-inventory 4
