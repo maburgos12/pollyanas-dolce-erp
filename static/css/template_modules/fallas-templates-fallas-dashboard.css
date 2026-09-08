@@ -85,6 +85,14 @@
 .page-fallas-dashboard .fallas-modal-backdrop{z-index:var(--fallas-z-detail)}
 .page-fallas-dashboard .fallas-provider-backdrop{z-index:var(--fallas-z-provider)}
 .fallas-provider-help{margin:6px 0;color:var(--pd-ink-soft);font-size:13px}
+.fallas-provider-results{max-height:240px;overflow-y:auto;margin-top:8px;border:1px solid var(--pd-border);border-radius:8px;background:var(--blanco,#fffaf5)}
+.fallas-provider-option{display:block;width:100%;min-height:44px;padding:10px 12px;border:0;border-bottom:1px solid var(--pd-border);background:transparent;color:var(--texto,#3d2b2b);font:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.fallas-provider-option:last-child{border-bottom:0}
+.fallas-provider-option[aria-pressed="true"]{background:var(--rosa,#f8e8ee);font-weight:800}
+.fallas-provider-option[aria-pressed="true"]::before{content:"✓ ";color:var(--vino,#8b2252)}
+.fallas-provider-option:focus-visible{outline:2px solid var(--vino,#8b2252);outline-offset:-3px}
+.fallas-provider-option:active{background:var(--rosa,#f8e8ee)}
+.fallas-provider-add{color:var(--vino,#8b2252);font-weight:800}
 .fallas-provider-error{color:var(--pd-danger);margin:0;overflow-wrap:anywhere}
 #form-proveedor{max-height:calc(100dvh - 48px);overflow:auto;margin:0}
 #form-proveedor input,#form-proveedor textarea{width:100%;min-width:0}

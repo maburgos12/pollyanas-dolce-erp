@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from requests.exceptions import RequestException
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.mail import send_mail
 from django.http import JsonResponse
+from django.db import connection, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -20,6 +22,7 @@ from django.views.decorators.http import require_POST
 
 from core.access import can_review_seguimiento_global
 from core.audit import log_event
+from core.models import AuditLog
 from core.notificaciones import (
     PUBLIC_BASE_URL,
     crear_notificaciones,
@@ -121,6 +124,52 @@ def _writeback_agente_dg_item(item: SeguimientoItem, *, accion: str, comentario:
     return False
 
 
+def _revision_response(request, item, message, *, status=200):
+    """Un contrato para POST tradicional y acciones progresivas del detalle."""
+    ok = status < 400
+    is_dg = can_review_seguimiento_global(request.user)
+    route = "seguimiento:detalle_dg" if is_dg else "seguimiento:detalle"
+    url = reverse(route, args=[item.pk]) + "#seg-revision"
+    if "application/json" in request.headers.get("Accept", ""):
+        payload = {"ok": ok, "toast": {"type": "success" if ok else "error", "message": message, "persistent": not ok}}
+        if ok:
+            # Reemplaza el detalle completo en su lugar; no reinicia scroll ni navegación.
+            response = detalle_item_dg(request, item.pk, fragment=True) if is_dg else detalle_item(request, item.pk, fragment=True)
+            payload.update(target="#seg-detail", html=response.content.decode())
+        return JsonResponse(payload, status=status)
+    (messages.success if ok else messages.error)(request, message)
+    if not ok:
+        request.session[f"seguimiento_revision_{item.pk}"] = request.POST.get("comentario", "")
+        return redirect(url)
+    if is_dg and request.POST.get("next") != "detalle":
+        return _redirect_post_resolucion(request, item.pk)
+    return redirect(url)
+
+
+def _lock_revision(pk):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s, %s)", [65901, pk])
+
+
+def _guardar_revision(item, estatus, actor, *, accion=""):
+    item.estatus = estatus
+    item.metadata = {**(item.metadata or {}), "revision_erp": {
+        "estatus": estatus, "actor_id": actor.pk, "at": timezone.now().isoformat(), "accion": accion,
+    }}
+    item.save(update_fields=["estatus", "metadata", "updated_at"])
+
+
+def _historial_revision(item):
+    labels = {"seguimiento.entrega": "Entregó para revisión", "seguimiento.aprobar": "Aprobó el acuerdo",
+              "seguimiento.devolver": "Devolvió para corrección", "seguimiento.retractar": "Retiró la entrega",
+              "seguimiento.completar": "Completó el acuerdo", "seguimiento.recuperar_entrega": "Recuperó la entrega registrada"}
+    events = list(AuditLog.objects.filter(model="SeguimientoItem", object_id=str(item.pk),
+                  action__in=labels).select_related("user").order_by("timestamp", "pk"))
+    for event in events:
+        event.label = labels[event.action]
+    return events
+
+
 def _conversacion_context(comentarios):
     comentarios_list = list(comentarios)
     comentarios_dg = [comentario for comentario in comentarios_list if comentario.tipo == SeguimientoComentario.TIPO_REVISION_DG]
@@ -181,6 +230,8 @@ def _tiene_desfase_agente_dg(item: SeguimientoItem) -> bool:
     source_status = _source_status(item)
     if str((item.metadata or {}).get("source") or "").strip() != "agente_dg":
         return False
+    if (item.metadata or {}).get("revision_erp") and not _source_archived_at(item) and source_status not in CANCELLED_AGENTE_DG_STATUSES:
+        return False  # Revisión DG en ERP y ejecución de origen son estados distintos.
     if source_status in ACTIVE_AGENTE_DG_STATUSES and item.aprobado_at:
         return True
     if source_status in ACTIVE_AGENTE_DG_STATUSES and item.estatus == SeguimientoItem.ESTATUS_COMPLETADO:
@@ -193,7 +244,7 @@ def _tiene_desfase_agente_dg(item: SeguimientoItem) -> bool:
 def _bucket_panel_seguimiento(item: SeguimientoItem) -> str:
     if item.tiene_desfase_agente_dg:
         return "desfases"
-    if item.esta_cerrado or _source_status(item) in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES or _source_archived_at(item):
+    if item.esta_cerrado or item.es_historico_agente_dg:
         return "historico"
     if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION or getattr(item, "prorroga_pendiente", None):
         return "revision"
@@ -211,7 +262,7 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
     item.estado_app_label = item.source_status or ("Archivado" if item.source_archived_at else "Sin estado app")
     if item.source_archived_at and "Archivado" not in item.estado_app_label:
         item.estado_app_label = f"{item.estado_app_label} · Archivado"
-    item.es_historico_agente_dg = bool(item.source_archived_at or item.source_status in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES)
+    item.es_historico_agente_dg = bool(item.source_archived_at or (item.source_status in CLOSED_OR_CANCELLED_AGENTE_DG_STATUSES and not (item.metadata or {}).get("revision_erp")))
     item.es_vencido_visual = bool(item.esta_vencido and not item.tiene_desfase_agente_dg and not item.es_historico_agente_dg)
     if item.checklist_total:
         item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100)
@@ -225,6 +276,7 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
         item.progreso_pct = 0
         item.avance_label = "Sin checklist"
         item.avance_detalle = "Avance no medible"
+    item.devuelto_para_corregir = (item.estatus == SeguimientoItem.ESTATUS_EN_PROCESO and (item.metadata or {}).get("revision_erp", {}).get("accion") == "devolver")
     checklist_completo = bool(item.checklist_total) and item.checklist_done == item.checklist_total
     item.listo_para_cerrar = bool(
         checklist_completo
@@ -234,12 +286,16 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
         }
         and not item.tiene_desfase_agente_dg
         and not item.es_historico_agente_dg
+        and not item.devuelto_para_corregir
     )
     if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
         item.estado_operativo_label = item.get_estatus_display()
         item.estado_operativo_tone = item.estatus.lower()
+    elif item.devuelto_para_corregir:
+        item.estado_operativo_label = "Devuelto para corrección"
+        item.estado_operativo_tone = "en_proceso"
     elif item.listo_para_cerrar:
-        item.estado_operativo_label = "Listo para cerrar"
+        item.estado_operativo_label = "Listo para entregar" if item.requiere_aprobacion else "Listo para cerrar"
         item.estado_operativo_tone = "listo_cerrar"
     else:
         item.estado_operativo_label = item.get_estatus_display()
@@ -612,6 +668,10 @@ def seguimiento_compromisos(request):
 @require_POST
 def toggle_checklist(request, pk, check_id):
     item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+        messages.error(request, "Retira la entrega antes de cambiar los puntos de un acuerdo en revisión.")
+        return redirect("seguimiento:detalle", pk=pk)
+
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
     if check.origen_step_id:
         messages.error(
@@ -669,6 +729,10 @@ def marcar_paso(request, pk, check_id):
     from .agente_dg_client import AgenteDGError, is_configured, patch_step
 
     item = _get_item_para_usuario(request.user, pk)
+    if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+        messages.error(request, "Retira la entrega antes de cambiar los puntos de un acuerdo en revisión.")
+        return redirect("seguimiento:detalle", pk=pk)
+
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
 
     if not (_writeback_activo() and is_configured()):
@@ -737,10 +801,6 @@ def registrar_feedback(request, pk):
             _writeback_agente_dg_item(item, accion="feedback", comentario=comentario)
         except Exception:
             logger.exception("Write-back feedback Agente DG falló (item %s)", item.pk)
-    elif item.requiere_aprobacion:
-        if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
-            item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
-            item.save(update_fields=["estatus", "updated_at"])
     elif item.estatus == SeguimientoItem.ESTATUS_PENDIENTE:
         item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
@@ -771,11 +831,7 @@ def subir_evidencia(request, pk):
         nombre_original=archivo.name,
         comentario=(request.POST.get("comentario") or "").strip(),
     )
-    if item.requiere_aprobacion:
-        if item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}:
-            item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
-            item.save(update_fields=["estatus", "updated_at"])
-    elif item.estatus == SeguimientoItem.ESTATUS_PENDIENTE:
+    if item.estatus == SeguimientoItem.ESTATUS_PENDIENTE:
         item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
         item.save(update_fields=["estatus", "updated_at"])
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
@@ -809,13 +865,6 @@ def solicitar_prorroga(request, pk):
         fecha_solicitada=fecha_solicitada,
         motivo=motivo,
     )
-    if item.estatus in {
-        SeguimientoItem.ESTATUS_PENDIENTE,
-        SeguimientoItem.ESTATUS_EN_PROCESO,
-        SeguimientoItem.ESTATUS_BLOQUEADO,
-    }:
-        item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
-        item.save(update_fields=["estatus", "updated_at"])
     log_event(
         request.user,
         "seguimiento.prorroga",
@@ -834,7 +883,10 @@ def bandeja_revision(request):
         messages.error(request, "No tienes acceso a la bandeja de revisión.")
         return redirect("seguimiento:mi_seguimiento")
     items = (
-        SeguimientoItem.objects.filter(estatus=SeguimientoItem.ESTATUS_EN_REVISION)
+        SeguimientoItem.objects.filter(
+            Q(estatus=SeguimientoItem.ESTATUS_EN_REVISION)
+            | Q(prorrogas__estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE)
+        ).distinct()
         .select_related("responsable_user", "responsable_empleado")
         .prefetch_related("comentarios", "evidencias__usuario", "prorrogas", "checklist")
         .order_by("fecha_limite", "-updated_at")
@@ -844,6 +896,7 @@ def bandeja_revision(request):
         item.checklist_total = len(checks)
         item.checklist_done = sum(1 for c in checks if c.completado)
         item.progreso_pct = round((item.checklist_done / item.checklist_total) * 100) if item.checklist_total else 0
+        item.entrega_auditada = AuditLog.objects.filter(model="SeguimientoItem", object_id=str(item.pk), action="seguimiento.entrega").order_by("-timestamp").first()
         item.ultima_evidencia = item.evidencias.order_by("-created_at").first()
         item.ultimo_comentario = item.comentarios.order_by("-created_at").first()
         item.prorroga_pendiente = item.prorrogas.filter(estatus=SeguimientoProrrogaSolicitud.ESTATUS_PENDIENTE).first()
@@ -864,23 +917,26 @@ def _redirect_post_resolucion(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def resolver_revision(request, pk):
     from .agente_dg_client import AgenteDGError
 
     if not can_review_seguimiento_global(request.user):
         messages.error(request, "No tienes permiso para resolver revisiones.")
         return redirect("seguimiento:bandeja_revision")
+    _lock_revision(pk)
     item = get_object_or_404(SeguimientoItem, pk=pk)
+    if item.estatus != SeguimientoItem.ESTATUS_EN_REVISION:
+        return _revision_response(request, item, "El acuerdo ya no está en revisión. Consulta su estado actual.", status=409)
     accion = (request.POST.get("accion") or "").strip()
     comentario_texto = (request.POST.get("comentario") or "").strip()
     if accion == "aprobar":
         try:
             _writeback_agente_dg_item(item, accion="aprobar", comentario=comentario_texto)
-        except AgenteDGError as exc:
+        except (AgenteDGError, RequestException) as exc:
             logger.warning("Write-back cierre Agente DG falló (item %s): %s", item.pk, exc)
-            messages.error(request, "No se pudo cerrar en app.pollyanasdolce.com. El acuerdo no se marcó como completado en ERP; intenta de nuevo.")
-            return _redirect_post_resolucion(request, pk)
-        item.estatus = SeguimientoItem.ESTATUS_COMPLETADO
+            return _revision_response(request, item, "No se pudo confirmar el cierre en Agente DG. La entrega sigue en revisión; intenta de nuevo.", status=502)
+        _guardar_revision(item, SeguimientoItem.ESTATUS_COMPLETADO, request.user)
         item.aprobado_por = request.user
         item.aprobado_at = timezone.now()
         item.save(update_fields=["estatus", "aprobado_por", "aprobado_at", "updated_at"])
@@ -891,19 +947,17 @@ def resolver_revision(request, pk):
                 comentario=f"[APROBADO] {comentario_texto}",
             )
         log_event(request.user, "seguimiento.aprobar", "SeguimientoItem", item.pk, {})
-        notificar_seguimiento_aprobado(item, comentario=comentario_texto, actor=request.user)
-        messages.success(request, f"'{item.titulo[:60]}' marcado como completado.")
+        transaction.on_commit(lambda: notificar_seguimiento_aprobado(item, comentario=comentario_texto, actor=request.user))
+        return _revision_response(request, item, "Acuerdo aprobado como completado.")
     elif accion == "devolver":
         if not comentario_texto:
-            messages.error(request, "Escribe el motivo para devolver el acuerdo.")
-            return _redirect_post_resolucion(request, pk)
+            return _revision_response(request, item, "Escribe el motivo para devolver el acuerdo.", status=400)
         try:
             _writeback_agente_dg_item(item, accion="devolver", comentario=comentario_texto)
-        except AgenteDGError as exc:
+        except (AgenteDGError, RequestException) as exc:
             logger.warning("Write-back devolucion Agente DG falló (item %s): %s", item.pk, exc)
-            messages.error(request, "No se pudo devolver en app.pollyanasdolce.com. El acuerdo no se modificó en ERP; intenta de nuevo.")
-            return _redirect_post_resolucion(request, pk)
-        item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
+            return _revision_response(request, item, "No se pudo confirmar la devolución en Agente DG. La entrega sigue en revisión; intenta de nuevo.", status=502)
+        _guardar_revision(item, SeguimientoItem.ESTATUS_EN_PROCESO, request.user, accion="devolver")
         item.save(update_fields=["estatus", "updated_at"])
         SeguimientoComentario.objects.create(
             seguimiento=item, usuario=request.user,
@@ -911,11 +965,10 @@ def resolver_revision(request, pk):
             comentario=f"[DEVUELTO] {comentario_texto}",
         )
         log_event(request.user, "seguimiento.devolver", "SeguimientoItem", item.pk, {})
-        notificar_seguimiento_devuelto(item, comentario=comentario_texto, actor=request.user)
-        messages.warning(request, f"'{item.titulo[:60]}' devuelto para corrección.")
+        transaction.on_commit(lambda: notificar_seguimiento_devuelto(item, comentario=comentario_texto, actor=request.user))
+        return _revision_response(request, item, "Acuerdo devuelto para corrección.")
     else:
-        messages.error(request, "Acción no reconocida.")
-    return _redirect_post_resolucion(request, pk)
+        return _revision_response(request, item, "Acción no reconocida.", status=400)
 
 
 @login_required
@@ -1276,31 +1329,36 @@ def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
 
 @login_required
 @require_POST
+@transaction.atomic
 def entregar_para_revision(request, pk):
-    """Flujo para acuerdos que sí requieren aprobación del DG."""
+    _lock_revision(pk)
     item = _get_item_para_usuario(request.user, pk)
-    if item.esta_cerrado:
-        messages.error(request, "Este acuerdo ya está cerrado.")
-        return redirect("seguimiento:detalle", pk=pk)
+    item = SeguimientoItem.objects.select_for_update().get(pk=item.pk)
+    if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_BLOQUEADO:
+        return _revision_response(request, item, "Este acuerdo no admite una entrega en su estado actual.", status=409)
+    if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+        return _revision_response(request, item, "La entrega ya está registrada y espera revisión.")
     if not item.requiere_aprobacion:
-        messages.error(request, "Este tipo de acuerdo no requiere aprobación; márcalo como completado.")
-        return redirect("seguimiento:detalle", pk=pk)
-
+        return _revision_response(request, item, "Este acuerdo no requiere aprobación; márcalo como completado.", status=409)
+    if item.checklist.filter(completado=False).exists():
+        return _revision_response(request, item, "Completa los puntos pendientes antes de entregar. Puedes registrar un avance parcial.", status=409)
+    archivo = request.FILES.get("archivo")
+    if archivo:
+        error = _validar_archivo_evidencia(archivo)
+        if error:
+            return _revision_response(request, item, error, status=400)
     if not _registrar_cierre_opcional(request, item, "ENTREGA"):
-        return redirect("seguimiento:detalle", pk=pk)
-
-    item.estatus = SeguimientoItem.ESTATUS_EN_REVISION
-    item.save(update_fields=["estatus", "updated_at"])
+        return _revision_response(request, item, "No se pudo guardar la evidencia.", status=400)
+    _guardar_revision(item, SeguimientoItem.ESTATUS_EN_REVISION, request.user)
     log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
-    notificar_seguimiento_entrega(item, actor=request.user)
-    messages.success(request, "Acuerdo enviado a revisión. El Director General será notificado.")
-    return redirect("seguimiento:detalle", pk=pk)
+    transaction.on_commit(lambda: notificar_seguimiento_entrega(item, actor=request.user))
+    return _revision_response(request, item, "Entrega registrada. Dirección General puede revisarla.")
 
 
 @login_required
 @require_POST
 def completar_directamente(request, pk):
-    """Cierre directo para acuerdos sin aprobación requerida o con checklist 100%."""
+    """Cierre directo exclusivamente para acuerdos sin aprobación requerida."""
     from .agente_dg_client import AgenteDGError
 
     item = _get_item_para_usuario(request.user, pk)
@@ -1308,9 +1366,7 @@ def completar_directamente(request, pk):
         messages.error(request, "Este acuerdo ya está cerrado.")
         return redirect("seguimiento:detalle", pk=pk)
 
-    checks = list(item.checklist.all())
-    checklist_completo = checks and all(c.completado for c in checks)
-    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
+    puede_cerrar_directo = not item.requiere_aprobacion
 
     if not puede_cerrar_directo:
         messages.error(request, "Este acuerdo requiere aprobación del Director General.")
@@ -1337,7 +1393,7 @@ def completar_directamente(request, pk):
 
 
 @login_required
-def detalle_item(request, pk):
+def detalle_item(request, pk, *, fragment=False):
     item = _get_item_para_usuario(request.user, pk)
     checks = list(item.checklist.all())
     _aplicar_estado_visual_seguimiento(item, checks)
@@ -1359,14 +1415,11 @@ def detalle_item(request, pk):
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
 
     checklist_completo = bool(checks) and all(c.completado for c in checks)
-    puede_cerrar_directo = not item.requiere_aprobacion or checklist_completo
-    puede_entregar = not item.esta_cerrado and item.requiere_aprobacion and not checklist_completo
+    puede_cerrar_directo = not item.requiere_aprobacion
+    puede_entregar = (item.estatus in {SeguimientoItem.ESTATUS_PENDIENTE, SeguimientoItem.ESTATUS_EN_PROCESO}
+                      and item.requiere_aprobacion and (not checks or checklist_completo))
 
-    tiene_revision_dg = comentarios.filter(tipo=SeguimientoComentario.TIPO_REVISION_DG).exists()
-    puede_retractar = (
-        item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
-        and not tiene_revision_dg
-    )
+    puede_retractar = item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
 
     # Orden secuencial: solo el primer paso incompleto se puede marcar y solo el último
     # completado se puede deshacer. El resto queda bloqueado en la interfaz.
@@ -1385,9 +1438,11 @@ def detalle_item(request, pk):
 
     return render(
         request,
-        "seguimiento/detalle_item.html",
+        "seguimiento/_detalle_contenido.html" if fragment else "seguimiento/detalle_item.html",
         {
             "item": item,
+            "historial_revision": _historial_revision(item),
+            "revision_comentario": request.session.pop(f"seguimiento_revision_{item.pk}", ""),
             "checks": checks,
             "checklist_total": checklist_total,
             "checklist_done": checklist_done,
@@ -1476,24 +1531,20 @@ def editar_nota_evidencia(request, pk, evidencia_id):
 
 @login_required
 @require_POST
+@transaction.atomic
 def retractar_entrega(request, pk):
+    _lock_revision(pk)
     item = _get_item_para_usuario(request.user, pk)
+    item = SeguimientoItem.objects.select_for_update().get(pk=item.pk)
     if item.estatus != SeguimientoItem.ESTATUS_EN_REVISION:
-        messages.error(request, "Solo puedes retractar cuando el acuerdo está en revisión.")
-        return redirect("seguimiento:detalle", pk=pk)
-    tiene_revision_dg = item.comentarios.filter(tipo=SeguimientoComentario.TIPO_REVISION_DG).exists()
-    if tiene_revision_dg:
-        messages.error(request, "El Director General ya revisó este acuerdo. No es posible retractarlo.")
-        return redirect("seguimiento:detalle", pk=pk)
-    item.estatus = SeguimientoItem.ESTATUS_EN_PROCESO
-    item.save(update_fields=["estatus", "updated_at"])
+        return _revision_response(request, item, "Esta entrega ya no está en revisión.", status=409)
+    _guardar_revision(item, SeguimientoItem.ESTATUS_EN_PROCESO, request.user)
     log_event(request.user, "seguimiento.retractar", "SeguimientoItem", item.pk, {})
-    messages.success(request, "Acuerdo regresado a 'En proceso'. Ya puedes hacer cambios y volver a enviarlo.")
-    return redirect("seguimiento:detalle", pk=pk)
+    return _revision_response(request, item, "Entrega retirada. Puedes corregir los puntos y volver a entregarla.")
 
 
 @login_required
-def detalle_item_dg(request, pk):
+def detalle_item_dg(request, pk, *, fragment=False):
     """Detalle de cualquier acuerdo para DG — sin restricción de responsable."""
     if not can_review_seguimiento_global(request.user):
         messages.error(request, "Acceso restringido a Dirección General.")
@@ -1521,8 +1572,10 @@ def detalle_item_dg(request, pk):
     evidencias = item.evidencias.select_related("usuario", "revisado_por").order_by("created_at")
     checklist_completo = bool(checks) and all(c.completado for c in checks)
     siguiente_check_id = next((c.id for c in checks if not c.completado), None)
-    return render(request, "seguimiento/detalle_item.html", {
+    return render(request, "seguimiento/_detalle_contenido.html" if fragment else "seguimiento/detalle_item.html", {
         "item": item,
+        "historial_revision": _historial_revision(item),
+        "revision_comentario": request.session.pop(f"seguimiento_revision_{item.pk}", ""),
         "checks": checks,
         "checklist_total": checklist_total,
         "checklist_done": checklist_done,
