@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
@@ -9,9 +9,9 @@ from django.db import connection
 from django.utils import timezone
 
 from core.cache_versions import get_or_set_versioned_cache
+from reportes.closed_sales import CLOSED_SALES_VERSION, latest_closed_sales_date
 from ventas.services.sales_canonical_source import (
     SALES_CANONICAL_CACHE_GENERATION,
-    canonical_point_max_date,
     canonical_point_previous_dates,
     point_sales_month_total,
 )
@@ -46,29 +46,10 @@ def _coerce_json(value):
     return value
 
 
-def _expected_operational_visible_cutoff(*, today: date | None = None) -> date:
-    now = timezone.localtime()
-    if today is not None and today != now.date():
-        now = now.replace(year=today.year, month=today.month, day=today.day)
-    cutoff_has_run = (now.hour, now.minute) >= (3, 35)
-    return now.date() - timedelta(days=1 if cutoff_has_run else 2)
-
-
-def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: date) -> dict[str, object]:
+def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: date | None) -> dict[str, object]:
     sql = """
-    WITH latest_dates AS (
-        SELECT
-            (SELECT MAX(fecha) FROM reportes_factventadiaria) AS latest_fact_date,
-            (SELECT MAX(corte_date) FROM reportes_corteoficialdiario) AS latest_cut_date
-    ),
-    latest AS (
-        SELECT COALESCE(
-            latest_cut_date,
-            LEAST(latest_fact_date, %(visible_cutoff)s::date),
-            %(visible_cutoff)s::date,
-            %(today)s::date
-        )::date AS latest_date
-        FROM latest_dates
+    WITH latest AS (
+        SELECT %(visible_cutoff)s::date AS latest_date
     ),
     prev AS (
         SELECT MAX(fecha)::date AS prev_date
@@ -341,9 +322,9 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: 
 
 
 def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, object]:
-    visible_cutoff = _expected_operational_visible_cutoff(today=today)
+    visible_cutoff = latest_closed_sales_date(today=today)
     raw = _fetch_dashboard_sales_dataset(today=today, months=months, visible_cutoff=visible_cutoff)
-    canonical_latest_date = canonical_point_max_date()
+    canonical_latest_date = visible_cutoff
     # Nota: no exigimos raw["latest_date"] != canonical_latest_date. Desde que
     # `latest` se ancla al corte operativo esperado (visible_cutoff), la fecha
     # resuelta puede coincidir con la canónica aun sin datos crudos; en ese caso
@@ -517,15 +498,15 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
         "present_branch_ids": raw["present_branch_ids"],
         "monthly_sales_rows": monthly_rows,
         "daily_sales_snapshot": {
-            "status": "Corte cargado",
-            "tone": "success",
-            "detail": "Resumen del último corte de ventas. Fuente canónica Point bridge.",
+            "status": "Cierre completo" if raw["latest_date"] else "Cierre pendiente",
+            "tone": "success" if raw["latest_date"] else "warning",
+            "detail": "Resumen del último cierre de ventas. Fuente canónica Point bridge.",
             "date": raw["latest_date"],
             "date_label": raw["latest_date"].isoformat() if raw["latest_date"] else "",
             "month_label": f"{raw['latest_date'].year}-{raw['latest_date'].month:02d}" if raw["latest_date"] else "",
             "source_label": "Point directo",
             "total_units": raw["day_units"],
-            "total_amount": total_amount,
+            "total_amount": total_amount if raw["latest_date"] else None,
             "raw_total_amount": raw["raw_day_amount"],
             "total_tickets": total_tickets,
             "raw_total_tickets": raw["raw_day_tickets"],
@@ -555,7 +536,7 @@ def get_dashboard_sales_dataset(*, today: date | None = None, months: int = 6) -
     if bool(getattr(settings, "RUNNING_TESTS", False)):
         return _build_dashboard_sales_dataset(today=today, months=months)
     return get_or_set_versioned_cache(
-        key_parts=("erp", "analytics", "dashboard-sales-dataset", SALES_CANONICAL_CACHE_GENERATION, today.isoformat(), months),
+        key_parts=("erp", "analytics", "dashboard-sales-dataset", SALES_CANONICAL_CACHE_GENERATION, CLOSED_SALES_VERSION, today.isoformat(), months),
         scopes=("ventas", "dashboard"),
         builder=lambda: _build_dashboard_sales_dataset(today=today, months=months),
     )

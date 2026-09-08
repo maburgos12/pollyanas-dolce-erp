@@ -227,6 +227,9 @@ class ReportesBITests(TestCase):
             total_tickets=4,
             total_avg_ticket=Decimal("200"),
         )
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS, started_at=timezone.now(), finished_at=timezone.now())
+        PointDailyBranchIndicator.objects.filter(branch=point_branch).update(sync_job=closed_job)
         resp = self.client.get(reverse("reportes:bi"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "BI Ejecutivo")
@@ -430,6 +433,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_marks_missing_required_branch(self):
         fecha_actual = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         guamuchil = self._create_sucursal("GUAMUCHIL", "Guamuchil")
         guamuchil.fecha_apertura = fecha_actual
@@ -483,6 +489,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_ignores_matrizdbg_alias_branch(self):
         fecha_actual = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         matriz_dbg = self._create_sucursal("MATRIZDBG", "Matriz DBG")
         point_branch_matriz = PointBranch.objects.create(
@@ -530,6 +539,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_counts_indicator_zero_amount_as_present_branch(self):
         fecha_actual = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         leyva = self._create_sucursal("LEYVA", "Leyva")
         point_branch_matriz = PointBranch.objects.create(
@@ -584,6 +596,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_ignores_validated_operational_zero_exception(self):
         fecha_actual = date(2026, 4, 4)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         colosio = self._create_sucursal("COLOSIO", "Colosio")
         point_branch_colosio = PointBranch.objects.create(
@@ -632,6 +647,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_counts_successful_official_backfill_zero_row_as_present_branch(self):
         fecha_actual = date(2026, 1, 4)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         plaza_nio = self._create_sucursal("PLAZA_NIO", "Plaza Nío")
         point_branch_matriz = PointBranch.objects.create(
@@ -699,6 +717,9 @@ class ReportesBITests(TestCase):
 
     def test_daily_snapshot_prefers_official_cut_when_present(self):
         fecha_actual = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         matriz = self._create_sucursal("MATRIZ", "Matriz")
         point_branch = PointBranch.objects.create(
             external_id="1",
@@ -1228,6 +1249,9 @@ class ReportesBITests(TestCase):
         sucursal = self._create_sucursal("VTA-01", "Sucursal Ventas 01")
         receta = Receta.objects.create(nombre="Pastel Ventas", hash_contenido="hash-ventas-001")
         fecha_actual = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         fecha_comparable = fecha_actual - timedelta(days=7)
         point_branch = PointBranch.objects.create(external_id="VTA-01", name="Sucursal Ventas 01", erp_branch=sucursal)
         point_product = PointProduct.objects.create(external_id="PVTA-01", sku="VTA001", name="Pastel Ventas", active=True)
@@ -1561,6 +1585,9 @@ class ReportesBITests(TestCase):
         sucursal = self._create_sucursal("SNAP-V2", "Sucursal Snapshot V2")
         point_branch = PointBranch.objects.create(external_id="SNAP-V2", name="Sucursal Snapshot V2", erp_branch=sucursal)
         latest_day = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=latest_day)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         point_product = PointProduct.objects.create(external_id="SNAP-V2-P", sku="SNAPV2", name="Pastel Snapshot", active=True)
 
         PointSalesDailyCategoryFact.objects.create(
@@ -1610,6 +1637,9 @@ class ReportesBITests(TestCase):
         sucursal = self._create_sucursal("SNAP-COMP", "Sucursal Snapshot Compare")
         point_branch = PointBranch.objects.create(external_id="SNAP-COMP", name="Sucursal Snapshot Compare", erp_branch=sucursal)
         latest_day = timezone.localdate() - timedelta(days=1)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=latest_day)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         prev_day = latest_day - timedelta(days=7)
 
         PointSalesDailyCategoryFact.objects.create(
@@ -1645,6 +1675,13 @@ class ReportesBITests(TestCase):
         sucursal = self._create_sucursal("CUT-LAST", "Sucursal Corte Cerrado")
         closed_cut_day = date(2026, 4, 21)
         partial_day = date(2026, 4, 22)
+        closed_branch = PointBranch.objects.create(external_id=sucursal.codigo, name=sucursal.nombre, erp_branch=sucursal)
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.make_aware(datetime.combine(partial_day, datetime.min.time())),
+            finished_at=timezone.make_aware(datetime.combine(partial_day, datetime.min.time())) + timedelta(minutes=5))
+        PointDailyBranchIndicator.objects.create(branch=closed_branch, sync_job=closed_job,
+            indicator_date=closed_cut_day, total_amount=Decimal("90500"), total_tickets=280)
 
         CorteOficialDiario.objects.create(
             corte_date=closed_cut_day,
@@ -1702,6 +1739,13 @@ class ReportesBITests(TestCase):
         sucursal = self._create_sucursal("CUT-OPS", "Sucursal Corte Operativo")
         closed_cut_day = date(2026, 4, 21)
         partial_day = date(2026, 4, 22)
+        closed_branch = PointBranch.objects.create(external_id=sucursal.codigo, name=sucursal.nombre, erp_branch=sucursal)
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=timezone.make_aware(datetime.combine(partial_day, datetime.min.time())),
+            finished_at=timezone.make_aware(datetime.combine(partial_day, datetime.min.time())) + timedelta(minutes=5))
+        PointDailyBranchIndicator.objects.create(branch=closed_branch, sync_job=closed_job,
+            indicator_date=closed_cut_day, total_amount=Decimal("90500"), total_tickets=280)
 
         FactVentaDiaria.objects.create(
             fecha=closed_cut_day,
@@ -2358,6 +2402,9 @@ class ReportesBIUtilsTests(TestCase):
 
     def test_dashboard_monthly_rows_ignore_duplicated_fact_table_when_point_is_available(self):
         fecha_actual = date(2026, 3, 31)
+        cutoff_patch = patch("reportes.dashboard_sales_dataset.latest_closed_sales_date", return_value=fecha_actual)
+        cutoff_patch.start()
+        self.addCleanup(cutoff_patch.stop)
         FactVentaDiaria.objects.create(
             fecha=date(2026, 3, 16),
             sucursal=self.sucursal,

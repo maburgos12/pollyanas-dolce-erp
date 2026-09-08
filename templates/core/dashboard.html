@@ -52,8 +52,8 @@
     </div>
     <div class="dashboard-summary-grid">
         <article class="kpi-card executive-kpi-card">
-            <div class="kpi-number is-primary">{% if daily_sales_snapshot %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}$0.00{% endif %}</div>
-            <div class="kpi-label">Venta último corte</div>
+            <div class="kpi-number is-primary">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
+            <div class="kpi-label">Venta último cierre</div>
             <div class="muted executive-kpi-note">
                 {% if daily_sales_snapshot %}
                     {{ daily_sales_snapshot.date_label }} · {{ daily_sales_snapshot.source_label }}
@@ -102,13 +102,14 @@
         </article>
         {% with hero=yoy_panel.hero_row %}
         <article class="kpi-card executive-kpi-card">
-            <div class="kpi-number {% if hero and hero.amount_delta_pct is not None and hero.amount_delta_pct < 0 %}is-warning{% else %}is-success{% endif %}">
-                {% if hero and hero.amount_delta_pct is not None %}{{ hero.amount_delta_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+            <div class="kpi-number is-{{ hero.comparison_tone|default:'warning' }}">
+                {{ hero.comparison_label|default:"Comparativo pendiente" }}
             </div>
             <div class="kpi-label">Mes vs año anterior</div>
             <div class="muted executive-kpi-note">
                 {% if yoy_panel %}
                     {{ yoy_panel.hero_note }}
+                    {% if yoy_panel.coverage_note %}<br>{{ yoy_panel.coverage_note }}{% endif %}
                 {% else %}
                     Sin comparación disponible
                 {% endif %}

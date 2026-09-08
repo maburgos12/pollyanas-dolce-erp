@@ -119,7 +119,7 @@ from .models import DgOperacionSnapshot
 from .services_reporte_diario import _armar_cuerpo, construir_y_enviar_reporte_diario
 
 
-BI_SALES_CACHE_GENERATION = "bi-sales-v2"
+BI_SALES_CACHE_GENERATION = "bi-sales-v3-closed-cutoff"
 from .daily_operational_closure_service import build_daily_operational_closure
 from .forecast_service import build_daily_forecast_context
 from .production_projection_supply_service import build_projection_supply_context
@@ -128,7 +128,7 @@ from .executive_panels import (
     _active_sales_queryset,
     _recipe_cost_map_for_sales_lens,
     build_executive_bi_panels,
-    build_monthly_yoy_panel,
+    build_closed_yoy_panel,
     build_profitability_panel,
     build_sales_forecast_panel,
 )
@@ -327,6 +327,7 @@ def bi_force_refresh(request: HttpRequest) -> HttpResponse:
         lookback_days = 7
     if refresh_scope == "cutoff":
         lookback_days = 1
+        reference_date = min(reference_date, timezone.localdate() - timedelta(days=1))
 
     if not cache.add(BI_FORCE_REFRESH_LOCK_KEY, reference_date.isoformat(), BI_FORCE_REFRESH_LOCK_SECONDS):
         messages.warning(
@@ -1040,13 +1041,14 @@ def _bi_daily_sales_snapshot() -> dict[str, object]:
     latest_date = snapshot.get("date")
     if not latest_date:
         return {
-            "status": "Sin cortes",
+            "status": "Cierre pendiente",
+            "date": None,
             "tone": "warning",
             "detail": "Todavía no hay ventas recientes para lectura ejecutiva diaria.",
             "date_label": "Sin fecha",
             "source_label": "Sin fuente",
             "total_units": Decimal("0"),
-            "total_amount": Decimal("0"),
+            "total_amount": None,
             "total_tickets": 0,
             "branch_count": 0,
             "recipe_count": 0,
@@ -1301,7 +1303,7 @@ def ventas(request: HttpRequest) -> HttpResponse:
 
     daily_sales_snapshot = _bi_daily_sales_snapshot()
     forecast_panel = build_sales_forecast_panel()
-    yoy_panel = build_monthly_yoy_panel(months=months_window)
+    yoy_panel = build_closed_yoy_panel(cutoff=daily_sales_snapshot.get("date"), months=months_window)
     branch_weekday_rows = _bi_branch_weekday_comparisons(limit=6)
     product_weekday_rows = _bi_product_weekday_comparisons(limit=6)
     ventas_historicas_summary = _ventas_historicas_bi_summary()

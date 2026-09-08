@@ -12,7 +12,7 @@ from reportes.decision_score_service import build_decision_score_context
 from reportes.dashboard_daily_ops_dataset import get_dashboard_daily_ops_dataset
 from reportes.dashboard_production_dataset import get_dashboard_production_dataset
 from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
-from reportes.executive_panels import build_executive_bi_panels
+from reportes.executive_panels import build_executive_bi_panels, build_closed_yoy_panel
 from reportes.forecast_service import build_daily_forecast_context
 from reportes.opportunity_service import build_opportunity_context
 from reportes.production_recommendation_service import build_production_recommendation_context
@@ -69,6 +69,21 @@ def _hydrate_dashboard_full_payload(payload: dict[str, object] | None) -> dict[s
     if not isinstance(payload, dict):
         return None
     hydrated = dict(payload)
+    # Sales refresh independently of the heavier materialized operational panels.
+    # Never publish its old daily/YoY pair after the canonical closure changes.
+    months = normalize_dashboard_months_window(hydrated.get("months_window"))
+    sales = get_dashboard_sales_dataset(months=months)
+    yoy = build_closed_yoy_panel(cutoff=sales.get("latest_date"), months=months)
+    hydrated["dataset_sales"] = sales
+    hydrated["daily_sales_snapshot"] = dict(sales["daily_sales_snapshot"])
+    hydrated["yoy_panel"] = yoy
+    hydrated["executive_panels"] = {**(hydrated.get("executive_panels") or {}),
+        "yoy_panel": yoy, "sales_closed_cutoff_date": sales.get("latest_date")}
+    hydrated["kpi_summary"] = {**(hydrated.get("kpi_summary") or {}),
+        "sales_amount": sales["daily_sales_snapshot"].get("total_amount"),
+        "sales_tickets": sales["daily_sales_snapshot"].get("total_tickets"),
+        "yoy_delta_pct": (yoy.get("hero_row") or {}).get("amount_delta_pct")}
+
     inventory_ledger_panel = dict(hydrated.get("inventory_ledger_panel") or {})
     inventory_ledger_panel["cutoff_date"] = _parse_iso_date(inventory_ledger_panel.get("cutoff_date"))
     inventory_ledger_panel["flow_coverage_start"] = _parse_iso_date(inventory_ledger_panel.get("flow_coverage_start"))
