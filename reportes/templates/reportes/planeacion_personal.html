@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load humanize l10n %}
+{% block title %}Planeación de personal{% endblock %}
+{% block page_title %}Planeación de personal{% endblock %}
+{% block extra_css %}
+<style>
+.personal-plan{display:grid;gap:24px}.personal-plan .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.personal-plan .metric{border-top:3px solid var(--vino);padding-top:16px}.personal-plan .metric strong{display:block;font-size:1.7rem;font-variant-numeric:tabular-nums;margin:8px 0}.personal-plan table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.personal-plan th,.personal-plan td{padding:12px;text-align:right;border-bottom:1px solid var(--gris-suave)}.personal-plan th:first-child,.personal-plan td:first-child{text-align:left}.personal-plan th{background:var(--rosa);color:var(--texto)}.personal-plan .table-responsive{overflow:auto}.personal-plan .reading{max-width:85ch;line-height:1.6}.personal-plan .tools{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.personal-plan h2{font-size:1.3rem}.personal-plan .period-label{font-weight:700;color:var(--vino)}.personal-plan details summary{cursor:pointer;padding:12px 0}.personal-plan .source{white-space:normal}.personal-plan .sale-bar{height:8px;background:var(--vino);border-radius:2px;min-width:2px}.personal-plan .caption{font-size:.9rem;color:var(--texto-light)}
+@media(max-width:800px){.personal-plan .metrics{grid-template-columns:1fr}.personal-plan .metric strong{font-size:1.4rem}}
+@media print{.sidebar,.topbar,.module-tabs,.personal-plan .tools{display:none!important}.main-content{margin:0!important}.personal-plan .table-responsive{overflow:visible}.personal-plan th,.personal-plan td{white-space:normal;padding:5px;font-size:9pt}.personal-plan .card{break-inside:avoid}.personal-plan{gap:14px}details{display:none}}
+</style>
+{% endblock %}
+{% block content %}
+<nav class="module-tabs report-tabs" aria-label="Secciones de reportes">{% for tab in module_tabs %}<a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>{% endfor %}</nav>
+<main class="personal-plan">
+<section class="card">
+  <h1>Presupuesto de personal con ventas reales</h1>
+  <p class="reading">Corte al <strong>{{ cutoff|date:"d/m/Y" }}</strong> · GRUPO EMPRESARIAL FONSMA · {{ rfc }}. La referencia se actualiza con los últimos tres meses completos. Los porcentajes 25% y 27% son límites de planeación definidos para este análisis.</p>
+  <form method="get" class="tools"><label>Mes de cierre <input type="month" name="mes" value="{{ cutoff|date:'Y-m' }}" required></label><button class="btn" type="submit">Consultar corte</button><a class="btn" href="?mes={{ cutoff|date:'Y-m' }}&amp;formato=csv">Descargar cifras y fuentes</a><button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button></form>
+</section>
+<section class="card">
+{% if policy %}
+  <p class="period-label">Referencia observada · {{ recent.0|date:"m/Y" }} a {{ recent.2|date:"m/Y" }}</p>
+  <div class="metrics">
+    <div class="metric">Venta mensual promedio<strong>${{ policy.average|floatformat:2|intcomma }}</strong><span class="caption">Suma de tres meses ÷ 3</span></div>
+    <div class="metric">Objetivo de costo habitual<strong>${{ policy.target|floatformat:2|intcomma }}</strong><span class="caption">Menor entre 25% del promedio y 27% del mes más bajo</span></div>
+    <div class="metric">Límite sobre el promedio<strong>${{ policy.ceiling|floatformat:2|intcomma }}</strong><span class="caption">27% · incluye personal habitual y refuerzos</span></div>
+  </div>
+  <p class="reading">El mes más bajo del trimestre vendió <strong>${{ policy.low|floatformat:2|intcomma }}</strong>. El objetivo habitual habría representado <strong>{{ policy.target_low_pct }}%</strong> de esa venta. Esta prueba usa meses observados; no asigna ventas futuras a nuevas sucursales.</p>
+{% else %}<p>No hay tres meses consecutivos con ventas positivas en este corte. Consulta un corte con tres meses de operación registrados.</p>{% endif %}
+</section>
+<section class="card">
+  <h2>Ventas y límites por mes</h2>
+  <div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Ventas con impuestos</th><th>Distribución de ventas</th><th>25%</th><th>27%</th><th>Licencias Point</th></tr></thead><tbody>
+  {% for row in months %}<tr><td>{{ row.month|date:"m/Y" }}</td><td>{% if row.sales is not None %}${{ row.sales|floatformat:2|intcomma }}{% else %}Sin registro{% endif %}</td><td>{% if row.sales %}<progress class="sale-bar" value="{{ row.sales|unlocalize }}" max="{{ sales_total|unlocalize }}" aria-label="Participación de la venta mensual"></progress>{% endif %}</td><td>{{ row.target|default_if_none:"—"|intcomma }}</td><td>{{ row.ceiling|default_if_none:"—"|intcomma }}</td><td>{{ row.branches|default:"—" }}</td></tr>{% endfor %}
+  </tbody></table></div><p class="caption">PointDailySale.total_amount: venta después de descuentos, con impuestos. No es una conciliación de depósitos bancarios. Las licencias Point conservan su historial aunque cambie el nombre del local; no son un conteo de locales físicos.</p>
+</section>
+<section class="card">
+  <h2>Costo documentado por periodo</h2>
+  <p class="reading">Percepciones fiscales más cargas patronales, ISN y servicio de vales con IVA. La nómina extraordinaria incluye PTU e indemnizaciones según el comprobante. Los vales y bonos contenidos en percepciones no se suman otra vez.</p>
+  <div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Ordinaria</th><th>Extraordinaria</th><th>IMSS</th><th>RCV / Infonavit</th><th>ISN</th><th>Servicio vales</th><th>Suma documentada</th></tr></thead><tbody>
+  {% for row in months %}<tr><td>{{ row.month|date:"m/Y" }}</td><td>{{ row.ordinary|default_if_none:"—"|intcomma }}</td><td>{{ row.extraordinary|default_if_none:"—"|intcomma }}</td><td>{{ row.imss|default_if_none:"—"|intcomma }}</td><td>{{ row.rcv|default_if_none:"—"|intcomma }}</td><td>{{ row.isn|default_if_none:"—"|intcomma }}</td><td>{{ row.fees|default_if_none:"—"|intcomma }}</td><td><strong>{{ row.documented|default_if_none:"—"|intcomma }}</strong></td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="caption">“—” significa que no existe importe identificado para esa familia en el corte; nunca se transforma en cero. La suma documentada no representa costo integral cerrado ni efectivo pagado. RCV/Infonavit conserva la distribución mensual del control SIPARE; no se vuelve a dividir el bimestre. Las distribuciones por área no se suman al control corporativo.</p>
+  {% if unparsed %}<p>Comprobantes que requieren lectura del original: {{ unparsed|join:", " }}. Sus importes no se incorporan automáticamente.</p>{% endif %}
+  <details><summary>Ver documentos y registros que componen cada importe</summary><div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Fuente</th><th>ID ERP</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>{% for source in sources %}<tr><td>{{ source.month|date:"m/Y" }}</td><td class="source">{{ source.kind }}</td><td>{{ source.id }}</td><td class="source">{{ source.reference }}</td><td>{{ source.amount|intcomma }}</td></tr>{% endfor %}</tbody></table></div></details>
+</section>
+<section class="card">
+  <h2>Ventas por licencia Point</h2>
+  <div class="table-responsive"><table><thead><tr><th>Licencia · nombre actual</th><th>ID Point / ERP</th><th>Primera venta del periodo</th><th>Última venta del periodo</th><th>Venta acumulada</th><th>Promedio últimos 3 meses</th></tr></thead><tbody>{% for branch in branches %}<tr><td>{{ branch.branch__name }}</td><td>{{ branch.branch_id }} / {{ branch.branch__erp_branch_id|default_if_none:"—" }}</td><td>{{ branch.first|date:"d/m/Y" }}</td><td>{{ branch.last|date:"d/m/Y" }}</td><td>{{ branch.amount|intcomma }}</td><td>{{ branch.recent_average|default_if_none:"—"|intcomma }}</td></tr>{% endfor %}</tbody></table></div>
+  <p class="caption">Primera y última venta corresponden a la actividad de la licencia, no a la apertura o cierre del local. Crucero → Bamoa conserva la misma licencia, según la operación confirmada por Dirección: su historial se cuenta una sola vez. El nombre actual Bamoa no reclasifica las ventas anteriores como ventas de ese local. Las licencias nuevas sólo aportan ventas cuando existen registros reales.</p>
+</section>
+<section class="card">
+  <h2>Plantilla activa del ERP · {{ people }} personas</h2>
+  <div class="table-responsive"><table><thead><tr><th>Departamento actual</th><th>Contrato</th><th>Personas</th><th>Suma de salarios diarios registrados</th></tr></thead><tbody>{% for item in staff %}<tr><td>{{ item.department_label|default:"Sin adscripción registrada" }}</td><td>{{ item.contract_label }}</td><td>{{ item.people }}</td><td>{{ item.daily_salary|intcomma }}</td></tr>{% endfor %}</tbody></table></div>
+  <p class="caption">Foto actual de RRHH, independiente del corte histórico. El salario diario no es el costo integral de contratación. Las bajas permanecen en sus comprobantes históricos, pero no en esta plantilla activa.</p>
+</section>
+<section class="card reading">
+  <h2>Reglas para utilizar el presupuesto</h2>
+  <ol><li>Comparar el costo habitual completo con el objetivo; reservar dentro de él prestaciones y cargas, sin duplicar pagos ya reconocidos.</li><li>Evaluar refuerzos por pedidos, turnos y capacidad de producción. Restar del límite el costo integral habitual y los refuerzos ya comprometidos; no convertir toda la diferencia entre 25% y 27% en plazas.</li><li>Comprobar el efectivo disponible después de insumos, operación e impuestos antes de comprometer una contratación.</li><li>Evaluar el trimestre sumando costos y ventas del mismo periodo. No promediar porcentajes mensuales ni eliminar la PTU por ser extraordinaria.</li></ol>
+  <p>Este módulo calcula límites y muestra sus fuentes. No autoriza contrataciones ni atribuye a un local ventas anteriores a su apertura.</p>
+</section>
+</main>
+{% endblock %}

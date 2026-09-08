@@ -12,7 +12,7 @@ from django.utils.dateparse import parse_datetime
 from core.models import Sucursal
 from maestros.models import Insumo
 from pos_bridge.models import PointProduct, PointSyncJob
-from .conteos_access import autorizado_sucursal, puede_capturar, puede_coordinar, puede_revisar
+from .conteos_access import autorizado_sucursal, puede_capturar, puede_coordinar, puede_revisar, sucursal_app
 from .models_conteos import ConteoSucursal, LineaConteoSucursal, LecturaConteoSucursal, EventoConteoSucursal, OperacionConteoSucursal
 
 
@@ -52,8 +52,12 @@ def _cantidad(value):
 
 
 @transaction.atomic
-def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, request_id):
-    if not puede_coordinar(actor): raise ConteoError('Sin permiso para preparar conteos.')
+def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, request_id, desde_app=False):
+    if desde_app:
+        assigned = sucursal_app(actor)
+        if assigned is None or assigned.pk != sucursal.pk or responsable.pk != actor.pk:
+            raise ConteoError('El conteo debe pertenecer a tu sucursal asignada y a tu usuario.')
+    elif not puede_coordinar(actor): raise ConteoError('Sin permiso para preparar conteos.')
     request_id = _uuid(request_id)
     if not isinstance(fecha, date): raise ConteoError('Fecha inválida.')
     titulo = _text(titulo,180,True)

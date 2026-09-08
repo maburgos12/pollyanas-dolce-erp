@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-fallas-pwa-v9-proveedores-selector";
+const CACHE_NAME = "pollyanas-fallas-pwa-v10-proveedores-imprimir";
 const SHELL_ASSETS = [
   "/fallas/app/",
   "/static/fallas/manifest.json?v=20260707-workflow-icon-v5",

@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-proveedores-v3">
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-proveedores-print-v4">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -179,7 +179,10 @@
   <div class="fallas-modal">
     <div class="fallas-modal-head">
       <strong id="modal-title">Detalle de falla</strong>
-      <button type="button" class="btn btn-secondary btn-small" id="modal-close">Cerrar</button>
+      <div class="fallas-detail-actions">
+        <button type="button" class="btn btn-secondary btn-small" id="btn-imprimir" disabled>Imprimir reporte</button>
+        <button type="button" class="btn btn-secondary btn-small" id="modal-close">Cerrar</button>
+      </div>
     </div>
     <div class="fallas-modal-body" id="modal-body">Cargando...</div>
     <div class="fallas-modal-actions">
@@ -219,6 +222,7 @@
   </form>
 </div>
 {% endif %}
+<script src="{% static 'fallas/imprimir_reporte.js' %}?v=20260908-print-v1"></script>
 <script>
 // Escape the main-content stacking context so navigation cannot cover dialogs/toasts.
 ["modal", "modal-proveedor", "erp-toast-region"].forEach(id => {
@@ -254,6 +258,7 @@ const ESTATUS_BADGE = {
 };
 
 let reporteActual = null;
+let detalleImpresion = null;
 let categoriasAdmin = [];
 let usuariosGestion = [];
 
@@ -366,12 +371,18 @@ async function cargarReportes() {
 // ── Modal detalle ────────────────────────────────────────
 async function abrirDetalle(id) {
   reporteActual = id;
+  detalleImpresion = null;
+  document.getElementById("btn-imprimir").disabled = true;
   document.getElementById("modal").classList.add("is-open");
   document.getElementById("modal-body").innerHTML = `<div class="pd-cell-loading">Cargando...</div>`;
 
   const res = await fetch(`${API}/reportes/${id}/`, {headers: h()});
+  if (reporteActual !== id) return;
   if (!res.ok) { document.getElementById("modal-body").textContent = "Error al cargar el reporte."; return; }
   const rep = await res.json();
+  if (reporteActual !== id) return;
+  detalleImpresion = rep;
+  document.getElementById("btn-imprimir").disabled = false;
 
   document.getElementById("modal-title").textContent = `#${rep.id} · ${rep.sucursal_nombre}`;
 
@@ -507,7 +518,7 @@ async function actualizarEstatus() {
   }
 }
 
-function cerrarModal() { document.getElementById("modal").classList.remove("is-open"); }
+function cerrarModal() { document.getElementById("modal").classList.remove("is-open"); reporteActual = null; detalleImpresion = null; }
 
 // Selector y alta explícita de proveedores de servicio.
 let proveedoresServicio = [];
@@ -656,6 +667,11 @@ function cerrarModalCat() { document.getElementById("modal-cat").classList.remov
 // ── Event listeners ──────────────────────────────────────
 document.getElementById("btn-filtrar").addEventListener("click", () => { cargarKPIs(); cargarReportes(); });
 document.getElementById("modal-close").addEventListener("click", cerrarModal);
+document.getElementById("btn-imprimir").addEventListener("click", () => {
+  if (!detalleImpresion) return;
+  const responsable = usuariosGestion.find(u => Number(u.id) === Number(detalleImpresion.asignado_a));
+  window.imprimirReporteFalla(detalleImpresion, responsable?.nombre || responsable?.username);
+});
 document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
 document.getElementById("btn-actualizar")?.addEventListener("click", actualizarEstatus);
 

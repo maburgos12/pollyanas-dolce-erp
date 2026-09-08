@@ -92,3 +92,4 @@
 #form-proveedor button:active{filter:brightness(.95)}
 @media(max-width:600px){.fallas-provider-backdrop{padding:12px}#form-proveedor{max-height:calc(100dvh - 24px)}}
 #buscar-proveedor::placeholder,#form-proveedor input::placeholder{color:#7a6565;opacity:1}
+  .fallas-detail-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
