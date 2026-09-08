@@ -6,7 +6,7 @@
 {% block content %}
 <main class="cd-shell cd-form-shell">
   <a class="cd-back" href="{% url 'compras:departamental_mis_solicitudes' %}">← Volver a solicitudes</a>
-  <header class="cd-hero compact"><div><span class="cd-eyebrow">Nueva solicitud</span><h1>¿Qué necesita tu área?</h1><p>Incluye varios artículos en una sola solicitud. El costo estimado y la imagen son opcionales.</p></div></header>
+  <header class="cd-hero compact"><div><span class="cd-eyebrow">Nueva solicitud</span><h1>¿Qué necesita tu área?</h1><p>Incluye varios artículos en una sola solicitud. El costo estimado y la imagen son opcionales.</p><p>Durante esta etapa de aprendizaje puedes enviar cualquier día y elegir el mes que necesitas.</p></div></header>
   <form method="post" enctype="multipart/form-data" class="cd-form" data-async-action>
     {% csrf_token %}
     <section class="cd-card">
@@ -39,7 +39,7 @@
         </article>
       </div>
     </section>
-    <div class="cd-actions"><button class="cd-button ghost" name="accion" value="borrador">Guardar borrador</button><button class="cd-button primary" name="accion" value="enviar">Enviar a Compras</button></div>
+    <div class="cd-actions"><button type="submit" class="cd-button ghost" name="accion" value="borrador">Guardar borrador</button><button type="submit" class="cd-button primary" name="accion" value="enviar">Enviar a Compras</button></div>
   </form>
 </main>
 {% endblock %}
