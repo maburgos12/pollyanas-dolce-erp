@@ -92,6 +92,17 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(result['months'][6]['isn'], D(16737))
         self.assertIsNone(result['months'][7]['isn'])
 
+    def test_unrecognized_service_is_not_silently_treated_as_zero(self, _):
+        invoice = self.invoice('unknown-service',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+            '<c:Concepto Descripcion="SERVICIO NUEVO" Importe="100"/>'
+            '</c:Conceptos></c:Comprobante>',
+            tipo_cfdi='recibido', tipo_comprobante='I', rfc_emisor='EDENRED',
+            nombre_emisor='EDENRED MEXICO', rfc_receptor=RFC)
+        result = build_personnel_plan()
+        self.assertEqual(result['unparsed'], [invoice.pk])
+        self.assertIsNone(result['months'][-1]['documented'])
+
     def test_sipare_corporate_not_department_double_count(self, _):
         for area_code in ('nomina', 'gastos-venta'):
             area, _ = AreaPresupuesto.objects.get_or_create(codigo=area_code, defaults={'nombre': area_code})

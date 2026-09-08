@@ -126,7 +126,11 @@ def build_personnel_plan(cutoff=None):
                             'CARGO POR ENVIO', 'CARGO POR ENVÍO'))
                         for d in descriptions
                     ):
-                        continue
+                        if descriptions and all(any(load in d for load in (
+                            'VALES', 'DISPERSION', 'DISPERSIÓN', 'SALDO', 'DOTACION', 'DOTACIÓN'))
+                            for d in descriptions):
+                            continue
+                        raise ValueError('Conceptos de Edenred sin clasificación inequívoca')
                     issued = root.attrib.get('Fecha', '')[:10]
                     month = (date.fromisoformat(issued) if issued else
                              timezone.localtime(invoice.fecha_emision).date()).replace(day=1)
