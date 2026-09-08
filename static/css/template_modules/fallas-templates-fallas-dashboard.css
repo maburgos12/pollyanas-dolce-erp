@@ -79,3 +79,15 @@
     .fallas-toolbar,.fallas-detail-grid,.fallas-category-layout,.kpi-charts{grid-template-columns:1fr}
     .fallas-table{min-width:700px}
   }
+
+/* Alta de proveedor sobre el detalle, conservando su captura. */
+.page-fallas-dashboard{--fallas-z-detail:1400;--fallas-z-provider:1410}
+.page-fallas-dashboard .fallas-modal-backdrop{z-index:var(--fallas-z-detail)}
+.page-fallas-dashboard .fallas-provider-backdrop{z-index:var(--fallas-z-provider)}
+.fallas-provider-help{margin:6px 0;color:var(--pd-ink-soft);font-size:13px}
+.fallas-provider-error{color:var(--pd-danger);margin:0;overflow-wrap:anywhere}
+#form-proveedor{max-height:calc(100dvh - 48px);overflow:auto;margin:0}
+#form-proveedor input,#form-proveedor textarea{width:100%;min-width:0}
+#form-proveedor :focus-visible{outline:2px solid var(--pd-wine);outline-offset:2px}
+#form-proveedor button:active{filter:brightness(.95)}
+@media(max-width:600px){.fallas-provider-backdrop{padding:12px}#form-proveedor{max-height:calc(100dvh - 24px)}}

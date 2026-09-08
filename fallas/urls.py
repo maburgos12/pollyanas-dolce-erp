@@ -17,6 +17,7 @@ urlpatterns = [
     path("categorias/<int:pk>/", views.CategoriaFallaUpdateView.as_view(), name="categoria-detail"),
     path("activos/", views.ActivoFallaListView.as_view(), name="activos"),
     path("me/", views.perfil_actual, name="perfil-actual"),
+    path("proveedores/", views.proveedores_servicio, name="proveedores-servicio"),
     path("usuarios-gestion/", views.usuarios_gestion, name="usuarios-gestion"),
     path("reportes/", views.ReporteFallaListCreateView.as_view(), name="reportes-list"),
     path("reportes/<int:pk>/", views.ReporteFallaDetailView.as_view(), name="reporte-detail"),

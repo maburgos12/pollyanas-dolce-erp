@@ -246,7 +246,18 @@ class CambioEstatusSerializer(serializers.Serializer):
     asignado_a = serializers.IntegerField(required=False, allow_null=True)
     costo_estimado = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     costo_real = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
-    proveedor_servicio = serializers.CharField(required=False, allow_blank=True)
+    proveedor_servicio = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    proveedor_servicio_id = serializers.IntegerField(required=False, min_value=1)
+
+    def validate(self, attrs):
+        if "proveedor_servicio_id" in attrs:
+            from mantenimiento.models import ProveedorServicio
+
+            proveedor = ProveedorServicio.objects.filter(pk=attrs.pop("proveedor_servicio_id"), activo=True).first()
+            if proveedor is None:
+                raise serializers.ValidationError({"proveedor_servicio_id": "Selecciona un proveedor registrado y activo."})
+            attrs["proveedor_servicio"] = proveedor.nombre
+        return attrs
 
     def validate_asignado_a(self, value):
         if value is None:
@@ -254,3 +265,17 @@ class CambioEstatusSerializer(serializers.Serializer):
         if not get_user_model().objects.filter(pk=value, is_active=True).exists():
             raise serializers.ValidationError("Usuario asignado no encontrado o inactivo.")
         return value
+
+
+class AltaProveedorServicioSerializer(serializers.ModelSerializer):
+    """Alta explícita desde Fallas; no modifica registros existentes."""
+
+    class Meta:
+        from mantenimiento.models import ProveedorServicio
+
+        model = ProveedorServicio
+        fields = ("id", "nombre", "contacto", "telefono", "especialidad", "notas")
+        read_only_fields = ("id",)
+
+    def validate_nombre(self, value):
+        return " ".join(value.split())
