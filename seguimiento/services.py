@@ -416,6 +416,10 @@ class AgenteDGSeguimientoImporter:
             "synced_at": timezone.now().isoformat(),
             "source_participants": participant_payload if participants_supplied else previous_participants,
         }
+        # Contratos guardados por ERP: nunca aceptar estas claves desde un webhook.
+        for key in ("checklist_writeback", "entrega_snapshot"):
+            if item and key in (item.metadata or {}):
+                metadata[key] = item.metadata[key]
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
         # actividades de desempeño que el colaborador gestiona y cierra por su cuenta.
         requiere_aprobacion = tipo in (SeguimientoItem.TIPO_MINUTA, SeguimientoItem.TIPO_PROYECTO)
@@ -482,10 +486,27 @@ class AgenteDGSeguimientoImporter:
 
         if checklist is _PRESERVE_CHECKLIST:
             return
+        if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION and metadata.get("entrega_snapshot"):
+            return  # El colaborador entregó estos puntos; quedan congelados hasta su decisión.
+        checkpoint = metadata.get("checklist_writeback") if source_table == "minute_agreements" else None
+        incoming_at = agente_dg_as_datetime(row.get("updated_at"))
+        confirmed_at = agente_dg_as_datetime(checkpoint.get("updated_at")) if checkpoint else None
+        if checkpoint and (not incoming_at or (confirmed_at and incoming_at < confirmed_at)):
+            self._sync_checklist(item, agente_dg_checklist_payload_from_json(json.dumps(checkpoint["items"])))
+            return
         checklist_payload = checklist
         if checklist_payload is None:
             checklist_payload = agente_dg_checklist_payload_from_json(row.get("checklist_items_json"))
         self._sync_checklist(item, checklist_payload)
+        if checkpoint and incoming_at and (not confirmed_at or incoming_at >= confirmed_at):
+            # Conservar también la versión nueva: otro evento atrasado no debe restaurar
+            # el primer punto de control que guardó el ERP.
+            metadata["checklist_writeback"] = {
+                "updated_at": incoming_at.isoformat(),
+                "items": [{"text": point["titulo"], "completed": bool(point.get("completado")),
+                           "completed_at": point.get("completado_at")} for point in (checklist_payload or [])],
+            }
+            item.save(update_fields=["metadata", "updated_at"])
 
     def _resolve_participants(self, participants):
         users = []
@@ -583,7 +604,7 @@ class AgenteDGSeguimientoImporter:
                     (origen_step_id and check.origen_step_id == origen_step_id)
                     or normalizar_nombre(check.titulo or "") == normalizar_nombre(titulo or "")
                 )
-                if same_check and check.completado and not defaults["completado"]:
+                if same_check and check.completado and not defaults["completado"] and not (item.metadata or {}).get("checklist_writeback"):
                     defaults["completado"] = True
                 defaults["sub_checklist"] = _merge_sub_checklist(check.sub_checklist, defaults["sub_checklist"])
                 check.orden = index

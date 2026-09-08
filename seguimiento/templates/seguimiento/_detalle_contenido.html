@@ -133,7 +133,8 @@
             {% if check.pk == siguiente_check_id %}
             <span class="muted seg-complete-meta">Usa la acción principal de esta pantalla.</span>
             {% elif check.completado and check.pk == ultimo_completado_id %}
-            <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}">
+            <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk check.pk %}" data-async-action>
+              <input type="hidden" name="completado" value="0">
               {% csrf_token %}
               <button class="btn btn-secondary btn-sm" type="submit">Deshacer</button>
             </form>
@@ -200,7 +201,8 @@
         {% elif siguiente_check.origen_step_id %}
           <span class="seg-next-waiting">La sincronización con app.pollyanasdolce.com no está disponible en este momento.</span>
         {% else %}
-          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk siguiente_check.pk %}">
+          <form method="post" action="{% url 'seguimiento:toggle_checklist' item.pk siguiente_check.pk %}" data-async-action>
+            <input type="hidden" name="completado" value="1">
             {% csrf_token %}
             <button class="btn btn-primary" type="submit">Marcar punto terminado</button>
           </form>
@@ -523,6 +525,12 @@
         <div class="seg-timeline-dot">✓</div>
         <div class="seg-timeline-body">
           <strong>{{ event.label }}</strong>
+          {% if event.payload.checklist %}
+          <details><summary>Puntos enviados: {{ event.payload.checklist|length }}</summary>
+            <ul>{% for point in event.payload.checklist %}<li>{{ point.titulo }} — {{ point.completado|yesno:"Concluido,Pendiente" }}</li>{% endfor %}</ul>
+          </details>
+          {% endif %}
+          {% if event.action == 'seguimiento.reconciliar_puntos_dg' %}<p>{{ event.payload.motivo }}</p>{% endif %}
           <p class="seg-timeline-meta">{{ event.user.get_full_name|default:event.user.username|default:"Sistema" }} · {{ event.timestamp|date:"d/m/Y H:i" }}</p>
         </div>
       </div>

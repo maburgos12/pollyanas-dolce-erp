@@ -162,7 +162,8 @@ def _guardar_revision(item, estatus, actor, *, accion=""):
 def _historial_revision(item):
     labels = {"seguimiento.entrega": "Entregó para revisión", "seguimiento.aprobar": "Aprobó el acuerdo",
               "seguimiento.devolver": "Devolvió para corrección", "seguimiento.retractar": "Retiró la entrega",
-              "seguimiento.completar": "Completó el acuerdo", "seguimiento.recuperar_entrega": "Recuperó la entrega registrada"}
+              "seguimiento.completar": "Completó el acuerdo", "seguimiento.recuperar_entrega": "Recuperó la entrega registrada",
+              "seguimiento.reconciliar_puntos_dg": "Regularizó puntos concluidos por confirmación de DG"}
     events = list(AuditLog.objects.filter(model="SeguimientoItem", object_id=str(item.pk),
                   action__in=labels).select_related("user").order_by("timestamp", "pk"))
     for event in events:
@@ -666,19 +667,22 @@ def seguimiento_compromisos(request):
 
 @login_required
 @require_POST
+@transaction.atomic
 def toggle_checklist(request, pk, check_id):
+    _lock_revision(pk)
     item = _get_item_para_usuario(request.user, pk)
     if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
-        messages.error(request, "Retira la entrega antes de cambiar los puntos de un acuerdo en revisión.")
-        return redirect("seguimiento:detalle", pk=pk)
+        return _revision_response(request, item, "Retira la entrega antes de cambiar los puntos de un acuerdo en revisión.", status=409)
 
     check = get_object_or_404(SeguimientoChecklistItem, pk=check_id, seguimiento=item)
     if check.origen_step_id:
-        messages.error(
-            request,
-            "Este paso viene de app.pollyanasdolce.com; abre el detalle para usar el flujo sincronizado.",
-        )
-        return redirect("seguimiento:detalle", pk=item.pk)
+        return _revision_response(request, item, "Este paso requiere el flujo sincronizado de proyectos.", status=409)
+    raw_value = request.POST.get("completado")
+    if raw_value not in {None, "0", "1"}:
+        return _revision_response(request, item, "Valor de punto inválido.", status=400)
+    desired = raw_value == "1" if raw_value is not None else not check.completado
+    if desired == check.completado:
+        return _revision_response(request, item, "El punto ya tiene ese estado.")
     checks = list(item.checklist.all())  # ordenado por (orden, id) según Meta
 
     # Orden secuencial: los pasos se completan en orden y se deshacen en orden inverso.
@@ -686,16 +690,25 @@ def toggle_checklist(request, pk, check_id):
         # Marcar: todos los pasos anteriores deben estar completados.
         anteriores = [c for c in checks if (c.orden, c.id) < (check.orden, check.id)]
         if any(not c.completado for c in anteriores):
-            messages.error(request, "Completa primero los pasos anteriores, en orden.")
-            return redirect("seguimiento:detalle", pk=item.pk)
+            return _revision_response(request, item, "Completa primero los pasos anteriores, en orden.", status=409)
     else:
         # Desmarcar: ningún paso posterior debe estar completado.
         posteriores = [c for c in checks if (c.orden, c.id) > (check.orden, check.id)]
         if any(c.completado for c in posteriores):
-            messages.error(request, "Desmarca primero los pasos posteriores, en orden inverso.")
-            return redirect("seguimiento:detalle", pk=item.pk)
+            return _revision_response(request, item, "Desmarca primero los pasos posteriores, en orden inverso.", status=409)
 
-    check.completado = not check.completado
+    source = _agente_dg_source(item)
+    if source and source[0] == "minute_agreements":
+        from .agente_dg_client import AgenteDGError, is_configured
+        from .minuta_checklist import sincronizar_checklist_minuta
+        try:
+            if not (_writeback_activo() and is_configured()):
+                raise AgenteDGError("La sincronización de minutas no está activa.")
+            sincronizar_checklist_minuta(item, check=check, completado=desired)
+        except (AgenteDGError, RequestException) as exc:
+            logger.warning("No se confirmó el punto de minuta %s: %s", check.pk, exc)
+            return _revision_response(request, item, "No se pudo confirmar el punto en origen. Actualiza el acuerdo antes de reintentar.", status=502)
+    check.completado = desired
     if check.completado:
         check.completado_por = request.user
         check.completado_at = timezone.now()
@@ -706,15 +719,14 @@ def toggle_checklist(request, pk, check_id):
         check.completado_por = None
         check.completado_at = None
     check.save(update_fields=["completado", "completado_por", "completado_at", "updated_at"])
-    log_event(request.user, "seguimiento.checklist", "SeguimientoChecklistItem", check.pk, {"seguimiento_id": item.pk})
+    log_event(request.user, "seguimiento.checklist", "SeguimientoChecklistItem", check.pk, {"seguimiento_id": item.pk, "titulo": check.titulo, "completado": check.completado})
     notificar_seguimiento_avance(
         item,
         actor=request.user,
         mensaje_extra=f"Check: {'✓ ' if check.completado else '○ '}{check.titulo}",
         enviar_correo=False,
     )
-    messages.success(request, "Checklist actualizado.")
-    return redirect("seguimiento:detalle", pk=item.pk)
+    return _revision_response(request, item, "Punto actualizado.")
 
 
 @login_required
@@ -1333,7 +1345,6 @@ def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
 def entregar_para_revision(request, pk):
     _lock_revision(pk)
     item = _get_item_para_usuario(request.user, pk)
-    item = SeguimientoItem.objects.select_for_update().get(pk=item.pk)
     if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_BLOQUEADO:
         return _revision_response(request, item, "Este acuerdo no admite una entrega en su estado actual.", status=409)
     if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
@@ -1347,10 +1358,24 @@ def entregar_para_revision(request, pk):
         error = _validar_archivo_evidencia(archivo)
         if error:
             return _revision_response(request, item, error, status=400)
+    source = _agente_dg_source(item)
+    if source and source[0] == "minute_agreements" and _writeback_activo():
+        from .agente_dg_client import AgenteDGError
+        from .minuta_checklist import sincronizar_checklist_minuta
+        try:
+            sincronizar_checklist_minuta(item)
+        except (AgenteDGError, RequestException) as exc:
+            logger.warning("No se confirmó checklist de entrega %s: %s", item.pk, exc)
+            return _revision_response(request, item, "No se pudo confirmar la lista de puntos en origen. Actualiza el acuerdo y reintenta.", status=502)
     if not _registrar_cierre_opcional(request, item, "ENTREGA"):
         return _revision_response(request, item, "No se pudo guardar la evidencia.", status=400)
     _guardar_revision(item, SeguimientoItem.ESTATUS_EN_REVISION, request.user)
-    log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True})
+    snapshot = [{"id": point.pk, "titulo": point.titulo, "completado": point.completado,
+                 "completado_at": point.completado_at.isoformat() if point.completado_at else None}
+                for point in item.checklist.all()]
+    item.metadata = {**item.metadata, "entrega_snapshot": snapshot}
+    item.save(update_fields=["metadata", "updated_at"])
+    log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True, "checklist": snapshot})
     transaction.on_commit(lambda: notificar_seguimiento_entrega(item, actor=request.user))
     return _revision_response(request, item, "Entrega registrada. Dirección General puede revisarla.")
 
