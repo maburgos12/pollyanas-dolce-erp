@@ -1,10 +1,11 @@
 {% load static %}
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#8B2252"><title>{% block title %}Conteos físicos · Pollyana's Dolce{% endblock %}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@600;700&display=swap">
-<link rel="stylesheet" href="{% static 'css/styles.css' %}">{% block extra_css %}{% endblock %}</head>
+<link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260721-fecha-mobile-v5">{% block extra_css %}{% endblock %}</head>
 <body class="conteos-mobile"><a class="skip-link" href="#main-content">Saltar al contenido</a>
-<header class="conteos-brand"><a href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa">← App Operativa</a><img src="{% static 'logistica/pwa/pollyanas-logo-header.png' %}" alt="Pollyana's Dolce"></header>
+{% include 'operacion/_lucide_sprite.html' %}
+<header class="conteos-brand"><div class="conteos-brand-identity"><img src="{% static 'logistica/pwa/pollyanas-logo-header.png' %}" alt="Pollyana's Dolce"><span>App Operativa</span></div><a class="conteos-home" href="{% url 'operacion:app_home' %}" aria-label="Volver a App Operativa"><svg aria-hidden="true"><use href="#icon-home"></use></svg></a></header>
 <main id="main-content" class="conteos-app-shell">{% block content %}{% endblock %}</main>
 <div class="erp-toast-region" id="erp-toast-region" aria-live="polite" aria-atomic="false" aria-label="Notificaciones">{% for message in messages %}<div class="erp-toast erp-toast--{{ message.tags }}" role="status">{{ message }}</div>{% endfor %}</div>
-<div id="erp-confirm-dialog" class="conteos-confirm" role="dialog" aria-modal="true" aria-labelledby="erp-confirm-message" hidden><div><p id="erp-confirm-message"></p><button type="button" data-confirm-cancel>Volver</button><button type="button" data-confirm-accept>Confirmar</button></div></div>
+<div id="erp-confirm-dialog" class="conteos-confirm" role="dialog" aria-modal="true" aria-labelledby="erp-confirm-message" hidden><div><p id="erp-confirm-message"></p><button type="button" class="count-button secondary" data-confirm-cancel>Volver</button><button type="button" class="count-button" data-confirm-accept>Confirmar</button></div></div>
 <script src="{% static 'js/erp_actions.js' %}" defer></script>{% block extra_js %}{% endblock %}</body></html>
