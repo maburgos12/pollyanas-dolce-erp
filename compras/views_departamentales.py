@@ -19,6 +19,7 @@ from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPr
 from .models import (
     CompromisoCompraDepartamental,
     CotizacionCompraDepartamental,
+    EventoCompraDepartamental,
     ItemCompraDepartamental,
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
@@ -59,13 +60,22 @@ def _puede_ver_solicitud(user, solicitud):
     )
 
 
-def _respuesta_accion(request, *, message, redirect_url, status=200):
+def _puede_enviar_solicitud(user, solicitud):
+    # Mismo alcance que la captura: responsables activos del área y Compras.
+    return (
+        puede_gestionar_compras_departamentales(user)
+        or _areas_usuario(user).filter(pk=solicitud.area_id).exists()
+    )
+
+
+def _respuesta_accion(request, *, message, redirect_url, status=200, reload=False):
     if request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", ""):
         return JsonResponse(
             {
                 "ok": status < 400,
                 "toast": {"type": "success" if status < 400 else "error", "message": message},
                 "redirect": redirect_url,
+                "reload": reload,
             },
             status=status,
         )
@@ -146,13 +156,7 @@ def departamental_nueva(request):
 
     tipo = request.POST.get("tipo") or SolicitudCompraDepartamental.TIPO_MENSUAL
     accion = request.POST.get("accion") or "borrador"
-    if accion == "enviar" and tipo == SolicitudCompraDepartamental.TIPO_MENSUAL:
-        today = timezone.localdate()
-        if not 20 <= today.day <= 25:
-            return _error_nueva(request, "La solicitud mensual se envía del día 20 al 25. Puedes guardarla como borrador o marcarla extraordinaria.", areas)
-        siguiente_mes = date(today.year + (today.month == 12), 1 if today.month == 12 else today.month + 1, 1)
-        if periodo != siguiente_mes:
-            return _error_nueva(request, "La solicitud mensual debe corresponder al mes siguiente.", areas)
+    # Etapa de aprendizaje: el mes elegido no restringe la fecha de envío.
 
     descripciones = request.POST.getlist("descripcion")
     if not any(value.strip() for value in descripciones):
@@ -215,6 +219,36 @@ def departamental_nueva(request):
 
 
 @login_required
+@require_POST
+def departamental_enviar(request, pk):
+    with transaction.atomic():
+        solicitud = get_object_or_404(SolicitudCompraDepartamental.objects.select_for_update(), pk=pk)
+        if not _puede_enviar_solicitud(request.user, solicitud):
+            raise PermissionDenied("No puedes enviar solicitudes de esta área.")
+        destino = reverse("compras:departamental_detalle", args=[solicitud.pk]) + "#solicitud-envio"
+        if solicitud.estado == SolicitudCompraDepartamental.ESTADO_ENVIADA:
+            return _respuesta_accion(request, message="La solicitud ya fue enviada a Compras.", redirect_url=destino, reload=True)
+        if solicitud.estado != SolicitudCompraDepartamental.ESTADO_BORRADOR:
+            return _respuesta_accion(request, message="Solo puedes enviar solicitudes en borrador.", redirect_url=destino, status=409)
+        if not solicitud.items.exists():
+            return _respuesta_accion(request, message="La solicitud debe contener al menos un artículo.", redirect_url=destino, status=400)
+        if solicitud.items.exclude(estado=ItemCompraDepartamental.ESTADO_POR_REVISAR).exists():
+            return _respuesta_accion(request, message="Compras ya está atendiendo artículos de esta solicitud. Revisa su seguimiento.", redirect_url=destino, status=409)
+        solicitud.estado = SolicitudCompraDepartamental.ESTADO_ENVIADA
+        solicitud.enviada_en = timezone.now()
+        try:
+            solicitud.full_clean()
+        except ValidationError as exc:
+            return _respuesta_accion(request, message="; ".join(exc.messages), redirect_url=destino, status=400)
+        solicitud.save(update_fields=["estado", "enviada_en", "actualizado_en"])
+        EventoCompraDepartamental.objects.create(
+            solicitud=solicitud, actor=request.user, tipo="ENVIO_SOLICITUD",
+            detalle="Borrador enviado a Compras durante la etapa de aprendizaje.",
+        )
+    return _respuesta_accion(request, message=f"Solicitud {solicitud.folio} enviada a Compras.", redirect_url=destino, reload=True)
+
+
+@login_required
 def departamental_detalle(request, pk):
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
@@ -248,6 +282,7 @@ def departamental_detalle(request, pk):
         "compras/departamentales/detalle.html",
         {
             "solicitud": solicitud,
+            "puede_enviar": solicitud.estado == SolicitudCompraDepartamental.ESTADO_BORRADOR and _puede_enviar_solicitud(request.user, solicitud),
             "rubros": rubros,
             "proveedores": proveedores,
             "es_compras": puede_gestionar_compras_departamentales(request.user),

@@ -11,6 +11,7 @@ urlpatterns = [
     path("departamentales/nueva/", views_departamentales.departamental_nueva, name="departamental_nueva"),
     path("departamentales/bandeja/", views_departamentales.departamental_bandeja, name="departamental_bandeja"),
     path("departamentales/direccion/", views_departamentales.departamental_direccion, name="departamental_direccion"),
+    path("departamentales/<int:pk>/enviar/", views_departamentales.departamental_enviar, name="departamental_enviar"),
     path("departamentales/<int:pk>/", views_departamentales.departamental_detalle, name="departamental_detalle"),
     path("departamentales/<int:pk>/asignar/", views_departamentales.departamental_asignar, name="departamental_asignar"),
     path("departamentales/<int:pk>/generar-ordenes/", views_departamentales.departamental_generar_ordenes, name="departamental_generar_ordenes"),
