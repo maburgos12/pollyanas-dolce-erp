@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-print-v1">
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-proveedores-print-v4">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -194,8 +194,41 @@
   </div>
 </div>
 
+{% if puede_gestionar %}
+<div class="fallas-modal-backdrop fallas-provider-backdrop" id="modal-proveedor">
+  <form class="fallas-modal fallas-modal-sm" id="form-proveedor" role="dialog" aria-modal="true"
+        aria-labelledby="proveedor-title" action="{% url 'fallas_api:proveedores-servicio' %}" method="post"
+        data-async-action data-action-bound="true">
+    {% csrf_token %}
+    <div class="fallas-modal-head"><strong id="proveedor-title">Agregar proveedor nuevo</strong></div>
+    <div class="fallas-modal-body fallas-category-form">
+      <p class="fallas-provider-help">El nombre es obligatorio. Los demás datos son opcionales.</p>
+      <label for="proveedor-nombre">Nombre del proveedor *</label>
+      <input id="proveedor-nombre" name="nombre" maxlength="200" required autocomplete="organization">
+      <label for="proveedor-contacto">Nombre del contacto</label>
+      <input id="proveedor-contacto" name="contacto" maxlength="120" autocomplete="name">
+      <label for="proveedor-telefono">Teléfono</label>
+      <input id="proveedor-telefono" name="telefono" type="tel" maxlength="30" autocomplete="tel">
+      <label for="proveedor-especialidad">Especialidad</label>
+      <input id="proveedor-especialidad" name="especialidad" maxlength="120" placeholder="Ej. Electricidad o refrigeración">
+      <label for="proveedor-notas">Notas</label>
+      <textarea id="proveedor-notas" name="notas" rows="2"></textarea>
+      <p id="proveedor-error" class="fallas-provider-error" role="alert" hidden></p>
+    </div>
+    <div class="fallas-modal-actions">
+      <button type="button" class="btn btn-secondary" id="cancelar-proveedor">Cancelar</button>
+      <button type="submit" class="btn btn-primary" data-pending-label="Guardando…">Guardar proveedor</button>
+    </div>
+  </form>
+</div>
+{% endif %}
 <script src="{% static 'fallas/imprimir_reporte.js' %}?v=20260908-print-v1"></script>
 <script>
+// Escape the main-content stacking context so navigation cannot cover dialogs/toasts.
+["modal", "modal-proveedor", "erp-toast-region"].forEach(id => {
+  const element = document.getElementById(id);
+  if (element) document.body.appendChild(element);
+});
 const API = "/api/fallas";
 const token = localStorage.getItem("pd_logistica_access") || localStorage.getItem("fallas_jwt") || localStorage.getItem("access_token") || "";
 const csrf = "{{ csrf_token }}";
@@ -427,12 +460,17 @@ async function abrirDetalle(id) {
       <textarea id="comentario-estatus" rows="3" class="fallas-input-full pd-textarea-lg"></textarea>
       <label class="pd-form-label pd-mt-3">Evidencia para seguimiento</label>
       <input id="evidencias-seguimiento" class="fallas-file-input" type="file" multiple accept="image/*,.pdf">
-      <label class="pd-form-label pd-mt-3">Proveedor de servicio</label>
-      <input id="proveedor-servicio" type="text" placeholder="Nombre del proveedor o técnico" value="${esc(rep.proveedor_servicio || "")}" class="fallas-input-full">
+      <label for="buscar-proveedor" class="pd-form-label pd-mt-3">Buscar proveedor de servicio</label>
+      <input id="buscar-proveedor" type="search" placeholder="Buscar por nombre o especialidad" class="fallas-input-full" disabled>
+      <label for="proveedor-servicio" class="pd-form-label">Proveedor de servicio</label>
+      <select id="proveedor-servicio" class="fallas-select-full" disabled><option>Cargando proveedores…</option></select>
+      <p id="proveedor-lista-estado" class="fallas-provider-help" aria-live="polite"></p>
+      <button id="reintentar-proveedores" type="button" class="btn btn-secondary btn-small" hidden>Reintentar carga</button>
     ` : ""}
     <hr class="fallas-divider">
     <h3 class="fallas-log-title">Bitácora</h3>
     <div class="bi-list bi-list-dense">${bitacora || '<article class="bi-list-item pd-detail-meta">Sin historial aún.</article>'}</div>`;
+  if (PUEDE_GESTIONAR) iniciarProveedores(rep);
 }
 
 async function actualizarEstatus() {
@@ -442,7 +480,8 @@ async function actualizarEstatus() {
   const asignadoEl = document.getElementById("asignado-a");
   const body = new FormData();
   body.append("comentario", document.getElementById("comentario-estatus")?.value || "");
-  body.append("proveedor_servicio", document.getElementById("proveedor-servicio")?.value || "");
+  const proveedorId = document.getElementById("proveedor-servicio")?.value;
+  if (proveedorId && /^\d+$/.test(proveedorId)) body.append("proveedor_servicio_id", proveedorId);
   const costoEst = document.getElementById("costo-est")?.value;
   const costoReal = document.getElementById("costo-real")?.value;
   if (costoEst) body.append("costo_estimado", costoEst);
@@ -452,22 +491,146 @@ async function actualizarEstatus() {
   const evidencias = document.getElementById("evidencias-seguimiento")?.files || [];
   Array.from(evidencias).forEach((file) => body.append("evidencias_seguimiento", file));
 
-  const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {
-    method: "POST",
-    headers: h(),
-    body
-  });
-  if (res.ok) {
-    cerrarModal();
-    cargarKPIs();
-    cargarReportes();
-  } else {
-    const err = await res.json().catch(() => ({}));
-    alert("Error al actualizar: " + (JSON.stringify(err) || "verifica los datos."));
+  const boton = document.getElementById("btn-actualizar");
+  if (boton.disabled) return;
+  boton.disabled = true;
+  boton.textContent = "Guardando…";
+  try {
+    const res = await fetch(`${API}/reportes/${reporteActual}/estatus/`, {
+      method: "POST",
+      headers: h(),
+      body
+    });
+    if (res.ok) {
+      window.ERPActionUI.showToast({type: "success", message: "Reporte actualizado."});
+      cerrarModal();
+      cargarKPIs();
+      cargarReportes();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      window.ERPActionUI.showToast({type: "error", message: "No se guardó el reporte: " + JSON.stringify(err)});
+    }
+  } catch (error) {
+    window.ERPActionUI.showToast({type: "error", message: "No se recibió respuesta. Revisa tu conexión y el reporte antes de reintentar."});
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Guardar cambios";
   }
 }
 
 function cerrarModal() { document.getElementById("modal").classList.remove("is-open"); reporteActual = null; detalleImpresion = null; }
+
+// Selector y alta explícita de proveedores de servicio.
+let proveedoresServicio = [];
+let proveedorElegido = "";
+let proveedorHistorico = "";
+const claveProveedor = value => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").replace(/\s+/g, " ").trim();
+function pintarProveedores() {
+  const select = document.getElementById("proveedor-servicio");
+  const filtro = claveProveedor(document.getElementById("buscar-proveedor").value);
+  const opciones = proveedoresServicio.filter(p => String(p.id) === proveedorElegido || claveProveedor(p.nombre + " " + p.especialidad).includes(filtro));
+  select.innerHTML = `<option value="nuevo">＋ Agregar proveedor nuevo</option>
+    <option value="">${proveedorHistorico ? (proveedoresServicio.some(p => p.nombre === proveedorHistorico) ? "Conservar proveedor actual" : "Conservar: " + esc(proveedorHistorico) + " (registro histórico)") : "Selecciona un proveedor"}</option>` +
+    opciones.map(p => `<option value="${p.id}">${esc(p.nombre)}${p.especialidad ? " · " + esc(p.especialidad) : ""}</option>`).join("");
+  select.value = proveedorElegido;
+  document.getElementById("proveedor-lista-estado").textContent = opciones.length ? "" : "No hay proveedores que coincidan. Puedes agregar uno nuevo.";
+}
+async function iniciarProveedores(rep) {
+  const select = document.getElementById("proveedor-servicio");
+  const search = document.getElementById("buscar-proveedor");
+  const retry = document.getElementById("reintentar-proveedores");
+  const estado = document.getElementById("proveedor-lista-estado");
+  proveedorElegido = "";
+  proveedorHistorico = rep.proveedor_servicio || "";
+  async function cargar() {
+    retry.hidden = true;
+    try {
+      const res = await fetch(`${API}/proveedores/`, {headers: h()});
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      if (!select.isConnected) return;
+      proveedoresServicio = data.sort((a,b) => a.nombre.localeCompare(b.nombre, "es"));
+      const actual = data.find(p => p.nombre === proveedorHistorico);
+      proveedorElegido = actual ? String(actual.id) : "";
+      pintarProveedores();
+      select.disabled = false;
+      search.disabled = false;
+    } catch (error) {
+      if (!select.isConnected) return;
+      estado.textContent = "No se pudo cargar el catálogo. El proveedor actual se conservará.";
+      retry.hidden = false;
+    }
+  }
+  retry.onclick = cargar;
+  search.oninput = pintarProveedores;
+  select.onchange = () => {
+    if (select.value === "nuevo") {
+      select.value = proveedorElegido;
+      document.getElementById("form-proveedor").reset();
+      document.getElementById("proveedor-error").hidden = true;
+      document.getElementById("modal-proveedor").classList.add("is-open");
+      document.getElementById("modal").inert = true;
+      document.getElementById("fallas-app").inert = true;
+      document.getElementById("proveedor-nombre").focus();
+    } else proveedorElegido = select.value;
+  };
+  await cargar();
+}
+function cerrarProveedor() {
+  if (document.getElementById("form-proveedor").dataset.actionPending === "true") return;
+  document.getElementById("modal-proveedor").classList.remove("is-open");
+  document.getElementById("modal").inert = false;
+  document.getElementById("fallas-app").inert = false;
+  document.getElementById("proveedor-servicio")?.focus();
+}
+document.getElementById("cancelar-proveedor")?.addEventListener("click", cerrarProveedor);
+document.getElementById("modal-proveedor")?.addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cerrarProveedor(); }
+  if (event.key === "Tab") {
+    const campos = Array.from(event.currentTarget.querySelectorAll("input:not([type=hidden]), textarea, button:not(:disabled)"));
+    const primero = campos[0], ultimo = campos[campos.length - 1];
+    if (event.shiftKey && document.activeElement === primero) { event.preventDefault(); ultimo.focus(); }
+    else if (!event.shiftKey && document.activeElement === ultimo) { event.preventDefault(); primero.focus(); }
+  }
+});
+document.getElementById("form-proveedor")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (form.dataset.actionPending === "true" || !form.reportValidity()) return;
+  const boton = form.querySelector('[type="submit"]');
+  const errorEl = document.getElementById("proveedor-error");
+  form.dataset.actionPending = "true";
+  boton.disabled = true;
+  boton.textContent = "Guardando…";
+  errorEl.hidden = true;
+  try {
+    const res = await fetch(form.action, {method: "POST", headers: h(), body: new FormData(form)});
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const mensaje = data.errors ? Object.values(data.errors).flat().join(" ") : data.toast?.message || data.detail;
+      throw new Error(mensaje || "No se pudo guardar el proveedor. Revisa los datos e inténtalo de nuevo.");
+    }
+    const proveedor = data.proveedor;
+    proveedoresServicio.push(proveedor);
+    proveedoresServicio.sort((a,b) => a.nombre.localeCompare(b.nombre, "es"));
+    proveedorElegido = String(proveedor.id);
+    document.getElementById("buscar-proveedor").value = "";
+    pintarProveedores();
+    form.dataset.actionPending = "false";
+    cerrarProveedor();
+    window.ERPActionUI.showToast(data.toast);
+  } catch (error) {
+    errorEl.textContent = error instanceof TypeError || error instanceof SyntaxError
+      ? "No se recibió respuesta. Revisa tu conexión y consulta la lista antes de reintentar."
+      : error.message;
+    errorEl.hidden = false;
+    window.ERPActionUI.showToast({type: "error", message: errorEl.textContent, persistent: true});
+  } finally {
+    form.dataset.actionPending = "false";
+    boton.disabled = false;
+    boton.textContent = "Guardar proveedor";
+  }
+});
 
 // ── Catálogo de categorías (DG) ──────────────────────────
 async function cargarCatalogoAdmin() {
