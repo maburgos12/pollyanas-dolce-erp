@@ -2771,12 +2771,17 @@ def build_closed_yoy_panel(*, cutoff: date | None, months: int = 6) -> dict:
                     "coverage_note": "Comparativo pendiente", "current_year": timezone.localdate().year,
                     "prev_year": timezone.localdate().year - 1, "prev2_year": timezone.localdate().year - 2}
         panel = build_monthly_yoy_panel(latest_date=cutoff, months=months)
-        hero = {**(panel.get("latest_row") or {}), **closed_month_comparison(cutoff=cutoff)}
+        # Preserve the total-network history; current branches are not a historical cohort.
+        latest = panel["latest_row"]
+        hero = {**latest, **closed_month_comparison(
+            cutoff=cutoff,
+            previous_totals={"amount": latest["prev_amount"], "quantity": latest["prev_quantity"]},
+        )}
         panel["rows"][-1] = hero
         panel.update(hero_row=hero, latest_row=hero, hero_mode="closed_cutoff",
                      cutoff_date=cutoff, hero_note=hero["comparison_note"],
                      coverage_note=hero["coverage_note"],
-                     basis_note="Último cierre completo. Mismas fechas y sucursales en ambos años; se excluye el día en curso.")
+                     basis_note="Venta total de la red en cada año al mismo cierre; incluye la variación de sucursales entre años. Se excluye el día en curso.")
         return panel
     return get_or_set_versioned_cache(
         key_parts=("erp", CLOSED_SALES_VERSION, "yoy", str(cutoff), months),

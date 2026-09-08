@@ -119,7 +119,7 @@ from .models import DgOperacionSnapshot
 from .services_reporte_diario import _armar_cuerpo, construir_y_enviar_reporte_diario
 
 
-BI_SALES_CACHE_GENERATION = "bi-sales-v3-closed-cutoff"
+BI_SALES_CACHE_GENERATION = "bi-sales-v4-network-total"
 from .daily_operational_closure_service import build_daily_operational_closure
 from .forecast_service import build_daily_forecast_context
 from .production_projection_supply_service import build_projection_supply_context

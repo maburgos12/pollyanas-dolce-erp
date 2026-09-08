@@ -103,13 +103,12 @@
         {% with hero=yoy_panel.hero_row %}
         <article class="kpi-card executive-kpi-card">
             <div class="kpi-number is-{{ hero.comparison_tone|default:'warning' }}">
-                {{ hero.comparison_label|default:"Comparativo pendiente" }}
+                {{ hero.comparison_label|default:"N/D" }}
             </div>
             <div class="kpi-label">Mes vs año anterior</div>
             <div class="muted executive-kpi-note">
                 {% if yoy_panel %}
                     {{ yoy_panel.hero_note }}
-                    {% if yoy_panel.coverage_note %}<br>{{ yoy_panel.coverage_note }}{% endif %}
                 {% else %}
                     Sin comparación disponible
                 {% endif %}
