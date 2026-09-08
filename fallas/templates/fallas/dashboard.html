@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-proveedores-print-v4">
+<link rel="stylesheet" href="/static/css/template_modules/fallas-templates-fallas-dashboard.css?v=20260908-proveedores-resultados-v5">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260526-word-guard-v1">
 {% endblock %}
 
@@ -461,10 +461,11 @@ async function abrirDetalle(id) {
       <label class="pd-form-label pd-mt-3">Evidencia para seguimiento</label>
       <input id="evidencias-seguimiento" class="fallas-file-input" type="file" multiple accept="image/*,.pdf">
       <label for="buscar-proveedor" class="pd-form-label pd-mt-3">Buscar proveedor de servicio</label>
-      <input id="buscar-proveedor" type="search" placeholder="Buscar por nombre o especialidad" class="fallas-input-full" disabled>
-      <label for="proveedor-servicio" class="pd-form-label">Proveedor de servicio</label>
-      <select id="proveedor-servicio" class="fallas-select-full" disabled><option>Cargando proveedores…</option></select>
+      <input id="buscar-proveedor" type="search" placeholder="Buscar por nombre o especialidad" class="fallas-input-full" aria-controls="proveedor-resultados" disabled>
+      <input id="proveedor-servicio" type="hidden" value="">
+      <div id="proveedor-resultados" class="fallas-provider-results" role="group" aria-label="Proveedores de servicio">Cargando proveedores…</div>
       <p id="proveedor-lista-estado" class="fallas-provider-help" aria-live="polite"></p>
+      <p id="proveedor-seleccionado" class="fallas-provider-help" aria-live="polite"></p>
       <button id="reintentar-proveedores" type="button" class="btn btn-secondary btn-small" hidden>Reintentar carga</button>
     ` : ""}
     <hr class="fallas-divider">
@@ -528,12 +529,18 @@ const claveProveedor = value => value.normalize("NFD").replace(/[\u0300-\u036f]/
 function pintarProveedores() {
   const select = document.getElementById("proveedor-servicio");
   const filtro = claveProveedor(document.getElementById("buscar-proveedor").value);
-  const opciones = proveedoresServicio.filter(p => String(p.id) === proveedorElegido || claveProveedor(p.nombre + " " + p.especialidad).includes(filtro));
-  select.innerHTML = `<option value="nuevo">＋ Agregar proveedor nuevo</option>
-    <option value="">${proveedorHistorico ? (proveedoresServicio.some(p => p.nombre === proveedorHistorico) ? "Conservar proveedor actual" : "Conservar: " + esc(proveedorHistorico) + " (registro histórico)") : "Selecciona un proveedor"}</option>` +
-    opciones.map(p => `<option value="${p.id}">${esc(p.nombre)}${p.especialidad ? " · " + esc(p.especialidad) : ""}</option>`).join("");
+  const opciones = proveedoresServicio.filter(p => claveProveedor(p.nombre + " " + p.especialidad).includes(filtro));
+  const resultados = document.getElementById("proveedor-resultados");
+  resultados.innerHTML = `<button type="button" class="fallas-provider-option fallas-provider-add" data-proveedor="nuevo">＋ Agregar proveedor nuevo</button>` +
+    opciones.map(p => `<button type="button" class="fallas-provider-option" data-proveedor="${p.id}" aria-pressed="${String(p.id) === proveedorElegido}">${esc(p.nombre)}${p.especialidad ? " · " + esc(p.especialidad) : ""}</button>`).join("");
+  resultados.scrollTop = 0;
   select.value = proveedorElegido;
-  document.getElementById("proveedor-lista-estado").textContent = opciones.length ? "" : "No hay proveedores que coincidan. Puedes agregar uno nuevo.";
+  document.getElementById("proveedor-lista-estado").textContent = opciones.length
+    ? `${opciones.length} ${opciones.length === 1 ? "coincidencia" : "coincidencias"}. Haz clic en el proveedor para seleccionarlo.`
+    : "No hay proveedores que coincidan. Puedes agregar uno nuevo.";
+  const elegido = proveedoresServicio.find(p => String(p.id) === proveedorElegido);
+  document.getElementById("proveedor-seleccionado").textContent = elegido ? "Seleccionado: " + elegido.nombre
+    : proveedorHistorico ? "Se conserva: " + proveedorHistorico + " (registro histórico)" : "Ningún proveedor seleccionado.";
 }
 async function iniciarProveedores(rep) {
   const select = document.getElementById("proveedor-servicio");
@@ -553,7 +560,6 @@ async function iniciarProveedores(rep) {
       const actual = data.find(p => p.nombre === proveedorHistorico);
       proveedorElegido = actual ? String(actual.id) : "";
       pintarProveedores();
-      select.disabled = false;
       search.disabled = false;
     } catch (error) {
       if (!select.isConnected) return;
@@ -563,16 +569,23 @@ async function iniciarProveedores(rep) {
   }
   retry.onclick = cargar;
   search.oninput = pintarProveedores;
-  select.onchange = () => {
-    if (select.value === "nuevo") {
-      select.value = proveedorElegido;
+  document.getElementById("proveedor-resultados").onclick = event => {
+    const opcion = event.target.closest("button[data-proveedor]");
+    if (!opcion) return;
+    if (opcion.dataset.proveedor === "nuevo") {
       document.getElementById("form-proveedor").reset();
       document.getElementById("proveedor-error").hidden = true;
       document.getElementById("modal-proveedor").classList.add("is-open");
       document.getElementById("modal").inert = true;
       document.getElementById("fallas-app").inert = true;
       document.getElementById("proveedor-nombre").focus();
-    } else proveedorElegido = select.value;
+    } else {
+      const scroll = document.getElementById("proveedor-resultados").scrollTop;
+      proveedorElegido = opcion.dataset.proveedor;
+      pintarProveedores();
+      document.getElementById("proveedor-resultados").scrollTop = scroll;
+      document.querySelector(`#proveedor-resultados [data-proveedor="${proveedorElegido}"]`)?.focus({preventScroll: true});
+    }
   };
   await cargar();
 }
@@ -581,7 +594,7 @@ function cerrarProveedor() {
   document.getElementById("modal-proveedor").classList.remove("is-open");
   document.getElementById("modal").inert = false;
   document.getElementById("fallas-app").inert = false;
-  document.getElementById("proveedor-servicio")?.focus();
+  document.querySelector('#proveedor-resultados [data-proveedor="nuevo"]')?.focus({preventScroll: true});
 }
 document.getElementById("cancelar-proveedor")?.addEventListener("click", cerrarProveedor);
 document.getElementById("modal-proveedor")?.addEventListener("keydown", event => {
