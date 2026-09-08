@@ -6,7 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import JsonResponse
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +24,7 @@ from .models import (
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
 )
+from .resumen_departamentales import construir_resumen_departamental, exportar_resumen_departamental
 from .access_departamentales import puede_gestionar_compras_departamentales
 from .services_departamentales import (
     confirmar_recepcion_departamental,
@@ -299,20 +300,18 @@ def departamental_detalle(request, pk):
 def departamental_bandeja(request):
     if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied("La bandeja compartida corresponde a Administración.")
-    items = ItemCompraDepartamental.objects.select_related(
-        "solicitud__area", "solicitud__solicitante", "solicitud__comprador_asignado"
-    ).exclude(estado__in=[ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME, ItemCompraDepartamental.ESTADO_RECHAZADO, ItemCompraDepartamental.ESTADO_CANCELADO])
-    return render(
-        request,
-        "compras/departamentales/bandeja.html",
-        {
-            "items": items,
-            "vista": "compras",
-            "puede_solicitar": _areas_usuario(request.user).exists(),
-            "es_compras": True,
-            "es_direccion": _es_direccion(request.user),
-        },
-    )
+    contexto = construir_resumen_departamental(request.GET)
+    if request.GET.get("exportar") == "xlsx":
+        if contexto["filtros"].errors:
+            return HttpResponseBadRequest("Corrige los filtros antes de exportar.")
+        return exportar_resumen_departamental(contexto)
+    contexto.update({
+        "vista": "compras",
+        "puede_solicitar": _areas_usuario(request.user).exists(),
+        "es_compras": True,
+        "es_direccion": _es_direccion(request.user),
+    })
+    return render(request, "compras/departamentales/bandeja.html", contexto)
 
 
 @login_required

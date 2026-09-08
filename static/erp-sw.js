@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v30-compras-envio-aprendizaje";
+const CACHE_NAME = "pollyanas-erp-shell-v31-compras-resumen-departamental";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
