@@ -1,0 +1,41 @@
+/* Documento independiente: estilos compartidos entre vista previa y papel. */
+:root { color-scheme: light; font-family: Arial, sans-serif; color: #302529; background: #f3f3f3; }
+* { box-sizing: border-box; }
+body { margin: 0; font-size: 11pt; line-height: 1.45; }
+main { max-width: 215.9mm; margin: 20px auto; padding: 14mm; background: white; }
+.herramientas { max-width: 215.9mm; margin: 20px auto; padding: 0 16px; }
+.herramientas p { font-size: 10pt; }
+button { padding: 10px 16px; border: 0; border-radius: 6px; background: #8b2252; color: white; font: inherit; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+button:focus-visible { outline: 3px solid #302529; outline-offset: 3px; }
+header { border-bottom: 2px solid #8b2252; padding-bottom: 12px; margin-bottom: 18px; }
+header p { margin: 4px 0; }
+.marca { color: #8b2252; font: bold 16pt Georgia, serif; }
+h1 { font-size: 20pt; margin: 10px 0 4px; }
+h2 { font-size: 13pt; margin: 18px 0 8px; break-after: avoid; }
+h3 { font-size: 10pt; margin: 0 0 6px; break-after: avoid; }
+p { margin: 6px 0; }
+.datos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
+.datos > div { break-inside: avoid; }
+dt { font-size: 9pt; color: #605057; }
+dd { margin: 2px 0 0; font-weight: bold; }
+.texto { white-space: pre-wrap; }
+p, dd, h1, h2, h3, a { overflow-wrap: anywhere; }
+figure { margin: 16px 0; break-inside: avoid; }
+figure img { display: block; max-width: 100%; max-height: 80mm; width: auto; height: auto; object-fit: contain; }
+figcaption { font-size: 9pt; color: #605057; margin-top: 4px; }
+.movimiento { break-inside: avoid; padding: 10px 0; border-top: 1px solid #ccc; }
+.adjunto { font-size: 9pt; }
+a { color: #64203f; }
+footer { border-top: 1px solid #ccc; padding-top: 10px; margin-top: 20px; font-size: 9pt; color: #605057; }
+@page { size: letter; margin: 14mm; }
+@media print {
+  :root { background: white; color: black; }
+  .herramientas { display: none; }
+  main { margin: 0; padding: 0; max-width: none; }
+  p { orphans: 3; widows: 3; }
+}
+@media screen and (max-width: 600px) {
+  main { padding: 20px; margin: 12px 0; }
+  .datos { grid-template-columns: 1fr; }
+}

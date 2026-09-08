@@ -79,3 +79,5 @@
     .fallas-toolbar,.fallas-detail-grid,.fallas-category-layout,.kpi-charts{grid-template-columns:1fr}
     .fallas-table{min-width:700px}
   }
+
+  .fallas-detail-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
