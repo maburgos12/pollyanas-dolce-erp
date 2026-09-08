@@ -5,11 +5,13 @@ from . import investment_views
 from . import views_mano_obra_area
 from . import views_presupuesto_real
 from . import views_presupuesto_catalogos
+from . import views_planeacion_personal
 from .views_produccion import ProducidoVsVendidoMermaView
 
 app_name = "reportes"
 
 urlpatterns = [
+    path("planeacion-personal/", views_planeacion_personal.planeacion_personal, name="planeacion_personal"),
     path("", views.consumo, name="home"),
     path(
         "mano-obra-area/clasificacion/",
