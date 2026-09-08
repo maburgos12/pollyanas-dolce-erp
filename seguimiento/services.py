@@ -385,12 +385,13 @@ class AgenteDGSeguimientoImporter:
             )
         return {project_id: list(values.values()) for project_id, values in by_project.items()}
 
+    @transaction.atomic
     def _upsert_item(self, row, source_table: str, tipo: str, counters: dict[str, int], checklist=None, participants=None):
         if not row.get("id") or not row.get("titulo"):
             counters["skipped"] += 1
             return
 
-        item = SeguimientoItem.objects.filter(
+        item = SeguimientoItem.objects.select_for_update().filter(
             metadata__source="agente_dg",
             metadata__source_table=source_table,
             metadata__source_id=row["id"],
@@ -425,6 +426,20 @@ class AgenteDGSeguimientoImporter:
         if not requiere_aprobacion and estatus == SeguimientoItem.ESTATUS_EN_REVISION:
             estatus = SeguimientoItem.ESTATUS_EN_PROCESO
 
+        # La revisión del ERP no existe en los estados de minutas del Agente DG.
+        # Conservar únicamente nuestro contrato local, nunca metadata recibida por webhook.
+        revision = (item.metadata or {}).get("revision_erp", {}) if item else {}
+        estado_revision = revision.get("estatus")
+        cancelado = estatus == SeguimientoItem.ESTATUS_CANCELADO or bool(row.get("archived_at"))
+        if requiere_aprobacion and estado_revision and not cancelado:
+            if estado_revision == SeguimientoItem.ESTATUS_EN_REVISION or revision.get("accion") == "devolver" or estado_revision != estatus:
+                metadata["revision_erp"] = revision
+                estatus = estado_revision
+        elif item and item.estatus == SeguimientoItem.ESTATUS_EN_REVISION and not cancelado:
+            # Compatibilidad con entregas anteriores al contrato; no perderlas por un OPEN.
+            if estatus not in {SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO}:
+                estatus = item.estatus
+
         defaults = {
             "tipo": tipo,
             "titulo": row["titulo"],
@@ -454,10 +469,10 @@ class AgenteDGSeguimientoImporter:
             SeguimientoItem.ESTATUS_CANCELADO,
         }
         cierre_at = agente_dg_as_datetime(row.get("archived_at") or row.get("completed_at"))
-        if cierre_fuente and cierre_at and item.aprobado_at != cierre_at:
+        if cierre_fuente and cierre_at and item.esta_cerrado and item.aprobado_at != cierre_at:
             item.aprobado_at = cierre_at
             item.save(update_fields=["aprobado_at", "updated_at"])
-        elif not cierre_fuente and item.aprobado_at:
+        elif not cierre_fuente and item.aprobado_at and not metadata.get("revision_erp"):
             item.aprobado_at = None
             item.save(update_fields=["aprobado_at", "updated_at"])
 

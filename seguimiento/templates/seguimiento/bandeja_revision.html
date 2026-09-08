@@ -66,7 +66,7 @@
         </div>
         <div class="pd-u-43b7eb3b77">
           <span class="pd-u-6e4b91a759">{{ item.updated_at|timesince }} atrás</span>
-          <a href="{% url 'seguimiento:detalle' item.pk %}" class="btn btn-secondary btn-sm">Ver detalle</a>
+          <a href="{% url 'seguimiento:detalle_dg' item.pk %}" class="btn btn-secondary btn-sm">Ver detalle</a>
         </div>
       </div>
 
@@ -96,7 +96,8 @@
           <span class="muted pd-u-f6909f80c2">— {{ item.ultimo_comentario.usuario.get_full_name|default:item.ultimo_comentario.usuario.username }}, {{ item.ultimo_comentario.created_at|date:"d/m/Y H:i" }}</span>
         </div>
         {% endif %}
-        {% if not item.ultima_evidencia and not item.ultimo_comentario %}
+        {% if item.entrega_auditada %}<p>Entrega registrada el {{ item.entrega_auditada.timestamp|date:"d/m/Y H:i" }}.</p>{% endif %}
+        {% if not item.ultima_evidencia and not item.ultimo_comentario and not item.entrega_auditada %}
         <span class="muted">Sin actividad registrada.</span>
         {% endif %}
         <div class="bi-subtle">Checks: {{ item.checklist_done }}/{{ item.checklist_total }} · {{ item.progreso_pct }}%</div>
@@ -124,6 +125,7 @@
       {% endif %}
 
       <!-- Aprobar / Devolver -->
+      {% if item.estatus == "EN_REVISION" %}
       <div class="seg-rev-actions">
         <p class="pd-u-b39bb2d1ee">Tu decisión</p>
         <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}">
@@ -143,6 +145,7 @@
           </div>
         </form>
       </div>
+      {% endif %}
 
     </div>
     {% endfor %}

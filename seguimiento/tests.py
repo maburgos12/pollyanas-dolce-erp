@@ -188,7 +188,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertFalse(SeguimientoComentario.objects.filter(seguimiento=self.item, comentario="Intento ajeno").exists())
         self.assertFalse(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=otro).exists())
 
-    def test_retroalimentacion_coloca_en_revision(self):
+    def test_retroalimentacion_conserva_avance_sin_entregar(self):
         response = self.client.post(
             f"/seguimiento/{self.item.pk}/retroalimentacion/",
             {"comentario": "Inventario revisado, faltan dos diferencias por validar."},
@@ -196,17 +196,17 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.item.refresh_from_db()
-        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_PROCESO)
         self.assertTrue(SeguimientoComentario.objects.filter(seguimiento=self.item, usuario=self.user).exists())
 
-    def test_evidencia_se_adjunta_y_coloca_en_revision(self):
+    def test_evidencia_se_adjunta_y_conserva_avance_sin_entregar(self):
         archivo = SimpleUploadedFile("evidencia.txt", b"foto o documento", content_type="text/plain")
 
         response = self.client.post(f"/seguimiento/{self.item.pk}/evidencias/", {"archivo": archivo})
 
         self.assertEqual(response.status_code, 302)
         self.item.refresh_from_db()
-        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_PROCESO)
         self.assertTrue(SeguimientoEvidencia.objects.filter(seguimiento=self.item, usuario=self.user).exists())
 
     def test_evidencia_rechaza_archivo_activo(self):
@@ -251,7 +251,7 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.item.refresh_from_db()
-        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+        self.assertEqual(self.item.estatus, SeguimientoItem.ESTATUS_PENDIENTE)
         solicitud = SeguimientoProrrogaSolicitud.objects.get(seguimiento=self.item)
         self.assertEqual(solicitud.usuario, self.user)
         self.assertEqual(solicitud.fecha_solicitada.isoformat(), fecha_solicitada)
@@ -427,7 +427,7 @@ class SeguimientoColaboradorTests(TestCase):
         response = self.client.get(f"/seguimiento/{self.item.pk}/")
 
         item = response.context["item"]
-        self.assertEqual(getattr(item, "estado_operativo_label", None), "Listo para cerrar")
+        self.assertEqual(getattr(item, "estado_operativo_label", None), "Listo para entregar")
         self.assertEqual(getattr(item, "estado_operativo_tone", None), "listo_cerrar")
         self.assertEqual(item.get_estatus_display(), "Pendiente")
 
@@ -463,7 +463,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(getattr(item, "estado_operativo_label", None), "Bloqueado")
         self.assertEqual(getattr(item, "estado_operativo_tone", None), "bloqueado")
         self.assertFalse(getattr(item, "listo_para_cerrar", True))
-        self.assertNotContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
+        self.assertNotContains(response, "Todos los puntos están completos. Envía el resultado a Dirección General para su aprobación.")
 
     def test_estado_operativo_no_marca_listo_si_fuente_esta_cerrada_o_archivada(self):
         self.check.completado = True
@@ -481,7 +481,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(getattr(item, "estado_operativo_label", None), "Pendiente")
         self.assertEqual(getattr(item, "estado_operativo_tone", None), "pendiente")
         self.assertFalse(getattr(item, "listo_para_cerrar", True))
-        self.assertNotContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
+        self.assertNotContains(response, "Todos los puntos están completos. Envía el resultado a Dirección General para su aprobación.")
 
     def test_colaborador_con_checklist_completo_ve_cierre_como_siguiente_accion(self):
         self.check.completado = True
@@ -489,10 +489,10 @@ class SeguimientoColaboradorTests(TestCase):
 
         response = self.client.get(f"/seguimiento/{self.item.pk}/")
 
-        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para cerrar</span>')
-        self.assertContains(response, "Todos los puntos están completos. Solo falta confirmar el cierre.")
-        self.assertContains(response, 'id="seg-cierre-acuerdo"')
-        self.assertContains(response, "Cerrar acuerdo")
+        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para entregar</span>')
+        self.assertContains(response, "Todos los puntos están completos. Envía el resultado a Dirección General para su aprobación.")
+        self.assertContains(response, 'id="seg-entrega"')
+        self.assertContains(response, "Enviar a revisión")
         self.assertContains(response, "<dt>Estado ERP</dt><dd>Pendiente</dd>", html=True)
 
     def test_dg_ve_que_colaborador_termino_y_falta_cierre(self):
@@ -507,10 +507,10 @@ class SeguimientoColaboradorTests(TestCase):
 
         response = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
 
-        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para cerrar</span>')
+        self.assertContains(response, 'class="seg-badge-status listo_cerrar">Listo para entregar</span>')
         self.assertContains(
             response,
-            "El colaborador terminó todos los puntos. Falta que confirme el cierre del acuerdo.",
+            "El colaborador terminó los puntos. Falta que entregue el resultado para tu revisión.",
         )
         self.assertContains(response, "<dt>Estado app</dt><dd>OPEN</dd>", html=True)
         self.assertContains(response, "<dt>Estado ERP</dt><dd>Pendiente</dd>", html=True)
@@ -526,7 +526,7 @@ class SeguimientoColaboradorTests(TestCase):
 
         response = self.client.get("/seguimiento/panel/?estado=activos")
 
-        self.assertContains(response, 'class="bi-pill pill-listo_cerrar">Listo para cerrar</span>')
+        self.assertContains(response, 'class="bi-pill pill-listo_cerrar">Listo para entregar</span>')
 
     def test_dg_cierra_minuta_agente_dg_con_writeback(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
