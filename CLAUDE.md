@@ -571,3 +571,36 @@ por sí solos un estado terminal.
 - Ante error, conservar inputs y habilitar reintento. Para POST tradicional, regresar a un identificador estable mediante fragmento.
 - Usar confirmación modal solo para acciones destructivas o irreversibles; debe admitir Escape, atrapar foco y devolverlo al disparador.
 - Registrar cada migración en `docs/ux/action-context-coverage.md`; no declarar cobertura total mientras existan pantallas pendientes.
+
+
+## CI automático obligatorio para cada implementación
+
+- GitHub Actions ejecuta `.github/workflows/ci.yml` al abrir o actualizar un PR y
+  en cada push a `main`, incluidos cambios documentales para que el check requerido
+  nunca quede pendiente por filtros de rutas. También admite ejecución manual.
+- Antes de subir cambios, Codex ejecuta checks, verificación de migraciones y las
+  pruebas locales del módulo afectado sobre PostgreSQL 16. El CI descubre la suite
+  completa y la reparte automáticamente en cuatro jobs aislados; las pruebas nuevas
+  se incluyen sin mantener listas manuales de módulos. Las clases permanecen juntas.
+- Cada grupo prepara su base una sola vez. Las pruebas de cierre de inventario y
+  rendimiento forman parte de esa suite completa; no se repiten en bases adicionales.
+- `scripts/ci_test_runner.py` se selecciona explícitamente en CI; no cambiar el runner
+  ni las opciones de seguridad del ERP en producción para acelerar pruebas.
+- Se cancelan únicamente ejecuciones superadas del mismo PR. Nunca cancelar otros
+  PR ni commits de `main` como parte de esta optimización.
+- El check final `test` exige éxito de checks, recuperación de recetas y los cuatro
+  grupos; comprueba sus inventarios para detectar pruebas omitidas, duplicadas o
+  descubrimientos diferentes. Un fallo, cancelación o grupo omitido bloquea el gate.
+- `main` debe exigir el check `test` de GitHub Actions y PR antes del merge, también
+  para administradores. No omitir pruebas, usar bypass, quitar protecciones ni
+  declarar éxito basándose solo en que empezó una ejecución.
+- Antes del merge verificar el SHA actual del PR y sus checks. Si cambia el código,
+  esperar la nueva ejecución. Medir la duración real del CI; no prometer un tiempo
+  fijo ni confundir tiempo en cola con ejecución de pruebas.
+- Flujo de entrega: solicitud → worktree registrado → implementación → validación
+  local → PR → CI completo aprobado → merge → despliegue oficial cuando aplique →
+  validación en el consumidor real → cierre por el ciclo de vida del proyecto.
+  Para cambios exclusivos del CI, el consumidor real es GitHub Actions y la
+  protección de `main`; validar allí el PR y la ejecución posterior al merge.
+- Estas reglas no amplían la autorización para cambios delicados ni sustituyen la
+  validación en producción cuando la implementación modifica el ERP.

@@ -2423,7 +2423,8 @@ class PointDeliverySyncApiTests(APITestCase):
 
 
 class PointDeliveryIntakeAssignmentRaceTests(TransactionTestCase):
-    reset_sequences = True
+    # No fixed IDs are needed. Resetting sequences collides with migrated branches
+    # when this is the first TransactionTestCase in an isolated CI shard.
 
     def setUp(self):
         self.actor = get_user_model().objects.create_user(
