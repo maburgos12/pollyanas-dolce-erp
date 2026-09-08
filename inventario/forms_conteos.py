@@ -20,3 +20,9 @@ class PrepararConteoForm(forms.Form):
         profiles=UserProfile.objects.filter(sucursal__in=branches).values('user_id')
         grants=AccesoConteoSucursal.objects.filter(sucursal__in=branches,activo=True,capturar=True).values('user_id')
         self.fields['responsable'].queryset=get_user_model().objects.filter(is_active=True).filter(Q(pk__in=profiles)|Q(pk__in=grants)).order_by('username')
+
+
+class PrepararMiConteoForm(forms.Form):
+    fecha = forms.DateField(label='Fecha del conteo', widget=forms.DateInput(attrs={'type':'date'}, format='%Y-%m-%d'))
+    titulo = forms.CharField(max_length=180, label='Nombre del conteo', initial='Conteo de cierre')
+    request_id = forms.UUIDField(widget=forms.HiddenInput)

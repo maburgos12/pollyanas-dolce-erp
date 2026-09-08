@@ -98,11 +98,11 @@ class ConteoViewsTests(TestCase):
         for version,action,payload in [(1,'iniciar',{}),(2,'enviar',{'lecturas':{str(self.count.lineas.get().pk):{'cantidad':'0','incidencia':''}}})]:
             ejecutar_accion(conteo_id=self.count.pk,actor=self.operator,action=action,version=version,request_id=uuid4(),payload=payload)
         self.client.force_login(self.admin)
-        response=self.client.get(self.url())
+        response=self.client.get(reverse('inventario:conteos_erp:detalle',args=[self.count.pk]))
         self.assertEqual(response.status_code,200)
         self.assertContains(response,'Sin referencia')
         self.assertContains(response,'Solicitar reconteo')
-        exported=self.client.get(self.url('exportar'))
+        exported=self.client.get(reverse('inventario:conteos_erp:exportar',args=[self.count.pk]))
         self.assertEqual(exported.status_code,200)
         row=list(load_workbook(BytesIO(exported.content)).active.values)[1]
         self.assertEqual(row[8],0)
@@ -127,7 +127,7 @@ class ConteoViewsTests(TestCase):
         products=PointProduct.objects.bulk_create([PointProduct(external_id=f'bulk-{i}',sku=f'B{i}',name=f'Artículo {i}') for i in range(510)])
         items=[{'producto_id':p.pk,'unidad':'PZA','fuente_unidad':'Prueba de formato compacto'} for p in products]
         self.client.force_login(self.admin)
-        response=self.client.post(reverse('operacion:conteos_app:preparar'),{'sucursal':self.branch.pk,'responsable':self.operator.pk,'fecha':date.today().isoformat(),'titulo':'Alcance grande','request_id':str(uuid4()),'articulos_json':json.dumps(items)},HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        response=self.client.post(reverse('inventario:conteos_erp:preparar'),{'sucursal':self.branch.pk,'responsable':self.operator.pk,'fecha':date.today().isoformat(),'titulo':'Alcance grande','request_id':str(uuid4()),'articulos_json':json.dumps(items)},HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(response.status_code,200,response.content)
         count=ConteoSucursal.objects.get(titulo='Alcance grande')
         url=reverse('operacion:conteos_app:accion',args=[count.pk])

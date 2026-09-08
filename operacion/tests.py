@@ -293,7 +293,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260907-conteos-diseno-v12")
+        self.assertContains(response, "20260908-conteos-sesion-v13")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -316,7 +316,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260907-conteos-diseno-v12"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260908-conteos-sesion-v13"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -359,7 +359,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v38-conteos-diseno-movil", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v39-conteos-sucursal-sesion", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3189,7 +3189,7 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v38-conteos-diseno-movil", sw_content)
+        self.assertIn("v39-conteos-sucursal-sesion", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/conteos/")', sw_content)
         self.assertIn('key.startsWith("pollyanas-app-operativa-pwa-")', sw_content)

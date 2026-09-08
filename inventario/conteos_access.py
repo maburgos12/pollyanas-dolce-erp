@@ -37,3 +37,12 @@ def conteos_visibles(user):
     from core.models import Sucursal
     operational = Sucursal.objects.filter(sucursales_operativas_q()).values('pk')
     return qs.filter(Q(sucursal_id__in=grants)|Q(responsable=user,sucursal_id__in=profile), sucursal_id__in=operational)
+
+
+def sucursal_app(user):
+    """La app de sucursal siempre usa la asignación vigente del perfil."""
+    if not _activo(user):
+        return None
+    profile = UserProfile.objects.select_related('sucursal').filter(user=user).first()
+    branch = profile.sucursal if profile else None
+    return branch if branch and branch.esta_operativa() else None

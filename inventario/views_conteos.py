@@ -20,8 +20,8 @@ from openpyxl import Workbook
 
 from maestros.models import Insumo
 from pos_bridge.models import PointProduct
-from .conteos_access import conteos_visibles, puede_capturar, puede_coordinar, puede_revisar
-from .forms_conteos import PrepararConteoForm
+from .conteos_access import conteos_visibles, puede_capturar, puede_coordinar, puede_revisar, sucursal_app
+from .forms_conteos import PrepararConteoForm, PrepararMiConteoForm
 from .models_conteos import LecturaConteoSucursal
 from .services_conteos import ConteoConflict, ejecutar_accion, lecturas_efectivas, preparar_conteo
 
@@ -38,8 +38,16 @@ def _url(request, name, *args):
     return reverse(_namespace(request) + ':' + name, args=args)
 
 
+def _visible(request):
+    qs = conteos_visibles(request.user)
+    if _namespace(request) == 'operacion:conteos_app':
+        assigned = sucursal_app(request.user)
+        return qs.filter(sucursal=assigned) if assigned else qs.none()
+    return qs
+
+
 def _count(request, pk):
-    return get_object_or_404(conteos_visibles(request.user).select_related('sucursal','responsable'), pk=pk)
+    return get_object_or_404(_visible(request).select_related('sucursal','responsable'), pk=pk)
 
 
 def _context(request, count, *, ack='', ack_version=None):
@@ -91,7 +99,7 @@ def _evidence_links(request,count,editable):
 @never_cache
 @require_GET
 def lista(request):
-    qs = conteos_visibles(request.user).select_related('sucursal','responsable')
+    qs = _visible(request).select_related('sucursal','responsable')
     branch = request.GET.get('sucursal','')
     state = request.GET.get('estado','')
     if branch.isdigit(): qs = qs.filter(sucursal_id=branch)
@@ -100,7 +108,9 @@ def lista(request):
     page = Paginator(qs,30).get_page(request.GET.get('page'))
     return render(request,'inventario/conteos/lista.html',{'base_template':_base(request),'page':page,
         'rows':[{'conteo':c,'url':_url(request,'detalle',c.pk)} for c in page],
-        'puede_preparar':puede_coordinar(request.user),'preparar_url':_url(request,'preparar'),
+        'es_app':_namespace(request) == 'operacion:conteos_app',
+        'sucursal_asignada':sucursal_app(request.user), 'puede_coordinar':puede_coordinar(request.user),
+        'puede_preparar':bool(sucursal_app(request.user)) if _namespace(request) == 'operacion:conteos_app' else puede_coordinar(request.user),'preparar_url':_url(request,'preparar'),
         'estado':state,'sucursal':branch})
 
 
@@ -183,9 +193,24 @@ def _catalogo(tipo, query):
 @login_required
 @never_cache
 def preparar(request):
-    if not puede_coordinar(request.user): raise PermissionDenied
+    es_app = _namespace(request) == 'operacion:conteos_app'
+    assigned = sucursal_app(request.user) if es_app else None
+    if es_app:
+        if assigned is None:
+            if _async(request):
+                return JsonResponse({'ok':False,'toast':{'type':'error','message':'Tu cuenta no tiene una sucursal operativa asignada.','persistent':True}},status=403)
+            return render(request, 'inventario/conteos/sin_sucursal.html', {
+                'base_template':_base(request), 'puede_coordinar':puede_coordinar(request.user)}, status=403)
+        # These values are never accepted from clients, including admin sessions.
+        if any(key in request.POST for key in ('sucursal','responsable')):
+            if _async(request):
+                return JsonResponse({'ok':False,'toast':{'type':'error','message':'La sucursal y el responsable se determinan desde tu sesión.','persistent':True}},status=403)
+            raise PermissionDenied('La sucursal y el responsable se determinan desde tu sesión.')
+    elif not puede_coordinar(request.user):
+        raise PermissionDenied
     if request.method not in ('GET','POST'): return HttpResponse(status=405)
-    form = PrepararConteoForm(request.POST or None, initial={'fecha':timezone.localdate(),'request_id':uuid4()})
+    form_class = PrepararMiConteoForm if es_app else PrepararConteoForm
+    form = form_class(request.POST if request.method == 'POST' else None, initial={'fecha':timezone.localdate(),'request_id':uuid4()})
     tipo = request.GET.get('tipo','producto')
     query = request.GET.get('q','').strip()[:120]
     if request.method == 'POST' and form.is_valid():
@@ -198,7 +223,8 @@ def preparar(request):
                     if len(key)<2 or key[0] not in 'pi' or not key[1:].isdigit(): raise ValidationError('Artículo inválido.')
                     items.append({'producto_id' if key[0]=='p' else 'insumo_id':int(key[1:]),
                                   'unidad':request.POST.get('unidad_'+key,''), 'fuente_unidad':request.POST.get('fuente_'+key,'')})
-            count = preparar_conteo(actor=request.user,items=items,**form.cleaned_data)
+            identity = {'sucursal':assigned, 'responsable':request.user, 'desde_app':True} if es_app else {}
+            count = preparar_conteo(actor=request.user,items=items,**form.cleaned_data,**identity)
         except (ValidationError,ValueError) as exc:
             form.add_error(None,exc)
         else:
@@ -214,7 +240,7 @@ def preparar(request):
             row['fuente'] = request.POST.get('fuente_'+row['key'],row['fuente'])
         if _async(request):
             return JsonResponse({'ok':False,'toast':{'type':'error','message':' '.join(str(e) for errors in form.errors.values() for e in errors),'persistent':True}},status=400)
-    return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})
+    return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'es_app':es_app,'sucursal_asignada':assigned,'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})
 
 
 def _excel_text(value):
