@@ -1,5 +1,5 @@
 {% extends base_template %}{% load static %}
 {% block title %}CF-{{ conteo.pk }} · {{ conteo.titulo }}{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20260907-1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20260907-2">{% endblock %}
 {% block content %}<div class="conteos-page">{% include 'inventario/conteos/_detalle.html' %}</div>{% endblock %}
 {% block extra_js %}<script src="{% static 'inventario/conteos.js' %}?v=20260907-1" defer></script>{% endblock %}

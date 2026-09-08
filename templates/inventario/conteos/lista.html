@@ -1,6 +1,6 @@
 {% extends base_template %}{% load static %}
 {% block title %}Conteos de sucursales · Pollyana's Dolce{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20260907-1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20260907-2">{% endblock %}
 {% block content %}<div class="conteos-page">
 <header class="conteos-heading"><div><h1>Conteos físicos</h1><p>Capturas de sucursal, revisiones y reconteos.</p></div>{% if puede_preparar %}<a class="count-button" href="{{ preparar_url }}">Preparar conteo</a>{% endif %}</header>
 <form class="conteos-filters" method="get"><label>Estado<select name="estado"><option value="">Todos</option><option value="CAPTURA" {% if estado == 'CAPTURA' %}selected{% endif %}>En captura</option><option value="ENVIADO" {% if estado == 'ENVIADO' %}selected{% endif %}>En revisión</option><option value="RECONTEO" {% if estado == 'RECONTEO' %}selected{% endif %}>Reconteo</option><option value="ACEPTADO" {% if estado == 'ACEPTADO' %}selected{% endif %}>Aceptado</option><option value="CANCELADO" {% if estado == 'CANCELADO' %}selected{% endif %}>Cancelado</option></select></label><button class="count-button secondary" type="submit">Filtrar</button></form>
