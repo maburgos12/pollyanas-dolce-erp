@@ -91,3 +91,4 @@
 #form-proveedor :focus-visible{outline:2px solid var(--pd-wine);outline-offset:2px}
 #form-proveedor button:active{filter:brightness(.95)}
 @media(max-width:600px){.fallas-provider-backdrop{padding:12px}#form-proveedor{max-height:calc(100dvh - 24px)}}
+#buscar-proveedor::placeholder,#form-proveedor input::placeholder{color:#7a6565;opacity:1}
