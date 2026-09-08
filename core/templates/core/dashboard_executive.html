@@ -179,11 +179,10 @@
     </article>
     <article class="home-exec-card home-exec-kpi is-hero">
       <div class="home-exec-kpi-value is-{{ yoy_panel.hero_row.comparison_tone|default:'warning' }}">
-        {{ yoy_panel.hero_row.comparison_label|default:"Comparativo pendiente" }}
+        {{ yoy_panel.hero_row.comparison_label|default:"N/D" }}
       </div>
       <div class="home-exec-kpi-label">Mes vs año anterior</div>
       <div class="home-exec-note">{{ yoy_panel.hero_note|default:"Sin mes" }}</div>
-      {% if yoy_panel.coverage_note %}<div class="home-exec-note">{{ yoy_panel.coverage_note }}</div>{% endif %}
     </article>
   </section>
 
@@ -223,7 +222,7 @@
           <h2 class="home-exec-title">Mes contra año anterior</h2>
         </div>
         <div class="home-exec-panel-actions">
-          <span class="home-exec-pill">{{ yoy_panel.hero_note|default:"Sin mes" }}</span>
+          <span class="home-exec-pill" title="{{ yoy_panel.hero_note }}">Mismo corte anual</span>
           <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Comparativo ventas</a>
         </div>
       </div>

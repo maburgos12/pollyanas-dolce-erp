@@ -105,7 +105,7 @@ class ClosedSalesTests(TestCase):
         })
         self.assertIsNone(row['prev_amount'])
         self.assertIsNone(row['amount_delta_pct'])
-        self.assertEqual(row['comparison_label'], 'Comparativo pendiente')
+        self.assertEqual(row['comparison_label'], 'N/D')
         self.assertIn('COLOSIO', row['coverage_note'])
 
     def test_missing_middle_day_is_not_a_complete_month(self):
@@ -214,3 +214,32 @@ class ClosedSalesTests(TestCase):
         self.assertEqual(response.context['yoy_panel']['cutoff_date'], date(2026, 9, 1))
         self.assertContains(response, '1–1 sep 2026 vs 1–1 sep 2025')
         self.assertContains(response, '-10.0%')
+
+    def test_total_network_keeps_history_when_current_branch_has_no_prior_sales(self):
+        from reportes.models import FactVentaDiaria
+        from reportes.executive_panels import build_closed_yoy_panel
+        for year, branch, amount in [(2025, self.branches[0], 100),
+                                     (2026, self.branches[0], 90),
+                                     (2026, self.branches[1], 20)]:
+            FactVentaDiaria.objects.create(fecha=date(year, 9, 1), sucursal=branch.erp_branch,
+                producto_clave='TOTAL', cantidad=1, venta_total=amount,
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE)
+        panel = build_closed_yoy_panel(cutoff=date(2026, 9, 1), months=1)
+        self.assertEqual(panel['hero_row']['prev_amount'], Decimal('100'))
+        self.assertEqual(panel['hero_row']['amount'], Decimal('110'))
+        self.assertEqual(panel['hero_row']['amount_delta_pct'], Decimal('10'))
+        self.assertEqual(panel['rows'][-1]['prev_amount'], Decimal('100'))
+        self.assertFalse(panel['coverage_note'])
+
+
+    def test_unavailable_network_history_is_not_reported_as_zero(self):
+        from reportes.closed_sales import closed_month_comparison
+        with patch('reportes.closed_sales.get_daily_sales_bulk', return_value={'dates': {
+            '2026-09-01': self.day_payload('90'),
+        }}):
+            row = closed_month_comparison(cutoff=date(2026, 9, 1),
+                previous_totals={'amount': None, 'quantity': None})
+        self.assertIsNone(row['prev_amount'])
+        self.assertIsNone(row['amount_delta_pct'])
+        self.assertEqual(row['comparison_label'], 'N/D')
+        self.assertNotIn('venta cero', row['coverage_note'])

@@ -146,7 +146,7 @@ def _dashboard_cached_value(
     parts: tuple[object, ...] = (),
 ):
     return get_or_set_versioned_cache(
-        key_parts=("erp", "dashboard", "closed-sales-v1", section, *parts),
+        key_parts=("erp", "dashboard", "closed-sales-v2-network-total", section, *parts),
         scopes=("dashboard",),
         builder=builder,
         runtime_cache=runtime_cache,
