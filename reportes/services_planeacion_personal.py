@@ -12,9 +12,9 @@ from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
 from core.models import Sucursal
-from pos_bridge.models import PointDailySale
 from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
+from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 from .models import LineaPresupuestoMensual
 
 ZERO = Decimal('0')
@@ -68,7 +68,8 @@ def build_personnel_plan(cutoff=None):
     rows = {m: dict(month=m, sales=None, ordinary=ZERO, extraordinary=ZERO,
                     imss=None, rcv=None, isn=None, fees=None, cfdis=0,
                     sources=[], errors=[]) for m in periods}
-    sales = PointDailySale.objects.filter(sale_date__gte=start, sale_date__lt=end)
+    sales = official_point_sales_rows_for_range(
+        start_date=start, end_date=end - timedelta(days=1))
     for item in sales.annotate(month=TruncMonth('sale_date')).values('month').annotate(
             amount=Sum('total_amount'), branches=Count('branch_id', distinct=True)):
         month = item['month']

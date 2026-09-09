@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone as tz
 from decimal import Decimal as D
+from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -10,6 +11,8 @@ from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
 from reportes.models import AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 from reportes.services_planeacion_personal import budget_policy, build_personnel_plan, parse_payroll, RFC
+from orquestacion.services.pointdailysale_guard import scan_pointdailysale_usage
+from ventas.services.sales_canonical_source import OFFICIAL_POINT_SOURCE, RECENT_POINT_SOURCE
 
 
 def payroll_xml(end='2026-08-31', kind='O', amount='100'):
@@ -20,6 +23,11 @@ def payroll_xml(end='2026-08-31', kind='O', amount='100'):
 
 
 class BudgetPolicyTests(SimpleTestCase):
+    def test_personnel_plan_respects_sales_read_boundary(self):
+        scan = scan_pointdailysale_usage(base_dir=Path(__file__).resolve().parents[1])
+        self.assertEqual([v for v in scan.violations
+                          if v.relative_path == 'reportes/services_planeacion_personal.py'], [])
+
     def test_real_recent_quarter(self):
         result = budget_policy([D('3506661.80'), D('3171945.93'), D('3455069.62')])
         self.assertEqual(result['average'], D('3377892.45'))
@@ -45,7 +53,43 @@ class PersonnelPlanTests(TestCase):
         self.product = PointProduct.objects.create(external_id='test-plan', name='Pastel')
         for month, amount in [(6, 300), (7, 200), (8, 400), (9, 9000)]:
             PointDailySale.objects.create(branch=self.branch, product=self.product,
-                                         sale_date=date(2026, month, 1), total_amount=amount)
+                                         sale_date=date(2026, month, 1), total_amount=amount,
+                                         source_endpoint=OFFICIAL_POINT_SOURCE)
+
+    def test_official_sales_preserve_tax_amount_dates_and_branch_averages(self, _):
+        other = PointBranch.objects.create(external_id='plan-b', name='Sucursal B')
+        for month in (6, 7, 8):
+            PointDailySale.objects.create(
+                branch=other, product=self.product, sale_date=date(2026, month, 28),
+                total_amount=116, gross_amount=100, source_endpoint=OFFICIAL_POINT_SOURCE)
+        PointDailySale.objects.create(
+            branch=self.branch, product=self.product, sale_date=date(2026, 8, 31),
+            total_amount=116, gross_amount=100, source_endpoint=OFFICIAL_POINT_SOURCE)
+        PointDailySale.objects.create(
+            branch=other, product=self.product, sale_date=date(2025, 12, 31),
+            total_amount=9000, source_endpoint=OFFICIAL_POINT_SOURCE)
+        # Category and unknown staging rows must not inflate the official report.
+        for source, day in ((RECENT_POINT_SOURCE, 2), ('unknown', 3)):
+            PointDailySale.objects.create(
+                branch=self.branch, product=self.product, sale_date=date(2026, 8, day),
+                total_amount=9000, source_endpoint=source)
+        result = build_personnel_plan()
+        self.assertEqual(result['sales_total'], D(1364))
+        self.assertIsNone(result['months'][0]['sales'])
+        self.assertEqual(result['months'][-1]['sales'], D(632))
+        self.assertEqual(result['months'][-1]['target'], D(158))
+        branches = {r['branch_id']: r for r in result['branches']}
+        self.assertEqual(branches[self.branch.pk]['recent_average'], D('338.67'))
+        self.assertEqual(branches[other.pk]['recent_average'], D(116))
+        self.assertEqual(sum(r['amount'] for r in result['branches']), result['sales_total'])
+
+    def test_legacy_only_month_remains_missing(self, _):
+        PointDailySale.objects.filter(sale_date__month=8).update(source_endpoint=RECENT_POINT_SOURCE)
+        result = build_personnel_plan()
+        self.assertIsNone(result['months'][-1]['sales'])
+        self.assertIsNone(result['months'][-1]['target'])
+        self.assertIsNone(result['policy'])
+        self.assertIsNone(result['branches'][0]['recent_average'])
 
     def invoice(self, uuid, xml, **kwargs):
         values = dict(uuid=uuid, rfc_emisor=RFC, rfc_receptor='PERSONA', subtotal=100,
@@ -136,6 +180,10 @@ class PersonnelPlanTests(TestCase):
         response = self.client.get(path + '?formato=csv')
         self.assertContains(response, 'Ventas Point')
         self.assertNotContains(response, 'local-test')
+        self.assertContains(response, '2026-08-01,400.00,100.00,108.00')
+        data = self.client.get(path + '?formato=json').json()
+        self.assertEqual(data['sales_total'], '900.00')
+        self.assertEqual(data['months'][-1]['sales'], '400.00')
         reader = get_user_model().objects.create_user(username='without-report-access')
         self.client.force_login(reader)
         self.assertEqual(self.client.get(path).status_code, 403)
