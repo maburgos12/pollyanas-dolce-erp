@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -15,6 +16,8 @@ from django.views.decorators.http import require_POST
 from core.access import ROLE_DG, has_any_role
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto
+
+from .forms_cotizaciones import CotizacionDepartamentalForm, ProveedorCotizacionForm, crear_proveedor_cotizacion
 
 from .models import (
     CompromisoCompraDepartamental,
@@ -250,7 +253,7 @@ def departamental_enviar(request, pk):
 
 
 @login_required
-def departamental_detalle(request, pk):
+def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error=None, status=200):
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
             "items__cotizaciones__proveedor", "items__eventos"
@@ -266,6 +269,17 @@ def departamental_detalle(request, pk):
     total_comprometido = Decimal("0")
     total_gastado = Decimal("0")
     for item in solicitud.items.all():
+        item.puede_cotizar = (item.estado not in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
+                             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
+        item.cotizacion_form = (cotizacion_error[1] if cotizacion_error and cotizacion_error[0] == item.pk
+                                else CotizacionDepartamentalForm(item=item))
+        item.proveedor_form = (proveedor_error[1] if proveedor_error and proveedor_error[0] == item.pk
+                               else ProveedorCotizacionForm(auto_id=f'proveedor-{item.pk}-%s'))
+        if request.GET.get('item') == str(item.pk):
+            item.cotizacion_form.initial['proveedor'] = request.GET.get('proveedor')
+        item.abrir_cotizacion = bool((cotizacion_error and cotizacion_error[0] == item.pk)
+                                    or (proveedor_error and proveedor_error[0] == item.pk)
+                                    or request.GET.get('item') == str(item.pk))
         if item.subtotal_estimado is not None:
             total_solicitado += item.subtotal_estimado
         seleccionada = next((quote for quote in item.cotizaciones.all() if quote.seleccionada), None)
@@ -293,6 +307,7 @@ def departamental_detalle(request, pk):
             "total_comprometido": total_comprometido,
             "total_gastado": total_gastado,
         },
+        status=status,
     )
 
 
@@ -350,31 +365,85 @@ def departamental_asignar(request, pk):
     return _respuesta_accion(request, message="Solicitud asignada; los artículos quedaron por cotizar.", redirect_url=reverse("compras:departamental_detalle", args=[pk]))
 
 
+def _error_cotizacion(request, item, form, *, proveedor=False, status=400):
+    message = " ".join(str(error) for errors in form.errors.values() for error in errors)
+    if request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", ""):
+        return JsonResponse({"ok": False, "toast": {"type": "error", "message": message, "persistent": True}}, status=status)
+    return departamental_detalle(request, item.solicitud_id, status=status,
+                                 **{"proveedor_error" if proveedor else "cotizacion_error": (item.pk, form)})
+
+
+@login_required
+@require_POST
+def departamental_proveedor_crear(request, item_pk):
+    if not puede_gestionar_compras_departamentales(request.user):
+        raise PermissionDenied
+    item = get_object_or_404(ItemCompraDepartamental, pk=item_pk)
+    form = ProveedorCotizacionForm(request.POST, auto_id=f'proveedor-{item.pk}-%s')
+    if not form.is_valid():
+        return _error_cotizacion(request, item, form, proveedor=True)
+    try:
+        proveedor = crear_proveedor_cotizacion(**form.cleaned_data, actor=request.user, item=item)
+    except ValidationError as exc:
+        form.add_error('nombre', exc)
+        return _error_cotizacion(request, item, form, proveedor=True, status=409)
+    message = 'Proveedor guardado y seleccionado. Puedes continuar la cotización.'
+    if request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", ""):
+        item.cotizacion_form = CotizacionDepartamentalForm(item=item, initial={'proveedor': proveedor.pk})
+        item.proveedor_form = ProveedorCotizacionForm(auto_id=f'proveedor-{item.pk}-%s')
+        return JsonResponse({'ok':True, 'target':f'#proveedor-item-{item.pk}',
+                             'html':render_to_string('compras/departamentales/proveedor_cotizacion.html', {'item':item}, request=request),
+                             'toast':{'type':'success','message':message}}, status=201)
+    destino = reverse('compras:departamental_detalle', args=[item.solicitud_id])
+    return _respuesta_accion(request, message=message, redirect_url=f'{destino}?item={item.pk}&proveedor={proveedor.pk}#cotizar-{item.pk}')
+
+
 @login_required
 @require_POST
 def departamental_cotizar(request, item_pk):
     if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     item = get_object_or_404(ItemCompraDepartamental.objects.select_related("solicitud"), pk=item_pk)
-    cotizacion = CotizacionCompraDepartamental.objects.create(
-        item=item,
-        proveedor=get_object_or_404(Proveedor, pk=request.POST.get("proveedor"), activo=True),
-        documento=request.FILES.get("documento"),
-        cantidad_ofertada=Decimal(request.POST.get("cantidad_ofertada") or item.cantidad),
-        costo_unitario=Decimal(request.POST.get("costo_unitario")),
-        descuento=Decimal(request.POST.get("descuento") or "0"),
-        impuestos=Decimal(request.POST.get("impuestos") or "0"),
-        envio=Decimal(request.POST.get("envio") or "0"),
-        instalacion=Decimal(request.POST.get("instalacion") or "0"),
-        otros_cargos=Decimal(request.POST.get("otros_cargos") or "0"),
-        garantia_observaciones=request.POST.get("garantia_observaciones", "").strip(),
-    )
-    if request.POST.get("seleccionar"):
-        seleccionar_cotizacion(cotizacion, actor=request.user)
-    else:
-        item.estado = ItemCompraDepartamental.ESTADO_COTIZANDO
-        item.save(update_fields=["estado", "actualizado_en"])
-    return _respuesta_accion(request, message="Cotización guardada.", redirect_url=reverse("compras:departamental_detalle", args=[item.solicitud_id]))
+    form = CotizacionDepartamentalForm(request.POST, request.FILES, item=item)
+    if not form.is_valid():
+        return _error_cotizacion(request, item, form)
+    with transaction.atomic():
+        item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
+        if item.estado in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA'):
+            form.add_error(None, 'Este artículo ya no admite nuevas cotizaciones.')
+            return _error_cotizacion(request, item, form, status=409)
+        cotizacion = form.save(commit=False)
+        cotizacion.item = item
+        cotizacion.save()
+        if request.POST.get("seleccionar"):
+            seleccionar_cotizacion(cotizacion, actor=request.user)
+        else:
+            if not item.cotizaciones.filter(seleccionada=True).exists():
+                item.estado = ItemCompraDepartamental.ESTADO_COTIZANDO
+                item.save(update_fields=["estado", "actualizado_en"])
+                item.solicitud.actualizar_estado_desde_items()
+            EventoCompraDepartamental.objects.create(solicitud=item.solicitud, item=item, actor=request.user,
+                                                      tipo='COTIZACION_REGISTRADA', detalle=f'{cotizacion.proveedor}: ${cotizacion.total_adquisicion}')
+    destino = reverse('compras:departamental_detalle', args=[item.solicitud_id])
+    return _respuesta_accion(request, message="Cotización guardada.", redirect_url=f'{destino}#item-{item.pk}', reload=True)
+
+
+@login_required
+@require_POST
+def departamental_cotizacion_seleccionar(request, quote_pk):
+    if not puede_gestionar_compras_departamentales(request.user):
+        raise PermissionDenied
+    quote = get_object_or_404(CotizacionCompraDepartamental.objects.select_related('item','proveedor'), pk=quote_pk)
+    destino = reverse('compras:departamental_detalle', args=[quote.item.solicitud_id]) + f'#item-{quote.item_id}'
+    with transaction.atomic():
+        item = ItemCompraDepartamental.objects.select_for_update().get(pk=quote.item_id)
+        if item.estado in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA'):
+            return _respuesta_accion(request, message='Este artículo ya no admite cambiar la cotización seleccionada.', redirect_url=destino, status=409)
+        if not quote.proveedor.activo:
+            return _respuesta_accion(request, message='El proveedor está inactivo. Revisa su ficha antes de seleccionar.', redirect_url=destino, status=409)
+        if not CotizacionCompraDepartamental.objects.get(pk=quote.pk).seleccionada:
+            seleccionar_cotizacion(quote, actor=request.user)
+    return _respuesta_accion(request, message='Cotización seleccionada.', redirect_url=destino, reload=True)
 
 
 @login_required

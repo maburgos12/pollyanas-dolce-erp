@@ -384,6 +384,9 @@ class ItemCompraDepartamental(models.Model):
 
 
 class CotizacionCompraDepartamental(models.Model):
+    PLATAFORMAS = [("", "Compra directa"), ("AMAZON", "Amazon"), ("MERCADO_LIBRE", "Mercado Libre"), ("OTRA", "Otra tienda en línea")]
+    plataforma = models.CharField(max_length=20, choices=PLATAFORMAS, blank=True, default="")
+    enlace_producto = models.URLField(max_length=2000, blank=True, default="")
     item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.CASCADE, related_name="cotizaciones")
     proveedor = models.ForeignKey(Proveedor, on_delete=models.PROTECT, related_name="cotizaciones_departamentales")
     documento = models.FileField(upload_to="compras/cotizaciones/%Y/%m/", null=True, blank=True)

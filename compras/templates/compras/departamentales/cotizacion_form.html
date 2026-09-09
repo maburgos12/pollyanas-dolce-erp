@@ -1,0 +1,22 @@
+<details class="cd-action-panel cd-quote-panel" id="cotizar-{{ item.pk }}" {% if item.abrir_cotizacion %}open{% endif %}>
+  <summary>+ Registrar cotización</summary>
+  {% include "compras/departamentales/proveedor_cotizacion.html" %}
+  <form id="cotizacion-form-{{ item.pk }}" method="post" enctype="multipart/form-data" action="{% url 'compras:departamental_cotizar' item.pk %}" data-async-action>
+    {% csrf_token %}
+    {{ item.cotizacion_form.non_field_errors }}
+    <div class="cd-grid two">
+      <label for="{{ item.cotizacion_form.plataforma.id_for_label }}">Dónde cotizas{{ item.cotizacion_form.plataforma }}{{ item.cotizacion_form.plataforma.errors }}</label>
+      <label for="{{ item.cotizacion_form.enlace_producto.id_for_label }}">Enlace al producto{{ item.cotizacion_form.enlace_producto }}{{ item.cotizacion_form.enlace_producto.errors }}<small class="cd-field-help">Obligatorio para compras en línea.</small></label>
+    </div>
+    <div class="cd-grid three">
+      {% for field in item.cotizacion_form %}{% if field.name != 'proveedor' and field.name != 'plataforma' and field.name != 'enlace_producto' and field.name != 'garantia_observaciones' %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}{{ field }}{{ field.errors }}</label>
+      {% endif %}{% endfor %}
+    </div>
+    <label for="{{ item.cotizacion_form.garantia_observaciones.id_for_label }}">Garantía u observaciones{{ item.cotizacion_form.garantia_observaciones }}{{ item.cotizacion_form.garantia_observaciones.errors }}</label>
+    <div class="cd-actions">
+      <button type="submit" class="cd-button ghost" data-pending-label="Guardando…">Guardar para comparar</button>
+      <button type="submit" class="cd-button primary" name="seleccionar" value="1" data-pending-label="Guardando…">Guardar y seleccionar</button>
+    </div>
+  </form>
+</details>

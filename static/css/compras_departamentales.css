@@ -26,3 +26,19 @@
 .cd-bandeja{width:100%;max-width:1440px;min-width:0}
 .cd-bandeja .cd-filters>div{min-width:0}
 @media(min-width:1101px){.cd-bandeja .cd-filters{grid-template-columns:180px minmax(150px,1fr) minmax(170px,1fr)}.cd-bandeja .cd-filter-actions{grid-column:1/-1}}
+
+/* Cotizaciones: alta junto al selector sin perder el resto de la captura. */
+.cd-detalle{width:100%;min-width:0}
+.cd-detalle .cd-item-body,.cd-detalle .cd-grid>label{min-width:0}
+.cd-detalle [id^="item-"],.cd-detalle .cd-quote-panel{scroll-margin-top:90px}
+.cd-detalle .cd-provider-section{margin:18px 0;padding-bottom:18px;border-bottom:1px solid #e7dcd6}
+.cd-detalle .cd-provider-create{margin-top:10px}
+.cd-detalle .cd-provider-create summary{color:var(--wine);font-weight:800;cursor:pointer}
+.cd-detalle .cd-provider-create form{padding:12px 0 0}
+.cd-detalle .cd-field-help{display:block;font-size:13px;color:#685252;line-height:1.5;margin:6px 0}
+.cd-detalle .errorlist{color:#a32b3d;font-size:14px;padding-left:18px}
+.cd-detalle :is(button,select,input,textarea,summary,a):focus-visible{outline:3px solid var(--wine);outline-offset:3px}
+.cd-detalle .cd-button:active{transform:scale(.97)}
+.cd-detalle .cd-button:disabled{opacity:.65;cursor:wait}
+.cd-detalle .cd-quote a{display:inline-block;font-size:14px;margin:5px 0;color:var(--wine)}
+@media(prefers-reduced-motion:reduce){.cd-detalle .cd-button:active{transform:none}}
