@@ -1,0 +1,16 @@
+<div id="proveedor-item-{{ item.pk }}" class="cd-provider-section">
+  <label for="{{ item.cotizacion_form.proveedor.id_for_label }}">Proveedor o vendedor</label>
+  {{ item.cotizacion_form.proveedor }}{{ item.cotizacion_form.proveedor.errors }}
+  <p class="cd-field-help">En Amazon o Mercado Libre, selecciona la tienda o vendedor que ofrece el producto.</p>
+  <details class="cd-provider-create" {% if item.proveedor_form.errors %}open{% endif %}>
+    <summary>+ Agregar proveedor nuevo</summary>
+    <form method="post" action="{% url 'compras:departamental_proveedor_crear' item.pk %}" data-async-action>
+      {% csrf_token %}
+      {{ item.proveedor_form.non_field_errors }}
+      <div class="cd-grid two">
+        {% for field in item.proveedor_form %}<label for="{{ field.id_for_label }}">{{ field.label }}{{ field }}{{ field.errors }}</label>{% endfor %}
+      </div>
+      <button type="submit" class="cd-button" data-pending-label="Guardando…">Guardar proveedor y usarlo</button>
+    </form>
+  </details>
+</div>
