@@ -57,6 +57,8 @@ class ProveedorCotizacionTests(TestCase):
         self.assertEqual(quote.plataforma,'AMAZON')
         self.assertEqual(quote.enlace_producto,'https://www.amazon.com.mx/dp/ejemplo')
         self.assertFalse(quote.seleccionada)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estado,'EN_ATENCION')
         self.assertFalse(hasattr(self.item,'compromiso'))
         self.assertIn(f'#item-{self.item.pk}',response.json()['redirect'])
 

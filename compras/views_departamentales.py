@@ -421,6 +421,7 @@ def departamental_cotizar(request, item_pk):
             if not item.cotizaciones.filter(seleccionada=True).exists():
                 item.estado = ItemCompraDepartamental.ESTADO_COTIZANDO
                 item.save(update_fields=["estado", "actualizado_en"])
+                item.solicitud.actualizar_estado_desde_items()
             EventoCompraDepartamental.objects.create(solicitud=item.solicitud, item=item, actor=request.user,
                                                       tipo='COTIZACION_REGISTRADA', detalle=f'{cotizacion.proveedor}: ${cotizacion.total_adquisicion}')
     destino = reverse('compras:departamental_detalle', args=[item.solicitud_id])
