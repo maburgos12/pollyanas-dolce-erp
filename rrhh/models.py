@@ -1505,6 +1505,40 @@ class IncapacidadEmpleado(models.Model):
         return f"{self.empleado} · {self.fecha_inicio} a {self.fecha_fin}"
 
 
+class IncapacidadCambio(models.Model):
+    ACCION_EDITAR = "editar"
+    ACCION_CANCELAR = "cancelar"
+    ACCION_CHOICES = [
+        (ACCION_EDITAR, "Corrección"),
+        (ACCION_CANCELAR, "Cancelación"),
+    ]
+
+    incapacidad = models.ForeignKey(
+        IncapacidadEmpleado,
+        on_delete=models.CASCADE,
+        related_name="cambios",
+    )
+    accion = models.CharField(max_length=12, choices=ACCION_CHOICES, db_index=True)
+    motivo = models.TextField()
+    cambios = models.JSONField(default=list, blank=True)
+    realizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="incapacidades_cambios",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        verbose_name = "Cambio de incapacidad"
+        verbose_name_plural = "Cambios de incapacidades"
+
+    def __str__(self) -> str:
+        return f"{self.incapacidad_id} · {self.get_accion_display()}"
+
+
 class ReglamentoLaboral(models.Model):
     ESTADO_BORRADOR = "borrador"
     ESTADO_VIGENTE = "vigente"
