@@ -19,6 +19,7 @@ urlpatterns = [
     path("flota/servicio/", views.registrar_servicio_flota, name="mant-flota-servicio"),
     path("flota/tipos/", views.gestionar_tipo_servicio, name="mant-flota-tipo"),
     path("proveedores/", views.gestionar_proveedor, name="mant-proveedor"),
+    path("proveedores/alta/", views.alta_proveedor_seguimiento, name="mant-proveedor-alta"),
     path("proveedores/importar/", views.importar_proveedores, name="mant-proveedor-importar"),
     path("proveedores/<int:pk>/eliminar/", views.eliminar_proveedor, name="mant-proveedor-eliminar"),
 ]
