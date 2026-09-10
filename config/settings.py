@@ -336,6 +336,10 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TASK_ROUTES = {
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
+    # Los avisos a personas no pueden formarse detrás de la automatización de
+    # navegador de Point: el worker por omisión corre --pool=solo y una sola
+    # sincronización de ventas lo ocupa más de diez minutos.
+    "compras.enviar_avisos_compra_realizada": {"queue": "notificaciones"},
 }
 CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {

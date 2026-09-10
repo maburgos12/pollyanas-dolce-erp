@@ -453,3 +453,26 @@ class TransaccionRevertidaTests(BaseAvisosMixin, TransactionTestCase):
             compra = self.registrar_compra()
         encolar.assert_called_once_with(compra.pk)
         self.assertEqual(AvisoCompraDepartamental.objects.count(), 2)
+
+
+class RuteoDeColaTests(TestCase):
+    """El aviso no debe formarse detrás de la automatización de Point."""
+
+    def test_el_aviso_va_a_su_propia_cola(self):
+        from django.conf import settings
+
+        ruta = settings.CELERY_TASK_ROUTES.get("compras.enviar_avisos_compra_realizada")
+        self.assertEqual(ruta, {"queue": "notificaciones"})
+        self.assertNotEqual(ruta["queue"], "celery")
+
+    def test_existe_un_consumidor_para_esa_cola(self):
+        """Una ruta sin worker deja los avisos encolados para siempre."""
+        import pathlib
+        import re
+
+        from django.conf import settings
+
+        compose = (pathlib.Path(settings.BASE_DIR) / "docker-compose.yml").read_text()
+        comandos = re.findall(r"command:.*celery.*-Q\s+([\w,]+)", compose)
+        colas = {cola for grupo in comandos for cola in grupo.split(",")}
+        self.assertIn("notificaciones", colas)
