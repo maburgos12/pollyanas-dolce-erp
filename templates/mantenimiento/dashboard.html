@@ -342,13 +342,13 @@
             {{ prov.nombre }}{% if prov.especialidad %} <span class="mant-badge is-info is-inline">{{ prov.especialidad }}</span>{% endif %}
           </div>
           <div class="mant-plan-meta">
-            {% if prov.contacto %}{{ prov.contacto }}{% endif %}{% if prov.telefono %} · {{ prov.telefono }}{% endif %}
+            {% if prov.contacto %}{{ prov.contacto }}{% endif %}{% if prov.telefono %} · Tel. {{ prov.telefono }}{% endif %}{% if prov.whatsapp %} · WhatsApp {{ prov.whatsapp }}{% endif %}
             {% if prov.notas %}<br>{{ prov.notas }}{% endif %}
           </div>
         </div>
         <div class="mant-action-row">
           <button class="btn btn-secondary btn-sm" type="button"
-            onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }})">
+            onclick="abrirEditarProveedor({{ prov.pk }},'{{ prov.nombre|escapejs }}','{{ prov.contacto|escapejs }}','{{ prov.telefono|escapejs }}','{{ prov.especialidad|escapejs }}','{{ prov.notas|escapejs }}',{{ prov.activo|yesno:'true,false' }},'{{ prov.whatsapp|escapejs }}')">
             Editar
           </button>
           <form method="post" action="{% url 'mantenimiento:mant-proveedor-eliminar' prov.pk %}"
@@ -874,7 +874,7 @@
       <input type="hidden" name="proveedor_id" id="proveedorId">
       <div class="mant-modal-grid">
         <label class="mant-field span-2">Nombre del taller / técnico <span class="pd-required">*</span>
-          <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required
+          <input type="text" name="nombre" id="proveedorNombre" class="mant-input" required maxlength="200"
             placeholder="Escribe para buscar o agregar nuevo..."
             list="proveedores-sugeridos" autocomplete="off">
           <datalist id="proveedores-sugeridos">
@@ -885,15 +885,19 @@
           <span class="mant-plan-meta">Si el proveedor ya existía en el sistema aparece como sugerencia al escribir.</span>
         </label>
         <label class="mant-field">Especialidad
-          <input type="text" name="especialidad" id="proveedorEspecialidad" class="mant-input"
+          <input type="text" name="especialidad" id="proveedorEspecialidad" class="mant-input" maxlength="120"
             placeholder="Ej. Refrigeración, Electricidad, Mecánica">
         </label>
         <label class="mant-field">Teléfono
           <input type="text" name="telefono" id="proveedorTelefono" class="mant-input"
-            placeholder="Ej. 667 123 4567">
+            maxlength="30" placeholder="Ej. 667 123 4567">
+        </label>
+        <label class="mant-field">WhatsApp / celular
+          <input type="text" name="whatsapp" id="proveedorWhatsapp" class="mant-input"
+            maxlength="30" placeholder="Ej. 667 123 4567">
         </label>
         <label class="mant-field span-2">Nombre del contacto
-          <input type="text" name="contacto" id="proveedorContacto" class="mant-input"
+          <input type="text" name="contacto" id="proveedorContacto" class="mant-input" maxlength="120"
             placeholder="Persona que atiende (opcional)">
         </label>
         <label class="mant-field span-2">Notas
@@ -1581,6 +1585,7 @@ function abrirModalProveedor() {
   document.getElementById("proveedorNombre").value = "";
   document.getElementById("proveedorEspecialidad").value = "";
   document.getElementById("proveedorTelefono").value = "";
+  document.getElementById("proveedorWhatsapp").value = "";
   document.getElementById("proveedorContacto").value = "";
   document.getElementById("proveedorNotas").value = "";
   document.getElementById("proveedorActivoBlock").style.display = "none";
@@ -1588,13 +1593,14 @@ function abrirModalProveedor() {
   document.getElementById("modalProveedor").classList.add("is-open");
   setTimeout(() => document.getElementById("proveedorNombre").focus(), 120);
 }
-function abrirEditarProveedor(id, nombre, contacto, telefono, especialidad, notas, activo) {
+function abrirEditarProveedor(id, nombre, contacto, telefono, especialidad, notas, activo, whatsapp) {
   document.getElementById("modalProveedorTitulo").textContent = "Editar proveedor";
   document.getElementById("proveedorAction").value = "editar";
   document.getElementById("proveedorId").value = id;
   document.getElementById("proveedorNombre").value = nombre;
   document.getElementById("proveedorEspecialidad").value = especialidad || "";
   document.getElementById("proveedorTelefono").value = telefono || "";
+  document.getElementById("proveedorWhatsapp").value = whatsapp || "";
   document.getElementById("proveedorContacto").value = contacto || "";
   document.getElementById("proveedorNotas").value = notas || "";
   document.getElementById("proveedorActivo").checked = activo;

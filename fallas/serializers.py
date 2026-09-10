@@ -274,7 +274,7 @@ class AltaProveedorServicioSerializer(serializers.ModelSerializer):
         from mantenimiento.models import ProveedorServicio
 
         model = ProveedorServicio
-        fields = ("id", "nombre", "contacto", "telefono", "especialidad", "notas")
+        fields = ("id", "nombre", "contacto", "telefono", "whatsapp", "especialidad", "notas")
         read_only_fields = ("id",)
 
     def validate_nombre(self, value):

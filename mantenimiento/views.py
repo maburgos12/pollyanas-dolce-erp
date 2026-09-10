@@ -1993,30 +1993,43 @@ def gestionar_proveedor(request):
 
     contacto = (request.POST.get("contacto") or "").strip()
     telefono = (request.POST.get("telefono") or "").strip()
+    whatsapp = (request.POST.get("whatsapp") or "").strip()
     especialidad = (request.POST.get("especialidad") or "").strip()
     notas = (request.POST.get("notas") or "").strip()
 
     if action == "editar":
         prov_id = _safe_int(request.POST.get("proveedor_id"))
         prov = get_object_or_404(ProveedorServicio, pk=prov_id)
-        prov.nombre = nombre
-        prov.contacto = contacto
-        prov.telefono = telefono
-        prov.especialidad = especialidad
-        prov.notas = notas
-        prov.activo = request.POST.get("activo", "1") != "0"
-        prov.save()
-        msg.success(request, f"Proveedor '{nombre}' actualizado.")
+        activo = request.POST.get("activo", "1") != "0"
     else:
         if ProveedorServicio.objects.filter(nombre__iexact=nombre).exists():
-            msg.warning(request, f"Ya existe un proveedor de servicio con ese nombre.")
-        else:
-            ProveedorServicio.objects.create(
-                nombre=nombre, contacto=contacto, telefono=telefono,
-                especialidad=especialidad, notas=notas, activo=True,
-            )
-            msg.success(request, f"Proveedor '{nombre}' creado.")
+            msg.warning(request, "Ya existe un proveedor de servicio con ese nombre.")
+            return redirect("mantenimiento:dashboard")
+        prov = ProveedorServicio()
+        activo = True
 
+    prov.nombre = nombre
+    prov.contacto = contacto
+    prov.telefono = telefono
+    prov.whatsapp = whatsapp
+    prov.especialidad = especialidad
+    prov.notas = notas
+    prov.activo = activo
+
+    # Sin esto un dato más largo que la columna llega crudo a Postgres y revienta
+    # con DataError (500), perdiendo todo lo que la usuaria ya había capturado.
+    try:
+        prov.full_clean()
+    except ValidationError as exc:
+        etiquetas = {f.name: f.verbose_name for f in ProveedorServicio._meta.get_fields()
+                     if hasattr(f, "verbose_name")}
+        detalle = "; ".join(f"{etiquetas.get(campo, campo).capitalize()}: {' '.join(errores)}"
+                            for campo, errores in exc.message_dict.items())
+        msg.error(request, f"No se guardó el proveedor. {detalle}")
+        return redirect("mantenimiento:dashboard")
+
+    prov.save()
+    msg.success(request, f"Proveedor '{nombre}' {'actualizado' if action == 'editar' else 'creado'}.")
     return redirect("mantenimiento:dashboard")
 
 
