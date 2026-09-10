@@ -139,6 +139,18 @@ def _reevaluar_cambio_cobertura(antes: set, despues: set) -> None:
             evaluar_rango_asistencia(dia, dia, empleados=[empleado])
 
 
+def _huella(incapacidad: IncapacidadEmpleado) -> dict[str, str]:
+    """Datos copiados para que el rastro sobreviva si se elimina el registro."""
+    return {
+        "empleado_nombre": str(incapacidad.empleado) if incapacidad.empleado_id else "",
+        "resumen": (
+            f"#{incapacidad.id} · {incapacidad.fecha_inicio} al {incapacidad.fecha_fin}"
+            f" · {incapacidad.get_tipo_display()}"
+            f"{' · folio ' + incapacidad.folio if incapacidad.folio else ''}"
+        ),
+    }
+
+
 def _require_manage_rrhh(user):
     if not can_manage_submodule(user, "rrhh", "nomina"):
         raise PermissionDenied("Solo Capital Humano puede capturar incapacidades.")
@@ -272,6 +284,7 @@ def cancelar_incapacidad(request, incapacidad_id):
     incapacidad.save(update_fields=["estado", "comentario_cancelacion", "actualizado_en"])
     IncapacidadCambio.objects.create(
         incapacidad=incapacidad,
+        **_huella(incapacidad),
         accion=IncapacidadCambio.ACCION_CANCELAR,
         motivo=comentario,
         cambios=[
@@ -363,6 +376,7 @@ def editar_incapacidad(request, incapacidad_id):
 
     IncapacidadCambio.objects.create(
         incapacidad=incapacidad,
+        **_huella(incapacidad),
         accion=IncapacidadCambio.ACCION_EDITAR,
         motivo=motivo,
         cambios=cambios,
@@ -374,4 +388,40 @@ def editar_incapacidad(request, incapacidad_id):
         _dias_cubiertos(empleado.pk, fecha_inicio, fecha_fin, incapacidad.estado),
     )
     messages.success(request, "Incapacidad corregida.")
+    return redirect("rrhh:rrhh_incapacidades")
+
+
+@login_required
+@require_POST
+def eliminar_incapacidad(request, incapacidad_id):
+    _require_manage_rrhh(request.user)
+    incapacidad = get_object_or_404(
+        IncapacidadEmpleado.objects.select_related("empleado"), pk=incapacidad_id
+    )
+    motivo = (request.POST.get("motivo_eliminacion") or "").strip()
+    if not motivo:
+        messages.error(request, "El motivo de la eliminación es obligatorio.")
+        return redirect("rrhh:rrhh_incapacidades")
+
+    cubiertos_antes = _dias_cubiertos(
+        incapacidad.empleado_id, incapacidad.fecha_inicio, incapacidad.fecha_fin, incapacidad.estado
+    )
+    huella = _huella(incapacidad)
+    # El registro se va, el rastro se queda: la bitácora apunta a NULL y conserva
+    # copiados el nombre de la persona y los datos del registro eliminado.
+    IncapacidadCambio.objects.create(
+        incapacidad=None,
+        **huella,
+        accion=IncapacidadCambio.ACCION_ELIMINAR,
+        motivo=motivo,
+        cambios=[
+            {"campo": etiqueta, "antes": _valor_legible(incapacidad, campo), "despues": ""}
+            for campo, etiqueta in CAMPOS_EDITABLES
+        ],
+        realizado_por=request.user,
+    )
+    incapacidad.delete()
+
+    _reevaluar_cambio_cobertura(cubiertos_antes, set())
+    messages.success(request, f"Incapacidad eliminada ({huella['resumen']}).")
     return redirect("rrhh:rrhh_incapacidades")

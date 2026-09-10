@@ -343,6 +343,73 @@ class EdicionIncapacidadesTests(TestCase):
             {self.otro_empleado.id: {date(2026, 9, d) for d in range(2, 9)}},
         )
 
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_eliminar_borra_el_registro_y_deja_rastro(self, evaluar):
+        # El caso real: un renglón duplicado que quedó cancelado y estorba.
+        duplicado = IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 9, 9),
+            fecha_fin=date(2026, 9, 10),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            estado=IncapacidadEmpleado.ESTADO_CANCELADA,
+        )
+
+        self.client.post(
+            reverse("rrhh:rrhh_incapacidad_eliminar", args=[duplicado.id]),
+            {"motivo_eliminacion": "Renglón duplicado, la buena es la otra"},
+        )
+
+        self.assertFalse(IncapacidadEmpleado.objects.filter(pk=duplicado.id).exists())
+        rastro = IncapacidadCambio.objects.get(accion=IncapacidadCambio.ACCION_ELIMINAR)
+        self.assertIsNone(rastro.incapacidad_id)
+        self.assertEqual(rastro.empleado_nombre, str(self.empleado))
+        self.assertIn(f"#{duplicado.id}", rastro.resumen)
+        self.assertIn("2026-09-09", rastro.resumen)
+        self.assertEqual(rastro.realizado_por, self.user)
+        self.assertEqual(rastro.motivo, "Renglón duplicado, la buena es la otra")
+        # Estaba cancelada: no cubría días, así que no hay nada que reevaluar.
+        evaluar.assert_not_called()
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_eliminar_una_activa_libera_sus_dias(self, evaluar):
+        self.client.post(
+            reverse("rrhh:rrhh_incapacidad_eliminar", args=[self.incapacidad.id]),
+            {"motivo_eliminacion": "Capturada por error"},
+        )
+
+        self.assertFalse(IncapacidadEmpleado.objects.filter(pk=self.incapacidad.id).exists())
+        self.assertEqual(
+            self._dias_evaluados(evaluar),
+            {self.empleado.id: {date(2026, 7, d) for d in range(1, 6)}},
+        )
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_eliminar_exige_motivo(self, evaluar):
+        self.client.post(
+            reverse("rrhh:rrhh_incapacidad_eliminar", args=[self.incapacidad.id]),
+            {"motivo_eliminacion": "   "},
+        )
+
+        self.assertTrue(IncapacidadEmpleado.objects.filter(pk=self.incapacidad.id).exists())
+        self.assertFalse(IncapacidadCambio.objects.exists())
+        evaluar.assert_not_called()
+
+    def test_eliminar_requiere_permiso(self):
+        sin_permiso = get_user_model().objects.create_user(
+            username="rrhh-sin-permiso-borrar",
+            email="rrhh-sin-permiso-borrar@example.com",
+            password="testpass",
+        )
+        self.client.force_login(sin_permiso)
+
+        r = self.client.post(
+            reverse("rrhh:rrhh_incapacidad_eliminar", args=[self.incapacidad.id]),
+            {"motivo_eliminacion": "no deberia poder"},
+        )
+
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(IncapacidadEmpleado.objects.filter(pk=self.incapacidad.id).exists())
+
     def test_usuario_sin_permiso_no_puede_editar(self):
         sin_permiso = get_user_model().objects.create_user(
             username="rrhh-sin-permiso",

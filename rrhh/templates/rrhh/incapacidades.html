@@ -173,6 +173,19 @@
                       </form>
                     </details>
                   {% endif %}
+                  <details>
+                    <summary class="btn btn-sm btn-secondary">Eliminar</summary>
+                    <form method="post" action="{% url 'rrhh:rrhh_incapacidad_eliminar' incapacidad.id %}"
+                          onsubmit="return confirm('Se elimina la incapacidad #{{ incapacidad.id }} de {{ incapacidad.empleado.nombre|escapejs }}, del {{ incapacidad.fecha_inicio|date:'Y-m-d' }} al {{ incapacidad.fecha_fin|date:'Y-m-d' }}. No se puede deshacer. ¿Continuar?');">
+                      {% csrf_token %}
+                      <p class="muted">Úsalo para renglones duplicados o capturados por error. Queda registrado quién lo eliminó y por qué.</p>
+                      <div class="form-group">
+                        <label for="motivo_eliminacion_{{ incapacidad.id }}">Motivo</label>
+                        <textarea class="input-field" id="motivo_eliminacion_{{ incapacidad.id }}" name="motivo_eliminacion" required></textarea>
+                      </div>
+                      <button class="btn btn-sm btn-danger" type="submit">Confirmar eliminación</button>
+                    </form>
+                  </details>
                 </td>
               {% endif %}
             </tr>

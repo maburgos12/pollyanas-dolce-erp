@@ -9,6 +9,7 @@ from .models import (
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
     HoraExtra,
+    IncapacidadCambio,
     IncidenciaAsistencia,
     IncidenciaAsistenciaBitacora,
     ImportacionChecador,
@@ -580,3 +581,26 @@ class ImportContpaqAdmin(admin.ModelAdmin):
         "creado_por",
     )
     readonly_fields = ("log",)
+
+
+@admin.register(IncapacidadCambio)
+class IncapacidadCambioAdmin(admin.ModelAdmin):
+    """Solo lectura: es el rastro de correcciones, cancelaciones y eliminaciones.
+
+    Un registro eliminado ya no tiene pantalla propia, así que este es el único
+    lugar donde se puede consultar qué se borró, quién y por qué.
+    """
+
+    list_display = ("creado_en", "accion", "empleado_nombre", "resumen", "realizado_por")
+    list_filter = ("accion", "creado_en")
+    search_fields = ("empleado_nombre", "resumen", "motivo")
+    date_hierarchy = "creado_en"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

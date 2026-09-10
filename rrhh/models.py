@@ -1558,16 +1558,24 @@ class IncapacidadEmpleado(models.Model):
 class IncapacidadCambio(models.Model):
     ACCION_EDITAR = "editar"
     ACCION_CANCELAR = "cancelar"
+    ACCION_ELIMINAR = "eliminar"
     ACCION_CHOICES = [
         (ACCION_EDITAR, "Corrección"),
         (ACCION_CANCELAR, "Cancelación"),
+        (ACCION_ELIMINAR, "Eliminación"),
     ]
 
+    # SET_NULL y los datos copiados: el rastro de una eliminación tiene que
+    # sobrevivir al registro eliminado (mismo patrón que PermisoSalidaCambio).
     incapacidad = models.ForeignKey(
         IncapacidadEmpleado,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="cambios",
     )
+    empleado_nombre = models.CharField(max_length=180, blank=True, default="")
+    resumen = models.CharField(max_length=200, blank=True, default="")
     accion = models.CharField(max_length=12, choices=ACCION_CHOICES, db_index=True)
     motivo = models.TextField()
     cambios = models.JSONField(default=list, blank=True)
@@ -1586,7 +1594,7 @@ class IncapacidadCambio(models.Model):
         verbose_name_plural = "Cambios de incapacidades"
 
     def __str__(self) -> str:
-        return f"{self.incapacidad_id} · {self.get_accion_display()}"
+        return f"{self.empleado_nombre or self.incapacidad_id} · {self.get_accion_display()}"
 
 
 class ReglamentoLaboral(models.Model):
