@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -170,6 +170,50 @@ class EdicionIncapacidadesTests(TestCase):
         self.assertContains(response, "Guardar corrección")
         self.assertContains(response, "Corrección de captura")
         self.assertContains(response, "IMSS-003")
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_rechaza_rango_absurdo_por_error_de_tecleo(self, evaluar):
+        self.client.post(self.url, self._payload(fecha_inicio="0202-09-09", fecha_fin="2026-09-10"))
+
+        self.incapacidad.refresh_from_db()
+        self.assertEqual(self.incapacidad.fecha_inicio, date(2026, 7, 1))
+        self.assertFalse(self.incapacidad.cambios.exists())
+        evaluar.assert_not_called()
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_corregir_registro_heredado_acota_la_reevaluacion(self, evaluar):
+        # Los registros ya guardados con el año mal tecleado abarcan cientos de
+        # miles de días; reevaluarlos completos colgaría la petición.
+        heredada = IncapacidadEmpleado.objects.create(
+            empleado=self.otro_empleado,
+            fecha_inicio=date(202, 9, 9),
+            fecha_fin=date(2026, 9, 10),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            estado=IncapacidadEmpleado.ESTADO_ACTIVA,
+        )
+
+        self.client.post(
+            reverse("rrhh:rrhh_incapacidad_editar", args=[heredada.id]),
+            {
+                "empleado": str(self.otro_empleado.id),
+                "fecha_inicio": "2026-09-09",
+                "fecha_fin": "2026-09-10",
+                "tipo": IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+                "folio": "",
+                "estado": IncapacidadEmpleado.ESTADO_ACTIVA,
+                "notas": "",
+                "motivo": "El año venía mal tecleado",
+            },
+        )
+
+        heredada.refresh_from_db()
+        self.assertEqual(heredada.fecha_inicio, date(2026, 9, 9))
+        rango_viejo = evaluar.call_args_list[0].args
+        self.assertEqual(
+            rango_viejo[0],
+            date(2026, 9, 10) - timedelta(days=IncapacidadEmpleado.MAX_DIAS),
+        )
+        self.assertEqual((rango_viejo[1] - rango_viejo[0]).days, IncapacidadEmpleado.MAX_DIAS)
 
     def test_usuario_sin_permiso_no_puede_editar(self):
         sin_permiso = get_user_model().objects.create_user(
