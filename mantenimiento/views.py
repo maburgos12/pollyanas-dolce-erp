@@ -2054,9 +2054,6 @@ def solicitar_cancelacion(request, tipo, pk):
 
     tipo = (tipo or "").strip().lower()
     motivo = (request.POST.get("motivo") or "").strip()
-    if not motivo:
-        msg.error(request, "Debes indicar el motivo de cancelación.")
-        return redirect("mantenimiento:dashboard")
 
     if tipo == "falla":
         obj = get_object_or_404(ReporteFalla, pk=pk)
@@ -2075,6 +2072,12 @@ def solicitar_cancelacion(request, tipo, pk):
         # DG elimina directo sin pasar por solicitud
         obj.delete()
         msg.success(request, f"{referencia} eliminado.")
+        return redirect("mantenimiento:dashboard")
+
+    # El motivo solo es obligatorio para la solicitud: el DG elimina directo y el
+    # modal le oculta el campo, así que exigirlo antes dejaba un error sin campo visible.
+    if not motivo:
+        msg.error(request, "Debes indicar el motivo de cancelación.")
         return redirect("mantenimiento:dashboard")
 
     solicitud = SolicitudCancelacion.objects.create(
