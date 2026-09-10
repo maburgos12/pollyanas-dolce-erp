@@ -12,9 +12,13 @@ from django.views.decorators.http import require_http_methods
 
 from .access_departamentales import puede_gestionar_compras_departamentales
 from .forms_edicion_compra import EditarCotizacionDepartamentalForm, RegistrarCompraDepartamentalForm
-from .models import CompraRealizadaDepartamental, CotizacionCompraDepartamental, ItemCompraDepartamental
+from .models import (
+    AvisoCompraDepartamental, CompraRealizadaDepartamental, CotizacionCompraDepartamental,
+    ItemCompraDepartamental,
+)
+from .services_avisos_compra import enviar_aviso, reconciliar_incierto
 from .services_edicion_compra import editar_cotizacion, registrar_compra_realizada, validar_edicion
-from .views_departamentales import _puede_ver_solicitud, _respuesta_accion
+from .views_departamentales import _es_direccion, _puede_ver_solicitud, _respuesta_accion
 
 
 def _destino(item):
@@ -91,3 +95,29 @@ def departamental_compra_comprobante(request, pk):
         raise Http404('No se encontró el comprobante.')
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+@login_required
+@require_http_methods(['POST'])
+def departamental_aviso_reintentar(request, pk):
+    """Reintenta un aviso fallido. Solo Compras o Dirección; nunca reenvía uno aceptado."""
+    aviso = get_object_or_404(
+        AvisoCompraDepartamental.objects.select_related('compra__item__solicitud', 'destinatario'), pk=pk
+    )
+    if not (puede_gestionar_compras_departamentales(request.user) or _es_direccion(request.user)):
+        raise PermissionDenied
+    destino = _destino(aviso.compra.item) + '-avisos'
+    if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
+        return _respuesta_accion(request, message=f'El aviso por {aviso.get_canal_display().lower()} ya se había enviado. No se reenvió.',
+                                 redirect_url=destino, reload=True)
+    if aviso.estado == AvisoCompraDepartamental.ESTADO_INCIERTO:
+        aviso = reconciliar_incierto(aviso)
+        if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
+            return _respuesta_accion(request, message=f'El aviso por {aviso.get_canal_display().lower()} sí se había entregado al proveedor. No se reenvió.',
+                                     redirect_url=destino, reload=True)
+    aviso = enviar_aviso(aviso, actor=request.user)
+    if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
+        mensaje = f'Aviso por {aviso.get_canal_display().lower()} enviado al solicitante.'
+        return _respuesta_accion(request, message=mensaje, redirect_url=destino, reload=True)
+    mensaje = f'El aviso por {aviso.get_canal_display().lower()} sigue sin salir: {aviso.detalle or aviso.get_estado_display()}'
+    return _respuesta_accion(request, message=mensaje, redirect_url=destino, status=409)

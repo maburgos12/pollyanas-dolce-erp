@@ -292,7 +292,8 @@ def _cambios_historial_cotizacion(revision):
 def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error=None, status=200):
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
-            "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos", "items__compra_realizada"
+            "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
+            "items__compra_realizada__avisos"
         ),
         pk=pk,
     )
@@ -350,6 +351,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "proveedores": proveedores,
             "es_compras": puede_gestionar_compras_departamentales(request.user),
             "es_direccion": _es_direccion(request.user),
+            "puede_reintentar_avisos": puede_gestionar_compras_departamentales(request.user) or _es_direccion(request.user),
             "total_solicitado": total_solicitado,
             "total_cotizado": total_cotizado,
             "total_comprometido": total_comprometido,

@@ -1,0 +1,9 @@
+Hola, {{ nombre }}.
+
+Ya realizamos la compra de {{ articulo }}, de tu solicitud {{ folio }}.
+Fecha de compra: {{ fecha }}.
+Estado: Comprado, pendiente de entrega.
+
+Consulta el seguimiento: {{ url }}
+
+Pollyana's Dolce · ERP
