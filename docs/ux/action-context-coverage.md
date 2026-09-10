@@ -36,3 +36,11 @@ Inventario inicial: 381 formularios POST en 129 templates; 57 llamadas `fetch()`
 | Resto del ERP | Acciones mutantes restantes | No inventariado por pantalla | No | No | Pendiente etapa 4 |
 
 No se declarará cobertura total hasta que cada pantalla candidata tenga una fila con evidencia de implementación o una excepción justificada.
+
+
+### Compras departamentales — edición y compra realizada (2026-09-09)
+
+- `departamental_cotizacion_editar`: formulario dedicado con versión, motivo e historial antes/después; POST progresivo `data-async-action`, toast y retorno a `#item-{id}`. Errores JSON conservan todos los inputs y adjuntos, POST tradicional conserva formulario ligado.
+- `departamental_compra_registrar`: fecha, importe final, pedido y comprobante; misma acción para JSON/HTML y control transaccional para evitar duplicados. Se mantiene la entrega por separado.
+- `departamental_decidir` y `departamental_recibir`: retorno al artículo, toast y recarga contextual; bloquean decisiones incompatibles con compra/entrega.
+- Descarga de comprobante con alcance de solicitud y sin caché. SW v34 invalida HTML anterior.

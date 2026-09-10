@@ -297,6 +297,7 @@ class ItemCompraDepartamental(models.Model):
     ESTADO_FINANCIAMIENTO = "FINANCIAMIENTO"
     ESTADO_AUTORIZADO = "AUTORIZADO"
     ESTADO_ORDENADO = "ORDENADO"
+    ESTADO_COMPRADO = "COMPRADO"
     ESTADO_RECIBIDO_PARCIAL = "RECIBIDO_PARCIAL"
     ESTADO_PENDIENTE_CONFIRMACION = "PENDIENTE_CONFIRMACION"
     ESTADO_RECIBIDO_CONFORME = "RECIBIDO_CONFORME"
@@ -312,6 +313,7 @@ class ItemCompraDepartamental(models.Model):
         (ESTADO_FINANCIAMIENTO, "Evaluando financiamiento"),
         (ESTADO_AUTORIZADO, "Autorizado"),
         (ESTADO_ORDENADO, "Ordenado"),
+        (ESTADO_COMPRADO, "Comprado, pendiente de entrega"),
         (ESTADO_RECIBIDO_PARCIAL, "Recibido parcialmente"),
         (ESTADO_PENDIENTE_CONFIRMACION, "Comprado, pendiente de confirmación"),
         (ESTADO_RECIBIDO_CONFORME, "Recibido conforme"),
@@ -384,6 +386,7 @@ class ItemCompraDepartamental(models.Model):
 
 
 class CotizacionCompraDepartamental(models.Model):
+    version = models.PositiveIntegerField(default=1)
     PLATAFORMAS = [("", "Compra directa"), ("AMAZON", "Amazon"), ("MERCADO_LIBRE", "Mercado Libre"), ("OTRA", "Otra tienda en línea")]
     plataforma = models.CharField(max_length=20, choices=PLATAFORMAS, blank=True, default="")
     enlace_producto = models.URLField(max_length=2000, blank=True, default="")
@@ -414,6 +417,38 @@ class CotizacionCompraDepartamental(models.Model):
     @property
     def costo_efectivo_unitario(self):
         return self.total_adquisicion / self.cantidad_ofertada if self.cantidad_ofertada else Decimal("0")
+
+
+class HistorialCotizacionDepartamental(models.Model):
+    cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT, related_name="historial")
+    antes = models.JSONField()
+    despues = models.JSONField()
+    motivo = models.TextField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
+
+
+class CompraRealizadaDepartamental(models.Model):
+    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compra_realizada")
+    cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
+    fecha_compra = models.DateField()
+    importe_final = models.DecimalField(max_digits=14, decimal_places=2)
+    numero_pedido = models.CharField(max_length=160, blank=True, default="")
+    comprobante = models.FileField(upload_to="compras/cotizaciones/compras/%Y/%m/")
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    def clean(self):
+        super().clean()
+        if self.fecha_compra and self.fecha_compra > timezone.localdate():
+            raise ValidationError({"fecha_compra": "La fecha de compra no puede ser futura."})
+        if self.importe_final is not None and self.importe_final <= 0:
+            raise ValidationError({"importe_final": "El importe final debe ser mayor que cero."})
+        if self.cotizacion_id and self.item_id and self.cotizacion.item_id != self.item_id:
+            raise ValidationError("La cotización debe corresponder al artículo comprado.")
 
 
 class CompromisoCompraDepartamental(models.Model):

@@ -71,15 +71,18 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
 
 @transaction.atomic
 def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
+    item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud__area").get(pk=cotizacion.item_id)
     cotizacion = CotizacionCompraDepartamental.objects.select_for_update().get(pk=cotizacion.pk)
-    item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud__area").get(
-        pk=cotizacion.item_id
-    )
+    from .services_edicion_compra import tiene_compra_o_recepcion
+    if item.estado in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO') or tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+        raise ValidationError("Este artículo ya no admite cambiar la cotización seleccionada.")
+    revision_pendiente = (item.estado in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO')
+        and item.cotizaciones.filter(historial__isnull=False).exists())
     CotizacionCompraDepartamental.objects.filter(item=item).update(seleccionada=False)
     cotizacion.seleccionada = True
     cotizacion.save(update_fields=["seleccionada"])
     resultado = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
-    if resultado.exceso:
+    if resultado.exceso or revision_pendiente:
         CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
         item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_DG
@@ -109,7 +112,11 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
 
 
 @transaction.atomic
-def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: str, actor):
+def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: str, actor, cotizacion_id=None, version=None):
+    from .services_edicion_compra import tiene_compra_o_recepcion, sincronizar_linea_orden
+    item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
+    if tiene_compra_o_recepcion(item) or item.estado not in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO'):
+        raise ValidationError("El artículo no tiene una decisión de Dirección General pendiente.")
     decisiones = {
         "AUTORIZAR": (ItemCompraDepartamental.ESTADO_AUTORIZADO, ItemCompraDepartamental.RESPONSABLE_COMPRAS),
         "POSPONER": (ItemCompraDepartamental.ESTADO_POSPUESTO, ItemCompraDepartamental.RESPONSABLE_DG),
@@ -123,7 +130,14 @@ def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: 
     cotizacion = item.cotizaciones.filter(seleccionada=True).first()
     if not cotizacion:
         raise ValidationError("Selecciona una cotización antes de decidir.")
+    if (cotizacion_id is not None or version is not None) and (cotizacion.pk != cotizacion_id or cotizacion.version != version):
+        raise ValidationError("La cotización cambió desde que abriste la decisión. Recarga y revisa la versión actual antes de autorizar.")
     item.estado, item.siguiente_responsable = decisiones[decision]
+    linea = None
+    if decision == "AUTORIZAR":
+        linea = sincronizar_linea_orden(item, cotizacion, actor=actor)
+        if linea:
+            item.estado = ItemCompraDepartamental.ESTADO_ORDENADO
     item.comentario_reciente = comentario
     item.save(update_fields=["estado", "siguiente_responsable", "comentario_reciente", "actualizado_en"])
     item.solicitud.actualizar_estado_desde_items()
@@ -134,10 +148,12 @@ def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: 
                 "cotizacion": cotizacion,
                 "monto": cotizacion.total_adquisicion,
                 "activo": True,
-                "formalizado_en": None,
+                "formalizado_en": timezone.now() if linea else None,
                 "liberado_en": None,
             },
         )
+    else:
+        CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
     EventoCompraDepartamental.objects.create(
         solicitud=item.solicitud, item=item, actor=actor, tipo=f"DG_{decision}", detalle=comentario
     )
@@ -147,7 +163,10 @@ def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: 
 def generar_ordenes_departamentales(items, *, actor):
     grupos = {}
     for original in items:
-        item = ItemCompraDepartamental.objects.select_related("solicitud").get(pk=original.pk)
+        item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud").get(pk=original.pk)
+        from .services_edicion_compra import tiene_compra_o_recepcion
+        if tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+            raise ValidationError(f"{item.descripcion} ya tiene una orden, compra o entrega registrada.")
         cotizacion = item.cotizaciones.select_related("proveedor").filter(seleccionada=True).first()
         if not cotizacion:
             raise ValidationError(f"{item.descripcion} no tiene cotización seleccionada.")
