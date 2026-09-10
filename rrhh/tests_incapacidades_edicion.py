@@ -37,6 +37,16 @@ class EdicionIncapacidadesTests(TestCase):
         self.client.force_login(self.user)
         self.url = reverse("rrhh:rrhh_incapacidad_editar", args=[self.incapacidad.id])
 
+    def _dias_evaluados(self, evaluar):
+        """Días que el motor reevaluó, por empleado."""
+        por_empleado = {}
+        for llamada in evaluar.call_args_list:
+            inicio, fin = llamada.args
+            self.assertEqual(inicio, fin, "se evalúa día por día, no por rangos")
+            for empleado in llamada.kwargs["empleados"]:
+                por_empleado.setdefault(empleado.id, set()).add(inicio)
+        return por_empleado
+
     def _payload(self, **overrides):
         payload = {
             "empleado": str(self.empleado.id),
@@ -73,10 +83,19 @@ class EdicionIncapacidadesTests(TestCase):
         self.assertEqual(inicio["antes"], "2026-07-01")
         self.assertEqual(inicio["despues"], "2026-07-02")
 
-        # El rango viejo y el nuevo se reevalúan por separado.
-        self.assertEqual(evaluar.call_count, 2)
-        self.assertEqual(evaluar.call_args_list[0].args, (date(2026, 7, 1), date(2026, 7, 5)))
-        self.assertEqual(evaluar.call_args_list[1].args, (date(2026, 7, 2), date(2026, 7, 8)))
+        # Solo los días que cambiaron de cobertura: sale el 1, entran 6, 7 y 8.
+        # Del 2 al 5 siguen cubiertos y no se tocan.
+        self.assertEqual(
+            self._dias_evaluados(evaluar),
+            {
+                self.empleado.id: {
+                    date(2026, 7, 1),
+                    date(2026, 7, 6),
+                    date(2026, 7, 7),
+                    date(2026, 7, 8),
+                }
+            },
+        )
 
     @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
     def test_cambio_de_empleado_reevalua_ambos(self, evaluar):
@@ -84,9 +103,12 @@ class EdicionIncapacidadesTests(TestCase):
 
         self.incapacidad.refresh_from_db()
         self.assertEqual(self.incapacidad.empleado, self.otro_empleado)
-        self.assertEqual(evaluar.call_count, 2)
-        self.assertEqual(evaluar.call_args_list[0].kwargs["empleados"], [self.empleado])
-        self.assertEqual(evaluar.call_args_list[1].kwargs["empleados"], [self.otro_empleado])
+        # Los cinco días dejan de cubrir a uno y pasan a cubrir al otro.
+        rango = {date(2026, 7, d) for d in range(1, 6)}
+        self.assertEqual(
+            self._dias_evaluados(evaluar),
+            {self.empleado.id: rango, self.otro_empleado.id: rango},
+        )
 
     @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
     def test_motivo_obligatorio(self, evaluar):
@@ -208,12 +230,12 @@ class EdicionIncapacidadesTests(TestCase):
 
         heredada.refresh_from_db()
         self.assertEqual(heredada.fecha_inicio, date(2026, 9, 9))
-        rango_viejo = evaluar.call_args_list[0].args
-        self.assertEqual(
-            rango_viejo[0],
-            date(2026, 9, 10) - timedelta(days=IncapacidadEmpleado.MAX_DIAS),
-        )
-        self.assertEqual((rango_viejo[1] - rango_viejo[0]).days, IncapacidadEmpleado.MAX_DIAS)
+        dias = self._dias_evaluados(evaluar)[self.otro_empleado.id]
+        # El tope acota cuánto se camina hacia atrás...
+        self.assertEqual(min(dias), date(2026, 9, 10) - timedelta(days=IncapacidadEmpleado.MAX_DIAS))
+        # ...y los días que siguen cubiertos no se vuelven a evaluar.
+        self.assertNotIn(date(2026, 9, 9), dias)
+        self.assertNotIn(date(2026, 9, 10), dias)
 
     @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
     def test_folio_repetido_nombra_el_registro_en_conflicto(self, evaluar):
@@ -287,6 +309,39 @@ class EdicionIncapacidadesTests(TestCase):
 
         self.assertEqual(self.client.get(reverse("rrhh:rrhh_incapacidades")).status_code, 200)
         self.assertEqual(self.client.get(self.url).status_code, 200)
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_incapacidad_larga_solo_reevalua_los_dias_agregados(self, evaluar):
+        # Enfermedad o accidente de meses: extender la fecha final no puede
+        # recalcular los meses que ya estaban cubiertos.
+        larga = IncapacidadEmpleado.objects.create(
+            empleado=self.otro_empleado,
+            fecha_inicio=date(2026, 3, 1),
+            fecha_fin=date(2026, 9, 1),
+            tipo=IncapacidadEmpleado.TIPO_RIESGO_TRABAJO,
+            estado=IncapacidadEmpleado.ESTADO_ACTIVA,
+        )
+
+        self.client.post(
+            reverse("rrhh:rrhh_incapacidad_editar", args=[larga.id]),
+            {
+                "empleado": str(self.otro_empleado.id),
+                "fecha_inicio": "2026-03-01",
+                "fecha_fin": "2026-09-08",
+                "tipo": IncapacidadEmpleado.TIPO_RIESGO_TRABAJO,
+                "folio": "",
+                "estado": IncapacidadEmpleado.ESTADO_ACTIVA,
+                "notas": "",
+                "motivo": "Se prorrogó una semana",
+            },
+        )
+
+        larga.refresh_from_db()
+        self.assertEqual(larga.fecha_fin, date(2026, 9, 8))
+        self.assertEqual(
+            self._dias_evaluados(evaluar),
+            {self.otro_empleado.id: {date(2026, 9, d) for d in range(2, 9)}},
+        )
 
     def test_usuario_sin_permiso_no_puede_editar(self):
         sin_permiso = get_user_model().objects.create_user(
