@@ -19,6 +19,20 @@ La migración es aditiva y sin backfill: las compras registradas antes de este
 cambio no tienen renglones de aviso y, por lo tanto, **no generan envíos
 retroactivos** en migración ni en despliegue.
 
+## Cola dedicada
+
+El worker por omisión corre `--pool=solo --concurrency=1` y atiende una tarea a
+la vez. Una sincronización de ventas de Point ocupa ese worker más de diez
+minutos, así que un aviso ruteado a la cola `celery` se forma detrás de la
+automatización de navegador y puede tardar horas en salir (caso real: 9 compras
+con sus 18 avisos en `PENDIENTE` detrás de 45 tareas de Point).
+
+Por eso `compras.enviar_avisos_compra_realizada` va a la cola `notificaciones`,
+con su propio consumidor `worker_notificaciones` en `docker-compose.yml`, igual
+que `pos_bridge.catalog_recipe_sync` usa `recipes`. **Rutear la tarea sin
+levantar su consumidor deja los avisos encolados para siempre**; hay una prueba
+que verifica que el `docker-compose.yml` declara un worker con `-Q notificaciones`.
+
 ## Estados
 
 | Estado | Significa |

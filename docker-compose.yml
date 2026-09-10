@@ -87,6 +87,24 @@ services:
           - pollyanas-erp-worker
     restart: unless-stopped
 
+  worker_notificaciones:
+    build: .
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
+    command: /opt/venv/bin/python -m celery -A config worker -l info --pool=prefork --concurrency=1 --prefetch-multiplier=1 -Q notificaciones --hostname=notificaciones@%h
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker_recetas:
     build: .
     env_file:
