@@ -16,7 +16,9 @@ from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 
 
-class EdicionCompraTests(TestCase):
+class _CompraDepartamentalBase:
+    """setUp y helpers compartidos; sin pruebas propias para no duplicarlas."""
+
     def setUp(self):
         self.media = TemporaryDirectory()
         self.addCleanup(self.media.cleanup)
@@ -57,6 +59,7 @@ class EdicionCompraTests(TestCase):
         generar_ordenes_departamentales([self.item],actor=self.user)
         self.item.refresh_from_db()
 
+class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
     def test_edicion_de_texto_audita_sin_perder_autorizacion(self):
         response=self.editar()
         self.assertEqual(response.status_code,200,response.content)
@@ -349,3 +352,78 @@ class EdicionCompraTests(TestCase):
         response=self.comprar(importe_final='0.67')
         self.assertEqual(response.status_code,200,response.content)
         self.assertEqual(CompraRealizadaDepartamental.objects.get().importe_final,Decimal('0.67'))
+
+
+class CorreccionCompraRegistradaTests(_CompraDepartamentalBase, TestCase):
+    """La compra ya pagada se corrige con motivo y sin reabrir la autorización."""
+
+    def corregir(self, **changes):
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        data = {'version': compra.version, 'fecha_compra': compra.fecha_compra.isoformat(),
+                'importe_final': '296.62', 'numero_pedido': compra.numero_pedido,
+                'motivo': 'Se capturó el precio por pieza; el paquete cuesta más.', **changes}
+        return self.client.post(
+            reverse('compras:departamental_compra_corregir', args=[compra.pk]), data, **self.headers)
+
+    def test_corrige_importe_con_historial_y_sin_reabrir_autorizacion(self):
+        self.ordenar()
+        self.comprar()
+        respuesta = self.corregir()
+        self.assertEqual(respuesta.status_code, 200)
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.item.refresh_from_db()
+        self.assertEqual(compra.importe_final, Decimal('296.62'))
+        self.assertEqual(compra.version, 2)
+        # Ya se pagó: el artículo no vuelve con Dirección General.
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertNotEqual(self.item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_DG)
+        historial = compra.historial.get()
+        self.assertEqual(historial.antes['importe_final'], '200.00')
+        self.assertEqual(historial.despues['importe_final'], '296.62')
+        self.assertIn('precio por pieza', historial.motivo)
+        self.assertTrue(self.item.eventos.filter(tipo='COMPRA_CORREGIDA').exists())
+        # El importe comprometido sigue a lo realmente pagado.
+        self.assertEqual(self.item.compromiso.monto, Decimal('296.62'))
+
+    def test_corregir_por_arriba_de_la_cotizacion_es_valido(self):
+        """Registrar exige no superar la cotización; corregir existe justo porque
+        la cotización pudo capturarse mal."""
+        self.ordenar()
+        self.comprar()
+        self.corregir(importe_final='999.00')
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.assertEqual(compra.importe_final, Decimal('999.00'))
+
+    def test_sin_motivo_no_corrige(self):
+        self.ordenar()
+        self.comprar()
+        respuesta = self.corregir(motivo='')
+        self.assertEqual(respuesta.status_code, 400)
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.assertEqual(compra.importe_final, Decimal('200.00'))
+        self.assertFalse(compra.historial.exists())
+
+    def test_version_vieja_no_pisa_una_correccion_ajena(self):
+        self.ordenar()
+        self.comprar()
+        self.corregir(importe_final='296.62')
+        respuesta = self.corregir(version='1', importe_final='50.00')
+        self.assertEqual(respuesta.status_code, 409)
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.assertEqual(compra.importe_final, Decimal('296.62'))
+
+    def test_area_solicitante_no_puede_corregir(self):
+        self.ordenar()
+        self.comprar()
+        otro = get_user_model().objects.create_user('area-sin-permiso', password='test')
+        self.client.force_login(otro)
+        respuesta = self.corregir()
+        self.assertEqual(respuesta.status_code, 403)
+
+    def test_detalle_ofrece_corregir_y_muestra_el_historial(self):
+        self.ordenar()
+        self.comprar()
+        self.corregir()
+        respuesta = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(respuesta, 'Corregir esta compra')
+        self.assertContains(respuesta, 'precio por pieza')

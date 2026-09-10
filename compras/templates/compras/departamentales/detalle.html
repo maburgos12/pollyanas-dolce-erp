@@ -2,7 +2,7 @@
 {% load static humanize %}
 {% block title %}{{ solicitud.folio }} · Compra departamental{% endblock %}
 {% block page_title %}Seguimiento {{ solicitud.folio }}{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260909-edicion-compra-1"><link rel="stylesheet" href="{% static 'css/compras_departamentales_budget.css' %}?v=20260803-1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260910-correccion-compra-1"><link rel="stylesheet" href="{% static 'css/compras_departamentales_budget.css' %}?v=20260803-1">{% endblock %}
 {% block content %}
 <main class="cd-shell cd-detalle">
   <a class="cd-back" href="{% url 'compras:departamental_inicio' %}">← Volver</a>
@@ -42,7 +42,10 @@
             {% for revision in quote.historial_visible %}<section class="cd-history-entry"><strong>{{ revision.creado_en|date:"d M Y H:i" }} · {{ revision.actor.get_full_name|default:revision.actor.username }}</strong><p>{{ revision.motivo }}</p><ul>{% for cambio in revision.cambios_visibles %}<li><strong>{{ cambio.campo }}:</strong> {{ cambio.antes|default:"Sin dato" }} → {{ cambio.despues|default:"Sin dato" }}</li>{% empty %}<li>Sin cambio en los datos de la cotización.</li>{% endfor %}</ul></section>{% endfor %}
           </details>{% endif %}
           {% endfor %}</div>{% endif %}
-          {% if item.compra_realizada %}<section class="cd-purchase-record"><h3>Compra realizada</h3><dl><div><dt>Fecha de compra</dt><dd>{{ item.compra_realizada.fecha_compra|date:"d M Y" }}</dd></div><div><dt>Importe final</dt><dd>${{ item.compra_realizada.importe_final|floatformat:2|intcomma }}</dd></div><div><dt>Pedido o referencia</dt><dd>{{ item.compra_realizada.numero_pedido|default:"Sin referencia" }}</dd></div></dl><a href="{% url 'compras:departamental_compra_comprobante' item.compra_realizada.pk %}">Descargar comprobante de compra</a><div class="cd-notice-list" id="item-{{ item.pk }}-avisos"><h4>Aviso al solicitante</h4><p class="cd-notice-help">Se avisa a {{ item.solicitud.solicitante.get_full_name|default:item.solicitud.solicitante.username }}, quien creó la solicitud. El aviso sale al contacto de trabajo (cuenta del ERP), nunca al personal del expediente. «Enviado» significa que el proveedor del canal aceptó el mensaje; la entrega al aparato no se confirma aquí.</p><ul>{% for aviso in item.compra_realizada.avisos.all %}<li class="cd-notice cd-notice--{{ aviso.estado|lower }}"><span class="cd-notice-channel">{{ aviso.get_canal_display }}</span><span class="cd-notice-state">{{ aviso.get_estado_display }}</span>{% if aviso.destino %}<span class="cd-notice-target">{{ aviso.destino }}</span>{% endif %}{% if aviso.detalle %}<span class="cd-notice-detail">{{ aviso.detalle }}</span>{% endif %}{% if aviso.estado == 'ENVIADO' and aviso.enviado_en %}<span class="cd-notice-detail">Aceptado el {{ aviso.enviado_en|date:"d M Y H:i" }}.</span>{% endif %}{% if puede_reintentar_avisos and aviso.puede_reintentarse %}<form method="post" action="{% url 'compras:departamental_aviso_reintentar' aviso.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button type="submit" class="cd-button ghost">{% if aviso.estado == 'INCIERTO' %}Reconciliar y reintentar{% else %}Reintentar aviso{% endif %}</button></form>{% endif %}</li>{% empty %}<li class="cd-notice">Esta compra se registró antes de que existieran los avisos automáticos.</li>{% endfor %}</ul></div></section>{% endif %}
+          {% if item.compra_realizada %}<section class="cd-purchase-record"><h3>Compra realizada</h3><dl><div><dt>Fecha de compra</dt><dd>{{ item.compra_realizada.fecha_compra|date:"d M Y" }}</dd></div><div><dt>Importe final</dt><dd>${{ item.compra_realizada.importe_final|floatformat:2|intcomma }}</dd></div><div><dt>Pedido o referencia</dt><dd>{{ item.compra_realizada.numero_pedido|default:"Sin referencia" }}</dd></div></dl><a href="{% url 'compras:departamental_compra_comprobante' item.compra_realizada.pk %}">Descargar comprobante de compra</a>{% if es_compras %} · <a href="{% url 'compras:departamental_compra_corregir' item.compra_realizada.pk %}">Corregir esta compra</a>{% endif %}
+          {% if item.compra_realizada.historial.all %}<details class="cd-quote-history"><summary>Correcciones ({{ item.compra_realizada.historial.all|length }})</summary>
+            {% for correccion in item.compra_realizada.historial.all %}<section class="cd-history-entry"><strong>{{ correccion.creado_en|date:"d M Y H:i" }} · {{ correccion.actor.get_full_name|default:correccion.actor.username }}</strong><p>{{ correccion.motivo }}</p><ul><li><strong>Importe:</strong> ${{ correccion.antes.importe_final }} → ${{ correccion.despues.importe_final }}</li>{% if correccion.antes.fecha_compra != correccion.despues.fecha_compra %}<li><strong>Fecha de compra:</strong> {{ correccion.antes.fecha_compra }} → {{ correccion.despues.fecha_compra }}</li>{% endif %}{% if correccion.antes.numero_pedido != correccion.despues.numero_pedido %}<li><strong>Pedido o referencia:</strong> {{ correccion.antes.numero_pedido|default:"Sin referencia" }} → {{ correccion.despues.numero_pedido|default:"Sin referencia" }}</li>{% endif %}{% if correccion.antes.comprobante != correccion.despues.comprobante %}<li><strong>Comprobante:</strong> reemplazado</li>{% endif %}</ul></section>{% endfor %}
+          </details>{% endif %}<div class="cd-notice-list" id="item-{{ item.pk }}-avisos"><h4>Aviso al solicitante</h4><p class="cd-notice-help">Se avisa a {{ item.solicitud.solicitante.get_full_name|default:item.solicitud.solicitante.username }}, quien creó la solicitud. El aviso sale al contacto de trabajo (cuenta del ERP), nunca al personal del expediente. «Enviado» significa que el proveedor del canal aceptó el mensaje; la entrega al aparato no se confirma aquí.</p><ul>{% for aviso in item.compra_realizada.avisos.all %}<li class="cd-notice cd-notice--{{ aviso.estado|lower }}"><span class="cd-notice-channel">{{ aviso.get_canal_display }}</span><span class="cd-notice-state">{{ aviso.get_estado_display }}</span>{% if aviso.destino %}<span class="cd-notice-target">{{ aviso.destino }}</span>{% endif %}{% if aviso.detalle %}<span class="cd-notice-detail">{{ aviso.detalle }}</span>{% endif %}{% if aviso.estado == 'ENVIADO' and aviso.enviado_en %}<span class="cd-notice-detail">Aceptado el {{ aviso.enviado_en|date:"d M Y H:i" }}.</span>{% endif %}{% if puede_reintentar_avisos and aviso.puede_reintentarse %}<form method="post" action="{% url 'compras:departamental_aviso_reintentar' aviso.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button type="submit" class="cd-button ghost">{% if aviso.estado == 'INCIERTO' %}Reconciliar y reintentar{% else %}Reintentar aviso{% endif %}</button></form>{% endif %}</li>{% empty %}<li class="cd-notice">Esta compra se registró antes de que existieran los avisos automáticos.</li>{% endfor %}</ul></div></section>{% endif %}
 
         {% if item.evaluacion_presupuesto %}
         {% with evaluacion=item.evaluacion_presupuesto %}
@@ -75,4 +78,38 @@
   </section>
   {% if es_compras %}<form method="post" action="{% url 'compras:departamental_generar_ordenes' solicitud.pk %}" data-async-action class="cd-sticky-action">{% csrf_token %}<div><strong>Órdenes por proveedor</strong><span>Solo incluye artículos autorizados con cotización seleccionada.</span></div><button class="cd-button primary">Generar órdenes disponibles</button></form>{% endif %}
 </main>
+{% endblock %}
+{% block extra_js %}
+<script>
+// El total de la cotización se muestra mientras se captura: una tienda en línea
+// suele anunciar el precio por pieza dentro de un paquete y ese número se copiaba
+// como si fuera el precio del paquete completo.
+(function () {
+  var CAMPOS = ['cantidad_ofertada', 'costo_unitario', 'descuento', 'impuestos', 'envio', 'instalacion', 'otros_cargos'];
+  var moneda = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+  function numero(form, nombre) {
+    var campo = form.querySelector('[name="' + nombre + '"]');
+    var valor = campo ? parseFloat(campo.value) : NaN;
+    return isNaN(valor) ? 0 : valor;
+  }
+  function actualizar(form) {
+    var destino = form.querySelector('[data-quote-total] strong');
+    if (!destino) { return; }
+    var cantidad = numero(form, 'cantidad_ofertada');
+    var unitario = numero(form, 'costo_unitario');
+    if (!cantidad || !unitario) { destino.textContent = '—'; return; }
+    var total = cantidad * unitario - numero(form, 'descuento') + numero(form, 'impuestos')
+      + numero(form, 'envio') + numero(form, 'instalacion') + numero(form, 'otros_cargos');
+    var panel = form.querySelector('[data-quote-total]');
+    destino.textContent = moneda.format(total) + ' por ' + cantidad + ' ' + panel.dataset.unidad;
+  }
+  document.addEventListener('input', function (evento) {
+    var form = evento.target.form;
+    if (form && CAMPOS.indexOf(evento.target.name) !== -1) { actualizar(form); }
+  });
+  document.querySelectorAll('[data-quote-total]').forEach(function (panel) {
+    if (panel.form || panel.closest('form')) { actualizar(panel.closest('form')); }
+  });
+})();
+</script>
 {% endblock %}

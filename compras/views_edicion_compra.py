@@ -11,13 +11,18 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from .access_departamentales import puede_gestionar_compras_departamentales
-from .forms_edicion_compra import EditarCotizacionDepartamentalForm, RegistrarCompraDepartamentalForm
+from .forms_edicion_compra import (
+    CorregirCompraDepartamentalForm, EditarCotizacionDepartamentalForm,
+    RegistrarCompraDepartamentalForm,
+)
 from .models import (
     AvisoCompraDepartamental, CompraRealizadaDepartamental, CotizacionCompraDepartamental,
     ItemCompraDepartamental,
 )
 from .services_avisos_compra import enviar_aviso, reconciliar_incierto
-from .services_edicion_compra import editar_cotizacion, registrar_compra_realizada, validar_edicion
+from .services_edicion_compra import (
+    corregir_compra_realizada, editar_cotizacion, registrar_compra_realizada, validar_edicion,
+)
 from .views_departamentales import _es_direccion, _puede_ver_solicitud, _respuesta_accion
 
 
@@ -79,6 +84,33 @@ def departamental_compra_registrar(request, item_pk):
                 form.add_error(None, '; '.join(exc.messages))
                 return _mostrar_formulario(request, item, form, status=409, **config)
             return _respuesta_accion(request, message='Compra registrada. El artículo queda pendiente de entrega.', redirect_url=_destino(item))
+        return _mostrar_formulario(request, item, form, status=400, **config)
+    return _mostrar_formulario(request, item, form, **config)
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def departamental_compra_corregir(request, pk):
+    if not puede_gestionar_compras_departamentales(request.user):
+        raise PermissionDenied
+    compra = get_object_or_404(
+        CompraRealizadaDepartamental.objects.select_related('item__solicitud'), pk=pk)
+    item = compra.item
+    form = CorregirCompraDepartamentalForm(request.POST or None, request.FILES or None, instance=compra)
+    config = {'titulo': 'Corregir compra registrada',
+              'explicacion': 'Usa esto cuando el importe registrado no coincide con lo que realmente se pagó. '
+                             'El cambio queda con motivo, autor y valores anteriores. No reabre la autorización '
+                             'de Dirección General: la compra ya se pagó.'}
+    if request.method == 'POST':
+        if form.is_valid():
+            try:
+                corregir_compra_realizada(
+                    compra, datos=form.cleaned_data, version=form.cleaned_data['version'],
+                    motivo=form.cleaned_data['motivo'], actor=request.user)
+            except ValidationError as exc:
+                form.add_error(None, '; '.join(exc.messages))
+                return _mostrar_formulario(request, item, form, status=409, **config)
+            return _respuesta_accion(request, message='Compra corregida con historial.', redirect_url=_destino(item), reload=True)
         return _mostrar_formulario(request, item, form, status=400, **config)
     return _mostrar_formulario(request, item, form, **config)
 

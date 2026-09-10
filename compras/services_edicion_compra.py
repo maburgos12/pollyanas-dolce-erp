@@ -1,15 +1,17 @@
 """Correcciones auditables y registro de compra, independientes de la recepción."""
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 
 from .forms_cotizaciones import CotizacionDepartamentalForm
 from .models import (
     CompraRealizadaDepartamental, CompromisoCompraDepartamental, CotizacionCompraDepartamental,
-    EventoCompraDepartamental, HistorialCotizacionDepartamental, ItemCompraDepartamental,
-    LineaOrdenCompraDepartamental, RecepcionItemDepartamental,
+    EventoCompraDepartamental, HistorialCompraDepartamental, HistorialCotizacionDepartamental,
+    ItemCompraDepartamental, LineaOrdenCompraDepartamental, RecepcionItemDepartamental,
 )
 from .services_avisos_compra import programar_avisos
 
@@ -157,4 +159,56 @@ def registrar_compra_realizada(item, *, fecha_compra, importe_final, numero_pedi
     # La cola de avisos vive en la misma transacción (una compra revertida no deja
     # aviso) y el envío se despacha hasta que el commit confirma la compra.
     programar_avisos(compra)
+    return compra
+
+
+CAMPOS_CORRECCION_COMPRA = ('fecha_compra', 'importe_final', 'numero_pedido')
+
+
+def snapshot_compra(compra):
+    return {
+        'fecha_compra': compra.fecha_compra.isoformat(),
+        'importe_final': format(compra.importe_final, '.2f'),
+        'numero_pedido': compra.numero_pedido,
+        'comprobante': Path(compra.comprobante.name).name if compra.comprobante else '',
+        'version': compra.version,
+    }
+
+
+@transaction.atomic
+def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
+    """Corrige los datos de una compra ya pagada dejando rastro del cambio.
+
+    No reabre la autorización de Dirección General ni toca el estado del
+    artículo: el dinero ya salió y lo que se arregla es el registro. El
+    compromiso sí se realinea porque alimenta el importe comprometido.
+    """
+    compra = (CompraRealizadaDepartamental.objects.select_for_update()
+              .select_related('item__solicitud').get(pk=compra.pk))
+    item = compra.item
+    if not motivo.strip():
+        raise ValidationError('Escribe el motivo de la corrección.')
+    if compra.version != version:
+        raise ValidationError('Otra persona corrigió esta compra. Recarga la página y revisa los datos actuales antes de guardar.')
+    antes = snapshot_compra(compra)
+    for name in CAMPOS_CORRECCION_COMPRA:
+        if name in datos:
+            setattr(compra, name, datos[name])
+    if isinstance(datos.get('comprobante'), UploadedFile):
+        compra.comprobante = datos['comprobante']
+    compra.version += 1
+    compra.full_clean()
+    compra.save()
+    despues = snapshot_compra(compra)
+    if antes['importe_final'] != despues['importe_final']:
+        # El compromiso refleja lo realmente pagado; la cotización queda intacta
+        # como evidencia de lo que se cotizó, aunque se haya cotizado mal.
+        CompromisoCompraDepartamental.objects.filter(item=item).update(monto=compra.importe_final)
+    HistorialCompraDepartamental.objects.create(
+        compra=compra, antes=antes, despues=despues, motivo=motivo.strip(), actor=actor)
+    EventoCompraDepartamental.objects.create(
+        solicitud=item.solicitud, item=item, actor=actor, tipo='COMPRA_CORREGIDA',
+        detalle=(f'Importe ${antes["importe_final"]} → ${despues["importe_final"]}. '
+                 f'{motivo.strip()} La autorización no se reabrió: la compra ya estaba pagada.'),
+    )
     return compra

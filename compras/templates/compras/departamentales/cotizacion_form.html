@@ -13,6 +13,7 @@
       <label for="{{ field.id_for_label }}">{{ field.label }}{{ field }}{{ field.errors }}</label>
       {% endif %}{% endfor %}
     </div>
+    <p class="cd-quote-total" data-quote-total data-unidad="{{ item.unidad }}" data-cantidad-solicitada="{{ item.cantidad|floatformat:-3 }}">Total de esta cotización: <strong>—</strong></p>
     <label for="{{ item.cotizacion_form.garantia_observaciones.id_for_label }}">Garantía u observaciones{{ item.cotizacion_form.garantia_observaciones }}{{ item.cotizacion_form.garantia_observaciones.errors }}</label>
     <div class="cd-actions">
       <button type="submit" class="cd-button ghost" data-pending-label="Guardando…">Guardar para comparar</button>

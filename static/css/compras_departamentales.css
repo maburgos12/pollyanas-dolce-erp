@@ -86,3 +86,7 @@
 .cd-notice--incierto .cd-notice-state { background:#faf1d9; color:#7a6120; }
 .cd-notice--sin_contacto, .cd-notice--sin_canal { border-left-color:#7A6565; }
 .cd-notice--sin_contacto .cd-notice-state, .cd-notice--sin_canal .cd-notice-state { background:#efeae6; color:#5c4a4a; }
+
+/* Total en vivo de la cotización: hace visible el importe que se está capturando. */
+.cd-quote-total { margin: 12px 0; padding: 10px 14px; border-radius: 10px; background: var(--rosa,#f8e8ee); color: var(--texto,#3d2b2b); font-weight: 700; }
+.cd-quote-total strong { color: var(--vino,#8b2252); }
