@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-alta-proveedor-seguimiento-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-proveedor-nuevo-visible-v2", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -1399,14 +1399,36 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
         self.assertNotIn('id="mantDrawerProviderNew"', solo_lectura)
         self.assertNotIn("+ Agregar proveedor nuevo", solo_lectura)
 
+    def test_la_opcion_va_antes_de_los_talleres_para_que_se_vea_al_abrir(self):
+        # searchable_selects.js despliega las opciones en orden: al final de un
+        # catálogo largo la opción queda fuera de vista y nadie la encuentra.
+        for nombre in ["A4F Solutions", "Taller Sánchez", "Zeta Refrigeración"]:
+            ProveedorServicio.objects.create(nombre=nombre)
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        bloque = source.split('id="mantDrawerProvider"')[1].split("</select>")[0]
+        opciones = re.findall(r"<option value=\"[^\"]*\"[^>]*>([^<]+)</option>", bloque)
+        self.assertEqual(opciones[0], "Sin proveedor asignado")
+        self.assertEqual(opciones[1], "+ Agregar proveedor nuevo")
+        self.assertEqual(opciones[2:], ["A4F Solutions", "Taller Sánchez", "Zeta Refrigeración"])
+
+    def test_cancelar_el_modal_devuelve_la_caja_de_busqueda_a_su_valor(self):
+        # Al elegir la opción, searchable_selects.js ya escribió su etiqueta en la
+        # caja visible; revertir solo el select nativo dejaría el texto colgado.
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertIn("aplicar(previo);", source)
+        # aplicar() debe vivir en el mismo closure que el handler: setSelect() es
+        # del closure del drawer y desde aquí lanzaría ReferenceError.
+        bloque = source.split("function aplicar(valor)")[1].split("})();")[0]
+        self.assertIn('provider.dispatchEvent(new Event("change"));', bloque)
+
     def test_el_drawer_sincroniza_los_selects_con_su_caja_de_busqueda(self):
         # searchable_selects.js solo actualiza su input visible al oír "change":
         # sin esto el proveedor recién creado (y el ya guardado) se ven en blanco.
         source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
         self.assertIn('element.dispatchEvent(new Event("change"));', source)
         self.assertIn('setSelect(provider, button.dataset.provider || "");', source)
-        self.assertIn('provider.dispatchEvent(new Event("change"));', source)
+        self.assertIn("aplicar(nombre);", source)
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20260910-alta-proveedor-seguimiento-v1", sw)
+        self.assertIn("20260910-proveedor-nuevo-visible-v2", sw)

@@ -619,12 +619,12 @@
         <label class="mant-field">Proveedor o taller
           <select class="mant-input" name="proveedor_servicio" id="mantDrawerProvider">
             <option value="">Sin proveedor asignado</option>
-            {% for proveedor in provider_options %}
-              <option value="{{ proveedor.nombre }}">{{ proveedor.nombre }}</option>
-            {% endfor %}
             {% if puede_crear_proveedor %}
               <option value="__nuevo__" id="mantDrawerProviderNew">+ Agregar proveedor nuevo</option>
             {% endif %}
+            {% for proveedor in provider_options %}
+              <option value="{{ proveedor.nombre }}">{{ proveedor.nombre }}</option>
+            {% endfor %}
           </select>
         </label>
         <label class="mant-field" id="mantDrawerAssetField">Activo relacionado
@@ -1608,7 +1608,9 @@ function cerrarModalProveedor() {
   document.getElementById("modalProveedor").classList.remove("is-open");
   if (form.dataset.seguimiento === "1") {
     form.dataset.seguimiento = "";
-    document.getElementById("mantDrawerProvider")?.focus({preventScroll: true});
+    const campo = document.getElementById("mantDrawerProvider")?.closest(".mant-field");
+    (campo?.querySelector(".pd-searchable-select__input") || campo?.querySelector("select"))
+      ?.focus({preventScroll: true});
   }
 }
 
@@ -1622,22 +1624,26 @@ function cerrarModalProveedor() {
   const boton = document.getElementById("proveedorSubmitBtn");
   let previo = provider.value;
 
+  function aplicar(valor) {
+    provider.value = valor;
+    provider.dispatchEvent(new Event("change"));
+    previo = valor;
+  }
+
   function seleccionarProveedor(nombre) {
     if (!Array.from(provider.options).some((o) => o.value === nombre)) {
       const opcion = document.createElement("option");
       opcion.value = nombre;
       opcion.textContent = nombre;
-      provider.insertBefore(opcion, document.getElementById("mantDrawerProviderNew"));
+      provider.add(opcion, document.getElementById("mantDrawerProviderNew").index + 1);
     }
-    provider.value = nombre;
-    provider.dispatchEvent(new Event("change"));
-    previo = nombre;
+    aplicar(nombre);
   }
 
   provider.addEventListener("focus", () => { if (provider.value !== "__nuevo__") previo = provider.value; });
   provider.addEventListener("change", () => {
     if (provider.value !== "__nuevo__") { previo = provider.value; return; }
-    provider.value = previo;
+    aplicar(previo);
     abrirModalProveedor();
     document.getElementById("modalProveedorTitulo").textContent = "Agregar proveedor nuevo";
     errorEl.hidden = true;
