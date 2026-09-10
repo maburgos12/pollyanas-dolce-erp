@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -89,7 +91,11 @@ def _diff_incapacidad(antes: dict[str, str], incapacidad: IncapacidadEmpleado) -
 
 
 def _reevaluar_asistencia(empleado: Empleado, fecha_inicio, fecha_fin) -> None:
-    evaluar_rango_asistencia(fecha_inicio, fecha_fin, empleados=[empleado])
+    # Los registros heredados con el año mal tecleado abarcan cientos de miles de
+    # días: evaluar día por día ese rango colgaría la petición. El tope del modelo
+    # impide crear nuevos, y aquí se acota el rango viejo al corregirlos.
+    inicio = max(fecha_inicio, fecha_fin - timedelta(days=IncapacidadEmpleado.MAX_DIAS))
+    evaluar_rango_asistencia(inicio, fecha_fin, empleados=[empleado])
 
 
 def _require_manage_rrhh(user):
@@ -208,7 +214,7 @@ def crear_incapacidad(request):
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
         return redirect("rrhh:rrhh_incapacidades")
 
-    evaluar_rango_asistencia(fecha_inicio, fecha_fin, empleados=[empleado])
+    _reevaluar_asistencia(empleado, fecha_inicio, fecha_fin)
     messages.success(request, "Incapacidad registrada.")
     return redirect("rrhh:rrhh_incapacidades")
 
@@ -242,7 +248,9 @@ def cancelar_incapacidad(request, incapacidad_id):
     )
     hoy = timezone.localdate()
     if incapacidad.fecha_inicio <= hoy:
-        evaluar_rango_asistencia(incapacidad.fecha_inicio, min(incapacidad.fecha_fin, hoy), empleados=[incapacidad.empleado])
+        _reevaluar_asistencia(
+            incapacidad.empleado, incapacidad.fecha_inicio, min(incapacidad.fecha_fin, hoy)
+        )
     messages.success(request, "Incapacidad cancelada.")
     return redirect("rrhh:rrhh_incapacidades")
 

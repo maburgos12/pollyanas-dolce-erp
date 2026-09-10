@@ -1446,6 +1446,10 @@ class IncapacidadEmpleado(models.Model):
         (ESTADO_CANCELADA, "Cancelada"),
     ]
 
+    # El IMSS tope a 78 semanas (546 días); 730 deja holgura y atrapa los errores
+    # de tecleo en el año, que generan rangos de cientos de miles de días.
+    MAX_DIAS = 730
+
     empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="incapacidades")
     fecha_inicio = models.DateField()
     fecha_fin = models.DateField()
@@ -1487,6 +1491,15 @@ class IncapacidadEmpleado(models.Model):
     def clean(self):
         if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
             raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
+        if self.fecha_inicio and self.fecha_fin and self.dias_naturales > self.MAX_DIAS:
+            raise ValidationError(
+                {
+                    "fecha_inicio": (
+                        f"La incapacidad abarca {self.dias_naturales} días naturales; "
+                        f"el máximo son {self.MAX_DIAS}. Revisa el año de las fechas."
+                    )
+                }
+            )
         if self.estado != self.ESTADO_CANCELADA and self.empleado_id and self.fecha_inicio and self.fecha_fin:
             traslape = IncapacidadEmpleado.objects.filter(
                 empleado_id=self.empleado_id,
