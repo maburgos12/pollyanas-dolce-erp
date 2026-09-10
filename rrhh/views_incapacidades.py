@@ -90,12 +90,53 @@ def _diff_incapacidad(antes: dict[str, str], incapacidad: IncapacidadEmpleado) -
     return cambios
 
 
-def _reevaluar_asistencia(empleado: Empleado, fecha_inicio, fecha_fin) -> None:
-    # Los registros heredados con el año mal tecleado abarcan cientos de miles de
-    # días: evaluar día por día ese rango colgaría la petición. El tope del modelo
-    # impide crear nuevos, y aquí se acota el rango viejo al corregirlos.
+def _dias_cubiertos(empleado_id, fecha_inicio, fecha_fin, estado) -> set:
+    """Días que la incapacidad marca como cubiertos, junto al empleado al que aplican.
+
+    Una incapacidad cancelada no cubre nada. El tope de MAX_DIAS acota los dos
+    registros heredados con el año mal tecleado, que abarcan cientos de miles de días.
+    """
+    if not (empleado_id and fecha_inicio and fecha_fin):
+        return set()
+    if estado == IncapacidadEmpleado.ESTADO_CANCELADA:
+        return set()
     inicio = max(fecha_inicio, fecha_fin - timedelta(days=IncapacidadEmpleado.MAX_DIAS))
-    evaluar_rango_asistencia(inicio, fecha_fin, empleados=[empleado])
+    dias = set()
+    cursor = inicio
+    while cursor <= fecha_fin:
+        dias.add((empleado_id, cursor))
+        cursor += timedelta(days=1)
+    return dias
+
+
+def _reevaluar_cambio_cobertura(antes: set, despues: set) -> None:
+    """Reevalúa solo los días que cambiaron de cobertura.
+
+    Recalcular el rango completo reescribe historia que nadie pidió: al corregir el
+    año de un registro heredado el motor le fabricó faltas —y hasta un escalamiento
+    de baja— en la semana de inducción de la empleada. Extender una incapacidad
+    larga toca ahora solo los días agregados, y cancelarla sí toca todos, que es lo
+    correcto.
+    """
+    # Nunca hacia el futuro: un día que deja de estar cubierto y todavía no llega no
+    # tiene checadas, y evaluarlo generaría una falta por adelantado. El job diario
+    # los evalúa cuando toca.
+    hoy = timezone.localdate()
+    afectados = {(emp, dia) for emp, dia in antes ^ despues if dia <= hoy}
+    if not afectados:
+        return
+
+    por_empleado: dict[int, list] = {}
+    for empleado_id, dia in afectados:
+        por_empleado.setdefault(empleado_id, []).append(dia)
+
+    empleados = Empleado.objects.in_bulk(por_empleado.keys())
+    for empleado_id, dias in por_empleado.items():
+        empleado = empleados.get(empleado_id)
+        if empleado is None:
+            continue
+        for dia in sorted(dias):
+            evaluar_rango_asistencia(dia, dia, empleados=[empleado])
 
 
 def _require_manage_rrhh(user):
@@ -205,7 +246,9 @@ def crear_incapacidad(request):
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
         return redirect("rrhh:rrhh_incapacidades")
 
-    _reevaluar_asistencia(empleado, fecha_inicio, fecha_fin)
+    _reevaluar_cambio_cobertura(
+        set(), _dias_cubiertos(empleado.pk, fecha_inicio, fecha_fin, incapacidad.estado)
+    )
     messages.success(request, "Incapacidad registrada.")
     return redirect("rrhh:rrhh_incapacidades")
 
@@ -221,6 +264,9 @@ def cancelar_incapacidad(request, incapacidad_id):
         return redirect("rrhh:rrhh_incapacidades")
 
     estado_anterior = incapacidad.get_estado_display()
+    cubiertos_antes = _dias_cubiertos(
+        incapacidad.empleado_id, incapacidad.fecha_inicio, incapacidad.fecha_fin, incapacidad.estado
+    )
     incapacidad.estado = IncapacidadEmpleado.ESTADO_CANCELADA
     incapacidad.comentario_cancelacion = comentario
     incapacidad.save(update_fields=["estado", "comentario_cancelacion", "actualizado_en"])
@@ -237,11 +283,7 @@ def cancelar_incapacidad(request, incapacidad_id):
         ],
         realizado_por=request.user,
     )
-    hoy = timezone.localdate()
-    if incapacidad.fecha_inicio <= hoy:
-        _reevaluar_asistencia(
-            incapacidad.empleado, incapacidad.fecha_inicio, min(incapacidad.fecha_fin, hoy)
-        )
+    _reevaluar_cambio_cobertura(cubiertos_antes, set())
     messages.success(request, "Incapacidad cancelada.")
     return redirect("rrhh:rrhh_incapacidades")
 
@@ -294,9 +336,9 @@ def editar_incapacidad(request, incapacidad_id):
         return redirect("rrhh:rrhh_incapacidad_editar", incapacidad_id=incapacidad.id)
 
     antes = {campo: _valor_legible(incapacidad, campo) for campo, _ in CAMPOS_EDITABLES}
-    empleado_anterior = incapacidad.empleado
-    fecha_inicio_anterior = incapacidad.fecha_inicio
-    fecha_fin_anterior = incapacidad.fecha_fin
+    cubiertos_antes = _dias_cubiertos(
+        incapacidad.empleado_id, incapacidad.fecha_inicio, incapacidad.fecha_fin, incapacidad.estado
+    )
 
     incapacidad.empleado = empleado
     incapacidad.fecha_inicio = fecha_inicio
@@ -327,15 +369,9 @@ def editar_incapacidad(request, incapacidad_id):
         realizado_por=request.user,
     )
 
-    # El rango viejo y el nuevo pueden ser disjuntos o de empleados distintos:
-    # hay que reevaluar ambos para no dejar faltas fantasma.
-    _reevaluar_asistencia(empleado_anterior, fecha_inicio_anterior, fecha_fin_anterior)
-    if (empleado.pk, fecha_inicio, fecha_fin) != (
-        empleado_anterior.pk,
-        fecha_inicio_anterior,
-        fecha_fin_anterior,
-    ):
-        _reevaluar_asistencia(empleado, fecha_inicio, fecha_fin)
-
+    _reevaluar_cambio_cobertura(
+        cubiertos_antes,
+        _dias_cubiertos(empleado.pk, fecha_inicio, fecha_fin, incapacidad.estado),
+    )
     messages.success(request, "Incapacidad corregida.")
     return redirect("rrhh:rrhh_incapacidades")
