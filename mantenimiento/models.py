@@ -9,6 +9,8 @@ class ProveedorServicio(models.Model):
     nombre = models.CharField(max_length=200)
     contacto = models.CharField(max_length=120, blank=True, default="", verbose_name="Nombre del contacto")
     telefono = models.CharField(max_length=30, blank=True, default="")
+    whatsapp = models.CharField(max_length=30, blank=True, default="",
+                                verbose_name="WhatsApp / celular")
     especialidad = models.CharField(max_length=120, blank=True, default="",
                                     help_text="Ej. Refrigeración, Electricidad, Mecánica general")
     notas = models.TextField(blank=True, default="")

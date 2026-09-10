@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-proveedor-nuevo-visible-v2", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-proveedor-whatsapp-v3", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -1431,4 +1431,62 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20260910-proveedor-nuevo-visible-v2", sw)
+        self.assertIn("20260910-proveedor-whatsapp-v3", sw)
+
+
+class ProveedorTelefonoWhatsappTests(TestCase):
+    """El teléfono largo devolvía DataError 500 en la pestaña Proveedores."""
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(username="mant_admin", password="test12345")
+        UserModuleAccess.objects.create(user=self.user, module="mantenimiento", access=ACCESS_MANAGE)
+        self.client.force_login(self.user)
+        self.url = reverse("mantenimiento:mant-proveedor")
+
+    def test_telefono_mas_largo_que_la_columna_no_rompe_con_500(self):
+        response = self.client.post(self.url, {
+            "action": "crear", "nombre": "Frenos y Clutch Alfe",
+            "telefono": "667 87 2 3 63 14 WAT GO y tambien el fijo 667 111 2233",
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ProveedorServicio.objects.exists())
+        aviso = " ".join(str(m) for m in response.context["messages"])
+        self.assertIn("No se guardó el proveedor", aviso)
+        self.assertIn("30", aviso)
+
+    def test_telefono_y_whatsapp_se_guardan_por_separado(self):
+        response = self.client.post(self.url, {
+            "action": "crear", "nombre": "Frenos y Clutch Alfe", "telefono": "667 872 3631",
+            "whatsapp": "667 114 4188", "contacto": "Eduardo Rendón de Anda",
+            "especialidad": "Frenos", "notas": "8:30 AM 5:30 PM",
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        proveedor = ProveedorServicio.objects.get(nombre="Frenos y Clutch Alfe")
+        self.assertEqual(proveedor.telefono, "667 872 3631")
+        self.assertEqual(proveedor.whatsapp, "667 114 4188")
+        self.assertEqual(proveedor.contacto, "Eduardo Rendón de Anda")
+
+    def test_editar_tambien_valida_en_vez_de_romper(self):
+        proveedor = ProveedorServicio.objects.create(nombre="Taller", telefono="667 111 2233")
+        response = self.client.post(self.url, {
+            "action": "editar", "proveedor_id": proveedor.pk, "nombre": "Taller",
+            "telefono": "x" * 40,
+        }, follow=True)
+        self.assertEqual(response.status_code, 200)
+        proveedor.refresh_from_db()
+        self.assertEqual(proveedor.telefono, "667 111 2233")
+
+    def test_el_alta_desde_seguimiento_acepta_whatsapp(self):
+        response = self.client.post(reverse("mantenimiento:mant-proveedor-alta"), {
+            "nombre": "Refrigeración del Valle", "telefono": "667 872 3631", "whatsapp": "667 114 4188",
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["proveedor"]["whatsapp"], "667 114 4188")
+        self.assertEqual(ProveedorServicio.objects.get(nombre="Refrigeración del Valle").whatsapp, "667 114 4188")
+
+    def test_el_modal_pide_whatsapp_y_topa_las_longitudes(self):
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertIn('id="proveedorWhatsapp"', source)
+        self.assertIn("WhatsApp / celular", source)
+        self.assertIn('name="whatsapp" id="proveedorWhatsapp" class="mant-input"\n            maxlength="30"', source)
