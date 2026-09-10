@@ -20,7 +20,7 @@
 
 <section class="card">
   <div class="card-header">Incapacidad #{{ incapacidad.id }} · {{ incapacidad.empleado.nombre }}</div>
-  <p class="muted">Registrada por {{ incapacidad.registrada_por.get_full_name|default:incapacidad.registrada_por.username|default:"-" }} el {{ incapacidad.creado_en|date:"Y-m-d H:i" }}.</p>
+  <p class="muted">Registrada por {% firstof incapacidad.registrada_por.get_full_name incapacidad.registrada_por.username "-" %} el {{ incapacidad.creado_en|date:"Y-m-d H:i" }}.</p>
   <p class="muted">Guardar recalcula la asistencia del rango anterior y del nuevo, y deja el cambio en la bitácora con tu usuario y el motivo.</p>
 
   <form method="post">
@@ -108,7 +108,7 @@
             <tr>
               <td>{{ cambio.creado_en|date:"Y-m-d H:i" }}</td>
               <td>{{ cambio.get_accion_display }}</td>
-              <td>{{ cambio.realizado_por.get_full_name|default:cambio.realizado_por.username|default:"-" }}</td>
+              <td>{% firstof cambio.realizado_por.get_full_name cambio.realizado_por.username "-" %}</td>
               <td>
                 {% for detalle in cambio.cambios %}
                   {{ detalle.campo }}: {{ detalle.antes|default:"(vacío)" }} → {{ detalle.despues|default:"(vacío)" }}<br>

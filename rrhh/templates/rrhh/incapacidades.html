@@ -155,7 +155,7 @@
                   -
                 {% endfor %}
               </td>
-              <td>{{ incapacidad.registrada_por.get_full_name|default:incapacidad.registrada_por.username|default:"-" }}</td>
+              <td>{% firstof incapacidad.registrada_por.get_full_name incapacidad.registrada_por.username "-" %}</td>
               <td>{{ incapacidad.notas|default:""|linebreaksbr }}</td>
               {% if can_manage_rrhh %}
                 <td>

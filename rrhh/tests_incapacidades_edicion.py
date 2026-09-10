@@ -215,6 +215,79 @@ class EdicionIncapacidadesTests(TestCase):
         )
         self.assertEqual((rango_viejo[1] - rango_viejo[0]).days, IncapacidadEmpleado.MAX_DIAS)
 
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_folio_repetido_nombra_el_registro_en_conflicto(self, evaluar):
+        # Caso real: se intenta completar el registro cancelado con el folio que ya
+        # tiene el activo. Debe decir cuál es, no el nombre interno de la restricción.
+        cancelada = IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 9, 9),
+            fecha_fin=date(2026, 9, 10),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            estado=IncapacidadEmpleado.ESTADO_CANCELADA,
+        )
+        activa = IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 9, 8),
+            fecha_fin=date(2026, 9, 10),
+            tipo=IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+            folio="GC829675",
+            estado=IncapacidadEmpleado.ESTADO_ACTIVA,
+        )
+
+        response = self.client.post(
+            reverse("rrhh:rrhh_incapacidad_editar", args=[cancelada.id]),
+            {
+                "empleado": str(self.empleado.id),
+                "fecha_inicio": "2026-09-09",
+                "fecha_fin": "2026-09-10",
+                "tipo": IncapacidadEmpleado.TIPO_ENFERMEDAD_GENERAL,
+                "folio": "GC829675",
+                "estado": IncapacidadEmpleado.ESTADO_ACTIVA,
+                "notas": "",
+                "motivo": "Le falta el folio",
+            },
+            follow=True,
+        )
+
+        avisos = [str(m) for m in response.context["messages"]]
+        self.assertTrue(avisos)
+        texto = " ".join(avisos)
+        self.assertNotIn("rrhh_incapacidad_folio_unico_empleado", texto)
+        self.assertNotIn("restricción", texto)
+        self.assertIn(f"#{activa.id}", texto)
+        self.assertIn("GC829675", texto)
+        cancelada.refresh_from_db()
+        self.assertEqual(cancelada.folio, "")
+
+    @patch("rrhh.views_incapacidades.evaluar_rango_asistencia")
+    def test_traslape_nombra_el_registro_en_conflicto(self, evaluar):
+        otra = IncapacidadEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 10),
+            tipo=IncapacidadEmpleado.TIPO_OTRO,
+            estado=IncapacidadEmpleado.ESTADO_ACTIVA,
+        )
+
+        response = self.client.post(
+            self.url,
+            self._payload(fecha_inicio="2026-08-05", fecha_fin="2026-08-06"),
+            follow=True,
+        )
+
+        texto = " ".join(str(m) for m in response.context["messages"])
+        self.assertIn(f"#{otra.id}", texto)
+        self.assertIn("2026-08-01", texto)
+
+    def test_pantallas_toleran_usuario_borrado(self):
+        # registrada_por / realizado_por son SET_NULL: la plantilla no puede reventar.
+        self.incapacidad.registrada_por = None
+        self.incapacidad.save(update_fields=["registrada_por"])
+
+        self.assertEqual(self.client.get(reverse("rrhh:rrhh_incapacidades")).status_code, 200)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+
     def test_usuario_sin_permiso_no_puede_editar(self):
         sin_permiso = get_user_model().objects.create_user(
             username="rrhh-sin-permiso",

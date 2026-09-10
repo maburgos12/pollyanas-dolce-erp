@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -1489,26 +1489,63 @@ class IncapacidadEmpleado(models.Model):
         return (self.fecha_fin - self.fecha_inicio).days + 1
 
     def clean(self):
-        if self.fecha_inicio and self.fecha_fin and self.fecha_fin < self.fecha_inicio:
-            raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
-        if self.fecha_inicio and self.fecha_fin and self.dias_naturales > self.MAX_DIAS:
-            raise ValidationError(
-                {
-                    "fecha_inicio": (
-                        f"La incapacidad abarca {self.dias_naturales} días naturales; "
-                        f"el máximo son {self.MAX_DIAS}. Revisa el año de las fechas."
-                    )
-                }
+        # Se juntan todos los errores: si clean() cortara en el primero, full_clean
+        # seguiría con validate_constraints y dejaría escapar el nombre interno de la
+        # restricción del folio junto al mensaje bueno.
+        errores: dict[str, list[str]] = {}
+
+        def agregar(campo: str, mensaje: str) -> None:
+            errores.setdefault(campo, []).append(mensaje)
+
+        fechas_ok = bool(self.fecha_inicio and self.fecha_fin)
+        if fechas_ok and self.fecha_fin < self.fecha_inicio:
+            agregar("fecha_fin", "La fecha final no puede ser anterior a la fecha inicial.")
+            fechas_ok = False
+        elif fechas_ok and self.dias_naturales > self.MAX_DIAS:
+            agregar(
+                "fecha_inicio",
+                f"La incapacidad abarca {self.dias_naturales} días naturales; "
+                f"el máximo son {self.MAX_DIAS}. Revisa el año de las fechas.",
             )
-        if self.estado != self.ESTADO_CANCELADA and self.empleado_id and self.fecha_inicio and self.fecha_fin:
-            traslape = IncapacidadEmpleado.objects.filter(
-                empleado_id=self.empleado_id,
-                estado__in=[self.ESTADO_ACTIVA, self.ESTADO_CERRADA],
-                fecha_inicio__lte=self.fecha_fin,
-                fecha_fin__gte=self.fecha_inicio,
-            ).exclude(pk=self.pk)
-            if traslape.exists():
-                raise ValidationError("Ya existe una incapacidad no cancelada que cruza esas fechas.")
+
+        if fechas_ok and self.empleado_id and self.estado != self.ESTADO_CANCELADA:
+            traslape = (
+                IncapacidadEmpleado.objects.filter(
+                    empleado_id=self.empleado_id,
+                    estado__in=[self.ESTADO_ACTIVA, self.ESTADO_CERRADA],
+                    fecha_inicio__lte=self.fecha_fin,
+                    fecha_fin__gte=self.fecha_inicio,
+                )
+                .exclude(pk=self.pk)
+                .first()
+            )
+            if traslape is not None:
+                agregar(
+                    NON_FIELD_ERRORS,
+                    f"Esas fechas cruzan con la incapacidad #{traslape.id} de la misma persona "
+                    f"({traslape.fecha_inicio} al {traslape.fecha_fin}, "
+                    f"{traslape.get_estado_display().lower()}). Corrige esa incapacidad en lugar "
+                    f"de capturar otra.",
+                )
+
+        folio = (self.folio or "").strip()
+        if folio and self.empleado_id:
+            repetido = (
+                IncapacidadEmpleado.objects.filter(empleado_id=self.empleado_id, folio=folio)
+                .exclude(pk=self.pk)
+                .first()
+            )
+            if repetido is not None:
+                agregar(
+                    "folio",
+                    f"El folio {folio} ya está en la incapacidad #{repetido.id} de la misma "
+                    f"persona ({repetido.fecha_inicio} al {repetido.fecha_fin}, "
+                    f"{repetido.get_estado_display().lower()}). Corrige esa incapacidad en "
+                    f"lugar de capturar otra.",
+                )
+
+        if errores:
+            raise ValidationError(errores)
 
     def save(self, *args, **kwargs):
         self.folio = (self.folio or "").strip()

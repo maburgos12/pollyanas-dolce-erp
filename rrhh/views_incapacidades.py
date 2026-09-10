@@ -188,15 +188,6 @@ def crear_incapacidad(request):
     if estado not in {IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA}:
         messages.error(request, "Solo se puede crear una incapacidad activa o cerrada.")
         return redirect("rrhh:rrhh_incapacidades")
-    if IncapacidadEmpleado.objects.filter(
-        empleado=empleado,
-        estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
-        fecha_inicio__lte=fecha_fin,
-        fecha_fin__gte=fecha_inicio,
-    ).exists():
-        messages.error(request, "Ya existe una incapacidad no cancelada que cruza esas fechas.")
-        return redirect("rrhh:rrhh_incapacidades")
-
     incapacidad = IncapacidadEmpleado(
         empleado=empleado,
         fecha_inicio=fecha_inicio,
@@ -208,7 +199,7 @@ def crear_incapacidad(request):
         registrada_por=request.user,
     )
     try:
-        incapacidad.full_clean()
+        incapacidad.full_clean(validate_constraints=False)
         incapacidad.save()
     except (IntegrityError, ValidationError) as exc:
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
@@ -317,7 +308,7 @@ def editar_incapacidad(request, incapacidad_id):
     incapacidad.comentario_cancelacion = ""
 
     try:
-        incapacidad.full_clean()
+        incapacidad.full_clean(validate_constraints=False)
         incapacidad.save()
     except (IntegrityError, ValidationError) as exc:
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
