@@ -33,18 +33,30 @@ retroactivos** en migración ni en despliegue.
 No existe estado «entregado»: ni Resend ni Meta confirman entrega al aparato por
 esta vía, así que la pantalla no lo afirma.
 
-## Precedencia de contactos
+## Contacto de trabajo vs. contacto personal
 
-Definida en `core/contactos.py` y única para todo el ERP:
+El ERP guarda dos cosas distintas que **no deben mezclarse**:
 
-* **Correo:** `User.email` → `Empleado.email` (empleado ligado por `usuario_erp`).
-* **Teléfono:** `UserProfile.telefono` → `Empleado.telefono`.
+| | Campo | Qué guarda |
+| --- | --- | --- |
+| **Trabajo** | `User.email`, `UserProfile.telefono` | Correo `@pollyanasdolce.com` y línea propiedad de Pollyana's Dolce, asignada a un puesto o departamento. |
+| **Personal** | `Empleado.email`, `Empleado.telefono` | Gmail y celular propios del colaborador. Existen para Capital Humano. |
 
-El dato de la cuenta va primero porque es el que la persona mantiene; el
-expediente de Capital Humano es el respaldo. Ambos se validan (correo con
-`validate_email`, teléfono normalizado a E.164 con lada 52 para 10 dígitos). Si
-el titular no tiene dato válido se muestra «Sin correo registrado» o «Sin
-teléfono registrado»: **nunca** se sustituye por el contacto de otra persona.
+`core/contactos.py` resuelve **solo el contacto de trabajo**. No hay fallback al
+expediente: el celular y el correo personales no son un respaldo del contacto de
+trabajo, y mandar un asunto operativo ahí es mezclar dos cosas distintas.
+
+Si la persona no tiene contacto de trabajo, el aviso queda `SIN_CONTACTO` con el
+motivo «Sin correo de trabajo registrado» o «Sin teléfono de trabajo registrado».
+**Nunca** se sustituye por el contacto de otra persona ni por el personal del
+propio titular.
+
+Ambos valores se validan: el correo con `validate_email`, el teléfono
+normalizado a E.164 (un número de 10 dígitos recibe la lada 52).
+
+Nota operativa: las líneas de la empresa que ya usaba el sistema Agente DG se
+registraron en `UserProfile.telefono`; los números del expediente de RRHH se
+conservaron intactos porque son personales.
 
 ## Canal de WhatsApp
 
