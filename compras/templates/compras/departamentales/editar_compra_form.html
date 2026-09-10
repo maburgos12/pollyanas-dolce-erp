@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ titulo }} · {{ item.solicitud.folio }}{% endblock %}
+{% block page_title %}{{ titulo }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260909-edicion-compra-1">{% endblock %}
+{% block content %}
+<main class="cd-shell cd-operation-form">
+  <a class="cd-back" href="{{ destino }}">← Volver al artículo</a>
+  <header><h1>{{ titulo }}</h1><h2>{{ item.descripcion }}</h2><p>{{ item.solicitud.folio }} · {{ item.solicitud.area.nombre }}</p><p>{{ explicacion }}</p></header>
+  <form method="post" enctype="multipart/form-data" data-async-action class="cd-edit-form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% if volver_adjuntar %}<p role="status">Para reintentar el envío, selecciona nuevamente el archivo adjunto.</p>{% endif %}
+    {% for hidden in form.hidden_fields %}{{ hidden }}{{ hidden.errors }}{% endfor %}
+    <div class="cd-edit-grid">
+    {% for field in form.visible_fields %}
+      <div class="cd-edit-field {% if field.name == 'motivo' or field.name == 'garantia_observaciones' or field.name == 'comprobante' %}cd-edit-wide{% endif %}">
+        {{ field.label_tag }}{{ field }}
+        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}
+      </div>
+    {% endfor %}
+    </div>
+    <div class="cd-actions"><button type="submit" class="cd-button primary">{% if form.motivo %}Guardar cambios{% else %}Registrar compra realizada{% endif %}</button><a class="cd-button ghost" href="{{ destino }}">Cancelar</a></div>
+  </form>
+</main>
+{% endblock %}

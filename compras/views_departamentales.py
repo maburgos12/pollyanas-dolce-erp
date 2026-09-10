@@ -17,6 +17,8 @@ from core.access import ROLE_DG, has_any_role
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto
 
+from .services_edicion_compra import tiene_compra_o_recepcion
+
 from .forms_cotizaciones import CotizacionDepartamentalForm, ProveedorCotizacionForm, crear_proveedor_cotizacion
 
 from .models import (
@@ -252,11 +254,45 @@ def departamental_enviar(request, pk):
     return _respuesta_accion(request, message=f"Solicitud {solicitud.folio} enviada a Compras.", redirect_url=destino, reload=True)
 
 
+def _cambios_historial_cotizacion(revision):
+    etiquetas = {
+        'proveedor': 'Proveedor', 'plataforma': 'Dónde cotizas', 'enlace_producto': 'Enlace al producto',
+        'cantidad_ofertada': 'Cantidad ofertada', 'costo_unitario': 'Costo unitario', 'descuento': 'Descuento',
+        'impuestos': 'Impuestos', 'envio': 'Envío', 'instalacion': 'Instalación', 'otros_cargos': 'Otros cargos',
+        'documento': 'Documento', 'garantia_observaciones': 'Garantía u observaciones',
+        'total_adquisicion': 'Total de adquisición',
+    }
+    importes = {'costo_unitario', 'descuento', 'impuestos', 'envio', 'instalacion', 'otros_cargos', 'total_adquisicion'}
+
+    def presentar(campo, valor):
+        if valor in (None, ''):
+            return 'Sin dato'
+        if campo in importes:
+            return f'${Decimal(valor):,.2f}'
+        if campo == 'cantidad_ofertada':
+            return f'{Decimal(valor):,.3f}'.rstrip('0').rstrip('.')
+        if campo == 'plataforma':
+            return dict(CotizacionCompraDepartamental.PLATAFORMAS).get(valor, valor)
+        if campo == 'documento':
+            return str(valor).rsplit('/', 1)[-1]
+        return valor
+
+    cambios = []
+    for nombre, anterior in revision.antes.items():
+        posterior = revision.despues.get(nombre, '')
+        if nombre not in etiquetas or anterior == posterior:
+            continue
+        antes, despues = presentar(nombre, anterior), presentar(nombre, posterior)
+        if antes != despues:
+            cambios.append({'campo': etiquetas[nombre], 'antes': antes, 'despues': despues})
+    return cambios
+
+
 @login_required
 def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error=None, status=200):
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
-            "items__cotizaciones__proveedor", "items__eventos"
+            "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos", "items__compra_realizada"
         ),
         pk=pk,
     )
@@ -269,8 +305,19 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     total_comprometido = Decimal("0")
     total_gastado = Decimal("0")
     for item in solicitud.items.all():
-        item.puede_cotizar = (item.estado not in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
-                             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
+        cerrado_por_evidencia = tiene_compra_o_recepcion(item)
+        item.puede_editar_cotizacion = (not cerrado_por_evidencia
+            and item.estado not in ('COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
+            and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
+        item.puede_registrar_compra = (not cerrado_por_evidencia and item.estado in ('AUTORIZADO','ORDENADO')
+            and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
+        for quote in item.cotizaciones.all():
+            quote.historial_visible = []
+            for revision in quote.historial.all():
+                revision.cambios_visibles = _cambios_historial_cotizacion(revision)
+                quote.historial_visible.append(revision)
+        item.puede_cotizar = (item.estado not in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
+                             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA') and not cerrado_por_evidencia and not hasattr(item, 'linea_orden'))
         item.cotizacion_form = (cotizacion_error[1] if cotizacion_error and cotizacion_error[0] == item.pk
                                 else CotizacionDepartamentalForm(item=item))
         item.proveedor_form = (proveedor_error[1] if proveedor_error and proveedor_error[0] == item.pk
@@ -283,6 +330,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         if item.subtotal_estimado is not None:
             total_solicitado += item.subtotal_estimado
         seleccionada = next((quote for quote in item.cotizaciones.all() if quote.seleccionada), None)
+        item.cotizacion_seleccionada = seleccionada
         if seleccionada:
             total_cotizado += seleccionada.total_adquisicion
             item.evaluacion_presupuesto = evaluar_presupuesto_item(item, seleccionada.total_adquisicion)
@@ -409,7 +457,7 @@ def departamental_cotizar(request, item_pk):
         return _error_cotizacion(request, item, form)
     with transaction.atomic():
         item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
-        if item.estado in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA'):
+        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or hasattr(item, 'linea_orden'):
             form.add_error(None, 'Este artículo ya no admite nuevas cotizaciones.')
             return _error_cotizacion(request, item, form, status=409)
         cotizacion = form.save(commit=False)
@@ -437,7 +485,7 @@ def departamental_cotizacion_seleccionar(request, quote_pk):
     destino = reverse('compras:departamental_detalle', args=[quote.item.solicitud_id]) + f'#item-{quote.item_id}'
     with transaction.atomic():
         item = ItemCompraDepartamental.objects.select_for_update().get(pk=quote.item_id)
-        if item.estado in ('ORDENADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA'):
+        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or hasattr(item, 'linea_orden'):
             return _respuesta_accion(request, message='Este artículo ya no admite cambiar la cotización seleccionada.', redirect_url=destino, status=409)
         if not quote.proveedor.activo:
             return _respuesta_accion(request, message='El proveedor está inactivo. Revisa su ficha antes de seleccionar.', redirect_url=destino, status=409)
@@ -452,8 +500,18 @@ def departamental_decidir(request, item_pk):
     if not _es_direccion(request.user):
         raise PermissionDenied
     item = get_object_or_404(ItemCompraDepartamental, pk=item_pk)
-    decidir_exceso(item, decision=request.POST.get("decision", ""), comentario=request.POST.get("comentario", ""), actor=request.user)
-    return _respuesta_accion(request, message="Decisión registrada con trazabilidad.", redirect_url=reverse("compras:departamental_detalle", args=[item.solicitud_id]))
+    destino = reverse("compras:departamental_detalle", args=[item.solicitud_id]) + f'#item-{item.pk}'
+    try:
+        cotizacion_id = int(request.POST.get('cotizacion_id', ''))
+        version = int(request.POST.get('version', ''))
+    except (ValueError, TypeError):
+        return _respuesta_accion(request, message='Recarga la solicitud y revisa la cotización actual antes de decidir.', redirect_url=destino, status=400)
+    try:
+        decidir_exceso(item, decision=request.POST.get("decision", ""), comentario=request.POST.get("comentario", ""), actor=request.user,
+                       cotizacion_id=cotizacion_id, version=version)
+    except ValidationError as exc:
+        return _respuesta_accion(request, message='; '.join(exc.messages), redirect_url=destino, status=409)
+    return _respuesta_accion(request, message="Decisión registrada con trazabilidad.", redirect_url=destino, reload=True)
 
 
 @login_required
@@ -474,15 +532,24 @@ def departamental_generar_ordenes(request, pk):
 def departamental_recibir(request, item_pk):
     if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
-    item = get_object_or_404(ItemCompraDepartamental, pk=item_pk)
-    linea = item.linea_orden
-    RecepcionItemDepartamental.objects.create(
-        linea_orden=linea,
-        cantidad_recibida=Decimal(request.POST.get("cantidad_recibida")),
-        observaciones=request.POST.get("observaciones", "").strip(),
-        registrado_por=request.user,
-    )
-    return _respuesta_accion(request, message="Recepción registrada; el pendiente continuará visible hasta confirmación del área.", redirect_url=reverse("compras:departamental_detalle", args=[item.solicitud_id]))
+    with transaction.atomic():
+        item = get_object_or_404(ItemCompraDepartamental.objects.select_for_update(), pk=item_pk)
+        destino = reverse("compras:departamental_detalle", args=[item.solicitud_id]) + f'#item-{item.pk}'
+        if item.estado not in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL'):
+            return _respuesta_accion(request, message='Este artículo no está pendiente de entrega.', redirect_url=destino, status=409)
+        try:
+            cantidad = Decimal(request.POST.get("cantidad_recibida", ""))
+            if not cantidad.is_finite() or cantidad <= 0:
+                raise InvalidOperation
+        except InvalidOperation:
+            return _respuesta_accion(request, message='La cantidad recibida debe ser mayor que cero.', redirect_url=destino, status=400)
+        if not hasattr(item, 'linea_orden'):
+            return _respuesta_accion(request, message='No se encontró la orden del artículo.', redirect_url=destino, status=409)
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=item.linea_orden, cantidad_recibida=cantidad,
+            observaciones=request.POST.get("observaciones", "").strip(), registrado_por=request.user,
+        )
+    return _respuesta_accion(request, message="Recepción registrada; el pendiente continuará visible hasta confirmación del área.", redirect_url=destino, reload=True)
 
 
 @login_required

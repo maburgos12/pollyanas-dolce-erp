@@ -1,11 +1,14 @@
 from django.urls import path
 
 from . import views
-from . import views_departamentales
+from . import views_departamentales, views_edicion_compra
 
 app_name = "compras"
 
 urlpatterns = [
+    path("departamentales/cotizaciones/<int:quote_pk>/editar/", views_edicion_compra.departamental_cotizacion_editar, name="departamental_cotizacion_editar"),
+    path("departamentales/items/<int:item_pk>/comprar/", views_edicion_compra.departamental_compra_registrar, name="departamental_compra_registrar"),
+    path("departamentales/compras/<int:pk>/comprobante/", views_edicion_compra.departamental_compra_comprobante, name="departamental_compra_comprobante"),
     path("departamentales/", views_departamentales.departamental_inicio, name="departamental_inicio"),
     path("departamentales/mis-solicitudes/", views_departamentales.departamental_mis_solicitudes, name="departamental_mis_solicitudes"),
     path("departamentales/nueva/", views_departamentales.departamental_nueva, name="departamental_nueva"),
