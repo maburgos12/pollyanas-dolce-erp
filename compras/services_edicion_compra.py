@@ -11,6 +11,7 @@ from .models import (
     EventoCompraDepartamental, HistorialCotizacionDepartamental, ItemCompraDepartamental,
     LineaOrdenCompraDepartamental, RecepcionItemDepartamental,
 )
+from .services_avisos_compra import programar_avisos
 
 CAMPOS_MONETARIOS = ('cantidad_ofertada', 'costo_unitario', 'descuento', 'impuestos', 'envio', 'instalacion', 'otros_cargos')
 ESTADOS_CERRADOS = ('COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO')
@@ -153,4 +154,7 @@ def registrar_compra_realizada(item, *, fecha_compra, importe_final, numero_pedi
         solicitud=item.solicitud, item=item, actor=actor, tipo='COMPRA_REALIZADA',
         detalle=f'Compra del {fecha_compra:%d/%m/%Y}: ${importe_final}. Pedido: {numero_pedido or "sin referencia"}. Pendiente de entrega.',
     )
+    # La cola de avisos vive en la misma transacción (una compra revertida no deja
+    # aviso) y el envío se despacha hasta que el commit confirma la compra.
+    programar_avisos(compra)
     return compra

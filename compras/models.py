@@ -619,3 +619,77 @@ class PresupuestoCompraCategoria(models.Model):
 
     def __str__(self):
         return f"{self.presupuesto_periodo} · {self.categoria}"
+
+
+class AvisoCompraDepartamental(models.Model):
+    """Cola persistente de avisos al solicitante cuando Compras registra la compra.
+
+    Un renglón por compra y canal (`unique_together`) es la protección contra
+    duplicados: doble clic, reintento manual y ejecución concurrente escriben
+    sobre el mismo renglón en lugar de crear otro envío.
+    """
+
+    CANAL_CORREO = "CORREO"
+    CANAL_WHATSAPP = "WHATSAPP"
+    CANAL_CHOICES = [
+        (CANAL_CORREO, "Correo"),
+        (CANAL_WHATSAPP, "WhatsApp"),
+    ]
+
+    ESTADO_PENDIENTE = "PENDIENTE"
+    ESTADO_ENVIADO = "ENVIADO"
+    ESTADO_FALLIDO = "FALLIDO"
+    ESTADO_SIN_CONTACTO = "SIN_CONTACTO"
+    ESTADO_INCIERTO = "INCIERTO"
+    ESTADO_SIN_CANAL = "SIN_CANAL"
+    ESTADO_CHOICES = [
+        (ESTADO_PENDIENTE, "Pendiente"),
+        (ESTADO_ENVIADO, "Enviado"),
+        (ESTADO_FALLIDO, "Fallido"),
+        (ESTADO_SIN_CONTACTO, "Sin contacto"),
+        (ESTADO_INCIERTO, "Resultado incierto"),
+        (ESTADO_SIN_CANAL, "Canal no disponible"),
+    ]
+
+    compra = models.ForeignKey(
+        CompraRealizadaDepartamental, on_delete=models.CASCADE, related_name="avisos"
+    )
+    canal = models.CharField(max_length=20, choices=CANAL_CHOICES)
+    destinatario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="avisos_compra_departamental"
+    )
+    destino = models.CharField(
+        max_length=160, blank=True, default="", help_text="Correo o teléfono realmente usado."
+    )
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_PENDIENTE, db_index=True)
+    detalle = models.TextField(blank=True, default="", help_text="Motivo del último resultado.")
+    referencia_externa = models.CharField(
+        max_length=160, blank=True, default="", help_text="Id del mensaje devuelto por el proveedor."
+    )
+    intentos = models.PositiveIntegerField(default=0)
+    enviado_en = models.DateTimeField(null=True, blank=True)
+    ultimo_intento_en = models.DateTimeField(null=True, blank=True)
+    ultimo_intento_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="avisos_compra_departamental_reintentados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["canal"]
+        constraints = [
+            models.UniqueConstraint(fields=["compra", "canal"], name="aviso_compra_canal_unico"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_canal_display()} · {self.get_estado_display()}"
+
+    @property
+    def puede_reintentarse(self) -> bool:
+        """Un envío aceptado nunca se reenvía; el incierto exige reconciliar primero."""
+        return self.estado in {self.ESTADO_PENDIENTE, self.ESTADO_FALLIDO, self.ESTADO_SIN_CONTACTO,
+                               self.ESTADO_SIN_CANAL, self.ESTADO_INCIERTO}
