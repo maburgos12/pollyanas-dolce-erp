@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";
-const CACHE_VERSION = "20260910-alta-proveedor-seguimiento-v1";
+const CACHE_VERSION = "20260910-proveedor-nuevo-visible-v2";
 const CACHE_NAME = `${CACHE_PREFIX}v21-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
