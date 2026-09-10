@@ -106,6 +106,11 @@ urlpatterns = [
         views_incapacidades.editar_incapacidad,
         name="rrhh_incapacidad_editar",
     ),
+    path(
+        "incapacidades/<int:incapacidad_id>/eliminar/",
+        views_incapacidades.eliminar_incapacidad,
+        name="rrhh_incapacidad_eliminar",
+    ),
     path("vacaciones/", views.vacaciones_list, name="rrhh_vacaciones_list"),
     path("reglamento-interno/", views.reglamento_interno, name="rrhh_reglamento_interno"),
     path("prestamos/", views_prestamos.prestamos_lista, name="rrhh_prestamos_lista"),
