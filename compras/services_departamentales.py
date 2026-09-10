@@ -20,17 +20,33 @@ from .models import (
 
 @dataclass(frozen=True)
 class EvaluacionPresupuesto:
-    presupuesto: Decimal
-    gasto_real: Decimal
-    compromisos_previos: Decimal
-    disponible_antes: Decimal
+    presupuesto: Decimal | None
+    gasto_real: Decimal | None
+    compromisos_previos: Decimal | None
+    disponible_antes: Decimal | None
     costo_seleccionado: Decimal
-    disponible_despues: Decimal
-    exceso: Decimal
+    disponible_despues: Decimal | None
+    exceso: Decimal | None
+
+    @property
+    def presupuesto_asignado(self):
+        return self.presupuesto is not None
+
+    @property
+    def calculable(self):
+        return self.disponible_antes is not None
+
+    @property
+    def requiere_dg(self):
+        return not self.calculable or self.exceso > 0
 
 
 def _lineas_presupuesto(item):
+    if item.rubro_id is None:
+        return LineaPresupuestoMensual.objects.none()
     qs = LineaPresupuestoMensual.objects.filter(
+        rubro_id=item.rubro_id,
+        rubro__activo=True,
         rubro__area=item.solicitud.area,
         periodo=item.solicitud.periodo,
     )
@@ -44,20 +60,25 @@ def _lineas_presupuesto(item):
 def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> EvaluacionPresupuesto:
     lineas = _lineas_presupuesto(item)
     totales = lineas.aggregate(presupuesto=Sum("monto_presupuesto"), real=Sum("monto_real"))
-    presupuesto = totales["presupuesto"] or Decimal("0")
-    gasto_real = totales["real"] or Decimal("0")
-    compromisos = (
-        CompromisoCompraDepartamental.objects.filter(
-            activo=True,
-            item__solicitud__area=item.solicitud.area,
-            item__solicitud__periodo=item.solicitud.periodo,
+    # Ausencia de partida y gasto real desconocido no equivalen a cero.
+    presupuesto = totales["presupuesto"]
+    gasto_real = totales["real"]
+    compromisos = None
+    if presupuesto is not None:
+        compromisos = (
+            CompromisoCompraDepartamental.objects.filter(
+                activo=True,
+                item__rubro_id=item.rubro_id,
+                item__solicitud__area=item.solicitud.area,
+                item__solicitud__periodo=item.solicitud.periodo,
+            )
+            .exclude(item=item)
+            .aggregate(total=Sum("monto"))["total"]
+            or Decimal("0")
         )
-        .exclude(item=item)
-        .aggregate(total=Sum("monto"))["total"]
-        or Decimal("0")
-    )
-    disponible_antes = presupuesto - gasto_real - compromisos
-    disponible_despues = disponible_antes - costo
+    calculable = presupuesto is not None and gasto_real is not None
+    disponible_antes = presupuesto - gasto_real - compromisos if calculable else None
+    disponible_despues = disponible_antes - costo if calculable else None
     return EvaluacionPresupuesto(
         presupuesto=presupuesto,
         gasto_real=gasto_real,
@@ -65,7 +86,7 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
         disponible_antes=disponible_antes,
         costo_seleccionado=costo,
         disponible_despues=disponible_despues,
-        exceso=max(-disponible_despues, Decimal("0")),
+        exceso=max(-disponible_despues, Decimal("0")) if calculable else None,
     )
 
 
@@ -82,7 +103,7 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
     cotizacion.seleccionada = True
     cotizacion.save(update_fields=["seleccionada"])
     resultado = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
-    if resultado.exceso or revision_pendiente:
+    if resultado.requiere_dg or revision_pendiente:
         CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
         item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_DG

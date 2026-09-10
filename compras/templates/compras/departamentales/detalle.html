@@ -44,7 +44,25 @@
           {% endfor %}</div>{% endif %}
           {% if item.compra_realizada %}<section class="cd-purchase-record"><h3>Compra realizada</h3><dl><div><dt>Fecha de compra</dt><dd>{{ item.compra_realizada.fecha_compra|date:"d M Y" }}</dd></div><div><dt>Importe final</dt><dd>${{ item.compra_realizada.importe_final|floatformat:2|intcomma }}</dd></div><div><dt>Pedido o referencia</dt><dd>{{ item.compra_realizada.numero_pedido|default:"Sin referencia" }}</dd></div></dl><a href="{% url 'compras:departamental_compra_comprobante' item.compra_realizada.pk %}">Descargar comprobante de compra</a></section>{% endif %}
 
-        {% if item.evaluacion_presupuesto %}<div class="cd-budget-panel"><div class="cd-budget-title"><span>Análisis del periodo</span><strong>{{ solicitud.periodo|date:"F Y" }}</strong></div><div class="cd-budget-grid"><div><span>Presupuesto</span><strong>${{ item.evaluacion_presupuesto.presupuesto|floatformat:2|intcomma }}</strong></div><div><span>Gasto real acumulado</span><strong>− ${{ item.evaluacion_presupuesto.gasto_real|floatformat:2|intcomma }}</strong></div><div><span>Otros compromisos</span><strong>− ${{ item.evaluacion_presupuesto.compromisos_previos|floatformat:2|intcomma }}</strong></div><div><span>Disponible antes</span><strong>${{ item.evaluacion_presupuesto.disponible_antes|floatformat:2|intcomma }}</strong></div><div><span>Compra seleccionada</span><strong>− ${{ item.evaluacion_presupuesto.costo_seleccionado|floatformat:2|intcomma }}</strong></div><div class="projected"><span>Disponible proyectado</span><strong>${{ item.evaluacion_presupuesto.disponible_despues|floatformat:2|intcomma }}</strong></div></div>{% if item.evaluacion_presupuesto.exceso %}<div class="cd-overrun"><span>Exceso a decidir</span><strong>${{ item.evaluacion_presupuesto.exceso|floatformat:2|intcomma }}</strong></div>{% endif %}</div>{% endif %}
+        {% if item.evaluacion_presupuesto %}
+        {% with evaluacion=item.evaluacion_presupuesto %}
+        <div class="cd-budget-panel">
+          <div class="cd-budget-title"><span>Presupuesto del artículo</span><strong>{{ solicitud.periodo|date:"F Y" }}</strong></div>
+          {% if not evaluacion.presupuesto_asignado %}<p><strong>Sin presupuesto asignado</strong>. No hay una partida activa del área para este artículo en el periodo.</p>
+          {% elif not evaluacion.calculable %}<p><strong>Gasto real no disponible</strong>. La disponibilidad no se puede calcular.</p>{% endif %}
+          {% if evaluacion.presupuesto_asignado %}<p>Partida: {{ item.rubro.concepto }}</p>{% endif %}
+          <div class="cd-budget-grid">
+            <div><span>Presupuesto</span><strong>{% if evaluacion.presupuesto_asignado %}${{ evaluacion.presupuesto|floatformat:2|intcomma }}{% else %}Sin presupuesto asignado{% endif %}</strong></div>
+            <div><span>Gasto real acumulado</span><strong>{% if evaluacion.gasto_real is not None %}− ${{ evaluacion.gasto_real|floatformat:2|intcomma }}{% else %}No disponible{% endif %}</strong></div>
+            <div><span>Otros compromisos de la partida</span><strong>{% if evaluacion.presupuesto_asignado %}− ${{ evaluacion.compromisos_previos|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
+            <div><span>Disponible antes</span><strong>{% if evaluacion.calculable %}${{ evaluacion.disponible_antes|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
+            <div><span>Compra seleccionada</span><strong>− ${{ evaluacion.costo_seleccionado|floatformat:2|intcomma }}</strong></div>
+            <div class="projected"><span>Disponible proyectado</span><strong>{% if evaluacion.calculable %}${{ evaluacion.disponible_despues|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
+          </div>
+          {% if evaluacion.exceso %}<div class="cd-overrun"><span>Exceso a decidir</span><strong>${{ evaluacion.exceso|floatformat:2|intcomma }}</strong></div>{% endif %}
+        </div>
+        {% endwith %}
+        {% endif %}
         {% if es_compras %}
           {% if item.puede_cotizar %}{% include "compras/departamentales/cotizacion_form.html" %}{% endif %}
           {% if item.puede_registrar_compra %}<p><a class="cd-button primary" href="{% url 'compras:departamental_compra_registrar' item.pk %}">Registrar compra realizada</a></p>{% endif %}

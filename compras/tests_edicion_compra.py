@@ -31,7 +31,7 @@ class EdicionCompraTests(TestCase):
                                                monto_presupuesto=10000, monto_real=0)
         self.solicitud = SolicitudCompraDepartamental.objects.create(area=self.area, solicitante=self.user,
                                                                     periodo=date(2026,9,1), estado='ENVIADA')
-        self.item = ItemCompraDepartamental.objects.create(solicitud=self.solicitud, descripcion='Bancos', cantidad=2)
+        self.item = ItemCompraDepartamental.objects.create(solicitud=self.solicitud, descripcion='Bancos', cantidad=2, rubro=self.rubro)
         self.proveedor = Proveedor.objects.create(nombre='Proveedor')
         self.quote = CotizacionCompraDepartamental.objects.create(item=self.item, proveedor=self.proveedor,
                                                                   cantidad_ofertada=2, costo_unitario=100)
@@ -68,6 +68,69 @@ class EdicionCompraTests(TestCase):
         self.assertEqual(history.actor,self.user)
         self.assertEqual(history.motivo,'Corrección solicitada')
         self.assertNotEqual(history.antes,history.despues)
+
+    def test_autorizacion_existente_sin_rubro_se_conserva_al_consultar_y_reducir(self):
+        self.item.rubro = None
+        self.item.save(update_fields=['rubro'])
+        for estado in ('AUTORIZADO', 'ORDENADO'):
+            with self.subTest(estado=estado):
+                if estado == 'ORDENADO':
+                    self.ordenar()
+                response = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+                self.assertContains(response, 'Sin presupuesto asignado')
+                self.assertContains(response, 'No calculable')
+                self.assertNotContains(response, '10,000.00')
+                self.item.refresh_from_db()
+                self.assertEqual(self.item.estado, estado)
+                self.assertTrue(self.item.compromiso.activo)
+        self.assertEqual(self.editar(costo_unitario='90').status_code, 200)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'ORDENADO')
+        self.assertEqual(self.item.linea_orden.total, Decimal('180'))
+        self.assertTrue(self.item.compromiso.activo)
+
+    def test_compra_realizada_sin_rubro_no_se_altera_al_consultar(self):
+        self.assertEqual(self.comprar().status_code, 200)
+        self.item.rubro = None
+        self.item.save(update_fields=['rubro'])
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        response = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(response, 'Sin presupuesto asignado')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertEqual(CompraRealizadaDepartamental.objects.get(item=self.item).pk, compra.pk)
+        self.assertTrue(self.item.compromiso.activo)
+
+    def test_sin_rubro_texto_preserva_autorizacion_pero_incremento_requiere_dg(self):
+        self.item.rubro = None
+        self.item.save(update_fields=['rubro'])
+        self.assertEqual(self.editar().status_code, 200)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'AUTORIZADO')
+        self.assertEqual(self.editar(costo_unitario='150', version='2').status_code, 200)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'ESPERANDO_DG')
+        self.assertFalse(self.item.compromiso.activo)
+
+    def test_real_desconocido_visible_sin_inventar_disponibilidad(self):
+        LineaPresupuestoMensual.objects.filter(rubro=self.rubro).update(monto_real=None)
+        response = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(response, 'Gasto real no disponible')
+        self.assertContains(response, 'No calculable')
+        self.assertNotContains(response, 'Sin presupuesto asignado')
+        self.assertContains(response, '10,000.00')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'AUTORIZADO')
+
+    def test_sin_rubro_seleccion_nueva_aparece_con_motivo_en_direccion(self):
+        self.item.rubro = None
+        self.item.save(update_fields=['rubro'])
+        nueva = CotizacionCompraDepartamental.objects.create(
+            item=self.item, proveedor=self.proveedor, cantidad_ofertada=2, costo_unitario=90)
+        seleccionar_cotizacion(nueva, actor=self.user)
+        response = self.client.get(reverse('compras:departamental_direccion'))
+        self.assertContains(response, 'Sin presupuesto asignado')
+        self.assertContains(response, 'No calculable')
 
     def test_incremento_requiere_dg_aunque_haya_presupuesto_global(self):
         self.assertEqual(self.editar(costo_unitario='150').status_code,200)

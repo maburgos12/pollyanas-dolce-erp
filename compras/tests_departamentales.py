@@ -153,6 +153,73 @@ class ComprasDepartamentalesDomainTests(TestCase):
         self.assertEqual(resultado.disponible_antes, Decimal("4500.00"))
         self.assertEqual(resultado.exceso, Decimal("500.00"))
 
+    def test_presupuesto_ausente_no_toma_dinero_del_area_y_requiere_dg(self):
+        for caso in ('sin_rubro', 'inactivo', 'otra_area', 'sin_linea'):
+            with self.subTest(caso=caso):
+                rubro = None
+                if caso != 'sin_rubro':
+                    area = self.area
+                    if caso == 'otra_area':
+                        area = AreaPresupuesto.objects.create(nombre='Otra', codigo='otra')
+                    rubro = RubroPresupuesto.objects.create(
+                        area=area, concepto=caso, activo=caso != 'inactivo')
+                    if caso != 'sin_linea':
+                        LineaPresupuestoMensual.objects.create(
+                            rubro=rubro, periodo=date(2026, 9, 1), monto_presupuesto=10000, monto_real=0)
+                item = ItemCompraDepartamental.objects.create(
+                    solicitud=self.crear_solicitud(), descripcion=caso, cantidad=1, rubro=rubro)
+                quote = CotizacionCompraDepartamental.objects.create(
+                    item=item, proveedor=self.proveedor_a, cantidad_ofertada=1, costo_unitario=100)
+                resultado = seleccionar_cotizacion(quote, actor=self.comprador)
+                self.assertIsNone(resultado.presupuesto)
+                self.assertIsNone(resultado.disponible_antes)
+                self.assertIsNone(resultado.disponible_despues)
+                self.assertIsNone(resultado.exceso)
+                item.refresh_from_db()
+                self.assertEqual(item.estado, 'ESPERANDO_DG')
+                self.assertFalse(CompromisoCompraDepartamental.objects.filter(item=item, activo=True).exists())
+
+    def test_solo_rubro_asignado_y_sus_compromisos_con_revision_preferida(self):
+        otro = RubroPresupuesto.objects.create(area=self.area, concepto='Otros gastos')
+        LineaPresupuestoMensual.objects.create(
+            rubro=otro, periodo=date(2026, 9, 1), monto_presupuesto=100000, monto_real=100)
+        LineaPresupuestoMensual.objects.create(
+            rubro=self.rubro, periodo=date(2026, 9, 1), monto_presupuesto=20000, monto_real=500)
+        ajeno = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion='Otro gasto', cantidad=1, rubro=otro)
+        quote = CotizacionCompraDepartamental.objects.create(
+            item=ajeno, proveedor=self.proveedor_a, cantidad_ofertada=1, costo_unitario=1000)
+        seleccionar_cotizacion(quote, actor=self.comprador)
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion='Mi gasto', cantidad=1, rubro=self.rubro)
+        resultado = evaluar_presupuesto_item(item, Decimal('2000'))
+        self.assertEqual(resultado.presupuesto, Decimal('10000'))
+        self.assertEqual(resultado.gasto_real, Decimal('2500'))
+        self.assertEqual(resultado.compromisos_previos, Decimal('0'))
+        self.assertEqual(resultado.disponible_despues, Decimal('5500'))
+
+    def test_gasto_real_desconocido_no_se_convierte_en_cero(self):
+        LineaPresupuestoMensual.objects.filter(rubro=self.rubro).update(monto_real=None)
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion='Equipo', cantidad=1, rubro=self.rubro)
+        quote = CotizacionCompraDepartamental.objects.create(
+            item=item, proveedor=self.proveedor_a, cantidad_ofertada=1, costo_unitario=100)
+        resultado = seleccionar_cotizacion(quote, actor=self.comprador)
+        self.assertEqual(resultado.presupuesto, Decimal('10000'))
+        self.assertIsNone(resultado.gasto_real)
+        self.assertIsNone(resultado.disponible_antes)
+        item.refresh_from_db()
+        self.assertEqual(item.estado, 'ESPERANDO_DG')
+
+    def test_presupuesto_cero_es_asignado_y_calculable(self):
+        LineaPresupuestoMensual.objects.filter(rubro=self.rubro).update(monto_presupuesto=0, monto_real=0)
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion='Equipo', cantidad=1, rubro=self.rubro)
+        resultado = evaluar_presupuesto_item(item, Decimal('100'))
+        self.assertEqual(resultado.presupuesto, Decimal('0'))
+        self.assertEqual(resultado.disponible_antes, Decimal('0'))
+        self.assertEqual(resultado.exceso, Decimal('100'))
+
     def test_una_solicitud_se_divide_en_ordenes_por_proveedor(self):
         solicitud = self.crear_solicitud()
         items = [

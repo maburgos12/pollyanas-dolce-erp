@@ -44,3 +44,9 @@ No se declarará cobertura total hasta que cada pantalla candidata tenga una fil
 - `departamental_compra_registrar`: fecha, importe final, pedido y comprobante; misma acción para JSON/HTML y control transaccional para evitar duplicados. Se mantiene la entrega por separado.
 - `departamental_decidir` y `departamental_recibir`: retorno al artículo, toast y recarga contextual; bloquean decisiones incompatibles con compra/entrega.
 - Descarga de comprobante con alcance de solicitud y sin caché. SW v34 invalida HTML anterior.
+
+### Compras departamentales — presupuesto por partida (2026-09-10)
+
+- La selección de cotización conserva `data-async-action`, toast y regreso al artículo; la falta de presupuesto calculable conduce a decisión DG, no a autorización automática.
+- El panel distingue ausencia de partida, real desconocido y presupuesto cero; la vista de detalle no modifica autorizaciones ni órdenes existentes.
+- La bandeja DG explica el motivo de revisión usando la misma evaluación; no se agrega una acción financiera nueva ni se alteran asignaciones presupuestales.
