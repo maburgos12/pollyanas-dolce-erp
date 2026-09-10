@@ -159,6 +159,7 @@
               <td>{{ incapacidad.notas|default:""|linebreaksbr }}</td>
               {% if can_manage_rrhh %}
                 <td>
+                  <a class="btn btn-sm btn-secondary" href="{% url 'rrhh:rrhh_incapacidad_editar' incapacidad.id %}">Corregir</a>
                   {% if incapacidad.estado != "cancelada" %}
                     <details>
                       <summary class="btn btn-sm btn-secondary">Cancelar</summary>
@@ -171,8 +172,6 @@
                         <button class="btn btn-sm btn-primary pd-u-d0ee3ca9de" type="submit">Confirmar cancelación</button>
                       </form>
                     </details>
-                  {% else %}
-                    -
                   {% endif %}
                 </td>
               {% endif %}

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}RRHH · Corregir incapacidad{% endblock %}
+{% block page_title %}RRHH · Corregir incapacidad{% endblock %}
+
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}
+    <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
+</section>
+
+{% if messages %}
+  {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% else %}alert-info{% endif %}">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+<section class="card">
+  <div class="card-header">Incapacidad #{{ incapacidad.id }} · {{ incapacidad.empleado.nombre }}</div>
+  <p class="muted">Registrada por {{ incapacidad.registrada_por.get_full_name|default:incapacidad.registrada_por.username|default:"-" }} el {{ incapacidad.creado_en|date:"Y-m-d H:i" }}.</p>
+  <p class="muted">Guardar recalcula la asistencia del rango anterior y del nuevo, y deja el cambio en la bitácora con tu usuario y el motivo.</p>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label for="id_empleado">Empleado <span class="text-danger">*</span></label>
+        <select class="input-field" id="id_empleado" name="empleado" required>
+          {% for empleado in empleados %}
+            <option value="{{ empleado.id }}" {% if empleado.id == incapacidad.empleado_id %}selected{% endif %}>{{ empleado.nombre }}{% if empleado.codigo %} · {{ empleado.codigo }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="id_tipo">Tipo <span class="text-danger">*</span></label>
+        <select class="input-field" id="id_tipo" name="tipo" required>
+          {% for value, label in tipo_choices %}
+            <option value="{{ value }}" {% if incapacidad.tipo == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="id_fecha_inicio">Fecha inicio <span class="text-danger">*</span></label>
+        <input class="input-field" id="id_fecha_inicio" type="date" name="fecha_inicio" value="{{ incapacidad.fecha_inicio|date:'Y-m-d' }}" required>
+      </div>
+
+      <div class="form-group">
+        <label for="id_fecha_fin">Fecha fin <span class="text-danger">*</span></label>
+        <input class="input-field" id="id_fecha_fin" type="date" name="fecha_fin" value="{{ incapacidad.fecha_fin|date:'Y-m-d' }}" required>
+      </div>
+
+      <div class="form-group">
+        <label for="id_folio">Folio IMSS / referencia</label>
+        <input class="input-field" id="id_folio" type="text" name="folio" maxlength="80" value="{{ incapacidad.folio }}">
+      </div>
+
+      <div class="form-group">
+        <label for="id_estado">Estado administrativo</label>
+        <select class="input-field" id="id_estado" name="estado">
+          <option value="activa" {% if incapacidad.estado != "cerrada" %}selected{% endif %}>Activa</option>
+          <option value="cerrada" {% if incapacidad.estado == "cerrada" %}selected{% endif %}>Cerrada</option>
+        </select>
+        {% if incapacidad.estado == "cancelada" %}
+          <p class="muted">Esta incapacidad está cancelada. Guardar la reactivará con el estado que elijas.</p>
+        {% endif %}
+      </div>
+
+      <div class="form-group full">
+        <label for="id_notas">Notas</label>
+        <textarea class="input-field" id="id_notas" name="notas" rows="3">{{ incapacidad.notas }}</textarea>
+      </div>
+
+      <div class="form-group full">
+        <label for="id_motivo">Motivo de la corrección <span class="text-danger">*</span></label>
+        <textarea class="input-field" id="id_motivo" name="motivo" rows="3" required></textarea>
+        <p class="muted">Queda guardado en la bitácora. Explica qué se capturó mal.</p>
+      </div>
+    </div>
+
+    <div class="quick-actions pd-u-88b9d5c614">
+      <button class="btn btn-primary pd-u-d0ee3ca9de" type="submit">Guardar corrección</button>
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_incapacidades' %}">Volver sin guardar</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">Bitácora de cambios</div>
+  {% if bitacora %}
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Acción</th>
+            <th>Usuario</th>
+            <th>Cambios</th>
+            <th>Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cambio in bitacora %}
+            <tr>
+              <td>{{ cambio.creado_en|date:"Y-m-d H:i" }}</td>
+              <td>{{ cambio.get_accion_display }}</td>
+              <td>{{ cambio.realizado_por.get_full_name|default:cambio.realizado_por.username|default:"-" }}</td>
+              <td>
+                {% for detalle in cambio.cambios %}
+                  {{ detalle.campo }}: {{ detalle.antes|default:"(vacío)" }} → {{ detalle.despues|default:"(vacío)" }}<br>
+                {% empty %}
+                  -
+                {% endfor %}
+              </td>
+              <td>{{ cambio.motivo|linebreaksbr }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">Sin correcciones ni cancelaciones registradas.</p>
+  {% endif %}
+</section>
+{% endblock %}
