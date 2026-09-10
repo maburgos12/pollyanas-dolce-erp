@@ -1828,6 +1828,7 @@ def dashboard(request):
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
+    puede_crear_proveedor = _can_write_mantenimiento(request.user)
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
@@ -1884,6 +1885,7 @@ def dashboard(request):
             "kanban_columns": _kanban_columns(items),
             "summary": _dashboard_summary(items),
             "provider_options": provider_options,
+            "puede_crear_proveedor": puede_crear_proveedor,
             "asset_options": asset_options,
             "asset_categories": _asset_catalog_values("categoria"),
             "asset_locations": _asset_catalog_values("ubicacion"),
@@ -1953,6 +1955,25 @@ def eliminar_proveedor(request, pk):
     prov.delete()
     msg.success(request, f"Proveedor '{nombre}' eliminado.")
     return redirect("mantenimiento:dashboard")
+
+
+@api_view(["POST"])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def alta_proveedor_seguimiento(request):
+    """Alta de proveedor de servicio sin salir del seguimiento de fallas y reparaciones."""
+    from fallas.serializers import AltaProveedorServicioSerializer
+
+    from .services_proveedores import alta_proveedor_servicio
+
+    serializer = AltaProveedorServicioSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({"ok": False, "errors": serializer.errors, "toast": {
+            "type": "error", "message": "Revisa los datos del proveedor.",
+        }}, status=400)
+
+    payload, codigo = alta_proveedor_servicio(serializer, request.user, "mantenimiento_seguimiento")
+    return Response(payload, status=codigo)
 
 
 @login_required

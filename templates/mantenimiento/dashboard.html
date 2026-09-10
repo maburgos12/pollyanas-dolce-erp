@@ -622,6 +622,9 @@
             {% for proveedor in provider_options %}
               <option value="{{ proveedor.nombre }}">{{ proveedor.nombre }}</option>
             {% endfor %}
+            {% if puede_crear_proveedor %}
+              <option value="__nuevo__" id="mantDrawerProviderNew">+ Agregar proveedor nuevo</option>
+            {% endif %}
           </select>
         </label>
         <label class="mant-field" id="mantDrawerAssetField">Activo relacionado
@@ -904,6 +907,7 @@
           </label>
         </div>
       </div>
+      <p id="proveedorError" class="mant-form-error" role="alert" hidden></p>
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" onclick="cerrarModalProveedor()">Cancelar</button>
         <button class="btn btn-primary btn-sm" type="submit" id="proveedorSubmitBtn">Guardar</button>
@@ -1026,6 +1030,11 @@ function requireElements(scope, elementMap) {
     priority, date, latestBlock, latestNote,
   })) return;
 
+  function setSelect(element, value) {
+    element.value = value;
+    element.dispatchEvent(new Event("change"));
+  }
+
   function setFact(element, value) {
     if (element) element.textContent = (value || "").trim() || "-";
   }
@@ -1038,11 +1047,13 @@ function requireElements(scope, elementMap) {
     title.textContent = button.dataset.title || "Seguimiento";
     meta.textContent = button.dataset.meta || "";
     status.innerHTML = template ? template.innerHTML : "";
-    status.value = button.dataset.status || "";
-    provider.value = button.dataset.provider || "";
+    // Los selects los envuelve searchable_selects.js: sin "change" su caja de
+    // búsqueda queda vacía aunque el select ya tenga el valor del caso.
+    setSelect(status, button.dataset.status || "");
+    setSelect(provider, button.dataset.provider || "");
     estimated.value = button.dataset.estimated || "";
     real.value = button.dataset.real || "";
-    asset.value = button.dataset.assetId || "";
+    setSelect(asset, button.dataset.assetId || "");
     assetField.hidden = hideAssets;
     if (assetLocked) {
       assetLocked.hidden = !hasLinkedAsset || hideAssets;
@@ -1592,8 +1603,94 @@ function abrirEditarProveedor(id, nombre, contacto, telefono, especialidad, nota
   document.getElementById("modalProveedor").classList.add("is-open");
 }
 function cerrarModalProveedor() {
+  const form = document.getElementById("formProveedor");
+  if (form.dataset.actionPending === "true") return;
   document.getElementById("modalProveedor").classList.remove("is-open");
+  if (form.dataset.seguimiento === "1") {
+    form.dataset.seguimiento = "";
+    document.getElementById("mantDrawerProvider")?.focus({preventScroll: true});
+  }
 }
+
+// Alta de proveedor sin salir del seguimiento: el modal guarda por fetch para no
+// recargar la página y perder cotización, costo, comentario o archivos ya elegidos.
+(() => {
+  const provider = document.getElementById("mantDrawerProvider");
+  if (!provider || !document.getElementById("mantDrawerProviderNew")) return;
+  const form = document.getElementById("formProveedor");
+  const errorEl = document.getElementById("proveedorError");
+  const boton = document.getElementById("proveedorSubmitBtn");
+  let previo = provider.value;
+
+  function seleccionarProveedor(nombre) {
+    if (!Array.from(provider.options).some((o) => o.value === nombre)) {
+      const opcion = document.createElement("option");
+      opcion.value = nombre;
+      opcion.textContent = nombre;
+      provider.insertBefore(opcion, document.getElementById("mantDrawerProviderNew"));
+    }
+    provider.value = nombre;
+    provider.dispatchEvent(new Event("change"));
+    previo = nombre;
+  }
+
+  provider.addEventListener("focus", () => { if (provider.value !== "__nuevo__") previo = provider.value; });
+  provider.addEventListener("change", () => {
+    if (provider.value !== "__nuevo__") { previo = provider.value; return; }
+    provider.value = previo;
+    abrirModalProveedor();
+    document.getElementById("modalProveedorTitulo").textContent = "Agregar proveedor nuevo";
+    errorEl.hidden = true;
+    form.dataset.seguimiento = "1";
+  });
+
+  form.addEventListener("submit", async (event) => {
+    if (form.dataset.seguimiento !== "1") return;
+    event.preventDefault();
+    if (form.dataset.actionPending === "true" || !form.reportValidity()) return;
+    form.dataset.actionPending = "true";
+    boton.disabled = true;
+    boton.textContent = "Guardando…";
+    errorEl.hidden = true;
+    try {
+      const res = await fetch("{% url 'mantenimiento:mant-proveedor-alta' %}", {
+        method: "POST",
+        headers: {"X-CSRFToken": "{{ csrf_token }}"},
+        body: new FormData(form),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.proveedor) {
+        // Ya existía: se selecciona el registrado en vez de duplicarlo.
+        seleccionarProveedor(data.proveedor.nombre);
+        form.dataset.actionPending = "false";
+        cerrarModalProveedor();
+        window.ERPActionUI?.showToast(data.toast);
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          (data.errors ? Object.values(data.errors).flat().join(" ") : "") ||
+          data.toast?.message || data.detail ||
+          "No se pudo guardar el proveedor. Revisa los datos e inténtalo de nuevo."
+        );
+      }
+      seleccionarProveedor(data.proveedor.nombre);
+      form.dataset.actionPending = "false";
+      cerrarModalProveedor();
+      window.ERPActionUI?.showToast(data.toast);
+    } catch (error) {
+      errorEl.textContent = error instanceof TypeError || error instanceof SyntaxError
+        ? "No se recibió respuesta. Revisa tu conexión e inténtalo de nuevo."
+        : error.message;
+      errorEl.hidden = false;
+      window.ERPActionUI?.showToast({type: "error", message: errorEl.textContent});
+    } finally {
+      form.dataset.actionPending = "false";
+      boton.disabled = false;
+      boton.textContent = "Guardar";
+    }
+  });
+})();
 document.getElementById("modalProveedor").addEventListener("click", (e) => {
   if (e.target === document.getElementById("modalProveedor")) cerrarModalProveedor();
 });

@@ -630,11 +630,8 @@ def usuarios_gestion(request):
 @permission_classes([EsComprasODG])
 def proveedores_servicio(request):
     """Catálogo de servicios para gestores de Fallas, con alta explícita auditada."""
-    import unicodedata
-
-    from django.db import connection, transaction
-    from core.models import AuditLog
     from mantenimiento.models import ProveedorServicio
+    from mantenimiento.services_proveedores import alta_proveedor_servicio
     from .serializers import AltaProveedorServicioSerializer
 
     if request.method == "GET":
@@ -647,25 +644,5 @@ def proveedores_servicio(request):
             "type": "error", "message": "Revisa los datos del proveedor.",
         }}, status=400)
 
-    def clave(nombre):
-        return " ".join("".join(c for c in unicodedata.normalize("NFKD", nombre)
-                                if not unicodedata.combining(c)).casefold().split())
-
-    with transaction.atomic():
-        # Serialize concurrent registrations, including an empty catalog.
-        with connection.cursor() as cursor:
-            cursor.execute("LOCK TABLE mantenimiento_proveedorservicio IN SHARE ROW EXCLUSIVE MODE")
-        nombre = serializer.validated_data["nombre"]
-        existente = next((p for p in ProveedorServicio.objects.order_by("pk")
-                          if clave(p.nombre) == clave(nombre)), None)
-        if existente:
-            mensaje = (f"Ya existe «{existente.nombre}». Selecciónalo en la lista." if existente.activo
-                       else f"«{existente.nombre}» ya está registrado como inactivo. Revisa su ficha en Mantenimiento.")
-            return Response({"ok": False, "errors": {"nombre": [mensaje]}, "toast": {
-                "type": "warning", "message": mensaje,
-            }}, status=409)
-        proveedor = serializer.save()
-        AuditLog.objects.create(user=request.user, action="CREATE", model="mantenimiento.ProveedorServicio",
-                                object_id=str(proveedor.pk), payload={"origen": "fallas", "nombre": proveedor.nombre})
-    return Response({"ok": True, "proveedor": AltaProveedorServicioSerializer(proveedor).data,
-                     "toast": {"type": "success", "message": "Proveedor guardado y seleccionado."}}, status=201)
+    payload, status = alta_proveedor_servicio(serializer, request.user, "fallas")
+    return Response(payload, status=status)

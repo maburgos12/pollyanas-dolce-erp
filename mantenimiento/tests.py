@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
-from core.models import Sucursal, UserModuleAccess
+from core.models import AuditLog, Sucursal, UserModuleAccess
 from core.navigation import build_nav_groups
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260728-historial-autor-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-alta-proveedor-seguimiento-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -1325,3 +1325,88 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         self.assertRegex(service_worker, r'const CACHE_NAME = "pollyanas-erp-shell-v\d+-[^"\n]+";')
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)
+
+
+class AltaProveedorDesdeSeguimientoTests(TestCase):
+    """Alta de proveedor sin salir del panel de seguimiento de fallas y reparaciones."""
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(username="mant_gestor", password="test12345")
+        UserModuleAccess.objects.create(user=self.user, module="mantenimiento", access=ACCESS_MANAGE)
+        self.client.force_login(self.user)
+        self.url = reverse("mantenimiento:mant-proveedor-alta")
+
+    def test_crea_en_el_catalogo_real_con_auditoria_de_origen(self):
+        response = self.client.post(self.url, {
+            "nombre": "  Taller   Del   Norte ", "telefono": "6871234567", "especialidad": "Refrigeración",
+        })
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["proveedor"]["nombre"], "Taller Del Norte")
+        self.assertEqual(payload["toast"]["type"], "success")
+        proveedor = ProveedorServicio.objects.get(pk=payload["proveedor"]["id"])
+        self.assertTrue(proveedor.activo)
+        self.assertEqual(proveedor.telefono, "6871234567")
+        self.assertTrue(AuditLog.objects.filter(
+            user=self.user, action="CREATE", model="mantenimiento.ProveedorServicio",
+            object_id=str(proveedor.pk), payload__origen="mantenimiento_seguimiento",
+        ).exists())
+
+    def test_duplicado_no_se_registra_y_devuelve_el_existente_para_seleccionarlo(self):
+        existente = ProveedorServicio.objects.create(nombre="Taller Eléctrico", telefono="123")
+        for nombre in ["taller electrico", " TALLER   ELÉCTRICO ", "Taller Eléctrico"]:
+            response = self.client.post(self.url, {"nombre": nombre, "telefono": "999"})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["proveedor"]["id"], existente.pk)
+            self.assertEqual(response.json()["proveedor"]["nombre"], existente.nombre)
+        existente.refresh_from_db()
+        self.assertEqual(existente.telefono, "123")
+        self.assertEqual(ProveedorServicio.objects.count(), 1)
+
+    def test_duplicado_inactivo_no_se_reactiva_ni_se_ofrece_para_seleccionar(self):
+        inactivo = ProveedorServicio.objects.create(nombre="Técnico", activo=False)
+        response = self.client.post(self.url, {"nombre": "Tecnico"})
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("proveedor", response.json())
+        inactivo.refresh_from_db()
+        self.assertFalse(inactivo.activo)
+
+    def test_nombre_obligatorio(self):
+        for data in [{"nombre": ""}, {"nombre": "   "}, {"nombre": "a" * 201}]:
+            self.assertEqual(self.client.post(self.url, data).status_code, 400)
+        self.assertFalse(ProveedorServicio.objects.exists())
+
+    def test_permiso_de_escritura_obligatorio(self):
+        UserModuleAccess.objects.filter(user=self.user).update(access=ACCESS_VIEW)
+        response = self.client.post(self.url, {"nombre": "Taller"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ProveedorServicio.objects.exists())
+
+    def test_solo_quien_puede_escribir_ve_la_opcion_en_el_selector(self):
+        proveedor = ProveedorServicio.objects.create(nombre="Taller Base")
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertIn('id="mantDrawerProviderNew"', source)
+        self.assertIn("+ Agregar proveedor nuevo", source)
+        # El alta es por fetch: el avance capturado no se pierde al registrar al proveedor.
+        self.assertIn(reverse("mantenimiento:mant-proveedor-alta"), source)
+        self.assertIn("seleccionarProveedor(data.proveedor.nombre);", source)
+        self.assertIn(f'<option value="{proveedor.nombre}">', source)
+
+        UserModuleAccess.objects.filter(user=self.user).update(access=ACCESS_VIEW)
+        solo_lectura = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertNotIn('id="mantDrawerProviderNew"', solo_lectura)
+        self.assertNotIn("+ Agregar proveedor nuevo", solo_lectura)
+
+    def test_el_drawer_sincroniza_los_selects_con_su_caja_de_busqueda(self):
+        # searchable_selects.js solo actualiza su input visible al oír "change":
+        # sin esto el proveedor recién creado (y el ya guardado) se ven en blanco.
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertIn('element.dispatchEvent(new Event("change"));', source)
+        self.assertIn('setSelect(provider, button.dataset.provider || "");', source)
+        self.assertIn('provider.dispatchEvent(new Event("change"));', source)
+
+    def test_service_worker_bumpeado_con_el_cambio_de_template(self):
+        sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
+        self.assertIn("20260910-alta-proveedor-seguimiento-v1", sw)
