@@ -82,7 +82,10 @@ def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
     monetario = any(antes[name] != despues[name] for name in CAMPOS_MONETARIOS)
     if cotizacion.seleccionada and monetario:
         evaluacion = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
-        requiere_dg = (cotizacion.total_adquisicion > total_anterior or evaluacion.exceso
+        # Una reducción conserva la autorización existente cuando el presupuesto
+        # no es calculable; un incremento siempre exige una nueva decisión.
+        exceso_conocido = evaluacion.calculable and evaluacion.exceso > 0
+        requiere_dg = (cotizacion.total_adquisicion > total_anterior or exceso_conocido
                        or item.estado not in ('AUTORIZADO', 'ORDENADO'))
         if requiere_dg:
             item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG

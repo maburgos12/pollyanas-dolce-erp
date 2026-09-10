@@ -383,7 +383,11 @@ def departamental_direccion(request):
         raise PermissionDenied("Esta bandeja corresponde a Dirección General.")
     items = ItemCompraDepartamental.objects.filter(
         estado=ItemCompraDepartamental.ESTADO_ESPERANDO_DG
-    ).select_related("solicitud__area", "solicitud__solicitante")
+    ).select_related("solicitud__area", "solicitud__solicitante").prefetch_related("cotizaciones")
+    for item in items:
+        seleccionada = next((quote for quote in item.cotizaciones.all() if quote.seleccionada), None)
+        if seleccionada:
+            item.evaluacion_presupuesto = evaluar_presupuesto_item(item, seleccionada.total_adquisicion)
     return render(
         request,
         "compras/departamentales/direccion.html",

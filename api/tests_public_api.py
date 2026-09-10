@@ -114,8 +114,10 @@ class PublicApiTests(APITestCase):
             name="Pastel Selva Negra",
             category="Pasteles",
         )
-        self.snapshot_job_id = 1
-        self._ensure_snapshot_job()
+        self.snapshot_job_id = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+            status=PointSyncJob.STATUS_SUCCESS,
+        ).pk
         PointInventorySnapshot.objects.create(
             branch=self.point_branch,
             product=self.point_product,
@@ -133,17 +135,6 @@ class PublicApiTests(APITestCase):
 
     def _auth_headers(self):
         return {"HTTP_X_API_KEY": self.raw_api_key}
-
-    def _ensure_snapshot_job(self):
-        from pos_bridge.models import PointSyncJob
-
-        PointSyncJob.objects.get_or_create(
-            id=self.snapshot_job_id,
-            defaults={
-                "job_type": PointSyncJob.JOB_TYPE_INVENTORY,
-                "status": PointSyncJob.STATUS_SUCCESS,
-            },
-        )
 
     def test_health_public_without_key(self):
         url = reverse("api_public_health")
@@ -626,7 +617,6 @@ class PublicApiTests(APITestCase):
             erp_branch=self.sucursal,
         )
         stale_job = PointSyncJob.objects.create(
-            id=self.snapshot_job_id + 1,
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_SUCCESS,
         )
