@@ -293,7 +293,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
             "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
-            "items__compra_realizada__avisos"
+            "items__compra_realizada__avisos", "items__compra_realizada__historial__actor"
         ),
         pk=pk,
     )

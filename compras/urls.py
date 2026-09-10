@@ -8,6 +8,7 @@ app_name = "compras"
 urlpatterns = [
     path("departamentales/cotizaciones/<int:quote_pk>/editar/", views_edicion_compra.departamental_cotizacion_editar, name="departamental_cotizacion_editar"),
     path("departamentales/items/<int:item_pk>/comprar/", views_edicion_compra.departamental_compra_registrar, name="departamental_compra_registrar"),
+    path("departamentales/compras/<int:pk>/corregir/", views_edicion_compra.departamental_compra_corregir, name="departamental_compra_corregir"),
     path("departamentales/compras/<int:pk>/comprobante/", views_edicion_compra.departamental_compra_comprobante, name="departamental_compra_comprobante"),
     path("departamentales/avisos/<int:pk>/reintentar/", views_edicion_compra.departamental_aviso_reintentar, name="departamental_aviso_reintentar"),
     path("departamentales/", views_departamentales.departamental_inicio, name="departamental_inicio"),

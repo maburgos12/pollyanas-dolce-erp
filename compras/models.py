@@ -432,6 +432,7 @@ class HistorialCotizacionDepartamental(models.Model):
 
 
 class CompraRealizadaDepartamental(models.Model):
+    version = models.PositiveIntegerField(default=1)
     item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compra_realizada")
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     fecha_compra = models.DateField()
@@ -449,6 +450,27 @@ class CompraRealizadaDepartamental(models.Model):
             raise ValidationError({"importe_final": "El importe final debe ser mayor que cero."})
         if self.cotizacion_id and self.item_id and self.cotizacion.item_id != self.item_id:
             raise ValidationError("La cotización debe corresponder al artículo comprado.")
+
+
+class HistorialCompraDepartamental(models.Model):
+    """Corrección auditable de una compra ya registrada.
+
+    Registrar la compra cierra la edición de la cotización, así que este es el
+    único camino para arreglar un importe mal capturado sin borrar evidencia.
+    Corregir no reabre la autorización: la compra ya se pagó.
+    """
+
+    compra = models.ForeignKey(
+        "CompraRealizadaDepartamental", on_delete=models.PROTECT, related_name="historial"
+    )
+    antes = models.JSONField()
+    despues = models.JSONField()
+    motivo = models.TextField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
 
 
 class CompromisoCompraDepartamental(models.Model):
