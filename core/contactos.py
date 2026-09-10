@@ -1,15 +1,19 @@
-"""Resolución de contactos de una persona del ERP con precedencia explícita.
+"""Contacto de trabajo de una persona del ERP.
 
-Precedencia (documentada y única para todo el ERP):
+El ERP guarda dos cosas distintas que no deben mezclarse:
 
-* Correo: ``User.email`` → ``Empleado.email`` del empleado ligado por
-  ``usuario_erp``.
-* Teléfono: ``UserProfile.telefono`` → ``Empleado.telefono`` del mismo empleado.
+* **Contacto de trabajo** — la cuenta del ERP: ``User.email`` (correo
+  ``@pollyanasdolce.com``) y ``UserProfile.telefono`` (línea propiedad de
+  Pollyana's Dolce, asignada a un puesto o departamento). Es lo único que se usa
+  para avisos operativos.
+* **Contacto personal** — el expediente de Capital Humano: ``Empleado.email`` y
+  ``Empleado.telefono``. Son el gmail y el celular propios del colaborador.
+  Existen para RRHH, **no** son un respaldo del contacto de trabajo.
 
-El dato de la cuenta va primero porque es el que la persona mantiene y con el
-que el ERP ya la identifica; el expediente de Capital Humano es el respaldo.
-Nunca se sustituye por el contacto de otra persona: si el titular no tiene dato
-válido, la resolución devuelve vacío con su motivo.
+Por eso aquí **no hay fallback al expediente**: si la persona no tiene contacto
+de trabajo registrado, la resolución devuelve vacío con su motivo y el aviso lo
+dice. Nunca se manda un asunto de trabajo al teléfono o correo personal, ni se
+sustituye por el contacto de otra persona.
 """
 from __future__ import annotations
 
@@ -18,14 +22,17 @@ import re
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
-SIN_CORREO = "Sin correo registrado"
-SIN_TELEFONO = "Sin teléfono registrado"
-CORREO_INVALIDO = "Correo registrado con formato inválido"
-TELEFONO_INVALIDO = "Teléfono registrado con formato inválido"
+SIN_CORREO = "Sin correo de trabajo registrado"
+SIN_TELEFONO = "Sin teléfono de trabajo registrado"
+CORREO_INVALIDO = "Correo de trabajo con formato inválido"
+TELEFONO_INVALIDO = "Teléfono de trabajo con formato inválido"
 
 
 def empleado_de_usuario(usuario):
-    """Empleado ligado por ``usuario_erp``; nunca empareja por nombre o correo."""
+    """Empleado ligado por ``usuario_erp``; nunca empareja por nombre o correo.
+
+    Se usa solo para el nombre de la persona, no para resolver contactos.
+    """
     return getattr(usuario, "empleado_rrhh", None)
 
 
@@ -51,51 +58,32 @@ def normalizar_telefono(raw: str) -> str:
     return digitos
 
 
-def _candidatos_correo(usuario) -> list[str]:
-    empleado = empleado_de_usuario(usuario)
-    return [
-        (getattr(usuario, "email", "") or "").strip(),
-        (getattr(empleado, "email", "") or "").strip(),
-    ]
-
-
-def _candidatos_telefono(usuario) -> list[str]:
-    empleado = empleado_de_usuario(usuario)
-    perfil = getattr(usuario, "userprofile", None)
-    return [
-        (getattr(perfil, "telefono", "") or "").strip(),
-        (getattr(empleado, "telefono", "") or "").strip(),
-    ]
-
-
 def resolver_correo(usuario) -> tuple[str, str]:
-    """Devuelve ``(correo, motivo)``. Con correo válido el motivo queda vacío."""
+    """Correo de trabajo de la cuenta. Devuelve ``(correo, motivo)``."""
     if not usuario:
         return "", SIN_CORREO
-    candidatos = [valor for valor in _candidatos_correo(usuario) if valor]
-    if not candidatos:
+    valor = (getattr(usuario, "email", "") or "").strip()
+    if not valor:
         return "", SIN_CORREO
-    for valor in candidatos:
-        try:
-            validate_email(valor)
-        except ValidationError:
-            continue
-        return valor, ""
-    return "", CORREO_INVALIDO
+    try:
+        validate_email(valor)
+    except ValidationError:
+        return "", CORREO_INVALIDO
+    return valor, ""
 
 
 def resolver_telefono(usuario) -> tuple[str, str]:
-    """Devuelve ``(telefono_e164, motivo)``. Con teléfono válido el motivo queda vacío."""
+    """Línea de trabajo del perfil. Devuelve ``(telefono_e164, motivo)``."""
     if not usuario:
         return "", SIN_TELEFONO
-    candidatos = [valor for valor in _candidatos_telefono(usuario) if valor]
-    if not candidatos:
+    perfil = getattr(usuario, "userprofile", None)
+    valor = (getattr(perfil, "telefono", "") or "").strip()
+    if not valor:
         return "", SIN_TELEFONO
-    for valor in candidatos:
-        normalizado = normalizar_telefono(valor)
-        if normalizado:
-            return normalizado, ""
-    return "", TELEFONO_INVALIDO
+    normalizado = normalizar_telefono(valor)
+    if not normalizado:
+        return "", TELEFONO_INVALIDO
+    return normalizado, ""
 
 
 def nombre_para_saludo(usuario) -> str:

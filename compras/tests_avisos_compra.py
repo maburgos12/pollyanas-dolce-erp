@@ -77,44 +77,48 @@ class BaseAvisosMixin:
 
 
 class ResolucionContactosTests(BaseAvisosMixin, TestCase):
+    """El ERP avisa al contacto de trabajo; el expediente de RRHH es personal."""
+
     def setUp(self):
         self.preparar()
 
-    def test_correo_de_usuario_tiene_precedencia_sobre_empleado(self):
-        Empleado.objects.create(nombre="Carolina Prueba", email="otro@pollyanasdolce.com",
+    def test_correo_sale_de_la_cuenta_no_del_expediente(self):
+        Empleado.objects.create(nombre="Carolina Prueba", email="personal@gmail.com",
                                 telefono="6871234567", usuario_erp=self.solicitante)
         correo, motivo = resolver_correo(self.solicitante)
         self.assertEqual(correo, "carolina@pollyanasdolce.com")
         self.assertEqual(motivo, "")
 
-    def test_telefono_cae_al_empleado_cuando_el_perfil_no_lo_tiene(self):
-        """Caso Carolina Cayetano: teléfono solo en el expediente de RRHH."""
-        UserProfile.objects.create(user=self.solicitante, telefono="")
-        Empleado.objects.create(nombre="Carolina Prueba", email="", telefono="687 123 4567",
+    def test_sin_correo_de_trabajo_no_cae_al_personal_del_expediente(self):
+        self.solicitante.email = ""
+        self.solicitante.save(update_fields=["email"])
+        Empleado.objects.create(nombre="Carolina Prueba", email="personal@gmail.com",
                                 usuario_erp=self.solicitante)
-        telefono, motivo = resolver_telefono(self.solicitante)
-        self.assertEqual(telefono, "526871234567")
-        self.assertEqual(motivo, "")
+        self.assertEqual(resolver_correo(self.solicitante), ("", "Sin correo de trabajo registrado"))
 
-    def test_perfil_gana_al_empleado_cuando_ambos_tienen_telefono(self):
-        UserProfile.objects.create(user=self.solicitante, telefono="6879999999")
-        Empleado.objects.create(nombre="Carolina Prueba", telefono="6871111111",
+    def test_telefono_sale_del_perfil_que_guarda_la_linea_de_empresa(self):
+        UserProfile.objects.create(user=self.solicitante, telefono="6871747006")
+        Empleado.objects.create(nombre="Carolina Prueba", telefono="6871064285",
                                 usuario_erp=self.solicitante)
-        self.assertEqual(resolver_telefono(self.solicitante)[0], "526879999999")
+        self.assertEqual(resolver_telefono(self.solicitante), ("526871747006", ""))
+
+    def test_sin_linea_de_empresa_no_cae_al_celular_personal(self):
+        """El celular del expediente es de Capital Humano, no un respaldo."""
+        UserProfile.objects.create(user=self.solicitante, telefono="")
+        Empleado.objects.create(nombre="Carolina Prueba", telefono="6871064285",
+                                usuario_erp=self.solicitante)
+        self.assertEqual(resolver_telefono(self.solicitante), ("", "Sin teléfono de trabajo registrado"))
 
     def test_sin_contacto_no_toma_el_de_otra_persona(self):
         sin_datos = get_user_model().objects.create_user("sin.datos", password="test")
-        correo, motivo_correo = resolver_correo(sin_datos)
-        telefono, motivo_telefono = resolver_telefono(sin_datos)
-        self.assertEqual((correo, telefono), ("", ""))
-        self.assertEqual(motivo_correo, "Sin correo registrado")
-        self.assertEqual(motivo_telefono, "Sin teléfono registrado")
+        self.assertEqual(resolver_correo(sin_datos), ("", "Sin correo de trabajo registrado"))
+        self.assertEqual(resolver_telefono(sin_datos), ("", "Sin teléfono de trabajo registrado"))
 
-    def test_contacto_invalido_se_reporta_como_invalido(self):
+    def test_contacto_de_trabajo_invalido_se_reporta_como_invalido(self):
         malo = get_user_model().objects.create_user("malo", password="test", email="no-es-correo")
-        Empleado.objects.create(nombre="Malo", telefono="123", usuario_erp=malo)
-        self.assertEqual(resolver_correo(malo), ("", "Correo registrado con formato inválido"))
-        self.assertEqual(resolver_telefono(malo), ("", "Teléfono registrado con formato inválido"))
+        UserProfile.objects.create(user=malo, telefono="671539723")
+        self.assertEqual(resolver_correo(malo), ("", "Correo de trabajo con formato inválido"))
+        self.assertEqual(resolver_telefono(malo), ("", "Teléfono de trabajo con formato inválido"))
 
     def test_normalizacion_de_telefono(self):
         self.assertEqual(normalizar_telefono("(687) 123-4567"), "526871234567")
@@ -206,7 +210,7 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
         enviar.assert_not_called()
         aviso = compra.avisos.get(canal="WHATSAPP")
         self.assertEqual(aviso.estado, "SIN_CONTACTO")
-        self.assertEqual(aviso.detalle, "Sin teléfono registrado")
+        self.assertEqual(aviso.detalle, "Sin teléfono de trabajo registrado")
         self.assertEqual(aviso.destino, "")
 
     def test_reenvio_no_duplica_un_aviso_ya_enviado(self):
