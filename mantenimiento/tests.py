@@ -776,6 +776,36 @@ class MantenimientoUnifiedInboxTests(TestCase):
         solicitud.refresh_from_db()
         self.assertEqual(solicitud.estatus, SolicitudCancelacion.ESTATUS_RECHAZADA)
 
+    def test_dg_elimina_falla_sin_motivo_y_gestor_sigue_obligado(self):
+        """El modal oculta el motivo al DG: exigirlo antes de eliminar dejaba un error sin campo."""
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_login(self.user)
+        falla_id = self.falla.id
+
+        dg = self.client.post(f"/mantenimiento/bandeja/falla/{falla_id}/cancelar/", {}, follow=True)
+
+        self.assertEqual(dg.status_code, 200)
+        self.assertFalse(ReporteFalla.objects.filter(pk=falla_id).exists())
+        self.assertNotIn("motivo de cancelación", " ".join(str(m) for m in dg.context["messages"]))
+
+        otra = ReporteFalla.objects.create(
+            sucursal=self.branch,
+            categoria=self.categoria,
+            titulo="Vitrina fría",
+            descripcion="No enfría.",
+            reportado_por=self.reporter,
+        )
+        self.user.is_staff = False
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_login(self.user)
+
+        gestor = self.client.post(f"/mantenimiento/bandeja/falla/{otra.id}/cancelar/", {}, follow=True)
+
+        self.assertIn("motivo de cancelación", " ".join(str(m) for m in gestor.context["messages"]))
+        self.assertTrue(ReporteFalla.objects.filter(pk=otra.id).exists())
+        self.assertFalse(SolicitudCancelacion.objects.filter(objeto_id=otra.id).exists())
+
     def test_branch_failure_items_include_evidence_and_work_context(self):
         BitacoraFalla.objects.create(
             reporte=self.falla,
