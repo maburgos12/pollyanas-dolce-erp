@@ -336,6 +336,9 @@
         <div class="bi-kicker">Catálogo</div>
         <h2 class="bi-panel-title">Proveedores de servicio</h2>
         <p class="bi-copy">Talleres, técnicos y empresas de mantenimiento. Agrégalos aquí para asignarlos rápidamente a cualquier reporte u orden.</p>
+        {% if proveedores_sin_contacto %}
+          <p class="bi-copy"><strong>{{ proveedores_sin_contacto }}</strong> de {{ proveedores_todos|length }} no tienen teléfono ni WhatsApp. Complétalos cuando los uses: sin número no hay a quién llamar en una urgencia.</p>
+        {% endif %}
       </div>
       <div class="bi-panel-actions">
         <button class="btn btn-primary btn-sm" type="button" onclick="abrirModalProveedor()">+ Nuevo proveedor</button>
@@ -347,6 +350,7 @@
         <div>
           <div class="mant-plan-title">
             {% if not prov.activo %}<span class="mant-badge is-neutral is-spaced">Inactivo</span>{% endif %}
+            {% if not prov.telefono and not prov.whatsapp %}<span class="mant-badge is-warning is-spaced">Sin contacto</span>{% endif %}
             {{ prov.nombre }}{% if prov.especialidad %} <span class="mant-badge is-info is-inline">{{ prov.especialidad }}</span>{% endif %}
           </div>
           <div class="mant-plan-meta">

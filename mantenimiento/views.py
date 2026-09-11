@@ -1832,6 +1832,7 @@ def dashboard(request):
     items = _unified_items(origen)
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     puede_crear_proveedor = _can_write_mantenimiento(request.user)
+    proveedores_todos = list(ProveedorServicio.objects.order_by("nombre"))
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
     )[:180]
@@ -1916,7 +1917,10 @@ def dashboard(request):
             "activos_para_plan": list(Activo.objects.select_related("sucursal").filter(activo=True).order_by("sucursal__nombre", "nombre")[:400]),
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
             "instalacion_categorias": INSTALACION_CATEGORIAS,
-            "proveedores_todos": list(ProveedorServicio.objects.order_by("nombre")),
+            "proveedores_todos": proveedores_todos,
+            "proveedores_sin_contacto": sum(
+                1 for p in proveedores_todos if not p.telefono and not p.whatsapp
+            ),
             "proveedores_importables": _get_proveedores_importables(),
         },
     )
