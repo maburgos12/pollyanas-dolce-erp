@@ -5,7 +5,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from openpyxl import Workbook, load_workbook
 
@@ -815,3 +817,91 @@ class ActivosFlowsTests(TestCase):
             csv_content.encode("utf-8"),
             content_type="text/csv",
         )
+
+
+class ActivoIdentidadTecnicaTests(TestCase):
+    """Identidad técnica opcional y token QR permanente del activo."""
+
+    def test_activo_sin_datos_tecnicos_queda_vacio_y_recibe_token(self):
+        activo = Activo.objects.create(nombre="Horno histórico sin placa")
+        activo.refresh_from_db()
+        self.assertTrue(activo.qr_token)
+        self.assertEqual(activo.marca, "")
+        self.assertEqual(activo.modelo, "")
+        self.assertEqual(activo.numero_serie, "")
+        self.assertIsNone(activo.proveedor_compra)
+        self.assertIsNone(activo.fecha_compra)
+        self.assertIsNone(activo.costo_adquisicion)
+        self.assertIsNone(activo.garantia_hasta)
+
+    def test_activo_completo_conserva_cada_campo(self):
+        from decimal import Decimal as _Decimal
+
+        from maestros.models import Proveedor
+
+        proveedor = Proveedor.objects.create(nombre="Refrigeración del Valle")
+        activo = Activo.objects.create(
+            nombre="Cámara de refrigeración 01",
+            marca="ACME",
+            modelo="HX-20",
+            numero_serie="SER-0001",
+            proveedor_compra=proveedor,
+            fecha_compra=timezone.localdate(),
+            costo_adquisicion=_Decimal("125000.50"),
+            garantia_hasta=timezone.localdate() + timedelta(days=365),
+        )
+        activo.refresh_from_db()
+        self.assertEqual(activo.marca, "ACME")
+        self.assertEqual(activo.modelo, "HX-20")
+        self.assertEqual(activo.numero_serie, "SER-0001")
+        self.assertEqual(activo.proveedor_compra, proveedor)
+        self.assertEqual(activo.costo_adquisicion, _Decimal("125000.50"))
+        self.assertEqual(proveedor.activos_vendidos.get(), activo)
+
+    def test_token_qr_es_unico_por_activo(self):
+        uno = Activo.objects.create(nombre="Batidora 20L")
+        dos = Activo.objects.create(nombre="Batidora 40L")
+        self.assertNotEqual(uno.qr_token, dos.qr_token)
+
+    def test_token_qr_no_cambia_al_editar_el_activo(self):
+        activo = Activo.objects.create(nombre="Abatidor")
+        token = activo.qr_token
+        activo.nombre = "Abatidor de temperatura"
+        activo.ubicacion = "Producción"
+        activo.save()
+        activo.refresh_from_db()
+        self.assertEqual(activo.qr_token, token)
+
+    def test_numeros_de_serie_repetidos_no_destruyen_historico(self):
+        uno = Activo.objects.create(nombre="Vitrina Payán", numero_serie="SIN-PLACA")
+        dos = Activo.objects.create(nombre="Vitrina Leyva", numero_serie="SIN-PLACA")
+        self.assertEqual(Activo.objects.filter(numero_serie="SIN-PLACA").count(), 2)
+        self.assertNotEqual(uno.pk, dos.pk)
+        self.assertNotEqual(uno.qr_token, dos.qr_token)
+
+
+class ActivoPasaporteMigracionTests(TransactionTestCase):
+    """La migración 0006 debe darle un UUID distinto a cada activo ya existente."""
+
+    available_apps = None
+
+    def test_backfill_genera_un_uuid_por_fila_existente(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([("activos", "0005_trazabilidad_mantenimiento")])
+        executor.loader.build_graph()
+
+        historico = executor.loader.project_state(
+            [("activos", "0005_trazabilidad_mantenimiento")]
+        ).apps
+        ActivoHistorico = historico.get_model("activos", "Activo")
+        for indice in range(3):
+            ActivoHistorico.objects.create(codigo=f"ACT-MIG-{indice}", nombre=f"Equipo {indice}")
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("activos", "0006_activo_pasaporte_qr")])
+
+        tokens = set(
+            Activo.objects.filter(codigo__startswith="ACT-MIG-").values_list("qr_token", flat=True)
+        )
+        self.assertEqual(len(tokens), 3)
+        self.assertNotIn(None, tokens)

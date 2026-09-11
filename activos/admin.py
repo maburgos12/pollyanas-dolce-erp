@@ -18,8 +18,36 @@ class ActivoAdmin(admin.ModelAdmin):
     )
     list_filter = ("estado", "criticidad", "activo", "categoria", "sucursal")
     list_editable = ("sucursal",)
-    search_fields = ("codigo", "nombre", "categoria", "ubicacion")
-    autocomplete_fields = ("sucursal", "proveedor_mantenimiento")
+    search_fields = ("codigo", "nombre", "categoria", "ubicacion", "marca", "modelo", "numero_serie")
+    autocomplete_fields = ("sucursal", "proveedor_mantenimiento", "proveedor_compra")
+    readonly_fields = ("qr_token",)
+    fieldsets = (
+        (None, {"fields": ("codigo", "qr_token", "nombre", "categoria", "sucursal", "ubicacion")}),
+        (
+            "Ficha técnica",
+            {"fields": ("marca", "modelo", "numero_serie")},
+        ),
+        (
+            "Compra y garantía",
+            {"fields": ("proveedor_compra", "fecha_compra", "costo_adquisicion", "garantia_hasta")},
+        ),
+        (
+            "Operación",
+            {
+                "fields": (
+                    "estado",
+                    "criticidad",
+                    "proveedor_mantenimiento",
+                    "fecha_alta",
+                    "valor_reposicion",
+                    "vida_util_meses",
+                    "horas_uso_promedio_mes",
+                    "notas",
+                    "activo",
+                )
+            },
+        ),
+    )
     ordering = ("nombre",)
 
 
