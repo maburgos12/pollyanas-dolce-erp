@@ -1,0 +1,35 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Etiquetas QR · {% if modo == 'carta' %}Hoja carta{% else %}Térmica 90 × 50 mm{% endif %}</title>
+  <link rel="stylesheet" href="{% static 'activos/etiquetas.css' %}?v=20260911-pasaporte-qr-v1">
+  <style>
+    {% if modo == 'carta' %}
+      /* 180 mm de contenido dentro de 215.9 mm; 250 mm dentro de 279.4 mm. */
+      @page { size: Letter; margin: 14.7mm 17.95mm; }
+    {% else %}
+      @page { size: 90mm 50mm; margin: 0; }
+    {% endif %}
+  </style>
+</head>
+<body class="etiquetas etiquetas-{{ modo }}">
+  <p class="aviso-pantalla">
+    Imprime al <strong>100 %</strong> de escala. No uses «Ajustar a página»: cambiaría el tamaño físico
+    del QR y de la etiqueta. Mide la primera hoja con regla antes de gastar material.
+  </p>
+
+  {% if modo == 'carta' %}
+    {% for hoja in hojas %}
+      <div class="sheet">
+        {% for etiqueta in hoja %}{% include "activos/_etiqueta.html" with etiqueta=etiqueta %}{% endfor %}
+      </div>
+    {% endfor %}
+  {% else %}
+    {% for etiqueta in etiquetas %}
+      <div class="label-page">{% include "activos/_etiqueta.html" with etiqueta=etiqueta %}</div>
+    {% endfor %}
+  {% endif %}
+</body>
+</html>

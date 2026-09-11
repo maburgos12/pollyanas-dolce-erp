@@ -663,6 +663,9 @@
     >
       Export brechas XLSX
     </a>
+    {% if can_manage_activos %}
+      <a class="btn btn-primary" href="{% url 'activos:etiquetas' %}">Etiquetas QR</a>
+    {% endif %}
   </div>
 
   <div class="table-responsive pd-table-spaced">

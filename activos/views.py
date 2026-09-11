@@ -8,7 +8,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.db.models.functions import Lower
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -21,10 +22,12 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
-from core.models import AuditLog
+from core.models import AuditLog, Sucursal
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
+
+from .services_pasaporte import svg_qr_activo
 
 from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
 from .utils.bitacora_import import import_bitacora
@@ -3741,3 +3744,87 @@ def registro_rapido(request):
         "module_tabs": _module_tabs("activos:ordenes"),
         "can_manage_activos": can_manage_inventario(request.user),
     })
+
+
+ETIQUETA_MODOS = {"carta", "termica"}
+# Carta: dos columnas de 90 mm por cinco filas de 50 mm.
+ETIQUETAS_POR_HOJA = 10
+
+
+def _etiquetas_queryset(user):
+    """Etiquetas sólo para quien gestiona Activos, con alcance global.
+
+    Reimprimir una etiqueta es una tarea administrativa: quien la genera decide
+    qué equipo se rotula, así que el alcance es el catálogo completo y no la
+    sucursal de la sesión.
+    """
+    if not can_manage_inventario(user):
+        raise PermissionDenied("No tienes permisos para generar etiquetas de Activos.")
+    return Activo.objects.select_related("sucursal").order_by("nombre", "id")
+
+
+@login_required
+def etiquetas_selector(request):
+    queryset = _etiquetas_queryset(request.user)
+
+    q = (request.GET.get("q") or "").strip()
+    sucursal_id = _safe_int(request.GET.get("sucursal"))
+    if q:
+        queryset = queryset.filter(
+            Q(nombre__icontains=q) | Q(codigo__icontains=q) | Q(categoria__icontains=q)
+        )
+    if sucursal_id > 0:
+        queryset = queryset.filter(sucursal_id=sucursal_id)
+
+    return render(
+        request,
+        "activos/etiquetas.html",
+        {
+            "activos": list(queryset[:400]),
+            "sucursales": Sucursal.objects.order_by("nombre"),
+            "filters": {"q": q, "sucursal": sucursal_id or ""},
+            "etiquetas_por_hoja": ETIQUETAS_POR_HOJA,
+        },
+    )
+
+
+@login_required
+@require_POST
+def etiquetas_imprimir(request):
+    queryset = _etiquetas_queryset(request.user)
+
+    modo = (request.POST.get("modo") or "").strip().lower()
+    if modo not in ETIQUETA_MODOS:
+        return HttpResponseBadRequest("Formato de etiqueta no reconocido.")
+
+    pedidos = [_safe_int(valor) for valor in request.POST.getlist("activo_id")]
+    activos = list(queryset.filter(pk__in=[pk for pk in pedidos if pk > 0]))
+    if not activos:
+        return HttpResponseBadRequest("Selecciona al menos un activo con etiqueta que imprimir.")
+
+    # Se respeta el orden en que se eligieron para que la hoja salga como la
+    # persona la armó y pueda ir pegando en ese mismo orden.
+    posicion = {pk: indice for indice, pk in enumerate(pedidos)}
+    activos.sort(key=lambda activo: posicion.get(activo.pk, len(pedidos)))
+
+    etiquetas = [
+        {"activo": activo, "qr_svg": svg_qr_activo(request, activo)} for activo in activos
+    ]
+    hojas = (
+        [etiquetas[i : i + ETIQUETAS_POR_HOJA] for i in range(0, len(etiquetas), ETIQUETAS_POR_HOJA)]
+        if modo == "carta"
+        else []
+    )
+
+    log_event(
+        request.user,
+        "EXPORT",
+        "activos.EtiquetaQR",
+        timezone.localtime().strftime("%Y%m%d%H%M%S"),
+        {"modo": modo, "total": len(activos), "codigos": [a.codigo for a in activos]},
+    )
+    return render(
+        request,
+        "activos/etiquetas_imprimir.html",
+        {"modo": modo, "etiquetas": etiquetas, "hojas": hojas},
+    )
