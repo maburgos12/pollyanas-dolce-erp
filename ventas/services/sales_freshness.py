@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
@@ -7,6 +9,8 @@ from django.utils import timezone
 
 from pos_bridge.tasks.celery_tasks import task_daily_sales_sync
 from ventas.services.sales_canonical_source import canonical_point_max_date
+
+logger = logging.getLogger(__name__)
 
 
 FORECAST_SALES_LAG_DAYS = 1
@@ -90,9 +94,15 @@ def queue_forecast_sales_refresh_if_needed(
     if freshness.is_fresh:
         return freshness
 
-    task = task_daily_sales_sync.delay(
-        days=freshness.refresh_days,
-        lag_days=lag_days,
-        triggered_by_id=triggered_by_id,
-    )
+    try:
+        task = task_daily_sales_sync.delay(
+            days=freshness.refresh_days,
+            lag_days=lag_days,
+            triggered_by_id=triggered_by_id,
+        )
+    except Exception as exc:
+        # El refresco es accesorio: el pronóstico se calcula con los datos que
+        # ya hay. Sin esto, un broker caído tumbaba toda la pantalla.
+        logger.warning("[ventas] No se pudo encolar el refresco de ventas: %s", exc)
+        return replace(freshness, refresh_task_id="")
     return replace(freshness, refresh_task_id=getattr(task, "id", ""))
