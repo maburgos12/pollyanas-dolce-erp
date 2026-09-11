@@ -11,31 +11,13 @@ import logging
 
 from django.db import transaction
 
+from core.duplicados import DuplicadoInvalido, enlazar_duplicado, principal_de  # noqa: F401
+
 from .models import BitacoraFalla, ReporteFalla
 
 logger = logging.getLogger(__name__)
 
-MAX_SALTOS = 20
-
-
-class DuplicadoInvalido(Exception):
-    """La vinculación pedida dejaría la cadena de duplicados inconsistente."""
-
-
-def principal_de(reporte: ReporteFalla) -> ReporteFalla:
-    """Sube por la cadena hasta el reporte que realmente se atiende.
-
-    Mantiene la jerarquía plana: marcar algo como duplicado de un duplicado liga
-    al principal de ambos. El tope de saltos es defensa contra un ciclo que
-    hubiera quedado en la base por una edición manual.
-    """
-
-    actual = reporte
-    for _ in range(MAX_SALTOS):
-        if actual.duplicado_de_id is None:
-            return actual
-        actual = actual.duplicado_de
-    raise DuplicadoInvalido("La cadena de duplicados es demasiado larga; revisa los reportes ligados.")
+ESTATUS_CERRADOS = (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_CANCELADO)
 
 
 @transaction.atomic
@@ -45,23 +27,7 @@ def marcar_duplicado(reporte: ReporteFalla, principal: ReporteFalla, usuario) ->
     reporte = ReporteFalla.objects.select_for_update().get(pk=reporte.pk)
     principal = ReporteFalla.objects.select_for_update().get(pk=principal.pk)
 
-    if reporte.pk == principal.pk:
-        raise DuplicadoInvalido("Un reporte no puede ser duplicado de sí mismo.")
-
-    destino = principal_de(principal)
-    if destino.pk == reporte.pk:
-        raise DuplicadoInvalido(
-            f"La falla #{principal.pk} ya está ligada a #{reporte.pk}; ligarlas al revés crearía un ciclo."
-        )
-    if reporte.estatus in (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_CANCELADO):
-        raise DuplicadoInvalido("El reporte ya está cerrado; no hace falta ligarlo.")
-
-    # Si el reporte ya tenía duplicados colgando, se mueven al mismo principal
-    # para que no quede una cadena de dos niveles.
-    ReporteFalla.objects.filter(duplicado_de=reporte).update(duplicado_de=destino)
-
-    reporte.duplicado_de = destino
-    reporte.save(update_fields=["duplicado_de"])
+    destino = enlazar_duplicado(reporte, principal, estatus_cerrados=ESTATUS_CERRADOS)
 
     BitacoraFalla.objects.create(
         reporte=reporte,

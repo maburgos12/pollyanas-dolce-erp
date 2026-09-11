@@ -118,7 +118,7 @@ class DuplicadosFallasTests(TestCase):
             side_effect=OSError("Error 61 connecting to localhost:6379."),
         ):
             response = self.client.post(
-                reverse("mantenimiento:mant-duplicado", args=[repetido.pk]),
+                reverse("mantenimiento:mant-duplicado", args=["falla", repetido.pk]),
                 {"principal_id": principal.pk},
                 follow=True,
             )
@@ -144,12 +144,12 @@ class DuplicadosFallasTests(TestCase):
         principal = self._falla("Llantas de la unidad 3")
         repetido = self._falla("Llantas lisas unidad 3")
         self.client.force_login(self.gestor)
-        url = reverse("mantenimiento:mant-duplicado", args=[repetido.pk])
+        url = reverse("mantenimiento:mant-duplicado", args=["falla", repetido.pk])
 
         sin_seleccion = self.client.post(url, {"principal_id": ""}, follow=True)
         repetido.refresh_from_db()
         self.assertIsNone(repetido.duplicado_de_id)
-        self.assertIn("Selecciona la falla", " ".join(str(m) for m in sin_seleccion.context["messages"]))
+        self.assertIn("Selecciona el reporte", " ".join(str(m) for m in sin_seleccion.context["messages"]))
 
         ok = self.client.post(url, {"principal_id": principal.pk}, follow=True)
         repetido.refresh_from_db()

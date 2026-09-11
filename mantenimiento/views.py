@@ -391,6 +391,8 @@ def _logistica_item(reporte):
         "dias_abierto": dias,
         "semaforo": _semaforo(dias),
         "asignado": bool(reporte.proveedor_servicio),
+        "duplicados_total": getattr(reporte, "duplicados_total", 0),
+        "reafirmaciones_total": getattr(reporte, "reafirmaciones_total", 0),
     }
 
 
@@ -423,6 +425,11 @@ def _unified_items(origen=""):
     if origen in ("", "logistica"):
         reportes = (
             ReporteUnidad.objects.filter(estatus__in=_unit_open_statuses())
+            .filter(duplicado_de__isnull=True)
+            .annotate(
+                duplicados_total=Count("duplicados", distinct=True),
+                reafirmaciones_total=Count("reafirmaciones", distinct=True),
+            )
             .select_related("unidad", "repartidor__user")
             .order_by("-fecha_reporte")[:80]
         )
@@ -1427,6 +1434,12 @@ def actualizar_item(request, tipo, pk):
         if comentario:
             reporte.notas_compras = comentario
         reporte.save()
+        if estatus == ReporteUnidad.ESTATUS_CERRADO:
+            # Los repetidos ligados a este no se trabajan por separado: si no los
+            # arrastramos, se quedan abiertos para siempre.
+            from logistica.services_reportes_repetidos import propagar_cierre_unidad
+
+            propagar_cierre_unidad(reporte, estatus)
         return _update_response(request, _logistica_item(reporte))
 
     if tipo == "orden":
@@ -2049,8 +2062,8 @@ def pwa_mantenimiento(request):
 
 
 @login_required
-def marcar_duplicado(request, pk):
-    """Liga una falla repetida a la que ya se está atendiendo."""
+def marcar_duplicado(request, tipo, pk):
+    """Liga un reporte repetido al que ya se está atendiendo (falla o unidad)."""
     _require_mantenimiento(request.user)
     if request.method != "POST":
         return redirect("mantenimiento:dashboard")
@@ -2059,17 +2072,30 @@ def marcar_duplicado(request, pk):
 
     from django.contrib import messages as msg
 
-    from fallas.services_duplicados import DuplicadoInvalido, marcar_duplicado as _vincular
+    from core.duplicados import DuplicadoInvalido
 
-    reporte = get_object_or_404(ReporteFalla, pk=pk)
-    principal_id = (request.POST.get("principal_id") or "").strip()
-    if not principal_id.isdigit():
-        msg.error(request, "Selecciona la falla que ya se está atendiendo.")
+    tipo = (tipo or "").strip().lower()
+    if tipo == "falla":
+        from fallas.services_duplicados import marcar_duplicado as _vincular
+
+        modelo, etiqueta = ReporteFalla, "Falla"
+    elif tipo == "unidad":
+        from logistica.services_reportes_repetidos import marcar_duplicado_unidad as _vincular
+
+        modelo, etiqueta = ReporteUnidad, "Reporte de unidad"
+    else:
+        msg.error(request, "Tipo no válido.")
         return redirect("mantenimiento:dashboard")
 
-    principal = ReporteFalla.objects.filter(pk=int(principal_id)).first()
+    reporte = get_object_or_404(modelo, pk=pk)
+    principal_id = (request.POST.get("principal_id") or "").strip()
+    if not principal_id.isdigit():
+        msg.error(request, "Selecciona el reporte que ya se está atendiendo.")
+        return redirect("mantenimiento:dashboard")
+
+    principal = modelo.objects.filter(pk=int(principal_id)).first()
     if principal is None:
-        msg.error(request, "No se encontró la falla principal seleccionada.")
+        msg.error(request, "No se encontró el reporte principal seleccionado.")
         return redirect("mantenimiento:dashboard")
 
     try:
@@ -2080,8 +2106,8 @@ def marcar_duplicado(request, pk):
 
     msg.success(
         request,
-        f"Falla #{reporte.pk} ligada como repetida de #{destino.pk}. "
-        "Sale de pendientes y se cerrará junto con ella.",
+        f"{etiqueta} #{reporte.pk} ligado como repetido de #{destino.pk}. "
+        "Sale de pendientes y se cerrará junto con él.",
     )
     return redirect("mantenimiento:dashboard")
 
