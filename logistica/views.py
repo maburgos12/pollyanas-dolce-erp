@@ -23,7 +23,7 @@ from core.audit import log_event
 from core.models import Sucursal
 from crm.models import PedidoCliente
 
-from .domain_ruta import point_transfer_enviada
+from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
 from .exports_indicadores_abasto import build_indicadores_abasto_xlsx
 from .models import (
     BitacoraSalidaLlegada,
@@ -2528,37 +2528,115 @@ def ruta_detail(request, pk: int):
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "add_parada":
+            accepts_json = "application/json" in (request.headers.get("Accept") or "").lower()
+            redirect_url = f'{reverse("logistica:ruta_detail", kwargs={"pk": ruta.id})}#paradas-ruta'
+
+            def add_parada_response(*, ok: bool, message: str, status: int = 200):
+                if accepts_json:
+                    return JsonResponse(
+                        {
+                            "ok": ok,
+                            "redirect": redirect_url,
+                            "reload": True,
+                            "toast": {
+                                "type": "success" if ok else "error",
+                                "message": message,
+                                "persistent": not ok,
+                            },
+                        },
+                        status=status,
+                    )
+                (messages.success if ok else messages.error)(request, message)
+                return redirect(redirect_url)
+
             punto_id = (request.POST.get("punto") or "").strip()
             punto = PuntoLogistico.objects.filter(pk=int(punto_id), activo=True).first() if punto_id.isdigit() else None
             if not punto:
-                messages.error(request, "Selecciona un punto logístico activo.")
-                return redirect("logistica:ruta_detail", pk=ruta.id)
-            if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and punto.tipo != PuntoLogistico.TIPO_CEDIS:
-                messages.error(request, "La ruta ya está en seguimiento; solo puedes agregar una parada CEDIS para recarga.")
-                return redirect("logistica:ruta_detail", pk=ruta.id)
+                return add_parada_response(
+                    ok=False,
+                    message="Selecciona un punto logístico activo.",
+                    status=422,
+                )
+            tipos_permitidos_en_ruta = {
+                PuntoLogistico.TIPO_SUCURSAL,
+                PuntoLogistico.TIPO_CEDIS,
+            }
+            if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and punto.tipo not in tipos_permitidos_en_ruta:
+                return add_parada_response(
+                    ok=False,
+                    message="La ruta ya está en seguimiento; solo puedes agregar sucursales o CEDIS.",
+                    status=422,
+                )
             try:
                 orden = int(request.POST.get("orden") or (ruta.paradas.count() + 1))
             except (TypeError, ValueError):
-                messages.error(request, "El orden de la parada debe ser un número.")
-                return redirect("logistica:ruta_detail", pk=ruta.id)
+                return add_parada_response(
+                    ok=False,
+                    message="El orden de la parada debe ser un número.",
+                    status=422,
+                )
             if orden < 1:
-                messages.error(request, "El orden de la parada debe ser mayor a cero.")
-                return redirect("logistica:ruta_detail", pk=ruta.id)
-            with transaction.atomic():
-                if ruta.paradas.filter(orden=orden).exists():
-                    for parada_existente in ruta.paradas.filter(orden__gte=orden).order_by("-orden"):
+                return add_parada_response(
+                    ok=False,
+                    message="El orden de la parada debe ser mayor a cero.",
+                    status=422,
+                )
+            try:
+                with transaction.atomic():
+                    ruta_bloqueada = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+                    paradas_bloqueadas = list(
+                        ParadaRuta.objects.select_for_update()
+                        .select_related("punto")
+                        .filter(ruta=ruta_bloqueada)
+                        .order_by("orden")
+                    )
+                    if ruta_bloqueada.estatus in {
+                        RutaEntrega.ESTATUS_COMPLETADA,
+                        RutaEntrega.ESTATUS_CANCELADA,
+                    }:
+                        raise ValidationError("La planeación de paradas ya está congelada para esta ruta.")
+                    if ruta_bloqueada.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+                        if punto.tipo not in tipos_permitidos_en_ruta:
+                            raise ValidationError(
+                                "La ruta ya está en seguimiento; solo puedes agregar sucursales o CEDIS."
+                            )
+                        ultimo_orden_atendido = max(
+                            (
+                                parada_existente.orden
+                                for parada_existente in paradas_bloqueadas
+                                if parada_resuelta_operativamente(parada_existente)
+                            ),
+                            default=0,
+                        )
+                        if orden <= ultimo_orden_atendido:
+                            raise ValidationError(
+                                "El orden debe ser posterior a la última parada atendida "
+                                f"(orden {ultimo_orden_atendido})."
+                            )
+                    for parada_existente in reversed(paradas_bloqueadas):
+                        if parada_existente.orden < orden:
+                            continue
                         parada_existente.orden += 1
                         parada_existente.save(update_fields=["orden", "actualizado_en"])
-                parada = ParadaRuta.objects.create(
-                    ruta=ruta,
-                    punto=punto,
-                    orden=orden,
-                    hora_estimada=_parse_datetime_local(request.POST.get("hora_estimada")),
-                    notas=(request.POST.get("notas") or "").strip(),
+                    parada = ParadaRuta.objects.create(
+                        ruta=ruta_bloqueada,
+                        punto=punto,
+                        orden=orden,
+                        hora_estimada=_parse_datetime_local(request.POST.get("hora_estimada")),
+                        notas=(request.POST.get("notas") or "").strip(),
+                    )
+                    ruta = ruta_bloqueada
+                    ruta.recompute_route_control()
+                    ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+                    recalcular_ruta_programada(ruta)
+            except ValidationError as exc:
+                return add_parada_response(ok=False, message=exc.messages[0], status=422)
+            except IntegrityError:
+                return add_parada_response(
+                    ok=False,
+                    message="Otra actualización cambió el orden de la ruta. Revisa las paradas e inténtalo de nuevo.",
+                    status=409,
                 )
-            ruta.recompute_route_control()
-            ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-            recalcular_ruta_programada(ruta)
             log_event(
                 request.user,
                 "CREATE",
@@ -2566,8 +2644,7 @@ def ruta_detail(request, pk: int):
                 str(parada.id),
                 {"ruta": ruta.folio, "punto": punto.nombre, "orden": parada.orden},
             )
-            messages.success(request, f"Parada {punto.nombre} agregada.")
-            return redirect("logistica:ruta_detail", pk=ruta.id)
+            return add_parada_response(ok=True, message=f"Parada {punto.nombre} agregada.")
 
         if action == "move_parada":
             parada_id = (request.POST.get("parada_id") or "").strip()
@@ -2575,13 +2652,28 @@ def ruta_detail(request, pk: int):
             if direction not in {"up", "down"}:
                 messages.error(request, "Dirección de movimiento inválida.")
                 return redirect("logistica:ruta_detail", pk=ruta.id)
-            parada = ParadaRuta.objects.filter(pk=int(parada_id), ruta=ruta).first() if parada_id.isdigit() else None
-            if parada:
-                target_order = parada.orden - 1 if direction == "up" else parada.orden + 1
-                target = ParadaRuta.objects.filter(ruta=ruta, orden=target_order).first()
-                if target:
-                    with transaction.atomic():
-                        temp_order = (ruta.paradas.aggregate(max_orden=Max("orden")).get("max_orden") or 0) + 1000
+            parada = None
+            target = None
+            try:
+                with transaction.atomic():
+                    ruta_bloqueada = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+                    if ruta_bloqueada.estatus != RutaEntrega.ESTATUS_PLANEADA:
+                        raise ValidationError("La ruta ya está en seguimiento; no puedes reordenar paradas existentes.")
+                    paradas_bloqueadas = list(
+                        ParadaRuta.objects.select_for_update().filter(ruta=ruta_bloqueada).order_by("orden", "id")
+                    )
+                    parada = next(
+                        (item for item in paradas_bloqueadas if str(item.id) == parada_id),
+                        None,
+                    )
+                    if parada:
+                        target_order = parada.orden - 1 if direction == "up" else parada.orden + 1
+                        target = next(
+                            (item for item in paradas_bloqueadas if item.orden == target_order),
+                            None,
+                        )
+                    if parada and target:
+                        temp_order = max((item.orden for item in paradas_bloqueadas), default=0) + 1000
                         original_order = parada.orden
                         target_original_order = target.orden
                         parada.orden = temp_order
@@ -2590,48 +2682,73 @@ def ruta_detail(request, pk: int):
                         target.save(update_fields=["orden", "actualizado_en"])
                         parada.orden = target_order
                         parada.save(update_fields=["orden", "actualizado_en"])
-                    recalcular_ruta_programada(ruta)
-                    log_event(
-                        request.user,
-                        "UPDATE",
-                        "logistica.ParadaRuta",
-                        str(parada.id),
-                        {
-                            "ruta": ruta.folio,
-                            "parada": parada.punto_nombre_snapshot,
-                            "from_orden": original_order,
-                            "to_orden": parada.orden,
-                            "parada_intercambiada": target.punto_nombre_snapshot,
-                            "intercambiada_from_orden": target_original_order,
-                            "intercambiada_to_orden": target.orden,
-                        },
-                    )
-                    messages.success(request, "Orden de paradas actualizado.")
+                        ruta = ruta_bloqueada
+                        recalcular_ruta_programada(ruta)
+            except (ValidationError, IntegrityError) as exc:
+                message = exc.messages[0] if isinstance(exc, ValidationError) else "El orden cambió mientras se actualizaba. Inténtalo de nuevo."
+                messages.error(request, message)
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if parada and target:
+                log_event(
+                    request.user,
+                    "UPDATE",
+                    "logistica.ParadaRuta",
+                    str(parada.id),
+                    {
+                        "ruta": ruta.folio,
+                        "parada": parada.punto_nombre_snapshot,
+                        "from_orden": original_order,
+                        "to_orden": parada.orden,
+                        "parada_intercambiada": target.punto_nombre_snapshot,
+                        "intercambiada_from_orden": target_original_order,
+                        "intercambiada_to_orden": target.orden,
+                    },
+                )
+                messages.success(request, "Orden de paradas actualizado.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "delete_parada":
             parada_id = (request.POST.get("parada_id") or "").strip()
-            parada = ParadaRuta.objects.filter(pk=int(parada_id), ruta=ruta).first() if parada_id.isdigit() else None
-            if parada:
-                nombre_punto = parada.punto_nombre_snapshot
-                orden_eliminado = parada.orden
-                parada_id_log = parada.id
-                if ruta.paradas.count() <= 1:
-                    messages.error(request, "La ruta debe conservar al menos una parada.")
-                    return redirect("logistica:ruta_detail", pk=ruta.id)
-                puede_quitarse, motivo = _parada_puede_quitarse(parada)
-                if not puede_quitarse:
-                    messages.error(request, motivo)
-                    return redirect("logistica:ruta_detail", pk=ruta.id)
+            parada = None
+            try:
                 with transaction.atomic():
+                    ruta_bloqueada = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+                    paradas_bloqueadas = list(
+                        ParadaRuta.objects.select_for_update()
+                        .filter(ruta=ruta_bloqueada)
+                        .order_by("orden", "id")
+                    )
+                    parada = next(
+                        (item for item in paradas_bloqueadas if str(item.id) == parada_id),
+                        None,
+                    )
+                    if not parada:
+                        return redirect("logistica:ruta_detail", pk=ruta.id)
+                    nombre_punto = parada.punto_nombre_snapshot
+                    orden_eliminado = parada.orden
+                    parada_id_log = parada.id
+                    if len(paradas_bloqueadas) <= 1:
+                        raise ValidationError("La ruta debe conservar al menos una parada.")
+                    puede_quitarse, motivo = _parada_puede_quitarse(parada)
+                    if not puede_quitarse:
+                        raise ValidationError(motivo)
                     parada.lineas_carga.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
                     parada.delete()
-                for index, item in enumerate(ruta.paradas.filter(orden__gt=orden_eliminado).order_by("orden", "id"), start=orden_eliminado):
-                    item.orden = index
-                    item.save(update_fields=["orden", "actualizado_en"])
-                ruta.recompute_route_control()
-                ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
-                recalcular_ruta_programada(ruta)
+                    for index, item in enumerate(
+                        (item for item in paradas_bloqueadas if item.id != parada_id_log and item.orden > orden_eliminado),
+                        start=orden_eliminado,
+                    ):
+                        item.orden = index
+                        item.save(update_fields=["orden", "actualizado_en"])
+                    ruta = ruta_bloqueada
+                    ruta.recompute_route_control()
+                    ruta.save(update_fields=["cumplimiento_porcentaje", "updated_at"])
+                    recalcular_ruta_programada(ruta)
+            except (ValidationError, IntegrityError) as exc:
+                message = exc.messages[0] if isinstance(exc, ValidationError) else "El orden cambió mientras se actualizaba. Inténtalo de nuevo."
+                messages.error(request, message)
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if parada:
                 log_event(
                     request.user,
                     "DELETE",
