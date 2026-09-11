@@ -37,7 +37,7 @@
 - Modify: `logistica/templates/logistica/pwa.html`
 - Modify: `logistica/tests.py`
 
-- [ ] **Step 1: Cambiar `CACHE_NAME` y el parámetro de registro a `v90-mensaje-error-turno`.**
+- [ ] **Step 1: Cambiar `CACHE_NAME` y el parámetro de registro a `v91-mensaje-error-turno`.**
 - [ ] **Step 2: Actualizar las aserciones de versión existentes.**
 - [ ] **Step 3: Ejecutar pruebas enfocadas de Logística.**
 - [ ] **Step 4: Ejecutar `python manage.py migrate --check` y `python manage.py check` con PostgreSQL aislado.**

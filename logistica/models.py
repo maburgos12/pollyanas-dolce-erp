@@ -1046,6 +1046,15 @@ class ReporteUnidad(models.Model):
     notas_compras = models.TextField(blank=True, default="")
     notificacion_escalada = models.BooleanField(default=False)
     actualizado_en = models.DateTimeField(auto_now=True)
+    duplicado_de = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="duplicados",
+        verbose_name="Duplicado de",
+        help_text="Reporte principal que ya atiende este mismo desperfecto.",
+    )
 
     class Meta:
         ordering = ["-fecha_reporte", "-id"]
@@ -1054,6 +1063,7 @@ class ReporteUnidad(models.Model):
         indexes = [
             models.Index(fields=["estatus", "severidad", "fecha_reporte"]),
             models.Index(fields=["unidad", "fecha_reporte"]),
+            models.Index(fields=["duplicado_de"]),
         ]
 
     def __str__(self) -> str:

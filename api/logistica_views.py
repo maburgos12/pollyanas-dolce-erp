@@ -23,6 +23,10 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from core.access import can_manage_logistica, can_manage_submodule, can_view_logistica, can_view_module, can_view_submodule
 from core.audit import log_event
 from crm.models import PedidoCliente
+from logistica.services_reportes_repetidos import (
+    buscar_reporte_abierto_equivalente,
+    reafirmar_desde_inspeccion,
+)
 from logistica.models import (
     BitacoraRepartidor,
     BitacoraSalidaLlegada,
@@ -1057,20 +1061,47 @@ class InspeccionDiariaCreateView(_LogisticaPreviewGuardMixin, generics.CreateAPI
         tiene_fallas = bool(observaciones) and any(
             serializer.validated_data.get(field) is False for field in INSPECCION_DIARIA_BOOL_FIELDS
         )
+        # El repartidor pudo señalar desde la PWA que el desperfecto es uno que ya
+        # está reportado; si no lo hizo, se compara el texto contra los abiertos.
+        reporte_existente_id = str(request.data.get("reporte_existente_id") or "").strip()
+        reafirmado = False
         try:
             with transaction.atomic():
                 inspeccion = serializer.save(ip_registro=request.META.get("REMOTE_ADDR"), tiene_fallas=tiene_fallas)
                 if tiene_fallas:
-                    reporte = ReporteUnidad.objects.create(
-                        repartidor=repartidor,
-                        unidad=inspeccion.unidad,
-                        tipo=ReporteUnidad.TIPO_OTRO,
-                        severidad=ReporteUnidad.SEVERIDAD_URGENTE,
-                        descripcion=f"Falla detectada en inspección diaria: {observaciones}",
-                        latitud=inspeccion.latitud,
-                        longitud=inspeccion.longitud,
-                        ip_reporte=request.META.get("REMOTE_ADDR"),
-                    )
+                    existente = None
+                    if reporte_existente_id.isdigit():
+                        existente = (
+                            ReporteUnidad.objects.filter(pk=int(reporte_existente_id), unidad=inspeccion.unidad)
+                            .exclude(estatus=ReporteUnidad.ESTATUS_CERRADO)
+                            .filter(duplicado_de__isnull=True)
+                            .first()
+                        )
+                    if existente is None:
+                        existente = buscar_reporte_abierto_equivalente(inspeccion.unidad, observaciones)
+
+                    if existente is not None:
+                        reafirmar_desde_inspeccion(
+                            existente,
+                            repartidor,
+                            observaciones,
+                            latitud=inspeccion.latitud,
+                            longitud=inspeccion.longitud,
+                            ip=request.META.get("REMOTE_ADDR"),
+                        )
+                        reporte = existente
+                        reafirmado = True
+                    else:
+                        reporte = ReporteUnidad.objects.create(
+                            repartidor=repartidor,
+                            unidad=inspeccion.unidad,
+                            tipo=ReporteUnidad.TIPO_OTRO,
+                            severidad=ReporteUnidad.SEVERIDAD_URGENTE,
+                            descripcion=f"Falla detectada en inspección diaria: {observaciones}",
+                            latitud=inspeccion.latitud,
+                            longitud=inspeccion.longitud,
+                            ip_reporte=request.META.get("REMOTE_ADDR"),
+                        )
                     inspeccion.reporte_generado = reporte
                     inspeccion.save(update_fields=["reporte_generado"])
         except IntegrityError:
@@ -1079,7 +1110,11 @@ class InspeccionDiariaCreateView(_LogisticaPreviewGuardMixin, generics.CreateAPI
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response(LogisticaInspeccionDiariaSerializer(inspeccion).data, status=status.HTTP_201_CREATED)
+        # La PWA le dice al repartidor si se abrió un ticket nuevo o se sumó a uno
+        # existente: el candado no debe ser invisible para quien captura.
+        payload = LogisticaInspeccionDiariaSerializer(inspeccion).data
+        payload["reporte_reafirmado"] = reafirmado
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class LogisticaRutasView(_LogisticaBaseView):

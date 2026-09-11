@@ -65,5 +65,5 @@ class LogisticaPwaTicketPhotoTemplateTests(SimpleTestCase):
         sw_path = Path(settings.BASE_DIR) / "logistica" / "static" / "logistica" / "pwa" / "sw.js"
         sw_source = sw_path.read_text(encoding="utf-8")
 
-        self.assertIn("pollyanas-logistica-pwa-v90-mensaje-error-turno", sw_source)
-        self.assertIn("route-control-v90-mensaje-error-turno", source)
+        self.assertIn("pollyanas-logistica-pwa-v91-mensaje-error-turno", sw_source)
+        self.assertIn("route-control-v91-mensaje-error-turno", source)

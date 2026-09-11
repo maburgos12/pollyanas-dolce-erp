@@ -4706,6 +4706,9 @@
             inspeccionDiariaObservaciones: "",
             inspeccionDiariaExpanded: { fluidos: true },
             inspeccionDiariaHighlight: "",
+            inspeccionReportesAbiertos: [],
+            inspeccionReportesLoading: false,
+            inspeccionReporteExistente: null,
             inspeccionDiariaChecks
           };
         }
@@ -4750,6 +4753,8 @@
         draft.inspeccionDiariaAviso = "";
         draft.inspeccionDiariaObservaciones = "";
         draft.inspeccionDiariaHighlight = "";
+        draft.inspeccionReportesAbiertos = [];
+        draft.inspeccionReporteExistente = null;
         Object.keys(draft.inspeccionDiariaChecks).forEach((field) => { draft.inspeccionDiariaChecks[field] = null; });
         if (!value) return renderBitacoraSalida();
         draft.inspeccionDiariaLoading = true;
@@ -4757,6 +4762,9 @@
         const response = await apiFetch(`/inspeccion-diaria/check/?unidad_id=${encodeURIComponent(value)}`);
         draft.inspeccionDiariaLoading = false;
         draft.inspeccionDiariaCheck = response.ok ? await response.json() : { ya_inspeccionada: false };
+        renderBitacoraSalida();
+        // Se precargan aquí para que el panel ya esté listo cuando marque una FALLA.
+        await cargarReportesAbiertosInspeccion();
         renderBitacoraSalida();
       }
 
@@ -4838,6 +4846,46 @@
         `;
       }
 
+      async function cargarReportesAbiertosInspeccion() {
+        const draft = ensureBitacoraSalidaDraft();
+        if (!draft.unidad) { draft.inspeccionReportesAbiertos = []; return []; }
+        draft.inspeccionReportesLoading = true;
+        const response = await apiFetch(`/reportes/abiertos-unidad/?unidad_id=${encodeURIComponent(draft.unidad)}`);
+        draft.inspeccionReportesLoading = false;
+        draft.inspeccionReportesAbiertos = response.ok ? await response.json() : [];
+        return draft.inspeccionReportesAbiertos;
+      }
+
+      function marcarInspeccionReporteExistente(reporteId) {
+        const draft = ensureBitacoraSalidaDraft();
+        const id = Number(reporteId);
+        // Segundo toque deselecciona: el repartidor puede corregirse sin salir.
+        draft.inspeccionReporteExistente = draft.inspeccionReporteExistente === id ? null : id;
+        renderBitacoraSalida();
+      }
+
+      function reportesAbiertosInspeccionHtml(draft) {
+        if (draft.inspeccionReportesLoading) return `<p class="unit-line">Revisando lo que ya está reportado de esta unidad...</p>`;
+        const reportes = draft.inspeccionReportesAbiertos || [];
+        if (!reportes.length) return "";
+        return `
+          <section class="card report-card">
+            <h2 style="color:var(--gold-text);margin-top:0;">Esta unidad ya tiene pendientes</h2>
+            <p class="muted">Si lo que viste hoy es uno de estos, márcalo: se suma al ticket que ya existe en vez de abrir otro.</p>
+            ${reportes.map((reporte) => {
+              const activo = draft.inspeccionReporteExistente === Number(reporte.id);
+              return `
+              <article class="duplicate-report-card">
+                <h3>${escapeHtml(reporte.estatus_display || reporte.estatus)} · ID ${escapeHtml(reporte.id)}</h3>
+                <p>${escapeHtml((reporte.descripcion || "").slice(0, 140))}${(reporte.descripcion || "").length > 140 ? "..." : ""}</p>
+                <p class="meta">${formatDate(reporte.fecha_reporte)} · reafirmado ${escapeHtml(reporte.reafirmaciones_count || 0)} ${Number(reporte.reafirmaciones_count || 0) === 1 ? "vez" : "veces"}</p>
+                <button class="${activo ? "primary-btn" : "secondary-btn"}" type="button" onclick="marcarInspeccionReporteExistente(${Number(reporte.id)})">${activo ? "✓ Es este mismo" : "Es este mismo"}</button>
+              </article>
+            `;}).join("")}
+          </section>
+        `;
+      }
+
       async function continuarInspeccionDiaria() {
         if (previewBlocked("La inspección diaria está bloqueada en vista como repartidor.")) return;
         const draft = ensureBitacoraSalidaDraft();
@@ -4865,6 +4913,7 @@
         const payload = new FormData();
         payload.append("unidad", draft.unidad);
         payload.append("observaciones", draft.inspeccionDiariaObservaciones);
+        if (draft.inspeccionReporteExistente) payload.append("reporte_existente_id", draft.inspeccionReporteExistente);
         payload.append("latitud", draft.latitud_salida);
         payload.append("longitud", draft.longitud_salida);
         Object.entries(draft.inspeccionDiariaChecks).forEach(([field, value]) => payload.append(field, value ? "true" : "false"));
@@ -4885,9 +4934,13 @@
         }
         const data = await response.json();
         draft.inspeccionDiariaCompletada = true;
-        draft.inspeccionDiariaAviso = data.tiene_fallas && data.reporte_generado_id
-          ? `⚠️ Se generó un reporte automático por las fallas encontradas. Folio: ${data.reporte_generado_id}`
-          : "✅ Inspección diaria registrada. Puedes iniciar turno.";
+        if (data.tiene_fallas && data.reporte_generado_id && data.reporte_reafirmado) {
+          draft.inspeccionDiariaAviso = `⚠️ Se sumó al reporte ${data.reporte_generado_id}, que ya estaba abierto por lo mismo. No se abrió otro ticket.`;
+        } else if (data.tiene_fallas && data.reporte_generado_id) {
+          draft.inspeccionDiariaAviso = `⚠️ Se generó un reporte automático por las fallas encontradas. Folio: ${data.reporte_generado_id}`;
+        } else {
+          draft.inspeccionDiariaAviso = "✅ Inspección diaria registrada. Puedes iniciar turno.";
+        }
         renderBitacoraSalida();
       }
 
@@ -5142,6 +5195,7 @@
                   </section>
                   ${inspeccionDiariaSecciones.map(renderInspeccionDiariaSection).join("")}
                   ${tieneFallasDiarias ? `
+                    ${reportesAbiertosInspeccionHtml(draft)}
                     <div class="field daily-fail-field">
                       <label for="inspeccion_diaria_observaciones">${lucideIcon("triangle-alert", "status-icon warning")} Describe las fallas encontradas</label>
                       <textarea id="inspeccion_diaria_observaciones" required placeholder="Anota qué falla viste y si la unidad puede salir o debe detenerse." oninput="state.bitacoraSalidaDraft.inspeccionDiariaObservaciones = this.value">${escapeHtml(draft.inspeccionDiariaObservaciones)}</textarea>
@@ -5667,7 +5721,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v90-mensaje-error-turno", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v91-mensaje-error-turno", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
