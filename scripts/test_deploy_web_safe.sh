@@ -18,4 +18,23 @@ if requires_process_restart $'logistica/templates/logistica/ruta_detail.html\nlo
   exit 1
 fi
 
+# Una dependencia nueva exige reconstruir la imagen: con `restart` el
+# contenedor reusa la imagen vieja y el import revienta en producción.
+requires_image_rebuild $'requirements.txt'
+requires_image_rebuild $'Dockerfile'
+requires_image_rebuild $'pyproject.toml'
+requires_image_rebuild $'activos/services_pasaporte.py\nrequirements.txt'
+
+for solo_codigo in \
+  'logistica/models.py' \
+  'docker-compose.yml' \
+  'templates/operacion/activo_pasaporte.html' \
+  'static/operacion/sw.js'
+do
+  if requires_image_rebuild "$solo_codigo"; then
+    echo "«$solo_codigo» no cambia dependencias; reconstruir la imagen sólo alarga el corte" >&2
+    exit 1
+  fi
+done
+
 echo "deploy-web-safe-tests-ok"
