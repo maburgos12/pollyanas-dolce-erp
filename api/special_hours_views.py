@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -62,6 +64,9 @@ def _serialize_request(obj: SolicitudHorarioEspecial) -> dict:
         "updated_at": obj.updated_at,
         "details": details,
     }
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpecialHoursPreviewView(APIView):
@@ -161,7 +166,18 @@ class SpecialHoursExecuteView(APIView):
         serializer.is_valid(raise_exception=True)
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
         if serializer.validated_data.get("async_execute", True):
-            task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
+            try:
+                task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
+            except Exception as exc:
+                logger.warning("[horarios] No se pudo encolar la ejecución de %s: %s", obj.id, exc)
+                return Response(
+                    {
+                        "status": "unavailable",
+                        "detail": "La cola de tareas no responde; no se encoló la ejecución. Reintenta en unos minutos.",
+                        "request": _serialize_request(obj),
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             return Response(
                 {
                     "status": "queued",
@@ -182,9 +198,24 @@ class SpecialHoursRetryView(APIView):
         if not _can_approve_special_hours(request.user):
             raise PermissionDenied("No tienes permisos para reintentar horarios especiales.")
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
+        status_previo = obj.status
         obj.status = SolicitudHorarioEspecial.STATUS_APROBADO
         obj.save(update_fields=["status", "updated_at"])
-        task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
+        try:
+            task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
+        except Exception as exc:
+            # Sin esto la solicitud quedaba APROBADA sin nada encolado que la
+            # ejecutara: en la pantalla se ve en curso y nunca avanza.
+            logger.warning("[horarios] No se pudo encolar el reintento de %s: %s", obj.id, exc)
+            obj.status = status_previo
+            obj.save(update_fields=["status", "updated_at"])
+            return Response(
+                {
+                    "status": "unavailable",
+                    "detail": "La cola de tareas no responde; la solicitud quedó como estaba. Reintenta en unos minutos.",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response({"status": "queued", "task_id": task.id}, status=status.HTTP_202_ACCEPTED)
 
 

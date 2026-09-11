@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+import logging
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -7,6 +9,9 @@ from core.models import Sucursal
 from activos.models import Activo
 
 from .models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
+
+
+logger = logging.getLogger(__name__)
 
 
 class SucursalFallaSerializer(serializers.ModelSerializer):
@@ -169,12 +174,18 @@ class ReporteFallaCreateSerializer(serializers.ModelSerializer):
                 estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
                 comentario="Reporte creado desde aplicación móvil.",
             )
-            try:
-                from .tasks import notificar_nuevo_reporte
+            # El try va DENTRO del callback: on_commit corre después de cerrar la
+            # transacción, así que aquí afuera no atrapa nada y un broker caído
+            # impedía a la sucursal levantar el reporte desde la PWA.
+            def _avisar_al_area():
+                try:
+                    from .tasks import notificar_nuevo_reporte
 
-                transaction.on_commit(lambda: notificar_nuevo_reporte.delay(reporte.pk))
-            except Exception:
-                pass
+                    notificar_nuevo_reporte.delay(reporte.pk)
+                except Exception as exc:
+                    logger.warning("[fallas] No se pudo encolar el aviso del reporte %s: %s", reporte.pk, exc)
+
+            transaction.on_commit(_avisar_al_area)
         return reporte
 
 

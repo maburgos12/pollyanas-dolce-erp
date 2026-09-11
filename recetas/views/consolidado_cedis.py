@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -72,6 +73,9 @@ def _inventory_close_payload(fecha_operacion: date) -> dict:
     return payload
 
 
+logger = logging.getLogger(__name__)
+
+
 @login_required
 def consolidado_cedis_revision(request):
     if not can_view_recetas(request.user):
@@ -136,12 +140,21 @@ def consolidado_cedis_generar(request):
             f"Ya existe consolidado CEDIS para {fecha_operacion:%Y-%m-%d}. No se recalculó desde la pantalla.",
         )
     else:
-        consolidado_nocturno_cedis.delay(
-            fecha_operacion=fecha_operacion.isoformat(),
-            sincronizar_point=request.POST.get("sincronizar_point", "1") == "1",
-            sincronizar_inventario_cedis=True,
-            forzar_recalculo=False,
-        )
+        try:
+            consolidado_nocturno_cedis.delay(
+                fecha_operacion=fecha_operacion.isoformat(),
+                sincronizar_point=request.POST.get("sincronizar_point", "1") == "1",
+                sincronizar_inventario_cedis=True,
+                forzar_recalculo=False,
+            )
+        except Exception as exc:
+            logger.warning("[recetas] No se pudo encolar el consolidado CEDIS: %s", exc)
+            messages.error(
+                request,
+                "No se pudo encolar el consolidado: la cola de tareas no responde. "
+                "Vuelve a intentarlo en unos minutos.",
+            )
+            return redirect("recetas:consolidado_cedis_revision")
         messages.success(
             request,
             f"Consolidado CEDIS para {fecha_operacion:%Y-%m-%d} encolado. Actualiza la pantalla en unos minutos.",
