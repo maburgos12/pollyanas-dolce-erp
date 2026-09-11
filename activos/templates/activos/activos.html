@@ -432,6 +432,39 @@
         <label>Horas uso promedio mes</label>
         <input type="number" step="0.01" min="0" name="horas_uso_promedio_mes" value="0">
       </div>
+      <div>
+        <label>Marca</label>
+        <input type="text" name="marca" maxlength="100" placeholder="Déjalo vacío si no la sabes">
+      </div>
+      <div>
+        <label>Modelo</label>
+        <input type="text" name="modelo" maxlength="120" placeholder="Déjalo vacío si no lo sabes">
+      </div>
+      <div>
+        <label>Número de serie</label>
+        <input type="text" name="numero_serie" maxlength="160" placeholder="Sólo si la placa es legible">
+      </div>
+      <div>
+        <label>Proveedor de compra</label>
+        <select name="proveedor_compra_id">
+          <option value="">Sin capturar</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}">{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Fecha de compra</label>
+        <input type="date" name="fecha_compra">
+      </div>
+      <div>
+        <label>Costo de adquisición</label>
+        <input type="number" step="0.01" min="0" name="costo_adquisicion" placeholder="Sin capturar">
+      </div>
+      <div>
+        <label>Garantía hasta</label>
+        <input type="date" name="garantia_hasta">
+      </div>
       <div class="pd-grid-span-2">
         <label>Notas</label>
         <input type="text" name="notas" placeholder="Observaciones del equipo">
@@ -643,6 +676,7 @@
           <th>Estado</th>
           <th>Criticidad</th>
           <th>Proveedor</th>
+          <th>Ficha técnica</th>
           <th>Estado ERP</th>
           <th>Siguiente acción</th>
           <th>Habilitado</th>
@@ -660,6 +694,44 @@
             <td><span class="badge badge-primary">{{ a.get_estado_display }}</span></td>
             <td>{{ a.get_criticidad_display }}</td>
             <td>{% if a.proveedor_mantenimiento %}{{ a.proveedor_mantenimiento.nombre }}{% else %}-{% endif %}</td>
+            <td id="activo-{{ a.id }}">
+              {% if a.marca or a.modelo or a.numero_serie %}
+                <div>{{ a.marca }}{% if a.marca and a.modelo %} · {% endif %}{{ a.modelo }}</div>
+                {% if a.numero_serie %}<div class="text-muted">Serie {{ a.numero_serie }}</div>{% endif %}
+              {% else %}
+                <span class="badge badge-warning">Datos pendientes</span>
+              {% endif %}
+              {% if can_manage_activos %}
+                <details class="pd-mt-2">
+                  <summary>Corregir ficha</summary>
+                  <form method="post" data-async-action action="{% url 'activos:activos' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="update_identity">
+                    <input type="hidden" name="activo_id" value="{{ a.id }}">
+                    <label for="marca-{{ a.id }}">Marca</label>
+                    <input id="marca-{{ a.id }}" type="text" name="marca" maxlength="100" value="{{ a.marca }}">
+                    <label for="modelo-{{ a.id }}">Modelo</label>
+                    <input id="modelo-{{ a.id }}" type="text" name="modelo" maxlength="120" value="{{ a.modelo }}">
+                    <label for="serie-{{ a.id }}">Número de serie</label>
+                    <input id="serie-{{ a.id }}" type="text" name="numero_serie" maxlength="160" value="{{ a.numero_serie }}">
+                    <label for="prov-compra-{{ a.id }}">Proveedor de compra</label>
+                    <select id="prov-compra-{{ a.id }}" name="proveedor_compra_id">
+                      <option value="">Sin capturar</option>
+                      {% for p in proveedores %}
+                        <option value="{{ p.id }}" {% if a.proveedor_compra_id == p.id %}selected{% endif %}>{{ p.nombre }}</option>
+                      {% endfor %}
+                    </select>
+                    <label for="fcompra-{{ a.id }}">Fecha de compra</label>
+                    <input id="fcompra-{{ a.id }}" type="date" name="fecha_compra" value="{{ a.fecha_compra|date:'Y-m-d' }}">
+                    <label for="costo-{{ a.id }}">Costo de adquisición</label>
+                    <input id="costo-{{ a.id }}" type="number" step="0.01" min="0" name="costo_adquisicion" value="{{ a.costo_adquisicion|default_if_none:'' }}">
+                    <label for="garantia-{{ a.id }}">Garantía hasta</label>
+                    <input id="garantia-{{ a.id }}" type="date" name="garantia_hasta" value="{{ a.garantia_hasta|date:'Y-m-d' }}">
+                    <button class="btn btn-secondary" type="submit">Guardar ficha</button>
+                  </form>
+                </details>
+              {% endif %}
+            </td>
             <td>
               <span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span>
               {% if enterprise.gaps %}
@@ -698,7 +770,7 @@
           </tr>
           {% endwith %}
         {% empty %}
-          <tr><td colspan="11" class="text-muted">Sin activos para el filtro actual.</td></tr>
+          <tr><td colspan="12" class="text-muted">Sin activos para el filtro actual.</td></tr>
         {% endfor %}
       </tbody>
     </table>

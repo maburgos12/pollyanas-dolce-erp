@@ -1,3 +1,4 @@
+from decimal import Decimal
 from io import BytesIO
 from datetime import timedelta
 from unittest.mock import patch
@@ -905,3 +906,210 @@ class ActivoPasaporteMigracionTests(TransactionTestCase):
         )
         self.assertEqual(len(tokens), 3)
         self.assertNotIn(None, tokens)
+
+
+class ActivoFichaTecnicaUITests(TestCase):
+    """Captura y corrección de la ficha técnica sin inventar información."""
+
+    def setUp(self):
+        from maestros.models import Proveedor
+
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_user("admin_ficha", "admin_ficha@example.com", "test12345")
+        Group.objects.get_or_create(name=ROLE_ADMIN)[0].user_set.add(self.admin)
+        self.ventas = user_model.objects.create_user("ventas_ficha", "ventas_ficha@example.com", "test12345")
+        Group.objects.get_or_create(name=ROLE_VENTAS)[0].user_set.add(self.ventas)
+        self.proveedor = Proveedor.objects.create(nombre="Refrigeración del Valle")
+        self.otro_proveedor = Proveedor.objects.create(nombre="Servicios Industriales")
+        self.client.force_login(self.admin)
+
+    def test_alta_guarda_la_ficha_tecnica_completa(self):
+        self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "create_activo",
+                "nombre": "Horno rotatorio",
+                "marca": "ACME",
+                "modelo": "HX-20",
+                "numero_serie": "SER-777",
+                "proveedor_compra_id": str(self.proveedor.id),
+                "fecha_compra": "2026-02-01",
+                "costo_adquisicion": "125000.50",
+                "garantia_hasta": "2027-02-01",
+                "activo": "1",
+            },
+            follow=True,
+        )
+        activo = Activo.objects.get(nombre="Horno rotatorio")
+
+        self.assertEqual(activo.marca, "ACME")
+        self.assertEqual(activo.numero_serie, "SER-777")
+        self.assertEqual(activo.proveedor_compra, self.proveedor)
+        self.assertEqual(str(activo.fecha_compra), "2026-02-01")
+        self.assertEqual(activo.costo_adquisicion, Decimal("125000.50"))
+
+    def test_los_campos_vacios_se_guardan_vacios_y_no_se_inventan(self):
+        self.client.post(
+            reverse("activos:activos"),
+            {"action": "create_activo", "nombre": "Equipo histórico", "activo": "1"},
+            follow=True,
+        )
+        activo = Activo.objects.get(nombre="Equipo histórico")
+
+        self.assertEqual(activo.marca, "")
+        self.assertIsNone(activo.proveedor_compra)
+        self.assertIsNone(activo.fecha_compra)
+        self.assertIsNone(activo.costo_adquisicion)
+        self.assertIsNone(activo.garantia_hasta)
+
+    def test_el_proveedor_de_mantenimiento_nunca_se_copia_como_proveedor_de_compra(self):
+        self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "create_activo",
+                "nombre": "Cámara fría",
+                "proveedor_mantenimiento_id": str(self.otro_proveedor.id),
+                "activo": "1",
+            },
+            follow=True,
+        )
+        activo = Activo.objects.get(nombre="Cámara fría")
+
+        self.assertEqual(activo.proveedor_mantenimiento, self.otro_proveedor)
+        self.assertIsNone(activo.proveedor_compra)
+
+    def test_update_identity_corrige_la_ficha_y_responde_json(self):
+        activo = Activo.objects.create(nombre="Batidora")
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "update_identity",
+                "activo_id": str(activo.id),
+                "marca": "Hobart",
+                "modelo": "H-600",
+                "numero_serie": "SER-42",
+                "fecha_compra": "2025-05-10",
+                "costo_adquisicion": "80000",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["marca"], "Hobart")
+        self.assertEqual(activo.modelo, "H-600")
+        self.assertEqual(activo.costo_adquisicion, Decimal("80000"))
+
+    def test_update_identity_rechaza_costo_negativo_sin_tocar_el_activo(self):
+        activo = Activo.objects.create(nombre="Vitrina", marca="ACME")
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "update_identity",
+                "activo_id": str(activo.id),
+                "marca": "Corregida",
+                "costo_adquisicion": "-5",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(activo.marca, "ACME")
+
+    def test_update_identity_rechaza_fecha_invalida(self):
+        activo = Activo.objects.create(nombre="Congelador")
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "update_identity",
+                "activo_id": str(activo.id),
+                "fecha_compra": "01/02/2026",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(activo.fecha_compra)
+
+    def test_update_identity_rechaza_proveedor_inexistente(self):
+        activo = Activo.objects.create(nombre="Licuadora")
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "update_identity",
+                "activo_id": str(activo.id),
+                "proveedor_compra_id": "999999",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(activo.proveedor_compra)
+
+    def test_una_serie_repetida_avisa_pero_no_fusiona(self):
+        Activo.objects.create(nombre="Vitrina Payán", numero_serie="SIN-PLACA")
+        activo = Activo.objects.create(nombre="Vitrina Leyva")
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {
+                "action": "update_identity",
+                "activo_id": str(activo.id),
+                "numero_serie": "SIN-PLACA",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(activo.numero_serie, "SIN-PLACA")
+        self.assertIn("SIN-PLACA", response.json()["advertencia"])
+        self.assertEqual(Activo.objects.filter(numero_serie="SIN-PLACA").count(), 2)
+
+    def test_sin_permiso_de_gestion_no_se_edita_la_ficha(self):
+        activo = Activo.objects.create(nombre="Horno ajeno", marca="ACME")
+        self.client.force_login(self.ventas)
+
+        response = self.client.post(
+            reverse("activos:activos"),
+            {"action": "update_identity", "activo_id": str(activo.id), "marca": "Cambiada"},
+        )
+        activo.refresh_from_db()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(activo.marca, "ACME")
+
+    def test_la_completitud_se_muestra_sin_bloquear_nada(self):
+        Activo.objects.create(nombre="Equipo incompleto")
+
+        response = self.client.get(reverse("activos:activos"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Datos pendientes")
+
+    def test_la_respuesta_async_usa_el_envelope_global_del_erp(self):
+        """`static/js/erp_actions.js` exige `ok` y `toast`; sin eso el toast no sale."""
+        activo = Activo.objects.create(nombre="Amasadora")
+
+        exito = self.client.post(
+            reverse("activos:activos"),
+            {"action": "update_identity", "activo_id": str(activo.id), "marca": "Sinmag"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        ).json()
+        fallo = self.client.post(
+            reverse("activos:activos"),
+            {"action": "update_identity", "activo_id": str(activo.id), "costo_adquisicion": "-1"},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        ).json()
+
+        self.assertTrue(exito["ok"])
+        self.assertEqual(exito["toast"]["type"], "success")
+        self.assertFalse(fallo["ok"])
+        self.assertEqual(fallo["toast"]["type"], "error")
