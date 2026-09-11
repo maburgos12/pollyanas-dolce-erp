@@ -9,7 +9,7 @@ from django.contrib.auth.models import Group
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
@@ -1561,3 +1561,29 @@ class ProveedorSinContactoTests(TestCase):
         source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
         self.assertNotIn("no tienen teléfono ni WhatsApp", source)
         self.assertNotIn("Sin contacto", source)
+
+
+class ImportarProveedoresSoloPorLaAppTests(TestCase):
+    """La ruta web de importación quedó sin consumidor y con un candado más flojo que la móvil."""
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(username="mant_lector", password="test12345")
+        UserModuleAccess.objects.create(user=self.user, module="mantenimiento", access=ACCESS_VIEW)
+        self.client.force_login(self.user)
+
+    def test_la_ruta_web_ya_no_existe(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("mantenimiento:mant-proveedor-importar")
+        proveedor = Proveedor.objects.create(nombre="Taller del catálogo general", activo=True)
+        respuesta = self.client.post("/mantenimiento/proveedores/importar/",
+                                     {"proveedor_ids": [proveedor.id]})
+        self.assertEqual(respuesta.status_code, 404)
+        self.assertFalse(ProveedorServicio.objects.exists())
+
+    def test_la_ruta_de_la_app_sigue_exigiendo_permiso_de_escritura(self):
+        proveedor = Proveedor.objects.create(nombre="Taller del catálogo general", activo=True)
+        respuesta = self.client.post("/api/mantenimiento/proveedores/importar/",
+                                     {"proveedor_ids": [proveedor.id]}, content_type="application/json")
+        self.assertEqual(respuesta.status_code, 403)
+        self.assertFalse(ProveedorServicio.objects.exists())

@@ -1927,32 +1927,6 @@ def dashboard(request):
 
 
 @login_required
-def importar_proveedores(request):
-    """Importa proveedores seleccionados del catálogo general como ProveedorServicio."""
-    _require_mantenimiento(request.user)
-    if request.method != "POST":
-        return redirect("mantenimiento:dashboard")
-
-    from django.contrib import messages as msg
-
-    ids = request.POST.getlist("proveedor_ids")
-    if not ids:
-        msg.warning(request, "Selecciona al menos un proveedor para importar.")
-        return redirect("mantenimiento:dashboard")
-
-    importados = 0
-    for prov in Proveedor.objects.filter(id__in=ids, activo=True):
-        _, created = ProveedorServicio.objects.get_or_create(
-            nombre=prov.nombre, defaults={"activo": True}
-        )
-        if created:
-            importados += 1
-
-    msg.success(request, f"{importados} proveedor(es) importado(s) correctamente.")
-    return redirect("mantenimiento:dashboard")
-
-
-@login_required
 def eliminar_proveedor(request, pk):
     _require_mantenimiento(request.user)
     if request.method != "POST":
