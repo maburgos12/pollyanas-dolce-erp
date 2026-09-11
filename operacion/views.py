@@ -23,6 +23,11 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from activos.models import Activo
+from activos.services_pasaporte import (
+    activos_autorizados,
+    construir_pasaporte,
+)
+from core.audit import log_event
 from core.access import (
     can_manage_module,
     can_view_module,
@@ -166,6 +171,43 @@ def _respuesta_accion_merma(request, *, merma_id, payload=None, error="", mensaj
 @login_required
 def app_home(request):
     return render(request, "operacion/app_home.html", build_operacion_context(request.user))
+
+
+@login_required
+@never_cache
+def activo_pasaporte(request, qr_token):
+    """Ficha del activo abierta desde su etiqueta QR.
+
+    El QR sólo lleva el UUID: quién puede verlo se decide aquí y en
+    `activos_autorizados`. Un token de otra sucursal responde 404 —no 403— para
+    no confirmar que ese equipo existe.
+    """
+    activo = (
+        activos_autorizados(request.user)
+        .select_related("sucursal", "proveedor_compra", "proveedor_mantenimiento")
+        .filter(qr_token=qr_token)
+        .first()
+    )
+    if activo is None:
+        raise Http404("Activo no disponible para esta sesión.")
+
+    log_event(request.user, "SCAN", "activos.Activo", activo.pk, {"qr": True})
+    contexto = construir_pasaporte(activo, request.user)
+    contexto["reportar_url"] = (
+        f"{reverse('operacion:sucursal_tools')}?tab=fallas&activo={activo.pk}#falla-form"
+        if contexto["puede_reportar"]
+        else ""
+    )
+    return render(request, "operacion/activo_pasaporte.html", contexto)
+
+
+@login_required
+@never_cache
+def activo_escanear(request):
+    """Lector de etiquetas QR dentro de la App Operativa."""
+    if not activos_autorizados(request.user).exists():
+        raise PermissionDenied("Tu sesión no tiene activos asignados para escanear.")
+    return render(request, "operacion/activo_escanear.html", {})
 
 
 @login_required

@@ -1,0 +1,132 @@
+{% load static %}
+<!doctype html>
+<html lang="es" class="operacion-app-html">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pollyana's Operativa">
+  <title>{{ identidad.nombre }} · Pasaporte de activo</title>
+  <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
+  <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
+  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v1">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v1">
+  <link rel="stylesheet" href="{% static 'operacion/activo_pasaporte.css' %}?v=20260911-pasaporte-qr-v1">
+</head>
+<body class="operacion-app-body pasaporte-body">
+  <main class="pasaporte">
+    <header class="pasaporte-top">
+      <a class="volver" href="{% url 'operacion:app_home' %}">Inicio</a>
+      <span class="codigo">{{ identidad.codigo }}</span>
+    </header>
+
+    <section class="pasaporte-identidad">
+      <h1>{{ identidad.nombre }}</h1>
+      <p class="ubicacion">
+        {% if identidad.sucursal %}{{ identidad.sucursal }}{% else %}Sin sucursal asignada{% endif %}
+        {% if identidad.ubicacion %} · {{ identidad.ubicacion }}{% endif %}
+      </p>
+      <div class="chips">
+        <span class="chip chip-estado chip-{{ identidad.estado|lower }}">{{ identidad.estado_label }}</span>
+        <span class="chip">Criticidad {{ identidad.criticidad_label }}</span>
+        {% if not identidad.vigente %}<span class="chip chip-baja">Dado de baja</span>{% endif %}
+      </div>
+      {% if identidad.marca or identidad.modelo or identidad.numero_serie %}
+        <dl class="ficha">
+          {% if identidad.marca %}<div><dt>Marca</dt><dd>{{ identidad.marca }}</dd></div>{% endif %}
+          {% if identidad.modelo %}<div><dt>Modelo</dt><dd>{{ identidad.modelo }}</dd></div>{% endif %}
+          {% if identidad.numero_serie %}<div><dt>Serie</dt><dd>{{ identidad.numero_serie }}</dd></div>{% endif %}
+        </dl>
+      {% else %}
+        <p class="pendiente">Datos técnicos pendientes de capturar.</p>
+      {% endif %}
+    </section>
+
+    {% if fallas_abiertas %}
+      <section class="bloque bloque-alerta" aria-labelledby="fallas-abiertas">
+        <h2 id="fallas-abiertas">Ya hay {{ fallas_abiertas|length }} reporte{{ fallas_abiertas|pluralize }} abierto{{ fallas_abiertas|pluralize }}</h2>
+        <ul class="lista-fallas">
+          {% for falla in fallas_abiertas %}
+            <li>
+              <a href="/fallas/app/?reporte={{ falla.id }}">
+                <b>{{ falla.titulo }}</b>
+                <small>{{ falla.estatus_label }} · Prioridad {{ falla.prioridad_label }} · {{ falla.fecha_reporte|date:"d/m/Y" }}</small>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if reportar_url %}
+          <p class="nota">Si tu problema ya está en esta lista, abre el reporte existente en vez de crear otro.</p>
+          <a class="btn btn-secundario" href="{{ reportar_url }}">Reportar otro problema</a>
+        {% endif %}
+      </section>
+    {% elif reportar_url %}
+      <a class="btn btn-primario" href="{{ reportar_url }}">Reportar una falla de este equipo</a>
+    {% endif %}
+
+    <section class="bloque" aria-labelledby="mantenimiento">
+      <h2 id="mantenimiento">Mantenimiento</h2>
+      {% if ultimo_mantenimiento %}
+        <p class="dato"><span>Último cierre</span><b>{{ ultimo_mantenimiento.fecha|date:"d/m/Y" }} · {{ ultimo_mantenimiento.folio }}</b></p>
+      {% else %}
+        <p class="dato"><span>Último cierre</span><b>Sin órdenes cerradas</b></p>
+      {% endif %}
+      {% if proximo_plan %}
+        <p class="dato"><span>Próxima revisión</span><b>{{ proximo_plan.proxima_ejecucion|date:"d/m/Y" }} · {{ proximo_plan.nombre }}</b></p>
+      {% else %}
+        <p class="dato"><span>Próxima revisión</span><b>Sin plan programado</b></p>
+      {% endif %}
+
+      {% if ordenes_recientes %}
+        <ul class="lista-ordenes">
+          {% for orden in ordenes_recientes %}
+            <li>
+              <b>{{ orden.folio }}</b>
+              <small>{{ orden.tipo }} · {{ orden.estatus_label }} · {{ orden.fecha|date:"d/m/Y" }}</small>
+              {% if orden.descripcion %}<p>{{ orden.descripcion }}</p>{% endif %}
+              {% if puede_ver_costos %}
+                <span class="costo">{{ orden.costo_total|floatformat:2 }} MXN{% if orden.numero_factura %} · Factura {{ orden.numero_factura }}{% endif %}</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+
+    {% if puede_ver_costos %}
+      <section class="bloque bloque-costos" aria-labelledby="costos">
+        <h2 id="costos">Costos y compra</h2>
+        <p class="dato"><span>Adquisición</span><b>{% if costos.adquisicion %}{{ costos.adquisicion|floatformat:2 }} MXN{% else %}Sin capturar{% endif %}</b></p>
+        <p class="dato"><span>Mantenimiento acumulado</span><b>{{ costos.mantenimiento_total|floatformat:2 }} MXN</b></p>
+        <p class="dato"><span>Proveedor de compra</span><b>{% if proveedor_compra %}{{ proveedor_compra }}{% else %}Sin capturar{% endif %}</b></p>
+        <p class="dato"><span>Garantía</span><b>{% if garantia_hasta %}{{ garantia_hasta|date:"d/m/Y" }}{% else %}Sin capturar{% endif %}</b></p>
+        {% if facturas %}
+          <ul class="lista-facturas">
+            {% for factura in facturas %}
+              <li>
+                {% if factura.archivo %}<a href="{{ factura.archivo }}">{{ factura.numero|default:factura.folio_orden }}</a>
+                {% else %}<span>{{ factura.numero|default:factura.folio_orden }}</span>{% endif %}
+                <small>{{ factura.folio_orden }} · {{ factura.fecha|date:"d/m/Y" }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    <footer class="pasaporte-pie">
+      <a href="{% url 'operacion:activo_escanear' %}">Escanear otro activo</a>
+    </footer>
+  </main>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1", {
+        scope: "/app/",
+        updateViaCache: "none"
+      }).catch(function () {});
+    }
+  </script>
+</body>
+</html>
