@@ -14,7 +14,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.staticfiles import finders
 from django.core.paginator import Paginator
 from django.db import IntegrityError, OperationalError, connection, transaction
-from django.db.models.functions import Trim
+from django.db.models.functions import Trim, Upper
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -209,6 +209,35 @@ def activo_escanear(request):
     if not activos_autorizados(request.user).exists():
         raise PermissionDenied("Tu sesión no tiene activos asignados para escanear.")
     return render(request, "operacion/activo_escanear.html", {})
+
+
+@login_required
+@never_cache
+@require_GET
+def activo_buscar(request):
+    """Captura manual del código cuando la cámara no es opción.
+
+    Coincidencia exacta contra el mismo queryset autorizado: teclear un
+    fragmento no puede llevar a la ficha de otro equipo.
+    """
+    codigo = (request.GET.get("codigo") or "").strip().upper()
+    if not codigo:
+        return JsonResponse({"error": "Escribe el código completo del activo."}, status=400)
+
+    activo = (
+        activos_autorizados(request.user)
+        .annotate(codigo_normalizado=Upper(Trim("codigo")))
+        .filter(codigo_normalizado=codigo)
+        .only("id", "qr_token")
+        .first()
+    )
+    if activo is None:
+        return JsonResponse(
+            {"error": "Ese código no corresponde a un activo disponible para tu sesión."}, status=404
+        )
+    return JsonResponse(
+        {"url": reverse("operacion:activo_pasaporte", args=[activo.qr_token])}
+    )
 
 
 @login_required
