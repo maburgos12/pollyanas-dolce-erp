@@ -1,6 +1,10 @@
 /* Pasaporte de activo: ficha que se abre desde la etiqueta QR, en el piso,
    con una mano y a contraluz. Prioriza identidad legible y una sola acción. */
 
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
 .pasaporte-body {
   margin: 0;
   font-family: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;

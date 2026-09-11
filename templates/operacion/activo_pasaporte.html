@@ -11,9 +11,9 @@
   <title>{{ identidad.nombre }} · Pasaporte de activo</title>
   <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
-  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v1">
-  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v1">
-  <link rel="stylesheet" href="{% static 'operacion/activo_pasaporte.css' %}?v=20260911-pasaporte-qr-v1">
+  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/activo_pasaporte.css' %}?v=20260911-pasaporte-qr-v2">
 </head>
 <body class="operacion-app-body pasaporte-body">
   <main class="pasaporte">
@@ -122,7 +122,7 @@
   </main>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1", {
+      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2", {
         scope: "/app/",
         updateViaCache: "none"
       }).catch(function () {});

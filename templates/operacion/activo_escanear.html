@@ -11,9 +11,9 @@
   <title>Escanear activo · App Operativa</title>
   <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
   <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
-  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v1">
-  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v1">
-  <link rel="stylesheet" href="{% static 'operacion/activo_scanner.css' %}?v=20260911-pasaporte-qr-v1">
+  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/activo_scanner.css' %}?v=20260911-pasaporte-qr-v2">
 </head>
 <body class="operacion-app-body scanner-body">
   <main class="scanner"
@@ -53,10 +53,10 @@
   </main>
 
   <script src="{% static 'vendor/qr-scanner/qr-scanner.umd.min.js' %}?v=1.4.2"></script>
-  <script src="{% static 'operacion/activo_scanner.js' %}?v=20260911-pasaporte-qr-v1" defer></script>
+  <script src="{% static 'operacion/activo_scanner.js' %}?v=20260911-pasaporte-qr-v2" defer></script>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1", {
+      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2", {
         scope: "/app/",
         updateViaCache: "none"
       }).catch(function () {});

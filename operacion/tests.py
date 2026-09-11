@@ -294,7 +294,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260911-pasaporte-qr-v1")
+        self.assertContains(response, "20260911-pasaporte-qr-v2")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -317,7 +317,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -3206,6 +3206,13 @@ class ResponsiveDesignAndContentTests(TestCase):
         # Fase 1 sin autoenvío: el reintento lo decide la persona.
         self.assertNotIn("SyncManager", js)
         self.assertNotIn("background-sync", js)
+
+    def test_las_hojas_del_pasaporte_declaran_box_sizing(self):
+        """Sin border-box el botón de ancho completo se sale de su tarjeta."""
+        root = Path(__file__).resolve().parents[1]
+        for hoja in ("activo_pasaporte.css", "activo_scanner.css"):
+            css = (root / "static/operacion" / hoja).read_text(encoding="utf-8")
+            self.assertIn("box-sizing: border-box", css, hoja)
 
     def test_el_pasaporte_nunca_se_sirve_desde_cache(self):
         from django.contrib.staticfiles import finders

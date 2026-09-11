@@ -46,7 +46,7 @@
       <table class="table table-striped">
         <thead>
           <tr>
-            <th scope="col"><span class="sr-only">Seleccionar</span></th>
+            <th scope="col">Sel.</th>
             <th scope="col">Código</th>
             <th scope="col">Activo</th>
             <th scope="col">Sucursal</th>
@@ -59,8 +59,8 @@
             <tr>
               <td>
                 <input type="checkbox" name="activo_id" value="{{ activo.id }}"
-                       id="etiqueta-{{ activo.id }}" data-etiqueta-check>
-                <label class="sr-only" for="etiqueta-{{ activo.id }}">Imprimir etiqueta de {{ activo.nombre }}</label>
+                       id="etiqueta-{{ activo.id }}" data-etiqueta-check
+                       aria-label="Imprimir etiqueta de {{ activo.nombre }}">
               </td>
               <td>{{ activo.codigo }}</td>
               <td>{{ activo.nombre }}</td>

@@ -1,6 +1,10 @@
 /* Lector QR: una sola acción grande, el visor debajo y siempre a la vista las
    dos salidas cuando la cámara no coopera. */
 
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
 .scanner-body {
   margin: 0;
   font-family: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
