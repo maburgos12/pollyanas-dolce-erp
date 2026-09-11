@@ -82,7 +82,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260910-proveedor-whatsapp-v3", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260911-proveedor-sin-contacto-v4", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
@@ -1461,7 +1461,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20260910-proveedor-whatsapp-v3", sw)
+        self.assertIn("20260911-proveedor-sin-contacto-v4", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):
@@ -1520,3 +1520,44 @@ class ProveedorTelefonoWhatsappTests(TestCase):
         self.assertIn('id="proveedorWhatsapp"', source)
         self.assertIn("WhatsApp / celular", source)
         self.assertIn('name="whatsapp" id="proveedorWhatsapp" class="mant-input"\n            maxlength="30"', source)
+
+
+class ProveedorSinContactoTests(TestCase):
+    """29 de los 36 proveedores llegaron sin número por el import del catálogo de insumos."""
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(username="mant_ver", password="test12345")
+        UserModuleAccess.objects.create(user=self.user, module="mantenimiento", access=ACCESS_MANAGE)
+        self.client.force_login(self.user)
+
+    def _fichas(self):
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        panel = source.split('id="tab-proveedores"')[1]
+        return {re.sub(r"\s+", " ", bloque.split("</div>")[0]).strip()
+                for bloque in panel.split('class="mant-plan-title">')[1:]}
+
+    def test_marca_solo_a_quien_no_tiene_ningun_numero(self):
+        ProveedorServicio.objects.create(nombre="Sin datos")
+        ProveedorServicio.objects.create(nombre="Con fijo", telefono="667 111 2233")
+        ProveedorServicio.objects.create(nombre="Solo WhatsApp", whatsapp="667 114 4188")
+        fichas = self._fichas()
+        marcadas = {f for f in fichas if "Sin contacto" in f}
+        self.assertEqual(len(marcadas), 1)
+        self.assertTrue(any("Sin datos" in f for f in marcadas))
+        # Un WhatsApp basta: hay a quién escribirle.
+        self.assertTrue(all("Sin contacto" not in f for f in fichas
+                            if "Con fijo" in f or "Solo WhatsApp" in f))
+
+    def test_el_encabezado_dice_cuantos_son_del_total(self):
+        for i in range(3):
+            ProveedorServicio.objects.create(nombre=f"Vacio {i}")
+        ProveedorServicio.objects.create(nombre="Completo", telefono="667 111 2233")
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertIn("<strong>3</strong> de 4 no tienen teléfono ni WhatsApp", source)
+
+    def test_sin_faltantes_no_hay_aviso(self):
+        ProveedorServicio.objects.create(nombre="Completo", telefono="667 111 2233")
+        source = self.client.get(reverse("mantenimiento:dashboard")).content.decode()
+        self.assertNotIn("no tienen teléfono ni WhatsApp", source)
+        self.assertNotIn("Sin contacto", source)
