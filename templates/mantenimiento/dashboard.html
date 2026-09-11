@@ -130,6 +130,7 @@
                     <span class="mant-badge">{{ item.prioridad }}</span>
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
                     {% if item.duplicados_total %}<span class="mant-badge is-warning" title="Otros reportes del mismo problema, ligados a este">Reportado {{ item.duplicados_total|add:1 }} veces</span>{% endif %}
+                    {% if item.reafirmaciones_total %}<span class="mant-badge is-warning" title="El repartidor volvió a verlo en la inspección diaria">Insistido {{ item.reafirmaciones_total }}×</span>{% endif %}
                     <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                   </div>
                   <div class="mant-ticket-main {% if not item.foto_url %}no-photo{% endif %}">
@@ -178,10 +179,11 @@
                       data-latest-note="{{ item.ultimo_avance|default:'' }}"
                       data-latest-date="{% if item.ultimo_avance_fecha %}{{ item.ultimo_avance_fecha|date:'d/m/Y H:i' }}{% endif %}"
                     >Trabajar</button>
-                    {% if item.tipo == "falla" and puede_escribir %}
+                    {% if item.tipo != "orden" and puede_escribir %}
                     <button class="btn btn-secondary btn-sm" type="button" data-open-duplicado
-                      data-action="{% url 'mantenimiento:mant-duplicado' item.id %}"
-                      data-falla-id="{{ item.id }}"
+                      data-action="{% url 'mantenimiento:mant-duplicado' item.tipo item.id %}"
+                      data-reporte-tipo="{{ item.tipo }}"
+                      data-reporte-id="{{ item.id }}"
                       data-label="{{ item.referencia }} · {{ item.titulo }}"
                     >Ya se reportó</button>
                     {% endif %}
@@ -414,8 +416,8 @@
         ¿Cuál es la falla que ya se está atendiendo? <span class="pd-required">*</span>
         <select name="principal_id" id="mantDuplicadoSelect" class="mant-input" required>
           <option value="">Selecciona el reporte principal...</option>
-          {% for it in items %}{% if it.tipo == "falla" %}
-          <option value="{{ it.id }}">#{{ it.id }} · {{ it.ubicacion|default:"Sin sucursal" }} · {{ it.titulo|truncatechars:60 }}</option>
+          {% for it in items %}{% if it.tipo != "orden" %}
+          <option value="{{ it.id }}" data-reporte-tipo="{{ it.tipo }}">#{{ it.id }} · {{ it.ubicacion|default:"Sin ubicación" }} · {{ it.titulo|truncatechars:60 }}</option>
           {% endif %}{% endfor %}
         </select>
       </label>
@@ -1221,9 +1223,12 @@ function requireElements(scope, elementMap) {
     form.action = btn.dataset.action;
     label.textContent = `"${btn.dataset.label}" es el mismo problema que otro reporte ya en seguimiento.`;
     select.value = "";
-    // Una falla no puede ser duplicado de sí misma.
+    // Solo reportes del mismo tipo, y nunca el reporte contra sí mismo:
+    // una falla de sucursal y un reporte de unidad no se pueden ligar entre sí.
     Array.from(select.options).forEach((opt) => {
-      opt.hidden = opt.value === btn.dataset.fallaId;
+      if (!opt.value) { opt.hidden = false; return; }
+      opt.hidden = opt.dataset.reporteTipo !== btn.dataset.reporteTipo
+        || opt.value === btn.dataset.reporteId;
     });
     modal.classList.add("is-open");
   });
