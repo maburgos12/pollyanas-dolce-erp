@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#8b2252">
   <title>{% if tab_activa == 'fallas' %}Fallas{% else %}Merma de insumo{% endif %} · App Operativa</title>
   <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260722-insumos-v1">
-  <link rel="stylesheet" href="{% static 'operacion/sucursal_tools.css' %}?v=20260730-branch-fallas-v2">
+  <link rel="stylesheet" href="{% static 'operacion/sucursal_tools.css' %}?v=20260911-pasaporte-qr-v1">
 </head>
 <body class="branch-tools">
   <main class="tools-shell">
@@ -172,7 +172,7 @@
   </div>
   <script>
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7", {
+      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1", {
         scope: "/app/",
         updateViaCache: "none"
       }).then(function (registration) {
@@ -180,6 +180,6 @@
       }).catch(function () {});
     }
   </script>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260730-branch-fallas-v4" defer></script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260911-pasaporte-qr-v1" defer></script>
 </body>
 </html>

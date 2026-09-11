@@ -294,7 +294,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260908-conteos-sesion-v13")
+        self.assertContains(response, "20260911-pasaporte-qr-v1")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -317,7 +317,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260908-conteos-sesion-v13"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v1"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -360,7 +360,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v39-conteos-sucursal-sesion", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v40-pasaporte-activos-qr", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3190,11 +3190,29 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v39-conteos-sucursal-sesion", sw_content)
+        self.assertIn("v40-pasaporte-activos-qr", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/conteos/")', sw_content)
+        self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)
         self.assertIn('key.startsWith("pollyanas-app-operativa-pwa-")', sw_content)
         self.assertNotIn("v21-", sw_content)
+
+    def test_sin_red_no_se_finge_un_reporte_enviado(self):
+        """Un fallo de red debe decir que no se envió nada, no un error genérico."""
+        root = Path(__file__).resolve().parents[1]
+        js = (root / "static/operacion/sucursal_tools.js").read_text(encoding="utf-8")
+
+        self.assertIn("No hay conexión; no se envió ningún reporte.", js)
+        # Fase 1 sin autoenvío: el reintento lo decide la persona.
+        self.assertNotIn("SyncManager", js)
+        self.assertNotIn("background-sync", js)
+
+    def test_el_pasaporte_nunca_se_sirve_desde_cache(self):
+        from django.contrib.staticfiles import finders
+
+        sw_content = Path(finders.find("operacion/sw.js")).read_text(encoding="utf-8")
+
+        self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)
 
 
 class ActivoEscanearTests(TestCase):
