@@ -1674,9 +1674,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v89-turno-combustible-seguro"},
+            {"route-control-v90-mensaje-error-turno"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v90-mensaje-error-turno", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5201,9 +5201,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v89-turno-combustible-seguro", pwa_html)
+        self.assertIn("?v=route-control-v90-mensaje-error-turno", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v90-mensaje-error-turno", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5312,7 +5312,7 @@ class LogisticaControlRutasTests(TestCase):
             Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html"
         ).read_text(encoding="utf-8")
         guardar_salida = re.search(
-            r"async function guardarSalida\(event\) \{(?P<body>.*?)\n      \}",
+            r"async function guardarSalida\(button = null\) \{(?P<body>.*?)\n      \}",
             pwa_html,
             re.DOTALL,
         )
@@ -5332,13 +5332,30 @@ class LogisticaControlRutasTests(TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn(
-            '<button class="primary-btn" type="button" onclick="guardarSalida()">Iniciar turno</button>',
+            '<button class="primary-btn" type="button" onclick="guardarSalida(this)" ${draft.salida_enviando ? "disabled" : ""}>',
             pwa_html,
         )
         self.assertNotIn(
             'draft.foto_tablero_salida ? "" : "disabled"}>Iniciar turno</button>',
             pwa_html,
         )
+
+    def test_pwa_inicio_turno_muestra_error_persistente_y_permite_reintento(self):
+        from pathlib import Path
+
+        pwa_html = (
+            Path(__file__).resolve().parent / "templates" / "logistica" / "pwa.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('salida_error: ""', pwa_html)
+        self.assertIn('salida_enviando: false', pwa_html)
+        self.assertIn('role="alert" aria-live="assertive"', pwa_html)
+        self.assertIn('onclick="guardarSalida(this)"', pwa_html)
+        self.assertIn('draft.salida_enviando ? "disabled" : ""', pwa_html)
+        self.assertIn('draft.salida_enviando ? "Iniciando…" : "Iniciar turno"', pwa_html)
+        self.assertIn('draft.salida_error = message;', pwa_html)
+        self.assertIn('catch (networkError)', pwa_html)
+        self.assertIn('No pudimos contactar al servidor. Revisa la conexión e intenta nuevamente.', pwa_html)
 
     def test_pwa_sw_se_sirve_sin_cache_de_borde(self):
         self.client.force_login(self.user)
@@ -5349,7 +5366,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v89-turno-combustible-seguro", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v90-mensaje-error-turno", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8831,7 +8848,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v89-turno-combustible-seguro", pwa_html)
+        self.assertIn("route-control-v90-mensaje-error-turno", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
