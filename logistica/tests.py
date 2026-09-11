@@ -1674,9 +1674,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v91-mensaje-error-turno"},
+            {"route-control-v92-paradas-ruta-viva"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v91-mensaje-error-turno", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5201,9 +5201,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v91-mensaje-error-turno", pwa_html)
+        self.assertIn("?v=route-control-v92-paradas-ruta-viva", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v91-mensaje-error-turno", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5366,7 +5366,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v91-mensaje-error-turno", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -5671,9 +5671,16 @@ class LogisticaControlRutasTests(TestCase):
         self.assertTrue(ParadaRuta.objects.filter(pk=self.parada.id).exists())
         self.assertContains(response, "ya tiene carga validada")
 
-    def test_ruta_en_ruta_solo_permite_agregar_cedis(self):
+    def test_ruta_en_ruta_permite_agregar_sucursal_y_cedis(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        sucursal_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Extra",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.568916",
+            longitud="-108.460969",
+            radio_geocerca_metros=120,
+        )
         cedis = PuntoLogistico.objects.create(
             nombre="CEDIS",
             tipo=PuntoLogistico.TIPO_CEDIS,
@@ -5681,22 +5688,210 @@ class LogisticaControlRutasTests(TestCase):
             longitud="-108.459969",
             radio_geocerca_metros=120,
         )
-
-        bloqueada = self.client.post(
-            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
-            {"action": "add_parada", "punto": self.punto.id, "orden": "2"},
-            follow=True,
-        )
-        permitida = self.client.post(
-            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
-            {"action": "add_parada", "punto": cedis.id, "orden": "2"},
-            follow=True,
+        proveedor = PuntoLogistico.objects.create(
+            nombre="Proveedor externo",
+            tipo=PuntoLogistico.TIPO_PROVEEDOR,
+            latitud="25.566916",
+            longitud="-108.458969",
+            radio_geocerca_metros=120,
         )
 
-        self.assertEqual(bloqueada.status_code, 200)
-        self.assertContains(bloqueada, "solo puedes agregar una parada CEDIS")
-        self.assertEqual(permitida.status_code, 200)
+        sucursal_agregada = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": sucursal_extra.id, "orden": "2"},
+            follow=True,
+        )
+        cedis_agregado = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": cedis.id, "orden": "3"},
+            follow=True,
+        )
+        proveedor_bloqueado = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": proveedor.id, "orden": "4"},
+            follow=True,
+        )
+
+        self.assertEqual(sucursal_agregada.status_code, 200)
+        self.assertContains(sucursal_agregada, "Parada Sucursal Extra agregada")
+        self.assertTrue(ParadaRuta.objects.filter(ruta=self.ruta, punto=sucursal_extra, orden=2).exists())
+        self.assertEqual(cedis_agregado.status_code, 200)
         self.assertTrue(ParadaRuta.objects.filter(ruta=self.ruta, punto=cedis).exists())
+        self.assertEqual(proveedor_bloqueado.status_code, 200)
+        self.assertContains(proveedor_bloqueado, "solo puedes agregar sucursales o CEDIS")
+        self.assertFalse(ParadaRuta.objects.filter(ruta=self.ruta, punto=proveedor).exists())
+
+    def test_ruta_en_ruta_muestra_sucursales_disponibles_en_agregar_parada(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+
+        response = self.client.get(reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ruta en curso: puedes agregar sucursales y CEDIS")
+        self.assertNotContains(response, f'value="{self.punto.id}" disabled')
+        self.assertContains(response, 'class="filters route-stop-form" style="margin-bottom:0;" data-async-action')
+        self.assertContains(response, 'data-pending-label="Agregando…"')
+
+    def test_ruta_en_ruta_agregar_parada_async_devuelve_toast_y_contexto(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        sucursal_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Async",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.568916",
+            longitud="-108.460969",
+            radio_geocerca_metros=120,
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": sucursal_extra.id, "orden": "2"},
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "success")
+        self.assertEqual(response.json()["toast"]["message"], "Parada Sucursal Async agregada.")
+        self.assertTrue(response.json()["redirect"].endswith("#paradas-ruta"))
+        self.assertTrue(response.json()["reload"])
+
+    def test_ruta_en_ruta_inserta_secuencia_solicitada_despues_del_cedis_atendido(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.save(update_fields=["entrega_estado", "actualizado_en"])
+
+        def crear_punto(nombre, tipo=PuntoLogistico.TIPO_SUCURSAL):
+            return PuntoLogistico.objects.create(
+                nombre=nombre,
+                tipo=tipo,
+                latitud="25.568916",
+                longitud="-108.460969",
+                radio_geocerca_metros=120,
+            )
+
+        for orden, nombre in ((2, "Bamoa"), (3, "Guamuchil")):
+            parada = ParadaRuta.objects.create(ruta=self.ruta, punto=crear_punto(nombre), orden=orden)
+            parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+            parada.save(update_fields=["entrega_estado", "actualizado_en"])
+        cedis_atendido = crear_punto("CEDIS", PuntoLogistico.TIPO_CEDIS)
+        parada_cedis = ParadaRuta.objects.create(ruta=self.ruta, punto=cedis_atendido, orden=4)
+        parada_cedis.estado = ParadaRuta.ESTADO_VISITADA
+        parada_cedis.save(update_fields=["estado", "actualizado_en"])
+        plaza_nio = crear_punto("Plaza Nio")
+        ParadaRuta.objects.create(ruta=self.ruta, punto=plaza_nio, orden=5)
+
+        nuevas_paradas = [
+            (5, crear_punto("Plaza Las Glorias")),
+            (6, crear_punto("Payan")),
+            (7, crear_punto("Leyva")),
+            (8, crear_punto("CEDIS Recarga", PuntoLogistico.TIPO_CEDIS)),
+            (10, crear_punto("El Tunel")),
+        ]
+        for orden, punto in nuevas_paradas:
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+                {"action": "add_parada", "punto": punto.id, "orden": str(orden)},
+            )
+            self.assertEqual(response.status_code, 302)
+
+        secuencia = list(
+            self.ruta.paradas.order_by("orden").values_list("orden", "punto__nombre")
+        )
+        self.assertEqual(
+            secuencia,
+            [
+                (1, self.punto.nombre),
+                (2, "Bamoa"),
+                (3, "Guamuchil"),
+                (4, "CEDIS"),
+                (5, "Plaza Las Glorias"),
+                (6, "Payan"),
+                (7, "Leyva"),
+                (8, "CEDIS Recarga"),
+                (9, "Plaza Nio"),
+                (10, "El Tunel"),
+            ],
+        )
+
+    def test_ruta_en_ruta_fuera_de_radio_no_cuenta_como_parada_resuelta(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_FUERA_RADIO
+        self.parada.save(update_fields=["estado", "actualizado_en"])
+        sucursal_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Antes de Incidencia",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.568916",
+            longitud="-108.460969",
+            radio_geocerca_metros=120,
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": sucursal_extra.id, "orden": "1"},
+            follow=True,
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Parada Sucursal Antes de Incidencia agregada")
+        self.assertEqual(self.parada.orden, 2)
+        self.assertTrue(ParadaRuta.objects.filter(ruta=self.ruta, punto=sucursal_extra, orden=1).exists())
+
+    def test_ruta_en_ruta_maneja_conflicto_concurrente_sin_error_500(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        sucursal_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Concurrente",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.568916",
+            longitud="-108.460969",
+            radio_geocerca_metros=120,
+        )
+
+        with patch("logistica.views.ParadaRuta.objects.create", side_effect=IntegrityError):
+            response = self.client.post(
+                reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+                {"action": "add_parada", "punto": sucursal_extra.id, "orden": "2"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "error")
+        self.assertIn("Otra actualización cambió el orden de la ruta", response.json()["toast"]["message"])
+        self.assertFalse(ParadaRuta.objects.filter(ruta=self.ruta, punto=sucursal_extra).exists())
+
+    def test_ruta_en_ruta_no_inserta_antes_de_la_ultima_parada_atendida(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.parada.estado = ParadaRuta.ESTADO_VISITADA
+        self.parada.entrega_estado = ParadaRuta.ENTREGA_ENTREGADA
+        self.parada.save(update_fields=["estado", "entrega_estado", "actualizado_en"])
+        sucursal_extra = PuntoLogistico.objects.create(
+            nombre="Sucursal Posterior",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.568916",
+            longitud="-108.460969",
+            radio_geocerca_metros=120,
+        )
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id}),
+            {"action": "add_parada", "punto": sucursal_extra.id, "orden": "1"},
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.parada.refresh_from_db()
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(response.json()["ok"])
+        self.assertIn("El orden debe ser posterior a la última parada atendida", response.json()["toast"]["message"])
+        self.assertTrue(response.json()["redirect"].endswith("#paradas-ruta"))
+        self.assertEqual(self.parada.orden, 1)
+        self.assertFalse(ParadaRuta.objects.filter(ruta=self.ruta, punto=sucursal_extra).exists())
 
     def test_ruta_en_ruta_no_permite_actualizar_entrega_oculta(self):
         self.client.force_login(self.user)
@@ -8848,7 +9043,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v91-mensaje-error-turno", pwa_html)
+        self.assertIn("route-control-v92-paradas-ruta-viva", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
