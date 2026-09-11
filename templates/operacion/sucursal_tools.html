@@ -30,14 +30,14 @@
         {% csrf_token %}
         <fieldset class="choice-row">
           <legend>Tipo de reporte</legend>
-          <label><input type="radio" name="tipo_objetivo" value="EQUIPO" {% if draft_fallas.tipo_objetivo != 'INSTALACION' %}checked{% endif %}> Equipo registrado</label>
-          <label><input type="radio" name="tipo_objetivo" value="INSTALACION" {% if draft_fallas.tipo_objetivo == 'INSTALACION' %}checked{% endif %}> Instalación</label>
+          <label><input type="radio" name="tipo_objetivo" value="EQUIPO" {% if activo_preseleccionado or draft_fallas.tipo_objetivo != 'INSTALACION' %}checked{% endif %}> Equipo registrado</label>
+          <label><input type="radio" name="tipo_objetivo" value="INSTALACION" {% if not activo_preseleccionado and draft_fallas.tipo_objetivo == 'INSTALACION' %}checked{% endif %}> Instalación</label>
         </fieldset>
         <div data-equipment-fields>
           <label for="activo_id">Equipo de {{ sucursal.nombre }}</label>
           <select id="activo_id" name="activo_id">
             <option value="">Selecciona un equipo</option>
-            {% for activo in activos %}<option value="{{ activo.id }}" {% if draft_fallas.activo_id == activo.id|stringformat:'s' %}selected{% endif %}>{{ activo.nombre }}{% if activo.codigo %} · {{ activo.codigo }}{% endif %}</option>{% endfor %}
+            {% for activo in activos %}<option value="{{ activo.id }}" {% if draft_fallas.activo_id %}{% if draft_fallas.activo_id == activo.id|stringformat:'s' %}selected{% endif %}{% elif activo_preseleccionado == activo.id %}selected{% endif %}>{{ activo.nombre }}{% if activo.codigo %} · {{ activo.codigo }}{% endif %}</option>{% endfor %}
           </select>
         </div>
         <div data-installation-fields hidden>
@@ -154,6 +154,22 @@
     {% endif %}
   </main>
   <div class="toast" role="status" aria-live="polite" hidden></div>
+  <div class="dup-backdrop" data-dup-modal hidden>
+    <div class="dup-dialog" role="dialog" aria-modal="true" aria-labelledby="dup-titulo" aria-describedby="dup-detalle">
+      <h2 id="dup-titulo">Este equipo ya tiene un reporte abierto</h2>
+      <p id="dup-detalle">Revisa si tu problema es el mismo que ya se está atendiendo.</p>
+      <ul class="dup-lista" data-dup-lista></ul>
+      <label class="dup-confirmar">
+        <input type="checkbox" data-dup-checkbox>
+        Es un problema diferente
+      </label>
+      <div class="dup-acciones">
+        <button type="button" class="btn-secondary" data-dup-abrir>Abrir reporte existente</button>
+        <button type="button" class="btn-primary" data-dup-continuar disabled>Sí, es otro problema</button>
+      </div>
+      <button type="button" class="dup-cerrar" data-dup-cerrar aria-label="Cerrar">Cancelar</button>
+    </div>
+  </div>
   <script>
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7", {

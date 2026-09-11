@@ -134,6 +134,93 @@
   supply?.addEventListener("change", syncSupply);
   recoverSupplyCatalog().then(syncSupply);
 
+  // Freno de duplicados. El servidor decide (409); esto sólo le da forma a la
+  // decisión: abrir lo que ya existe o afirmar que es otro problema.
+  const dupModal = document.querySelector("[data-dup-modal]");
+  const dupLista = dupModal?.querySelector("[data-dup-lista]");
+  const dupCheckbox = dupModal?.querySelector("[data-dup-checkbox]");
+  const dupContinuar = dupModal?.querySelector("[data-dup-continuar]");
+  const dupAbrir = dupModal?.querySelector("[data-dup-abrir]");
+  const dupCerrar = dupModal?.querySelector("[data-dup-cerrar]");
+  let dupDisparador = null;
+  let dupResolver = null;
+
+  function dupFocusables() {
+    return [...dupModal.querySelectorAll("button, input, a[href]")].filter((el) => !el.disabled);
+  }
+
+  function cerrarDup(resultado) {
+    if (!dupModal || dupModal.hidden) return;
+    dupModal.hidden = true;
+    document.removeEventListener("keydown", dupTeclado, true);
+    const resolver = dupResolver;
+    dupResolver = null;
+    dupDisparador?.focus();
+    dupDisparador = null;
+    resolver?.(resultado);
+  }
+
+  function dupTeclado(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cerrarDup(false);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusables = dupFocusables();
+    if (!focusables.length) return;
+    const primero = focusables[0];
+    const ultimo = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === primero) {
+      event.preventDefault();
+      ultimo.focus();
+    } else if (!event.shiftKey && document.activeElement === ultimo) {
+      event.preventDefault();
+      primero.focus();
+    }
+  }
+
+  function pedirConfirmacionDuplicado(reportes, disparador) {
+    if (!dupModal || !dupLista) return Promise.resolve(false);
+    dupLista.replaceChildren();
+    reportes.forEach((reporte) => {
+      const item = document.createElement("li");
+      const enlace = document.createElement("a");
+      enlace.href = `/fallas/app/?reporte=${encodeURIComponent(reporte.id)}`;
+      enlace.textContent = reporte.titulo;
+      const detalle = document.createElement("small");
+      detalle.textContent = `${reporte.estatus_label || reporte.estatus} · Prioridad ${reporte.prioridad_label || reporte.prioridad}`;
+      item.append(enlace, detalle);
+      dupLista.appendChild(item);
+    });
+    if (dupAbrir) {
+      dupAbrir.dataset.href = reportes.length
+        ? `/fallas/app/?reporte=${encodeURIComponent(reportes[0].id)}`
+        : "/fallas/app/";
+    }
+    if (dupCheckbox) dupCheckbox.checked = false;
+    if (dupContinuar) dupContinuar.disabled = true;
+    dupDisparador = disparador || document.activeElement;
+    dupModal.hidden = false;
+    document.addEventListener("keydown", dupTeclado, true);
+    (dupAbrir || dupFocusables()[0])?.focus();
+    return new Promise((resolve) => { dupResolver = resolve; });
+  }
+
+  dupCheckbox?.addEventListener("change", () => {
+    if (dupContinuar) dupContinuar.disabled = !dupCheckbox.checked;
+  });
+  dupContinuar?.addEventListener("click", () => cerrarDup(true));
+  dupCerrar?.addEventListener("click", () => cerrarDup(false));
+  dupAbrir?.addEventListener("click", () => {
+    const destino = dupAbrir.dataset.href || "/fallas/app/";
+    cerrarDup(false);
+    window.location.href = destino;
+  });
+  dupModal?.addEventListener("click", (event) => {
+    if (event.target === dupModal) cerrarDup(false);
+  });
+
   document.querySelectorAll("form[data-async-action]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -146,13 +233,28 @@
       try {
         const body = new FormData(form);
         if (button.name) body.set(button.name, button.value);
-        const response = await fetch(form.action, {
+        let response = await fetch(form.action, {
           method: "POST",
           body,
           headers: { "X-Requested-With": "XMLHttpRequest" },
           credentials: "same-origin",
         });
-        const payload = await response.json().catch(() => ({}));
+        let payload = await response.json().catch(() => ({}));
+        if (response.status === 409 && Array.isArray(payload.existing_reports)) {
+          const continuar = await pedirConfirmacionDuplicado(payload.existing_reports, button);
+          if (!continuar) {
+            showToast("No se envió nada; tu captura sigue aquí.", "warning");
+            return;
+          }
+          body.set("confirmar_problema_distinto", "1");
+          response = await fetch(form.action, {
+            method: "POST",
+            body,
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            credentials: "same-origin",
+          });
+          payload = await response.json().catch(() => ({}));
+        }
         if (!response.ok) throw new Error(payload.error || "No fue posible guardar la captura.");
         showToast(form.id === "falla-form" ? "Reporte enviado a Mantenimiento." : "Merma enviada correctamente.");
         if (form.dataset.resetOnSuccess !== "false") form.reset();
@@ -160,7 +262,8 @@
         if (form.id === "merma-form") await syncSupply();
         document.dispatchEvent(new CustomEvent("operacion:action-complete", { detail: payload }));
       } catch (error) {
-        showToast(error.message, "error");
+        const sinRed = error instanceof TypeError || !navigator.onLine;
+        showToast(sinRed ? "No hay conexión; no se envió ningún reporte." : error.message, "error");
       } finally {
         button.disabled = form.id === "merma-form" && !supply?.value;
         button.textContent = original;
