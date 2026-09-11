@@ -3214,6 +3214,24 @@ class ResponsiveDesignAndContentTests(TestCase):
             css = (root / "static/operacion" / hoja).read_text(encoding="utf-8")
             self.assertIn("box-sizing: border-box", css, hoja)
 
+    def test_todo_sourcemap_referenciado_existe_en_disco(self):
+        """WhiteNoise resuelve `sourceMappingURL` al correr collectstatic.
+
+        Si el .map no está, collectstatic **aborta entero** y el deploy se queda
+        con los estáticos viejos. Pasó en producción con qr-scanner.
+        """
+        import re
+
+        root = Path(__file__).resolve().parents[1]
+        faltantes = []
+        for js in (root / "static").rglob("*.js"):
+            for referencia in re.findall(r"sourceMappingURL=(\S+)", js.read_text(errors="ignore")):
+                if referencia.startswith(("http://", "https://", "data:")):
+                    continue
+                if not (js.parent / referencia).exists():
+                    faltantes.append(f"{js.relative_to(root)} -> {referencia}")
+        self.assertEqual(faltantes, [], "Sourcemaps referenciados que no existen")
+
     def test_el_pasaporte_nunca_se_sirve_desde_cache(self):
         from django.contrib.staticfiles import finders
 
