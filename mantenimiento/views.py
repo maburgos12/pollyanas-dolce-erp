@@ -8,7 +8,7 @@ from django.contrib.staticfiles import finders
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -327,6 +327,7 @@ def _branch_falla_item(reporte):
         "dias_abierto": dias,
         "semaforo": _semaforo(dias),
         "asignado": bool(getattr(reporte, "asignado_a_id", None)),
+        "duplicados_total": getattr(reporte, "duplicados_total", 0),
     }
 
 
@@ -398,6 +399,8 @@ def _unified_items(origen=""):
     if origen in ("", "sucursales"):
         fallas = (
             ReporteFalla.objects.filter(estatus__in=_branch_statuses())
+            .filter(duplicado_de__isnull=True)
+            .annotate(duplicados_total=Count("duplicados"))
             .select_related("sucursal", "categoria", "activo_relacionado", "reportado_por")
             .prefetch_related(
                 Prefetch(
@@ -1886,6 +1889,7 @@ def dashboard(request):
             "summary": _dashboard_summary(items),
             "provider_options": provider_options,
             "puede_crear_proveedor": puede_crear_proveedor,
+            "puede_escribir": puede_crear_proveedor,
             "asset_options": asset_options,
             "asset_categories": _asset_catalog_values("categoria"),
             "asset_locations": _asset_catalog_values("ubicacion"),
@@ -2038,6 +2042,44 @@ def pwa_mantenimiento(request):
     if not (is_admin_or_dg(request.user) or EsMantenimiento().has_permission(request, None)):
         raise PermissionDenied("No tienes permisos para usar Mantenimiento")
     return render(request, "mantenimiento/pwa.html")
+
+
+@login_required
+def marcar_duplicado(request, pk):
+    """Liga una falla repetida a la que ya se está atendiendo."""
+    _require_mantenimiento(request.user)
+    if request.method != "POST":
+        return redirect("mantenimiento:dashboard")
+    if not _can_write_mantenimiento(request.user):
+        raise PermissionDenied("No tienes permisos para ligar reportes repetidos")
+
+    from django.contrib import messages as msg
+
+    from fallas.services_duplicados import DuplicadoInvalido, marcar_duplicado as _vincular
+
+    reporte = get_object_or_404(ReporteFalla, pk=pk)
+    principal_id = (request.POST.get("principal_id") or "").strip()
+    if not principal_id.isdigit():
+        msg.error(request, "Selecciona la falla que ya se está atendiendo.")
+        return redirect("mantenimiento:dashboard")
+
+    principal = ReporteFalla.objects.filter(pk=int(principal_id)).first()
+    if principal is None:
+        msg.error(request, "No se encontró la falla principal seleccionada.")
+        return redirect("mantenimiento:dashboard")
+
+    try:
+        destino = _vincular(reporte, principal, request.user)
+    except DuplicadoInvalido as exc:
+        msg.error(request, str(exc))
+        return redirect("mantenimiento:dashboard")
+
+    msg.success(
+        request,
+        f"Falla #{reporte.pk} ligada como repetida de #{destino.pk}. "
+        "Sale de pendientes y se cerrará junto con ella.",
+    )
+    return redirect("mantenimiento:dashboard")
 
 
 @login_required

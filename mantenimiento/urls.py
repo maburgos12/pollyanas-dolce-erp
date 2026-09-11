@@ -13,6 +13,7 @@ urlpatterns = [
     path("reportes/unidad/nuevo/", views.crear_reporte_unidad, name="crear-reporte-unidad"),
     path("bandeja/<str:tipo>/<int:pk>/actualizar/", views.actualizar_item, name="mant-actualizar"),
     path("bandeja/<str:tipo>/<int:pk>/cancelar/", views.solicitar_cancelacion, name="mant-cancelar"),
+    path("bandeja/falla/<int:pk>/duplicado/", views.marcar_duplicado, name="mant-duplicado"),
     path("cancelaciones/<int:solicitud_id>/resolver/", views.resolver_cancelacion, name="mant-resolver-cancelacion"),
     path("planes/<int:pk>/ejecutar/", views.registrar_ejecucion_plan, name="mant-plan-ejecutar"),
     path("planes/gestionar/", views.gestionar_plan, name="mant-plan-gestionar"),

@@ -129,6 +129,7 @@
                     <span class="mant-badge {{ item.origen }}">{% if item.origen == 'logistica' %}Flota{% else %}Sucursal{% endif %}</span>
                     <span class="mant-badge">{{ item.prioridad }}</span>
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
+                    {% if item.duplicados_total %}<span class="mant-badge is-warning" title="Otros reportes del mismo problema, ligados a este">Reportado {{ item.duplicados_total|add:1 }} veces</span>{% endif %}
                     <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                   </div>
                   <div class="mant-ticket-main {% if not item.foto_url %}no-photo{% endif %}">
@@ -177,6 +178,13 @@
                       data-latest-note="{{ item.ultimo_avance|default:'' }}"
                       data-latest-date="{% if item.ultimo_avance_fecha %}{{ item.ultimo_avance_fecha|date:'d/m/Y H:i' }}{% endif %}"
                     >Trabajar</button>
+                    {% if item.tipo == "falla" and puede_escribir %}
+                    <button class="btn btn-secondary btn-sm" type="button" data-open-duplicado
+                      data-action="{% url 'mantenimiento:mant-duplicado' item.id %}"
+                      data-falla-id="{{ item.id }}"
+                      data-label="{{ item.referencia }} · {{ item.titulo }}"
+                    >Ya se reportó</button>
+                    {% endif %}
                     <button class="btn btn-sm mant-btn-eliminar" type="button" data-open-cancelar
                       data-action="{% url 'mantenimiento:mant-cancelar' item.tipo item.id %}"
                       data-label="{{ item.referencia }} · {{ item.titulo }}"
@@ -390,6 +398,31 @@
       <div class="mant-eliminar-actions">
         <button class="btn btn-secondary btn-sm" type="button" id="mantCancelarCerrar">Cancelar</button>
         <button class="btn btn-sm mant-danger-action" id="mantCancelarSubmit" type="submit">Eliminar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: ligar reporte repetido al que ya se atiende -->
+<div class="mant-eliminar-modal" id="mantDuplicadoModal" role="dialog" aria-modal="true" aria-labelledby="mantDuplicadoTitulo">
+  <div class="mant-eliminar-panel">
+    <h3 id="mantDuplicadoTitulo">Ya se reportó antes</h3>
+    <p id="mantDuplicadoLabel" class="mant-cancel-label"></p>
+    <form id="mantDuplicadoForm" method="post">
+      {% csrf_token %}
+      <label class="mant-field">
+        ¿Cuál es la falla que ya se está atendiendo? <span class="pd-required">*</span>
+        <select name="principal_id" id="mantDuplicadoSelect" class="mant-input" required>
+          <option value="">Selecciona el reporte principal...</option>
+          {% for it in items %}{% if it.tipo == "falla" %}
+          <option value="{{ it.id }}">#{{ it.id }} · {{ it.ubicacion|default:"Sin sucursal" }} · {{ it.titulo|truncatechars:60 }}</option>
+          {% endif %}{% endfor %}
+        </select>
+      </label>
+      <p class="mant-board-help">Este reporte sale de pendientes y queda ligado al principal. No se borra: el principal muestra cuántas veces se reportó lo mismo y al cerrarlo se cierran todos, avisando a quienes lo levantaron.</p>
+      <div class="mant-eliminar-actions">
+        <button class="btn btn-secondary btn-sm" type="button" id="mantDuplicadoCerrar">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="submit">Ligar al principal</button>
       </div>
     </form>
   </div>
@@ -1129,6 +1162,7 @@ function requireElements(scope, elementMap) {
 	      document.getElementById("modalNuevaFalla").classList.remove("is-open");
 	      document.getElementById("modalOrdenServicio").classList.remove("is-open");
 	      document.getElementById("mantCancelarModal").classList.remove("is-open");
+	      document.getElementById("mantDuplicadoModal").classList.remove("is-open");
 	    }
 	  });
 	})();
@@ -1167,6 +1201,31 @@ function requireElements(scope, elementMap) {
         submitBtn.textContent = "Enviar solicitud";
       }
       modal.classList.add("is-open");
+  });
+  cerrar.addEventListener("click", () => modal.classList.remove("is-open"));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("is-open"); });
+})();
+
+// Modal: ligar reporte repetido
+(() => {
+  const modal = document.getElementById("mantDuplicadoModal");
+  const form = document.getElementById("mantDuplicadoForm");
+  const label = document.getElementById("mantDuplicadoLabel");
+  const select = document.getElementById("mantDuplicadoSelect");
+  const cerrar = document.getElementById("mantDuplicadoCerrar");
+  if (!requireElements("duplicado-seguimiento", { modal, form, label, select, cerrar })) return;
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-open-duplicado]");
+    if (!btn) return;
+    form.action = btn.dataset.action;
+    label.textContent = `"${btn.dataset.label}" es el mismo problema que otro reporte ya en seguimiento.`;
+    select.value = "";
+    // Una falla no puede ser duplicado de sí misma.
+    Array.from(select.options).forEach((opt) => {
+      opt.hidden = opt.value === btn.dataset.fallaId;
+    });
+    modal.classList.add("is-open");
   });
   cerrar.addEventListener("click", () => modal.classList.remove("is-open"));
   modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.remove("is-open"); });
