@@ -172,3 +172,46 @@ def notificar_cambio_estatus(self, reporte_pk: int, nuevo_estatus: str, usuario_
         raise self.retry(exc=exc)
 
     return {"enviado": True, "reporte_id": reporte.pk, "usuario_id": usuario_pk}
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def notificar_duplicado_vinculado(self, reporte_pk: int, principal_pk: int):
+    """Avisa a quien reportó un repetido que su falla ya se está atendiendo.
+
+    Sin este aviso la sucursal se queda sin respuesta y vuelve a levantar el
+    mismo reporte, que es el origen del ruido que se quiere quitar.
+    """
+
+    from .models import ReporteFalla
+
+    reportes = ReporteFalla.objects.select_related("reportado_por", "sucursal").in_bulk([reporte_pk, principal_pk])
+    reporte = reportes.get(reporte_pk)
+    principal = reportes.get(principal_pk)
+    if reporte is None or principal is None:
+        return {"enviado": False, "motivo": "reporte_no_encontrado", "reporte_id": reporte_pk}
+
+    reportador = reporte.reportado_por
+    if not reportador.email:
+        return {"enviado": False, "motivo": "sin_email", "reporte_id": reporte.pk}
+
+    asunto = f"[En seguimiento] Tu reporte ya se está atendiendo - {reporte.titulo}"
+    cuerpo = (
+        f"Hola {reportador.first_name or reportador.username},\n\n"
+        f"Tu reporte '{reporte.titulo}' ({reporte.sucursal.nombre}) corresponde al mismo problema que "
+        f"la falla #{principal.pk}, que ya tiene seguimiento en curso.\n\n"
+        "No hace falta levantar otro reporte: te avisaremos cuando quede resuelto.\n\n"
+        f"Seguimiento: https://erp.pollyanasdolce.com/fallas/reportes/{principal.pk}/"
+    )
+
+    try:
+        send_mail(
+            subject=asunto,
+            message=cuerpo,
+            from_email=_from_email(),
+            recipient_list=[reportador.email],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+    return {"enviado": True, "reporte_id": reporte.pk, "principal_id": principal.pk}

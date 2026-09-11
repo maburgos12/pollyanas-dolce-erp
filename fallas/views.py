@@ -298,11 +298,25 @@ def cambiar_estatus(request, pk):
         )
         _guardar_evidencias_seguimiento(bitacora, request.FILES.getlist("evidencias_seguimiento"), request.user)
 
+    duplicados_movidos = []
+    if estatus_cambio and nuevo_estatus in (
+        ReporteFalla.ESTATUS_RESUELTO,
+        ReporteFalla.ESTATUS_CERRADO,
+        ReporteFalla.ESTATUS_CANCELADO,
+    ):
+        # Los repetidos ligados a este reporte siguen su suerte: si no, quedan
+        # abiertos para siempre porque nadie los trabaja por separado.
+        from .services_duplicados import propagar_cierre
+
+        duplicados_movidos = propagar_cierre(reporte, request.user, nuevo_estatus)
+
     if estatus_cambio:
         try:
             from .tasks import notificar_cambio_estatus
 
             notificar_cambio_estatus.delay(reporte.pk, nuevo_estatus, request.user.pk)
+            for duplicado_pk in duplicados_movidos:
+                notificar_cambio_estatus.delay(duplicado_pk, nuevo_estatus, request.user.pk)
         except Exception:
             pass
 

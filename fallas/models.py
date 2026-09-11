@@ -135,6 +135,15 @@ class ReporteFalla(models.Model):
     costo_real = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     proveedor_servicio = models.CharField(max_length=200, blank=True)
     notas_internas = models.TextField(blank=True)
+    duplicado_de = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="duplicados",
+        verbose_name="Duplicado de",
+        help_text="Reporte principal que ya atiende este mismo problema.",
+    )
 
     class Meta:
         ordering = ["-fecha_reporte"]
@@ -144,6 +153,7 @@ class ReporteFalla(models.Model):
             models.Index(fields=["sucursal", "estatus"]),
             models.Index(fields=["estatus", "prioridad"]),
             models.Index(fields=["fecha_reporte"]),
+            models.Index(fields=["duplicado_de"]),
         ]
 
     def __str__(self):
