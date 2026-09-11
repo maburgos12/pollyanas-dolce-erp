@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Etiquetas QR de activos{% endblock %}
+{% block page_title %}Etiquetas QR de activos{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">Elegir equipos</div>
+  <p class="muted">
+    Cada etiqueta lleva un QR permanente. Sigue funcionando aunque el equipo cambie de sucursal,
+    de estado o de dueño, porque el código no guarda esos datos: sólo la dirección de su ficha.
+  </p>
+
+  <form method="get" class="pd-mb-3">
+    <div class="row pd-grid-form-4">
+      <div>
+        <label for="filtro-q">Buscar</label>
+        <input id="filtro-q" type="text" name="q" value="{{ filters.q }}" placeholder="Código, nombre o categoría">
+      </div>
+      <div>
+        <label for="filtro-sucursal">Sucursal</label>
+        <select id="filtro-sucursal" name="sucursal">
+          <option value="">Todas</option>
+          {% for s in sucursales %}
+            <option value="{{ s.id }}" {% if filters.sucursal == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="pd-align-end">
+        <button class="btn btn-secondary" type="submit">Filtrar</button>
+      </div>
+    </div>
+  </form>
+
+  <form method="post" action="{% url 'activos:etiquetas_imprimir' %}" target="_blank" id="etiquetas-form">
+    {% csrf_token %}
+    <div class="quick-actions pd-mb-3">
+      <button class="btn btn-secondary" type="button" data-seleccionar-visibles>Seleccionar visibles</button>
+      <button class="btn btn-secondary" type="button" data-limpiar-seleccion>Limpiar selección</button>
+      <button class="btn btn-primary" type="submit" name="modo" value="carta">Imprimir hoja carta ({{ etiquetas_por_hoja }} por hoja)</button>
+      <button class="btn btn-primary" type="submit" name="modo" value="termica">Imprimir térmica 90 × 50 mm</button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th scope="col">Sel.</th>
+            <th scope="col">Código</th>
+            <th scope="col">Activo</th>
+            <th scope="col">Sucursal</th>
+            <th scope="col">Ubicación</th>
+            <th scope="col">Marca / modelo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for activo in activos %}
+            <tr>
+              <td>
+                <input type="checkbox" name="activo_id" value="{{ activo.id }}"
+                       id="etiqueta-{{ activo.id }}" data-etiqueta-check
+                       aria-label="Imprimir etiqueta de {{ activo.nombre }}">
+              </td>
+              <td>{{ activo.codigo }}</td>
+              <td>{{ activo.nombre }}</td>
+              <td>{% if activo.sucursal %}{{ activo.sucursal.nombre }}{% else %}Sin asignar{% endif %}</td>
+              <td>{{ activo.ubicacion|default:"-" }}</td>
+              <td>
+                {% if activo.marca or activo.modelo %}{{ activo.marca }}{% if activo.marca and activo.modelo %} · {% endif %}{{ activo.modelo }}
+                {% else %}<span class="muted">Sin capturar</span>{% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="text-muted">Sin activos para el filtro actual.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var form = document.querySelector("#etiquetas-form");
+    if (!form) return;
+    function marcar(valor) {
+      form.querySelectorAll("[data-etiqueta-check]").forEach(function (check) { check.checked = valor; });
+    }
+    form.querySelector("[data-seleccionar-visibles]").addEventListener("click", function () { marcar(true); });
+    form.querySelector("[data-limpiar-seleccion]").addEventListener("click", function () { marcar(false); });
+    form.addEventListener("submit", function (event) {
+      if (!form.querySelector("[data-etiqueta-check]:checked")) {
+        event.preventDefault();
+        window.alert("Selecciona al menos un equipo antes de imprimir.");
+      }
+    });
+  })();
+</script>
+{% endblock %}

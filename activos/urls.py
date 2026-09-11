@@ -21,4 +21,6 @@ urlpatterns = [
     path("ordenes/<int:orden_id>/evidencias/", views.subir_evidencia, name="orden_evidencias"),
     path("evidencias/<int:evidencia_id>/eliminar/", views.eliminar_evidencia, name="eliminar_evidencia"),
     path("registro-rapido/", views.registro_rapido, name="registro_rapido"),
+    path("etiquetas/", views.etiquetas_selector, name="etiquetas"),
+    path("etiquetas/imprimir/", views.etiquetas_imprimir, name="etiquetas_imprimir"),
 ]

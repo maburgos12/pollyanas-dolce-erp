@@ -170,10 +170,10 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20260730-branch-fallas-v4")
+        self.assertContains(pagina, "20260911-pasaporte-qr-v2")
         self.assertContains(
             pagina,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260730-higiene-branch-fallas-v7"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2"',
         )
         self.assertContains(pagina, 'updateViaCache: "none"')
         self.assertContains(pagina, "La existencia se consulta directamente en Point")

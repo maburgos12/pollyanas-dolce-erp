@@ -291,6 +291,17 @@ def build_operacion_context(user) -> dict:
                     area="Comercial",
                 )
             )
+        if operational_branch or _can_use_mantenimiento(user):
+            tiles.append(
+                OperacionTile(
+                    key="escanear_activo",
+                    title="Escanear activo",
+                    detail="Identifica un equipo y abre su ficha de mantenimiento.",
+                    href="/app/activos/escanear/",
+                    icon="mantenimiento",
+                    area="Activos",
+                )
+            )
         if _can_use_mantenimiento(user):
             tiles.append(
                 OperacionTile(

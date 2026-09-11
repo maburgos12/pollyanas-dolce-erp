@@ -1,6 +1,8 @@
 import json
 import base64
+from decimal import Decimal
 from types import SimpleNamespace
+from urllib.parse import quote
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -9,8 +11,10 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
 from django.urls import reverse
 
-from activos.models import Activo
-from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
+from django.utils import timezone
+
+from activos.models import Activo, OrdenMantenimiento
+from core.models import AuditLog, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from fallas.models import CategoriaFalla, ReporteFalla
 from fallas.serializers import ReporteFallaCreateSerializer
 
@@ -260,3 +264,280 @@ class OperacionFallasApiTests(TestCase):
         reporte = serializer.save()
         self.assertEqual(reporte.tipo_objetivo, ReporteFalla.OBJETIVO_INSTALACION)
         self.assertEqual(reporte.area_instalacion, "Sucursal")
+
+
+class ActivoPasaporteQrTests(TestCase):
+    """Ficha abierta desde la etiqueta QR: sesión, alcance y costos."""
+
+    def setUp(self):
+        self.payan = Sucursal.objects.create(codigo="PAYAN", nombre="Payán")
+        self.leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Leyva")
+        self.activo_payan = Activo.objects.create(
+            nombre="Refrigerador Payán", sucursal=self.payan, ubicacion="Mostrador"
+        )
+        self.activo_leyva = Activo.objects.create(nombre="Refrigerador Leyva", sucursal=self.leyva)
+        self.encargada = User.objects.create_user(username="encargada.payan")
+        UserProfile.objects.create(user=self.encargada, sucursal=self.payan)
+        self.dg = User.objects.create_superuser(username="dg.pasaporte", password="x")
+
+        OrdenMantenimiento.objects.create(
+            activo_ref=self.activo_payan,
+            descripcion="Cambio de compresor",
+            estatus=OrdenMantenimiento.ESTATUS_CERRADA,
+            fecha_cierre=timezone.localdate(),
+            costo_repuestos=Decimal("7654.32"),
+            numero_factura="FAC-QR-001",
+        )
+
+    def _url(self, activo):
+        return reverse("operacion:activo_pasaporte", args=[activo.qr_token])
+
+    def test_anonimo_va_a_login_conservando_el_activo_pedido(self):
+        destino = self._url(self.activo_payan)
+        response = self.client.get(destino)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"next={quote(destino)}", response["Location"])
+
+    def test_encargada_abre_el_pasaporte_de_su_sucursal(self):
+        self.client.force_login(self.encargada)
+        response = self.client.get(self._url(self.activo_payan))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activo_payan.codigo)
+        self.assertContains(response, "Refrigerador Payán")
+
+    def test_activo_de_otra_sucursal_no_existe_para_la_encargada(self):
+        self.client.force_login(self.encargada)
+        response = self.client.get(self._url(self.activo_leyva))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_token_inventado_no_revela_nada(self):
+        self.client.force_login(self.encargada)
+        response = self.client.get(
+            reverse("operacion:activo_pasaporte", args=["11111111-1111-4111-8111-111111111111"])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_operacion_no_recibe_costos_ni_facturas_en_el_html(self):
+        self.client.force_login(self.encargada)
+        response = self.client.get(self._url(self.activo_payan))
+        cuerpo = response.content.decode()
+
+        self.assertNotIn("7654.32", cuerpo)
+        self.assertNotIn("7,654.32", cuerpo)
+        self.assertNotIn("FAC-QR-001", cuerpo)
+
+    def test_gestion_autorizada_si_ve_costos_del_activo(self):
+        self.client.force_login(self.dg)
+        response = self.client.get(self._url(self.activo_payan))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FAC-QR-001")
+
+    def test_apertura_queda_en_bitacora_sin_datos_personales(self):
+        self.client.force_login(self.encargada)
+        self.client.get(self._url(self.activo_payan))
+
+        registro = AuditLog.objects.filter(action="SCAN", model="activos.Activo").latest("timestamp")
+        self.assertEqual(registro.object_id, str(self.activo_payan.pk))
+        self.assertEqual(registro.payload, {"qr": True})
+
+
+class FallaActivoPreseleccionTests(TestCase):
+    """Llegar desde el QR al formulario ya apuntando al equipo correcto."""
+
+    def setUp(self):
+        self.payan = Sucursal.objects.create(codigo="PAYAN", nombre="Payán")
+        self.leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Leyva")
+        self.activo_payan = Activo.objects.create(nombre="Refrigerador Payán", sucursal=self.payan)
+        self.activo_leyva = Activo.objects.create(nombre="Refrigerador Leyva", sucursal=self.leyva)
+        self.encargada = User.objects.create_user(username="encargada.payan")
+        UserProfile.objects.create(user=self.encargada, sucursal=self.payan)
+        self.client.force_login(self.encargada)
+        self.categoria = CategoriaFalla.objects.create(
+            nombre="Refrigeración", tipo=CategoriaFalla.TIPO_EQUIPO
+        )
+
+    def _abrir(self, activo_id):
+        return self.client.get(f"{reverse('operacion:sucursal_tools')}?tab=fallas&activo={activo_id}")
+
+    def test_preselecciona_el_activo_propio_y_fuerza_objetivo_equipo(self):
+        response = self._abrir(self.activo_payan.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["activo_preseleccionado"], self.activo_payan.pk)
+        self.assertContains(response, f'value="{self.activo_payan.pk}" selected')
+
+    def test_no_preselecciona_un_activo_de_otra_sucursal(self):
+        response = self._abrir(self.activo_leyva.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["activo_preseleccionado"])
+        self.assertNotContains(response, f'value="{self.activo_leyva.pk}"')
+
+    def test_activo_inexistente_no_rompe_la_pantalla(self):
+        response = self._abrir(999999)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["activo_preseleccionado"])
+
+    def test_el_borrador_gana_sobre_la_preseleccion(self):
+        sesion = self.client.session
+        sesion["operacion_draft_fallas"] = {
+            "activo_id": str(self.activo_payan.pk),
+            "titulo": "Lo que ya había escrito",
+        }
+        sesion.save()
+
+        response = self._abrir(self.activo_payan.pk)
+
+        self.assertContains(response, "Lo que ya había escrito")
+
+    def test_api_de_activos_reporta_las_fallas_abiertas_de_cada_equipo(self):
+        abierta = ReporteFalla.objects.create(
+            sucursal=self.payan,
+            activo_relacionado=self.activo_payan,
+            categoria=self.categoria,
+            titulo="No enfría",
+            descripcion="Desde ayer",
+            prioridad=ReporteFalla.PRIORIDAD_ALTA,
+            justificacion_sin_foto="Sin cámara",
+            reportado_por=self.encargada,
+        )
+        ReporteFalla.objects.create(
+            sucursal=self.payan,
+            activo_relacionado=self.activo_payan,
+            categoria=self.categoria,
+            titulo="Ya cerrada",
+            descripcion="Atendida",
+            prioridad=ReporteFalla.PRIORIDAD_BAJA,
+            estatus=ReporteFalla.ESTATUS_CERRADO,
+            justificacion_sin_foto="Sin cámara",
+            reportado_por=self.encargada,
+        )
+
+        response = self.client.get(reverse("operacion:fallas_activos_api"))
+        fila = next(r for r in response.json()["activos"] if r["id"] == self.activo_payan.pk)
+
+        self.assertEqual(len(fila["fallas_abiertas"]), 1)
+        self.assertEqual(fila["fallas_abiertas"][0]["id"], abierta.pk)
+        self.assertEqual(fila["fallas_abiertas"][0]["titulo"], "No enfría")
+        self.assertEqual(fila["fallas_abiertas"][0]["prioridad"], ReporteFalla.PRIORIDAD_ALTA)
+        self.assertEqual(fila["fallas_abiertas"][0]["estatus"], ReporteFalla.ESTATUS_ABIERTO)
+
+
+class FallaDuplicadaConfirmacionTests(TestCase):
+    """El servidor vuelve a preguntar por reportes abiertos antes de crear otro."""
+
+    def setUp(self):
+        self.payan = Sucursal.objects.create(codigo="PAYAN", nombre="Payán")
+        self.activo = Activo.objects.create(nombre="Refrigerador Payán", sucursal=self.payan)
+        self.encargada = User.objects.create_user(username="encargada.payan")
+        UserProfile.objects.create(user=self.encargada, sucursal=self.payan)
+        self.client.force_login(self.encargada)
+        self.categoria = CategoriaFalla.objects.create(
+            nombre="Refrigeración", tipo=CategoriaFalla.TIPO_EQUIPO
+        )
+        self.abierta = ReporteFalla.objects.create(
+            sucursal=self.payan,
+            activo_relacionado=self.activo,
+            categoria=self.categoria,
+            titulo="No enfría",
+            descripcion="Desde ayer",
+            prioridad=ReporteFalla.PRIORIDAD_ALTA,
+            justificacion_sin_foto="Sin cámara",
+            reportado_por=self.encargada,
+        )
+
+    def _payload(self, **extra):
+        datos = {
+            "tipo_objetivo": "EQUIPO",
+            "activo_id": self.activo.pk,
+            "categoria_id": self.categoria.pk,
+            "titulo": "Hace un ruido nuevo",
+            "descripcion": "Empezó hoy en la mañana",
+            "prioridad": "media",
+            "justificacion_sin_foto": "Cámara no disponible",
+        }
+        datos.update(extra)
+        return datos
+
+    def _post(self, datos):
+        return self.client.post(
+            reverse("operacion:fallas_crear_api"),
+            data=json.dumps(datos),
+            content_type="application/json",
+        )
+
+    def test_sin_confirmar_responde_409_y_no_crea_el_reporte(self):
+        response = self._post(self._payload())
+
+        self.assertEqual(response.status_code, 409)
+        cuerpo = response.json()
+        self.assertEqual([r["id"] for r in cuerpo["existing_reports"]], [self.abierta.pk])
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+
+    def test_con_confirmacion_explicita_si_crea_el_segundo_reporte(self):
+        response = self._post(self._payload(confirmar_problema_distinto="1"))
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(ReporteFalla.objects.count(), 2)
+
+    def test_la_confirmacion_del_cliente_no_puede_saltarse_el_alcance(self):
+        otra = Sucursal.objects.create(codigo="OTRA", nombre="Otra")
+        ajeno = Activo.objects.create(nombre="Equipo ajeno", sucursal=otra)
+
+        response = self._post(
+            self._payload(activo_id=ajeno.pk, confirmar_problema_distinto="1")
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+
+    def test_un_reporte_ya_ligado_como_duplicado_no_vuelve_a_frenar(self):
+        principal = ReporteFalla.objects.create(
+            sucursal=self.payan,
+            activo_relacionado=self.activo,
+            categoria=self.categoria,
+            titulo="Principal",
+            descripcion="El que se atiende",
+            prioridad=ReporteFalla.PRIORIDAD_ALTA,
+            justificacion_sin_foto="Sin cámara",
+            reportado_por=self.encargada,
+        )
+        self.abierta.duplicado_de = principal
+        self.abierta.save(update_fields=["duplicado_de"])
+
+        response = self._post(self._payload())
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual([r["id"] for r in response.json()["existing_reports"]], [principal.pk])
+
+    def test_sin_fallas_abiertas_no_pide_confirmacion(self):
+        self.abierta.estatus = ReporteFalla.ESTATUS_CERRADO
+        self.abierta.save(update_fields=["estatus"])
+
+        response = self._post(self._payload())
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_una_instalacion_no_pasa_por_el_freno_de_equipo(self):
+        categoria_instalacion = CategoriaFalla.objects.create(
+            nombre="Plomería", tipo=CategoriaFalla.TIPO_INSTALACION
+        )
+        response = self._post(
+            {
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": categoria_instalacion.pk,
+                "area_instalacion": "Baño",
+                "titulo": "Fuga en el lavabo",
+                "descripcion": "Gotea constante",
+                "prioridad": "media",
+                "justificacion_sin_foto": "Cámara no disponible",
+            }
+        )
+
+        self.assertEqual(response.status_code, 201)

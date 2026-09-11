@@ -1,0 +1,66 @@
+{% load static %}
+<!doctype html>
+<html lang="es" class="operacion-app-html">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pollyana's Operativa">
+  <title>Escanear activo · App Operativa</title>
+  <link rel="icon" href="{% static 'favicon.ico' %}?v=20260525-logo-v1" sizes="any">
+  <link rel="apple-touch-icon" href="{% static 'operacion/apple-touch-icon.png' %}?v=20260707-workflow-icon-v5">
+  <link rel="manifest" href="{% static 'operacion/manifest.webmanifest' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260911-pasaporte-qr-v2">
+  <link rel="stylesheet" href="{% static 'operacion/activo_scanner.css' %}?v=20260911-pasaporte-qr-v2">
+</head>
+<body class="operacion-app-body scanner-body">
+  <main class="scanner"
+        data-buscar-url="{% url 'operacion:activo_buscar' %}"
+        data-worker-url="{% static 'vendor/qr-scanner/qr-scanner-worker.min.js' %}">
+    <header class="scanner-top">
+      <a class="volver" href="{% url 'operacion:app_home' %}">Inicio</a>
+      <h1>Escanear activo</h1>
+    </header>
+
+    <p class="scanner-intro">Apunta la cámara a la etiqueta del equipo. La ficha se abre sola al leerla.</p>
+
+    <div class="scanner-visor" data-visor hidden>
+      <video data-video playsinline muted></video>
+    </div>
+
+    <button type="button" class="btn btn-primario" data-iniciar>Encender cámara</button>
+    <button type="button" class="btn btn-secundario" data-detener hidden>Apagar cámara</button>
+
+    <p class="scanner-estado" role="status" aria-live="polite" data-estado></p>
+
+    <section class="scanner-alterna" aria-labelledby="alternativas">
+      <h2 id="alternativas">Si la cámara no funciona</h2>
+
+      <div class="campo">
+        <label for="foto-qr">Sube una foto de la etiqueta</label>
+        <input type="file" id="foto-qr" accept="image/*" data-foto>
+      </div>
+
+      <form class="campo" data-codigo-form>
+        <label for="codigo-activo">O escribe el código completo</label>
+        <input type="text" id="codigo-activo" name="codigo" inputmode="text" autocapitalize="characters"
+               autocomplete="off" spellcheck="false" placeholder="ACT-2609-041" data-codigo required>
+        <button type="submit" class="btn btn-secundario" data-buscar>Abrir ficha</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="{% static 'vendor/qr-scanner/qr-scanner.umd.min.js' %}?v=1.4.2"></script>
+  <script src="{% static 'operacion/activo_scanner.js' %}?v=20260911-pasaporte-qr-v2" defer></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2", {
+        scope: "/app/",
+        updateViaCache: "none"
+      }).catch(function () {});
+    }
+  </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -54,6 +55,13 @@ class Activo(models.Model):
     ]
 
     codigo = models.CharField(max_length=32, unique=True, blank=True)
+    qr_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        verbose_name="Token QR",
+        help_text="Identificador permanente impreso en la etiqueta QR del activo",
+    )
     nombre = models.CharField(max_length=180)
     categoria = models.CharField(max_length=120, blank=True, default="")
     ubicacion = models.CharField(max_length=160, blank=True, default="")
@@ -73,6 +81,32 @@ class Activo(models.Model):
         blank=True,
         related_name="activos_mantenimiento",
     )
+    marca = models.CharField(max_length=100, blank=True, default="")
+    modelo = models.CharField(max_length=120, blank=True, default="")
+    numero_serie = models.CharField(
+        max_length=160,
+        blank=True,
+        default="",
+        verbose_name="Número de serie",
+        help_text="Sin unicidad: muchos equipos históricos no tienen placa legible",
+    )
+    proveedor_compra = models.ForeignKey(
+        Proveedor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activos_vendidos",
+        verbose_name="Proveedor de compra",
+    )
+    fecha_compra = models.DateField(null=True, blank=True, verbose_name="Fecha de compra")
+    costo_adquisicion = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Costo de adquisición",
+    )
+    garantia_hasta = models.DateField(null=True, blank=True, verbose_name="Garantía hasta")
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default=ESTADO_OPERATIVO)
     criticidad = models.CharField(max_length=10, choices=CRITICIDAD_CHOICES, default=CRITICIDAD_MEDIA)
     fecha_alta = models.DateField(default=timezone.localdate)

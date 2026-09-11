@@ -1,6 +1,6 @@
 import csv
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 
 from django.contrib import messages
@@ -8,7 +8,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.db.models.functions import Lower
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -21,10 +22,12 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.access import can_manage_inventario, can_view_inventario
 from core.audit import log_event
-from core.models import AuditLog
+from core.models import AuditLog, Sucursal
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
+
+from .services_pasaporte import svg_qr_activo
 
 from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
 from .utils.bitacora_import import import_bitacora
@@ -55,6 +58,141 @@ def _parse_date(value):
         return timezone.datetime.fromisoformat(raw).date()
     except Exception:
         return None
+
+
+class FichaTecnicaInvalida(Exception):
+    """La captura no se puede guardar tal cual viene del formulario."""
+
+
+def _ficha_tecnica_desde_post(post, *, parcial: bool) -> dict:
+    """Traduce el formulario a campos de ficha técnica.
+
+    Nada se inventa: lo que viene vacío se guarda vacío o en `null`. En modo
+    parcial (corrección) sólo se tocan las claves que el formulario mandó, para
+    que editar la marca no borre la fecha de compra capturada por otra persona.
+    """
+    campos: dict = {}
+
+    for nombre, largo in (("marca", 100), ("modelo", 120), ("numero_serie", 160)):
+        if parcial and nombre not in post:
+            continue
+        campos[nombre] = (post.get(nombre) or "").strip()[:largo]
+
+    for nombre in ("fecha_compra", "garantia_hasta"):
+        if parcial and nombre not in post:
+            continue
+        crudo = (post.get(nombre) or "").strip()
+        if not crudo:
+            campos[nombre] = None
+            continue
+        fecha = _parse_date(crudo)
+        if fecha is None:
+            raise FichaTecnicaInvalida(
+                f"La fecha «{crudo}» no es válida; usa el formato AAAA-MM-DD."
+            )
+        campos[nombre] = fecha
+
+    if not parcial or "costo_adquisicion" in post:
+        crudo = (post.get("costo_adquisicion") or "").strip()
+        if not crudo:
+            campos["costo_adquisicion"] = None
+        else:
+            try:
+                costo = Decimal(crudo.replace(",", ""))
+            except (InvalidOperation, ValueError):
+                raise FichaTecnicaInvalida(f"El costo «{crudo}» no es un número válido.")
+            if costo < 0:
+                raise FichaTecnicaInvalida("El costo de adquisición no puede ser negativo.")
+            campos["costo_adquisicion"] = costo
+
+    if not parcial or "proveedor_compra_id" in post:
+        crudo = (post.get("proveedor_compra_id") or "").strip()
+        if not crudo or crudo == "0":
+            campos["proveedor_compra"] = None
+        else:
+            proveedor = Proveedor.objects.filter(pk=_safe_int(crudo)).first()
+            if proveedor is None:
+                raise FichaTecnicaInvalida("El proveedor de compra seleccionado no existe.")
+            campos["proveedor_compra"] = proveedor
+
+    return campos
+
+
+def _respuesta_identidad(request, *, activo, error: str = ""):
+    """Respuesta compartida JSON/HTML de la corrección de ficha técnica.
+
+    Una sola construcción del resultado para los dos formatos: el fragmento
+    estable `#activo-<id>` deja al usuario donde estaba y el JSON alimenta el
+    toast sin recargar la tabla.
+    """
+    ancla = f"{reverse('activos:activos')}#activo-{activo.pk}"
+    asincrono = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if error:
+        if asincrono:
+            # Envelope de `static/js/erp_actions.js`: el runtime global lee
+            # `ok` y `toast`; no se inventa un contrato paralelo para Activos.
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": error,
+                    "activo_id": activo.pk,
+                    "toast": {"type": "error", "message": error, "persistent": True},
+                },
+                status=400,
+            )
+        messages.error(request, error)
+        return redirect(ancla)
+
+    advertencia = _advertencia_serie_repetida(activo)
+    if asincrono:
+        mensaje = f"Ficha técnica de {activo.codigo} actualizada."
+        return JsonResponse(
+            {
+                "ok": True,
+                "toast": {
+                    "type": "warning" if advertencia else "success",
+                    "message": f"{mensaje} {advertencia}".strip(),
+                    "persistent": bool(advertencia),
+                },
+                "activo_id": activo.pk,
+                "codigo": activo.codigo,
+                "marca": activo.marca,
+                "modelo": activo.modelo,
+                "numero_serie": activo.numero_serie,
+                "fecha_compra": activo.fecha_compra.isoformat() if activo.fecha_compra else "",
+                "garantia_hasta": activo.garantia_hasta.isoformat() if activo.garantia_hasta else "",
+                "costo_adquisicion": str(activo.costo_adquisicion or ""),
+                "proveedor_compra": activo.proveedor_compra.nombre if activo.proveedor_compra_id else "",
+                "advertencia": advertencia,
+                "mensaje": mensaje,
+            }
+        )
+    messages.success(request, f"Ficha técnica de {activo.codigo} actualizada.")
+    if advertencia:
+        messages.warning(request, advertencia)
+    return redirect(ancla)
+
+
+def _advertencia_serie_repetida(activo) -> str:
+    """Aviso humano, nunca fusión automática.
+
+    Dos equipos pueden compartir serie por una placa ilegible o una captura
+    apresurada; decidir cuál es cuál es trabajo de una persona.
+    """
+    serie = (activo.numero_serie or "").strip()
+    if not serie:
+        return ""
+    otros = list(
+        Activo.objects.filter(numero_serie__iexact=serie)
+        .exclude(pk=activo.pk)
+        .values_list("codigo", flat=True)[:5]
+    )
+    if not otros:
+        return ""
+    return (
+        f"La serie «{serie}» ya está en {', '.join(otros)}. "
+        "Revísalo con el equipo físico: no se fusionó nada."
+    )
 
 
 def _es_dg_o_compras(user) -> bool:
@@ -1571,7 +1709,13 @@ def activos_catalog(request):
             estado = (request.POST.get("estado") or Activo.ESTADO_OPERATIVO).strip().upper()
             criticidad = (request.POST.get("criticidad") or Activo.CRITICIDAD_MEDIA).strip().upper()
             proveedor_id = _safe_int(request.POST.get("proveedor_mantenimiento_id"))
+            try:
+                ficha = _ficha_tecnica_desde_post(request.POST, parcial=False)
+            except FichaTecnicaInvalida as exc:
+                messages.error(request, str(exc))
+                return redirect("activos:activos")
             activo = Activo.objects.create(
+                **ficha,
                 nombre=nombre,
                 creado_por=request.user,
                 categoria=(request.POST.get("categoria") or "").strip(),
@@ -1597,6 +1741,28 @@ def activos_catalog(request):
             )
             messages.success(request, f"Activo {activo.codigo} creado.")
             return redirect("activos:activos")
+
+        if action == "update_identity":
+            activo_obj = get_object_or_404(Activo, pk=_safe_int(request.POST.get("activo_id")))
+            try:
+                ficha = _ficha_tecnica_desde_post(request.POST, parcial=True)
+            except FichaTecnicaInvalida as exc:
+                return _respuesta_identidad(request, error=str(exc), activo=activo_obj)
+            if not ficha:
+                return _respuesta_identidad(
+                    request, error="No se recibió ningún dato que corregir.", activo=activo_obj
+                )
+            for campo, valor in ficha.items():
+                setattr(activo_obj, campo, valor)
+            activo_obj.save(update_fields=[*ficha.keys(), "actualizado_en"])
+            log_event(
+                request.user,
+                "UPDATE",
+                "activos.Activo",
+                activo_obj.id,
+                {"ficha_tecnica": sorted(ficha.keys())},
+            )
+            return _respuesta_identidad(request, activo=activo_obj)
 
         if action == "set_estado":
             activo_id = _safe_int(request.POST.get("activo_id"))
@@ -3578,3 +3744,87 @@ def registro_rapido(request):
         "module_tabs": _module_tabs("activos:ordenes"),
         "can_manage_activos": can_manage_inventario(request.user),
     })
+
+
+ETIQUETA_MODOS = {"carta", "termica"}
+# Carta: dos columnas de 90 mm por cinco filas de 50 mm.
+ETIQUETAS_POR_HOJA = 10
+
+
+def _etiquetas_queryset(user):
+    """Etiquetas sólo para quien gestiona Activos, con alcance global.
+
+    Reimprimir una etiqueta es una tarea administrativa: quien la genera decide
+    qué equipo se rotula, así que el alcance es el catálogo completo y no la
+    sucursal de la sesión.
+    """
+    if not can_manage_inventario(user):
+        raise PermissionDenied("No tienes permisos para generar etiquetas de Activos.")
+    return Activo.objects.select_related("sucursal").order_by("nombre", "id")
+
+
+@login_required
+def etiquetas_selector(request):
+    queryset = _etiquetas_queryset(request.user)
+
+    q = (request.GET.get("q") or "").strip()
+    sucursal_id = _safe_int(request.GET.get("sucursal"))
+    if q:
+        queryset = queryset.filter(
+            Q(nombre__icontains=q) | Q(codigo__icontains=q) | Q(categoria__icontains=q)
+        )
+    if sucursal_id > 0:
+        queryset = queryset.filter(sucursal_id=sucursal_id)
+
+    return render(
+        request,
+        "activos/etiquetas.html",
+        {
+            "activos": list(queryset[:400]),
+            "sucursales": Sucursal.objects.order_by("nombre"),
+            "filters": {"q": q, "sucursal": sucursal_id or ""},
+            "etiquetas_por_hoja": ETIQUETAS_POR_HOJA,
+        },
+    )
+
+
+@login_required
+@require_POST
+def etiquetas_imprimir(request):
+    queryset = _etiquetas_queryset(request.user)
+
+    modo = (request.POST.get("modo") or "").strip().lower()
+    if modo not in ETIQUETA_MODOS:
+        return HttpResponseBadRequest("Formato de etiqueta no reconocido.")
+
+    pedidos = [_safe_int(valor) for valor in request.POST.getlist("activo_id")]
+    activos = list(queryset.filter(pk__in=[pk for pk in pedidos if pk > 0]))
+    if not activos:
+        return HttpResponseBadRequest("Selecciona al menos un activo con etiqueta que imprimir.")
+
+    # Se respeta el orden en que se eligieron para que la hoja salga como la
+    # persona la armó y pueda ir pegando en ese mismo orden.
+    posicion = {pk: indice for indice, pk in enumerate(pedidos)}
+    activos.sort(key=lambda activo: posicion.get(activo.pk, len(pedidos)))
+
+    etiquetas = [
+        {"activo": activo, "qr_svg": svg_qr_activo(request, activo)} for activo in activos
+    ]
+    hojas = (
+        [etiquetas[i : i + ETIQUETAS_POR_HOJA] for i in range(0, len(etiquetas), ETIQUETAS_POR_HOJA)]
+        if modo == "carta"
+        else []
+    )
+
+    log_event(
+        request.user,
+        "EXPORT",
+        "activos.EtiquetaQR",
+        timezone.localtime().strftime("%Y%m%d%H%M%S"),
+        {"modo": modo, "total": len(activos), "codigos": [a.codigo for a in activos]},
+    )
+    return render(
+        request,
+        "activos/etiquetas_imprimir.html",
+        {"modo": modo, "etiquetas": etiquetas, "hojas": hojas},
+    )

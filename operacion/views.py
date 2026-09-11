@@ -14,7 +14,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.staticfiles import finders
 from django.core.paginator import Paginator
 from django.db import IntegrityError, OperationalError, connection, transaction
-from django.db.models.functions import Trim
+from django.db.models.functions import Trim, Upper
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -23,6 +23,12 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from activos.models import Activo
+from activos.services_pasaporte import (
+    FALLA_ESTATUS_ABIERTOS,
+    activos_autorizados,
+    construir_pasaporte,
+)
+from core.audit import log_event
 from core.access import (
     can_manage_module,
     can_view_module,
@@ -169,6 +175,72 @@ def app_home(request):
 
 
 @login_required
+@never_cache
+def activo_pasaporte(request, qr_token):
+    """Ficha del activo abierta desde su etiqueta QR.
+
+    El QR sólo lleva el UUID: quién puede verlo se decide aquí y en
+    `activos_autorizados`. Un token de otra sucursal responde 404 —no 403— para
+    no confirmar que ese equipo existe.
+    """
+    activo = (
+        activos_autorizados(request.user)
+        .select_related("sucursal", "proveedor_compra", "proveedor_mantenimiento")
+        .filter(qr_token=qr_token)
+        .first()
+    )
+    if activo is None:
+        raise Http404("Activo no disponible para esta sesión.")
+
+    log_event(request.user, "SCAN", "activos.Activo", activo.pk, {"qr": True})
+    contexto = construir_pasaporte(activo, request.user)
+    contexto["reportar_url"] = (
+        f"{reverse('operacion:sucursal_tools')}?tab=fallas&activo={activo.pk}#falla-form"
+        if contexto["puede_reportar"]
+        else ""
+    )
+    return render(request, "operacion/activo_pasaporte.html", contexto)
+
+
+@login_required
+@never_cache
+def activo_escanear(request):
+    """Lector de etiquetas QR dentro de la App Operativa."""
+    if not activos_autorizados(request.user).exists():
+        raise PermissionDenied("Tu sesión no tiene activos asignados para escanear.")
+    return render(request, "operacion/activo_escanear.html", {})
+
+
+@login_required
+@never_cache
+@require_GET
+def activo_buscar(request):
+    """Captura manual del código cuando la cámara no es opción.
+
+    Coincidencia exacta contra el mismo queryset autorizado: teclear un
+    fragmento no puede llevar a la ficha de otro equipo.
+    """
+    codigo = (request.GET.get("codigo") or "").strip().upper()
+    if not codigo:
+        return JsonResponse({"error": "Escribe el código completo del activo."}, status=400)
+
+    activo = (
+        activos_autorizados(request.user)
+        .annotate(codigo_normalizado=Upper(Trim("codigo")))
+        .filter(codigo_normalizado=codigo)
+        .only("id", "qr_token")
+        .first()
+    )
+    if activo is None:
+        return JsonResponse(
+            {"error": "Ese código no corresponde a un activo disponible para tu sesión."}, status=404
+        )
+    return JsonResponse(
+        {"url": reverse("operacion:activo_pasaporte", args=[activo.qr_token])}
+    )
+
+
+@login_required
 def sucursal_tools(request):
     sucursal = _sucursal_operativa_usuario(request.user)
     es_direccion = is_admin_or_dg(request.user)
@@ -206,13 +278,26 @@ def sucursal_tools(request):
         else ReporteFalla.objects.none()
     )
     fallas_sucursal = Paginator(fallas_queryset, 10).get_page(request.GET.get("fallas_page"))
+    activos_sucursal = list(
+        Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id")
+    ) if sucursal else []
+    # Llegar por QR sólo preselecciona; un id ajeno o inexistente se ignora en
+    # silencio en vez de mandar un error que la persona no puede resolver.
+    activo_pedido = (request.GET.get("activo") or "").strip()
+    activo_preseleccionado = None
+    if activo_pedido.isdigit():
+        activo_preseleccionado = next(
+            (activo.pk for activo in activos_sucursal if activo.pk == int(activo_pedido)), None
+        )
     return render(
         request,
         "operacion/sucursal_tools.html",
         {
             "sucursal": sucursal,
             "tab_activa": tab_activa,
-            "activos": Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id"),
+            "activos": activos_sucursal,
+            "activo_preseleccionado": activo_preseleccionado,
+            "fallas_abiertas_por_activo": _fallas_abiertas_de(activos_sucursal),
             "categorias_equipo": CategoriaFalla.objects.filter(
                 activo=True, tipo=CategoriaFalla.TIPO_EQUIPO
             ).order_by("orden", "nombre"),
@@ -233,6 +318,36 @@ def sucursal_tools(request):
             "fallas_sucursal": fallas_sucursal,
         },
     )
+
+
+def _fallas_abiertas_de(activos):
+    """Reportes vivos por activo, ya resueltos a su principal.
+
+    Un reporte ligado como duplicado ya no es el que se atiende: mostrarlo
+    mandaría a la persona a un ticket que nadie está mirando.
+    """
+    abiertas = (
+        ReporteFalla.objects.filter(
+            activo_relacionado__in=activos,
+            estatus__in=FALLA_ESTATUS_ABIERTOS,
+            duplicado_de__isnull=True,
+        )
+        .only("id", "titulo", "prioridad", "estatus", "activo_relacionado_id", "fecha_reporte")
+        .order_by("-fecha_reporte", "-id")
+    )
+    por_activo: dict[int, list[dict]] = {}
+    for falla in abiertas:
+        por_activo.setdefault(falla.activo_relacionado_id, []).append(
+            {
+                "id": falla.pk,
+                "titulo": falla.titulo,
+                "prioridad": falla.prioridad,
+                "prioridad_label": falla.get_prioridad_display(),
+                "estatus": falla.estatus,
+                "estatus_label": falla.get_estatus_display(),
+            }
+        )
+    return por_activo
 
 
 def _sucursal_operativa_usuario(user):
@@ -264,14 +379,48 @@ def fallas_activos_api(request):
     sucursal = _sucursal_operativa_usuario(request.user)
     if not sucursal:
         return JsonResponse({"error": "Tu sesión no tiene una sucursal operativa asignada."}, status=403)
-    activos = Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id")
+    activos = list(Activo.objects.filter(sucursal=sucursal, activo=True).order_by("nombre", "id"))
+    abiertas = _fallas_abiertas_de(activos)
     return JsonResponse(
         {
             "activos": [
-                {"id": activo.id, "codigo": activo.codigo, "nombre": activo.nombre, "categoria": activo.categoria}
+                {
+                    "id": activo.id,
+                    "codigo": activo.codigo,
+                    "nombre": activo.nombre,
+                    "categoria": activo.categoria,
+                    "fallas_abiertas": abiertas.get(activo.id, []),
+                }
                 for activo in activos
             ]
         }
+    )
+
+
+def _confirmo_problema_distinto(data) -> bool:
+    return str(data.get("confirmar_problema_distinto") or "").strip().lower() in {"1", "true", "on", "si", "sí"}
+
+
+def _respuesta_duplicado(request, *, activo, existentes):
+    """409: hay algo abierto en este equipo y falta decidir si es otro problema."""
+    mensaje = (
+        f"{activo.nombre} ya tiene {len(existentes)} reporte"
+        f"{'s' if len(existentes) != 1 else ''} abierto"
+        f"{'s' if len(existentes) != 1 else ''}."
+    )
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.content_type == "application/json":
+        return JsonResponse(
+            {"error": mensaje, "existing_reports": existentes, "activo_id": activo.pk}, status=409
+        )
+    request.session["operacion_draft_fallas"] = {
+        key: value for key, value in request.POST.items() if key != "csrfmiddlewaretoken"
+    }
+    messages.warning(
+        request,
+        f"{mensaje} Abre el reporte existente o vuelve a enviar confirmando que es un problema diferente.",
+    )
+    return redirect(
+        f"{reverse('operacion:sucursal_tools')}?tab=fallas&activo={activo.pk}#falla-form"
     )
 
 
@@ -296,6 +445,14 @@ def fallas_crear_api(request):
         activo = Activo.objects.filter(pk=data.get("activo_id"), sucursal=sucursal, activo=True).first()
         if not activo:
             return _respuesta_error(request, error="El equipo no pertenece a tu sucursal.", tab="fallas", anchor="falla-form")
+
+        # El aviso de JavaScript es una cortesía; la decisión se toma aquí, con
+        # la lista recién consultada, porque entre que se pintó la pantalla y
+        # se envió el formulario alguien más pudo reportar lo mismo.
+        if not _confirmo_problema_distinto(data):
+            abiertas = _fallas_abiertas_de([activo]).get(activo.pk, [])
+            if abiertas:
+                return _respuesta_duplicado(request, activo=activo, existentes=abiertas)
 
     try:
         fotos = validate_evidence_files(

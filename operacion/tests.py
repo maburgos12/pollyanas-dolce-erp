@@ -8,6 +8,7 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
@@ -293,7 +294,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260908-conteos-sesion-v13")
+        self.assertContains(response, "20260911-pasaporte-qr-v2")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -316,7 +317,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260908-conteos-sesion-v13"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -359,7 +360,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v39-conteos-sucursal-sesion", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v40-pasaporte-activos-qr", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3189,8 +3190,110 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v39-conteos-sucursal-sesion", sw_content)
+        self.assertIn("v40-pasaporte-activos-qr", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/conteos/")', sw_content)
+        self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)
         self.assertIn('key.startsWith("pollyanas-app-operativa-pwa-")', sw_content)
         self.assertNotIn("v21-", sw_content)
+
+    def test_sin_red_no_se_finge_un_reporte_enviado(self):
+        """Un fallo de red debe decir que no se envió nada, no un error genérico."""
+        root = Path(__file__).resolve().parents[1]
+        js = (root / "static/operacion/sucursal_tools.js").read_text(encoding="utf-8")
+
+        self.assertIn("No hay conexión; no se envió ningún reporte.", js)
+        # Fase 1 sin autoenvío: el reintento lo decide la persona.
+        self.assertNotIn("SyncManager", js)
+        self.assertNotIn("background-sync", js)
+
+    def test_las_hojas_del_pasaporte_declaran_box_sizing(self):
+        """Sin border-box el botón de ancho completo se sale de su tarjeta."""
+        root = Path(__file__).resolve().parents[1]
+        for hoja in ("activo_pasaporte.css", "activo_scanner.css"):
+            css = (root / "static/operacion" / hoja).read_text(encoding="utf-8")
+            self.assertIn("box-sizing: border-box", css, hoja)
+
+    def test_el_pasaporte_nunca_se_sirve_desde_cache(self):
+        from django.contrib.staticfiles import finders
+
+        sw_content = Path(finders.find("operacion/sw.js")).read_text(encoding="utf-8")
+
+        self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)
+
+
+class ActivoEscanearTests(TestCase):
+    """Lector QR: acceso al tile, la pantalla y la captura manual del código."""
+
+    def setUp(self):
+        from activos.models import Activo
+
+        self.sucursal = Sucursal.objects.create(codigo="PAY", nombre="Payán", activa=True)
+        self.otra = Sucursal.objects.create(codigo="LEY", nombre="Leyva", activa=True)
+        self.activo = Activo.objects.create(
+            codigo="ACT-2609-041", nombre="Refrigerador", sucursal=self.sucursal
+        )
+        self.ajeno = Activo.objects.create(
+            codigo="ACT-2609-099", nombre="Refrigerador Leyva", sucursal=self.otra
+        )
+        self.user = get_user_model().objects.create_user(
+            username="encargada.payan", password="test12345"
+        )
+        UserProfile.objects.create(user=self.user, sucursal=self.sucursal)
+        self.client.force_login(self.user)
+
+    def test_el_tile_de_escaneo_aparece_para_la_sucursal(self):
+        response = self.client.get("/app/")
+
+        claves = {tile["key"] for tile in response.context["tiles"]}
+        self.assertIn("escanear_activo", claves)
+
+    def test_usuario_sin_activos_no_entra_al_lector(self):
+        suelto = get_user_model().objects.create_user(username="sin.activos", password="test12345")
+        UserProfile.objects.create(user=suelto, sucursal=None)
+        self.client.force_login(suelto)
+
+        response = self.client.get(reverse("operacion:activo_escanear"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_la_pantalla_carga_el_lector_local_y_no_un_cdn(self):
+        response = self.client.get(reverse("operacion:activo_escanear"))
+        cuerpo = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("vendor/qr-scanner/qr-scanner.umd.min.js", cuerpo)
+        self.assertNotIn("unpkg", cuerpo)
+        self.assertNotIn("cdn.jsdelivr", cuerpo)
+
+    def test_codigo_exacto_devuelve_la_url_del_pasaporte(self):
+        response = self.client.get(reverse("operacion:activo_buscar"), {"codigo": "act-2609-041"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["url"],
+            reverse("operacion:activo_pasaporte", args=[self.activo.qr_token]),
+        )
+
+    def test_coincidencia_parcial_no_abre_ninguna_ficha(self):
+        response = self.client.get(reverse("operacion:activo_buscar"), {"codigo": "ACT-2609"})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_codigo_de_otra_sucursal_no_se_resuelve(self):
+        response = self.client.get(reverse("operacion:activo_buscar"), {"codigo": "ACT-2609-099"})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_codigo_vacio_pide_el_codigo_completo(self):
+        response = self.client.get(reverse("operacion:activo_buscar"), {"codigo": "  "})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_la_busqueda_manual_exige_sesion(self):
+        self.client.logout()
+
+        response = self.client.get(reverse("operacion:activo_buscar"), {"codigo": "ACT-2609-041"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response["Location"])

@@ -1,0 +1,20 @@
+{% comment %}
+Una etiqueta física. Sólo lleva lo que no cambia con el tiempo: identidad y QR.
+Estado, criticidad, garantía y costos se quedan fuera a propósito — cambian, y
+una etiqueta pegada al equipo no se actualiza sola.
+{% endcomment %}
+<div class="label">
+  <div class="label-texto">
+    <p class="label-codigo">{{ etiqueta.activo.codigo }}</p>
+    <p class="label-nombre">{{ etiqueta.activo.nombre }}</p>
+    <p class="label-lugar">
+      {% if etiqueta.activo.sucursal %}{{ etiqueta.activo.sucursal.nombre }}{% endif %}
+      {% if etiqueta.activo.ubicacion %}{% if etiqueta.activo.sucursal %} · {% endif %}{{ etiqueta.activo.ubicacion }}{% endif %}
+    </p>
+    {% if etiqueta.activo.marca or etiqueta.activo.modelo %}
+      <p class="label-equipo">{{ etiqueta.activo.marca }}{% if etiqueta.activo.marca and etiqueta.activo.modelo %} {% endif %}{{ etiqueta.activo.modelo }}</p>
+    {% endif %}
+    <p class="label-instruccion">Escanea para ver o reportar este equipo</p>
+  </div>
+  <div class="qr">{{ etiqueta.qr_svg|safe }}</div>
+</div>
