@@ -42,7 +42,12 @@ main() {
   "${compose[@]}" exec -T web python manage.py collectstatic --noinput
 
   if [[ "$imagen_reconstruida" == "1" ]]; then
-    : # La imagen nueva ya está corriendo; recrear otra vez sólo alarga el corte.
+    # La imagen nueva ya corría antes de collectstatic, así que el manifiesto de
+    # estáticos que tiene en memoria es el viejo: sin este reinicio, cualquier
+    # plantilla que use un estático nuevo revienta con "Missing staticfiles
+    # manifest entry". No se recrea el contenedor otra vez, sólo se reinicia.
+    "${compose[@]}" restart worker beat worker_recetas recetas_watchdog
+    "${compose[@]}" restart web
   elif requires_compose_recreate "$changed_files"; then
     # restart does not apply changed commands or create new services.
     "${compose[@]}" up -d --no-deps --build --force-recreate worker beat worker_recetas recetas_watchdog web
