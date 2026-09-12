@@ -456,7 +456,7 @@ class ImportadorBancarioTests(TestCase):
         with self.assertRaisesMessage(ImportacionBancariaError, "Este XML es un CFDI/factura"):
             generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
 
-    def test_generar_preview_reads_banbajio_statement_cfdi_addenda_concepts(self):
+    def test_generar_preview_rejects_banbajio_cfdi_addenda_as_bank_statement(self):
         archivo = SimpleUploadedFile(
             "2031_041064189_2.xml",
             (
@@ -484,16 +484,8 @@ class ImportadorBancarioTests(TestCase):
             content_type="application/xml",
         )
 
-        preview = generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
-
-        self.assertEqual(len(preview.movimientos), 2)
-        self.assertEqual(preview.movimientos[0].tipo, MovimientoBancario.TIPO_CARGO)
-        self.assertEqual(preview.movimientos[0].fecha.date().isoformat(), "2026-05-01")
-        self.assertEqual(preview.movimientos[0].monto, Decimal("54.94"))
-        self.assertEqual(preview.movimientos[1].tipo, MovimientoBancario.TIPO_CARGO)
-        self.assertEqual(preview.movimientos[1].fecha.date().isoformat(), "2026-05-02")
-        self.assertEqual(preview.movimientos[1].monto, Decimal("19.57"))
-        self.assertEqual(preview.errores, [])
+        with self.assertRaisesMessage(ImportacionBancariaError, "evidencia fiscal"):
+            generar_preview(cuenta=self.cuenta, uploaded_file=archivo)
 
     def test_generar_preview_keeps_iso_dates_in_year_month_day_order(self):
         archivo = SimpleUploadedFile(

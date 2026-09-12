@@ -9,7 +9,7 @@ from conciliacion.models import (
     InstrumentoFinancieroConciliacion,
     ReglaClasificacionMovimiento,
 )
-from syncfy_client.models import MovimientoBancario
+from syncfy_client.models import CuentaBancaria, MovimientoBancario
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,17 @@ def _descripcion_contiene_cuenta_propia(descripcion_normalizada: str) -> bool:
         for identificador in identificadores:
             if identificador and identificador in descripcion_normalizada:
                 return True
+    cuentas_bancarias = (
+        CuentaBancaria.objects.filter(activa=True)
+        .exclude(numero_cuenta__isnull=True)
+        .exclude(numero_cuenta="")
+        .only("numero_cuenta")
+    )
+    for cuenta in cuentas_bancarias:
+        numero = re.sub(r"\D", "", str(cuenta.numero_cuenta or ""))
+        candidatos = {numero, numero.lstrip("0")}
+        if any(candidato and candidato in descripcion_normalizada for candidato in candidatos):
+            return True
     return False
 
 
