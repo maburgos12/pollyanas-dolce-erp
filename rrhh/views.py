@@ -107,7 +107,7 @@ from .services_vacaciones import (
     saldo_vacaciones_empleado,
     vacaciones_jefe_q,
 )
-from .services_vacaciones_saldos import desglose_periodos_vacacionales
+from .services_vacaciones_saldos import desglose_periodos_vacacionales, resumir_periodos_vacacionales
 from .services_vacantes import (
     can_autorizar_vacante,
     can_solicitar_vacantes,
@@ -2982,16 +2982,8 @@ def vacaciones_list(request):
     empleados_historial = []
     for empleado in empleados_revision:
         periodos = desglose_periodos_vacacionales(empleado) if fifo_activo else []
-        if periodos:
-            saldo = {
-                "periodo_anio": periodos[-1]["anio"],
-                "generado": sum((periodo["generado"] for periodo in periodos), Decimal("0")),
-                "consumido": sum((periodo["gozado"] for periodo in periodos), Decimal("0")),
-                "reservado": sum((periodo["reservado"] for periodo in periodos), Decimal("0")),
-                "disponible": sum(
-                    (periodo["disponible_goce"] for periodo in periodos), Decimal("0")
-                ),
-            }
+        if fifo_activo:
+            saldo = resumir_periodos_vacacionales(periodos, al=hoy)
             pendiente_anterior = sum(
                 (
                     periodo["disponible_goce"]
@@ -3002,10 +2994,10 @@ def vacaciones_list(request):
             )
             periodo_referencia = next(
                 (periodo for periodo in periodos if periodo["disponible_goce"] > 0),
-                periodos[-1],
+                periodos[-1] if periodos else None,
             )
-            aniversario = periodo_referencia["aniversario"]
-            fecha_limite = periodo_referencia["fecha_limite"]
+            aniversario = periodo_referencia["aniversario"] if periodo_referencia else None
+            fecha_limite = periodo_referencia["fecha_limite"] if periodo_referencia else None
             disponible = saldo["disponible"]
         else:
             saldo = saldo_vacaciones_empleado(empleado, periodo_anio=hoy.year)

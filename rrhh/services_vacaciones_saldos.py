@@ -107,6 +107,18 @@ def desglose_periodos_vacacionales(empleado) -> list[dict]:
     return filas
 
 
+def resumir_periodos_vacacionales(periodos, *, al=None):
+    from django.utils import timezone
+
+    return {
+        "periodo_anio": periodos[-1]["anio"] if periodos else (al or timezone.localdate()).year,
+        "generado": sum((p["generado"] for p in periodos), Decimal("0")),
+        "consumido": sum((p["gozado"] for p in periodos), Decimal("0")),
+        "reservado": sum((p["reservado"] for p in periodos), Decimal("0")),
+        "disponible": sum((p["disponible_goce"] for p in periodos), Decimal("0")),
+    }
+
+
 def proponer_goce_fifo(empleado, dias: Decimal) -> dict:
     """Calcula una distribución FIFO informativa sin crear aplicaciones."""
     dias = Decimal(dias)

@@ -48,6 +48,7 @@ from .services_vacaciones import (
 )
 from .services_vacaciones_saldos import (
     desglose_periodos_vacacionales,
+    resumir_periodos_vacacionales,
     proponer_goce_fifo,
 )
 
@@ -328,37 +329,18 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
         ):
             raise PermissionDenied("No puedes consultar el saldo vacacional de ese empleado.")
 
-        saldo = saldo_vacaciones_empleado(empleado)
         fifo_activo = goce_vacacional_fifo_activo()
         periodos = desglose_periodos_vacacionales(empleado) if fifo_activo else []
-        disponible = sum(
-            (periodo["disponible_goce"] for periodo in periodos), Decimal("0")
-        )
-        generado = (
-            sum((periodo["generado"] for periodo in periodos), Decimal("0"))
-            if periodos
-            else saldo["generado"]
-        )
-        consumido = (
-            sum((periodo["gozado"] for periodo in periodos), Decimal("0"))
-            if periodos
-            else saldo["consumido"]
-        )
-        reservado = (
-            sum((periodo["reservado"] for periodo in periodos), Decimal("0"))
-            if periodos
-            else saldo["reservado"]
+        saldo = (
+            resumir_periodos_vacacionales(periodos) if fifo_activo
+            else saldo_vacaciones_empleado(empleado)
         )
         payload = {
             "empleado": empleado.id,
             "saldo": saldo,
             "fifo_activo": fifo_activo,
             "periodos": periodos,
-            "periodo_anio": saldo["periodo_anio"],
-            "generado": generado,
-            "consumido": consumido,
-            "reservado": reservado,
-            "disponible": disponible if periodos else saldo["disponible"],
+            **saldo,
         }
 
         fecha_inicio_raw = request.query_params.get("fecha_inicio")

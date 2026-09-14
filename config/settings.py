@@ -359,6 +359,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "rrhh.tasks.alertar_cuotas_quincena",
         "schedule": crontab(day_of_month="14,29", hour=8, minute=0),
     },
+    "rrhh-generar-periodos-vacacionales-diario": {
+        "task": "rrhh.tasks.generar_periodos_vacacionales_diario",
+        "schedule": crontab(hour=0, minute=5),
+        "options": {"timezone": TIME_ZONE},
+    },
     "rrhh-consumir-goce-vacaciones-completado": {
         "task": "rrhh.tasks.consumir_goce_vacaciones_completado",
         "schedule": crontab(hour=0, minute=10),
