@@ -30,6 +30,18 @@ def consumir_goce_vacaciones_completado():
 
 
 @shared_task
+def generar_periodos_vacacionales_diario():
+    from .services_vacaciones_aniversarios import asegurar_periodos_actuales
+
+    resultados = asegurar_periodos_actuales(referencia="tarea-diaria")
+    return {
+        "ok": not any(r["estado"] == "revision" for r in resultados),
+        "creados": sum(r["estado"] == "creado" for r in resultados),
+        "revision": [r for r in resultados if r["estado"] == "revision"],
+    }
+
+
+@shared_task
 def evaluar_asistencia_diaria(dias: int = 1):
     """Barrido diario del motor de asistencia: evalúa también a quien NO checó.
 
@@ -66,6 +78,17 @@ def _hallazgos_auditoria_vacaciones() -> list[str]:
 
     hoy = timezone.localdate()
     hallazgos: list[str] = []
+
+    from .models import Empleado
+    from .services_vacaciones_aniversarios import plan_periodo_actual
+
+    for empleado in Empleado.objects.filter(activo=True).iterator():
+        plan = plan_periodo_actual(empleado)
+        if plan["estado"] in {"propuesta", "revision"}:
+            hallazgos.append(
+                f"Falta periodo de aniversario: {empleado.nombre} ({plan['aniversario']}). "
+                + plan.get("motivo", "Pendiente de generación automática.")
+            )
 
     for periodo in PeriodoVacacional.objects.select_related("empleado"):
         saldo = saldo_periodo_vacacional(periodo)

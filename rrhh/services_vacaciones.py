@@ -25,6 +25,7 @@ from .services_vacaciones_saldos import (
     consumir_reservas_goce,
     liberar_reservas_goce,
     reservar_goce_fifo,
+    proponer_goce_fifo,
     validar_reservas_goce,
 )
 
@@ -219,6 +220,14 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
     if dias <= 0:
         raise ValidationError("El periodo no contiene días laborables.")
     with transaction.atomic():
+        # El respaldo de generación solo es necesario si faltan días: un
+        # aniversario por conciliar no debe bloquear bolsas anteriores válidas.
+        if goce_vacacional_fifo_activo() and not proponer_goce_fifo(empleado, dias)["suficiente"]:
+            from .services_vacaciones_aniversarios import asegurar_periodo_actual
+
+            asegurar_periodo_actual(
+                empleado.pk, al=fecha_inicio, actor=actor, referencia="solicitud",
+            )
         traslape = SolicitudVacaciones.objects.filter(
             empleado=empleado,
             estado__in=[
