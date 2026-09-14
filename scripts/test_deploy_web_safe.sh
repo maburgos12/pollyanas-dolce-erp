@@ -4,6 +4,25 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/deploy_web_safe.sh"
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+docker_calls="$tmp_dir/docker-calls.txt"
+
+docker() {
+  printf '%s\n' "$*" >>"$docker_calls"
+}
+
+build_application_images "/tmp/docker-compose-test.yml"
+cat >"$tmp_dir/expected-docker-calls.txt" <<'EOF'
+compose -f /tmp/docker-compose-test.yml build web
+compose -f /tmp/docker-compose-test.yml build worker
+compose -f /tmp/docker-compose-test.yml build worker_notificaciones
+compose -f /tmp/docker-compose-test.yml build worker_recetas
+compose -f /tmp/docker-compose-test.yml build recetas_watchdog
+compose -f /tmp/docker-compose-test.yml build beat
+EOF
+diff -u "$tmp_dir/expected-docker-calls.txt" "$docker_calls"
+
 requires_process_restart $'logistica/models.py\nlogistica/migrations/0036_example.py'
 requires_process_restart $'api/logistica_views.py'
 requires_process_restart $'requirements.txt'
