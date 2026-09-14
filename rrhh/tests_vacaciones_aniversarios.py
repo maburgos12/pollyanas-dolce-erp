@@ -21,6 +21,9 @@ from rrhh.models import (
 @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
 class AniversarioVacacionesTests(TestCase):
     def setUp(self):
+        # Las migraciones iniciales incluyen políticas reales; cada escenario
+        # controla su catálogo para no depender de una base nueva o reutilizada.
+        PoliticaVacaciones.objects.all().delete()
         self.clock = patch('django.utils.timezone.localdate', return_value=date(2026, 9, 14))
         self.clock.start()
         self.addCleanup(self.clock.stop)
@@ -201,6 +204,7 @@ class AniversarioVacacionesTests(TestCase):
 class AniversarioConcurrenciaTests(TransactionTestCase):
     @patch('django.utils.timezone.localdate', return_value=date(2026, 9, 14))
     def test_dos_generadores_crean_un_solo_periodo_y_auditoria(self, _clock):
+        PoliticaVacaciones.objects.all().delete()
         empleado = Empleado.objects.create(nombre='Concurrente', fecha_ingreso=date(2025, 8, 22))
         PoliticaVacaciones.objects.create(antiguedad_desde=1, antiguedad_hasta=None, dias_laborables=12)
         from rrhh.services_vacaciones_aniversarios import asegurar_periodo_actual
