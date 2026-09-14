@@ -132,7 +132,12 @@
       <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
       {% if can_manage_orquestacion %}
       <div class="home-exec-kpi-actions">
-        <form method="post" action="{% url 'reportes:bi_force_refresh' %}" class="home-exec-refresh-form">
+        <form
+          method="post"
+          action="{% url 'reportes:bi_force_refresh' %}"
+          class="home-exec-refresh-form"
+          {% if sales_refresh_status and sales_refresh_status.button_disabled %}data-cut-refresh-poll data-refresh-after-ms="10000"{% endif %}
+        >
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.get_full_path }}">
           <input type="hidden" name="refresh_scope" value="cutoff">
@@ -152,7 +157,7 @@
           {% if sales_refresh_status and sales_refresh_status.button_disabled %}
             <div class="home-exec-refresh-progress" aria-hidden="true"></div>
             <div class="home-exec-refresh-caption">
-              Actualización en curso. El tablero se refresca solo al terminar.
+              Puede tardar unos minutos. Esta pantalla comprobará el resultado automáticamente.
             </div>
           {% endif %}
         </form>
@@ -591,6 +596,7 @@
 {% block extra_js %}
 {{ forecast_panel.weekly_rows|json_script:"home-forecast-weekly-data" }}
 {{ yoy_panel.rows|json_script:"home-yoy-data" }}
+<script src="{% static 'js/dashboard_cut_refresh.js' %}?v=20260913-cut-refresh-poll-v1" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
   (() => {
