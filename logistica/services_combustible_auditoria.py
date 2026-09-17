@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
-from PIL import Image, ImageFilter, ImageStat, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
 from .models import CargaCombustibleUnidad
 
@@ -102,7 +102,11 @@ def _analizar_imagen(field_file) -> dict:
 
     field_file.open("rb")
     try:
-        with Image.open(field_file) as image:
+        with Image.open(field_file) as original:
+            # Los tickets se fotografían en vertical desde el celular, pero el JPEG
+            # se guarda apaisado con EXIF Orientation=6. Sin normalizar, toda foto
+            # legítima caía en "imagen_horizontal".
+            image = ImageOps.exif_transpose(original)
             width, height = image.size
             gray = image.convert("L")
             stat = ImageStat.Stat(gray)
