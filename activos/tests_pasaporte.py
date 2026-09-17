@@ -213,5 +213,6 @@ class PasaporteContenidoTests(TestCase):
         svg = svg_qr_activo(request, self.activo)
 
         self.assertIn("<svg", svg)
+        self.assertIn('viewBox="0 0 ', svg)
         self.assertNotIn(self.activo.nombre, svg)
         self.assertNotIn(self.activo.codigo, svg)
