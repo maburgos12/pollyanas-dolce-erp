@@ -21,6 +21,7 @@ from .models import (
 )
 from .services import TIEMPO_COMIDA_MINUTOS, calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
 from .services_vacaciones import es_dia_laborable
+from .services_extra_conciliacion import conciliar_extra_diario
 
 
 VENTANA_RETARDOS_DIAS = 15
@@ -417,22 +418,25 @@ def _evaluar_comida(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[
     return creados, actualizados
 
 
-def _evaluar_hora_extra(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
+def _evaluar_hora_extra(asistencia: AsistenciaEmpleado, touched: set[str], *, generar=True) -> tuple[int, int]:
     creados = 0
     actualizados = 0
-    if not asistencia.turno or not asistencia.entrada or not asistencia.salida:
+    if not asistencia.entrada or not asistencia.salida:
         return creados, actualizados
     if calcular_horas_extra(asistencia) <= Decimal("0"):
         return creados, actualizados
-    hora_extra = getattr(asistencia, "hora_extra", None) or generar_horas_extra_automatico(asistencia)
-    if not hora_extra:
-        return creados, actualizados
+    if generar:
+        generar_horas_extra_automatico(asistencia)
+    registros = list(HoraExtra.objects.filter(empleado_id=asistencia.empleado_id, fecha=asistencia.fecha))
+    conciliacion = conciliar_extra_diario(asistencia, registros)
+    hora_extra = next((r for r in registros if r.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}), None)
+    hora_extra = hora_extra or next((r for r in registros if r.estado == HoraExtra.ESTADO_PENDIENTE), None)
 
     tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
     touched.add(tipo)
     estado = (
         IncidenciaAsistencia.ESTADO_CONCILIADO
-        if hora_extra.estado == HoraExtra.ESTADO_AUTORIZADO
+        if conciliacion['pendiente_minutos'] == 0
         else IncidenciaAsistencia.ESTADO_PENDIENTE
     )
     _, creada, actualizada = _upsert_incidencia(
@@ -443,9 +447,9 @@ def _evaluar_hora_extra(asistencia: AsistenciaEmpleado, touched: set[str]) -> tu
         severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA if estado == IncidenciaAsistencia.ESTADO_PENDIENTE else IncidenciaAsistencia.SEVERIDAD_INFO,
         asistencia=asistencia,
         hora_extra=hora_extra,
-        minutos=int(Decimal(str(hora_extra.horas or "0")) * Decimal("60")),
-        detalle="Hora extra autorizada por jefe directo." if estado == IncidenciaAsistencia.ESTADO_CONCILIADO else "Hora extra detectada por checador pendiente de autorizacion.",
-        metadata={"horas": str(hora_extra.horas), "estado_hora_extra": hora_extra.estado},
+        minutos=conciliacion['pendiente_minutos'] if estado == IncidenciaAsistencia.ESTADO_PENDIENTE else conciliacion['detectado_minutos'],
+        detalle=f"{conciliacion['estado']}. Detectado: {conciliacion['detectado']}; autorizado: {conciliacion['autorizado']}; pendiente: {conciliacion['pendiente']}.",
+        metadata={key: conciliacion[key] for key in ('detectado_minutos', 'autorizado_minutos', 'pendiente_minutos', 'rechazado_minutos', 'base')},
     )
     creados += int(creada)
     actualizados += int(actualizada)

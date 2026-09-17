@@ -28,10 +28,12 @@ from .models import (
     EmpleadoBaja,
     IncidenciaAsistencia,
     IncidenciaAsistenciaBitacora,
+    HoraExtra,
     PermisoSalida,
     SolicitudVacaciones,
 )
 from .services import can_edit_incidencia
+from .services_extra_conciliacion import conciliar_extra_diario, formato_minutos
 from .views import _module_tabs
 
 
@@ -45,6 +47,9 @@ REPORTE_ASISTENCIA_HEADERS = [
     "severidad",
     "minutos",
     "detalle",
+    "entrada", "salida", "minutos_comida", "extra_detectado_minutos",
+    "extra_autorizado_minutos", "extra_pendiente_minutos", "extra_rechazado_minutos",
+    "conciliacion_extra",
 ]
 
 
@@ -63,12 +68,14 @@ def _empleados_reporte_asistencia(fecha_inicio: date, fecha_fin: date):
         .order_by("-fecha_baja", "-id")
         .values("fecha_baja")[:1]
     )
+    extras_en_rango = HoraExtra.objects.filter(empleado_id=OuterRef('pk'), fecha__range=(fecha_inicio, fecha_fin))
     return (
         Empleado.objects.alias(
+            tiene_extra=Exists(extras_en_rango),
             tiene_asistencia=Exists(asistencias_en_rango),
             tiene_incidencia=Exists(incidencias_en_rango),
         )
-        .filter(Q(activo=True) | Q(tiene_asistencia=True) | Q(tiene_incidencia=True))
+        .filter(Q(activo=True) | Q(tiene_asistencia=True) | Q(tiene_incidencia=True) | Q(tiene_extra=True))
         .annotate(fecha_baja_reporte=Subquery(ultima_baja))
         .order_by("nombre", "codigo")
     )
@@ -118,37 +125,25 @@ def _build_fila_pre_ingreso(empleado: Empleado, fecha: date) -> dict:
 def _build_export_rows(reportes: list[dict]) -> list[list]:
     rows = []
     for reporte in reportes:
-        datos = reporte["datos"]
-        for fila in reporte["filas"]:
-            if fila.get("estado_laboral_label"):
-                rows.append(
-                    [
-                        datos["codigo"],
-                        datos["nombre"],
-                        datos["sucursal"],
-                        fila["fecha"].isoformat(),
-                        fila["estado_laboral_label"],
-                        "No aplica",
-                        "",
-                        0,
-                        fila.get("detalle_laboral", ""),
-                    ]
-                )
-                continue
-            for incidencia in fila["incidencias"]:
-                rows.append(
-                    [
-                        datos["codigo"],
-                        datos["nombre"],
-                        datos["sucursal"],
-                        fila["fecha"].isoformat(),
-                        incidencia["tipo"],
-                        incidencia["estado"],
-                        incidencia["severidad"],
-                        incidencia["minutos"],
-                        incidencia["detalle"],
-                    ]
-                )
+        datos = reporte['datos']
+        for fila in reporte['filas']:
+            asistencia = fila['asistencia']
+            extra = fila.get('extra', {})
+            suffix = [
+                timezone.localtime(asistencia.entrada).strftime('%H:%M') if asistencia and asistencia.entrada else '',
+                timezone.localtime(asistencia.salida).strftime('%H:%M') if asistencia and asistencia.salida else '',
+                asistencia.minutos_comida if asistencia else '',
+                extra.get('detectado_minutos'), extra.get('autorizado_minutos'),
+                extra.get('pendiente_minutos'), extra.get('rechazado_minutos'), extra.get('estado', 'No aplica'),
+            ]
+            incidencias = fila['incidencias'] or [{
+                'tipo': fila.get('estado_laboral_label', ''), 'estado': 'No aplica' if fila.get('estado_laboral_label') else '',
+                'severidad': '', 'minutos': 0, 'detalle': fila.get('detalle_laboral', ''),
+            }]
+            for index, incidencia in enumerate(incidencias):
+                rows.append([datos['codigo'], datos['nombre'], datos['sucursal'], fila['fecha'].isoformat(),
+                    incidencia['tipo'], incidencia['estado'], incidencia['severidad'], incidencia['minutos'], incidencia['detalle'],
+                    *(suffix if index == 0 else [''] * len(suffix))])
     return rows
 
 
@@ -221,6 +216,9 @@ def _build_reporte_asistencia(
         .order_by("empleado__nombre", "fecha")
     )
     asistencias_por_dia = {(asistencia.empleado_id, asistencia.fecha): asistencia for asistencia in asistencias}
+    extras_por_dia = defaultdict(list)
+    for extra in HoraExtra.objects.filter(empleado_id__in=empleado_ids, fecha__range=(fecha_inicio, fecha_fin)):
+        extras_por_dia[(extra.empleado_id, extra.fecha)].append(extra)
 
     incidencias = (
         IncidenciaAsistencia.objects.filter(empleado_id__in=empleado_ids, fecha__range=(fecha_inicio, fecha_fin))
@@ -319,6 +317,7 @@ def _build_reporte_asistencia(
         jefe_usuario_id = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp_id", None)
         puede_editar = bool(user and (puede_gestionar_rrhh or jefe_usuario_id == user.id))
         resumen = resumenes[empleado.id]
+        totales_extra = {'detectado_minutos': 0, 'autorizado_minutos': 0, 'pendiente_minutos': 0, 'rechazado_minutos': 0, 'dias_no_calculables': 0}
         filas = []
         for fecha in fechas:
             if _es_fecha_pre_ingreso(empleado, fecha):
@@ -328,14 +327,21 @@ def _build_reporte_asistencia(
             incidencia_dia = incidencias_por_dia.get((empleado.id, fecha), [])
             total_incidencias += len(incidencia_dia)
             asistencia = asistencias_por_dia.get((empleado.id, fecha))
+            registros_extra = extras_por_dia.get((empleado.id, fecha), [])
             # Solo días con evento: registro de checador o incidencia.
-            if not incidencia_dia and not asistencia:
+            if not incidencia_dia and not asistencia and not registros_extra:
                 continue
+            extra = conciliar_extra_diario(asistencia, registros_extra)
+            for key in ('detectado_minutos', 'autorizado_minutos', 'pendiente_minutos', 'rechazado_minutos'):
+                totales_extra[key] += extra[key] or 0
+            if extra['detectado_minutos'] is None:
+                totales_extra['dias_no_calculables'] += 1
             filas.append(
                 {
                     "fecha": fecha,
                     "asistencia": asistencia,
                     "incidencias": incidencia_dia,
+                    "extra": extra,
                 }
             )
         # Omitir empleados sin actividad, salvo cuando se pidió uno específico.
@@ -352,6 +358,7 @@ def _build_reporte_asistencia(
                     "departamento": empleado.get_departamento_display() if empleado.departamento else "",
                 },
                 "resumen": resumen,
+                "extra_resumen": {**totales_extra, **{key.removesuffix('_minutos'): formato_minutos(totales_extra[key]) for key in ('detectado_minutos', 'autorizado_minutos', 'pendiente_minutos', 'rechazado_minutos')}},
                 "filas": filas,
                 "puede_editar": puede_editar,
             }
