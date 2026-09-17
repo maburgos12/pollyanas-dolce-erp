@@ -1224,6 +1224,33 @@ class CargaCombustibleUnidad(models.Model):
     def __str__(self) -> str:
         return f"{self.unidad.codigo} · {self.litros} L · ${self.importe_total}"
 
+    AUDITORIA_TEXTOS = {
+        "ticket_verificado": "El ticket coincide con lo capturado",
+        "litros_no_coinciden": "Los litros no coinciden con el ticket",
+        "importe_no_coincide": "El importe no coincide con el ticket",
+        "foto_no_es_ticket": "La foto no es un ticket de combustible",
+        "ticket_ilegible": "El ticket no se pudo leer",
+        "ticket_sin_litros": "El ticket no muestra los litros",
+        "ticket_sin_importe": "El ticket no muestra el importe",
+        "lectura_no_disponible": "No se pudo leer el ticket (servicio no disponible)",
+        "ticket_duplicado": "Este ticket ya se había subido antes",
+        "precio_por_litro_fuera_de_rango": "Precio por litro fuera de rango",
+        "litros_muy_altos": "Litros por encima de lo esperado",
+        "imagen_muy_oscura": "Foto demasiado oscura",
+        "imagen_no_legible": "La imagen no se pudo abrir",
+    }
+
+    @property
+    def auditoria_resumen(self) -> list[str]:
+        """Motivos de la auditoría en español, para mostrar al usuario."""
+        return [self.AUDITORIA_TEXTOS.get(motivo, motivo) for motivo in (self.auditoria_motivos or [])]
+
+    @property
+    def ticket_leido(self) -> dict:
+        """Lo que el lector extrajo del ticket, vacío si no hubo lectura."""
+        detalle = (self.auditoria_detalle or {}).get("ticket_leido") or {}
+        return detalle if detalle.get("status") == "ok" else {}
+
 
 class InspeccionVehiculo(models.Model):
     repartidor = models.ForeignKey(Repartidor, on_delete=models.PROTECT)

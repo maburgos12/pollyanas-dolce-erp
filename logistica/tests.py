@@ -1,13 +1,17 @@
+import base64
 import json
 import importlib
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time
 from decimal import Decimal
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import patch
+
+from PIL import Image
 
 from django.conf import settings
 from django.apps import apps as django_apps
@@ -45,6 +49,7 @@ from logistica.models import (
     Unidad,
 )
 from logistica.services_combustible_auditoria import auditar_carga_combustible
+from logistica.services_ticket_ocr import TicketOCRNoDisponible
 from logistica.services_carga_ruta import (
     autorizar_diferencia_checklist_carga,
     cerrar_ruta_con_diferencia_autorizada,
@@ -2707,6 +2712,22 @@ VALID_GIF = (
 )
 
 
+def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacion="Pemex QA") -> dict:
+    """Respuesta simulada del lector de tickets."""
+    return {
+        "es_ticket": es_ticket,
+        "legible": legible,
+        "litros": litros,
+        "importe_total": importe,
+        "precio_por_litro": None,
+        "estacion": estacion,
+        "fecha": "2026-09-17",
+        "observaciones": "",
+        "modelo": "gpt-4o",
+        "tokens": 800,
+    }
+
+
 def _ticket_jpeg_rotado() -> bytes:
     """Foto vertical de ticket como la guarda un celular: buffer apaisado + EXIF 6."""
     from io import BytesIO
@@ -2753,19 +2774,23 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
             foto_ticket=SimpleUploadedFile("ticket2.gif", VALID_GIF, content_type="image/gif"),
         )
 
-        auditar_carga_combustible(primera.id)
-        resultado = auditar_carga_combustible(segunda.id)
+        with mock.patch(
+            "logistica.services_combustible_auditoria.leer_ticket",
+            return_value=_lectura(litros=Decimal("44.00"), importe=Decimal("1200.00")),
+        ):
+            auditar_carga_combustible(primera.id)
+            resultado = auditar_carga_combustible(segunda.id)
         segunda.refresh_from_db()
 
         self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
         self.assertEqual(segunda.auditoria_estado, CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
         self.assertIn("ticket_duplicado", segunda.auditoria_motivos)
-        self.assertEqual(segunda.auditoria_detalle["modo"], "reglas_locales")
+        self.assertEqual(segunda.auditoria_detalle["modo"], "ocr_vision")
 
-    def test_auditoria_respeta_orientacion_exif_del_ticket(self):
-        user = User.objects.create_user(username="auditor.exif", password="pass123")
-        sucursal = Sucursal.objects.create(codigo="QA-EXIF", nombre="QA EXIF", activa=True)
-        unidad = Unidad.objects.create(codigo="QA-EXIF-1", descripcion="Unidad EXIF", sucursal=sucursal)
+    def _carga_de_prueba(self, sufijo, litros="44.61", importe="1200.00"):
+        user = User.objects.create_user(username=f"auditor.{sufijo}", password="pass123")
+        sucursal = Sucursal.objects.create(codigo=f"QA-{sufijo}", nombre=f"QA {sufijo}", activa=True)
+        unidad = Unidad.objects.create(codigo=f"QA-{sufijo}-1", descripcion="Unidad QA", sucursal=sucursal)
         repartidor = Repartidor.objects.create(user=user, sucursal=sucursal, unidad_asignada=unidad)
         bitacora = BitacoraSalidaLlegada.objects.create(
             repartidor=repartidor,
@@ -2774,24 +2799,96 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
             nivel_gas_salida="1/2",
             foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
         )
-        carga = CargaCombustibleUnidad.objects.create(
+        return CargaCombustibleUnidad.objects.create(
             bitacora=bitacora,
             unidad=unidad,
             repartidor=repartidor,
-            litros=Decimal("22.00"),
-            importe_total=Decimal("600.00"),
+            litros=Decimal(litros),
+            importe_total=Decimal(importe),
             foto_ticket=SimpleUploadedFile(
-                "ticket_vertical.jpg", _ticket_jpeg_rotado(), content_type="image/jpeg"
+                f"ticket_{sufijo}.jpg", _ticket_jpeg_rotado(), content_type="image/jpeg"
             ),
         )
 
-        resultado = auditar_carga_combustible(carga.id)
+    def test_ticket_que_coincide_queda_ok_sin_castigar_forma_ni_importe_redondo(self):
+        carga = self._carga_de_prueba("coincide")
+        lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), estacion="Pemex Guasave")
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
         carga.refresh_from_db()
 
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["motivos"], ["ticket_verificado"])
+        # Los vales vienen en montos cerrados: $1,200 ya no es motivo de revisión.
+        self.assertNotIn("importe_redondo_alto", resultado["motivos"])
+        # La forma de la foto dejó de puntuar.
         self.assertNotIn("imagen_horizontal", resultado["motivos"])
-        self.assertEqual(carga.auditoria_detalle["imagen"]["width"], 1224)
-        self.assertEqual(carga.auditoria_detalle["imagen"]["height"], 1632)
-        self.assertEqual(carga.auditoria_estado, CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(carga.auditoria_detalle["modo"], "ocr_vision")
+        self.assertEqual(carga.ticket_leido["estacion"], "Pemex Guasave")
+
+    def test_litros_que_no_coinciden_con_el_ticket_se_marcan(self):
+        carga = self._carga_de_prueba("difiere")
+        lectura = _lectura(litros=Decimal("38.20"), importe=Decimal("1200.00"))
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
+        self.assertIn("litros_no_coinciden", resultado["motivos"])
+
+    def test_diferencia_de_centavos_se_tolera(self):
+        carga = self._carga_de_prueba("centavos")
+        lectura = _lectura(litros=Decimal("44.60"), importe=Decimal("1199.98"))
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+
+    def test_foto_que_no_es_ticket_es_alto_riesgo(self):
+        carga = self._carga_de_prueba("noticket")
+        lectura = _lectura(es_ticket=False, litros=None, importe=None)
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
+        self.assertIn("foto_no_es_ticket", resultado["motivos"])
+
+    def test_si_el_lector_falla_no_se_castiga_la_carga(self):
+        carga = self._carga_de_prueba("sinservicio")
+
+        with mock.patch(
+            "logistica.services_combustible_auditoria.leer_ticket",
+            side_effect=TicketOCRNoDisponible("sin api key"),
+        ):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertIn("lectura_no_disponible", resultado["motivos"])
+        self.assertEqual(resultado["score"], 0)
+
+    def test_ticket_ilegible_no_suma_riesgo(self):
+        carga = self._carga_de_prueba("ilegible")
+        lectura = _lectura(legible=False, litros=None, importe=None)
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertIn("ticket_ilegible", resultado["motivos"])
+        self.assertEqual(resultado["score"], 0)
+
+    def test_lector_normaliza_orientacion_y_reduce_la_imagen(self):
+        from logistica.services_ticket_ocr import _imagen_para_modelo
+
+        carga = self._carga_de_prueba("resize")
+        codificada = _imagen_para_modelo(carga.foto_ticket)
+        with Image.open(BytesIO(base64.b64decode(codificada))) as imagen:
+            ancho, alto = imagen.size
+
+        self.assertLess(ancho, alto)  # EXIF aplicado: vuelve a ser vertical
+        self.assertLessEqual(max(ancho, alto), 1280)
 
 
 class LogisticaGroupAliasCompatibilityTests(TestCase):

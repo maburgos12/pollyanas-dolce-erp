@@ -3,11 +3,16 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
-from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
+from PIL import Image, ImageOps, ImageStat, UnidentifiedImageError
 
 from .models import CargaCombustibleUnidad
+from .services_ticket_ocr import TicketOCRNoDisponible, leer_ticket
 
 logger = logging.getLogger(__name__)
+
+# Diferencia tolerada entre lo capturado y lo que dice el ticket.
+TOLERANCIA_LITROS = Decimal("0.50")
+TOLERANCIA_IMPORTE = Decimal("5.00")
 
 
 def auditar_carga_combustible(carga_id: int) -> dict:
@@ -33,13 +38,14 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     if carga.litros > Decimal("80"):
         score += 35
         motivos.append("litros_muy_altos")
-    if carga.importe_total >= Decimal("1000") and carga.importe_total % Decimal("100") == 0:
-        score += 10
-        motivos.append("importe_redondo_alto")
 
     imagen = _analizar_imagen(carga.foto_ticket)
     score += imagen["score"]
     motivos.extend(imagen["motivos"])
+
+    lectura = _cotejar_ticket(carga)
+    score += lectura["score"]
+    motivos.extend(lectura["motivos"])
 
     estado = _estado(score)
     carga.ticket_sha256 = ticket_sha or ""
@@ -47,9 +53,10 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     carga.auditoria_estado = estado
     carga.auditoria_motivos = motivos
     carga.auditoria_detalle = {
-        "modo": "reglas_locales",
+        "modo": lectura["modo"],
         "precio_litro": str(precio_litro) if precio_litro is not None else None,
         "imagen": imagen["detalle"],
+        "ticket_leido": lectura["detalle"],
     }
     carga.auditoria_analizada_en = timezone.now()
     carga.save(
@@ -62,7 +69,77 @@ def auditar_carga_combustible(carga_id: int) -> dict:
             "auditoria_analizada_en",
         ]
     )
-    return {"estado": estado, "score": min(score, 100), "motivos": motivos}
+    return {"estado": estado, "score": min(score, 100), "motivos": motivos, "ticket": lectura["detalle"]}
+
+
+def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
+    """Lee el ticket y lo compara contra lo que capturó el repartidor.
+
+    Si la lectura no está disponible, la carga NO se castiga: se marca para
+    revisión humana sin sumar puntos de riesgo.
+    """
+    try:
+        leido = leer_ticket(carga.foto_ticket)
+    except TicketOCRNoDisponible as exc:
+        logger.warning("No se pudo leer ticket de carga %s: %s", carga.pk, exc)
+        return {
+            "score": 0,
+            "motivos": ["lectura_no_disponible"],
+            "modo": "reglas_locales",
+            "detalle": {"status": "no_disponible", "error": str(exc)},
+        }
+
+    motivos: list[str] = []
+    score = 0
+    detalle = dict(leido, status="ok")
+    detalle["litros"] = str(leido["litros"]) if leido["litros"] is not None else None
+    detalle["importe_total"] = str(leido["importe_total"]) if leido["importe_total"] is not None else None
+    detalle["precio_por_litro"] = (
+        str(leido["precio_por_litro"]) if leido["precio_por_litro"] is not None else None
+    )
+
+    if not leido["es_ticket"]:
+        return {
+            "score": 80,
+            "motivos": ["foto_no_es_ticket"],
+            "modo": "ocr_vision",
+            "detalle": detalle,
+        }
+
+    if not leido["legible"]:
+        return {
+            "score": 0,
+            "motivos": ["ticket_ilegible"],
+            "modo": "ocr_vision",
+            "detalle": detalle,
+        }
+
+    diferencia_litros = _diferencia(leido["litros"], carga.litros)
+    if diferencia_litros is None:
+        motivos.append("ticket_sin_litros")
+    elif diferencia_litros > TOLERANCIA_LITROS:
+        score += 45
+        motivos.append("litros_no_coinciden")
+    detalle["diferencia_litros"] = str(diferencia_litros) if diferencia_litros is not None else None
+
+    diferencia_importe = _diferencia(leido["importe_total"], carga.importe_total)
+    if diferencia_importe is None:
+        motivos.append("ticket_sin_importe")
+    elif diferencia_importe > TOLERANCIA_IMPORTE:
+        score += 45
+        motivos.append("importe_no_coincide")
+    detalle["diferencia_importe"] = str(diferencia_importe) if diferencia_importe is not None else None
+
+    if not motivos:
+        motivos.append("ticket_verificado")
+
+    return {"score": score, "motivos": motivos, "modo": "ocr_vision", "detalle": detalle}
+
+
+def _diferencia(leido: Decimal | None, capturado: Decimal | None) -> Decimal | None:
+    if leido is None or capturado is None:
+        return None
+    return abs(Decimal(leido) - Decimal(capturado))
 
 
 def _estado(score: int) -> str:
@@ -92,63 +169,41 @@ def _precio_litro(carga: CargaCombustibleUnidad) -> Decimal | None:
 
 
 def _analizar_imagen(field_file) -> dict:
+    """Solo verifica que la foto se pueda abrir y no esté a oscuras.
+
+    La forma de la foto (vertical, cuadrada, proporción) NO dice nada sobre si
+    es un ticket: de eso se encarga la lectura del ticket.
+    """
     motivos: list[str] = []
     score = 0
     detalle = {"status": "ok"}
 
-    if getattr(field_file, "size", 0) and field_file.size < 15_000:
-        score += 20
-        motivos.append("archivo_muy_chico")
-
     field_file.open("rb")
     try:
         with Image.open(field_file) as original:
-            # Los tickets se fotografían en vertical desde el celular, pero el JPEG
-            # se guarda apaisado con EXIF Orientation=6. Sin normalizar, toda foto
-            # legítima caía en "imagen_horizontal".
-            image = ImageOps.exif_transpose(original)
-            width, height = image.size
-            gray = image.convert("L")
-            stat = ImageStat.Stat(gray)
+            imagen = ImageOps.exif_transpose(original)
+            width, height = imagen.size
+            gris = imagen.convert("L")
+            stat = ImageStat.Stat(gris)
             brightness = stat.mean[0]
             contrast = stat.stddev[0]
-            edge_detail = ImageStat.Stat(gray.filter(ImageFilter.FIND_EDGES)).mean[0]
     except (UnidentifiedImageError, OSError) as exc:
         logger.warning("No se pudo leer imagen de ticket combustible: %s", exc)
         return {"score": 70, "motivos": ["imagen_no_legible"], "detalle": {"status": "error"}}
     finally:
         field_file.close()
 
-    shortest = min(width, height)
-    longest = max(width, height)
-    ratio = longest / shortest if shortest else 0
     detalle.update(
         {
             "width": width,
             "height": height,
             "brightness": round(brightness, 2),
             "contrast": round(contrast, 2),
-            "edge_detail": round(edge_detail, 2),
         }
     )
 
-    if shortest < 480:
-        score += 25
-        motivos.append("imagen_muy_chica")
-    if width > height and (width / height) > 1.25:
-        score += 25
-        motivos.append("imagen_horizontal")
-    if ratio < 1.2:
-        score += 15
-        motivos.append("imagen_casi_cuadrada")
     if brightness < 35:
         score += 25
         motivos.append("imagen_muy_oscura")
-    if contrast < 18:
-        score += 20
-        motivos.append("imagen_bajo_contraste")
-    if edge_detail < 4:
-        score += 20
-        motivos.append("imagen_sin_detalle")
 
     return {"score": score, "motivos": motivos, "detalle": detalle}
