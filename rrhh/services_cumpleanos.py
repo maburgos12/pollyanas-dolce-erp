@@ -12,7 +12,7 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
-from core.access import ROLE_DG, ROLE_RRHH, can_manage_submodule, group_name_variants
+from core.access import ROLE_DG, ROLE_RRHH, can_manage_submodule, has_any_role
 from core.contactos import resolver_correo
 from core.notificaciones import PUBLIC_BASE_URL, crear_notificacion
 from .models import AvisoCumpleanos, Empleado
@@ -36,7 +36,7 @@ def vista_global_cumpleanos(user):
         return False
     if user.is_superuser:
         return True
-    if user.groups.filter(name__in=group_name_variants(ROLE_RRHH, ROLE_DG)).exists():
+    if has_any_role(user, ROLE_RRHH, ROLE_DG):
         return True
     empleado = getattr(user, 'empleado_rrhh', None)
     return bool(empleado and (empleado.nivel_organizacional == Empleado.NIVEL_DIRECCION
@@ -60,7 +60,7 @@ def puede_gestionar_cumpleanos(user):
     if user.is_superuser:
         return True
     empleado = getattr(user, 'empleado_rrhh', None)
-    es_ch = user.groups.filter(name__in=group_name_variants(ROLE_RRHH)).exists() or bool(
+    es_ch = has_any_role(user, ROLE_RRHH) or bool(
         empleado and empleado.departamento == Empleado.DEP_RRHH
         and empleado.nivel_organizacional in NIVELES_JEFATURA)
     return es_ch and can_manage_submodule(user, 'rrhh', 'empleados')
