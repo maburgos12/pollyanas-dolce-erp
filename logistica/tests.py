@@ -2707,6 +2707,22 @@ VALID_GIF = (
 )
 
 
+def _ticket_jpeg_rotado() -> bytes:
+    """Foto vertical de ticket como la guarda un celular: buffer apaisado + EXIF 6."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    imagen = Image.new("RGB", (1632, 1224), "white")
+    for x in range(0, 1632, 12):  # rayas para que haya contraste y detalle de bordes
+        for y in range(1224):
+            imagen.putpixel((x, y), (10, 10, 10))
+    exif = imagen.getexif()
+    exif[274] = 6
+    buffer = BytesIO()
+    imagen.save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
+
 class LogisticaCombustibleAuditoriaTests(TestCase):
     def test_auditoria_marca_ticket_duplicado_como_alto_riesgo(self):
         user = User.objects.create_user(username="auditor.ticket", password="pass123")
@@ -2745,6 +2761,37 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         self.assertEqual(segunda.auditoria_estado, CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
         self.assertIn("ticket_duplicado", segunda.auditoria_motivos)
         self.assertEqual(segunda.auditoria_detalle["modo"], "reglas_locales")
+
+    def test_auditoria_respeta_orientacion_exif_del_ticket(self):
+        user = User.objects.create_user(username="auditor.exif", password="pass123")
+        sucursal = Sucursal.objects.create(codigo="QA-EXIF", nombre="QA EXIF", activa=True)
+        unidad = Unidad.objects.create(codigo="QA-EXIF-1", descripcion="Unidad EXIF", sucursal=sucursal)
+        repartidor = Repartidor.objects.create(user=user, sucursal=sucursal, unidad_asignada=unidad)
+        bitacora = BitacoraSalidaLlegada.objects.create(
+            repartidor=repartidor,
+            unidad=unidad,
+            km_salida=1000,
+            nivel_gas_salida="1/2",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        carga = CargaCombustibleUnidad.objects.create(
+            bitacora=bitacora,
+            unidad=unidad,
+            repartidor=repartidor,
+            litros=Decimal("22.00"),
+            importe_total=Decimal("600.00"),
+            foto_ticket=SimpleUploadedFile(
+                "ticket_vertical.jpg", _ticket_jpeg_rotado(), content_type="image/jpeg"
+            ),
+        )
+
+        resultado = auditar_carga_combustible(carga.id)
+        carga.refresh_from_db()
+
+        self.assertNotIn("imagen_horizontal", resultado["motivos"])
+        self.assertEqual(carga.auditoria_detalle["imagen"]["width"], 1224)
+        self.assertEqual(carga.auditoria_detalle["imagen"]["height"], 1632)
+        self.assertEqual(carga.auditoria_estado, CargaCombustibleUnidad.AUDITORIA_OK)
 
 
 class LogisticaGroupAliasCompatibilityTests(TestCase):
