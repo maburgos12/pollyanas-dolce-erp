@@ -50,7 +50,7 @@ def detectar_minutos_extra(asistencia):
         return None
     # Los 35 min previstos cuentan en las 8h. Un descanso mayor no crea
     # tiempo trabajado: solo su exceso se descuenta si hay ambas marcas.
-    if asistencia.salida_comida and asistencia.regreso_comida and asistencia.fuente != 'point':
+    if asistencia.salida_comida and asistencia.regreso_comida:
         comida_inicio, comida_fin = asistencia.salida_comida, asistencia.regreso_comida
         if not asistencia.entrada <= comida_inicio < comida_fin <= fin:
             return None

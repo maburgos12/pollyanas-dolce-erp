@@ -35,7 +35,9 @@ class ExtraConciliacionTests(TestCase):
         a.minutos_comida = 120
         a.minutos_trabajados = 480
         a.regreso_comida = a.salida_comida + timedelta(minutes=120)
-        self.assertEqual(calcular_horas_extra(a), Decimal('0.58'))
+        for fuente in ['hikconnect_api', 'point', 'manual']:
+            a.fuente = fuente
+            self.assertEqual(calcular_horas_extra(a), Decimal('0.58'))
 
     def test_turno_y_fuentes_comparten_comida_incluida(self):
         turno = Turno.objects.create(nombre='8 horas', hora_entrada=time(8), hora_salida=time(16))
