@@ -335,6 +335,7 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TASK_ROUTES = {
+    "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
     # Los avisos a personas no pueden formarse detrás de la automatización de
     # navegador de Point: el worker por omisión corre --pool=solo y una sola
@@ -343,6 +344,10 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
+    "rrhh-cumpleanos-diario": {
+        "task": "rrhh.tasks.avisar_cumpleanos",
+        "schedule": crontab(hour=8, minute=0),
+    },
     "logistica-alertar-documentos-por-vencer": {
         "task": "logistica.tasks.alertar_documentos_por_vencer",
         "schedule": crontab(hour=8, minute=0),

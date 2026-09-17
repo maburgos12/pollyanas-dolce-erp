@@ -270,6 +270,7 @@ NAV_GROUPS = [
             ("rrhh", "organizacion", "Organización", "/rrhh/organizacion/", ["/rrhh/organizacion/"]),
             ("rrhh", "catalogos", "Catálogos", "/rrhh/catalogos/", ["/rrhh/catalogos/"]),
             ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
+            ("rrhh", "cumpleanos", "Cumpleaños", "/rrhh/cumpleanos/", ["/rrhh/cumpleanos/"]),
             ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
             ("rrhh", "suspensiones", "Suspensiones", "/rrhh/suspensiones/", ["/rrhh/suspensiones/"]),
             ("rrhh", "incapacidades", "Incapacidades", "/rrhh/incapacidades/", ["/rrhh/incapacidades/"]),
@@ -343,7 +344,14 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
+            if module == "rrhh" and submodule == "cumpleanos":
+                from rrhh.services_cumpleanos import puede_ver_cumpleanos
+
+                if not puede_ver_cumpleanos(user):
+                    continue
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
+            if module == "rrhh" and submodule == "cumpleanos":
+                tiene_acceso_personal = True
             tiene_acceso_departamental = False
             if module == "compras" and submodule == "departamentales":
                 from compras.access_departamentales import puede_gestionar_compras_departamentales
