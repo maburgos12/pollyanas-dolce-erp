@@ -114,6 +114,11 @@ def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
             "detalle": detalle,
         }
 
+    # El folio caza el mismo ticket refotografiado; el SHA256 solo caza el mismo archivo.
+    if leido["folio"] and _folio_repetido(leido["folio"], carga.pk):
+        score += 80
+        motivos.append("folio_repetido")
+
     diferencia_litros = _diferencia(leido["litros"], carga.litros)
     if diferencia_litros is None:
         motivos.append("ticket_sin_litros")
@@ -134,6 +139,19 @@ def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
         motivos.append("ticket_verificado")
 
     return {"score": score, "motivos": motivos, "modo": "ocr_vision", "detalle": detalle}
+
+
+def _folio_repetido(folio: str, carga_id: int) -> bool:
+    """¿Otro registro ya declaró este folio de ticket?"""
+    # ponytail: consulta sobre el JSONField, sin índice. Con ~30 cargas al mes
+    # sobra; si el volumen crece, promover folio a columna indexada.
+    return (
+        CargaCombustibleUnidad.objects.filter(
+            auditoria_detalle__ticket_leido__folio=folio
+        )
+        .exclude(pk=carga_id)
+        .exists()
+    )
 
 
 def _diferencia(leido: Decimal | None, capturado: Decimal | None) -> Decimal | None:

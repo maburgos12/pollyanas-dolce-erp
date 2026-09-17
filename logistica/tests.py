@@ -2712,11 +2712,12 @@ VALID_GIF = (
 )
 
 
-def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacion="Pemex QA") -> dict:
+def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacion="Pemex QA", folio="") -> dict:
     """Respuesta simulada del lector de tickets."""
     return {
         "es_ticket": es_ticket,
         "legible": legible,
+        "folio": folio,
         "litros": litros,
         "importe_total": importe,
         "precio_por_litro": None,
@@ -2728,14 +2729,17 @@ def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacio
     }
 
 
-def _ticket_jpeg_rotado() -> bytes:
-    """Foto vertical de ticket como la guarda un celular: buffer apaisado + EXIF 6."""
+def _ticket_jpeg_rotado(variante: int = 0) -> bytes:
+    """Foto vertical de ticket como la guarda un celular: buffer apaisado + EXIF 6.
+
+    `variante` cambia los bytes para simular dos fotos distintas del mismo ticket.
+    """
     from io import BytesIO
 
     from PIL import Image
 
     imagen = Image.new("RGB", (1632, 1224), "white")
-    for x in range(0, 1632, 12):  # rayas para que haya contraste y detalle de bordes
+    for x in range(variante % 7, 1632, 12):  # rayas para que haya contraste
         for y in range(1224):
             imagen.putpixel((x, y), (10, 10, 10))
     exif = imagen.getexif()
@@ -2806,7 +2810,9 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
             litros=Decimal(litros),
             importe_total=Decimal(importe),
             foto_ticket=SimpleUploadedFile(
-                f"ticket_{sufijo}.jpg", _ticket_jpeg_rotado(), content_type="image/jpeg"
+                f"ticket_{sufijo}.jpg",
+                _ticket_jpeg_rotado(variante=abs(hash(sufijo)) % 7),
+                content_type="image/jpeg",
             ),
         )
 
@@ -2868,6 +2874,36 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
         self.assertIn("lectura_no_disponible", resultado["motivos"])
         self.assertEqual(resultado["score"], 0)
+
+    def test_mismo_folio_en_dos_cargas_es_alto_riesgo(self):
+        """El repartidor refotografía el mismo ticket: la foto cambia, el folio no."""
+        primera = self._carga_de_prueba("folio1", litros="44.61", importe="1200.00")
+        segunda = self._carga_de_prueba("folio2", litros="44.61", importe="1200.00")
+        lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), folio="2981277")
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            auditar_carga_combustible(primera.id)
+            resultado = auditar_carga_combustible(segunda.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
+        self.assertIn("folio_repetido", resultado["motivos"])
+
+    def test_folios_distintos_no_se_marcan(self):
+        primera = self._carga_de_prueba("folio3", litros="44.61", importe="1200.00")
+        segunda = self._carga_de_prueba("folio4", litros="22.31", importe="600.00")
+
+        with mock.patch(
+            "logistica.services_combustible_auditoria.leer_ticket",
+            return_value=_lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), folio="2981277"),
+        ):
+            auditar_carga_combustible(primera.id)
+        with mock.patch(
+            "logistica.services_combustible_auditoria.leer_ticket",
+            return_value=_lectura(litros=Decimal("22.31"), importe=Decimal("600.00"), folio="2981313"),
+        ):
+            resultado = auditar_carga_combustible(segunda.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
 
     def test_ticket_ilegible_no_suma_riesgo(self):
         carga = self._carga_de_prueba("ilegible")

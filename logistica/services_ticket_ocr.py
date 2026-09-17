@@ -22,6 +22,7 @@ Analiza la foto y responde SOLO con JSON, sin texto adicional.
 {
   "es_ticket_combustible": true|false,
   "legible": true|false,
+  "folio": "texto" o null,
   "litros": número o null,
   "importe_total": número o null,
   "precio_por_litro": número o null,
@@ -37,6 +38,8 @@ Reglas:
 - legible: false si la foto es un ticket pero no logras leer los importes.
 - No inventes cifras. Si un dato no se ve, ponlo en null.
 - importe_total es el total pagado, no el subtotal ni el IVA.
+- folio: el número de folio o ticket impreso (ej. "Folio: 2981277"). Copia los
+  dígitos tal cual, sin la palabra "Folio".
 """
 
 
@@ -87,6 +90,7 @@ def leer_ticket(field_file) -> dict:
     return {
         "es_ticket": bool(datos.get("es_ticket_combustible")),
         "legible": bool(datos.get("legible")),
+        "folio": str(datos.get("folio") or "").strip()[:40],
         "litros": _a_decimal(datos.get("litros")),
         "importe_total": _a_decimal(datos.get("importe_total")),
         "precio_por_litro": _a_decimal(datos.get("precio_por_litro")),
