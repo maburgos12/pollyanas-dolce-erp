@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-v38-etiquetas-termicas-80x40";
+const CACHE_NAME = "pollyanas-erp-shell-v39-rrhh-cumpleanos";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

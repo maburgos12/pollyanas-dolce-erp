@@ -486,6 +486,7 @@ RRHH_MODULE_TABS = [
     {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "key": "organizacion", "submodule": "organizacion"},
     {"label": "Catálogos", "url_name": "rrhh:rrhh_catalogos", "key": "catalogos", "submodule": "catalogos"},
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
+    {"label": "Cumpleaños", "url_name": "rrhh:rrhh_cumpleanos", "key": "cumpleanos", "submodule": "cumpleanos"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
     {"label": "Suspensiones", "url_name": "rrhh:rrhh_suspensiones", "key": "suspensiones", "submodule": "permisos"},
     {"label": "Incapacidades", "url_name": "rrhh:rrhh_incapacidades", "key": "incapacidades", "submodule": "nomina"},
@@ -585,6 +586,12 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
 def _module_tabs(active: str, user=None) -> list[dict]:
     tabs = []
     for tab in RRHH_MODULE_TABS:
+        if tab["key"] == "cumpleanos" and user is not None:
+            from .services_cumpleanos import puede_ver_cumpleanos
+
+            if puede_ver_cumpleanos(user):
+                tabs.append({"label": tab["label"], "url_name": tab["url_name"], "active": active == tab["key"]})
+            continue
         if tab["key"] == "catalogos" and user is not None and not can_manage_rrhh(user):
             continue
         if user is not None and not (

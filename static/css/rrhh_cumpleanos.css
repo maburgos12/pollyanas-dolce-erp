@@ -1,0 +1,225 @@
+.cumpleanos-page {
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  max-width:1400px;
+  margin:auto;
+  color:var(--texto,#3D2B2B)}
+.cumpleanos-header {
+  margin:24px 0}
+.cumpleanos-header h1 {
+  font-size:1.8rem;
+  margin:0 0 8px}
+.cumpleanos-page p {
+  max-width:72ch;
+  color:var(--texto-light,#7A6565);
+  line-height:1.6}
+.cumpleanos-resumen {
+  display:flex;
+  border-block:1px solid #ded1d7;
+  margin:24px 0;
+  gap:40px;
+  padding:20px 0}
+.cumpleanos-resumen dt {
+  font-size:.9rem}
+.cumpleanos-resumen dd {
+  margin:5px 0 0;
+  font-size:1.9rem;
+  font-weight:800;
+  color:var(--vino,#8B2252)}
+.cumpleanos-filtros {
+  display:flex;
+  align-items:end;
+  flex-wrap:wrap;
+  gap:16px;
+  margin-bottom:28px}
+.cumpleanos-filtros>div {
+  flex:1;
+  min-width:180px}
+.cumpleanos-page label {
+  display:block;
+  font-weight:700;
+  margin-bottom:7px}
+.cumpleanos-page input:not([type=hidden]),.cumpleanos-page select,.cumpleanos-page textarea {
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid #baa4af;
+  border-radius:8px;
+  background:var(--blanco,#FFFAF5);
+  padding:10px 12px;
+  color:var(--texto,#3D2B2B);
+  font:inherit;
+  min-height:44px}
+.cumpleanos-page textarea::placeholder {
+  color:#715c66}
+.cumpleanos-page :is(a,button,input,select,textarea):focus-visible {
+  outline:3px solid var(--vino,#8B2252);
+  outline-offset:3px}
+.cumpleanos-section {
+  margin:28px 0;
+  padding-top:20px;
+  border-top:1px solid #ded1d7}
+.cumpleanos-section h2 {
+  font-size:1.35rem;
+  margin:0 0 16px}
+.cumpleanos-section-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:16px}
+.cumpleanos-section-head h2 {
+  margin:0}
+.cumpleanos-section-head nav {
+  display:flex;
+  gap:8px}
+.cumpleanos-calendar-scroll {
+  overflow:auto;
+  max-width:100%;
+  min-width:0}
+.cumpleanos-calendar {
+  width:100%;
+  min-width:650px;
+  border-collapse:collapse;
+  table-layout:fixed}
+.cumpleanos-calendar th {
+  padding:12px;
+  text-align:left;
+  font-size:.85rem;
+  color:#71515f;
+  background:var(--rosa,#F8E8EE)}
+.cumpleanos-calendar td {
+  vertical-align:top;
+  border:1px solid #ded1d7;
+  padding:10px;
+  min-height:100px;
+  height:110px;
+  background:var(--blanco,#FFFAF5)}
+.cumpleanos-calendar .cumpleanos-hoy {
+  background:#f8e8ee;
+  border:2px solid var(--vino,#8B2252)}
+.cumpleanos-dia {
+  font-weight:700;
+  font-size:.85rem}
+.cumpleanos-dia span {
+  color:var(--vino,#8B2252)}
+.cumpleanos-evento {
+  margin-top:8px;
+  font-size:.85rem;
+  line-height:1.35;
+  overflow-wrap:anywhere}
+.cumpleanos-page a {
+  color:var(--vino,#8B2252)}
+.cumpleanos-page a.btn-primary {
+  color:#fff}
+.cumpleanos-lista {
+  list-style:none;
+  padding:0;
+  margin:0}
+.cumpleanos-lista li {
+  display:flex;
+  align-items:center;
+  gap:22px;
+  border-bottom:1px solid #e9dee3;
+  padding:16px 0}
+.cumpleanos-lista time {
+  font-weight:800;
+  width:64px;
+  flex-shrink:0;
+  color:var(--vino,#8B2252)}
+.cumpleanos-lista li>div {
+  flex:1}
+.cumpleanos-lista strong,.cumpleanos-lista span {
+  display:block}
+.cumpleanos-lista span {
+  font-size:.9rem;
+  margin-top:3px;
+  color:#715c66}
+.cumpleanos-lista a {
+  font-size:.9rem;
+}
+.cumpleanos-captura {
+  scroll-margin-top:110px}
+.cumpleanos-captura form {
+  max-width:640px}
+.cumpleanos-field {
+  margin:18px 0}
+.cumpleanos-error {
+  color:#a12626!important;
+  font-weight:700}
+.cumpleanos-total {
+  font:700 .9rem Nunito,sans-serif;
+  color:#715c66;
+  margin-left:8px}
+.cumpleanos-pendientes {
+  list-style:none;
+  padding:0;
+  columns:2;
+  column-gap:32px}
+.cumpleanos-pendientes li {
+  break-inside:avoid;
+  margin:0 0 10px}
+.cumpleanos-pendientes a {
+  display:block;
+  padding:12px 0;
+  border-bottom:1px solid #e9dee3}
+.cumpleanos-pendientes span {
+  display:block;
+  font-size:.85rem;
+  margin-top:3px}
+.cumpleanos-sr-only {
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  border:0}
+.cumpleanos-vacio {
+  padding:12px 0}
+.cumpleanos-page button:disabled {
+  opacity:.6;
+  cursor:wait}
+.cumpleanos-page button:active {
+  transform:scale(.97)}
+@media(max-width:650px) {
+  .cumpleanos-resumen {
+  gap:20px;
+  justify-content:space-between}
+.cumpleanos-resumen dt {
+  font-size:.8rem}
+.cumpleanos-resumen dd {
+  font-size:1.5rem}
+.cumpleanos-lista li {
+  flex-wrap:wrap;
+  gap:12px}
+.cumpleanos-lista li>a {
+  margin-left:76px}
+.cumpleanos-pendientes {
+  columns:1}
+.cumpleanos-filtros>div {
+  min-width:100%}
+}
+@media(hover:hover) and (pointer:fine) {
+  .cumpleanos-page a:hover {
+  text-decoration:underline}
+}
+@media(prefers-reduced-motion:reduce) {
+  .cumpleanos-page button:active {
+  transform:none}
+}
+
+
+.cumpleanos-historial-scroll { overflow: auto; max-width: 100%; min-width: 0; }
+.cumpleanos-historial { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .9rem; }
+.cumpleanos-historial th { text-align: left; background: var(--rosa,#F8E8EE); padding: 12px; }
+.cumpleanos-historial td { vertical-align: top; border-bottom: 1px solid #ded1d7; padding: 12px; overflow-wrap: anywhere; }
+.cumpleanos-historial p { margin: 7px 0; font-size: .85rem; }
+.cumpleanos-historial span { color: #715c66; font-size: .85rem; }
+
+.cumpleanos-proximos { display: flex; flex-wrap: wrap; gap: 24px; }
+.cumpleanos-proximos details { flex: 1; min-width: min(100%, 300px); }
+.cumpleanos-proximos summary { cursor: pointer; font-weight: 800; padding: 10px 0; }
+.cumpleanos-proximos li { margin: 12px 0; line-height: 1.5; }

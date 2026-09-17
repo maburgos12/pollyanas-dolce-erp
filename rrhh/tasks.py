@@ -7,6 +7,22 @@ from celery import shared_task
 from django.utils import timezone
 
 
+@shared_task(bind=True, max_retries=3)
+def avisar_cumpleanos(self, fecha_envio=None):
+    """Avisos de hoy; reintentos confirmados sólo durante el mismo día local."""
+    from .services_cumpleanos import generar_avisos_cumpleanos
+
+    hoy = timezone.localdate()
+    if fecha_envio and fecha_envio != hoy.isoformat():
+        return {"ok": True, "omitido": "El aviso ya no corresponde al día actual."}
+    if timezone.localtime().hour < 8:
+        return {"ok": True, "omitido": "Antes de las 08:00 locales."}
+    resultado = generar_avisos_cumpleanos(hoy)
+    if resultado["fallidos"] and self.request.retries < self.max_retries:
+        raise self.retry(kwargs={"fecha_envio": hoy.isoformat()}, countdown=300)
+    return resultado
+
+
 @shared_task
 def sync_asistencia_point():
     """

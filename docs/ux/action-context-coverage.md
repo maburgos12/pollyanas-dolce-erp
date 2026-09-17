@@ -60,3 +60,9 @@ No se declarará cobertura total hasta que cada pantalla candidata tenga una fil
 - Modal accesible `data-dup-modal`: ofrece «Abrir reporte existente» y «Sí, es otro problema» tras marcar una casilla explícita. Escape cierra, el foco queda atrapado y regresa al botón que lo abrió. El segundo envío reutiliza el mismo `FormData`, así que la captura y la foto no se pierden.
 - Sin red el toast dice «No hay conexión; no se envió ningún reporte» y el formulario conserva sus valores para un reintento explícito. No hay Background Sync ni autoenvío.
 - La creación sigue pasando exclusivamente por `operacion.services_fallas.crear_reporte_falla`; no se duplicó lógica de negocio.
+
+### RRHH — cumpleaños de empleados activos (2026-09-17)
+
+- Captura de fecha verificada desde `/rrhh/cumpleanos/`: `data-async-action`, toast global, bloqueo del botón y motivo obligatorio. Error JSON400 conserva fecha/motivo; fallback HTML devuelve el formulario ligado. Éxito preserva mes, departamento, sucursal y selección, vuelve a `#captura-cumpleanos`.
+- La misma acción guarda sólo fecha_nacimiento/updated_at y AuditLog bajo bloqueo del empleado activo; jefaturas/Dirección sin gestión no pueden capturar. No publica año de nacimiento/edad fuera de la captura autorizada.
+- Evidencia local: 231 pruebas de cumpleaños, RRHH y core aprobadas en PostgreSQL 16. Navegador real: JSON400 conserva fecha, JSON200 confirma captura auditada, filtros/fragmento preservados, jefatura limitada a su alcance, consola sin errores y viewport 390 px sin desbordamiento de página. La validación productiva corresponde al despliegue posterior.

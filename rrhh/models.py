@@ -98,6 +98,7 @@ class Empleado(models.Model):
     puesto = models.CharField(max_length=120, blank=True, default="")
     tipo_contrato = models.CharField(max_length=20, choices=CONTRATO_CHOICES, default=CONTRATO_FIJO)
     fecha_ingreso = models.DateField(default=timezone.localdate)
+    fecha_nacimiento = models.DateField(null=True, blank=True)
     salario_diario = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     telefono = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
@@ -1113,6 +1114,38 @@ class Turno(models.Model):
 
     def __str__(self) -> str:
         return f"{self.nombre} ({self.hora_entrada}-{self.hora_salida})"
+
+
+class AvisoCumpleanos(models.Model):
+    """Bitácora persistente; aceptar un correo no prueba su entrega al buzón."""
+
+    TIPO_CHOICES = [("hoy", "Hoy"), ("anticipado", "Tres días antes"), ("semanal", "Resumen semanal")]
+    ESTADO_CHOICES = [
+        ("pendiente", "Pendiente"), ("en_proceso", "En proceso"),
+        ("enviado", "Aceptado por correo"), ("fallido", "Falló"),
+        ("incierto", "Resultado incierto"), ("sin_contacto", "Sin correo de trabajo"),
+        ("omitido", "Omitido"),
+    ]
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    tipo = models.CharField(max_length=12, choices=TIPO_CHOICES)
+    fecha_referencia = models.DateField()
+    notificacion = models.ForeignKey("core.Notificacion", null=True, blank=True, on_delete=models.SET_NULL)
+    estado_correo = models.CharField(max_length=12, choices=ESTADO_CHOICES, default="pendiente")
+    correo_destino = models.EmailField(blank=True, default="")
+    error_correo = models.CharField(max_length=400, blank=True, default="")
+    referencia_correo = models.CharField(max_length=200, blank=True, default="")
+    # Impide dos reservas simultáneas de un mensaje idéntico para cuentas que
+    # comparten buzón. NULL permite pendientes sin un destino verificable.
+    clave_correo = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    intentos = models.PositiveSmallIntegerField(default=0)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+        constraints = [models.UniqueConstraint(
+            fields=["usuario", "tipo", "fecha_referencia"], name="rrhh_cumple_aviso_unico",
+        )]
 
 
 class AsistenciaEmpleado(models.Model):

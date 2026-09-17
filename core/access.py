@@ -172,6 +172,7 @@ ACCESS_SUBMODULES = {
         ("reportes", "Reportes"),
     ],
     "rrhh": [
+        ("cumpleanos", "Cumpleaños"),
         ("dashboard", "Dashboard"),
         ("indicadores", "Indicadores"),
         ("organizacion", "Organización"),
