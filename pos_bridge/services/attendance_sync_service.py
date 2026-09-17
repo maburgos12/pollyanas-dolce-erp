@@ -451,7 +451,7 @@ class PointAttendanceSyncService:
             ),
         )
         asistencia.save()
-        if asistencia.salida and asistencia.turno_id:
+        if asistencia.salida:
             generar_horas_extra_automatico(asistencia)
         try:
             evaluar_dia_empleado(asistencia.empleado, asistencia.fecha)

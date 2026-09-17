@@ -9,6 +9,7 @@ from core.access import can_manage_rrhh
 
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
 from rrhh.services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
+from rrhh.services_extra_conciliacion import detectar_minutos_extra, NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO
 
 TIEMPO_COMIDA_MINUTOS = 35
 
@@ -60,43 +61,50 @@ def minutos_jornada_programada(asistencia: AsistenciaEmpleado) -> int:
 
 
 def calcular_horas_extra(asistencia: AsistenciaEmpleado) -> Decimal:
-    """
-    Calcula horas extra a partir de la asistencia diaria.
-    Regla: minutos trabajados - jornada de turno > tolerancia.
-    """
-    if not asistencia.turno or not asistencia.entrada or not asistencia.salida:
-        return Decimal("0")
-
-    minutos_jornada = minutos_jornada_programada(asistencia)
-    excedente = int(asistencia.minutos_trabajados or 0) - minutos_jornada
-    if excedente > int(asistencia.turno.tolerancia_minutos or 0):
-        return Decimal(str(round(excedente / 60, 2))).quantize(Decimal("0.01"))
-    return Decimal("0")
+    minutos = detectar_minutos_extra(asistencia)
+    return (Decimal(minutos or 0) / 60).quantize(Decimal('0.01'))
 
 
+@transaction.atomic
 def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra | None:
     """
     Crea o actualiza la HoraExtra derivada de una asistencia.
     No modifica registros ya autorizados, rechazados o pagados.
     """
-    horas = calcular_horas_extra(asistencia)
-    if horas <= 0:
-        return None
-
-    he, creado = HoraExtra.objects.get_or_create(
-        asistencia=asistencia,
-        defaults={
-            "empleado": asistencia.empleado,
-            "fecha": asistencia.fecha,
-            "horas": horas,
-            "jefe_directo": usuario_jefe_directo_de_empleado(asistencia.empleado),
-        },
-    )
-    if not creado and he.estado == HoraExtra.ESTADO_PENDIENTE:
-        he.horas = horas
+    # Serializa eventos del mismo día, incluso entre Hik y Point.
+    asistencia = AsistenciaEmpleado.objects.select_for_update(of=('self',)).select_related(
+        'empleado__jefe_directo__usuario_erp', 'turno').get(pk=asistencia.pk)
+    minutos = detectar_minutos_extra(asistencia)
+    registros = list(HoraExtra.objects.filter(empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
+    he = next((r for r in registros if r.asistencia_id == asistencia.pk), None)
+    if minutos is None:
+        return he
+    # Una solicitud independiente ya cubre parte del tiempo; no la duplicamos.
+    cobertura = sum((r.horas for r in registros if r != he and r.estado != HoraExtra.ESTADO_CANCELADO), Decimal('0'))
+    saldo = max(calcular_horas_extra(asistencia) - cobertura, Decimal('0'))
+    reactivar = bool(he and saldo > 0 and he.estado == HoraExtra.ESTADO_CANCELADO
+        and he.notas.startswith(NOTA_EXTRA_AUTOMATICA) and he.notas.endswith(NOTA_SALDO_CUBIERTO))
+    if he and he.estado != HoraExtra.ESTADO_PENDIENTE and not reactivar:
+        return he  # Autorización, rechazo, pago y cancelación se conservan.
+    if saldo <= 0:
+        if he and he.notas.startswith(NOTA_EXTRA_AUTOMATICA):
+            he.estado = HoraExtra.ESTADO_CANCELADO
+            he.notas += '\n' + NOTA_SALDO_CUBIERTO
+            he.save(update_fields=['estado', 'notas'])
+        return next((r for r in registros if r != he and r.estado != HoraExtra.ESTADO_CANCELADO), he)
+    if he is None:
+        return HoraExtra.objects.create(asistencia=asistencia, empleado_id=asistencia.empleado_id,
+            fecha=asistencia.fecha, horas=saldo,
+            notas=f'{NOTA_EXTRA_AUTOMATICA} Jornada con comida incluida. Saldo no cubierto por otros registros.',
+            jefe_directo=usuario_jefe_directo_de_empleado(asistencia.empleado))
+    if he.horas != saldo or reactivar:
+        he.horas = saldo
+        if reactivar:
+            he.estado = HoraExtra.ESTADO_PENDIENTE
+            he.notas += '\nSaldo automático pendiente nuevamente por cambio de cobertura.'
         if not he.jefe_directo_id:
             he.jefe_directo = usuario_jefe_directo_de_empleado(asistencia.empleado)
-        he.save(update_fields=["horas", "jefe_directo"])
+        he.save(update_fields=['horas', 'jefe_directo', 'estado', 'notas'])
     return he
 
 

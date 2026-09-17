@@ -317,7 +317,7 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
                 asistencia.turno = turno
 
         asistencia.save()
-        if asistencia.salida and asistencia.turno_id:
+        if asistencia.salida:
             try:
                 generar_horas_extra_automatico(asistencia)
             except Exception as exc:

@@ -182,7 +182,7 @@ def _run_post_projection_effects(receipt_id: int) -> None:
                 empleado_id=receipt.empleado_id,
                 fecha=local_dt.date(),
             ).first()
-            if asistencia and asistencia.salida and asistencia.turno_id:
+            if asistencia and asistencia.salida:
                 generar_horas_extra_automatico(asistencia)
             evaluar_dia_empleado(receipt.empleado, local_dt.date())
             programar_sincronizacion_bonos_desde_checador(

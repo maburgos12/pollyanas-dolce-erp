@@ -100,7 +100,7 @@
         </div>
         <div class="kpi-card">
           <div class="kpi-number">{{ reporte.resumen.hora_extra }}</div>
-          <div class="kpi-label">Hora extra</div>
+          <div class="kpi-label">Incidencias de extra</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-number">{{ reporte.resumen.avisos_baja }}</div>
@@ -120,6 +120,13 @@
         </div>
       </div>
 
+      <p><strong>Tiempo extra:</strong> Extra detectado: <strong>{{ reporte.extra_resumen.detectado }}</strong> ·
+        Autorizado / pagado: <strong>{{ reporte.extra_resumen.autorizado }}</strong> ·
+        Pendiente de autorización: <strong>{{ reporte.extra_resumen.pendiente }}</strong> ·
+        Rechazado: <strong>{{ reporte.extra_resumen.rechazado }}</strong>.
+        {% if reporte.extra_resumen.dias_no_calculables %}<br>Totales de detección parciales: {{ reporte.extra_resumen.dias_no_calculables }} día(s) sin checadas completas o intervalo válido.{% endif %}
+      </p>
+      <p class="text-muted">La jornada incluye la comida. Sin turno asociado se compara la duración con 8 horas; no se infiere puntualidad. Las diferencias con la autorización requieren revisión y no acreditan pago.</p>
       <div class="table-responsive">
         <table class="table table-striped">
           <thead>
@@ -128,6 +135,10 @@
               <th>Entrada</th>
               <th>Salida</th>
               <th>Min. comida</th>
+              <th>Extra detectado</th>
+              <th>Extra autorizado / pagado</th>
+              <th>Extra pendiente</th>
+              <th>Conciliación de extra</th>
               <th>Incidencias</th>
               <th>Estado</th>
               <th>Minutos</th>
@@ -142,6 +153,10 @@
                 <td>{{ fila.asistencia.entrada|date:"H:i"|default:"-" }}</td>
                 <td>{{ fila.asistencia.salida|date:"H:i"|default:"-" }}</td>
                 <td>{{ fila.asistencia.minutos_comida|default:"-" }}</td>
+                <td>{{ fila.extra.detectado|default:"No aplica" }}</td>
+                <td>{{ fila.extra.autorizado|default:"No aplica" }}</td>
+                <td>{{ fila.extra.pendiente|default:"No aplica" }}</td>
+                <td>{{ fila.extra.estado|default:"No aplica" }}{% if fila.extra.base %}<br><small>{{ fila.extra.base }}</small>{% endif %}</td>
                 <td>
                   {% if fila.estado_laboral_label %}
                     <span class="badge bg-primary">{{ fila.estado_laboral_label }}</span>
