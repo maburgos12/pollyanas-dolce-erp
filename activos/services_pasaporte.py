@@ -248,4 +248,5 @@ def svg_qr_activo(request, activo: Activo) -> str:
     eso el SVG puede marcarse como seguro en el template.
     """
     url = url_qr_activo(request, activo)
-    return segno.make_qr(url, error="h").svg_inline(scale=4, border=4)
+    # viewBox permite escalar todos los módulos a 28 mm sin recortar el dibujo.
+    return segno.make_qr(url, error="h").svg_inline(scale=4, border=4, omitsize=True)

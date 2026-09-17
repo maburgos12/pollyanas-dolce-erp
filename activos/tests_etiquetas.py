@@ -1,10 +1,13 @@
 """Impresión de etiquetas QR: permisos, alcance, formato y datos impresos."""
 
 from decimal import Decimal
+from pathlib import Path
+import re
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import RequestFactory, TestCase
+from django.contrib.staticfiles import finders
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from core.access import ROLE_ADMIN, ROLE_VENTAS
@@ -81,6 +84,22 @@ class EtiquetasActivosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(cuerpo.count('class="label-page"'), 3)
         self.assertNotIn('class="sheet"', cuerpo)
+
+    def test_termica_usa_pagina_de_80_por_40_mm(self):
+        response = self._imprimir("termica", self.activos[:1])
+        self.assertContains(response, "@page { size: 80mm 40mm; margin: 0; }")
+        self.assertContains(response, "Térmica 80 × 40 mm")
+        self.assertNotContains(response, "90 × 50")
+
+    def test_selector_identifica_el_consumible_disponible(self):
+        response = self.client.get(reverse("activos:etiquetas"))
+        self.assertContains(response, "Imprimir térmica 80 × 40 mm")
+        self.assertContains(response, "080040PL011P0000C1G1K0")
+
+    def test_carta_conserva_su_pagina_y_no_usa_tamano_termico(self):
+        response = self._imprimir("carta", self.activos[:1])
+        self.assertContains(response, "@page { size: Letter; margin: 14.7mm 17.95mm; }")
+        self.assertNotContains(response, "@page { size: 80mm 40mm;")
 
     def test_cada_etiqueta_lleva_el_qr_de_su_propio_activo(self):
         """El UUID no aparece como texto: va codificado en el trazo del SVG.
@@ -170,3 +189,41 @@ class EtiquetasActivosTests(TestCase):
 
         self.assertContains(response, "Equipo 05")
         self.assertNotContains(response, "Equipo 06")
+
+
+class EtiquetasDimensionesCssTests(SimpleTestCase):
+    """Contratos físicos; además se debe medir el PDF y probar la impresión real."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.css = Path(finders.find("activos/etiquetas.css")).read_text()
+
+    def _reglas(self, selector):
+        patron = rf"(?:^|\n){re.escape(selector)}\s*\{{([^}}]*)\}}"
+        coincidencia = re.search(patron, self.css)
+        self.assertIsNotNone(coincidencia, f"Falta la regla {selector}")
+        return coincidencia.group(1)
+
+    def test_la_etiqueta_termica_mide_80_por_40_sin_escalar_el_qr(self):
+        reglas = self._reglas(".etiquetas-termica .label")
+        self.assertIn("width: 80mm;", reglas)
+        self.assertIn("height: 40mm;", reglas)
+        self.assertNotIn("transform", reglas)
+        for selector in (".qr", ".qr svg"):
+            with self.subTest(selector=selector):
+                qr = self._reglas(selector)
+                self.assertIn("width: 28mm;", qr)
+                self.assertIn("height: 28mm;", qr)
+
+    def test_la_pagina_termica_mide_80_por_40(self):
+        reglas = self._reglas(".label-page")
+        self.assertIn("width: 80mm;", reglas)
+        self.assertIn("height: 40mm;", reglas)
+        self.assertIn("break-after: page;", reglas)
+
+    def test_carta_conserva_etiquetas_de_90_por_50(self):
+        reglas = self._reglas(".label")
+        self.assertIn("width: 90mm;", reglas)
+        self.assertIn("height: 50mm;", reglas)
+        self.assertIn("grid-template-columns: 90mm 90mm;", self._reglas(".sheet"))

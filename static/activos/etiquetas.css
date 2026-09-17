@@ -1,7 +1,7 @@
 /* Etiquetas QR en unidades físicas.
  *
  * Todo va en milímetros, nunca en píxeles: la etiqueta tiene que salir de la
- * impresora midiendo 90 × 50 mm de verdad, con el QR en 28 mm. Cualquier
+ * impresora midiendo 80 × 40 mm (térmica) o 90 × 50 mm (carta), con QR de 28 mm. Cualquier
  * unidad relativa deja el tamaño a merced del zoom del navegador.
  */
 
@@ -25,7 +25,7 @@ body.etiquetas {
   line-height: 1.45;
 }
 
-/* --- La etiqueta, idéntica en los dos formatos --- */
+/* --- Etiqueta carta: se conserva su formato original --- */
 .label {
   display: flex;
   align-items: center;
@@ -118,9 +118,37 @@ body.etiquetas {
 }
 
 /* --- Térmica: una página física por etiqueta --- */
+.etiquetas-termica .label {
+  width: 80mm;
+  height: 40mm;
+  padding: 2.5mm;
+  gap: 2mm;
+}
+
+.etiquetas-termica .label-codigo {
+  font-size: 8pt;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.etiquetas-termica .label-nombre {
+  margin-top: .6mm;
+  font-size: 11pt;
+}
+
+.etiquetas-termica .label-lugar,
+.etiquetas-termica .label-equipo {
+  margin-top: 1mm;
+  font-size: 8pt;
+}
+
+.etiquetas-termica .label-instruccion {
+  margin-top: 1.2mm;
+}
+
 .label-page {
-  width: 90mm;
-  height: 50mm;
+  width: 80mm;
+  height: 40mm;
   overflow: hidden;
   break-after: page;
   page-break-after: always;

@@ -3,14 +3,14 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Etiquetas QR · {% if modo == 'carta' %}Hoja carta{% else %}Térmica 90 × 50 mm{% endif %}</title>
-  <link rel="stylesheet" href="{% static 'activos/etiquetas.css' %}?v=20260911-pasaporte-qr-v2">
+  <title>Etiquetas QR · {% if modo == 'carta' %}Hoja carta{% else %}Térmica 80 × 40 mm{% endif %}</title>
+  <link rel="stylesheet" href="{% static 'activos/etiquetas.css' %}?v=20260917-termica-80x40">
   <style>
     {% if modo == 'carta' %}
       /* 180 mm de contenido dentro de 215.9 mm; 250 mm dentro de 279.4 mm. */
       @page { size: Letter; margin: 14.7mm 17.95mm; }
     {% else %}
-      @page { size: 90mm 50mm; margin: 0; }
+      @page { size: 80mm 40mm; margin: 0; }
     {% endif %}
   </style>
 </head>
@@ -18,6 +18,11 @@
   <p class="aviso-pantalla">
     Imprime al <strong>100 %</strong> de escala. No uses «Ajustar a página»: cambiaría el tamaño físico
     del QR y de la etiqueta. Mide la primera hoja con regla antes de gastar material.
+    {% if modo == 'termica' %}
+      Configura papel de <strong>80 × 40 mm</strong>, márgenes cero y sin encabezados ni pies de página.
+      El QR conserva 28 mm. Prueba diez etiquetas sobre poliéster plata antes de rotular todos los equipos:
+      el ribbon negro no imprime un fondo blanco sobre el material plata.
+    {% endif %}
   </p>
 
   {% if modo == 'carta' %}
