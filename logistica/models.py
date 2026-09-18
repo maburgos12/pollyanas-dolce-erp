@@ -1226,7 +1226,8 @@ class CargaCombustibleUnidad(models.Model):
 
     AUDITORIA_TEXTOS = {
         "ticket_verificado": "El ticket coincide con lo capturado",
-        "litros_no_coinciden": "Los litros no coinciden con el ticket",
+        "litros_capturados_difieren": "Los litros capturados no son los del ticket (el importe sí cuadra)",
+        "litros_del_ticket_dudosos": "No se pudo leer con certeza el renglón de litros",
         "importe_no_coincide": "El importe no coincide con el ticket",
         "foto_no_es_ticket": "La foto no es un ticket de combustible",
         "ticket_ilegible": "El ticket no se pudo leer",
