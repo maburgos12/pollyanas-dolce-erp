@@ -163,6 +163,16 @@ class InversionesRefactorTests(TestCase):
         self.assertContains(response, "Financiamiento")
         self.assertNotContains(response, 'value="Apertura Bamoa 2026"')
 
+    def test_wizard_partidas_no_redibuja_tabla_al_capturar(self):
+        """El input de cada partida no debe reconstruir la tabla: destruía el
+        campo enfocado y hacía perder el foco en la primera tecla."""
+        response = self.client.get(reverse("reportes:inversiones_wizard"))
+        html = response.content.decode()
+        handler = html.split('input.addEventListener("input"', 1)[1].split("});", 1)[0]
+
+        self.assertNotIn("renderPartidas()", handler)
+        self.assertIn("totalCell.textContent", handler)
+
     def test_wizard_post_crea_proyecto_y_escenarios(self):
         response = self.client.post(reverse("reportes:inversiones_wizard"), self._payload_wizard())
 

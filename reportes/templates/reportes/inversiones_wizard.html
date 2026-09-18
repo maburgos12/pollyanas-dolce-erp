@@ -191,13 +191,19 @@
         <td><input data-field="proveedor_nombre" value="${escapeAttr(partida.proveedor_nombre)}" placeholder="Proveedor"></td>
         <td><input data-field="monto" type="number" step="0.01" min="0" value="${partida.monto || ""}"></td>
         <td><input data-field="iva" type="number" step="0.01" min="0" value="${partida.iva || ""}"></td>
-        <td class="pd-u-5565220dd2">${money(total)}</td>
+        <td class="pd-u-5565220dd2" data-total>${money(total)}</td>
         <td><button type="button" class="inv-button danger" data-delete="${idx}">X</button></td>`;
+      const totalCell = tr.querySelector("[data-total]");
       tr.querySelectorAll("[data-field]").forEach((input) => {
         input.addEventListener("input", () => {
           const field = input.dataset.field;
           partidas[idx][field] = ["monto", "iva"].includes(field) ? Number(input.value || 0) : input.value;
-          renderPartidas();
+          // ponytail: se actualiza solo la celda de total; redibujar la tabla aquí
+          // destruía el input y hacía perder el foco en cada tecla.
+          totalCell.textContent = money(Number(partidas[idx].monto || 0) + Number(partidas[idx].iva || 0));
+          renderTotales();
+          renderComparativo();
+          renderReview();
         });
       });
       tr.querySelector("[data-delete]").addEventListener("click", () => {
