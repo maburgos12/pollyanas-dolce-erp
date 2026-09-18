@@ -50,6 +50,13 @@ def _count(request, pk):
     return get_object_or_404(_visible(request).select_related('sucursal','responsable'), pk=pk)
 
 
+def _cantidad_visible(value):
+    if value is None:
+        return ''
+    text = format(value, 'f')
+    return text.rstrip('0').rstrip('.') if '.' in text else text
+
+
 def _context(request, count, *, ack='', ack_version=None):
     reviewer = puede_revisar(request.user, count)
     editable = puede_capturar(request.user, count) and count.estado in ('CAPTURA','RECONTEO')
@@ -62,7 +69,9 @@ def _context(request, count, *, ack='', ack_version=None):
         difference = None
         if source.get('cantidad') is not None and reading.cantidad is not None:
             difference = reading.cantidad - Decimal(source['cantidad'])
-        rows.append({'lectura':reading, 'linea':line, 'referencia':source, 'diferencia':difference})
+        rows.append({'lectura':reading, 'linea':line, 'referencia':source, 'diferencia':difference,
+                     'cantidad_visible':_cantidad_visible(reading.cantidad),
+                     'diferencia_visible':_cantidad_visible(difference)})
     captured = sum(r.cantidad is not None or bool(r.incidencia) for r in readings)
     # Event payloads can contain expected quantities and previous rounds. Never
     # serialize those into a blind capture page (even hidden DOM/JSON).
@@ -179,15 +188,29 @@ def accion(request, pk):
     return redirect(_url(request,'detalle',count.pk)+'#conteo-detail')
 
 
-def _catalogo(tipo, query):
+def _catalogo(tipo, query, sucursal=None):
+    from .conteos_units import unidad_conteo
+    from .conteos_catalog import codigos_habituales
+    if sucursal is None:
+        return []
+    habitual = codigos_habituales(sucursal) if not query else None
     if tipo == 'insumo':
         qs = Insumo.objects.filter(activo=True).exclude(codigo_point='').select_related('unidad_base')
         if query: qs=qs.filter(Q(nombre__icontains=query)|Q(codigo_point__icontains=query))
+        else: qs=qs.filter(codigo_point__in=habitual)
         return [{'key':f'i{x.pk}','nombre':x.nombre,'codigo':x.codigo_point,'unidad':x.unidad_base.codigo if x.unidad_base_id else '',
-                 'fuente':'Unidad base del catálogo canónico' if x.unidad_base_id else ''} for x in qs.order_by('nombre')[:200]]
+                 'selected':not query and bool(x.unidad_base_id)} for x in qs.order_by('nombre')[:200]]
     qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True).exclude(codigo_point='').values('codigo_point'))
     if query: qs=qs.filter(Q(name__icontains=query)|Q(sku__icontains=query)|Q(category__icontains=query))
-    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':'','fuente':''} for x in qs.order_by('name')[:200]]
+    else: qs=qs.filter(sku__in=habitual)
+    # Point replicas can carry multiple rows for one physical code. Prefer a
+    # row with verified unit evidence, then the most recently refreshed one.
+    products = sorted(qs, key=lambda x:(bool(unidad_conteo(x)[0]), x.updated_at, x.pk), reverse=True)
+    unique = {}
+    for product in products:
+        unique.setdefault(product.sku, product)
+    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':unidad_conteo(x)[0],
+             'selected':not query and bool(unidad_conteo(x)[0])} for x in sorted(unique.values(), key=lambda x:x.name.casefold())[:200]]
 
 
 @login_required
@@ -211,6 +234,12 @@ def preparar(request):
     if request.method not in ('GET','POST'): return HttpResponse(status=405)
     form_class = PrepararMiConteoForm if es_app else PrepararConteoForm
     form = form_class(request.POST if request.method == 'POST' else None, initial={'fecha':timezone.localdate(),'request_id':uuid4()})
+    catalog_branch = assigned
+    if not es_app:
+        branch_id = request.POST.get('sucursal') if request.method == 'POST' else request.GET.get('sucursal')
+        if str(branch_id or '').isdigit():
+            catalog_branch = form.fields['sucursal'].queryset.filter(pk=branch_id).first()
+            form.initial['sucursal'] = catalog_branch
     tipo = request.GET.get('tipo','producto')
     query = request.GET.get('q','').strip()[:120]
     if request.method == 'POST' and form.is_valid():
@@ -221,8 +250,7 @@ def preparar(request):
                 items = []
                 for key in request.POST.getlist('articulos'):
                     if len(key)<2 or key[0] not in 'pi' or not key[1:].isdigit(): raise ValidationError('Artículo inválido.')
-                    items.append({'producto_id' if key[0]=='p' else 'insumo_id':int(key[1:]),
-                                  'unidad':request.POST.get('unidad_'+key,''), 'fuente_unidad':request.POST.get('fuente_'+key,'')})
+                    items.append({'producto_id' if key[0]=='p' else 'insumo_id':int(key[1:])})
             identity = {'sucursal':assigned, 'responsable':request.user, 'desde_app':True} if es_app else {}
             count = preparar_conteo(actor=request.user,items=items,**form.cleaned_data,**identity)
         except (ValidationError,ValueError) as exc:
@@ -232,15 +260,13 @@ def preparar(request):
             if _async(request): return JsonResponse({'ok':True,'redirect':url,'toast':{'type':'success','message':'Conteo preparado y asignado.'}})
             messages.success(request,'Conteo preparado y asignado.')
             return redirect(url)
-    catalog = _catalogo(tipo,query)
+    catalog = _catalogo(tipo,query,catalog_branch)
     if request.method == 'POST':
         for row in catalog:
             row['selected'] = row['key'] in request.POST.getlist('articulos')
-            row['unidad'] = request.POST.get('unidad_'+row['key'],row['unidad'])
-            row['fuente'] = request.POST.get('fuente_'+row['key'],row['fuente'])
         if _async(request):
             return JsonResponse({'ok':False,'toast':{'type':'error','message':' '.join(str(e) for errors in form.errors.values() for e in errors),'persistent':True}},status=400)
-    return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'es_app':es_app,'sucursal_asignada':assigned,'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})
+    return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'es_app':es_app,'sucursal_asignada':assigned,'catalogo_sucursal':catalog_branch,'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})
 
 
 def _excel_text(value):

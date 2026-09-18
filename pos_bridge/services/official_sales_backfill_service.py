@@ -87,18 +87,23 @@ class OfficialSalesBackfillService:
             return False
         return not erp_branch.esta_operativa(sale_date)
 
+    @transaction.atomic
     def _resolve_product(self, *, sku: str, name: str, category: str) -> PointProduct:
         product = (
-            PointProduct.objects.filter(sku__iexact=sku, name__iexact=name).order_by("id").first()
-            or PointProduct.objects.filter(sku__iexact=sku).order_by("id").first()
+            PointProduct.objects.select_for_update().filter(sku__iexact=sku, name__iexact=name).order_by("id").first()
+            or PointProduct.objects.select_for_update().filter(sku__iexact=sku).order_by("id").first()
         )
         external_id = product.external_id if product is not None else f"official:{sku or deterministic_id(name, category)}"
+        from pos_bridge.services.product_count_units import COUNT_UNIT_KEY
+        metadata = {'official_report': True}
+        if product and COUNT_UNIT_KEY in (product.metadata or {}):
+            metadata[COUNT_UNIT_KEY] = product.metadata[COUNT_UNIT_KEY]
         defaults = {
             "sku": sku,
             "name": name,
             "category": category,
             "active": True,
-            "metadata": {"official_report": True},
+            "metadata": metadata,
         }
         product, _ = PointProduct.objects.update_or_create(external_id=external_id, defaults=defaults)
         return product

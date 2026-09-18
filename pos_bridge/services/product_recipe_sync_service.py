@@ -15,6 +15,7 @@ from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine, PointSyncJob
 from pos_bridge.services.point_http_client import PointHttpSessionClient
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
+from pos_bridge.services.product_count_units import COUNT_UNIT_KEY, catalog_count_unit
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService, ResolvedInsumo
 from pos_bridge.utils.helpers import sanitize_sensitive_data
 from pos_bridge.utils.exceptions import ExtractionError
@@ -489,6 +490,7 @@ class PointProductRecipeSyncService:
             raise ExtractionError(f"Point no devolvió los productos solicitados: {', '.join(sorted(missing))}.")
         return products
 
+    @transaction.atomic
     def _upsert_point_product_catalog_signal(self, product: dict) -> PointProduct | None:
         external_id = str(product.get("PK_Producto") or "").strip()
         sku = str(product.get("Codigo") or "").strip()
@@ -496,11 +498,14 @@ class PointProductRecipeSyncService:
         if not external_id or not sku or not name:
             return None
 
-        point_product = PointProduct.objects.filter(external_id=external_id).first()
+        point_product = PointProduct.objects.select_for_update().filter(external_id=external_id).first()
         if point_product is None:
-            point_product = PointProduct.objects.filter(sku__iexact=sku).order_by("-updated_at", "-id").first()
+            point_product = PointProduct.objects.select_for_update().filter(sku__iexact=sku).order_by("-updated_at", "-id").first()
 
         metadata = dict((point_product.metadata if point_product else {}) or {})
+        count_unit = catalog_count_unit(product)
+        if count_unit:
+            metadata[COUNT_UNIT_KEY] = count_unit
         metadata.update(
             {
                 "source": "POINT_RECIPE_SYNC",

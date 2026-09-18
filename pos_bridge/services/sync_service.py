@@ -148,13 +148,19 @@ class PointSyncService:
             "point_relogin_events": warning_logs.filter(context__event="point_relogin").count(),
         }
 
+    @transaction.atomic
     def _upsert_product(self, payload: dict) -> PointProduct:
+        from pos_bridge.services.product_count_units import COUNT_UNIT_KEY
+        existing = PointProduct.objects.select_for_update().filter(external_id=payload['external_id']).first()
+        metadata = dict(payload.get('metadata') or {})
+        if existing and COUNT_UNIT_KEY in (existing.metadata or {}):
+            metadata[COUNT_UNIT_KEY] = existing.metadata[COUNT_UNIT_KEY]
         defaults = {
             "sku": payload["sku"],
             "name": payload["name"],
             "category": payload["category"],
             "active": True,
-            "metadata": payload.get("metadata") or {},
+            "metadata": metadata,
         }
         product, _ = PointProduct.objects.update_or_create(
             external_id=payload["external_id"],

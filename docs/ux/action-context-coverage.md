@@ -66,3 +66,11 @@ No se declarará cobertura total hasta que cada pantalla candidata tenga una fil
 - Captura de fecha verificada desde `/rrhh/cumpleanos/`: `data-async-action`, toast global, bloqueo del botón y motivo obligatorio. Error JSON400 conserva fecha/motivo; fallback HTML devuelve el formulario ligado. Éxito preserva mes, departamento, sucursal y selección, vuelve a `#captura-cumpleanos`.
 - La misma acción guarda sólo fecha_nacimiento/updated_at y AuditLog bajo bloqueo del empleado activo; jefaturas/Dirección sin gestión no pueden capturar. No publica año de nacimiento/edad fuera de la captura autorizada.
 - Evidencia local: 231 pruebas de cumpleaños, RRHH y core aprobadas en PostgreSQL 16. Navegador real: JSON400 conserva fecha, JSON200 confirma captura auditada, filtros/fragmento preservados, jefatura limitada a su alcance, consola sin errores y viewport 390 px sin desbordamiento de página. La validación productiva corresponde al despliegue posterior.
+
+### Conteos — unidad automática (2026-09-18)
+
+- Preparación ERP/App: unidad del catálogo de sólo lectura; sin campos de unidad/fuente. La selección compacta envía sólo identidades; el servidor resuelve y congela unidad/procedencia. Artículos sin unidad no se pueden seleccionar y el servidor rechaza solicitudes manipuladas.
+- Se conserva `data-async-action`, toast y selección al buscar. Captura ciega: cantidad encontrada con unidad visible; cero y pendiente permanecen distintos. No altera saldos ni conteos previos.
+- Las cantidades visibles omiten ceros decimales finales sin redondear ni cambiar la precisión almacenada; la revisión previa muestra cantidad y unidad, sin repetir el título del campo.
+
+La preparación de conteos carga el alcance habitual por sucursal (ventas/recepciones de 30 días o existencias del último ciclo exitoso reciente de Point). El catálogo histórico queda en la búsqueda de excepciones; cambiar sucursal recarga su lista y las búsquedas conservan selecciones y exclusiones. No se muestran cantidades esperadas.
