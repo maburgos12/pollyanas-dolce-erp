@@ -334,7 +334,14 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Redis redelivers unacknowledged work after this deadline. SAT downloads can
+# take four hours; the one-hour default reruns the same task while it is active.
+# All workers sharing this broker must use the same timeout.
+CELERY_VISIBILITY_TIMEOUT = 24 * 60 * 60
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_TASK_ROUTES = {
+    "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
     "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
     # Los avisos a personas no pueden formarse detrás de la automatización de

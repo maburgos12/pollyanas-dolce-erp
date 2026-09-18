@@ -23,7 +23,7 @@ requires_image_rebuild() {
 build_application_images() {
   local compose_file="$1"
   local service
-  for service in web worker worker_notificaciones worker_recetas recetas_watchdog beat; do
+  for service in web worker worker_notificaciones worker_sat worker_recetas recetas_watchdog beat; do
     COMPOSE_PARALLEL_LIMIT=1 docker compose -f "$compose_file" build "$service"
   done
 }
@@ -47,7 +47,7 @@ main() {
   if requires_image_rebuild "$changed_files"; then
     imagen_reconstruida=1
     build_application_images "$compose_file"
-    "${compose[@]}" up -d --force-recreate worker worker_notificaciones beat worker_recetas recetas_watchdog web
+    "${compose[@]}" up -d --force-recreate worker worker_notificaciones worker_sat beat worker_recetas recetas_watchdog web
   fi
 
   "${compose[@]}" exec -T web python manage.py migrate --noinput
@@ -59,15 +59,15 @@ main() {
     # estáticos que tiene en memoria es el viejo: sin este reinicio, cualquier
     # plantilla que use un estático nuevo revienta con "Missing staticfiles
     # manifest entry". No se recrea el contenedor otra vez, sólo se reinicia.
-    "${compose[@]}" restart worker worker_notificaciones beat worker_recetas recetas_watchdog
+    "${compose[@]}" restart worker worker_notificaciones worker_sat beat worker_recetas recetas_watchdog
     "${compose[@]}" restart web
   elif requires_compose_recreate "$changed_files"; then
     # restart does not apply changed commands or create new services.
-    "${compose[@]}" up -d --no-deps --build --force-recreate worker worker_notificaciones beat worker_recetas recetas_watchdog web
+    "${compose[@]}" up -d --no-deps --build --force-recreate worker worker_notificaciones worker_sat beat worker_recetas recetas_watchdog web
   elif requires_process_restart "$changed_files"; then
     # Gunicorn runs with preload, so HUP forks workers from the master's stale
     # Python memory. Celery processes also retain imported task code.
-    "${compose[@]}" restart worker worker_notificaciones beat worker_recetas recetas_watchdog
+    "${compose[@]}" restart worker worker_notificaciones worker_sat beat worker_recetas recetas_watchdog
     "${compose[@]}" restart web
   else
     "${compose[@]}" exec -T web sh -lc 'kill -HUP 1'

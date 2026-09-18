@@ -17,6 +17,7 @@ cat >"$tmp_dir/expected-docker-calls.txt" <<'EOF'
 compose -f /tmp/docker-compose-test.yml build web
 compose -f /tmp/docker-compose-test.yml build worker
 compose -f /tmp/docker-compose-test.yml build worker_notificaciones
+compose -f /tmp/docker-compose-test.yml build worker_sat
 compose -f /tmp/docker-compose-test.yml build worker_recetas
 compose -f /tmp/docker-compose-test.yml build recetas_watchdog
 compose -f /tmp/docker-compose-test.yml build beat
