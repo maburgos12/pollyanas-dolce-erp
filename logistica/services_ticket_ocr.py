@@ -15,6 +15,9 @@ MODELO = "gpt-4o"
 # ponytail: 1280px de lado largo alcanza para leer un ticket térmico y recorta
 # el costo por imagen. Subir si aparecen tickets ilegibles por resolución.
 LADO_LARGO_MAX = 1280
+# El repartidor espera esta lectura parado en la gasolinera: si tarda más, se
+# acepta la carga y la auditoría posterior se encarga.
+TIMEOUT_SEGUNDOS = 10.0
 
 PROMPT = """Eres un auditor de tickets de gasolinera mexicanos.
 Analiza la foto y responde SOLO con JSON, sin texto adicional.
@@ -54,8 +57,11 @@ class TicketOCRNoDisponible(RuntimeError):
     """El servicio de lectura no está configurado o no respondió."""
 
 
-def leer_ticket(field_file) -> dict:
-    """Devuelve lo que el modelo leyó del ticket. Lanza TicketOCRNoDisponible si falla."""
+def leer_ticket(field_file, *, timeout: float | None = None) -> dict:
+    """Devuelve lo que el modelo leyó del ticket. Lanza TicketOCRNoDisponible si falla.
+
+    `timeout` acota la espera cuando hay una persona esperando la respuesta.
+    """
     api_key = getattr(settings, "OPENAI_API_KEY", "")
     if not api_key:
         raise TicketOCRNoDisponible("OPENAI_API_KEY no está configurada")
@@ -68,7 +74,8 @@ def leer_ticket(field_file) -> dict:
     imagen_b64 = _imagen_para_modelo(field_file)
 
     try:
-        respuesta = OpenAI(api_key=api_key).chat.completions.create(
+        cliente = OpenAI(api_key=api_key, timeout=timeout or TIMEOUT_SEGUNDOS, max_retries=1)
+        respuesta = cliente.chat.completions.create(
             model=MODELO,
             temperature=0,
             max_tokens=400,

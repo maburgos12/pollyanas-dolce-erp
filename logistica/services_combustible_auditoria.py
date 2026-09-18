@@ -24,7 +24,9 @@ PRECIO_LITRO_MIN = Decimal("15")
 PRECIO_LITRO_MAX = Decimal("40")
 
 
-def auditar_carga_combustible(carga_id: int) -> dict:
+def auditar_carga_combustible(carga_id: int, lectura: dict | None = None) -> dict:
+    """Audita una carga. `lectura` reaprovecha lo ya leído del ticket para no
+    pagar dos veces por la misma foto cuando la PWA ya la validó al guardar."""
     carga = CargaCombustibleUnidad.objects.select_related("bitacora", "unidad", "repartidor__user").get(pk=carga_id)
     motivos: list[str] = []
     score = 0
@@ -52,9 +54,9 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     score += imagen["score"]
     motivos.extend(imagen["motivos"])
 
-    lectura = _cotejar_ticket(carga)
-    score += lectura["score"]
-    motivos.extend(lectura["motivos"])
+    cotejo = _cotejar_ticket(carga, lectura)
+    score += cotejo["score"]
+    motivos.extend(cotejo["motivos"])
 
     estado = _estado(score)
     carga.ticket_sha256 = ticket_sha or ""
@@ -62,10 +64,10 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     carga.auditoria_estado = estado
     carga.auditoria_motivos = motivos
     carga.auditoria_detalle = {
-        "modo": lectura["modo"],
+        "modo": cotejo["modo"],
         "precio_litro": str(precio_litro) if precio_litro is not None else None,
         "imagen": imagen["detalle"],
-        "ticket_leido": lectura["detalle"],
+        "ticket_leido": cotejo["detalle"],
     }
     carga.auditoria_analizada_en = timezone.now()
     carga.save(
@@ -78,17 +80,17 @@ def auditar_carga_combustible(carga_id: int) -> dict:
             "auditoria_analizada_en",
         ]
     )
-    return {"estado": estado, "score": min(score, 100), "motivos": motivos, "ticket": lectura["detalle"]}
+    return {"estado": estado, "score": min(score, 100), "motivos": motivos, "ticket": cotejo["detalle"]}
 
 
-def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
+def _cotejar_ticket(carga: CargaCombustibleUnidad, lectura: dict | None = None) -> dict:
     """Lee el ticket y lo compara contra lo que capturó el repartidor.
 
     Si la lectura no está disponible, la carga NO se castiga: se marca para
     revisión humana sin sumar puntos de riesgo.
     """
     try:
-        leido = leer_ticket(carga.foto_ticket)
+        leido = lectura if lectura is not None else leer_ticket(carga.foto_ticket)
     except TicketOCRNoDisponible as exc:
         logger.warning("No se pudo leer ticket de carga %s: %s", carga.pk, exc)
         return {
