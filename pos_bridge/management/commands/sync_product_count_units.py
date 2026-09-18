@@ -22,21 +22,32 @@ class Command(BaseCommand):
             units = {str(row['ID_Unidad']): row for row in client.get_units()}
             rows = client.get_all_products()
         evidence = {}
+        ambiguous = set()
         for row in rows:
             unit = catalog_count_unit(row, units)
             if unit is None:
                 raise CommandError(f"Producto Point sin unidad comprobable: {row.get('Codigo')}")
             code = unit['codigo']
             if code in evidence:
-                raise CommandError(f'Código Point duplicado: {code}')
+                ambiguous.add(code)
             evidence[code] = unit
+        for code in ambiguous:
+            evidence.pop(code, None)
         if not evidence:
             raise CommandError('Point no devolvió productos con unidad.')
         updated = 0
         with transaction.atomic():
-            for product in PointProduct.objects.select_for_update().filter(active=True, sku__in=evidence):
+            for product in PointProduct.objects.select_for_update().filter(active=True, sku__in=set(evidence)|ambiguous):
                 if not options['dry_run']:
-                    product.metadata = {**(product.metadata or {}), COUNT_UNIT_KEY: evidence[product.sku]}
-                    product.save(update_fields=['metadata'])
-                updated += 1
+                    metadata = dict(product.metadata or {})
+                    if product.sku in ambiguous:
+                        metadata.pop(COUNT_UNIT_KEY, None)
+                    else:
+                        metadata[COUNT_UNIT_KEY] = evidence[product.sku]
+                    if metadata != product.metadata:
+                        product.metadata = metadata
+                        product.save(update_fields=['metadata'])
+                updated += product.sku not in ambiguous
+        if ambiguous:
+            self.stdout.write(self.style.WARNING('Códigos ambiguos sin unidad asignada: ' + ', '.join(sorted(ambiguous))))
         self.stdout.write(f"{'Simulación' if options['dry_run'] else 'Sincronizado'}: {updated} productos; {len(evidence)} códigos oficiales. Sin cambios a saldos ni conteos existentes.")

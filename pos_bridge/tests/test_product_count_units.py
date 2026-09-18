@@ -40,10 +40,33 @@ class ProductCountUnitSyncTests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(product_count_unit(self.product)[0], 'PZA')
 
-    def test_invalid_or_duplicate_catalog_rolls_back_without_erasing_old_metadata(self):
-        for rows in ([{'Codigo':'0119','FK_Unidad':999}], self.rows*2, []):
+    def test_invalid_catalog_rolls_back_without_erasing_old_metadata(self):
+        for rows in ([{'Codigo':'0119','FK_Unidad':999}], []):
             self.rows = rows
             with self.assertRaises(CommandError):
                 self.run_sync()
             self.product.refresh_from_db()
             self.assertEqual(self.product.metadata,{'keep':True})
+
+    def test_ambiguous_codes_do_not_block_unique_products_or_keep_old_unit_evidence(self):
+        self.run_sync()
+        other=PointProduct.objects.create(external_id='unique',sku='UNIQUE',name='Único',metadata={'keep':True})
+        self.rows += [{'Codigo':'0119','Unidad':'KG','FK_Unidad':3}, {'Codigo':'UNIQUE','Unidad':'LT','FK_Unidad':18}]
+        self.run_sync(dry=True)
+        self.product.refresh_from_db()
+        self.assertEqual(product_count_unit(self.product)[0],'PZA')
+        self.run_sync()
+        self.product.refresh_from_db();other.refresh_from_db()
+        self.assertEqual(self.product.metadata,{'keep':True})
+        self.assertEqual(product_count_unit(self.product)[0],'')
+        self.assertEqual(product_count_unit(other)[0],'LT')
+        self.assertTrue(other.metadata['keep'])
+
+    def test_duplicate_codes_are_ambiguous_even_when_units_agree(self):
+        other=PointProduct.objects.create(external_id='unique',sku='UNIQUE',name='Único')
+        self.rows = self.rows*2 + [{'Codigo':'UNIQUE','Unidad':'PZA','FK_Unidad':5}]
+        self.run_sync()
+        self.product.refresh_from_db()
+        self.assertNotIn(COUNT_UNIT_KEY,self.product.metadata)
+        other.refresh_from_db()
+        self.assertEqual(product_count_unit(other)[0],'PZA')
