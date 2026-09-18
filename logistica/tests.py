@@ -2860,6 +2860,34 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         self.assertEqual(resultado["score"], 0)
         self.assertIn("litros_capturados_difieren", resultado["motivos"])
 
+    def test_importe_leido_que_contradice_la_aritmetica_no_acusa(self):
+        """Caso real #13: el ticket dice 44.444 L x $27 = $1,200, pero el lector
+        reportó $1,206. Esa lectura se contradice y no debe señalar a nadie."""
+        carga = self._carga_de_prueba("aritmetica", litros="44.44", importe="1200.00")
+        lectura = _lectura(
+            litros=Decimal("44.444"), importe=Decimal("1260.00"), precio=Decimal("27.00")
+        )
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["score"], 0)
+        self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
+
+    def test_precio_por_litro_imposible_invalida_la_lectura(self):
+        """Caso real #36: el lector reportó $43.206/L. No existe ese precio."""
+        carga = self._carga_de_prueba("precioraro", litros="37.03", importe="1000.00")
+        lectura = _lectura(
+            litros=Decimal("37.037"), importe=Decimal("1600.00"), precio=Decimal("43.206")
+        )
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
+
     def test_ticket_doblado_no_acusa_por_litros_inventados(self):
         """El renglón de litros viene tapado y el lector devuelve un número que
         no cuadra con precio x litros: no se acusa a nadie con esa cifra."""
@@ -2874,7 +2902,7 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
 
         self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
         self.assertEqual(resultado["score"], 0)
-        self.assertIn("litros_del_ticket_dudosos", resultado["motivos"])
+        self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
 
     def test_diferencia_de_centavos_se_tolera(self):
         carga = self._carga_de_prueba("centavos")

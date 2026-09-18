@@ -18,6 +18,10 @@ TOLERANCIA_IMPORTE = Decimal("5.00")
 TOLERANCIA_LITROS_AVISO = Decimal("0.01")   # 1%: en producción el redondeo anda en 1-2%
 # Margen para dar por buena la aritmética del propio ticket (litros x precio).
 TOLERANCIA_COHERENCIA = Decimal("0.02")
+# Rango real del litro de combustible en México. Un precio leído fuera de aquí
+# significa que el lector tomó otro renglón, no que la gasolina costara eso.
+PRECIO_LITRO_MIN = Decimal("15")
+PRECIO_LITRO_MAX = Decimal("40")
 
 
 def auditar_carga_combustible(carga_id: int) -> dict:
@@ -124,24 +128,28 @@ def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
         score += 80
         motivos.append("folio_repetido")
 
+    # Una lectura solo sirve para señalar a alguien si el ticket cuadra consigo
+    # mismo. Si litros x precio contradice el importe, o el precio por litro no
+    # es un precio real de combustible, el lector tomó mal algún renglón.
+    coherente = _ticket_coherente(leido)
+    detalle["lectura_coherente"] = coherente
+
     # El importe es la señal dura: es el dinero que salió.
     diferencia_importe = _diferencia(leido["importe_total"], carga.importe_total)
-    if diferencia_importe is None:
+    detalle["diferencia_importe"] = str(diferencia_importe) if diferencia_importe is not None else None
+    if not coherente:
+        motivos.append("lectura_del_ticket_dudosa")
+    elif diferencia_importe is None:
         motivos.append("ticket_sin_importe")
     elif diferencia_importe > TOLERANCIA_IMPORTE:
         score += 45
         motivos.append("importe_no_coincide")
-    detalle["diferencia_importe"] = str(diferencia_importe) if diferencia_importe is not None else None
 
-    # Los litros solo valen si la aritmética del propio ticket cuadra. Un ticket
-    # doblado en ese renglón hace que el lector devuelva un número inventado.
-    coherente = _ticket_coherente(leido)
-    detalle["lectura_coherente"] = coherente
     diferencia_litros = _diferencia(leido["litros"], carga.litros)
     detalle["diferencia_litros"] = str(diferencia_litros) if diferencia_litros is not None else None
 
     if not coherente:
-        motivos.append("litros_del_ticket_dudosos")
+        pass  # ya se informó arriba que la lectura completa es dudosa
     elif diferencia_litros is None:
         motivos.append("ticket_sin_litros")
     elif carga.litros and (diferencia_litros / carga.litros) > TOLERANCIA_LITROS_AVISO:
@@ -156,16 +164,20 @@ def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
 
 
 def _ticket_coherente(leido: dict) -> bool:
-    """¿La aritmética del propio ticket cuadra (litros x precio = importe)?
+    """¿El ticket cuadra consigo mismo?
 
-    Si no cuadra, el lector se inventó alguna cifra —típicamente cuando el
-    renglón viene doblado— y sus litros no sirven para acusar a nadie.
+    Dos comprobaciones, ambas sobre las cifras del propio ticket:
+    litros x precio tiene que dar el importe, y el precio tiene que ser un
+    precio real de combustible. Si algo de eso falla, el lector tomó mal un
+    renglón —típicamente uno doblado— y ninguna de sus cifras sirve para
+    señalar a una persona.
     """
     litros, precio, importe = leido["litros"], leido["precio_por_litro"], leido["importe_total"]
     if not litros or not precio or not importe:
         return False
-    esperado = litros * precio
-    return abs(esperado - importe) <= importe * TOLERANCIA_COHERENCIA
+    if not (PRECIO_LITRO_MIN <= precio <= PRECIO_LITRO_MAX):
+        return False
+    return abs(litros * precio - importe) <= importe * TOLERANCIA_COHERENCIA
 
 
 def _folio_repetido(folio: str, carga_id: int) -> bool:
