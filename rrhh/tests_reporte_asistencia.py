@@ -194,6 +194,7 @@ class ReporteAsistenciaTests(TestCase):
             "fecha_inicio": "2026-06-10",
             "fecha_fin": "2026-06-10",
             "sucursal": "matr",
+            "vista": "incidencias",
         }
 
         response_html = self.client.get(self.url, params)

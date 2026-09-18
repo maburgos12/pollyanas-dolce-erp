@@ -1,0 +1,6 @@
+{% load static %}
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reporte de asistencia · {{ fecha_inicio }} al {{ fecha_fin }}</title><link rel="stylesheet" href="{% static 'css/rrhh_reportes.css' %}"></head>
+<body class="rrhh-print-page"><header><h1>Pollyana's Dolce · Reporte de asistencia</h1><p>{{ fecha_inicio }} al {{ fecha_fin }} · {{ departamento_nombre }} · {{ resumen_global.empleados }} empleados</p><a class="rrhh-print-control" href="{% url 'rrhh:rrhh_reporte_asistencia' %}?{{ query_volver }}">Volver a la consulta</a><button class="rrhh-print-control" type="button" id="rrhh-print-button">Imprimir</button><p class="rrhh-print-control">La impresión incluye todo el conjunto filtrado, aunque la consulta estuviera paginada.</p></header>
+{% include 'rrhh/includes/reporte_asistencia_resumen.html' %}
+{% for reporte in reportes %}<section class="rrhh-print-employee" data-empleado-id="{{ reporte.datos.id }}"><h2>{{ reporte.datos.nombre }} · {{ reporte.datos.codigo }}</h2>{% include 'rrhh/includes/reporte_asistencia_detalle.html' %}</section>{% empty %}<p>No hay empleados en este filtro.</p>{% endfor %}
+<footer>Uso interno · America/Mazatlan · Consulta de solo lectura</footer><script src="{% static 'js/rrhh_reportes.js' %}" defer></script></body></html>

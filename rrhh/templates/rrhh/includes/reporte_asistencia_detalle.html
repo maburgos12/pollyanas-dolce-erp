@@ -1,0 +1,30 @@
+<div class="rrhh-person-meta">
+  <p>{{ reporte.datos.departamento|default:"Sin departamento" }} · {{ reporte.datos.area|default:"Sin área" }} · {{ reporte.datos.sucursal|default:"Sin sucursal" }} · {{ reporte.datos.puesto|default:"Sin puesto" }}
+    {% if not reporte.empleado.activo %}<strong>Baja {{ reporte.empleado.fecha_baja_reporte|date:"Y-m-d"|default:"sin fecha documentada" }}</strong>{% endif %}</p>
+  <p><strong>Extra:</strong> detectado {{ reporte.extra_resumen.detectado }} · autorizado / pagado {{ reporte.extra_resumen.autorizado }} · pendiente {{ reporte.extra_resumen.pendiente }} · rechazado {{ reporte.extra_resumen.rechazado }} · solicitado pendiente {{ reporte.extra_resumen.solicitado }}. {% if reporte.extra_resumen.parcial %}<strong>Subtotal parcial.</strong>{% endif %}</p>
+  <p>Retardos registrados: {{ reporte.resumen.retardos }} · Faltas pendientes: {{ reporte.resumen.faltas }} · Conciliadas: {{ reporte.resumen.faltas_conciliadas }} · Por retardos: {{ reporte.resumen.falta_retardos }} · Faltas pendientes en 30 días: <strong>{{ reporte.faltas_30d }}</strong>.</p>
+  <p>Permisos: {{ reporte.permisos_resumen.minutos_cg }} min CG / {{ reporte.permisos_resumen.minutos_sg }} min SG; {{ reporte.permisos_resumen.dias_cg }} días CG / {{ reporte.permisos_resumen.dias_sg }} días SG. CG: con goce; SG: sin goce.</p>
+  {% for aviso in reporte.avisos_30d %}<p class="rrhh-report-warning">{{ aviso.fecha|date:"d/m/Y" }} · {{ aviso.tipo }} · {{ aviso.estado }} · {{ aviso.detalle }}</p>{% endfor %}
+  {% for nota in reporte.observaciones_resumen %}<p class="rrhh-report-warning">{{ nota }}</p>{% endfor %}
+</div>
+<div class="table-responsive rrhh-daily-scroll" tabindex="0" role="region" aria-label="Detalle diario de {{ reporte.datos.nombre }}">
+<table class="table table-striped rrhh-daily-table">
+  <caption class="rrhh-caption">Detalle diario · {{ reporte.datos.nombre }} · {{ fecha_inicio }} al {{ fecha_fin }}</caption>
+  <thead><tr><th scope="col">Fecha</th><th scope="col">Entrada</th><th scope="col">Salida</th><th scope="col">Comida min</th><th scope="col">Tarde min</th><th scope="col">Retardos registrados</th><th scope="col">Extra detectado</th><th scope="col">Autorizado / pagado</th><th scope="col">Pendiente</th><th scope="col">Rechazado</th><th scope="col">Solicitado pendiente</th><th scope="col">Permiso autorizado</th><th scope="col">Incidencia / estado</th></tr></thead>
+  <tbody>{% for fila in reporte.filas %}<tr data-fecha="{{ fila.fecha|date:'Y-m-d' }}">
+    <th scope="row">{{ fila.fecha|date:"d/m/Y" }}</th>
+    <td>{{ fila.asistencia.entrada|date:"H:i"|default:"--" }}</td><td>{{ fila.asistencia.salida|date:"H:i"|default:"--" }}</td>
+    <td>{% if fila.asistencia %}{{ fila.asistencia.minutos_comida|default_if_none:"--" }}{% else %}--{% endif %}</td><td>{{ fila.tarde_minutos|default_if_none:"N/D" }}</td><td>{{ fila.retardos_registrados }}</td>
+    <td>{{ fila.extra.detectado }}</td><td>{{ fila.extra.autorizado }}</td><td>{{ fila.extra.pendiente }}</td><td>{{ fila.extra.rechazado }}</td><td>{{ fila.extra.solicitado_minutos }} min</td>
+    <td>{{ fila.permiso_texto|default:"--" }}</td>
+    <td>{% if fila.estado_laboral == "pre_ingreso" %}<div>No laborado (previo ingreso)</div>{% elif fila.estado_laboral_label %}<div>{{ fila.estado_laboral_label }}</div>{% endif %}
+      {% for incidencia in fila.incidencias %}<div><strong>{{ incidencia.tipo }}</strong> · {{ incidencia.estado }}{% if incidencia.minutos %} · {{ incidencia.minutos }} min{% endif %}{% if incidencia.detalle %}<br>{{ incidencia.detalle }}{% endif %}</div>{% endfor %}
+      {% for nota in fila.observaciones %}<div>{{ nota }}</div>{% endfor %}
+      {% if fila.estado_laboral_label != "No aplica" %}<div>{{ fila.extra.estado }}</div>{% endif %}
+    </td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% if reporte.permisos %}
+<details class="rrhh-permit-details"><summary>Permisos autorizados y folios ({{ reporte.permisos|length }})</summary>
+  <ul>{% for permiso in reporte.permisos %}<li><strong>{{ permiso.folio }}</strong> · {{ permiso.tipo }} · {{ permiso.fecha_inicio|date:"d/m/Y H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"d/m/Y H:i" }}{% endif %} · {% if permiso.goce_sueldo %}con goce{% else %}sin goce{% endif %} · {% if permiso.dias %}{{ permiso.dias }} día(s){% else %}{{ permiso.minutos|default_if_none:"N/D" }} min{% endif %}{% for nota in permiso.observaciones %} · {{ nota }}{% endfor %}</li>{% endfor %}</ul>
+</details>{% endif %}

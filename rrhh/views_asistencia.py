@@ -9,9 +9,13 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.http import HttpResponse, JsonResponse
+from django.core.paginator import Paginator
+from django.views.decorators.cache import never_cache
+import logging
+import calendar
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
@@ -372,6 +376,7 @@ def _redirect_reporte_asistencia_from_post(request):
         "fecha_fin": (request.POST.get("fecha_fin") or "").strip(),
         "empleado": (request.POST.get("empleado") or "").strip(),
         "sucursal": (request.POST.get("sucursal") or "").strip(),
+        "vista": "incidencias",
     }
     query = urlencode({key: value for key, value in params.items() if value})
     url = reverse("rrhh:rrhh_reporte_asistencia")
@@ -498,7 +503,7 @@ def monitor_sincronizacion(request):
 
 
 @login_required
-def reporte_asistencia(request):
+def reporte_asistencia_incidencias(request):
     if not can_view_rrhh(request.user):
         raise PermissionDenied("No tienes permisos para ver el reporte de asistencia")
 
@@ -561,6 +566,96 @@ def reporte_asistencia(request):
             "query_xlsx": query_xlsx,
         },
     )
+
+
+@login_required
+@never_cache
+def reporte_asistencia(request):
+    """Consulta completa compartida por pantalla, PDF e impresión; sin escrituras."""
+    if not can_view_rrhh(request.user):
+        raise PermissionDenied("No tienes permisos para ver el reporte de asistencia")
+    export = (request.GET.get("export") or "").strip().lower()
+    if (request.GET.get("vista") == "incidencias" or export in {"csv", "xlsx"}) and not (request.GET.get("departamento") or request.GET.get("area")):
+        return reporte_asistencia_incidencias(request)
+
+    from .services_reporte_asistencia import build_reporte_departamento
+
+    hoy = timezone.localdate()
+    defaults = {"fecha_inicio": (hoy - timedelta(days=14)).isoformat(), "fecha_fin": hoy.isoformat()}
+    filtros = {key: (request.GET.get(key) or "").strip() for key in
+               ("fecha_inicio", "fecha_fin", "departamento", "area", "empleado", "sucursal")}
+    for key, value in defaults.items():
+        if not filtros[key]:
+            filtros[key] = value
+    error = ""
+    data = None
+    catalogo = []
+    try:
+        inicio, fin = parse_date(filtros["fecha_inicio"]), parse_date(filtros["fecha_fin"])
+        if inicio is None or fin is None:
+            raise ValidationError("Indica fechas válidas para la consulta.")
+        if export not in {"", "pdf", "imprimir"}:
+            raise ValidationError("El formato de reporte solicitado no es válido.")
+        # In production this is the first statement of a fresh read-only snapshot.
+        # Django TestCase already has an outer transaction; do not change it.
+        outer_transaction = connection.in_atomic_block
+        with transaction.atomic():
+            if not outer_transaction:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            data = build_reporte_departamento(inicio, fin, departamento=filtros["departamento"],
+                area=filtros["area"], empleado_id=filtros["empleado"], sucursal=filtros["sucursal"], user=request.user)
+            # Catalog and results use the same snapshot. The legacy helper remains
+            # the reference for active staff and former staff with recorded activity.
+            catalogo = list(_empleados_reporte_asistencia(inicio, fin).select_related("sucursal_ref"))
+            ids = {e.id for e in catalogo}
+            catalogo.extend(r["empleado"] for r in data["reportes"] if r["empleado"].id not in ids)
+    except (ValidationError, ValueError, OverflowError) as exc:
+        error = " ".join(exc.messages) if isinstance(exc, ValidationError) else "Indica fechas válidas para la consulta."
+
+    base_params = {key: value for key, value in filtros.items() if value}
+    context = {**filtros, "empleado_id": filtros["empleado"], "module_tabs": _module_tabs("reporte_asistencia", request.user),
+        "error_reporte": error, "data": data, "resumen_global": data["resumen"] if data else None,
+        "empleados": catalogo, "departamentos": Empleado.DEP_CHOICES,
+        "empleado_seleccionado_disponible": any(str(e.id) == filtros["empleado"] for e in catalogo),
+        "departamento_valido": not filtros["departamento"] or filtros["departamento"] in dict(Empleado.DEP_CHOICES),
+        "departamento_nombre": dict(Empleado.DEP_CHOICES).get(filtros["departamento"], "Todos los departamentos"),
+        "areas": sorted({e.area for e in catalogo if e.area}),
+        "sucursales": sorted({e.sucursal for e in catalogo if e.sucursal}),
+        "query_volver": urlencode(base_params),
+        "query_pdf": urlencode({**base_params, "export": "pdf"}),
+        "query_imprimir": urlencode({**base_params, "export": "imprimir"}),
+        "query_incidencias": urlencode({"vista": "incidencias", **{k:v for k,v in base_params.items() if k not in {"departamento", "area"}}}),
+        "mes_periodo": filtros["fecha_inicio"][:7], "quincena_seleccionada": "", "reportes": [], "total_incidencias": 0}
+    if data:
+        if inicio.year == fin.year and inicio.month == fin.month:
+            if inicio.day == 1 and fin.day == 15:
+                context["quincena_seleccionada"] = "1"
+            elif inicio.day == 16 and fin.day == calendar.monthrange(fin.year, fin.month)[1]:
+                context["quincena_seleccionada"] = "2"
+    if error:
+        return render(request, "rrhh/reporte_asistencia_completo.html", context, status=400)
+    for reporte in data["reportes"]:
+        employee_params = {**base_params, "empleado": str(reporte["empleado"].id)}
+        reporte["query_pdf"] = urlencode({**employee_params, "export": "pdf"})
+        reporte["query_consulta"] = urlencode(employee_params)
+    context["total_incidencias"] = sum(len(f["incidencias"]) for r in data["reportes"] for f in r["filas"])
+    if export == "pdf":
+        try:
+            from .exports_reporte_asistencia import exportar_pdf_reporte
+            return exportar_pdf_reporte(data)
+        except Exception:
+            logging.getLogger(__name__).exception("No se pudo generar el PDF de asistencia")
+            context["error_reporte"] = "No se pudo generar el PDF. Conservamos los filtros para que puedas reintentar."
+            return render(request, "rrhh/reporte_asistencia_completo.html", context, status=503)
+    if export == "imprimir":
+        context["reportes"] = data["reportes"]
+        return render(request, "rrhh/reporte_asistencia_imprimir.html", context)
+    paginator = Paginator(data["reportes"], 10)
+    pagina = paginator.get_page(request.GET.get("page", 1))
+    context.update({"reportes": list(pagina.object_list), "pagina": pagina,
+        "query_pagina": urlencode(base_params), "total_empleados": paginator.count})
+    return render(request, "rrhh/reporte_asistencia_completo.html", context)
 
 
 AJUSTE_CAMPOS_HORAS = {
