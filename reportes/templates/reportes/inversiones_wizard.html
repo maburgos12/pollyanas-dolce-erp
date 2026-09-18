@@ -27,7 +27,10 @@
     <article class="inv-kpi"><div class="inv-label">Fuente</div><div class="inv-value pd-u-f2ea5fc13d">{{ benchmark.data_source|default:"N/D" }}</div></article>
   </section>
 
-  <form method="post" id="inversionWizardForm" action="{% url 'inversiones:wizard' %}">
+  {# novalidate: los campos required viven en pasos ocultos y el navegador aborta el
+     envío en silencio porque no puede enfocarlos. La validación de abajo es la que
+     sí muestra los errores al usuario. #}
+  <form method="post" id="inversionWizardForm" action="{% url 'inversiones:wizard' %}" novalidate>
     {% csrf_token %}
     <input type="hidden" name="action" value="crear_proyecto">
     <input type="hidden" name="partidas_json" id="partidas_json">
@@ -290,6 +293,16 @@
   document.querySelectorAll(".js-operacion,.js-fin,.js-financing").forEach((input) => input.addEventListener("input", renderReview));
   document.getElementById("inversionWizardForm").addEventListener("submit", (event) => {
     const errors = [];
+    // Los campos por resaltar se juntan aquí y se marcan hasta el final: setErrors
+    // limpia las marcas .is-invalid, así que marcarlos antes no dejaba rastro.
+    const invalidos = [];
+    let pasoConError = null;
+    const marcar = (nodo) => {
+      if (!nodo) return;
+      invalidos.push(nodo);
+      const paso = nodo.closest(".inv-step")?.dataset.step;
+      if (paso && !pasoConError) pasoConError = Number(paso);
+    };
     const requiredFields = [
       ["[name=nombre_proyecto]", "Captura el nombre del proyecto."],
       ["[name=fecha_inicio]", "Captura la fecha de inicio."],
@@ -299,21 +312,29 @@
       const input = document.querySelector(selector);
       if (!String(input?.value || "").trim()) {
         errors.push(message);
-        input?.classList.add("is-invalid");
+        marcar(input);
       }
     });
     const gastos = ["renta_mensual", "nomina_mensual", "servicios_mensual", "marketing_mensual", "otros_fijos_mensual"].reduce((sum, name) => sum + Number(document.querySelector(`[name=${name}]`)?.value || 0), 0);
     if (gastos <= 0) {
       errors.push("Captura al menos un gasto fijo mensual para evitar ROI inflado.");
-      document.querySelectorAll(".js-operacion").forEach((input) => input.classList.add("is-invalid"));
+      document.querySelectorAll(".js-operacion").forEach(marcar);
     }
     document.getElementById("partidas_json").value = JSON.stringify(partidas);
     if (!partidas.length || !partidas.some((p) => Number(p.monto || 0) > 0 && String(p.descripcion || "").trim())) {
       errors.push("Agrega al menos una partida con descripción y monto mayor a cero.");
+      marcar(document.getElementById("partidasBody"));
     }
     if (errors.length) {
       event.preventDefault();
+      // Llevar al paso del primer error: el mensaje no sirve de nada si el campo
+      // que hay que corregir está en un paso que no se ve.
+      if (pasoConError) {
+        step = pasoConError;
+        renderSteps();
+      }
       setErrors(errors);
+      invalidos.forEach((nodo) => nodo.classList.add("is-invalid"));
     }
   });
   renderPartidas();

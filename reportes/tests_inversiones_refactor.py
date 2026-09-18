@@ -173,6 +173,17 @@ class InversionesRefactorTests(TestCase):
         self.assertNotIn("renderPartidas()", handler)
         self.assertIn("totalCell.textContent", handler)
 
+    def test_wizard_form_desactiva_validacion_nativa(self):
+        """Los campos required viven en pasos ocultos: con validación nativa el
+        navegador aborta el envío en silencio porque no puede enfocarlos, y la
+        validación propia del wizard —la que sí muestra errores— nunca corre."""
+        response = self.client.get(reverse("reportes:inversiones_wizard"))
+        html = response.content.decode()
+        form_tag = html.split('id="inversionWizardForm"', 1)[1].split(">", 1)[0]
+
+        self.assertIn("novalidate", form_tag)
+        self.assertIn("Captura ventas promedio base.", html)
+
     def test_wizard_post_crea_proyecto_y_escenarios(self):
         response = self.client.post(reverse("reportes:inversiones_wizard"), self._payload_wizard())
 
