@@ -10,7 +10,8 @@
 <div class="table-responsive rrhh-daily-scroll" tabindex="0" role="region" aria-label="Detalle diario de {{ reporte.datos.nombre }}">
 <table class="table table-striped rrhh-daily-table">
   <caption class="rrhh-caption">Detalle diario · {{ reporte.datos.nombre }} · {{ fecha_inicio }} al {{ fecha_fin }}</caption>
-  <thead><tr><th scope="col">Fecha</th><th scope="col">Entrada</th><th scope="col">Salida</th><th scope="col">Comida min</th><th scope="col">Tarde min</th><th scope="col">Retardos registrados</th><th scope="col">Extra detectado</th><th scope="col">Autorizado / pagado</th><th scope="col">Pendiente</th><th scope="col">Rechazado</th><th scope="col">Solicitado pendiente</th><th scope="col">Permiso autorizado</th><th scope="col">Incidencia / estado</th></tr></thead>
+  <colgroup><col span="12"><col class="rrhh-incidence-col"></colgroup>
+  <thead><tr class="rrhh-print-identification"><th colspan="13">{{ reporte.datos.nombre }} · {{ reporte.datos.codigo }} · {{ fecha_inicio }} al {{ fecha_fin }}</th></tr><tr><th scope="col">Fecha</th><th scope="col">Entrada</th><th scope="col">Salida</th><th scope="col">Comida min</th><th scope="col">Tarde min</th><th scope="col">Retardos registrados</th><th scope="col">Extra detectado</th><th scope="col">Autorizado / pagado</th><th scope="col">Pendiente</th><th scope="col">Rechazado</th><th scope="col">Solicitado pendiente</th><th scope="col">Permiso autorizado</th><th scope="col">Incidencia / estado</th></tr></thead>
   <tbody>{% for fila in reporte.filas %}<tr data-fecha="{{ fila.fecha|date:'Y-m-d' }}">
     <th scope="row">{{ fila.fecha|date:"d/m/Y" }}</th>
     <td>{{ fila.asistencia.entrada|date:"H:i"|default:"--" }}</td><td>{{ fila.asistencia.salida|date:"H:i"|default:"--" }}</td>

@@ -159,3 +159,11 @@ class ReportesDepartamentoFlowTests(TestCase):
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.context['resumen_global']['empleados'],0)
             self.assertContains(response,expected)
+
+    def test_month_print_identifies_every_employee_in_repeating_header(self):
+        response=self.client.get(self.url,{**self.params,'fecha_fin':'2026-09-30','export':'imprimir'})
+        self.assertEqual(response.status_code,200)
+        self.assertContains(response,'class="rrhh-print-identification"',count=12)
+        for employee in self.people:
+            self.assertContains(response,f'<th colspan="13">{employee.nombre} · {employee.codigo} · 2026-09-01 al 2026-09-30</th>',html=True)
+        self.assertEqual(response.content.decode().count('data-fecha='),12*30)
