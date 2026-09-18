@@ -1719,7 +1719,26 @@ textarea:focus,
 }
 
 .logi-bitacoras-table .logi-audit-cell {
-  min-width: 122px;
+  min-width: 190px;
+  white-space: normal;
+}
+
+.log-audit {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  max-width: 230px;
+}
+
+.log-audit .log-muted {
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.log-audit + .log-audit {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pd-border);
 }
 
 .logi-ticket-cell a + a,

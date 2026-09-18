@@ -116,7 +116,15 @@
             </td>
             <td class="cell-nowrap logi-audit-cell">
               {% for carga in bitacora.cargas_combustible.all %}
-                <span class="log-badge audit-{{ carga.auditoria_estado }}">{{ carga.get_auditoria_estado_display }}{% if carga.auditoria_score %} · {{ carga.auditoria_score }}{% endif %}</span>
+                <div class="log-audit">
+                  <span class="log-badge audit-{{ carga.auditoria_estado }}">{{ carga.get_auditoria_estado_display }}</span>
+                  {% with leido=carga.ticket_leido %}
+                    {% if leido %}
+                      <span class="log-muted">Ticket: {{ leido.litros|default:"?" }} L · ${{ leido.importe_total|default:"?" }}{% if leido.estacion %}<br>{{ leido.estacion }}{% endif %}</span>
+                    {% endif %}
+                  {% endwith %}
+                  {% for motivo in carga.auditoria_resumen %}<span class="log-muted">{{ motivo }}</span>{% endfor %}
+                </div>
               {% empty %}
                 <span class="log-muted">-</span>
               {% endfor %}
