@@ -18,11 +18,14 @@
   {% endfor %}
 {% endif %}
 
+<p><a class="btn btn-secondary" href="{% url 'rrhh:rrhh_reporte_asistencia' %}?fecha_inicio={{ fecha_inicio }}&amp;fecha_fin={{ fecha_fin }}">Consulta completa por departamento</a></p>
+<p class="muted">Esta vista muestra incidencias y permite su gestión. Usa fechas, empleado y sucursal para definir el alcance.</p>
 <section class="card">
   <div class="card-header">
     <h2>Filtros</h2>
   </div>
   <form method="get">
+    <input type="hidden" name="vista" value="incidencias">
     <div class="form-grid-2">
       <div class="form-group">
         <label for="fecha_inicio">Fecha inicio</label>

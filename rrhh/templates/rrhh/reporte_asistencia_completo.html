@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}RRHH · Reportes por departamento{% endblock %}
+{% block page_title %}RRHH · Reporte de asistencia{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/rrhh_reportes.css' %}">{% endblock %}
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">{% for tab in module_tabs %}<a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>{% endfor %}</section>
+<section class="card rrhh-report-filters" aria-labelledby="filtros-reporte">
+<div class="card-header"><div><h2 id="filtros-reporte">Consulta por departamento o persona</h2><p class="muted">Revisa el resumen y abre el detalle diario. Puedes descargar o imprimir todo el conjunto consultado.</p></div></div>
+<form method="get" id="rrhh-report-form">
+<div class="rrhh-filter-grid">
+  <div class="form-group"><label for="mes_periodo">Mes para elegir quincena</label><input class="input-field" id="mes_periodo" type="month" value="{{ mes_periodo }}"></div>
+  <div class="form-group"><label for="quincena">Elegir quincena</label><select class="input-field" id="quincena"><option value="">Fechas personalizadas</option><option value="1" {% if quincena_seleccionada == "1" %}selected{% endif %}>Primera: 1 al 15</option><option value="2" {% if quincena_seleccionada == "2" %}selected{% endif %}>Segunda: 16 al último día</option></select></div>
+  <div class="form-group"><label for="fecha_inicio">Fecha inicio</label><input class="input-field" id="fecha_inicio" type="date" name="fecha_inicio" value="{{ fecha_inicio }}" required></div>
+  <div class="form-group"><label for="fecha_fin">Fecha fin</label><input class="input-field" id="fecha_fin" type="date" name="fecha_fin" value="{{ fecha_fin }}" required></div>
+  <div class="form-group"><label for="departamento">Departamento</label><select class="input-field" id="departamento" name="departamento"><option value="">Todos los departamentos</option>{% if not departamento_valido %}<option value="{{ departamento }}" selected>Filtro inválido: {{ departamento }}</option>{% endif %}{% for codigo, nombre in departamentos %}<option value="{{ codigo }}" {% if departamento == codigo %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
+  <div class="form-group"><label for="area">Área registrada</label><select class="input-field" id="area" name="area"><option value="">Todas las áreas</option>{% if area and area not in areas %}<option value="{{ area }}" selected>{{ area }} (filtro conservado)</option>{% endif %}{% for nombre in areas %}<option value="{{ nombre }}" {% if area == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
+  <div class="form-group"><label for="empleado">Empleado</label><select class="input-field" id="empleado" name="empleado"><option value="">Plantilla completa del filtro</option>{% if empleado_id and not empleado_seleccionado_disponible %}<option value="{{ empleado_id }}" selected>Empleado {{ empleado_id }} (filtro conservado)</option>{% endif %}{% for empleado in empleados %}<option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }} · {{ empleado.codigo }}{% if not empleado.activo %} · Baja{% endif %}</option>{% endfor %}</select></div>
+  <div class="form-group"><label for="sucursal">Sucursal registrada</label><input class="input-field" id="sucursal" name="sucursal" value="{{ sucursal }}" placeholder="Todas" list="rrhh-sucursales"><datalist id="rrhh-sucursales">{% for nombre in sucursales %}<option value="{{ nombre }}">{% endfor %}</datalist></div>
+</div>
+<p class="muted">Hasta 31 días por consulta completa. Las fechas de ingreso y baja documentadas distinguen días no aplicables.</p>
+<div class="rrhh-report-actions"><button class="btn btn-primary" type="submit">Consultar</button>{% if data and not error_reporte %}<a class="btn btn-secondary" href="?{{ query_pdf }}">Descargar PDF del conjunto</a><a class="btn btn-secondary" href="?{{ query_imprimir }}">Imprimir conjunto completo</a>{% endif %}</div>
+</form></section>
+{% if error_reporte %}<div class="alert alert-danger" role="alert">{{ error_reporte }}</div>{% endif %}
+{% if data and not error_reporte %}
+{% include 'rrhh/includes/reporte_asistencia_resumen.html' %}
+{% if not reportes %}<div class="alert alert-info">No hay empleados que coincidan con todos los filtros. Revisa departamento, área, persona y sucursal.</div>{% else %}
+<section aria-labelledby="personas-reporte"><h2 id="personas-reporte">Detalle por empleado <small class="muted">{{ total_empleados }} en el conjunto</small></h2>
+{% for reporte in reportes %}
+<details class="card rrhh-employee-report" id="empleado-{{ reporte.datos.id }}" data-empleado-id="{{ reporte.datos.id }}" {% if empleado_id %}open{% endif %}>
+  <summary><span><strong>{{ reporte.datos.nombre }} · {{ reporte.datos.codigo }}</strong><span class="rrhh-person-summary">{{ reporte.datos.departamento|default:"Sin departamento" }} · Retardos {{ reporte.resumen.retardos }} · Extra detectado {{ reporte.extra_resumen.detectado }} · Autorizado {{ reporte.extra_resumen.autorizado }} · Pendiente {{ reporte.extra_resumen.pendiente }}</span></span><span class="rrhh-open-label">Ver  {{ reporte.filas|length }} días</span></summary>
+  <div class="rrhh-employee-body"><div class="rrhh-report-actions"><a class="btn btn-sm btn-secondary" href="?{{ reporte.query_pdf }}">PDF de esta persona</a><a class="btn btn-sm btn-secondary" href="?{{ reporte.query_consulta }}">Consultar solo esta persona</a></div>{% include 'rrhh/includes/reporte_asistencia_detalle.html' %}</div>
+</details>{% endfor %}
+</section>
+<nav class="rrhh-report-pagination" aria-label="Páginas de empleados">{% if pagina.has_previous %}<a class="btn btn-secondary" href="?{{ query_pagina }}&amp;page={{ pagina.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }} · {{ total_empleados }} empleados</span>{% if pagina.has_next %}<a class="btn btn-secondary" href="?{{ query_pagina }}&amp;page={{ pagina.next_page_number }}">Siguiente</a>{% endif %}</nav>
+{% endif %}
+{% endif %}
+<p class="muted rrhh-legacy-link">Para gestión y exportaciones de incidencias: <a href="?{{ query_incidencias }}">abrir reporte de incidencias</a>. Esa vista usa empleado, sucursal y fechas; vuelve a seleccionar el alcance si necesitas un departamento.</p>
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/rrhh_reportes.js' %}" defer></script>{% endblock %}
