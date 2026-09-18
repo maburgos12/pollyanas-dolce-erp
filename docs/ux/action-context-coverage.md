@@ -71,3 +71,6 @@ No se declarará cobertura total hasta que cada pantalla candidata tenga una fil
 
 - Preparación ERP/App: unidad del catálogo de sólo lectura; sin campos de unidad/fuente. La selección compacta envía sólo identidades; el servidor resuelve y congela unidad/procedencia. Artículos sin unidad no se pueden seleccionar y el servidor rechaza solicitudes manipuladas.
 - Se conserva `data-async-action`, toast y selección al buscar. Captura ciega: cantidad encontrada con unidad visible; cero y pendiente permanecen distintos. No altera saldos ni conteos previos.
+- Las cantidades visibles omiten ceros decimales finales sin redondear ni cambiar la precisión almacenada; la revisión previa muestra cantidad y unidad, sin repetir el título del campo.
+
+La preparación de conteos carga el alcance habitual por sucursal (ventas/recepciones de 30 días o existencias del último ciclo exitoso reciente de Point). El catálogo histórico queda en la búsqueda de excepciones; cambiar sucursal recarga su lista y las búsquedas conservan selecciones y exclusiones. No se muestran cantidades esperadas.

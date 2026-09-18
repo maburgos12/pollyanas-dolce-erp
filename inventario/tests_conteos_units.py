@@ -15,6 +15,10 @@ class AutomaticCountUnitTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         fixtures.ConteoViewsTests.setUpTestData.__func__(cls)
+        from pos_bridge.models import PointBranch, PointDailySale
+        from django.utils import timezone
+        cls.point_branch = PointBranch.objects.create(external_id='unit-branch', name='Prueba', erp_branch=cls.branch)
+        PointDailySale.objects.create(branch=cls.point_branch, product=cls.product, sale_date=timezone.localdate(), quantity=1)
 
     def prepare(self, item):
         return preparar_conteo(actor=self.operator, sucursal=self.branch, responsable=self.operator,
@@ -66,7 +70,10 @@ class AutomaticCountUnitTests(TestCase):
         ejecutar_accion(conteo_id=count.pk,actor=self.operator,action='guardar',version=2,request_id=uuid4(),
                         payload={'lecturas':{str(line.pk):{'cantidad':'2.5'}}})
         self.assertEqual(str(line.lecturas.get().cantidad),'2.500000')
-        self.assertContains(self.client.get(response['Location']), 'Cantidad encontrada (LT)')
+        page = self.client.get(response['Location'])
+        self.assertContains(page, 'Cantidad encontrada (LT)')
+        self.assertContains(page, 'value="2.5"')
+        self.assertNotContains(page, 'value="2.500000"')
 
     def test_inventory_refresh_preserves_unit_evidence(self):
         from pos_bridge.services.sync_service import PointSyncService
