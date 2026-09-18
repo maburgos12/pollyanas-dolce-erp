@@ -1,5 +1,6 @@
 import base64
 import json
+import zlib
 import importlib
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -2712,7 +2713,7 @@ VALID_GIF = (
 )
 
 
-def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacion="Pemex QA", folio="") -> dict:
+def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacion="Pemex QA", folio="", precio=None) -> dict:
     """Respuesta simulada del lector de tickets."""
     return {
         "es_ticket": es_ticket,
@@ -2720,7 +2721,7 @@ def _lectura(*, es_ticket=True, legible=True, litros=None, importe=None, estacio
         "folio": folio,
         "litros": litros,
         "importe_total": importe,
-        "precio_por_litro": None,
+        "precio_por_litro": precio,
         "estacion": estacion,
         "fecha": "2026-09-17",
         "observaciones": "",
@@ -2739,7 +2740,7 @@ def _ticket_jpeg_rotado(variante: int = 0) -> bytes:
     from PIL import Image
 
     imagen = Image.new("RGB", (1632, 1224), "white")
-    for x in range(variante % 7, 1632, 12):  # rayas para que haya contraste
+    for x in range(variante % 11, 1632, 12):  # rayas para que haya contraste
         for y in range(1224):
             imagen.putpixel((x, y), (10, 10, 10))
     exif = imagen.getexif()
@@ -2811,21 +2812,23 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
             importe_total=Decimal(importe),
             foto_ticket=SimpleUploadedFile(
                 f"ticket_{sufijo}.jpg",
-                _ticket_jpeg_rotado(variante=abs(hash(sufijo)) % 7),
+                # zlib.crc32 es determinista entre procesos; hash() no lo es y
+                # dos fotos idénticas dispararían el duplicado por SHA256.
+                _ticket_jpeg_rotado(variante=zlib.crc32(sufijo.encode())),
                 content_type="image/jpeg",
             ),
         )
 
     def test_ticket_que_coincide_queda_ok_sin_castigar_forma_ni_importe_redondo(self):
         carga = self._carga_de_prueba("coincide")
-        lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), estacion="Pemex Guasave")
+        lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), precio=Decimal("26.90"), estacion="Pemex Guasave")
 
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)
         carga.refresh_from_db()
 
         self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
-        self.assertEqual(resultado["motivos"], ["ticket_verificado"])
+        self.assertIn("ticket_verificado", resultado["motivos"])
         # Los vales vienen en montos cerrados: $1,200 ya no es motivo de revisión.
         self.assertNotIn("importe_redondo_alto", resultado["motivos"])
         # La forma de la foto dejó de puntuar.
@@ -2833,19 +2836,49 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         self.assertEqual(carga.auditoria_detalle["modo"], "ocr_vision")
         self.assertEqual(carga.ticket_leido["estacion"], "Pemex Guasave")
 
-    def test_litros_que_no_coinciden_con_el_ticket_se_marcan(self):
-        carga = self._carga_de_prueba("difiere")
-        lectura = _lectura(litros=Decimal("38.20"), importe=Decimal("1200.00"))
+    def test_importe_que_no_coincide_se_marca(self):
+        carga = self._carga_de_prueba("difiere", litros="44.61", importe="1200.00")
+        lectura = _lectura(litros=Decimal("22.24"), importe=Decimal("600.00"), precio=Decimal("26.98"))
 
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)
 
         self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
-        self.assertIn("litros_no_coinciden", resultado["motivos"])
+        self.assertIn("importe_no_coincide", resultado["motivos"])
+
+    def test_litros_redondeados_por_el_repartidor_no_son_riesgo(self):
+        """Teclean 44.00 en vez de 44.61 y el importe cuadra: no es fraude."""
+        carga = self._carga_de_prueba("redondeo", litros="44.00", importe="1200.00")
+        lectura = _lectura(
+            litros=Decimal("44.61"), importe=Decimal("1200.00"), precio=Decimal("26.90")
+        )
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["score"], 0)
+        self.assertIn("litros_capturados_difieren", resultado["motivos"])
+
+    def test_ticket_doblado_no_acusa_por_litros_inventados(self):
+        """El renglón de litros viene tapado y el lector devuelve un número que
+        no cuadra con precio x litros: no se acusa a nadie con esa cifra."""
+        carga = self._carga_de_prueba("doblado", litros="25.35", importe="600.00")
+        # 31.5 L x $23.50 = $740.25, no $600: la lectura se contradice sola.
+        lectura = _lectura(
+            litros=Decimal("31.5"), importe=Decimal("600.00"), precio=Decimal("23.50")
+        )
+
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+            resultado = auditar_carga_combustible(carga.id)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["score"], 0)
+        self.assertIn("litros_del_ticket_dudosos", resultado["motivos"])
 
     def test_diferencia_de_centavos_se_tolera(self):
         carga = self._carga_de_prueba("centavos")
-        lectura = _lectura(litros=Decimal("44.60"), importe=Decimal("1199.98"))
+        lectura = _lectura(litros=Decimal("44.60"), importe=Decimal("1199.98"), precio=Decimal("26.90"))
 
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)

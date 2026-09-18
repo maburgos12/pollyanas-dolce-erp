@@ -34,10 +34,17 @@ Analiza la foto y responde SOLO con JSON, sin texto adicional.
 Reglas:
 - es_ticket_combustible: true solo si es un comprobante de compra de combustible
   (ticket de bomba, nota de gasolinera, vale de gasolina canjeado). Una foto de
-  otra cosa, una pantalla, un recibo distinto o una imagen vacía es false.
+  otra cosa, una pantalla, un tablero de vehículo o una imagen vacía es false.
 - legible: false si la foto es un ticket pero no logras leer los importes.
-- No inventes cifras. Si un dato no se ve, ponlo en null.
+- NO INVENTES CIFRAS. Si un renglón está doblado, tapado, borroso o cortado,
+  ese dato va en null aunque puedas suponerlo. Es preferible null a un número
+  aproximado: un número inventado hace que se acuse a una persona sin motivo.
+- No deduzcas los litros dividiendo el importe entre el precio: si el renglón de
+  litros no se lee, litros va en null.
 - importe_total es el total pagado, no el subtotal ni el IVA.
+- Si la foto trae VARIOS documentos (por ejemplo una nota de venta manuscrita
+  junto a un ticket impreso de la bomba), reporta las cifras del ticket impreso
+  de la bomba y describe los otros documentos en observaciones.
 - folio: el número de folio o ticket impreso (ej. "Folio: 2981277"). Copia los
   dígitos tal cual, sin la palabra "Folio".
 """
