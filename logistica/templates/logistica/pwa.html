@@ -2351,6 +2351,9 @@
           try {
             const replayItem = window.PDLogisticaOfflineQueue.prepareReplay(item);
             const headers = cleanReplayHeaders(replayItem.headers || {});
+            // El servidor no revisa la foto en un reenvío: el repartidor ya no
+            // está en la gasolinera para corregirla y perderíamos el gasto.
+            headers["X-Logistica-Offline-Replay"] = "1";
             const response = await apiFetch(replayItem.path, {
               method: replayItem.method,
               headers,
@@ -2375,7 +2378,16 @@
                   message,
                 });
               } else if ([400, 403, 404, 409].includes(response.status)) {
+                // Se descarta —reintentar no lo va a arreglar— pero el repartidor
+                // tiene que enterarse de qué captura suya se perdió y por qué.
+                const data = await response.json().catch(() => ({}));
                 failed += 1;
+                replayErrors.push({
+                  id: item.id,
+                  label: item.label || "Captura",
+                  status: response.status,
+                  message: apiErrorMessage(data, "La captura no se pudo registrar al recuperar la señal."),
+                });
               } else {
                 remaining.push({ ...item, attempts: Number(item.attempts || 0) + 1 });
               }
@@ -5086,7 +5098,7 @@
               <p class="${draft.carga_geoStatus === "ready" ? "gps-registered" : "muted"}">${escapeHtml(draft.carga_geoLabel || "La ubicación es opcional; intentaremos registrarla.")}</p>
               ${draft.carga_geoStatus !== "ready" ? `<button class="secondary-btn" type="button" onclick="capturarUbicacionCargaCombustible()">Activar ubicación</button>` : ""}
               <div class="fuel-save-row">
-                <button id="guardar_carga_combustible_btn" class="primary-btn" type="button" onclick="guardarCargaCombustible()" ${draft.carga_guardando ? "disabled" : ""}>${draft.carga_guardando ? "Guardando..." : "Guardar carga"}</button>
+                <button id="guardar_carga_combustible_btn" class="primary-btn" type="button" onclick="guardarCargaCombustible()" ${draft.carga_guardando ? "disabled" : ""}>${draft.carga_guardando ? "Revisando el ticket..." : "Guardar carga"}</button>
               </div>
             </section>
           </div>
