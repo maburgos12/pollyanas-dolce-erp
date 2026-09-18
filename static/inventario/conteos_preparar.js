@@ -7,7 +7,7 @@
   form.addEventListener('submit',function(event){if(!('onformdata' in form)&&form.elements.length>900){event.preventDefault();event.stopImmediatePropagation();window.ERPActionUI.showToast({type:'error',message:'Actualiza el navegador para preparar un conteo de este tamaño. Tus selecciones permanecen en pantalla.',persistent:true});}},true);
   form.addEventListener('formdata',function(event){
     var items=[];
-    form.querySelectorAll('input[name="articulos"]:checked').forEach(function(box){var item={unidad:form.elements.namedItem('unidad_'+box.value).value,fuente_unidad:form.elements.namedItem('fuente_'+box.value).value};item[box.value[0]==='p'?'producto_id':'insumo_id']=Number(box.value.slice(1));items.push(item);});
+    form.querySelectorAll('input[name="articulos"]:checked').forEach(function(box){var item={};item[box.value[0]==='p'?'producto_id':'insumo_id']=Number(box.value.slice(1));items.push(item);});
     Array.from(event.formData.keys()).forEach(function(name){if(name==='articulos'||name.indexOf('unidad_')===0||name.indexOf('fuente_')===0)event.formData.delete(name);});
     event.formData.set('articulos_json',JSON.stringify(items));
   });
@@ -32,7 +32,7 @@
       selected.forEach(function(row){fragment.appendChild(row);});
       fresh.querySelectorAll('tr').forEach(function(row){var box=row.querySelector('input[name="articulos"]');if(box&&!selected.has(box.value))fragment.appendChild(row);});
       body.replaceChildren(fragment);summary();
-      if(!body.children.length){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='No hay coincidencias. Cambia la búsqueda.';row.appendChild(cell);body.appendChild(row);}
+      if(!body.children.length){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.textContent='No hay coincidencias. Cambia la búsqueda.';row.appendChild(cell);body.appendChild(row);}
       window.ERPActionUI.showToast({type:'info',message:'Catálogo actualizado. Los artículos seleccionados permanecen al principio.'});
     }catch(error){window.ERPActionUI.showToast({type:'error',message:error.name==='AbortError'?'La búsqueda tardó demasiado. Tus selecciones se conservan.':error.message,persistent:true});}
     finally{busy=false;button.disabled=false;button.textContent='Buscar artículos';}

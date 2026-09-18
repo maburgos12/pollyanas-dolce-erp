@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from core.models import Sucursal, UserProfile
 from pos_bridge.models import PointProduct
+from pos_bridge.services.product_count_units import COUNT_UNIT_KEY, catalog_count_unit
 
 
 class ConteoRouteTests(SimpleTestCase):
@@ -24,7 +25,7 @@ class ConteoViewsTests(TestCase):
         cls.other = User.objects.create_user('ajeno', password='test-local')
         cls.branch = Sucursal.objects.create(codigo='CT-M', nombre='Sucursal de prueba')
         UserProfile.objects.update_or_create(user=cls.operator, defaults={'sucursal':cls.branch})
-        cls.product = PointProduct.objects.create(external_id='ct-100', sku='CT100', name='Producto conteo')
+        cls.product = PointProduct.objects.create(external_id='ct-100', sku='CT100', name='Producto conteo',metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'CT100','Unidad':'PZA'})})
         cls.count = preparar_conteo(actor=cls.admin, sucursal=cls.branch, responsable=cls.operator, fecha=date.today(), titulo='Conteo cierre', items=[{'producto_id':cls.product.pk,'unidad':'PZA','fuente_unidad':'Reporte Point validado'}], request_id=str(uuid4()))
 
     def url(self, name='detalle'):
@@ -124,7 +125,7 @@ class ConteoViewsTests(TestCase):
     def test_large_scope_uses_compact_payload_below_django_field_limit(self):
         import json
         from inventario.models_conteos import ConteoSucursal
-        products=PointProduct.objects.bulk_create([PointProduct(external_id=f'bulk-{i}',sku=f'B{i}',name=f'Artículo {i}') for i in range(510)])
+        products=PointProduct.objects.bulk_create([PointProduct(external_id=f'bulk-{i}',sku=f'B{i}',name=f'Artículo {i}',metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':f'B{i}','Unidad':'PZA'})}) for i in range(510)])
         items=[{'producto_id':p.pk,'unidad':'PZA','fuente_unidad':'Prueba de formato compacto'} for p in products]
         self.client.force_login(self.admin)
         response=self.client.post(reverse('inventario:conteos_erp:preparar'),{'sucursal':self.branch.pk,'responsable':self.operator.pk,'fecha':date.today().isoformat(),'titulo':'Alcance grande','request_id':str(uuid4()),'articulos_json':json.dumps(items)},HTTP_X_REQUESTED_WITH='XMLHttpRequest')

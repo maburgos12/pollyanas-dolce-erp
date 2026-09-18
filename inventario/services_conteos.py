@@ -13,6 +13,7 @@ from core.models import Sucursal
 from maestros.models import Insumo
 from pos_bridge.models import PointProduct, PointSyncJob
 from .conteos_access import autorizado_sucursal, puede_capturar, puede_coordinar, puede_revisar, sucursal_app
+from .conteos_units import unidad_conteo
 from .models_conteos import ConteoSucursal, LineaConteoSucursal, LecturaConteoSucursal, EventoConteoSucursal, OperacionConteoSucursal
 
 
@@ -85,7 +86,10 @@ def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, reque
         if not code: raise ConteoError('Artículo sin código Point comprobable.')
         if code in codes: raise ConteoError('Código físico duplicado entre artículos.')
         codes.add(code)
-        frozen.append({kind:ident,'codigo':code,'nombre':source.name if kind=='producto_id' else source.nombre,'unidad':_text(item.get('unidad'),60,True),'fuente_unidad':_text(item.get('fuente_unidad'),255,True)})
+        unit, provenance = unidad_conteo(source)
+        if not unit:
+            raise ConteoError(f'{code}: falta la unidad del catálogo. Solicita su sincronización antes de contar este artículo.')
+        frozen.append({kind:ident,'codigo':code,'nombre':source.name if kind=='producto_id' else source.nombre,'unidad':unit,'fuente_unidad':provenance})
     overlap = Q(producto_id__in=[x['producto_id'] for x in frozen if 'producto_id' in x])|Q(insumo_id__in=[x['insumo_id'] for x in frozen if 'insumo_id' in x])
     if LineaConteoSucursal.objects.filter(overlap | Q(codigo__in=codes), conteo__sucursal=sucursal,conteo__fecha=fecha,conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO']).exists():
         raise ConteoConflict('Ya existe un conteo activo para estos artículos, sucursal y fecha.')

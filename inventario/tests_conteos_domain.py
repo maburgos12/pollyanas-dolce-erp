@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from core.models import Sucursal, UserProfile
 from pos_bridge.models import PointProduct
+from pos_bridge.services.product_count_units import COUNT_UNIT_KEY, catalog_count_unit
 
 
 class ConteosDomainTests(TestCase):
@@ -17,7 +18,7 @@ class ConteosDomainTests(TestCase):
         self.user = get_user_model().objects.create_user('count_user', password='test')
         self.branch = Sucursal.objects.create(codigo='CS1', nombre='Conteos')
         UserProfile.objects.update_or_create(user=self.user, defaults={'sucursal': self.branch})
-        self.products = [PointProduct.objects.create(external_id=str(i+1000), sku=str(i), name=f'Producto {i}') for i in (901,902)]
+        self.products = [PointProduct.objects.create(external_id=str(i+1000), sku=str(i), name=f'Producto {i}', metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':str(i),'Unidad':'pza'})}) for i in (901,902)]
         self.args = dict(actor=self.admin, sucursal=self.branch, responsable=self.user, fecha=date(2026,9,7), titulo='Cierre', items=[{'producto_id':p.pk,'unidad':'pza','fuente_unidad':'catálogo verificado'} for p in self.products], request_id=uuid4())
         self.count = service.preparar_conteo(**self.args)
 
@@ -193,7 +194,7 @@ class ConteosDomainTests(TestCase):
         self.assertFalse(conteos_visibles(self.user).exists())
 
     def test_nonoverlapping_partial_is_permitted(self):
-        product=PointProduct.objects.create(external_id='new',sku='new-code',name='Nuevo')
+        product=PointProduct.objects.create(external_id='new',sku='new-code',name='Nuevo',metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'new-code','Unidad':'pza'})})
         count=self.service.preparar_conteo(**{**self.args,'request_id':uuid4(),'items':[{'producto_id':product.pk,'unidad':'pza','fuente_unidad':'catálogo'}]})
         self.assertNotEqual(count.pk,self.count.pk)
 
@@ -305,7 +306,7 @@ class ConteosConcurrencyTests(TransactionTestCase):
         self.branches=[Sucursal.objects.create(codigo=f'PAR{i}',nombre=f'Paralela {i}') for i in (1,2)]
         for branch in self.branches:
             self.models.AccesoConteoSucursal.objects.create(user=self.user,sucursal=branch,capturar=True)
-        self.product=PointProduct.objects.create(external_id='par-id',sku='par-code',name='Paralelo')
+        self.product=PointProduct.objects.create(external_id='par-id',sku='par-code',name='Paralelo',metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'par-code','Unidad':'pza'})})
 
     def create(self,branch=None,key=None):
         return self.service.preparar_conteo(actor=get_user_model().objects.get(pk=self.admin.pk),sucursal=branch or self.branches[0],responsable=self.user,fecha=date(2026,9,7),titulo='Paralelo',items=[{'producto_id':self.product.pk,'unidad':'pza','fuente_unidad':'catálogo'}],request_id=key or uuid4())

@@ -298,6 +298,9 @@ class PointHttpSessionClient:
                 self._reset_session()
                 self.login(branch_hint=getattr(self, "_last_branch_hint", None))
 
+    def get_units(self) -> list[dict]:
+        return self._catalog_rows('/Catalogos/get_unidades')
+
     def get_product_detail(self, product_id: int | str) -> dict:
         return self._catalog_read(
             "/Catalogos/get_producto_byID", params={"id_producto": product_id}, expected_type=dict,

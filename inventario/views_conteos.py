@@ -180,6 +180,7 @@ def accion(request, pk):
 
 
 def _catalogo(tipo, query):
+    from .conteos_units import unidad_conteo
     if tipo == 'insumo':
         qs = Insumo.objects.filter(activo=True).exclude(codigo_point='').select_related('unidad_base')
         if query: qs=qs.filter(Q(nombre__icontains=query)|Q(codigo_point__icontains=query))
@@ -187,7 +188,7 @@ def _catalogo(tipo, query):
                  'fuente':'Unidad base del catálogo canónico' if x.unidad_base_id else ''} for x in qs.order_by('nombre')[:200]]
     qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True).exclude(codigo_point='').values('codigo_point'))
     if query: qs=qs.filter(Q(name__icontains=query)|Q(sku__icontains=query)|Q(category__icontains=query))
-    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':'','fuente':''} for x in qs.order_by('name')[:200]]
+    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':unidad_conteo(x)[0]} for x in qs.order_by('name')[:200]]
 
 
 @login_required
@@ -221,8 +222,7 @@ def preparar(request):
                 items = []
                 for key in request.POST.getlist('articulos'):
                     if len(key)<2 or key[0] not in 'pi' or not key[1:].isdigit(): raise ValidationError('Artículo inválido.')
-                    items.append({'producto_id' if key[0]=='p' else 'insumo_id':int(key[1:]),
-                                  'unidad':request.POST.get('unidad_'+key,''), 'fuente_unidad':request.POST.get('fuente_'+key,'')})
+                    items.append({'producto_id' if key[0]=='p' else 'insumo_id':int(key[1:])})
             identity = {'sucursal':assigned, 'responsable':request.user, 'desde_app':True} if es_app else {}
             count = preparar_conteo(actor=request.user,items=items,**form.cleaned_data,**identity)
         except (ValidationError,ValueError) as exc:
@@ -236,8 +236,6 @@ def preparar(request):
     if request.method == 'POST':
         for row in catalog:
             row['selected'] = row['key'] in request.POST.getlist('articulos')
-            row['unidad'] = request.POST.get('unidad_'+row['key'],row['unidad'])
-            row['fuente'] = request.POST.get('fuente_'+row['key'],row['fuente'])
         if _async(request):
             return JsonResponse({'ok':False,'toast':{'type':'error','message':' '.join(str(e) for errors in form.errors.values() for e in errors),'persistent':True}},status=400)
     return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'es_app':es_app,'sucursal_asignada':assigned,'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})

@@ -16,8 +16,7 @@ class ConteoSesionTests(TestCase):
 
     def body(self, **overrides):
         data={'fecha':(date.today()+timedelta(days=1)).isoformat(),'titulo':'Mi cierre',
-              'request_id':str(uuid4()),'articulos':[f'p{self.product.pk}'],
-              f'unidad_p{self.product.pk}':'PZA',f'fuente_p{self.product.pk}':'Catálogo verificado'}
+              'request_id':str(uuid4()),'articulos':[f'p{self.product.pk}']}
         data.update(overrides)
         return data
 
