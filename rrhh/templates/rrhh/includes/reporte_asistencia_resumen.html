@@ -1,5 +1,5 @@
 <section class="card rrhh-report-summary" aria-labelledby="resumen-reporte">
-  <div class="card-header"><h2 id="resumen-reporte">Resumen del conjunto consultado</h2></div>
+  <div class="card-header"><h2 id="resumen-reporte"><span class="rrhh-summary-title-long">Resumen del conjunto consultado</span><span class="rrhh-summary-title-short">Resumen de la consulta</span></h2></div>
   <dl class="rrhh-summary">
     <div><dt>Empleados</dt><dd>{{ resumen_global.empleados }}</dd></div>
     <div><dt>Retardos registrados</dt><dd>{{ resumen_global.retardos }}</dd></div>
@@ -9,9 +9,13 @@
     <div><dt>Avisos / incidencias de baja</dt><dd>{{ resumen_global.avisos_baja_30d }}</dd></div>
   </dl>
   <p><strong>Extra detectado:</strong> {{ resumen_global.extra.detectado }} · <strong>Autorizado / pagado:</strong> {{ resumen_global.extra.autorizado }} · <strong>Diferencia pendiente:</strong> {{ resumen_global.extra.pendiente }} · <strong>Rechazado:</strong> {{ resumen_global.extra.rechazado }}.</p>
-  <p class="muted">Solicitado en registros: {{ resumen_global.extra.solicitado }}. Días calculables: {{ resumen_global.extra.dias_calculables }}; no calculables: {{ resumen_global.extra.dias_no_calculables }}; sin registro: {{ resumen_global.extra.dias_sin_registro }}; no aplicables: {{ resumen_global.extra.dias_no_aplica }}. {% if resumen_global.extra.parcial %}<strong>La detección y la diferencia pendiente son subtotales parciales.</strong>{% endif %}</p>
   <p><strong>Permisos por tiempo:</strong> {{ resumen_global.permisos.minutos_cg }} min con goce / {{ resumen_global.permisos.minutos_sg }} min sin goce. <strong>Por día:</strong> {{ resumen_global.permisos.dias_cg }} con goce / {{ resumen_global.permisos.dias_sg }} sin goce. {% if resumen_global.permisos.conflictos %}<strong>Conflictos de goce: {{ resumen_global.permisos.conflictos }}; requieren revisión.</strong>{% endif %} {% if resumen_global.permisos.duracion_desconocida %}Duración no determinada: {{ resumen_global.permisos.duracion_desconocida }} permiso(s).{% endif %}</p>
+  <details class="rrhh-summary-method" data-mobile-collapse="true" open>
+  <summary>Cobertura y reglas de cálculo</summary>
+  <div>
+  <p class="muted">Solicitado en registros: {{ resumen_global.extra.solicitado }}. Días calculables: {{ resumen_global.extra.dias_calculables }}; no calculables: {{ resumen_global.extra.dias_no_calculables }}; sin registro: {{ resumen_global.extra.dias_sin_registro }}; no aplicables: {{ resumen_global.extra.dias_no_aplica }}. {% if resumen_global.extra.parcial %}<strong>La detección y la diferencia pendiente son subtotales parciales.</strong>{% endif %}</p>
   <p class="muted">Ventana de 30 días: {{ data.ventana_inicio|date:"d/m/Y" }} al {{ data.fecha_fin|date:"d/m/Y" }}. Cuenta faltas pendientes registradas; las faltas por retardos se muestran aparte. Un aviso o incidencia de baja no equivale a una baja efectiva.</p>
   <p class="muted">Sin turno, los minutos tarde son N/D; cero retardos registrados no demuestra puntualidad. Extra por duración: 8 horas incluyen 35 minutos de comida, descontando el exceso registrado. Sin checadas no se infiere falta ni descanso.</p>
   <p class="muted">Consulta: {{ data.consultado_en|date:"d/m/Y H:i:s" }} · America/Mazatlan. Departamento, área y estados actuales al consultar.</p>
+  </div></details>
 </section>

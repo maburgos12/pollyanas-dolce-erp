@@ -14,6 +14,14 @@
   month?.addEventListener('change', selectPeriod);
   half?.addEventListener('change', selectPeriod);
   [start, end].forEach(input => input?.addEventListener('change', () => { if (half) half.value = ''; }));
+  const compactSections = document.querySelectorAll('[data-mobile-collapse="true"]');
+  if (compactSections.length) {
+    const mobile = window.matchMedia('(max-width: 600px)');
+    if (mobile.matches) compactSections.forEach(section => { section.open = false; });
+    mobile.addEventListener('change', event => {
+      if (!event.matches) compactSections.forEach(section => { section.open = true; });
+    });
+  }
   document.getElementById('rrhh-print-button')?.addEventListener('click', () => window.print());
   // Permission folios are expanded in the dedicated print view before printing.
   if (document.body.classList.contains('rrhh-print-page')) document.querySelectorAll('.rrhh-permit-details').forEach(el => { el.open = true; });
