@@ -6,6 +6,9 @@
 {% block content %}
 <section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">{% for tab in module_tabs %}<a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>{% endfor %}</section>
 <section class="card rrhh-report-filters" aria-labelledby="filtros-reporte">
+<details class="rrhh-filter-disclosure" {% if not data or error_reporte %}open{% else %}data-mobile-collapse="true" open{% endif %}>
+<summary class="rrhh-filter-summary"><span>Filtros del reporte</span><strong>{% if quincena_seleccionada == "1" %}1–15{% elif quincena_seleccionada == "2" %}16–fin de mes{% else %}{{ fecha_inicio }} a {{ fecha_fin }}{% endif %} · {{ departamento_nombre }}{% if area %} · {{ area }}{% endif %}</strong></summary>
+<div class="rrhh-filter-body">
 <div class="card-header"><div><h2 id="filtros-reporte">Consulta por departamento o persona</h2><p class="muted">Revisa el resumen y abre el detalle diario. Puedes descargar o imprimir todo el conjunto consultado.</p></div></div>
 <form method="get" id="rrhh-report-form">
 <div class="rrhh-filter-grid">
@@ -15,12 +18,12 @@
   <div class="form-group"><label for="fecha_fin">Fecha fin</label><input class="input-field" id="fecha_fin" type="date" name="fecha_fin" value="{{ fecha_fin }}" required></div>
   <div class="form-group"><label for="departamento">Departamento</label><select class="input-field" id="departamento" name="departamento"><option value="">Todos los departamentos</option>{% if not departamento_valido %}<option value="{{ departamento }}" selected>Filtro inválido: {{ departamento }}</option>{% endif %}{% for codigo, nombre in departamentos %}<option value="{{ codigo }}" {% if departamento == codigo %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
   <div class="form-group"><label for="area">Área registrada</label><select class="input-field" id="area" name="area"><option value="">Todas las áreas</option>{% if area and area not in areas %}<option value="{{ area }}" selected>{{ area }} (filtro conservado)</option>{% endif %}{% for nombre in areas %}<option value="{{ nombre }}" {% if area == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
-  <div class="form-group"><label for="empleado">Empleado</label><select class="input-field" id="empleado" name="empleado"><option value="">Plantilla completa del filtro</option>{% if empleado_id and not empleado_seleccionado_disponible %}<option value="{{ empleado_id }}" selected>Empleado {{ empleado_id }} (filtro conservado)</option>{% endif %}{% for empleado in empleados %}<option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }} · {{ empleado.codigo }}{% if not empleado.activo %} · Baja{% endif %}</option>{% endfor %}</select></div>
-  <div class="form-group"><label for="sucursal">Sucursal registrada</label><input class="input-field" id="sucursal" name="sucursal" value="{{ sucursal }}" placeholder="Todas" list="rrhh-sucursales"><datalist id="rrhh-sucursales">{% for nombre in sucursales %}<option value="{{ nombre }}">{% endfor %}</datalist></div>
+  <div class="form-group rrhh-filter-span"><label for="empleado">Empleado</label><select class="input-field" id="empleado" name="empleado"><option value="">Plantilla completa del filtro</option>{% if empleado_id and not empleado_seleccionado_disponible %}<option value="{{ empleado_id }}" selected>Empleado {{ empleado_id }} (filtro conservado)</option>{% endif %}{% for empleado in empleados %}<option value="{{ empleado.id }}" {% if empleado_id == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }} · {{ empleado.codigo }}{% if not empleado.activo %} · Baja{% endif %}</option>{% endfor %}</select></div>
+  <div class="form-group rrhh-filter-span"><label for="sucursal">Sucursal registrada</label><input class="input-field" id="sucursal" name="sucursal" value="{{ sucursal }}" placeholder="Todas" list="rrhh-sucursales"><datalist id="rrhh-sucursales">{% for nombre in sucursales %}<option value="{{ nombre }}">{% endfor %}</datalist></div>
 </div>
 <p class="muted">Hasta 31 días por consulta completa. Las fechas de ingreso y baja documentadas distinguen días no aplicables.</p>
 <div class="rrhh-report-actions"><button class="btn btn-primary" type="submit">Consultar</button>{% if data and not error_reporte %}<a class="btn btn-secondary" href="?{{ query_pdf }}">Descargar PDF del conjunto</a><a class="btn btn-secondary" href="?{{ query_imprimir }}">Imprimir conjunto completo</a>{% endif %}</div>
-</form></section>
+</form></div></details></section>
 {% if error_reporte %}<div class="alert alert-danger" role="alert">{{ error_reporte }}</div>{% endif %}
 {% if data and not error_reporte %}
 {% include 'rrhh/includes/reporte_asistencia_resumen.html' %}

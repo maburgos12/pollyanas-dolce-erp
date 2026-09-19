@@ -82,8 +82,16 @@ class ReportesDepartamentoFlowTests(TestCase):
         first=self.client.get(self.url,{**self.params,'fecha_inicio':'2024-02-01','fecha_fin':'2024-02-15'})
         self.assertEqual(first.context['mes_periodo'],'2024-02')
         self.assertEqual(first.context['quincena_seleccionada'],'1')
+        self.assertContains(first,'data-mobile-collapse="true"')
+        self.assertContains(first,'Filtros del reporte')
+        self.assertContains(first,'1–15 · Producción')
+        self.assertContains(first,'Cobertura y reglas de cálculo')
         second=self.client.get(self.url,{**self.params,'fecha_inicio':'2024-02-16','fecha_fin':'2024-02-29'})
         self.assertEqual(second.context['quincena_seleccionada'],'2')
+
+        invalid=self.client.get(self.url,{**self.params,'fecha_inicio':'2024-02-30'})
+        self.assertEqual(invalid.status_code,400)
+        self.assertNotContains(invalid,'data-mobile-collapse="true"',status_code=400)
 
     def test_invalid_and_incompatible_filters_never_broaden(self):
         for filters in [{'departamento':'NO-EXISTE'},{'area':'NO-EXISTE'},{'empleado':'abc'},
