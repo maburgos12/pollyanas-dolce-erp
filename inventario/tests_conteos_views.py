@@ -157,3 +157,53 @@ class ConteoViewsTests(TestCase):
         self.assertEqual(self.client.get(url).status_code,200)
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(url).status_code,404)
+
+    def test_capture_catalog_search_excludes_existing_and_requires_capture_access(self):
+        candidate = PointProduct.objects.create(
+            external_id='ct-200', sku='CT200', name='Producto buscado',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'CT200','Unidad':'KG'})},
+        )
+        url = reverse('operacion:conteos_app:catalogo', args=[self.count.pk])
+        self.client.force_login(self.operator)
+        response = self.client.get(url, {'tipo':'producto','q':'buscado'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['resultados'][0]['key'], f'p{candidate.pk}')
+        self.assertEqual(response.json()['resultados'][0]['unidad'], 'KG')
+        self.assertEqual(self.client.get(url, {'tipo':'producto','q':'CT100'}).json()['resultados'], [])
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(url, {'tipo':'producto','q':'buscado'}).status_code, 404)
+
+    def test_capture_renders_one_row_per_item_and_type_filters(self):
+        from inventario.services_conteos import ejecutar_accion
+        ejecutar_accion(
+            conteo_id=self.count.pk, actor=self.operator, action='iniciar',
+            version=1, request_id=uuid4(), payload={},
+        )
+        self.client.force_login(self.operator)
+        response = self.client.get(self.url())
+        self.assertContains(response, 'data-count-type="producto"')
+        self.assertContains(response, 'data-count-catalog-search')
+        self.assertContains(response, 'Cantidad de Producto conteo en PZA')
+        self.assertContains(response, 'count-line-main')
+
+    def test_async_add_preserves_posted_reading_and_returns_new_row(self):
+        import json
+        candidate = PointProduct.objects.create(
+            external_id='ct-add', sku='CT-ADD', name='Producto agregado',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'CT-ADD','Unidad':'PZA'})},
+        )
+        self.client.force_login(self.operator)
+        start = self.client.post(self.url('accion'), {
+            'action':'iniciar','version':1,'request_id':str(uuid4()),
+        }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(start.status_code, 200)
+        line = self.count.lineas.get()
+        response = self.client.post(self.url('accion'), {
+            'action':'agregar','version':2,'request_id':str(uuid4()),
+            'articulo':f'p{candidate.pk}','observaciones':'',
+            'lecturas_json':json.dumps({str(line.pk):{'cantidad':'4','incidencia':''}}),
+        }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn('Producto agregado', response.json()['html'])
+        self.assertIn('value="4"', response.json()['html'])
+        self.assertEqual(response.json()['result']['version'], 3)

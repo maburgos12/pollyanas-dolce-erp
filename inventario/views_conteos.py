@@ -73,6 +73,8 @@ def _context(request, count, *, ack='', ack_version=None):
                      'cantidad_visible':_cantidad_visible(reading.cantidad),
                      'diferencia_visible':_cantidad_visible(difference)})
     captured = sum(r.cantidad is not None or bool(r.incidencia) for r in readings)
+    total_productos = sum(bool(r['linea'].producto_id) for r in rows)
+    total_insumos = len(rows) - total_productos
     # Event payloads can contain expected quantities and previous rounds. Never
     # serialize those into a blind capture page (even hidden DOM/JSON).
     events = count.eventos.select_related('actor').order_by('-pk') if reviewer and not editable else []
@@ -89,10 +91,12 @@ def _context(request, count, *, ack='', ack_version=None):
     return {'base_template':_base(request),'conteo':count,'rows':rows,'editable':editable,
             'revisor':reviewer,'referencia':reference,'historial':history,
             'motivo_reconteo':(count.eventos.filter(action='reconteo').order_by('-pk').values_list('payload__motivo',flat=True).first() or '') if editable and count.ronda > 1 else '',
-            'capturados':captured,'total':len(readings),'avance':round(captured*100/len(readings)) if readings else 0,
+            'capturados':captured,'total':len(readings),'total_productos':total_productos,'total_insumos':total_insumos,
+            'avance':round(captured*100/len(readings)) if readings else 0,
             'request_id':str(uuid4()),'action_ids':{key:str(uuid4()) for key in ('start','reference','recount','accept','verify','evidence','cancel')},'ack':ack,'ack_version':ack_version,
             'lista_url':_url(request,'lista'),'accion_url':_url(request,'accion',count.pk),
             'detalle_url':_url(request,'detalle',count.pk),'export_url':_url(request,'exportar',count.pk),
+            'catalogo_url':_url(request,'catalogo',count.pk),
             'evidencia_url':_url(request,'evidencia',count.pk), 'usuario_id':request.user.pk,
             'evidencias':_evidence_links(request,count,editable)}
 
@@ -131,12 +135,18 @@ def detalle(request, pk):
 
 
 def _payload(request, action):
-    if action in ('guardar','enviar'):
+    if action in ('guardar','enviar','agregar'):
         if 'lecturas_json' in request.POST:
-            return {'lecturas':json.loads(request.POST['lecturas_json']),'observaciones':request.POST.get('observaciones','')}
+            payload = {'lecturas':json.loads(request.POST['lecturas_json']),'observaciones':request.POST.get('observaciones','')}
+            if action == 'agregar':
+                payload['articulo'] = request.POST.get('articulo','')
+            return payload
         ids = {key.removeprefix('cantidad_') for key in request.POST if key.startswith('cantidad_')}
         ids.update(key.removeprefix('incidencia_') for key in request.POST if key.startswith('incidencia_'))
-        return {'lecturas':{key:{'cantidad':request.POST.get('cantidad_'+key,''),'incidencia':request.POST.get('incidencia_'+key,'')} for key in ids},'observaciones':request.POST.get('observaciones','')}
+        payload = {'lecturas':{key:{'cantidad':request.POST.get('cantidad_'+key,''),'incidencia':request.POST.get('incidencia_'+key,'')} for key in ids},'observaciones':request.POST.get('observaciones','')}
+        if action == 'agregar':
+            payload['articulo'] = request.POST.get('articulo','')
+        return payload
     if action == 'reconteo':
         return {'linea_ids':[int(i) for i in request.POST.getlist('linea_ids')], 'motivo':request.POST.get('motivo','')}
     if action in ('referencia','iniciar'): return {}
@@ -152,7 +162,7 @@ def _error(request, count, error, status=400):
     text = ' '.join(error.messages) if isinstance(error,ValidationError) else str(error)
     if _async(request): return JsonResponse({'ok':False,'toast':{'type':'error','message':text,'persistent':True}},status=status)
     context = _context(request,count)
-    if context['editable'] and request.POST.get('action') in ('guardar','enviar'):
+    if context['editable'] and request.POST.get('action') in ('guardar','enviar','agregar'):
         for row in context['rows']:
             row['posted_cantidad'] = request.POST.get(f"cantidad_{row['linea'].pk}", '')
             row['posted_incidencia'] = request.POST.get(f"incidencia_{row['linea'].pk}", '')
@@ -168,7 +178,7 @@ def _error(request, count, error, status=400):
 def accion(request, pk):
     count = _count(request,pk)
     action = request.POST.get('action','')
-    authorized = puede_capturar(request.user,count) if action in ('iniciar','guardar','enviar') else puede_revisar(request.user,count)
+    authorized = puede_capturar(request.user,count) if action in ('iniciar','guardar','enviar','agregar') else puede_revisar(request.user,count)
     if not authorized: return _error(request,count,'No tienes permiso para esta acción.',403)
     try:
         old_version = int(request.POST.get('version',''))
@@ -177,7 +187,7 @@ def accion(request, pk):
     except ConteoConflict as exc: return _error(request,count,exc,409)
     except (ValidationError,ValueError,TypeError) as exc: return _error(request,count,exc)
     count.refresh_from_db()
-    notice = {'iniciar':'Inicio del conteo registrado. Ya puedes capturar.','guardar':'Avance guardado.','enviar':'Conteo enviado a revisión.','reconteo':'Reconteo solicitado. Se conserva la captura anterior.',
+    notice = {'iniciar':'Inicio del conteo registrado. Ya puedes capturar.','guardar':'Avance guardado.','enviar':'Conteo enviado a revisión.','agregar':'Artículo agregado. El avance también quedó guardado.','reconteo':'Reconteo solicitado. Se conserva la captura anterior.',
               'aceptar':'Conteo físico aceptado. No se modificaron existencias.','cancelar':'Conteo cancelado. Se conserva su historial.',
               'referencia':'Referencia Point registrada. Revisa fecha, unidad y cobertura.',
               'validar_referencia':'Declaración de revisión del corte registrada.'}.get(action,'Acción registrada.')
@@ -211,6 +221,30 @@ def _catalogo(tipo, query, sucursal=None):
         unique.setdefault(product.sku, product)
     return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':unidad_conteo(x)[0],
              'selected':not query and bool(unidad_conteo(x)[0])} for x in sorted(unique.values(), key=lambda x:x.name.casefold())[:200]]
+
+
+@login_required
+@never_cache
+@require_GET
+def catalogo(request, pk):
+    count = _count(request, pk)
+    if not puede_capturar(request.user, count) or count.estado not in ('CAPTURA','RECONTEO'):
+        return JsonResponse({'ok':False,'error':'El conteo no está disponible para captura.'}, status=403)
+    query = request.GET.get('q','').strip()[:120]
+    tipo = request.GET.get('tipo','producto')
+    if tipo not in ('producto','insumo'):
+        return JsonResponse({'ok':False,'error':'Catálogo inválido.'}, status=400)
+    if not query:
+        return JsonResponse({'ok':True,'resultados':[]})
+    existing_products = set(count.lineas.exclude(producto=None).values_list('producto_id',flat=True))
+    existing_inputs = set(count.lineas.exclude(insumo=None).values_list('insumo_id',flat=True))
+    existing_codes = set(count.lineas.values_list('codigo',flat=True))
+    results = [
+        item for item in _catalogo(tipo, query, count.sucursal)
+        if item['codigo'] not in existing_codes
+        and (int(item['key'][1:]) not in (existing_products if tipo == 'producto' else existing_inputs))
+    ][:20]
+    return JsonResponse({'ok':True,'resultados':results})
 
 
 @login_required

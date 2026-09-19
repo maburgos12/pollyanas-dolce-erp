@@ -52,6 +52,26 @@ def _cantidad(value):
     return number
 
 
+def resolver_articulo_conteo(key):
+    if not isinstance(key, str) or len(key) < 2 or key[0] not in 'pi' or not key[1:].isdigit():
+        raise ConteoError('Artículo inválido.')
+    kind = 'producto_id' if key[0] == 'p' else 'insumo_id'
+    ident = int(key[1:])
+    source = (PointProduct.objects.filter(pk=ident, active=True).first()
+              if kind == 'producto_id' else Insumo.objects.filter(pk=ident, activo=True).first())
+    if not source:
+        raise ConteoError('Artículo inexistente o inactivo.')
+    code = ((source.sku if kind == 'producto_id' else source.codigo_point) or '').strip()
+    if not code:
+        raise ConteoError('Artículo sin código Point comprobable.')
+    unit, provenance = unidad_conteo(source)
+    if not unit:
+        raise ConteoError(f'{code}: falta la unidad del catálogo. Solicita su sincronización antes de contar este artículo.')
+    return {kind:ident, 'codigo':code,
+            'nombre':source.name if kind == 'producto_id' else source.nombre,
+            'unidad':unit, 'fuente_unidad':provenance}
+
+
 @transaction.atomic
 def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, request_id, desde_app=False):
     if desde_app:
@@ -80,16 +100,11 @@ def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, reque
         if not isinstance(ident,int) or isinstance(ident,bool): raise ConteoError('Artículo inválido.')
         if (kind,ident) in seen: raise ConteoError('Artículo duplicado.')
         seen.add((kind,ident))
-        source = (PointProduct.objects.filter(pk=ident,active=True).first() if kind=='producto_id' else Insumo.objects.filter(pk=ident,activo=True).first())
-        if not source: raise ConteoError('Artículo inexistente o inactivo.')
-        code = ((source.sku if kind=='producto_id' else source.codigo_point) or '').strip()
-        if not code: raise ConteoError('Artículo sin código Point comprobable.')
+        resolved = resolver_articulo_conteo(('p' if kind == 'producto_id' else 'i') + str(ident))
+        code = resolved['codigo']
         if code in codes: raise ConteoError('Código físico duplicado entre artículos.')
         codes.add(code)
-        unit, provenance = unidad_conteo(source)
-        if not unit:
-            raise ConteoError(f'{code}: falta la unidad del catálogo. Solicita su sincronización antes de contar este artículo.')
-        frozen.append({kind:ident,'codigo':code,'nombre':source.name if kind=='producto_id' else source.nombre,'unidad':unit,'fuente_unidad':provenance})
+        frozen.append(resolved)
     overlap = Q(producto_id__in=[x['producto_id'] for x in frozen if 'producto_id' in x])|Q(insumo_id__in=[x['insumo_id'] for x in frozen if 'insumo_id' in x])
     if LineaConteoSucursal.objects.filter(overlap | Q(codigo__in=codes), conteo__sucursal=sucursal,conteo__fecha=fecha,conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO']).exists():
         raise ConteoConflict('Ya existe un conteo activo para estos artículos, sucursal y fecha.')
@@ -135,9 +150,9 @@ def _guardar(conteo, actor, payload):
 @transaction.atomic
 def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
     if not isinstance(payload,dict): raise ConteoError('Datos inválidos.')
-    if action not in {'iniciar','guardar','enviar','reconteo','aceptar','cancelar','referencia','validar_referencia'}: raise ConteoError('Acción desconocida.')
+    if action not in {'iniciar','guardar','enviar','agregar','reconteo','aceptar','cancelar','referencia','validar_referencia'}: raise ConteoError('Acción desconocida.')
     count = ConteoSucursal.objects.select_for_update().select_related('sucursal').get(pk=conteo_id)
-    permission = puede_capturar if action in {'iniciar','guardar','enviar'} else puede_revisar
+    permission = puede_capturar if action in {'iniciar','guardar','enviar','agregar'} else puede_revisar
     if not permission(actor,count): raise ConteoError('Sin permiso vigente para esta acción.')
     request_id = _uuid(request_id)
     fingerprint = _hash({'action':action,'version':version,'payload':payload,'actor':actor.pk})
@@ -167,6 +182,30 @@ def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
             count.estado='ENVIADO'
             count.enviado_en=timezone.now()
             event_payload['snapshot']=[{'linea_id':r.linea_id,'ronda':r.ronda,'cantidad':str(r.cantidad) if r.cantidad is not None else None,'incidencia':r.incidencia} for r in effective]
+    elif action == 'agregar':
+        if count.estado not in {'CAPTURA','RECONTEO'}:
+            raise ConteoConflict('El conteo no está abierto a captura.')
+        if count.iniciado_en is None or not count.eventos.filter(action='iniciar', payload__ronda=count.ronda).exists():
+            raise ConteoError('Inicia explícitamente esta ronda antes de agregar artículos.')
+        if set(payload) - {'lecturas','observaciones','articulo'} or not {'lecturas','articulo'} <= set(payload):
+            raise ConteoError('Campos no admitidos.')
+        saved = {'lecturas':payload['lecturas']}
+        if 'observaciones' in payload:
+            saved['observaciones'] = payload['observaciones']
+        _guardar(count, actor, saved)
+        frozen = resolver_articulo_conteo(payload['articulo'])
+        source_filter = Q(producto_id=frozen['producto_id']) if 'producto_id' in frozen else Q(insumo_id=frozen['insumo_id'])
+        if count.lineas.filter(source_filter | Q(codigo=frozen['codigo'])).exists():
+            raise ConteoError('Este artículo ya forma parte del conteo.')
+        if LineaConteoSucursal.objects.filter(
+            source_filter | Q(codigo=frozen['codigo']),
+            conteo__sucursal=count.sucursal, conteo__fecha=count.fecha,
+            conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO'],
+        ).exclude(conteo=count).exists():
+            raise ConteoConflict('Ya existe un conteo activo para este artículo, sucursal y fecha.')
+        line = LineaConteoSucursal.objects.create(conteo=count, **frozen)
+        LecturaConteoSucursal.objects.create(linea=line, ronda=count.ronda, actor=actor)
+        event_payload = {'articulo':frozen, 'ronda':count.ronda}
     elif action=='reconteo':
         if count.estado!='ENVIADO': raise ConteoConflict('Solo se puede recontar un conteo enviado.')
         if set(payload)-{'linea_ids','motivo'}: raise ConteoError('Campos no admitidos.')
