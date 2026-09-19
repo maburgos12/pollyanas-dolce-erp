@@ -115,3 +115,34 @@
 .conteos-confirm { display: grid; place-items: center; padding: 16px; overflow: auto; }
 .conteos-confirm > div { width: 100%; max-height: calc(100dvh - 32px); overflow: auto; overflow-wrap: anywhere; }
 .conteos-confirm .count-button { max-width: 100%; white-space: normal; margin: 8px 8px 0 0; }
+
+/* Captura compacta: un artículo por renglón y un catálogo visible a la vez. */
+.count-line { display: block; padding: 12px 0; }
+.count-line-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(118px, 150px); gap: 14px; align-items: center; }
+.count-product label { font-size: 1rem; line-height: 1.25; margin: 0 0 3px; }
+.count-product .count-meta { display: block; }
+.count-quantity { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; align-items: center; }
+.count-quantity .count-unit { font-size: .8rem; }
+.count-quantity input { font-size: 1.1rem; padding: 9px 8px; }
+.count-incidence { margin-top: 3px; }
+.count-incidence summary { min-height: 36px; padding: 8px 0; }
+.count-type-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 18px 0 12px; }
+.conteos-page .count-type-tab { background: #fff; color: var(--count-wine); border-color: var(--count-line); }
+.conteos-page .count-type-tab[aria-selected=true] { background: var(--count-wine); color: #fff; border-color: var(--count-wine); }
+.count-type-tab span { font-variant-numeric: tabular-nums; }
+.count-catalog-search { padding: 14px; background: var(--count-pale); border-radius: 9px; margin-bottom: 18px; }
+.count-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 6px; }
+.count-search-row input { margin: 0 !important; }
+.count-catalog-results { margin-top: 8px; }
+.count-catalog-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--count-line); }
+.count-catalog-result span { min-width: 0; }
+.count-catalog-result strong, .count-catalog-result small { display: block; overflow-wrap: anywhere; }
+.count-catalog-result small, .count-catalog-empty { color: var(--count-muted); font-size: .85rem; }
+.count-catalog-result button { flex: 0 0 auto; }
+
+@media (max-width: 640px) {
+  .count-line-main { grid-template-columns: minmax(0, 1fr) 112px; gap: 10px; }
+  .count-quantity { grid-template-columns: 1fr; }
+  .count-quantity .count-unit { justify-self: end; margin-bottom: -4px; }
+  .count-quantity input { font-size: 1.05rem; padding: 9px 7px; }
+}

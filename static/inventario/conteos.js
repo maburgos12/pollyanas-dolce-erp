@@ -168,15 +168,58 @@
     },true);
     var search=root.querySelector('[data-count-search]');
     search.addEventListener('input',function(){var q=search.value.toLocaleLowerCase();root.querySelectorAll('[data-count-line]').forEach(function(row){row.hidden=row.dataset.search.toLocaleLowerCase().indexOf(q)<0;});});
+    var activeType='producto';
+    var typeTabs=Array.from(root.querySelectorAll('[data-count-type-tab]'));
+    var catalogQuery=root.querySelector('[data-catalog-query]');
+    var catalogResults=root.querySelector('[data-catalog-results]');
+    var catalogSubmit=root.querySelector('[data-catalog-submit]');
+    function selectType(type){
+      activeType=type;
+      typeTabs.forEach(function(tab){tab.setAttribute('aria-selected',String(tab.dataset.countTypeTab===type));});
+      root.querySelectorAll('[data-count-group]').forEach(function(group){group.hidden=group.dataset.countGroup!==type;});
+      var label=root.querySelector('[data-catalog-type-label]');if(label)label.textContent=type==='producto'?'producto':'insumo';
+      if(catalogResults)catalogResults.replaceChildren();
+      search.dispatchEvent(new Event('input'));
+    }
+    typeTabs.forEach(function(tab){tab.addEventListener('click',function(){selectType(tab.dataset.countTypeTab);});});
+    function renderCatalog(items){
+      catalogResults.replaceChildren();
+      if(!items.length){var empty=document.createElement('p');empty.className='count-catalog-empty';empty.textContent='No se encontraron artículos disponibles con esa búsqueda.';catalogResults.appendChild(empty);return;}
+      items.forEach(function(item){
+        var row=document.createElement('div');row.className='count-catalog-result';
+        var copy=document.createElement('span'),name=document.createElement('strong'),meta=document.createElement('small');
+        name.textContent=item.nombre;meta.textContent=item.codigo+(item.unidad?' · '+item.unidad:' · Unidad pendiente');
+        copy.append(name,meta);
+        var add=document.createElement('button');add.type='button';add.className='count-button secondary';add.textContent='Agregar';
+        if(!item.unidad){add.disabled=true;add.title='La unidad debe sincronizarse antes de agregar el artículo.';}
+        add.addEventListener('click',function(){form.elements.articulo.value=item.key;form.elements.request_id.value=uuid();form.requestSubmit(form.querySelector('[data-add-submit]'));});
+        row.append(copy,add);catalogResults.appendChild(row);
+      });
+    }
+    function searchCatalog(){
+      var q=catalogQuery.value.trim();
+      if(!q){renderCatalog([]);return;}
+      catalogSubmit.disabled=true;catalogResults.textContent='Buscando…';
+      var url=new URL(form.dataset.catalogUrl,window.location.origin);url.searchParams.set('tipo',activeType);url.searchParams.set('q',q);
+      fetch(url.toString(),{headers:{'Accept':'application/json'},credentials:'same-origin'})
+        .then(function(response){return response.json().then(function(data){if(!response.ok)throw new Error(data.error||'No fue posible buscar.');return data;});})
+        .then(function(data){renderCatalog(data.resultados||[]);})
+        .catch(function(error){catalogResults.textContent=error.message;})
+        .finally(function(){catalogSubmit.disabled=false;});
+    }
+    catalogSubmit.addEventListener('click',searchCatalog);
+    catalogQuery.addEventListener('keydown',function(event){if(event.key==='Enter'){event.preventDefault();searchCatalog();}});
     if(old&&old.dataset.round===root.dataset.round){
       var oldSearch=old.querySelector('[data-count-search]');
       if(oldSearch){search.value=oldSearch.value;search.dispatchEvent(new Event('input'));}
+      var oldType=old.querySelector('[data-count-type-tab][aria-selected="true"]');
+      if(oldType)selectType(oldType.dataset.countTypeTab);
       old.querySelectorAll('details[open] textarea[id]').forEach(function(el){var current=document.getElementById(el.id);if(current)current.closest('details').open=true;});
     }
     root.querySelector('[data-review-send]').addEventListener('click',function(){
       if(!form.reportValidity())return;
       var preview=root.querySelector('[data-send-preview]'),lines=root.querySelector('[data-preview-lines]');lines.replaceChildren();var missing=false;
-      root.querySelectorAll('[data-count-line]').forEach(function(row){var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value===''&&!i.value.trim())missing=true;var entry=document.createElement('div');entry.className='count-preview-row';var name=document.createElement('span');name.textContent=row.querySelector('.count-product label').textContent;var amount=document.createElement('strong');amount.textContent=q.value!==''?q.value+' '+(row.querySelector('.count-unit').dataset.unit||row.querySelector('.count-unit').textContent):(i.value.trim()?'Incidencia registrada':'Sin contar');entry.append(name,amount);lines.appendChild(entry);});
+      root.querySelectorAll('[data-count-line]').forEach(function(row){var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value===''&&!i.value.trim())missing=true;var entry=document.createElement('div');entry.className='count-preview-row';var name=document.createElement('span');name.textContent=row.querySelector('.count-product label').textContent;var amount=document.createElement('strong');amount.textContent=q.value!==''?q.value+' '+row.querySelector('.count-unit').textContent:(i.value.trim()?'Incidencia registrada':'Sin contar');entry.append(name,amount);lines.appendChild(entry);});
       if(missing){window.ERPActionUI.showToast({type:'error',message:'Completa las cantidades o registra una incidencia en cada artículo.',persistent:true});return;}
       preview.hidden=false;preview.scrollIntoView({block:'center',behavior:'auto'});
     });

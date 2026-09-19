@@ -212,6 +212,42 @@ class ConteosDomainTests(TestCase):
         with self.assertRaises(self.service.ConteoError):
             self.service.preparar_conteo(**{**self.args,'request_id':uuid4(),'items':[{'insumo_id':insumo.pk,'unidad':'kg','fuente_unidad':'catálogo'}]})
 
+    def test_add_item_saves_current_readings_and_audits_frozen_unit(self):
+        self.act('iniciar')
+        product = PointProduct.objects.create(
+            external_id='new-capture', sku='NEW-CAPTURE', name='Producto faltante',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'NEW-CAPTURE','Unidad':'kg'})},
+        )
+        payload = {
+            **self.readings('2.5'),
+            'articulo': f'p{product.pk}',
+        }
+        result = self.act('agregar', payload)
+        self.assertEqual(result['version'], 3)
+        line = self.count.lineas.get(producto=product)
+        self.assertEqual(line.unidad, 'kg')
+        self.assertEqual(line.lecturas.get(ronda=1).cantidad, None)
+        self.assertTrue(self.count.lineas.exclude(pk=line.pk).filter(lecturas__cantidad=Decimal('2.5')).exists())
+        event = self.count.eventos.get(action='agregar')
+        self.assertEqual(event.payload['articulo']['codigo'], 'NEW-CAPTURE')
+
+    def test_add_item_is_idempotent_and_rejects_duplicate_or_unverified_unit(self):
+        self.act('iniciar')
+        product = PointProduct.objects.create(
+            external_id='idempotent-add', sku='IDEMPOTENT', name='Nuevo',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'IDEMPOTENT','Unidad':'pza'})},
+        )
+        key = uuid4()
+        payload = {**self.readings('1'), 'articulo':f'p{product.pk}'}
+        first = self.act('agregar', payload, request_id=key, version=2)
+        self.assertEqual(first, self.act('agregar', payload, request_id=key, version=2))
+        self.assertEqual(self.count.lineas.filter(producto=product).count(), 1)
+        with self.assertRaises(self.service.ConteoError):
+            self.act('agregar', {'lecturas':{}, 'articulo':f'p{product.pk}'})
+        without_unit = PointProduct.objects.create(external_id='without-unit', sku='WITHOUT-UNIT', name='Sin unidad')
+        with self.assertRaises(self.service.ConteoError):
+            self.act('agregar', {'lecturas':{}, 'articulo':f'p{without_unit.pk}'})
+
 
     def fresh_reference(self, start_minutes=5, end_minutes=2):
         from datetime import timedelta

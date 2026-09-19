@@ -1,0 +1,20 @@
+<div class="count-line" data-count-line data-count-type="{{ tipo }}" data-search="{{ row.linea.nombre }} {{ row.linea.codigo }}">
+  <div class="count-line-main">
+    <div class="count-product">
+      <label for="cantidad-{{ row.linea.pk }}">{{ row.linea.nombre }}</label>
+      <span class="count-meta">{{ row.linea.codigo }} · {{ row.linea.unidad }}</span>
+    </div>
+    <div class="count-quantity">
+      <span class="count-unit" aria-hidden="true">{{ row.linea.unidad }}</span>
+      <input id="cantidad-{{ row.linea.pk }}" name="cantidad_{{ row.linea.pk }}" type="number"
+        inputmode="decimal" min="0" max="999999999999.999999" step="0.000001"
+        placeholder="Cantidad" aria-label="Cantidad de {{ row.linea.nombre }} en {{ row.linea.unidad }}"
+        value="{% if posted %}{{ row.posted_cantidad }}{% elif row.lectura.cantidad != None %}{{ row.cantidad_visible }}{% endif %}">
+    </div>
+  </div>
+  <details class="count-incidence" {% if row.lectura.incidencia or row.posted_incidencia %}open{% endif %}>
+    <summary>Registrar incidencia</summary>
+    <label for="incidencia-{{ row.linea.pk }}">Explica si no fue posible contar o hay una observación</label>
+    <textarea id="incidencia-{{ row.linea.pk }}" name="incidencia_{{ row.linea.pk }}" maxlength="2000" rows="2">{% if posted %}{{ row.posted_incidencia }}{% else %}{{ row.lectura.incidencia }}{% endif %}</textarea>
+  </details>
+</div>

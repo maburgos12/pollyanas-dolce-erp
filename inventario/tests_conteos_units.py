@@ -71,7 +71,7 @@ class AutomaticCountUnitTests(TestCase):
                         payload={'lecturas':{str(line.pk):{'cantidad':'2.5'}}})
         self.assertEqual(str(line.lecturas.get().cantidad),'2.500000')
         page = self.client.get(response['Location'])
-        self.assertContains(page, 'Cantidad encontrada (LT)')
+        self.assertContains(page, 'Cantidad de Producto conteo en LT')
         self.assertContains(page, 'value="2.5"')
         self.assertNotContains(page, 'value="2.500000"')
 
