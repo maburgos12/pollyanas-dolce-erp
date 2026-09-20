@@ -218,6 +218,27 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(meses[date(2026, 8, 1)]['rcv'], D('50.01'))
         self.assertEqual(meses[date(2026, 7, 1)]['rcv'] + meses[date(2026, 8, 1)]['rcv'], D('100.01'))
 
+    def test_sipare_bimestral_cubre_primer_mes_aunque_expediente_cierre_despues(self, _):
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('100.01'),
+        )
+
+        corte_julio = build_personnel_plan(date(2026, 7, 31))
+        julio = next(row for row in corte_julio['months'] if row['month'] == date(2026, 7, 1))
+        self.assertEqual(julio['rcv'], D('50.00'))
+
+        corte_agosto = build_personnel_plan(date(2026, 8, 31))
+        meses = {row['month']: row for row in corte_agosto['months']}
+        self.assertEqual(meses[date(2026, 8, 1)]['rcv'], D('50.01'))
+        self.assertEqual(
+            meses[date(2026, 7, 1)]['rcv'] + meses[date(2026, 8, 1)]['rcv'],
+            D('100.01'),
+        )
+
     def test_page_permissions_csv_and_read_only(self, _):
         path = '/reportes/planeacion-personal/'
         self.assertEqual(self.client.get(path).status_code, 302)

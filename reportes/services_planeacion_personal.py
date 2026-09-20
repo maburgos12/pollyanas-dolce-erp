@@ -154,9 +154,16 @@ def build_personnel_plan(cutoff=None):
 
     # Sólo control corporativo canónico: cada expediente aplicado se cuenta una vez.
     expedientes = ExpedienteCedulaIMSS.objects.filter(
+        Q(
+            tipo=ExpedienteCedulaIMSS.TIPO_MENSUAL,
+            periodo__gte=start,
+            periodo__lt=end,
+        ) | Q(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo__gte=start,
+            periodo__lte=end,
+        ),
         estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
-        periodo__gte=start,
-        periodo__lt=end,
         registro_patronal=REGISTRO,
     ).prefetch_related('documentos')
     for expediente in expedientes:
