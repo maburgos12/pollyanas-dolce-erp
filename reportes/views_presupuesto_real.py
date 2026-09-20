@@ -920,20 +920,62 @@ def _mensaje_cedula_seguro(mensaje: object) -> str:
 
 
 def _serializar_preview_cedula(preview) -> dict[str, object]:
+    documentos_registrados = {
+        documento.sha256: documento
+        for documento in DocumentoCedulaIMSS.objects.filter(
+            sha256__in=[documento.sha256 for documento in preview.documentos]
+        ).select_related("expediente")
+    }
+    etiquetas_clase = dict(DocumentoCedulaIMSS.CLASE_CHOICES)
+    meses_es = (
+        "enero",
+        "febrero",
+        "marzo",
+        "abril",
+        "mayo",
+        "junio",
+        "julio",
+        "agosto",
+        "septiembre",
+        "octubre",
+        "noviembre",
+        "diciembre",
+    )
+    meses = [
+        {"iso": mes.strftime("%Y-%m"), "label": f"{meses_es[mes.month - 1]} de {mes.year}"}
+        for mes in preview.parseada.meses
+    ]
+    destinos = {("nomina", None)}
+    destinos.update(
+        (detalle.area_codigo, detalle.sucursal_id)
+        for detalle in preview.detalles
+        if detalle.empleado_id is not None
+    )
     return {
         "tipo": preview.parseada.tipo,
-        "periodo": preview.parseada.periodo.strftime("%B %Y"),
         "registro_patronal": preview.parseada.registro_patronal,
+        "meses": meses,
         "total_patronal": str(preview.total_patronal),
         "total_detalle": str(preview.total_detalle),
         "documentos": [
             {
                 "clase": documento.clase,
+                "clase_label": etiquetas_clase[documento.clase],
                 "nombre": documento.nombre_original,
                 "tamano": documento.tamano,
+                "duplicado": documento.sha256 in documentos_registrados,
+                "expediente_id": (
+                    documentos_registrados[documento.sha256].expediente_id
+                    if documento.sha256 in documentos_registrados
+                    else None
+                ),
             }
             for documento in preview.documentos
         ],
+        "efecto_estimado": {
+            "lineas_maximas": len(meses) * len(destinos),
+            "destinos": len(destinos),
+        },
         "trabajadores": len(preview.detalles),
         "cruzados": sum(detalle.empleado_id is not None for detalle in preview.detalles),
         "sin_cruce": sum(detalle.empleado_id is None for detalle in preview.detalles),

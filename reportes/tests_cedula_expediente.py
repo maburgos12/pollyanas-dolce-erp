@@ -2,8 +2,12 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import tempfile
 import threading
+from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -881,6 +885,9 @@ class PantallaExpedienteTests(TestCase):
         preview = self._post("previsualizar")
 
         self.assertContains(preview, "Total conciliado")
+        self.assertContains(preview, "E52-40157-10-0")
+        self.assertContains(preview, "agosto de 2026")
+        self.assertContains(preview, "Hasta 2 líneas presupuestales")
         self.assertContains(preview, "•••• 2121")
         self.assertNotContains(preview, "12121212121")
         self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
@@ -907,9 +914,24 @@ class PantallaExpedienteTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["preview"]["total_patronal"], "150.25")
+        self.assertEqual(payload["preview"]["registro_patronal"], "E52-40157-10-0")
+        self.assertEqual(
+            payload["preview"]["meses"],
+            [{"iso": "2026-08", "label": "agosto de 2026"}],
+        )
+        self.assertEqual(payload["preview"]["efecto_estimado"]["lineas_maximas"], 2)
+        self.assertFalse(payload["preview"]["documentos"][0]["duplicado"])
         self.assertEqual(payload["preview"]["detalles"][0]["nss"], "•••• 2121")
         self.assertNotContains(response, "12121212121")
         self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+        self._post("aplicar")
+        repetida = self._post("previsualizar", json=True).json()["preview"]
+        self.assertTrue(repetida["documentos"][0]["duplicado"])
+        self.assertEqual(
+            repetida["documentos"][0]["expediente_id"],
+            reportes_models.ExpedienteCedulaIMSS.objects.get().pk,
+        )
 
     def test_aplicar_json_devuelve_toast_y_redireccion_al_detalle(self):
         self.client.force_login(self.user)
@@ -962,11 +984,62 @@ class PantallaExpedienteTests(TestCase):
 
         self.client.force_login(self.user)
         detalle = self.client.get(reverse("reportes:cedula_imss_detalle", args=[expediente.pk]))
+        self.assertContains(detalle, f"Expediente #{expediente.pk}")
         self.assertContains(detalle, "•••• 2121")
         self.assertNotContains(detalle, "12121212121")
         descarga = self.client.get(documento.archivo.url)
         self.assertEqual(descarga.status_code, 200)
         self.assertEqual(descarga["Cache-Control"], "private, no-store")
+
+
+@skipUnless(shutil.which("node"), "Node.js es requerido para validar la carrera de preview")
+class CedulaPreviewJavaScriptTests(SimpleTestCase):
+    def test_respuesta_obsoleta_no_habilita_aplicar_para_otro_filelist(self):
+        plantilla = (
+            Path(__file__).parent
+            / "templates"
+            / "reportes"
+            / "cedula_imss_importar.html"
+        )
+        fuente = plantilla.read_text()
+        script = re.search(r"<script>(.*?)</script>", fuente, flags=re.DOTALL).group(1)
+        escenario = r"""
+const handlers={};
+function element(name){return {name,disabled:false,hidden:true,textContent:'',dataset:{},files:[],addEventListener:(type,fn)=>{handlers[name+':'+type]=fn},querySelector:()=>element('child'),replaceChildren:()=>{},appendChild:()=>{},setAttribute:()=>{},scrollIntoView:()=>{}}}
+const form=element('form'),input=element('input'),apply=element('apply'),preview=element('preview'),region=element('region');
+form.reportValidity=()=>true;form.action='/preview';
+global.document={getElementById:(id)=>({"cedula-form":form,"id_documentos":input,"cedula-aplicar":apply,"cedula-preview":preview,"erp-toast-region":region}[id]),createElement:()=>element('created')};
+global.window={location:{href:'http://test/preview'},matchMedia:()=>({matches:true}),setTimeout:()=>{}};
+global.FormData=class{set(){} delete(){}};
+let resolveFetch;global.fetch=()=>new Promise((resolve)=>{resolveFetch=resolve});
+""" + script + r"""
+(async()=>{
+  input.files=[{name:'A.xls',size:10,lastModified:1,type:'application/vnd.ms-excel'}];
+  const pending=handlers['form:submit']({submitter:{name:'previsualizar',textContent:'Previsualizar',dataset:{}},preventDefault(){},stopImmediatePropagation(){}});
+  input.files=[{name:'B.xls',size:20,lastModified:2,type:'application/vnd.ms-excel'}];
+  handlers['input:change']();
+  resolveFetch({ok:true,json:async()=>({ok:true,preview:{total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
+  await pending;
+  if(!apply.disabled||preview.hidden!==true){throw new Error('La preview obsoleta habilitó Aplicar para otro FileList');}
+  const current=handlers['form:submit']({submitter:{name:'previsualizar',textContent:'Previsualizar',dataset:{}},preventDefault(){},stopImmediatePropagation(){}});
+  resolveFetch({ok:true,json:async()=>({ok:true,preview:{registro_patronal:'E52',meses:[],efecto_estimado:{lineas_maximas:2},total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
+  await current;
+  if(apply.disabled){throw new Error('La preview vigente no habilitó Aplicar');}
+  input.files=[{name:'C.xls',size:30,lastModified:3,type:'application/vnd.ms-excel'}];
+  let prevented=false;
+  await handlers['form:submit']({submitter:{name:'aplicar'},preventDefault(){prevented=true},stopImmediatePropagation(){}});
+  if(!prevented||!apply.disabled){throw new Error('Aplicar no quedó ligado al FileList previsualizado');}
+})().catch((error)=>{console.error(error);process.exit(1)});
+"""
+        resultado = subprocess.run(
+            [shutil.which("node")],
+            input=escenario,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
 
 
 class ConcurrenciaExpedienteTests(TransactionTestCase):
