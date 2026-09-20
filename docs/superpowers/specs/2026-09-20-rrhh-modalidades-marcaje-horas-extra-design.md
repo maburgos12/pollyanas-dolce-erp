@@ -89,7 +89,7 @@ No se crea ni actualiza una `HoraExtra` automática. Si el intervalo supera ocho
 - No cancelar, rechazar, recalcular ni borrar horas extra autorizadas, rechazadas o pagadas.
 - Una hora extra automática pendiente sin turno no podrá autorizarse desde la lista, API de RRHH ni APIs de bonos hasta que la asistencia tenga turno y sea reevaluada.
 - Una hora extra automática ya autorizada sin turno mostrará “Revisión recomendada”, pero conservará estado, monto y auditoría.
-- Las solicitudes manuales se distinguen de las automáticas por su asistencia y origen existente; no se someten al bloqueo retroactivo.
+- Para autorización y presentación, toda solicitud con `asistencia_id` es automática: el vínculo estructural creado por el generador determina su origen, aunque las notas se editen o queden vacías. Las capturas manuales no asignan asistencia y no se someten al bloqueo retroactivo. El prefijo de las notas nunca debe decidir si se valida el diagnóstico/saldo.
 
 ## Interfaz de horas extra
 

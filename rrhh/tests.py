@@ -2167,6 +2167,38 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
                 self.assertIn("saldo automático vigente", response.json()["detail"])
                 self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
 
+    def test_editar_notas_en_cada_api_no_elude_origen_automatico(self):
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor)
+                if consumidor == "generica":
+                    editada = self.client.patch(
+                        reverse("rrhh:hora-extra-detail", args=[hora.pk]),
+                        {"notas": "Motivo corregido sin prefijo"}, format="json",
+                    )
+                else:
+                    editada = self.client.post(url.replace("/autorizar/", "/editar/"), {
+                        "notas": "Motivo corregido sin prefijo", "fecha": hora.fecha.isoformat(),
+                        "horas": str(hora.horas), "motivo_cambio": "Aclarar el motivo operativo",
+                    }, format="json")
+                self.assertEqual(editada.status_code, 200)
+                hora.refresh_from_db()
+                self.assertIsNotNone(hora.asistencia_id)
+                self.assertFalse(hora.notas.startswith("[Detección automática]"))
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("Asigna el turno", response.json()["detail"])
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_origen_automatico_depende_del_enlace_y_no_de_notas(self):
+        from rrhh.services_extra_conciliacion import es_hora_extra_automatica
+
+        for notas in ("", "Motivo manual", "[Detección automática] Extra"):
+            with self.subTest(notas=notas):
+                self.assertTrue(es_hora_extra_automatica(HoraExtra(asistencia_id=1, notas=notas)))
+                self.assertFalse(es_hora_extra_automatica(HoraExtra(asistencia_id=None, notas=notas)))
+
     def test_todas_las_apis_rechazan_pendiente_y_conservan_respuesta(self):
         for consumidor in ("generica", "produccion", "ventas"):
             with self.subTest(consumidor=consumidor):

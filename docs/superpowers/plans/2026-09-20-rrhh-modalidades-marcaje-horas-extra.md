@@ -550,7 +550,7 @@ Agregar en `services_extra_conciliacion.py`:
 
 ```python
 def es_hora_extra_automatica(hora_extra):
-    return bool(hora_extra.asistencia_id and (hora_extra.notas or "").startswith(NOTA_EXTRA_AUTOMATICA))
+    return bool(hora_extra.asistencia_id)
 
 
 def contexto_hora_extra(hora_extra, registros_dia=None):
@@ -597,6 +597,8 @@ En `horas_extra_list`:
 - redirigir siempre a `#hora-extra-<id>`.
 
 La lista web, `HoraExtraViewSet` y `BaseHorasExtraEquipoViewSet` (producción y ventas) deben delegar autorización y rechazo al servicio único. Mantener consultas de alcance, permisos y respuesta de cada adaptador, incluida la restricción histórica del rechazo en bonos al jefe asignado incluso si quien actúa es superusuario. No duplicar monto, transición de estado ni validación del contexto en los adaptadores.
+
+El origen utilizado para autorización y contexto se determina exclusivamente por `asistencia_id`: el generador asigna ese enlace y las capturas manuales no lo asignan. Las notas son texto editable y quitar su prefijo no puede convertir una automática en manual. Cubrir con pruebas la secuencia PATCH de notas en API RRHH o `editar` en bonos producción/ventas → autorización bloqueada 400 sin mutación si falta turno, además del clasificador con/sin vínculo y distintas notas.
 
 Agregar regresiones del saldo obsoleto (2.00 almacenadas frente a 0.50 vigentes), cobertura parcial válida, estados no pendientes, conteo estable de consultas y una `TransactionTestCase` PostgreSQL con eventos y `pg_blocking_pids`: la autorización debe esperar a la transacción que corrige asistencia/genera la cancelación y rechazar al releer, sin monto ni metadatos de autorización residuales.
 

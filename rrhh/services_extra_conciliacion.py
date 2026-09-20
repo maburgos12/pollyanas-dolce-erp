@@ -102,10 +102,8 @@ def detectar_minutos_extra(asistencia):
 
 
 def es_hora_extra_automatica(hora_extra):
-    return bool(
-        hora_extra.asistencia_id
-        and (hora_extra.notas or "").startswith(NOTA_EXTRA_AUTOMATICA)
-    )
+    """El vínculo del generador define el origen; las notas son editables."""
+    return bool(hora_extra.asistencia_id)
 
 
 def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
