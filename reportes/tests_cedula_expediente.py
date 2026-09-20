@@ -14,7 +14,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, models, transaction
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
-from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import AuditLog
@@ -647,7 +648,6 @@ class PersistenciaExpedienteTests(TestCase):
             ).count(),
             1,
         )
-
     def test_carrera_sha_relee_ganador_despues_del_rollback_y_conserva_su_blob(self):
         from reportes.services_cedula_expediente import aplicar_expediente
 
@@ -818,6 +818,155 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertIn("lineas_actualizadas", payload)
         self.assertIn("protegidas_manual", payload)
         self.assertIn("conflictos_auto", payload)
+
+
+class PantallaExpedienteTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_superuser(
+            "direccion_cedulas", "direccion@example.com", "x"
+        )
+        cls.sin_permiso = get_user_model().objects.create_user("consulta_cedulas", password="x")
+        cls.adm = reportes_models.AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        cls.nom = reportes_models.AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in (cls.adm, cls.nom):
+            reportes_models.RubroPresupuesto.objects.create(
+                area=area,
+                concepto="IMSS",
+                tipo=reportes_models.RubroPresupuesto.TIPO_EGRESO,
+            )
+        Empleado.objects.create(
+            codigo="CED-UI-001",
+            nombre="Persona cédula UI",
+            nss="12-12-12-1212-1",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def setUp(self):
+        self._media = tempfile.TemporaryDirectory()
+        self._settings = self.settings(MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        self.addCleanup(self._media.cleanup)
+
+    @staticmethod
+    def _archivos():
+        return {
+            "documentos": [
+                PersistenciaExpedienteTests._sua(),
+                PersistenciaExpedienteTests._pdf(),
+            ],
+        }
+
+    def _post(self, accion, *, json=False):
+        headers = {
+            "HTTP_ACCEPT": "application/json",
+            "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
+        } if json else {}
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ):
+            return self.client.post(
+                reverse("reportes:cedula_imss_importar"),
+                {**self._archivos(), accion: "1"},
+                **headers,
+            )
+
+    def test_preview_no_guarda_y_aplicar_redirige_al_expediente(self):
+        self.client.force_login(self.user)
+
+        preview = self._post("previsualizar")
+
+        self.assertContains(preview, "Total conciliado")
+        self.assertContains(preview, "•••• 2121")
+        self.assertNotContains(preview, "12121212121")
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+        aplicado = self._post("aplicar")
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
+        self.assertRedirects(
+            aplicado,
+            reverse("reportes:cedula_imss_detalle", args=[expediente.pk]),
+        )
+
+    def test_preview_json_conserva_archivos_en_el_formulario_y_habilita_aplicar(self):
+        self.client.force_login(self.user)
+        pantalla = self.client.get(reverse("reportes:cedula_imss_importar"))
+        self.assertContains(pantalla, 'name="documentos"')
+        self.assertContains(pantalla, "multiple")
+        self.assertContains(pantalla, "data-async-action")
+        self.assertContains(pantalla, 'name="aplicar"')
+        self.assertContains(pantalla, "disabled")
+
+        response = self._post("previsualizar", json=True)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["preview"]["total_patronal"], "150.25")
+        self.assertEqual(payload["preview"]["detalles"][0]["nss"], "•••• 2121")
+        self.assertNotContains(response, "12121212121")
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    def test_aplicar_json_devuelve_toast_y_redireccion_al_detalle(self):
+        self.client.force_login(self.user)
+
+        response = self._post("aplicar", json=True)
+
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["redirect"],
+            reverse("reportes:cedula_imss_detalle", args=[expediente.pk]),
+        )
+        self.assertEqual(response.json()["toast"]["type"], "success")
+
+    def test_error_de_nss_duplicado_tambien_se_enmascara(self):
+        Empleado.objects.create(
+            codigo="CED-UI-DUP",
+            nombre="Persona duplicada",
+            nss="12121212121",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        self.client.force_login(self.user)
+
+        response = self._post("aplicar", json=True)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotContains(response, "12121212121", status_code=400)
+        self.assertIn("•••• 2121", response.json()["toast"]["message"])
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    @override_settings(DEBUG=False)
+    def test_descarga_requiere_permiso_y_detalle_enmascara_nss(self):
+        self.client.force_login(self.user)
+        self._post("aplicar")
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
+        documento = expediente.documentos.get(
+            clase=reportes_models.DocumentoCedulaIMSS.CLASE_SUA_XLS
+        )
+
+        self.client.logout()
+        self.assertEqual(self.client.get(documento.archivo.url).status_code, 404)
+        self.client.force_login(self.sin_permiso)
+        self.assertEqual(self.client.get(documento.archivo.url).status_code, 404)
+        self.assertEqual(
+            self.client.get(
+                reverse("reportes:cedula_imss_detalle", args=[expediente.pk])
+            ).status_code,
+            403,
+        )
+
+        self.client.force_login(self.user)
+        detalle = self.client.get(reverse("reportes:cedula_imss_detalle", args=[expediente.pk]))
+        self.assertContains(detalle, "•••• 2121")
+        self.assertNotContains(detalle, "12121212121")
+        descarga = self.client.get(documento.archivo.url)
+        self.assertEqual(descarga.status_code, 200)
+        self.assertEqual(descarga["Cache-Control"], "private, no-store")
 
 
 class ConcurrenciaExpedienteTests(TransactionTestCase):

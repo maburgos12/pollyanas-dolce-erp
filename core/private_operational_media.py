@@ -104,12 +104,22 @@ def _can_access_operational_media(user, path):
             puede_capturar=True,
             area__solicitudes_compra_departamentales__items__in=item_ids,
         ).exists()
+    if path.startswith("reportes/cedulas-imss/"):
+        from reportes.models import DocumentoCedulaIMSS
+        from reportes.views_presupuesto_real import _puede_subir_cedulas
+
+        return _puede_subir_cedulas(user) and DocumentoCedulaIMSS.objects.filter(
+            archivo=path,
+        ).exists()
     return False
 
 
 def serve_private_maintenance_media(request, path):
     """Serve operational evidence only when the current user can see its parent record."""
-    if not settings.DEBUG and not _can_access_operational_media(request.user, path):
+    es_cedula_imss = path.startswith("reportes/cedulas-imss/")
+    if (es_cedula_imss or not settings.DEBUG) and not _can_access_operational_media(
+        request.user, path
+    ):
         raise Http404
     response = static_serve(request, path, document_root=settings.MEDIA_ROOT)
     response["Cache-Control"] = "private, no-store"

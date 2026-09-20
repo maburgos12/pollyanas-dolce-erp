@@ -138,7 +138,7 @@ urlpatterns = [
 
 urlpatterns += [
     re_path(
-        r"^media/(?P<path>(?:fallas/(?:evidencias|seguimiento)|activos/(?:facturas|evidencias)|logistica/reportes|servicios_unidad|reparaciones_unidad)/.*)$",
+        r"^media/(?P<path>(?:fallas/(?:evidencias|seguimiento)|activos/(?:facturas|evidencias)|logistica/reportes|servicios_unidad|reparaciones_unidad|reportes/cedulas-imss)/.*)$",
         serve_private_maintenance_media,
     ),
     re_path(r"^media/(?P<path>.*)$", static_serve, {"document_root": settings.MEDIA_ROOT}),

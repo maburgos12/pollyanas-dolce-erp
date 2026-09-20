@@ -8,10 +8,12 @@ el detalle por rubro con semáforos y el estado de cobertura del mapeo.
 from __future__ import annotations
 
 import csv
+import re
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Q
@@ -28,6 +30,8 @@ from .models import (
     AreaPresupuestoResponsable,
     CategoriaGasto,
     CentroCosto,
+    DocumentoCedulaIMSS,
+    ExpedienteCedulaIMSS,
     GastoRecurrente,
     LineaPresupuestoMensual,
     ObligacionGasto,
@@ -906,6 +910,45 @@ def _puede_subir_cedulas(user) -> bool:
     ).exists()
 
 
+def _nss_enmascarado(nss: str) -> str:
+    digitos = "".join(caracter for caracter in str(nss or "") if caracter.isdigit())
+    return f"•••• {digitos[-4:]}" if digitos else "Sin NSS"
+
+
+def _mensaje_cedula_seguro(mensaje: object) -> str:
+    return re.sub(r"(?<!\d)\d{7}(\d{4})(?!\d)", r"•••• \1", str(mensaje))
+
+
+def _serializar_preview_cedula(preview) -> dict[str, object]:
+    return {
+        "tipo": preview.parseada.tipo,
+        "periodo": preview.parseada.periodo.strftime("%B %Y"),
+        "registro_patronal": preview.parseada.registro_patronal,
+        "total_patronal": str(preview.total_patronal),
+        "total_detalle": str(preview.total_detalle),
+        "documentos": [
+            {
+                "clase": documento.clase,
+                "nombre": documento.nombre_original,
+                "tamano": documento.tamano,
+            }
+            for documento in preview.documentos
+        ],
+        "trabajadores": len(preview.detalles),
+        "cruzados": sum(detalle.empleado_id is not None for detalle in preview.detalles),
+        "sin_cruce": sum(detalle.empleado_id is None for detalle in preview.detalles),
+        "detalles": [
+            {
+                "nss": _nss_enmascarado(detalle.nss),
+                "nombre": detalle.nombre_origen,
+                "cuota_patronal": str(detalle.cuota_patronal),
+                "estado": "Cruzado con RRHH" if detalle.empleado_id else "Sin cruce en RRHH",
+            }
+            for detalle in preview.detalles
+        ],
+    }
+
+
 @login_required
 def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
@@ -915,21 +958,52 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
 
     resumen = None
     error = None
-    fue_dry_run = False
     if request.method == "POST":
-        from .services_cedula_imss import procesar_cedula_subida
+        from .services_cedula_expediente import aplicar_expediente, preparar_expediente
 
-        archivo = request.FILES.get("cedula")
-        fue_dry_run = bool(request.POST.get("previsualizar"))
-        if archivo is None:
-            error = "Selecciona el archivo .xls de la cédula (SUA/SIPARE)."
-        elif not archivo.name.lower().endswith(".xls"):
-            error = "El archivo debe ser el .xls que genera el SUA/SIPARE."
+        archivos = request.FILES.getlist("documentos")
+        if not archivos:
+            error = "Selecciona una cédula SUA .xls y, si la tienes, su evidencia EMA o EBA en PDF."
         else:
             try:
-                resumen = procesar_cedula_subida(archivo, dry_run=fue_dry_run)
-            except ValueError as exc:
-                error = str(exc)
+                preview = preparar_expediente(archivos, usuario=request.user)
+                resumen = _serializar_preview_cedula(preview)
+                if "aplicar" in request.POST:
+                    expediente = aplicar_expediente(preview, usuario=request.user)
+                    destino = reverse("reportes:cedula_imss_detalle", args=[expediente.pk])
+                    mensaje = "Expediente aplicado y conciliado."
+                    if _wants_json(request):
+                        return JsonResponse(
+                            {
+                                "ok": True,
+                                "redirect": destino,
+                                "toast": {"type": "success", "message": mensaje},
+                            }
+                        )
+                    messages.success(request, mensaje)
+                    return redirect(destino)
+                if _wants_json(request):
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "preview": resumen,
+                            "toast": {
+                                "type": "info",
+                                "message": "Previsualización lista. No se guardó ningún dato.",
+                            },
+                        }
+                    )
+            except (RuntimeError, ValueError) as exc:
+                error = _mensaje_cedula_seguro(exc)
+
+        if error and _wants_json(request):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "toast": {"type": "error", "message": error, "persistent": True},
+                },
+                status=400,
+            )
 
     return render(
         request,
@@ -940,7 +1014,53 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
             else [],
             "resumen": resumen,
             "error": error,
-            "fue_dry_run": fue_dry_run,
+        },
+    )
+
+
+@login_required
+def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
+    from .views import _reportes_module_tabs
+
+    if not _puede_subir_cedulas(request.user):
+        raise PermissionDenied("No tienes permisos para consultar expedientes del IMSS.")
+    expediente = get_object_or_404(
+        ExpedienteCedulaIMSS.objects.prefetch_related("documentos__detalles__empleado"),
+        pk=pk,
+    )
+    documentos = list(expediente.documentos.all())
+    sua = next(
+        (
+            documento
+            for documento in documentos
+            if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS
+        ),
+        None,
+    )
+    detalles = []
+    if sua is not None:
+        detalles = [
+            {
+                "nss": _nss_enmascarado(detalle.nss),
+                "nombre": detalle.nombre_origen,
+                "dias": detalle.dias,
+                "sdi": detalle.sdi,
+                "cuota_patronal": detalle.cuota_patronal,
+                "cruce": detalle.get_cruce_estado_display(),
+                "empleado": detalle.empleado,
+            }
+            for detalle in sua.detalles.all()
+        ]
+    return render(
+        request,
+        "reportes/cedula_imss_detalle.html",
+        {
+            "module_tabs": _reportes_module_tabs("presupuesto_vs_real")
+            if can_view_reportes(request.user)
+            else [],
+            "expediente": expediente,
+            "documentos": documentos,
+            "detalles": detalles,
         },
     )
 
