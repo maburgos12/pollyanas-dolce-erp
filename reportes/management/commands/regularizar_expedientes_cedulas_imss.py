@@ -101,23 +101,50 @@ def _enumerar_archivos(root: Path) -> tuple[Path, ...]:
 
 
 def _leer_archivo_seguro(ruta: Path, root: Path) -> tuple[bytes, str]:
-    root_real = root.resolve(strict=True)
-    if not ruta.resolve(strict=False).is_relative_to(root_real):
-        raise CommandError(f"Archivo fuera de --root: {ruta}")
-    banderas = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    root_lexico = Path(os.path.abspath(root))
     try:
-        fd = os.open(ruta, banderas)
+        root_absoluto = root.resolve(strict=True)
     except OSError as exc:
+        raise CommandError(f"No se pudo resolver --root de forma segura: {exc}") from exc
+    ruta_absoluta = Path(os.path.abspath(ruta))
+    try:
+        relativa = ruta_absoluta.relative_to(root_lexico)
+    except ValueError as exc:
+        try:
+            relativa = ruta_absoluta.relative_to(root_absoluto)
+        except ValueError:
+            raise CommandError(f"Archivo fuera de --root: {ruta}") from exc
+    componentes = relativa.parts
+    if not componentes or any(parte in {"", ".", ".."} for parte in componentes):
+        raise CommandError(f"Ruta inválida bajo --root: {ruta}")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directorio_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+    archivo_flags = os.O_RDONLY | nofollow
+    directorios_abiertos: list[int] = []
+    archivo_fd = None
+    try:
+        actual = os.open(root_absoluto, directorio_flags)
+        directorios_abiertos.append(actual)
+        for componente in componentes[:-1]:
+            actual = os.open(componente, directorio_flags, dir_fd=actual)
+            directorios_abiertos.append(actual)
+        archivo_fd = os.open(componentes[-1], archivo_flags, dir_fd=actual)
+    except OSError as exc:
+        for directorio_fd in reversed(directorios_abiertos):
+            os.close(directorio_fd)
         raise CommandError(f"No se pudo abrir de forma segura '{ruta.name}': {exc}") from exc
     try:
-        estado = os.fstat(fd)
+        estado = os.fstat(archivo_fd)
         if not stat.S_ISREG(estado.st_mode):
             raise CommandError(f"'{ruta.name}' no es un archivo regular.")
         if estado.st_size > MAX_ARCHIVO_BYTES:
             raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
         partes, total = [], 0
         while True:
-            bloque = os.read(fd, min(1024 * 1024, MAX_ARCHIVO_BYTES + 1 - total))
+            bloque = os.read(
+                archivo_fd,
+                min(1024 * 1024, MAX_ARCHIVO_BYTES + 1 - total),
+            )
             if not bloque:
                 break
             partes.append(bloque)
@@ -129,7 +156,10 @@ def _leer_archivo_seguro(ruta: Path, root: Path) -> tuple[bytes, str]:
             raise CommandError(f"El archivo '{ruta.name}' cambió durante la lectura.")
         return contenido, hashlib.sha256(contenido).hexdigest()
     finally:
-        os.close(fd)
+        if archivo_fd is not None:
+            os.close(archivo_fd)
+        for directorio_fd in reversed(directorios_abiertos):
+            os.close(directorio_fd)
 
 
 def _cargar_filas_bytes(contenido: bytes):

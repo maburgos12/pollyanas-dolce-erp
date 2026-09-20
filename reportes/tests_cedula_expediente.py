@@ -404,10 +404,15 @@ class RegularizacionCedulasTests(TestCase):
         destino.write_bytes(b"xls")
         original = self.xls
 
-        def intercambiar(path, flags):
-            original.unlink()
-            original.symlink_to(destino)
-            return real_open(path, flags)
+        intercambiado = False
+
+        def intercambiar(path, flags, *args, **kwargs):
+            nonlocal intercambiado
+            if not intercambiado:
+                original.unlink()
+                original.symlink_to(destino)
+                intercambiado = True
+            return real_open(path, flags, *args, **kwargs)
 
         with patch("os.open", side_effect=intercambiar):
             with self.assertRaises(CommandError):
@@ -418,6 +423,35 @@ class RegularizacionCedulasTests(TestCase):
             archivo.truncate(10 * 1024 * 1024 + 1)
         with self.assertRaisesRegex(CommandError, "10 MiB"):
             _leer_archivo_seguro(grande, Path(self._root.name))
+
+    def test_lectura_segura_rechaza_swap_de_directorio_ancestro(self):
+        from reportes.management.commands.regularizar_expedientes_cedulas_imss import (
+            _leer_archivo_seguro,
+        )
+
+        root = Path(self._root.name)
+        carpeta = root / "periodo"
+        carpeta.mkdir()
+        interno = carpeta / "SUA.xls"
+        interno.write_bytes(b"interno")
+        externo_dir = Path(self._media.name) / "externo"
+        externo_dir.mkdir()
+        (externo_dir / "SUA.xls").write_bytes(b"externo-no-leer")
+        respaldo = root / "periodo-original"
+        real_open = os.open
+        llamadas = 0
+
+        def intercambiar_ancestro(path, flags, *args, **kwargs):
+            nonlocal llamadas
+            llamadas += 1
+            if llamadas == 1:
+                carpeta.rename(respaldo)
+                carpeta.symlink_to(externo_dir, target_is_directory=True)
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch("os.open", side_effect=intercambiar_ancestro):
+            with self.assertRaises(CommandError):
+                _leer_archivo_seguro(interno, root)
 
     def test_pdf_de_tipo_periodo_incorrecto_no_se_asocia_por_directorio(self):
         from reportlab.pdfgen import canvas
