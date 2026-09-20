@@ -1,12 +1,19 @@
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import FieldDoesNotExist
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, models, transaction
+from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
+from core.models import AuditLog
 from reportes import models as reportes_models
 from rrhh.models import Empleado
 
@@ -306,3 +313,233 @@ class ExpedienteCedulaIMSSDatabaseTests(TestCase):
 
         with self.assertRaises(ProtectedError):
             expediente.delete()
+
+
+class PersistenciaExpedienteTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("aplica_cedula", password="x")
+        cls.adm = reportes_models.AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        cls.nom = reportes_models.AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in (cls.adm, cls.nom):
+            reportes_models.RubroPresupuesto.objects.create(
+                area=area,
+                concepto="IMSS",
+                tipo=reportes_models.RubroPresupuesto.TIPO_EGRESO,
+            )
+        Empleado.objects.create(
+            codigo="CED-001",
+            nombre="Persona cédula",
+            nss="12-12-12-1212-1",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def setUp(self):
+        self._media = tempfile.TemporaryDirectory()
+        self._settings = self.settings(MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        self.addCleanup(self._media.cleanup)
+
+    @staticmethod
+    def _filas(*, detalle=Decimal("150.25"), control=Decimal("150.25")):
+        return [
+            ["SISTEMA UNICO DE AUTODETERMINACION"] + [""] * 21,
+            ["Período de Proceso: Agosto-2026"] + [""] * 21,
+            ["Registro Patronal: E52-40157-10-0", "POLLYANA'S DOLCE"] + [""] * 20,
+            ["Clave", "Movimiento", "Fecha", "Dias", "SDI", "Lic.", "Inc.", "Aus.",
+             "C.F.", "Exc.Pat.", "Exc. Obr.", "P.D. Pat.", "P.D. Obr.", "G.M.P. Pat.",
+             "G.M.P. Obr.", "R.T.", "I.V. Pat.", "I.V. Obr", "G.P.S.", "Patronal",
+             "Obrera", "SubTotal"],
+            ["12-12-12-1212-1", "", "", "", "", "PERSONA CEDULA"] + [""] * 16,
+            ["", "NORMAL", "", 30, 350] + [0] * 14 + [detalle, Decimal("20"), detalle + 20],
+            ["TOTAL REGISTRO PATRONAL", "", "", 30, ""] + [0] * 14
+            + [control, Decimal("20"), control + 20],
+        ]
+
+    @staticmethod
+    def _sua(nombre="SUA_agosto.xls", contenido=b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1xls"):
+        return SimpleUploadedFile(nombre, contenido, content_type="application/vnd.ms-excel")
+
+    @staticmethod
+    def _pdf(nombre="EMA_agosto.pdf"):
+        etiqueta = b"EBA EMISION BIMESTRAL ANTICIPADA" if "EBA" in nombre.upper() else b"EMA EMISION MENSUAL ANTICIPADA"
+        return SimpleUploadedFile(
+            nombre,
+            b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n" + etiqueta + b"\n%%EOF",
+            content_type="application/pdf",
+        )
+
+    def _preview(self, *, filas=None, archivos=None):
+        from reportes.services_cedula_expediente import preparar_expediente
+
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=filas or self._filas(),
+        ):
+            return preparar_expediente(archivos or [self._sua()], usuario=self.user)
+
+    def test_preview_no_escribe_y_prepara_cruce(self):
+        preview = self._preview(archivos=[self._sua(), self._pdf()])
+
+        self.assertEqual(preview.total_detalle, Decimal("150.25"))
+        self.assertEqual(preview.total_patronal, Decimal("150.25"))
+        self.assertEqual(preview.detalles[0].empleado_id, Empleado.objects.get(codigo="CED-001").pk)
+        self.assertEqual(preview.detalles[0].area_codigo, "administracion")
+        self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 0)
+        self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 0)
+        self.assertEqual(reportes_models.DetalleCedulaIMSS.objects.count(), 0)
+        self.assertEqual(list(Path(self._media.name).rglob("*")), [])
+
+    def test_preview_exige_un_solo_sua_y_firmas_validas(self):
+        with self.assertRaisesRegex(ValueError, "exactamente un"):
+            self._preview(archivos=[self._pdf()])
+        with self.assertRaisesRegex(ValueError, "firma válida"):
+            self._preview(archivos=[self._sua(contenido=b"xls falso")])
+
+    def test_preview_bloquea_total_control_ausente(self):
+        from reportes.services_cedula_expediente import CedulaDiscrepante
+
+        filas = self._filas()[:-1]
+        with self.assertRaisesRegex(CedulaDiscrepante, "control inequívoco"):
+            self._preview(filas=filas)
+
+    def test_preview_no_confunde_palabras_con_siglas_ema_eba(self):
+        pdf = SimpleUploadedFile(
+            "sistema_prueba.pdf",
+            b"%PDF-1.4\nDocumento sin clasificacion IMSS\n%%EOF",
+            content_type="application/pdf",
+        )
+        with self.assertRaisesRegex(ValueError, "clasificar inequívocamente"):
+            self._preview(archivos=[self._sua(), pdf])
+
+    def test_aplica_documentos_detalle_metadata_y_auditoria(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        expediente = aplicar_expediente(
+            self._preview(archivos=[self._sua(), self._pdf()]), usuario=self.user
+        )
+
+        self.assertEqual(expediente.estado, reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO)
+        self.assertEqual(expediente.documentos.count(), 2)
+        sua = expediente.documentos.get(clase=reportes_models.DocumentoCedulaIMSS.CLASE_SUA_XLS)
+        self.assertEqual(
+            sua.detalles.aggregate(total=Sum("cuota_patronal"))["total"], Decimal("150.25")
+        )
+        detalle = sua.detalles.get()
+        self.assertEqual(detalle.area_codigo, "administracion")
+        self.assertEqual(detalle.empleado.codigo, "CED-001")
+        lineas = reportes_models.LineaPresupuestoMensual.objects.filter(fuente_real="AUTO:SIPARE")
+        self.assertEqual(lineas.count(), 2)
+        for linea in lineas:
+            self.assertEqual(linea.metadata["expediente_cedula_imss_id"], expediente.pk)
+            self.assertEqual(linea.metadata["documento_cedula_imss_id"], sua.pk)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="CEDULA_IMSS_APLICADA",
+                model="reportes.ExpedienteCedulaIMSS",
+                object_id=str(expediente.pk),
+                user=self.user,
+            ).exists()
+        )
+
+    def test_sha_sua_es_idempotente_y_no_duplica(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        expediente = aplicar_expediente(self._preview(), usuario=self.user)
+        repetido = aplicar_expediente(self._preview(), usuario=self.user)
+
+        self.assertEqual(repetido.pk, expediente.pk)
+        self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
+        self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action="CEDULA_IMSS_APLICADA").count(), 1)
+
+    def test_total_discordante_hace_rollback_sin_lineas_ni_archivos(self):
+        from reportes.services_cedula_expediente import CedulaDiscrepante, aplicar_expediente
+
+        preview = self._preview(filas=self._filas(detalle=Decimal("150.25"), control=Decimal("151.25")))
+        with self.assertRaises(CedulaDiscrepante):
+            aplicar_expediente(preview, usuario=self.user)
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.LineaPresupuestoMensual.objects.exists())
+        self.assertEqual([p for p in Path(self._media.name).rglob("*") if p.is_file()], [])
+
+    def test_pdf_es_evidencia_y_no_incrementa_importes(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        expediente = aplicar_expediente(
+            self._preview(archivos=[self._sua(), self._pdf("EBA_bimestre.pdf")]),
+            usuario=self.user,
+        )
+
+        self.assertEqual(expediente.total_patronal, Decimal("150.25"))
+        self.assertEqual(
+            expediente.documentos.get(clase=reportes_models.DocumentoCedulaIMSS.CLASE_EBA_PDF).total_visible,
+            None,
+        )
+        self.assertEqual(
+            reportes_models.DetalleCedulaIMSS.objects.aggregate(total=Sum("cuota_patronal"))["total"],
+            Decimal("150.25"),
+        )
+
+    def test_nss_duplicado_activo_bloquea_sin_escrituras(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        Empleado.objects.create(
+            codigo="CED-002",
+            nombre="Duplicada",
+            nss="12121212121",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+        preview = self._preview()
+
+        with self.assertRaisesRegex(ValueError, "NSS duplicados"):
+            aplicar_expediente(preview, usuario=self.user)
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.LineaPresupuestoMensual.objects.exists())
+
+    def test_elimina_blobs_si_falla_la_base(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        preview = self._preview(archivos=[self._sua(), self._pdf()])
+        with patch.object(
+            reportes_models.DetalleCedulaIMSS.objects,
+            "bulk_create",
+            side_effect=IntegrityError("falla forzada"),
+        ):
+            with self.assertRaises(IntegrityError):
+                aplicar_expediente(preview, usuario=self.user)
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertEqual([p for p in Path(self._media.name).rglob("*") if p.is_file()], [])
+
+    def test_respeta_manual_y_conflicto_auto(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        rubro_adm = reportes_models.RubroPresupuesto.objects.get(area=self.adm, concepto="IMSS")
+        rubro_nom = reportes_models.RubroPresupuesto.objects.get(area=self.nom, concepto="IMSS")
+        manual = reportes_models.LineaPresupuestoMensual.objects.create(
+            rubro=rubro_adm,
+            periodo=date(2026, 8, 1),
+            monto_real=Decimal("999"),
+            fuente_real="MANUAL:paula",
+        )
+        auto = reportes_models.LineaPresupuestoMensual.objects.create(
+            rubro=rubro_nom,
+            periodo=date(2026, 8, 1),
+            monto_real=Decimal("888"),
+            fuente_real="AUTO:GASTO_OPERATIVO",
+        )
+
+        aplicar_expediente(self._preview(), usuario=self.user)
+
+        manual.refresh_from_db()
+        auto.refresh_from_db()
+        self.assertEqual((manual.monto_real, manual.fuente_real), (Decimal("999"), "MANUAL:paula"))
+        self.assertEqual(
+            (auto.monto_real, auto.fuente_real),
+            (Decimal("888"), "AUTO:GASTO_OPERATIVO"),
+        )
