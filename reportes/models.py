@@ -2970,6 +2970,11 @@ class ExpedienteCedulaIMSS(models.Model):
                 fields=["tipo", "periodo", "registro_patronal", "revision"],
                 name="uniq_cedula_imss_revision",
             ),
+            models.UniqueConstraint(
+                fields=["tipo", "periodo", "registro_patronal"],
+                condition=models.Q(estado="APLICADO"),
+                name="uniq_cedula_imss_aplicada",
+            ),
         ]
         indexes = [
             models.Index(
@@ -3027,6 +3032,11 @@ class DetalleCedulaIMSS(models.Model):
         on_delete=models.PROTECT,
         related_name="detalles",
     )
+    documento = models.ForeignKey(
+        DocumentoCedulaIMSS,
+        on_delete=models.PROTECT,
+        related_name="detalles",
+    )
     empleado = models.ForeignKey(
         "rrhh.Empleado",
         null=True,
@@ -3057,8 +3067,15 @@ class DetalleCedulaIMSS(models.Model):
         verbose_name_plural = "Detalles de cédula IMSS"
         constraints = [
             models.UniqueConstraint(
-                fields=["expediente", "nss"],
+                fields=["documento", "nss"],
                 name="uniq_cedula_imss_nss",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(cruce_estado="CRUZADO", empleado__isnull=False)
+                    | models.Q(cruce_estado="SIN_CRUCE", empleado__isnull=True)
+                ),
+                name="cedula_imss_cruce_coherente",
             ),
         ]
         indexes = [
@@ -3069,4 +3086,4 @@ class DetalleCedulaIMSS(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.nss} · {self.nombre_origen}"
+        return f"NSS •••••••{self.nss[-4:]} · {self.nombre_origen}"
