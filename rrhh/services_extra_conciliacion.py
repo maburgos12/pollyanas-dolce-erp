@@ -211,4 +211,8 @@ def conciliar_extra_diario(asistencia, registros):
         'pendiente': formato_minutos(pendiente), 'rechazado': formato_minutos(rechazado),
         'estado': estado, 'registros': registros,
         'base': 'Turno de la asistencia; comida incluida' if detectado is not None else diagnostico.detalle,
+        'modalidad': diagnostico.modalidad,
+        'comida_observable': diagnostico.comida_observable,
+        'requiere_revision': diagnostico.requiere_revision,
+        'codigo': diagnostico.codigo,
     }

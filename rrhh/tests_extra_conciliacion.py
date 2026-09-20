@@ -71,6 +71,19 @@ class ExtraConciliacionTests(TestCase):
         self.assertIsNone(generar_horas_extra_automatico(asistencia))
         self.assertFalse(HoraExtra.objects.exists())
 
+    def test_reporte_explica_extra_no_calculable_sin_turno(self):
+        self.asistencia(turno=None)
+        reportes, _ = _build_reporte_asistencia(
+            self.fecha, self.fecha, str(self.empleado.pk), ''
+        )
+        extra = reportes[0]['filas'][0]['extra']
+        self.assertIsNone(extra['detectado_minutos'])
+        self.assertEqual(extra['estado'], 'No calculable: falta asignar turno')
+        self.assertEqual(extra['codigo'], 'sin_turno')
+        self.assertEqual(extra['modalidad'], Empleado.MARCAJE_CUATRO_MARCAS)
+        self.assertTrue(extra['comida_observable'])
+        self.assertTrue(extra['requiere_revision'])
+
     def test_repartidor_con_turno_calcula_contra_salida_programada(self):
         self.empleado.puesto_operativo = 'REPARTIDOR'
         self.empleado.save(update_fields=['puesto_operativo'])
