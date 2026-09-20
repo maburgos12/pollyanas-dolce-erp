@@ -346,7 +346,7 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
 
 def _evaluar_integridad_marcaje(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
     modalidad = modalidad_marcaje_efectiva(asistencia)
-    falta_extremo = bool(asistencia.entrada) != bool(asistencia.salida)
+    falta_extremo = not asistencia.entrada or not asistencia.salida
     falta_comida = bool(asistencia.salida_comida) != bool(asistencia.regreso_comida)
     if not falta_extremo and not falta_comida:
         return 0, 0

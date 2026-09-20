@@ -145,6 +145,55 @@ class ReglasAsistenciaRRHHTests(TestCase):
                 self.assertEqual(resultado.resueltos, 1)
                 self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
 
+    def test_ambos_extremos_ausentes_generan_marcaje_incompleto_idempotente(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(fecha, time(8), salida=None, minutos=0)
+        asistencia.entrada = None
+        asistencia.save(update_fields=["entrada"])
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        incidencias = IncidenciaAsistencia.objects.filter(empleado=self.empleado, fecha=fecha)
+        incidencia = incidencias.get(tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO)
+        self.assertEqual(resultado.creados, 1)
+        self.assertEqual(incidencias.count(), 1)
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertIs(incidencia.metadata["falta_entrada_o_salida"], True)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertEqual(resultado.resueltos, 0)
+        self.assertEqual(incidencias.count(), 1)
+        reevaluada = incidencias.get()
+        self.assertEqual(reevaluada.pk, incidencia.pk)
+        self.assertEqual(reevaluada.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_quitar_ultimo_extremo_conserva_marcaje_incompleto_pendiente(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(fecha, time(8))
+        asistencia.entrada = None
+        asistencia.save(update_fields=["entrada"])
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencias = IncidenciaAsistencia.objects.filter(empleado=self.empleado, fecha=fecha)
+        incidencia = incidencias.get(tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO)
+        asistencia.salida = None
+        asistencia.minutos_trabajados = 0
+        asistencia.save(update_fields=["salida", "minutos_trabajados"])
+
+        for _ in range(2):
+            resultado = evaluar_dia_empleado(self.empleado, fecha)
+            self.assertEqual(resultado.creados, 0)
+            self.assertEqual(resultado.resueltos, 0)
+            self.assertEqual(incidencias.count(), 1)
+            reevaluada = incidencias.get()
+            self.assertEqual(reevaluada.pk, incidencia.pk)
+            self.assertEqual(reevaluada.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+            self.assertIs(reevaluada.metadata["falta_entrada_o_salida"], True)
+            self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
     def test_extra_no_calculable_se_resuelve_al_asignar_turno(self):
         fecha = date(2026, 6, 1)
         asistencia = self.crear_asistencia(fecha, time(8), salida=time(17), minutos=540)
