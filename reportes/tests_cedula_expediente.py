@@ -22,6 +22,7 @@ from django.db import IntegrityError, close_old_connections, connection, models,
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -80,6 +81,9 @@ class RegularizacionCedulasTests(TestCase):
         with patch(
             "reportes.services_cedula_expediente.cargar_filas_xls",
             return_value=PersistenciaExpedienteTests._filas(),
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
         ):
             return call_command(
                 "regularizar_expedientes_cedulas_imss",
@@ -104,6 +108,36 @@ class RegularizacionCedulasTests(TestCase):
         self.assertIn("150.25", salida.getvalue())
         self.assertIn("DRY-RUN", salida.getvalue())
 
+    def test_dry_run_no_usa_temporales_storage_ni_escrituras_sql(self):
+        self._crear_lineas_historicas()
+        with patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+            create=True,
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.preparar_expediente",
+            side_effect=AssertionError("dry-run no debe preparar persistencia"),
+        ), patch(
+            "tempfile.NamedTemporaryFile",
+            side_effect=AssertionError("dry-run no debe crear temporales"),
+        ), patch(
+            "django.db.models.fields.files.FieldFile.save",
+            side_effect=AssertionError("dry-run no debe escribir storage"),
+        ), CaptureQueriesContext(connection) as consultas:
+            call_command(
+                "regularizar_expedientes_cedulas_imss",
+                "--root",
+                self._root.name,
+                stdout=StringIO(),
+            )
+
+        escrituras = [
+            consulta["sql"]
+            for consulta in consultas.captured_queries
+            if re.match(r"^\s*(INSERT|UPDATE|DELETE)\b", consulta["sql"], re.IGNORECASE)
+        ]
+        self.assertEqual(escrituras, [])
+
     def test_apply_enlaza_sin_cambiar_montos_y_segunda_ejecucion_es_idempotente(self):
         lineas = self._crear_lineas_historicas()
         originales = {linea.pk: linea.monto_real for linea in lineas}
@@ -125,6 +159,40 @@ class RegularizacionCedulasTests(TestCase):
 
         self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
         self.assertIn("YA_ENLAZADO", salida.getvalue())
+
+    def test_apply_no_borra_ni_altera_linea_preexistente_con_fuente_vacia(self):
+        rubro_adm = reportes_models.RubroPresupuesto.objects.get(
+            area=self.adm, concepto="IMSS"
+        )
+        linea_vacia = reportes_models.LineaPresupuestoMensual.objects.create(
+            rubro=rubro_adm,
+            periodo=date(2026, 8, 1),
+            monto_presupuesto=Decimal("888.00"),
+            monto_real=Decimal("77.00"),
+            fuente_real="",
+            metadata={"conservar": {"valor": True}},
+        )
+        rubro_nom = reportes_models.RubroPresupuesto.objects.get(
+            area=self.nom, concepto="IMSS"
+        )
+        reportes_models.LineaPresupuestoMensual.objects.create(
+            rubro=rubro_nom,
+            periodo=date(2026, 8, 1),
+            monto_real=Decimal("150.25"),
+            fuente_real="AUTO:LEGADO",
+        )
+        creado_en = linea_vacia.creado_en
+        actualizado_en = linea_vacia.actualizado_en
+
+        self._ejecutar("--apply")
+
+        linea_vacia.refresh_from_db()
+        self.assertEqual(linea_vacia.monto_presupuesto, Decimal("888.00"))
+        self.assertEqual(linea_vacia.monto_real, Decimal("77.00"))
+        self.assertEqual(linea_vacia.fuente_real, "")
+        self.assertEqual(linea_vacia.metadata, {"conservar": {"valor": True}})
+        self.assertEqual(linea_vacia.creado_en, creado_en)
+        self.assertEqual(linea_vacia.actualizado_en, actualizado_en)
 
     def test_total_discordante_aborta_sin_aplicacion_parcial(self):
         lineas = self._crear_lineas_historicas()
@@ -190,6 +258,9 @@ class RegularizacionCedulasTests(TestCase):
 
         with patch(
             "reportes.services_cedula_expediente.cargar_filas_xls", return_value=filas
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            return_value=filas,
         ):
             call_command(
                 "regularizar_expedientes_cedulas_imss",
@@ -233,6 +304,9 @@ class RegularizacionCedulasTests(TestCase):
 
         with patch(
             "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
             "reportes.management.commands.regularizar_expedientes_cedulas_imss.aplicar_expediente",

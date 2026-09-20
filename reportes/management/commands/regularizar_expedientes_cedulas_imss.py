@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -13,10 +14,13 @@ from django.db import transaction
 
 from reportes.models import DocumentoCedulaIMSS, LineaPresupuestoMensual
 from reportes.services_cedula_expediente import (
+    CedulaDiscrepante,
     MAX_ARCHIVO_BYTES,
+    _extraer_total_control,
     aplicar_expediente,
     preparar_expediente,
 )
+from reportes.services_cedula_imss import cargar_filas_xls, parsear_cedula
 from reportes.services_presupuesto_maestro import normalize_header_text
 
 
@@ -26,9 +30,13 @@ FUENTES_HISTORICAS = ("AUTO:LEGADO", "AUTO:SIPARE")
 @dataclass(frozen=True)
 class ExpedienteHistorico:
     ruta_sua: Path
-    preview: object
+    rutas_pdf: tuple[Path, ...]
+    parseada: object
+    sha256_sua: str
+    total_patronal: Decimal
     lineas: tuple[LineaPresupuestoMensual, ...]
     monto_existente: Decimal
+    preview: object | None = None
 
 
 def _registro_normalizado(valor: str) -> str:
@@ -83,31 +91,88 @@ def _subida(ruta: Path) -> SimpleUploadedFile:
     return SimpleUploadedFile(ruta.name, ruta.read_bytes(), content_type=tipo)
 
 
-def _lineas_materializadas(preview) -> tuple[LineaPresupuestoMensual, ...]:
-    conceptos = {"imss"} if preview.parseada.tipo == "MENSUAL" else {"infonavit rcv", "infonavit"}
-    candidatas = (
-        LineaPresupuestoMensual.objects.filter(
-            periodo__in=preview.parseada.meses,
-            version=LineaPresupuestoMensual.VERSION_ORIGINAL,
-            fuente_real__in=FUENTES_HISTORICAS,
-            monto_real__isnull=False,
+def _huella_y_firma(ruta: Path, firma: bytes) -> str:
+    if ruta.stat().st_size > MAX_ARCHIVO_BYTES:
+        raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
+    digest = hashlib.sha256()
+    with ruta.open("rb") as archivo:
+        cabecera = archivo.read(len(firma))
+        if cabecera != firma:
+            raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
+        digest.update(cabecera)
+        for bloque in iter(lambda: archivo.read(1024 * 1024), b""):
+            digest.update(bloque)
+    return digest.hexdigest()
+
+
+def _validar_pdf_directo(ruta: Path) -> None:
+    _huella_y_firma(ruta, b"%PDF-")
+    try:
+        import pdfplumber
+    except ModuleNotFoundError as exc:
+        raise CommandError("Dependencia pdfplumber no disponible.") from exc
+    try:
+        with pdfplumber.open(ruta) as lector:
+            if not lector.pages:
+                raise ValueError
+            texto = normalize_header_text(
+                " ".join(pagina.extract_text() or "" for pagina in lector.pages)
+            )
+    except Exception as exc:
+        raise CommandError(f"El archivo '{ruta.name}' no es un PDF válido y parseable.") from exc
+    ema = bool(re.search(r"\bema\b", texto)) or "emision mensual anticipada" in texto
+    eba = bool(re.search(r"\beba\b", texto)) or "emision bimestral anticipada" in texto
+    if ema == eba:
+        raise CommandError(f"No se pudo clasificar inequívocamente el PDF '{ruta.name}'.")
+
+
+def _inspeccionar_sua(ruta: Path):
+    sha256 = _huella_y_firma(ruta, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+    try:
+        filas = cargar_filas_xls(str(ruta))
+        parseada = parsear_cedula(filas)
+        total_patronal = _extraer_total_control(filas, parseada.tipo)
+    except (OSError, ValueError) as exc:
+        raise CommandError(f"No se pudo validar {ruta.name}: {exc}") from exc
+    total_detalle = sum(
+        (trabajador.patronal for trabajador in parseada.trabajadores), Decimal("0")
+    ).quantize(Decimal("0.01"))
+    if total_detalle != total_patronal:
+        raise CedulaDiscrepante(
+            f"{ruta.name}: detalle {total_detalle:.2f} != control patronal {total_patronal:.2f}."
         )
-        .select_related("rubro__area")
-        .order_by("pk")
+    return parseada, sha256, total_patronal
+
+
+def _lineas_objetivo(parseada, *, bloquear: bool = False) -> tuple[LineaPresupuestoMensual, ...]:
+    conceptos = {"imss"} if parseada.tipo == "MENSUAL" else {"infonavit rcv", "infonavit"}
+    queryset = LineaPresupuestoMensual.objects.filter(
+        periodo__in=parseada.meses,
+        version=LineaPresupuestoMensual.VERSION_ORIGINAL,
     )
+    if bloquear:
+        queryset = queryset.select_for_update()
+    candidatas = queryset.select_related("rubro__area").order_by("pk")
     return tuple(
-        linea
-        for linea in candidatas
-        if normalize_header_text(linea.rubro.concepto) in conceptos
+        linea for linea in candidatas if normalize_header_text(linea.rubro.concepto) in conceptos
     )
 
 
-def _monto_control(preview, lineas: tuple[LineaPresupuestoMensual, ...]) -> Decimal:
+def _lineas_materializadas(parseada) -> tuple[LineaPresupuestoMensual, ...]:
+    candidatas = (
+        linea
+        for linea in _lineas_objetivo(parseada)
+        if linea.fuente_real in FUENTES_HISTORICAS and linea.monto_real is not None
+    )
+    return tuple(candidatas)
+
+
+def _monto_control(parseada, lineas: tuple[LineaPresupuestoMensual, ...]) -> Decimal:
     control = [linea for linea in lineas if linea.rubro.area.codigo == "nomina"]
     periodos_control = {linea.periodo for linea in control}
-    if periodos_control != set(preview.parseada.meses):
+    if periodos_control != set(parseada.meses):
         faltantes = ", ".join(
-            mes.isoformat() for mes in preview.parseada.meses if mes not in periodos_control
+            mes.isoformat() for mes in parseada.meses if mes not in periodos_control
         )
         raise CommandError(
             f"No existe materialización histórica completa de Nómina para {faltantes or 'el periodo'}."
@@ -115,11 +180,11 @@ def _monto_control(preview, lineas: tuple[LineaPresupuestoMensual, ...]) -> Deci
     return sum((linea.monto_real for linea in control), Decimal("0")).quantize(Decimal("0.01"))
 
 
-def _verificar_sha_materializado(preview, lineas: tuple[LineaPresupuestoMensual, ...]) -> None:
+def _verificar_sha_materializado(sha256_sua, lineas: tuple[LineaPresupuestoMensual, ...]) -> None:
     for linea in lineas:
         documento = (linea.metadata or {}).get("cedula_imss_documento", {})
         sha_historico = documento.get("sha256") if isinstance(documento, dict) else None
-        if sha_historico and sha_historico != preview.sua.sha256:
+        if sha_historico and sha_historico != sha256_sua:
             raise CommandError(
                 f"La línea histórica {linea.pk} referencia una huella SHA-256 distinta."
             )
@@ -142,28 +207,50 @@ class Command(BaseCommand):
         preparados: list[ExpedienteHistorico] = []
 
         for ruta_sua, pdfs in grupos:
-            try:
-                archivos = [_subida(ruta_sua), *(_subida(ruta) for ruta in pdfs)]
-                preview = preparar_expediente(archivos, usuario=None)
-            except Exception as exc:
-                raise CommandError(f"No se pudo validar {ruta_sua.name}: {exc}") from exc
-            sha_archivo = hashlib.sha256(ruta_sua.read_bytes()).hexdigest()
-            if sha_archivo != preview.sua.sha256:
-                raise CommandError(f"La huella SHA-256 cambió durante la lectura de {ruta_sua.name}.")
-            if _registro_normalizado(preview.parseada.registro_patronal) != registro_esperado:
+            parseada, sha256_sua, total_patronal = _inspeccionar_sua(ruta_sua)
+            for ruta_pdf in pdfs:
+                _validar_pdf_directo(ruta_pdf)
+            if _registro_normalizado(parseada.registro_patronal) != registro_esperado:
                 raise CommandError(
                     f"Registro patronal inesperado en {ruta_sua.name}: "
-                    f"{preview.parseada.registro_patronal}."
+                    f"{parseada.registro_patronal}."
                 )
-            lineas = _lineas_materializadas(preview)
-            _verificar_sha_materializado(preview, lineas)
-            monto_existente = _monto_control(preview, lineas)
-            if monto_existente != preview.total_patronal:
+            lineas = _lineas_materializadas(parseada)
+            _verificar_sha_materializado(sha256_sua, lineas)
+            monto_existente = _monto_control(parseada, lineas)
+            if monto_existente != total_patronal:
                 raise CommandError(
-                    f"{ruta_sua.name}: total documento {preview.total_patronal:.2f} no coincide "
+                    f"{ruta_sua.name}: total documento {total_patronal:.2f} no coincide "
                     f"con monto existente {monto_existente:.2f}."
                 )
-            preparados.append(ExpedienteHistorico(ruta_sua, preview, lineas, monto_existente))
+            preview = None
+            if options["apply"]:
+                try:
+                    archivos = [_subida(ruta_sua), *(_subida(ruta) for ruta in pdfs)]
+                    preview = preparar_expediente(archivos, usuario=None)
+                except Exception as exc:
+                    raise CommandError(f"No se pudo preparar {ruta_sua.name}: {exc}") from exc
+                if (
+                    preview.sua.sha256 != sha256_sua
+                    or preview.parseada.tipo != parseada.tipo
+                    or preview.parseada.periodo != parseada.periodo
+                    or preview.total_patronal != total_patronal
+                ):
+                    raise CommandError(
+                        f"{ruta_sua.name}: la inspección directa y la preparación no coinciden."
+                    )
+            preparados.append(
+                ExpedienteHistorico(
+                    ruta_sua=ruta_sua,
+                    rutas_pdf=pdfs,
+                    parseada=parseada,
+                    sha256_sua=sha256_sua,
+                    total_patronal=total_patronal,
+                    lineas=lineas,
+                    monto_existente=monto_existente,
+                    preview=preview,
+                )
+            )
 
         encabezado = "periodo | archivo | total_documento | monto_existente | accion"
         filas_salida: list[str] = []
@@ -171,8 +258,8 @@ class Command(BaseCommand):
             self.stdout.write(encabezado)
             for item in preparados:
                 filas_salida.append(
-                    f"{item.preview.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
-                    f"{item.preview.total_patronal:.2f} | {item.monto_existente:.2f} | DRY-RUN"
+                    f"{item.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
+                    f"{item.total_patronal:.2f} | {item.monto_existente:.2f} | DRY-RUN"
                 )
             for fila in filas_salida:
                 self.stdout.write(fila)
@@ -182,21 +269,32 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 for item in preparados:
-                    ids_originales = {linea.pk for linea in item.lineas}
+                    if item.preview is None:
+                        raise CommandError("Falta la preparación transaccional del expediente.")
+                    lineas_preexistentes = _lineas_objetivo(item.parseada, bloquear=True)
+                    ids_preexistentes = {linea.pk for linea in lineas_preexistentes}
                     lineas_bloqueadas = tuple(
-                        LineaPresupuestoMensual.objects.select_for_update()
-                        .filter(pk__in=ids_originales)
-                        .select_related("rubro__area")
-                        .order_by("pk")
+                        linea
+                        for linea in lineas_preexistentes
+                        if linea.fuente_real in FUENTES_HISTORICAS
+                        and linea.monto_real is not None
                     )
-                    if len(lineas_bloqueadas) != len(ids_originales):
+                    if {linea.pk for linea in lineas_bloqueadas} != {
+                        linea.pk for linea in item.lineas
+                    }:
                         raise CommandError("La materialización histórica cambió durante la ejecución.")
-                    _verificar_sha_materializado(item.preview, lineas_bloqueadas)
-                    if _monto_control(item.preview, lineas_bloqueadas) != item.monto_existente:
+                    _verificar_sha_materializado(item.sha256_sua, lineas_bloqueadas)
+                    if _monto_control(item.parseada, lineas_bloqueadas) != item.monto_existente:
                         raise CommandError("El monto histórico cambió durante la ejecución.")
                     instantaneas = {
-                        linea.pk: (linea.monto_real, linea.fuente_real, dict(linea.metadata or {}))
-                        for linea in lineas_bloqueadas
+                        linea.pk: (
+                            linea.monto_presupuesto,
+                            linea.monto_real,
+                            linea.fuente_real,
+                            dict(linea.metadata or {}),
+                            linea.actualizado_en,
+                        )
+                        for linea in lineas_preexistentes
                     }
                     for linea in lineas_bloqueadas:
                         vinculo = (linea.metadata or {}).get("expediente_cedula_imss_id")
@@ -207,7 +305,7 @@ class Command(BaseCommand):
                             documento = DocumentoCedulaIMSS.objects.filter(
                                 pk=documento_vinculado,
                                 expediente_id=vinculo,
-                                sha256=item.preview.sua.sha256,
+                                sha256=item.sha256_sua,
                             ).first()
                             if documento is None:
                                 raise CommandError(
@@ -226,40 +324,53 @@ class Command(BaseCommand):
                     for documento in expediente.documentos.exclude(sha256__in=shas_previos):
                         blobs_nuevos.append((documento.archivo.storage, documento.archivo.name))
 
-                    actuales = _lineas_materializadas(item.preview)
+                    actuales = _lineas_objetivo(item.parseada)
                     LineaPresupuestoMensual.objects.filter(
-                        pk__in=[linea.pk for linea in actuales if linea.pk not in ids_originales]
+                        pk__in=[linea.pk for linea in actuales if linea.pk not in ids_preexistentes]
                     ).delete()
-                    por_id = {linea.pk: linea for linea in lineas_bloqueadas}
-                    for linea_id, (monto, fuente, metadata_original) in instantaneas.items():
+                    por_id = {linea.pk: linea for linea in lineas_preexistentes}
+                    ids_historicos = {linea.pk for linea in lineas_bloqueadas}
+                    for linea_id, instantanea in instantaneas.items():
+                        presupuesto, monto, fuente, metadata_original, actualizado_en = instantanea
                         metadata = metadata_original
-                        vinculo = metadata.get("expediente_cedula_imss_id")
-                        if vinculo not in (None, expediente.pk):
-                            raise CommandError(
-                                f"La línea histórica {linea_id} ya pertenece al expediente {vinculo}."
-                            )
-                        metadata["expediente_cedula_imss_id"] = expediente.pk
-                        metadata["documento_cedula_imss_id"] = documento_sua.pk
-                        metadata["cedula_imss"] = {
-                            "tipo": item.preview.parseada.tipo,
-                            "registro_patronal": item.preview.parseada.registro_patronal,
-                        }
-                        metadata["cedula_imss_documento"] = {
-                            "archivo": item.ruta_sua.name,
-                            "sha256": item.preview.sua.sha256,
-                            "registro_patronal": item.preview.parseada.registro_patronal,
-                        }
+                        if linea_id in ids_historicos:
+                            vinculo = metadata.get("expediente_cedula_imss_id")
+                            if vinculo not in (None, expediente.pk):
+                                raise CommandError(
+                                    f"La línea histórica {linea_id} ya pertenece al expediente "
+                                    f"{vinculo}."
+                                )
+                            metadata["expediente_cedula_imss_id"] = expediente.pk
+                            metadata["documento_cedula_imss_id"] = documento_sua.pk
+                            metadata["cedula_imss"] = {
+                                "tipo": item.parseada.tipo,
+                                "registro_patronal": item.parseada.registro_patronal,
+                            }
+                            metadata["cedula_imss_documento"] = {
+                                "archivo": item.ruta_sua.name,
+                                "sha256": item.sha256_sua,
+                                "registro_patronal": item.parseada.registro_patronal,
+                            }
                         linea = por_id[linea_id]
+                        linea.monto_presupuesto = presupuesto
                         linea.monto_real = monto
                         linea.fuente_real = fuente
                         linea.metadata = metadata
+                        linea.actualizado_en = actualizado_en
                     LineaPresupuestoMensual.objects.bulk_update(
-                        tuple(por_id.values()), ["monto_real", "fuente_real", "metadata"]
+                        tuple(por_id.values()),
+                        [
+                            "monto_presupuesto",
+                            "monto_real",
+                            "fuente_real",
+                            "metadata",
+                            "actualizado_en",
+                        ],
                     )
-                    accion = "YA_ENLAZADO" if item.preview.sua.sha256 in shas_previos else "APLICADO"
+                    accion = "YA_ENLAZADO" if item.sha256_sua in shas_previos else "APLICADO"
                     filas_salida.append(
-                        f"{item.preview.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
-                        f"{item.preview.total_patronal:.2f} | {item.monto_existente:.2f} | {accion}"
+                        f"{item.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
+                        f"{item.total_patronal:.2f} | {item.monto_existente:.2f} | {accion}"
                     )
         except Exception:
             for storage, nombre in reversed(blobs_nuevos):
