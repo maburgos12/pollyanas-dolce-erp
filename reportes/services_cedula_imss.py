@@ -64,6 +64,11 @@ class TrabajadorCedula:
     nss: str
     nombre: str
     patronal: Decimal
+    dias: Decimal = Decimal("0")
+    sdi: Decimal = Decimal("0")
+    retiro: Decimal = Decimal("0")
+    cesantia_patronal: Decimal = Decimal("0")
+    aportacion_vivienda: Decimal = Decimal("0")
 
 
 @dataclass
@@ -103,8 +108,8 @@ def parsear_cedula(filas: list[list[object]]) -> CedulaParseada:
     tipo = ""
     periodo = None
     registro = ""
-    for fila in filas[:16]:
-        for celda in fila:
+    for fila in filas[:30]:
+        for idx, celda in enumerate(fila):
             texto = str(celda or "")
             m = re.search(r"(Per[ií]odo|Bimestre) de Proceso:\s*([A-Za-zÁÉÍÓÚáéíóú]+)-(\d{4})", texto)
             if m:
@@ -112,58 +117,133 @@ def parsear_cedula(filas: list[list[object]]) -> CedulaParseada:
                 mes = MESES.get(normalize_header_text(m.group(2)))
                 if mes:
                     periodo = date(int(m.group(3)), mes, 1)
-            if "Registro Patronal:" in texto:
-                idx = fila.index(celda)
-                registro = str(fila[idx + 1] if idx + 1 < len(fila) else "").strip() or texto.split(":", 1)[1].strip()
+            registro_match = re.search(r"Registro\s+Patronal\s*:\s*(.*)", texto, re.IGNORECASE)
+            if registro_match:
+                registro_inline = registro_match.group(1).strip()
+                registro_adyacente = str(fila[idx + 1] if idx + 1 < len(fila) else "").strip()
+                registro = registro_inline or registro_adyacente
     if not tipo or periodo is None:
         raise ValueError("No se encontró 'Período/Bimestre de Proceso: <Mes>-<Año>' en la cédula.")
 
-    columnas = _columnas_montos(filas, tipo)
+    encabezado, columnas = _columnas_montos(filas, tipo)
     trabajadores: list[TrabajadorCedula] = []
-    n = len(filas)
-    for i, fila in enumerate(filas):
-        nss = _nss_digits(fila[0]) if fila and NSS_RE.match(str(fila[0] or "").strip()) else ""
+    filas_nss: list[tuple[int, str]] = []
+    columna_nss = columnas["nss"]
+    for i, fila in enumerate(filas[encabezado + 1:], start=encabezado + 1):
+        valor_nss = fila[columna_nss] if columna_nss < len(fila) else ""
+        nss = _nss_digits(valor_nss) if NSS_RE.match(str(valor_nss or "").strip()) else ""
+        if nss:
+            filas_nss.append((i, nss))
+
+    for posicion, (i, nss) in enumerate(filas_nss):
+        fila = filas[i]
         if not nss:
             continue
         nombre = next((str(v).strip() for v in fila[1:8] if str(v or "").strip()), "")
-        # La fila de montos es la siguiente (hasta +3) con valor NUMÉRICO en
-        # TODAS las columnas objetivo (una fila basura o subtotal con texto se
-        # rechaza); si aparece otro NSS antes, el trabajador queda sin montos.
-        for j in range(i + 1, min(i + 4, n)):
-            montos = filas[j]
-            if montos and NSS_RE.match(str(montos[0] or "").strip()) and _nss_digits(montos[0]):
+        fin_bloque = filas_nss[posicion + 1][0] if posicion + 1 < len(filas_nss) else len(filas)
+        dias = Decimal("0")
+        sdi = Decimal("0")
+        retiro = Decimal("0")
+        cesantia_patronal = Decimal("0")
+        aportacion_vivienda = Decimal("0")
+        patronal_mensual = Decimal("0")
+        encontro_movimiento = False
+        for montos in filas[i + 1:fin_bloque]:
+            if _es_totalizador(montos):
                 break
-            celdas = [montos[c] if c < len(montos) else None for c in columnas.values()]
-            if all(isinstance(v, (int, float)) for v in celdas):
-                patronal = sum((_decimal(v) for v in celdas), Decimal("0"))
-                trabajadores.append(TrabajadorCedula(nss=nss, nombre=nombre, patronal=patronal))
-                break
+            claves_monto = (
+                ["patronal"]
+                if tipo == "MENSUAL"
+                else ["retiro", "cv_patronal", "aportacion"]
+            )
+            celdas_monto = [_valor_columna(montos, columnas[clave]) for clave in claves_monto]
+            if not all(_es_numero(valor) for valor in celdas_monto):
+                continue
+            encontro_movimiento = True
+            valor_dias = _valor_columna(montos, columnas.get("dias"))
+            valor_sdi = _valor_columna(montos, columnas.get("sdi"))
+            if _es_numero(valor_dias):
+                dias += _decimal(valor_dias)
+            if _es_numero(valor_sdi) and _decimal(valor_sdi) != 0:
+                sdi = _decimal(valor_sdi)
+            if tipo == "MENSUAL":
+                patronal_mensual += _decimal(celdas_monto[0])
+            else:
+                retiro += _decimal(celdas_monto[0])
+                cesantia_patronal += _decimal(celdas_monto[1])
+                aportacion_vivienda += _decimal(celdas_monto[2])
+        if encontro_movimiento:
+            patronal = (
+                patronal_mensual
+                if tipo == "MENSUAL"
+                else retiro + cesantia_patronal + aportacion_vivienda
+            )
+            trabajadores.append(TrabajadorCedula(
+                nss=nss,
+                nombre=nombre,
+                patronal=patronal,
+                dias=dias,
+                sdi=sdi,
+                retiro=retiro,
+                cesantia_patronal=cesantia_patronal,
+                aportacion_vivienda=aportacion_vivienda,
+            ))
 
     if not trabajadores:
         raise ValueError("La cédula no trae trabajadores reconocibles (formato inesperado).")
     return CedulaParseada(tipo=tipo, periodo=periodo, registro_patronal=registro, trabajadores=trabajadores)
 
 
-def _columnas_montos(filas: list[list[object]], tipo: str) -> dict[str, int]:
+def _valor_columna(fila: list[object], columna: int | None) -> object:
+    return fila[columna] if columna is not None and columna < len(fila) else None
+
+
+def _es_numero(valor: object) -> bool:
+    return isinstance(valor, (int, float, Decimal)) and not isinstance(valor, bool)
+
+
+def _es_totalizador(fila: list[object]) -> bool:
+    return any(
+        normalize_header_text(valor).startswith("total")
+        for valor in fila
+        if isinstance(valor, str)
+    )
+
+
+def _columnas_montos(filas: list[list[object]], tipo: str) -> tuple[int, dict[str, int]]:
     """Localiza por ETIQUETA las columnas de cuota patronal (resiliente a
     corrimientos de columnas entre versiones del SUA)."""
-    objetivo = (
-        {"patronal": ["patronal"]}
-        if tipo == "MENSUAL"
-        else {"retiro": ["retiro"], "cv_patronal": ["patronal"], "aportacion": ["aportacion pa", "aportación pa"]}
-    )
-    for fila in filas[:30]:
+    objetivo = {
+        "nss": ["clave"],
+        **(
+            {"patronal": ["patronal"]}
+            if tipo == "MENSUAL"
+            else {
+                "retiro": ["retiro"],
+                "cv_patronal": ["patronal"],
+                "aportacion": ["aportacion patronal", "aportacion pa"],
+            }
+        ),
+    }
+    for numero_fila, fila in enumerate(filas[:30]):
         etiquetas = [normalize_header_text(v) for v in fila]
         if "clave" not in etiquetas:
             continue
         encontradas: dict[str, int] = {}
         for clave, patrones in objetivo.items():
             for idx, etiqueta in enumerate(etiquetas):
-                if any(etiqueta.startswith(p) for p in patrones) and idx not in encontradas.values():
+                coincide = any(
+                    etiqueta == patron or etiqueta.startswith(f"{patron} ")
+                    for patron in patrones
+                )
+                if coincide and idx not in encontradas.values():
                     encontradas[clave] = idx
                     break
         if len(encontradas) == len(objetivo):
-            return encontradas
+            for opcional in ("dias", "sdi"):
+                if opcional in etiquetas:
+                    encontradas[opcional] = etiquetas.index(opcional)
+            return numero_fila, encontradas
     raise ValueError(f"No se localizaron las columnas de cuota patronal ({tipo}).")
 
 

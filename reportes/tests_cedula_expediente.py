@@ -11,6 +11,81 @@ from reportes import models as reportes_models
 from rrhh.models import Empleado
 
 
+class CedulaIMSSParserTests(SimpleTestCase):
+    def test_mensual_parsea_registro_inline_y_suma_baja_reingreso_sin_totales(self):
+        from reportes.services_cedula_imss import parsear_cedula
+
+        filas = [
+            ["SISTEMA UNICO DE AUTODETERMINACION"] + [""] * 21,
+            ["Periodo de Proceso: Agosto-2026"] + [""] * 21,
+            ["Registro Patronal: E52-40157-10-0", "POLLYANA'S DOLCE"] + [""] * 20,
+            ["Clave", "Movimiento", "Fecha", "Dias", "SDI", "Lic.", "Inc.", "Aus.",
+             "C.F.", "Exc.Pat.", "Exc. Obr.", "P.D. Pat.", "P.D. Obr.", "G.M.P. Pat.",
+             "G.M.P. Obr.", "R.T.", "I.V. Pat.", "I.V. Obr", "G.P.S.", "Patronal",
+             "Obrera", "SubTotal"],
+            ["23-91-73-3507-9", "", "", "", "", "ACOSTA FLORES MARIA"] + [""] * 16,
+            ["", "BAJA", "2026-08-10", 10, 331.44] + [0] * 14 + [350.25, 45.10, 395.35],
+            ["", "REINGRESO", "2026-08-11", 20, 345.67] + [0] * 14 + [710.35, 90.20, 800.55],
+            ["23-98-80-5185-2", "", "", "", "", "PEREZ ADMIN JUAN"] + [""] * 16,
+            ["", "NORMAL", "", 30, 400.10] + [0] * 14 + [900.40, 100.00, 1000.40],
+            ["TOTAL REGISTRO PATRONAL", "", "", 60, ""] + [0] * 14 + [9999.99, 235.30, 10235.29],
+        ]
+
+        parseada = parsear_cedula(filas)
+
+        self.assertEqual(parseada.registro_patronal, "E52-40157-10-0")
+        self.assertEqual(len(parseada.trabajadores), 2)
+        primero, segundo = parseada.trabajadores
+        self.assertEqual(primero.dias, Decimal("30.00"))
+        self.assertEqual(primero.sdi, Decimal("345.67"))
+        self.assertEqual(primero.patronal, Decimal("1060.60"))
+        self.assertEqual(primero.retiro, Decimal("0"))
+        self.assertEqual(primero.cesantia_patronal, Decimal("0"))
+        self.assertEqual(primero.aportacion_vivienda, Decimal("0"))
+        self.assertEqual(segundo.patronal, Decimal("900.40"))
+
+    def test_registro_patronal_en_celda_adyacente(self):
+        from reportes.services_cedula_imss import parsear_cedula
+
+        filas = [
+            ["Periodo de Proceso: Agosto-2026", "", "", "", ""],
+            ["Registro Patronal:", "Y54-67890-10-1", "", "", ""],
+            ["Clave", "Nombre", "Dias", "SDI", "Patronal"],
+            ["12-12-12-1212-1", "TRABAJADORA UNO", "", "", ""],
+            ["", "NORMAL", 30, 350.25, 500.75],
+        ]
+
+        parseada = parsear_cedula(filas)
+
+        self.assertEqual(parseada.registro_patronal, "Y54-67890-10-1")
+
+    def test_bimestral_desglosa_componentes_patronales_y_excluye_obrera_creditos(self):
+        from reportes.services_cedula_imss import parsear_cedula
+
+        filas = [
+            ["Bimestre de Proceso: Agosto-2026"] + [""] * 13,
+            ["Registro Patronal:", "E52-40157-10-0"] + [""] * 12,
+            ["Clave", "Movimiento", "Fecha", "Dias", "SDI", "Retiro", "Patronal",
+             "Obrera", "Suma", "Aportacion Patronal", "Amortizacion", "Credito Vivienda",
+             "Tipo", "Total"],
+            ["11-11-11-1111-1", "", "", "", "", "EMPLEADA BIMESTRAL"] + [""] * 8,
+            ["", "BAJA", "2026-07-15", 15, 300.00, 100.10, 200.20, 80.80, 381.10,
+             150.30, 999.99, 888.88, "02", 2420.27],
+            ["", "REINGRESO", "2026-07-16", 46, 320.00, 110.11, 210.21, 90.90, 411.22,
+             160.31, 777.77, 666.66, "03", 2016.87],
+            ["TOTAL", "", "", 61, "", 9999, 9999, 9999, 9999, 9999, 9999, 9999, "", 9999],
+        ]
+
+        trabajador = parsear_cedula(filas).trabajadores[0]
+
+        self.assertEqual(trabajador.dias, Decimal("61.00"))
+        self.assertEqual(trabajador.sdi, Decimal("320.00"))
+        self.assertEqual(trabajador.retiro, Decimal("210.21"))
+        self.assertEqual(trabajador.cesantia_patronal, Decimal("410.41"))
+        self.assertEqual(trabajador.aportacion_vivienda, Decimal("310.61"))
+        self.assertEqual(trabajador.patronal, Decimal("931.23"))
+
+
 class ExpedienteCedulaIMSSSchemaTests(SimpleTestCase):
     def test_define_los_tres_modelos_normalizados(self):
         for nombre_modelo in (
