@@ -69,6 +69,7 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
 from .services_extra_conciliacion import contexto_hora_extra, es_hora_extra_automatica
 from .services_horas_extra_autorizacion import resolver_hora_extra
+from .services_extra_bloqueos import JornadaExtraConflict
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
@@ -2657,17 +2658,22 @@ def horas_extra_list(request):
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
-        he, message, error = resolver_hora_extra(
-            request.POST.get("hora_extra_id"), (request.POST.get("action") or "").strip(), request.user,
-        )
+        status_error = 400
+        try:
+            he, message, error = resolver_hora_extra(
+                request.POST.get("hora_extra_id"), (request.POST.get("action") or "").strip(), request.user,
+            )
+            hora_extra_id = he.pk
+        except JornadaExtraConflict as exc:
+            hora_extra_id, error, status_error = request.POST.get("hora_extra_id"), str(exc), 409
         progressive = _wants_progressive_response(request)
-        redirect_url = f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{he.pk}'
+        redirect_url = f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora_extra_id}'
         if error:
             if progressive:
                 return JsonResponse({
                     "ok": False,
                     "toast": {"type": "error", "message": error, "persistent": True},
-                }, status=400)
+                }, status=status_error)
             messages.error(request, error)
             return redirect(redirect_url)
 

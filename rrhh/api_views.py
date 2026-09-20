@@ -30,7 +30,7 @@ from .serializers import (
 )
 from .services import usuario_jefe_directo_de_empleado
 from .services_horas_extra_autorizacion import resolver_hora_extra
-from .services_extra_bloqueos import bloquear_hora_extra, bloquear_jornadas_extra
+from .services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 from .services_prestamos import (
     aprobar_prestamo_direccion,
     autorizar_prestamo_jefe,
@@ -85,6 +85,11 @@ def empleado_de_usuario(user) -> Empleado | None:
 class _CapitalHumanoAccessMixin:
     authentication_classes = AUTH_CLASSES
     permission_classes = [permissions.IsAuthenticated]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, JornadaExtraConflict):
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return super().handle_exception(exc)
 
     def _employee_scope(self):
         if can_view_rrhh(self.request.user):

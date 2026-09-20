@@ -12,10 +12,10 @@ _conciliando = ContextVar('rrhh_conciliando_extra', default=False)
 
 
 @receiver(pre_delete, sender=AsistenciaEmpleado)
-def proteger_origen_extra(sender, instance, using, **kwargs):
+def proteger_origen_extra(sender, instance, using, origin=None, **kwargs):
     """SET_NULL no debe convertir una propuesta automática en captura manual."""
-    from .services_extra_bloqueos import bloquear_jornadas_extra
-    bloquear_jornadas_extra([(instance.empleado_id, instance.fecha)], using=using)
+    from .services_extra_bloqueos import preparar_eliminacion_asistencia
+    preparar_eliminacion_asistencia(instance, origin=origin, using=using)
     vinculadas = list(HoraExtra.objects.using(using).filter(asistencia_id=instance.pk))
     if vinculadas:
         raise ProtectedError("No se puede eliminar una asistencia vinculada a horas extra.", vinculadas)

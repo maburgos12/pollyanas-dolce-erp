@@ -121,6 +121,8 @@ PATCH parcial no puede recomponer silenciosamente un destino con campos de dos l
 
 Una protección de dominio `pre_delete` impide borrar por ORM una asistencia vinculada a cualquier hora extra (incluye queryset y cascadas); la API responde 409, sin modificar el vínculo ni degradar su origen. No cambia el esquema y no cubre SQL directo fuera del ORM, que permanece fuera del contrato operativo.
 
+El wrapper de guardado usa `atomic(savepoint=False)`: si PostgreSQL rechaza persistir el monto (por ejemplo, overflow), la autorización exterior debe revertirse aunque un llamador capture la excepción. No puede responder éxito dejando estado autorizado con monto nulo. El borrado de asistencias reúne las jornadas del lote completo antes del primer bloqueo individual; en cascadas de empleado, ambos modelos incluyen las jornadas de asistencias y extras para compartir el mismo orden. `JornadaExtraConflict` distingue un cambio de identidad durante la espera de una ausencia real: APIs responden409 y la bandeja conserva toast/ancla; 404 queda reservado a registros inexistentes.
+
 La lógica de cálculo seguirá siendo única para UI, incidencias y autorización; no se duplicará en templates ni endpoints.
 
 ## Compatibilidad y consumidores

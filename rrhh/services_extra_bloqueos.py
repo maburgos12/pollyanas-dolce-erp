@@ -10,6 +10,10 @@ from django.shortcuts import get_object_or_404
 from .models import AsistenciaEmpleado, HoraExtra
 
 
+class JornadaExtraConflict(Exception):
+    """El registro existe, pero su identidad cambió durante la espera."""
+
+
 def bloquear_jornadas_extra(jornadas, *, using=DEFAULT_DB_ALIAS):
     """Advisory xact locks ordenados; adquirir ANTES de cualquier bloqueo de fila.
 
@@ -78,12 +82,52 @@ def preparar_eliminacion_extra(instance, *, origin, using):
         seleccion |= Q(empleado_id=origin.pk)
     observadas = list(registros.filter(seleccion).order_by("pk").values_list("pk", "empleado_id", "fecha"))
     jornadas = {(empleado_id, fecha) for _, empleado_id, fecha in observadas}
+    jornadas.update(_jornadas_cascada_empleado(origin, using=using))
     bloquear_jornadas_extra(jornadas, using=using)
     _bloquear_asistencias(jornadas, using=using)
     actuales = list(registros.select_for_update().filter(pk__in=[r[0] for r in observadas]).order_by("pk").values_list("pk", "empleado_id", "fecha"))
     fecha = HoraExtra._meta.get_field("fecha").to_python(instance.fecha)
     if actuales != observadas or (instance.pk, instance.empleado_id, fecha) not in actuales:
         raise ValidationError("La jornada cambió mientras se eliminaba. Recarga y reintenta.")
+
+
+def _jornadas_cascada_empleado(origin, *, using):
+    """Ambos modelos del collector comparten el conjunto antes de tomar filas."""
+    from django.db.models import QuerySet
+    from .models import Empleado
+
+    if isinstance(origin, QuerySet) and origin.model is Empleado:
+        empleados = origin.values("pk")
+    elif isinstance(origin, Empleado):
+        empleados = [origin.pk]
+    else:
+        return set()
+    jornadas = set(AsistenciaEmpleado.objects.using(using).filter(empleado_id__in=empleados).values_list("empleado_id", "fecha"))
+    jornadas.update(HoraExtra.objects.using(using).filter(empleado_id__in=empleados).values_list("empleado_id", "fecha"))
+    return jornadas
+
+
+def preparar_eliminacion_asistencia(instance, *, origin, using):
+    """Bloquea todo el lote/cascada en orden, no en el orden de PK del collector."""
+    from django.db.models import QuerySet
+    from .models import Empleado
+
+    registros = AsistenciaEmpleado.objects.using(using)
+    seleccion = Q(pk=instance.pk)
+    if isinstance(origin, QuerySet) and origin.model is AsistenciaEmpleado:
+        seleccion |= Q(pk__in=origin.values("pk"))
+    elif isinstance(origin, QuerySet) and origin.model is Empleado:
+        seleccion |= Q(empleado_id__in=origin.values("pk"))
+    elif isinstance(origin, Empleado):
+        seleccion |= Q(empleado_id=origin.pk)
+    observadas = list(registros.filter(seleccion).order_by("pk").values_list("pk", "empleado_id", "fecha"))
+    jornadas = {(empleado_id, fecha) for _, empleado_id, fecha in observadas}
+    jornadas.update(_jornadas_cascada_empleado(origin, using=using))
+    bloquear_jornadas_extra(jornadas, using=using)
+    actuales = list(registros.select_for_update().filter(pk__in=[r[0] for r in observadas]).order_by("pk").values_list("pk", "empleado_id", "fecha"))
+    fecha = AsistenciaEmpleado._meta.get_field("fecha").to_python(instance.fecha)
+    if actuales != observadas or (instance.pk, instance.empleado_id, fecha) not in actuales:
+        raise JornadaExtraConflict("La jornada cambió mientras se eliminaba. Recarga y reintenta.")
 
 
 def bloquear_hora_extra(hora_extra_id, *, jornadas_adicionales=()):
@@ -103,10 +147,12 @@ def bloquear_hora_extra(hora_extra_id, *, jornadas_adicionales=()):
         "empleado__sucursal_ref", "jefe_directo", "asistencia__empleado", "asistencia__turno",
     ).order_by("pk"))
     he = next((registro for registro in registros if registro.pk == identidad.pk), None)
+    if he is None and not HoraExtra.objects.filter(pk=identidad.pk).exists():
+        raise Http404("La hora extra ya no existe.")
     if he is None or (he.empleado_id, he.fecha, he.asistencia_id) != (
         identidad.empleado_id, identidad.fecha, identidad.asistencia_id,
     ):
-        raise Http404("La jornada cambió. Recarga el registro antes de continuar.")
+        raise JornadaExtraConflict("La jornada cambió. Recarga el registro antes de continuar.")
     if he.asistencia_id and (he.asistencia.empleado_id, he.asistencia.fecha) not in jornadas:
-        raise Http404("La jornada de asistencia cambió. Recarga antes de continuar.")
+        raise JornadaExtraConflict("La jornada de asistencia cambió. Recarga antes de continuar.")
     return he, [r for r in registros if (r.empleado_id, r.fecha) == (he.empleado_id, he.fecha)]

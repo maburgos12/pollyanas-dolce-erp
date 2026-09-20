@@ -2078,6 +2078,63 @@ class CapitalHumanoAPITests(TestCase):
 
 
 class HoraExtraAutorizacionAPIsTests(TestCase):
+    def test_borrado_individual_sin_vinculo_y_extra_inexistente_conservan_respuesta(self):
+        hora, _ = self._extra_y_url("generica", manual=True)
+        asistencia = AsistenciaEmpleado.objects.create(empleado=hora.empleado, fecha=hora.fecha)
+        response = self.client.delete(reverse("rrhh:asistencia-detail", args=[asistencia.pk]))
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(AsistenciaEmpleado.objects.filter(pk=asistencia.pk).exists())
+        self.assertTrue(HoraExtra.objects.filter(pk=hora.pk).exists())
+        response = self.client.patch(reverse("rrhh:hora-extra-detail", args=[hora.pk + 999999]),
+            {"notas": "No existe"}, format="json")
+        self.assertEqual(response.status_code, 404)
+
+    def test_cascada_empleado_bloquea_todas_las_jornadas_antes_de_filas(self):
+        from datetime import date
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        for queryset in (False, True):
+            with self.subTest(queryset=queryset):
+                empleado = Empleado.objects.create(nombre="Cascada jornadas")
+                empleado_id = empleado.pk
+                for dia in (18, 19):
+                    AsistenciaEmpleado.objects.create(empleado=empleado, fecha=date(2026, 9, dia))
+                HoraExtra.objects.create(empleado=empleado, fecha=date(2026, 9, 20), horas=Decimal("0.50"))
+                with CaptureQueriesContext(connection) as consultas:
+                    if queryset:
+                        Empleado.objects.filter(pk=empleado.pk).delete()
+                    else:
+                        empleado.delete()
+                sqls = [consulta["sql"] for consulta in consultas]
+                primera_fila = next(i for i, sql in enumerate(sqls) if "FOR UPDATE" in sql)
+                self.assertEqual(sum("pg_advisory_xact_lock" in sql for sql in sqls[:primera_fila]), 3)
+                self.assertFalse(AsistenciaEmpleado.objects.filter(empleado_id=empleado_id).exists())
+                self.assertFalse(HoraExtra.objects.filter(empleado_id=empleado_id).exists())
+
+    def test_overflow_real_no_autoriza_con_monto_nulo(self):
+        from django.db import DataError, connection
+
+        hora, url = self._extra_y_url("generica", manual=True)
+        hora.empleado.salario_diario = Decimal("9999999999.99")
+        hora.empleado.save(update_fields=["salario_diario"])
+        hora.horas = Decimal("99.99")
+        hora.save(update_fields=["horas"])
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        errores_pg = []
+        def observar(execute, sql, params, many, context):
+            try:
+                return execute(sql, params, many, context)
+            except DataError as exc:
+                errores_pg.append(str(exc))
+                raise
+        self.client.raise_request_exception = False
+        with connection.execute_wrapper(observar):
+            response = self.client.post(url)
+        self.assertTrue(any("overflow" in error for error in errores_pg), errores_pg)
+        self.assertGreaterEqual(response.status_code, 400)
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
     def test_bonos_aborta_destino_compuesto_con_empleado_obsoleto(self):
         from rrhh.services_extra_bloqueos import bloquear_hora_extra
 
@@ -2321,6 +2378,164 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
 
 
 class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
+    def test_borrado_lote_asistencias_y_traslado_admin_no_se_bloquean(self):
+        from datetime import date
+        from hashlib import blake2b
+        from queue import Queue
+        from threading import Event, Thread
+        from time import monotonic
+        from django.contrib import admin
+        from django.db import close_old_connections, connection, connections
+        from django.test import RequestFactory
+        from rrhh.admin import AsistenciaAdmin, HoraExtraAdmin
+
+        empleado = Empleado.objects.create(nombre="Lote asistencia")
+        def clave(fecha):
+            return int.from_bytes(blake2b(f"rrhh:extra:{empleado.pk}:{fecha}".encode(), digest_size=8).digest(), "big", signed=True)
+        menor, mayor = sorted([date(2026, 9, 18), date(2026, 9, 19)], key=clave)
+        # PK ascendente deliberadamente opuesto al orden de advisory.
+        primera = AsistenciaEmpleado.objects.create(empleado=empleado, fecha=mayor)
+        segunda = AsistenciaEmpleado.objects.create(empleado=empleado, fecha=menor)
+        hora = HoraExtra.objects.create(empleado=empleado, fecha=menor, horas=Decimal("0.50"))
+        primer_lock, continuar, fin_traslado = Event(), Event(), Event()
+        resultados, backend_pid = Queue(), Queue()
+        request = RequestFactory().post("/admin/rrhh/")
+
+        def eliminar():
+            close_old_connections()
+            try:
+                def observar(execute, sql, params, many, context):
+                    result = execute(sql, params, many, context)
+                    if "pg_advisory_xact_lock" in sql and not primer_lock.is_set():
+                        primer_lock.set()
+                        if not continuar.wait(10):
+                            raise TimeoutError("Borrado no liberado")
+                    return result
+                with connection.execute_wrapper(observar):
+                    AsistenciaAdmin(AsistenciaEmpleado, admin.site).delete_queryset(request,
+                        AsistenciaEmpleado.objects.filter(pk__in=[primera.pk, segunda.pk]))
+                resultados.put("")
+            except Exception as exc:
+                resultados.put(exc)
+            finally:
+                connections.close_all()
+
+        def trasladar():
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '8s'")
+                    cursor.execute("SELECT pg_backend_pid()")
+                    backend_pid.put(cursor.fetchone()[0])
+                actual = HoraExtra.objects.get(pk=hora.pk)
+                actual.fecha = mayor
+                HoraExtraAdmin(HoraExtra, admin.site).save_model(request, actual, None, True)
+                resultados.put("")
+            except Exception as exc:
+                resultados.put(exc)
+            finally:
+                fin_traslado.set()
+                connections.close_all()
+
+        borrador, traslado = Thread(target=eliminar, daemon=True), Thread(target=trasladar, daemon=True)
+        bloqueado = False
+        borrador.start()
+        try:
+            self.assertTrue(primer_lock.wait(5))
+            traslado.start()
+            pid = backend_pid.get(timeout=5)
+            limite = monotonic() + 5
+            while monotonic() < limite and not fin_traslado.is_set():
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT cardinality(pg_blocking_pids(%s)) > 0", [pid])
+                    bloqueado = cursor.fetchone()[0]
+                if bloqueado:
+                    break
+                fin_traslado.wait(0.01)
+        finally:
+            continuar.set()
+            borrador.join(12)
+            if traslado.ident:
+                traslado.join(12)
+        self.assertFalse(borrador.is_alive())
+        self.assertFalse(traslado.is_alive())
+        for _ in range(2):
+            resultado = resultados.get(timeout=1)
+            self.assertNotIsInstance(resultado, Exception)
+            self.assertEqual(resultado, "")
+        self.assertTrue(bloqueado)
+        self.assertFalse(AsistenciaEmpleado.objects.filter(pk__in=[primera.pk, segunda.pk]).exists())
+        hora.refresh_from_db()
+        self.assertEqual(hora.fecha, mayor)
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+
+    def test_movimiento_durante_espera_del_helper_devuelve_conflicto(self):
+        from datetime import date
+        from queue import Queue
+        from threading import Event, Thread
+        from time import monotonic
+        from django.db import close_old_connections, connection, connections, transaction
+        from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
+
+        self.jefe_user = User.objects.create_superuser(username="conflicto.helper", password="pruebas")
+        self.jefe = Empleado.objects.create(nombre="Jefe conflicto", usuario_erp=self.jefe_user)
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = HoraExtraAutorizacionAPIsTests._extra_y_url(self, consumidor, manual=True)
+                resultados, backend_pid = Queue(), Queue()
+                fin = Event()
+                def editar():
+                    close_old_connections()
+                    try:
+                        with connection.cursor() as cursor:
+                            cursor.execute("SET lock_timeout = '8s'")
+                            cursor.execute("SELECT pg_backend_pid()")
+                            backend_pid.put(cursor.fetchone()[0])
+                        client = APIClient()
+                        client.force_authenticate(self.jefe_user)
+                        if consumidor == "generica":
+                            response = client.patch(reverse("rrhh:hora-extra-detail", args=[hora.pk]),
+                                {"notas": "Edición esperando"}, format="json")
+                        else:
+                            response = client.post(url.replace("/autorizar/", "/editar/"), {
+                                "fecha": hora.fecha.isoformat(), "horas": "0.50",
+                                "notas": "Edición esperando", "motivo_cambio": "Conflicto",
+                            }, format="json")
+                        resultados.put(response)
+                    except Exception as exc:
+                        resultados.put(exc)
+                    finally:
+                        fin.set()
+                        connections.close_all()
+                worker = Thread(target=editar, daemon=True)
+                bloqueado = False
+                try:
+                    with transaction.atomic():
+                        bloquear_jornadas_extra([(hora.empleado_id, hora.fecha), (hora.empleado_id, date(2026, 9, 19))])
+                        worker.start()
+                        pid = backend_pid.get(timeout=5)
+                        limite = monotonic() + 5
+                        while monotonic() < limite and not fin.is_set():
+                            with connection.cursor() as cursor:
+                                cursor.execute("SELECT cardinality(pg_blocking_pids(%s)) > 0", [pid])
+                                bloqueado = cursor.fetchone()[0]
+                            if bloqueado:
+                                break
+                            fin.wait(0.01)
+                        actual = HoraExtra.objects.get(pk=hora.pk)
+                        actual.fecha = date(2026, 9, 19)
+                        actual.save(update_fields=["fecha"])
+                        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                finally:
+                    worker.join(12)
+                self.assertFalse(worker.is_alive())
+                resultado = resultados.get(timeout=1)
+                if isinstance(resultado, Exception):
+                    raise resultado
+                self.assertTrue(bloqueado)
+                self.assertEqual(resultado.status_code, 409)
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
     def test_patch_parcial_con_jornada_movida_aborta_sin_escribir(self):
         from datetime import date
         from queue import Queue
@@ -2866,6 +3081,26 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
 
 
 class RRHHViewsTests(TestCase):
+    def test_conflicto_de_jornada_conserva_toast_y_ancla(self):
+        from datetime import date
+        from rrhh.services_extra_bloqueos import JornadaExtraConflict
+
+        empleado = Empleado.objects.create(nombre="Conflicto bandeja")
+        hora = HoraExtra.objects.create(empleado=empleado, fecha=date(2026, 9, 18),
+            jefe_directo=self.user, horas=Decimal("0.50"))
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        datos = {"hora_extra_id": hora.pk, "action": "autorizar"}
+        with patch("rrhh.views.resolver_hora_extra", side_effect=JornadaExtraConflict("La jornada cambió. Recarga.")):
+            response = self.client.post(reverse("rrhh:rrhh_he_list"), datos, HTTP_ACCEPT="application/json")
+            self.assertEqual(response.status_code, 409)
+            self.assertFalse(response.json()["ok"])
+            self.assertEqual(response.json()["toast"]["type"], "error")
+            self.assertTrue(response.json()["toast"]["persistent"])
+            response = self.client.post(reverse("rrhh:rrhh_he_list"), datos)
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response["Location"], f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
     def setUp(self):
         self.user = User.objects.create_user(username="rrhh", password="pass123")
         rrhh_group, _ = Group.objects.get_or_create(name="RRHH")

@@ -1262,9 +1262,10 @@ class HoraExtra(models.Model):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
         # Mantiene pre_save, SQL y conciliación dentro del mismo advisory xact lock,
-        # incluso en ORM directo/autocommit. No altera las opciones de Model.save.
+        # incluso en ORM directo/autocommit. Sin savepoint: un error SQL debe
+        # invalidar la autorización exterior aunque un llamador capture el error.
         using = using or router.db_for_write(type(self), instance=self)
-        with transaction.atomic(using=using):
+        with transaction.atomic(using=using, savepoint=False):
             return super().save(force_insert=force_insert, force_update=force_update,
                 using=using, update_fields=update_fields)
 

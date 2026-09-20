@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
-from rrhh.services_extra_bloqueos import bloquear_hora_extra, bloquear_jornadas_extra
+from rrhh.services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 
 
 ESTADOS_HORA_EXTRA_ACTIVOS = {
@@ -98,6 +98,11 @@ def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool 
 
 class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
+
+    def handle_exception(self, exc):
+        if isinstance(exc, JornadaExtraConflict):
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return super().handle_exception(exc)
 
     def empleados_queryset(self):
         return Empleado.objects.none()
