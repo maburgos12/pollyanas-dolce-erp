@@ -453,6 +453,18 @@ class PersistenciaExpedienteTests(TestCase):
                 archivos=[self._sua(contenido=b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"x" * (10 * 1024 * 1024))]
             )
 
+    def test_dependencia_pdf_ausente_no_se_reporta_como_archivo_invalido(self):
+        importar_real = __import__
+
+        def importar_sin_pdfplumber(nombre, *args, **kwargs):
+            if nombre == "pdfplumber":
+                raise ModuleNotFoundError("pdfplumber ausente")
+            return importar_real(nombre, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=importar_sin_pdfplumber):
+            with self.assertRaisesRegex(RuntimeError, "Dependencia pdfplumber"):
+                self._preview(archivos=[self._sua(), self._pdf()])
+
     def test_aplica_documentos_detalle_metadata_y_auditoria(self):
         from reportes.services_cedula_expediente import aplicar_expediente
 

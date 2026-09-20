@@ -117,12 +117,18 @@ def _leer_archivo(archivo, nombre: str) -> bytes:
 
 def _clasificar_pdf(nombre: str, contenido: bytes) -> str:
     try:
-        from pypdf import PdfReader
-
-        lector = PdfReader(BytesIO(contenido), strict=False)
-        if lector.is_encrypted or len(lector.pages) < 1:
-            raise ValueError
-        texto = normalize_header_text(" ".join(pagina.extract_text() or "" for pagina in lector.pages))
+        import pdfplumber
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Dependencia pdfplumber no disponible; no se pueden validar evidencias PDF."
+        ) from exc
+    try:
+        with pdfplumber.open(BytesIO(contenido)) as lector:
+            if len(lector.pages) < 1:
+                raise ValueError
+            texto = normalize_header_text(
+                " ".join(pagina.extract_text() or "" for pagina in lector.pages)
+            )
     except Exception as exc:
         raise ValueError(f"El archivo '{nombre}' no es un PDF válido y parseable.") from exc
     ema = bool(re.search(r"\bema\b", texto)) or "emision mensual anticipada" in texto
@@ -289,7 +295,11 @@ def _guardar_documento(expediente, documento_preview, blobs_guardados):
         mime_type=documento_preview.mime_type,
         total_visible=documento_preview.total_visible,
         metadata={
-            "validado_con": "xlrd" if documento_preview.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else "pypdf",
+            "validado_con": (
+                "xlrd"
+                if documento_preview.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS
+                else "pdfplumber"
+            ),
         },
     )
     documento.archivo.save(
