@@ -154,6 +154,9 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         empleado = datos.validated_data.get("empleado", anterior.empleado)
         fecha = datos.validated_data.get("fecha", anterior.fecha)
         actual, _ = bloquear_hora_extra(anterior.pk, jornadas_adicionales=[(empleado.pk, fecha)])
+        if (actual.empleado_id, actual.fecha) != (anterior.empleado_id, anterior.fecha):
+            return Response({"detail": "La jornada cambió. Recarga y reintenta la corrección."},
+                status=status.HTTP_409_CONFLICT)
         self.get_object()  # Revalida también el alcance de consulta tras la espera.
         self.check_object_permissions(request, actual)
         serializer = self.get_serializer(actual, data=request.data, partial=partial)

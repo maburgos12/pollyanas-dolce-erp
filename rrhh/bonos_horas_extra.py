@@ -217,10 +217,14 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @transaction.atomic
     def editar(self, request, pk=None):
         hora_extra = self.get_object()
+        identidad_destino = (hora_extra.empleado_id, hora_extra.fecha)
         destino = parse_date(str(request.data.get("fecha") or ""))
         hora_extra, _ = bloquear_hora_extra(
             hora_extra.pk, jornadas_adicionales=[(hora_extra.empleado_id, destino)] if destino else [],
         )
+        if (hora_extra.empleado_id, hora_extra.fecha) != identidad_destino:
+            return Response({"detail": "La jornada cambió. Recarga y reintenta la corrección."},
+                status=status.HTTP_409_CONFLICT)
         self.get_object()  # El equipo/período se verifica de nuevo después de esperar.
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para editar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)

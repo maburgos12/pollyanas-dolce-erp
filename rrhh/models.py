@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -1259,6 +1259,14 @@ class HoraExtra(models.Model):
 
     def __str__(self) -> str:
         return f"{self.empleado} · {self.fecha} · {self.horas}h"
+
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        # Mantiene pre_save, SQL y conciliación dentro del mismo advisory xact lock,
+        # incluso en ORM directo/autocommit. No altera las opciones de Model.save.
+        using = using or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            return super().save(force_insert=force_insert, force_update=force_update,
+                using=using, update_fields=update_fields)
 
 
 class PermisoSalida(models.Model):
