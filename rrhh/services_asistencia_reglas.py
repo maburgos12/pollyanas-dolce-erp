@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
@@ -19,9 +18,9 @@ from .models import (
     SuspensionEmpleado,
     Turno,
 )
-from .services import TIEMPO_COMIDA_MINUTOS, calcular_horas_extra, generar_horas_extra_automatico, minutos_jornada_programada
+from .services import TIEMPO_COMIDA_MINUTOS, generar_horas_extra_automatico, minutos_jornada_programada
 from .services_vacaciones import es_dia_laborable
-from .services_extra_conciliacion import conciliar_extra_diario
+from .services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
 
 
 VENTANA_RETARDOS_DIAS = 15
@@ -33,6 +32,8 @@ RETARDOS_POR_FALTA = 3
 FALTAS_AVISO_BAJA = 3
 FALTAS_BAJA = 4
 MARCAS_TOLERANCIA_POR_RETARDO = 3
+# Referencia solo para solicitar revisión sin turno; nunca calcula tiempo pagable.
+UMBRAL_REVISION_EXTRA_SIN_TURNO_MINUTOS = 8 * 60 + 10
 
 
 @dataclass(frozen=True)
@@ -343,6 +344,36 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
     return creados, actualizados
 
 
+def _evaluar_integridad_marcaje(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
+    modalidad = modalidad_marcaje_efectiva(asistencia)
+    falta_extremo = bool(asistencia.entrada) != bool(asistencia.salida)
+    falta_comida = bool(asistencia.salida_comida) != bool(asistencia.regreso_comida)
+    if not falta_extremo and not falta_comida:
+        return 0, 0
+    partes = []
+    if falta_extremo:
+        partes.append("Falta entrada o salida final")
+    if falta_comida:
+        partes.append("Falta una marca de comida")
+    tipo = IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO
+    touched.add(tipo)
+    _, creada, actualizada = _upsert_incidencia(
+        empleado=asistencia.empleado,
+        fecha=asistencia.fecha,
+        tipo=tipo,
+        estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+        asistencia=asistencia,
+        detalle=". ".join(partes) + ".",
+        metadata={
+            "modalidad": modalidad,
+            "falta_entrada_o_salida": falta_extremo,
+            "falta_marca_comida": falta_comida,
+        },
+    )
+    return int(creada), int(actualizada)
+
+
 def _evaluar_jornada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[int, int]:
     creados = 0
     actualizados = 0
@@ -421,9 +452,29 @@ def _evaluar_comida(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[
 def _evaluar_hora_extra(asistencia: AsistenciaEmpleado, touched: set[str], *, generar=True) -> tuple[int, int]:
     creados = 0
     actualizados = 0
-    if not asistencia.entrada or not asistencia.salida:
-        return creados, actualizados
-    if calcular_horas_extra(asistencia) <= Decimal("0"):
+    diagnostico = diagnosticar_horas_extra(asistencia)
+    if (
+        diagnostico.codigo == "sin_turno"
+        and diagnostico.duracion_minutos > UMBRAL_REVISION_EXTRA_SIN_TURNO_MINUTOS
+    ):
+        tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE
+        touched.add(tipo)
+        _, creada, actualizada = _upsert_incidencia(
+            empleado=asistencia.empleado,
+            fecha=asistencia.fecha,
+            tipo=tipo,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+            asistencia=asistencia,
+            detalle="No se calcularon horas extra: falta asignar el turno de esta jornada.",
+            metadata={
+                "motivo": "sin_turno",
+                "duracion_minutos": diagnostico.duracion_minutos,
+                "modalidad": diagnostico.modalidad,
+            },
+        )
+        return int(creada), int(actualizada)
+    if diagnostico.minutos is None or diagnostico.minutos <= 0:
         return creados, actualizados
     if generar:
         generar_horas_extra_automatico(asistencia)
@@ -656,6 +707,9 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
         creados_entrada, actualizados_entrada = _evaluar_entrada(asistencia, touched)
         creados += creados_entrada
         actualizados += actualizados_entrada
+        creados_integridad, actualizados_integridad = _evaluar_integridad_marcaje(asistencia, touched)
+        creados += creados_integridad
+        actualizados += actualizados_integridad
         creados_jornada, actualizados_jornada = _evaluar_jornada(asistencia, touched)
         creados += creados_jornada
         actualizados += actualizados_jornada

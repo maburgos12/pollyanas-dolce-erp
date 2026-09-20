@@ -67,6 +67,162 @@ class ReglasAsistenciaRRHHTests(TestCase):
             fuente=fuente,
         )
 
+    def test_intervalo_largo_sin_turno_genera_extra_no_calculable(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(fecha, time(8), salida=time(17), minutos=540)
+        asistencia.turno = None
+        asistencia.save(update_fields=["turno"])
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencia = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+        )
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(incidencia.metadata["motivo"], "sin_turno")
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_una_marca_de_comida_genera_marcaje_incompleto(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(fecha, time(8), salida=time(17), minutos=540)
+        asistencia.salida_comida = dt_local(fecha, time(12))
+        asistencia.regreso_comida = None
+        asistencia.save(update_fields=["salida_comida", "regreso_comida"])
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencia = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
+        )
+        self.assertIn("comida", incidencia.detalle.lower())
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_point_sin_marcas_de_comida_no_genera_marcaje_incompleto(self):
+        fecha = date(2026, 6, 1)
+        self.crear_asistencia(
+            fecha,
+            time(8),
+            salida=time(16),
+            minutos=480,
+            fuente=AsistenciaEmpleado.FUENTE_POINT,
+        )
+        evaluar_dia_empleado(self.empleado, fecha)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado,
+            fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
+        ).exists())
+
+    def test_extremo_faltante_genera_marcaje_incompleto_y_se_resuelve_al_corregir(self):
+        for offset, campo in enumerate(("entrada", "salida")):
+            with self.subTest(campo=campo):
+                fecha = date(2026, 6, 1) + timedelta(days=offset)
+                asistencia = self.crear_asistencia(fecha, time(8))
+                valor_original = getattr(asistencia, campo)
+                setattr(asistencia, campo, None)
+                asistencia.save(update_fields=[campo])
+
+                resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+                incidencia = IncidenciaAsistencia.objects.get(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
+                )
+                self.assertEqual(resultado.creados, 1)
+                self.assertTrue(incidencia.metadata["falta_entrada_o_salida"])
+                self.assertIsNone(incidencia.goce_sueldo)
+                self.assertEqual(incidencia.minutos, 0)
+                self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+                self.assertFalse(IncidenciaAsistencia.objects.filter(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_FALTA,
+                ).exists())
+
+                setattr(asistencia, campo, valor_original)
+                asistencia.save(update_fields=[campo])
+                resultado = evaluar_dia_empleado(self.empleado, fecha)
+                incidencia.refresh_from_db()
+                self.assertEqual(resultado.resueltos, 1)
+                self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+
+    def test_extra_no_calculable_se_resuelve_al_asignar_turno(self):
+        fecha = date(2026, 6, 1)
+        asistencia = self.crear_asistencia(fecha, time(8), salida=time(17), minutos=540)
+        asistencia.turno = None
+        asistencia.save(update_fields=["turno"])
+        evaluar_dia_empleado(self.empleado, fecha)
+        incidencia = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+        )
+        self.assertEqual(incidencia.metadata["duracion_minutos"], 540)
+        self.assertEqual(incidencia.detalle,
+            "No se calcularon horas extra: falta asignar el turno de esta jornada.")
+        self.assertIsNone(incidencia.goce_sueldo)
+        self.assertEqual(incidencia.minutos, 0)
+
+        asistencia.turno = self.turno
+        asistencia.save(update_fields=["turno"])
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        incidencia.refresh_from_db()
+        self.assertEqual(resultado.resueltos, 1)
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+        self.assertTrue(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_extra_no_calculable_solo_para_intervalo_valido_mayor_de_490_sin_turno(self):
+        casos = (
+            (time(16, 10), None, False),
+            (time(16, 11), None, True),
+            (time(7), None, False),
+            (time(17), time(12), False),
+        )
+        for offset, (salida, comida, esperado) in enumerate(casos):
+            with self.subTest(salida=salida, comida=comida):
+                fecha = date(2026, 6, 1) + timedelta(days=offset)
+                asistencia = self.crear_asistencia(fecha, time(8), salida=salida, salida_comida=comida)
+                asistencia.turno = None
+                asistencia.save(update_fields=["turno"])
+                evaluar_dia_empleado(self.empleado, fecha)
+                self.assertEqual(IncidenciaAsistencia.objects.filter(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+                ).exists(), esperado)
+                self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_corregir_comida_resuelve_incidencia_salvo_edicion_manual(self):
+        for offset, manual in enumerate((False, True)):
+            with self.subTest(manual=manual):
+                fecha = date(2026, 6, 1) + timedelta(days=offset)
+                asistencia = self.crear_asistencia(fecha, time(8), salida_comida=time(12))
+                evaluar_dia_empleado(self.empleado, fecha)
+                incidencia = IncidenciaAsistencia.objects.get(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
+                )
+                incidencia.editado_manual = manual
+                incidencia.save(update_fields=["editado_manual"])
+                asistencia.regreso_comida = dt_local(fecha, time(12, 30))
+                asistencia.save(update_fields=["regreso_comida"])
+                evaluar_dia_empleado(self.empleado, fecha)
+                incidencia.refresh_from_db()
+                self.assertEqual(incidencia.estado,
+                    IncidenciaAsistencia.ESTADO_PENDIENTE if manual else IncidenciaAsistencia.ESTADO_RESUELTO)
+
+    def test_ausencia_de_ambas_marcas_comida_no_es_marcaje_incompleto_en_ninguna_modalidad(self):
+        for offset, modalidad in enumerate((Empleado.MARCAJE_DOS_MARCAS,
+                Empleado.MARCAJE_CUATRO_MARCAS, Empleado.MARCAJE_RUTA)):
+            with self.subTest(modalidad=modalidad):
+                self.empleado.modalidad_marcaje = modalidad
+                self.empleado.save(update_fields=["modalidad_marcaje"])
+                fecha = date(2026, 6, 1) + timedelta(days=offset)
+                self.crear_asistencia(fecha, time(8))
+                evaluar_dia_empleado(self.empleado, fecha)
+                self.assertFalse(IncidenciaAsistencia.objects.filter(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
+                ).exists())
+
     def test_entrada_despues_de_tolerancia_sin_permiso_genera_falta(self):
         fecha = date(2026, 6, 1)
         self.crear_asistencia(fecha, time(8, 11), minutos=469)

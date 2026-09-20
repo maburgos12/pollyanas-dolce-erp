@@ -1939,6 +1939,8 @@ class IncidenciaAsistencia(models.Model):
     TIPO_FALTA_RETARDOS = "falta_retardos"
     TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
     TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
+    TIPO_HORA_EXTRA_NO_CALCULABLE = "extra_no_calculable"
+    TIPO_MARCAJE_INCOMPLETO = "marcaje_incompleto"
     TIPO_COMIDA_EXCEDIDA = "comida_excedida"
     TIPO_SUSPENSION = "suspension"
     TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
@@ -1951,6 +1953,8 @@ class IncidenciaAsistencia(models.Model):
         (TIPO_FALTA_RETARDOS, "Falta por retardos"),
         (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
         (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
+        (TIPO_HORA_EXTRA_NO_CALCULABLE, "Hora extra no calculable"),
+        (TIPO_MARCAJE_INCOMPLETO, "Marcaje incompleto"),
         (TIPO_COMIDA_EXCEDIDA, "Comida excedida"),
         (TIPO_SUSPENSION, "Suspensión"),
         (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
