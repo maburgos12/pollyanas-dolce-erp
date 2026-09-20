@@ -37,6 +37,18 @@ class ExtraConciliacionTests(TestCase):
         asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_POINT)
         self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_DOS_MARCAS)
 
+    def test_modalidad_auto_repartidor_prevalece_sobre_point(self):
+        self.empleado.puesto_operativo = "REPARTIDOR"
+        self.empleado.save(update_fields=["puesto_operativo"])
+        asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_POINT)
+        self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_RUTA)
+
+    def test_modalidad_auto_fuentes_no_point_son_cuatro_marcas(self):
+        asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+        for fuente in (AsistenciaEmpleado.FUENTE_HIKCONNECT_API, AsistenciaEmpleado.FUENTE_MANUAL):
+            asistencia.fuente = fuente
+            self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_CUATRO_MARCAS)
+
     def test_modalidad_explicita_prevalece_sobre_puesto_y_fuente(self):
         self.empleado.puesto_operativo = "REPARTIDOR"
         self.empleado.modalidad_marcaje = Empleado.MARCAJE_CUATRO_MARCAS
