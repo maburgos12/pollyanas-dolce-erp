@@ -4,13 +4,26 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.utils import timezone
 
-from .models import HoraExtra
+from .models import AsistenciaEmpleado, Empleado, HoraExtra
 
 JORNADA_DIARIA_MINUTOS = 8 * 60
 TOLERANCIA_EXTRA_MINUTOS = 10
 COMIDA_INCLUIDA_MINUTOS = 35
 NOTA_EXTRA_AUTOMATICA = '[Detección automática]'
 NOTA_SALDO_CUBIERTO = '[Saldo automático cubierto o checada corregida]'
+
+
+def modalidad_marcaje_efectiva(asistencia):
+    if not asistencia or not asistencia.empleado_id:
+        return Empleado.MARCAJE_CUATRO_MARCAS
+    empleado = asistencia.empleado
+    if empleado.modalidad_marcaje != Empleado.MARCAJE_AUTO:
+        return empleado.modalidad_marcaje
+    if (empleado.puesto_operativo or "").strip().upper() == "REPARTIDOR":
+        return Empleado.MARCAJE_RUTA
+    if asistencia.fuente == AsistenciaEmpleado.FUENTE_POINT:
+        return Empleado.MARCAJE_DOS_MARCAS
+    return Empleado.MARCAJE_CUATRO_MARCAS
 
 
 def formato_minutos(value):

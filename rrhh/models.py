@@ -87,6 +87,16 @@ class Empleado(models.Model):
         (NIVEL_JEFATURA, "Jefatura"),
         (NIVEL_DIRECCION, "Dirección"),
     ]
+    MARCAJE_AUTO = "AUTO"
+    MARCAJE_CUATRO_MARCAS = "CUATRO_MARCAS"
+    MARCAJE_DOS_MARCAS = "DOS_MARCAS"
+    MARCAJE_RUTA = "RUTA"
+    MODALIDAD_MARCAJE_CHOICES = [
+        (MARCAJE_AUTO, "Automática según puesto y fuente"),
+        (MARCAJE_CUATRO_MARCAS, "Cuatro marcas"),
+        (MARCAJE_DOS_MARCAS, "Dos marcas"),
+        (MARCAJE_RUTA, "Trabajo en ruta"),
+    ]
 
     codigo = models.CharField(max_length=40, unique=True, blank=True)
     nombre = models.CharField(max_length=180)
@@ -115,6 +125,13 @@ class Empleado(models.Model):
     departamento_origen = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     departamento = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    modalidad_marcaje = models.CharField(
+        max_length=20,
+        choices=MODALIDAD_MARCAJE_CHOICES,
+        default=MARCAJE_AUTO,
+        db_index=True,
+        help_text="Define las marcas esperadas; Automática usa puesto y fuente de asistencia.",
+    )
     nivel_organizacional = models.CharField(
         max_length=20,
         choices=NIVEL_ORGANIZACIONAL_CHOICES,

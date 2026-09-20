@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from rrhh.models import AsistenciaEmpleado, Empleado, HoraExtra, IncidenciaAsistencia, Turno
 from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
+from rrhh.services_extra_conciliacion import modalidad_marcaje_efectiva
 from rrhh.views_asistencia import _build_reporte_asistencia
 
 
@@ -25,6 +26,23 @@ class ExtraConciliacionTests(TestCase):
         return AsistenciaEmpleado.objects.create(empleado=self.empleado, fecha=self.fecha,
             entrada=dt(entrada), salida=dt(salida), minutos_trabajados=565,
             salida_comida=dt(time(12)), regreso_comida=dt(time(12, 35)), minutos_comida=35, **kwargs)
+
+    def test_modalidad_auto_repartidor_es_ruta(self):
+        self.empleado.puesto_operativo = "REPARTIDOR"
+        self.empleado.save(update_fields=["puesto_operativo"])
+        asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+        self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_RUTA)
+
+    def test_modalidad_auto_point_es_dos_marcas(self):
+        asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_POINT)
+        self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_DOS_MARCAS)
+
+    def test_modalidad_explicita_prevalece_sobre_puesto_y_fuente(self):
+        self.empleado.puesto_operativo = "REPARTIDOR"
+        self.empleado.modalidad_marcaje = Empleado.MARCAJE_CUATRO_MARCAS
+        self.empleado.save(update_fields=["puesto_operativo", "modalidad_marcaje"])
+        asistencia = self.asistencia(fuente=AsistenciaEmpleado.FUENTE_POINT)
+        self.assertEqual(modalidad_marcaje_efectiva(asistencia), Empleado.MARCAJE_CUATRO_MARCAS)
 
     def test_sin_turno_ocho_horas_incluyen_comida(self):
         a = self.asistencia()
