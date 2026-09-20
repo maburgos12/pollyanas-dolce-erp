@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
@@ -385,7 +386,7 @@ class PersistenciaExpedienteTests(TestCase):
 
         etiqueta = "EBA EMISION BIMESTRAL ANTICIPADA" if "EBA" in nombre.upper() else "EMA EMISION MENSUAL ANTICIPADA"
         salida = BytesIO()
-        pdf = canvas.Canvas(salida)
+        pdf = canvas.Canvas(salida, invariant=1)
         pdf.drawString(72, 720, etiqueta)
         pdf.showPage()
         pdf.save()
@@ -831,6 +832,9 @@ class PantallaExpedienteTests(TestCase):
             "direccion_cedulas", "direccion@example.com", "x"
         )
         cls.sin_permiso = get_user_model().objects.create_user("consulta_cedulas", password="x")
+        cls.otro_admin = get_user_model().objects.create_superuser(
+            "otra_direccion_cedulas", "otra-direccion@example.com", "x"
+        )
         cls.adm = reportes_models.AreaPresupuesto.objects.create(
             nombre="Administración", codigo="administracion"
         )
@@ -864,7 +868,7 @@ class PantallaExpedienteTests(TestCase):
             ],
         }
 
-    def _post(self, accion, *, json=False):
+    def _post(self, accion, *, json=False, token="", archivos=None):
         headers = {
             "HTTP_ACCEPT": "application/json",
             "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
@@ -875,9 +879,17 @@ class PantallaExpedienteTests(TestCase):
         ):
             return self.client.post(
                 reverse("reportes:cedula_imss_importar"),
-                {**self._archivos(), accion: "1"},
+                {
+                    **(archivos or self._archivos()),
+                    accion: "1",
+                    **({"preview_token": token} if token else {}),
+                },
                 **headers,
             )
+
+    def _preview_token(self, *, json=True):
+        response = self._post("previsualizar", json=json)
+        return response.json()["preview_token"] if json else response.context["preview_token"]
 
     def test_preview_no_guarda_y_aplicar_redirige_al_expediente(self):
         self.client.force_login(self.user)
@@ -892,7 +904,10 @@ class PantallaExpedienteTests(TestCase):
         self.assertNotContains(preview, "12121212121")
         self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
 
-        aplicado = self._post("aplicar")
+        self.assertContains(preview, 'name="preview_token"')
+        self.assertContains(preview, "Vuelve a seleccionar exactamente los mismos documentos")
+        self.assertNotContains(preview, 'id="cedula-aplicar" type="submit" name="aplicar" value="1" data-pending-label="Aplicando…" disabled')
+        aplicado = self._post("aplicar", token=preview.context["preview_token"])
         expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
         self.assertRedirects(
             aplicado,
@@ -921,11 +936,12 @@ class PantallaExpedienteTests(TestCase):
         )
         self.assertEqual(payload["preview"]["efecto_estimado"]["lineas_maximas"], 2)
         self.assertFalse(payload["preview"]["documentos"][0]["duplicado"])
+        self.assertTrue(payload["preview_token"])
         self.assertEqual(payload["preview"]["detalles"][0]["nss"], "•••• 2121")
         self.assertNotContains(response, "12121212121")
         self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
 
-        self._post("aplicar")
+        self._post("aplicar", token=payload["preview_token"])
         repetida = self._post("previsualizar", json=True).json()["preview"]
         self.assertTrue(repetida["documentos"][0]["duplicado"])
         self.assertEqual(
@@ -933,10 +949,11 @@ class PantallaExpedienteTests(TestCase):
             reportes_models.ExpedienteCedulaIMSS.objects.get().pk,
         )
 
-    def test_aplicar_json_devuelve_toast_y_redireccion_al_detalle(self):
+    def test_aplicar_json_con_token_valido_devuelve_toast_y_redireccion(self):
         self.client.force_login(self.user)
+        token = self._preview_token()
 
-        response = self._post("aplicar", json=True)
+        response = self._post("aplicar", json=True, token=token)
 
         expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
         self.assertEqual(response.status_code, 200)
@@ -946,6 +963,47 @@ class PantallaExpedienteTests(TestCase):
         )
         self.assertEqual(response.json()["toast"]["type"], "success")
 
+    def test_aplicar_directo_sin_preview_es_rechazado(self):
+        self.client.force_login(self.user)
+
+        response = self._post("aplicar", json=True)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("previsualiza", response.json()["toast"]["message"].lower())
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    def test_token_de_otro_usuario_o_archivos_distintos_es_rechazado(self):
+        self.client.force_login(self.user)
+        token = self._preview_token()
+
+        self.client.force_login(self.otro_admin)
+        otro_usuario = self._post("aplicar", json=True, token=token)
+        self.assertEqual(otro_usuario.status_code, 400)
+
+        self.client.force_login(self.user)
+        sua_distinta = PersistenciaExpedienteTests._sua(
+            contenido=PersistenciaExpedienteTests._sua().read() + b"correccion"
+        )
+        otros_archivos = {
+            "documentos": [sua_distinta, PersistenciaExpedienteTests._pdf()]
+        }
+        otros_documentos = self._post(
+            "aplicar", json=True, token=token, archivos=otros_archivos
+        )
+        self.assertEqual(otros_documentos.status_code, 400)
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    def test_token_expirado_es_rechazado(self):
+        self.client.force_login(self.user)
+        token = self._preview_token()
+
+        with patch("django.core.signing.time.time", return_value=time.time() + 3600):
+            response = self._post("aplicar", json=True, token=token)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("expiró", response.json()["toast"]["message"])
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
     def test_error_de_nss_duplicado_tambien_se_enmascara(self):
         Empleado.objects.create(
             codigo="CED-UI-DUP",
@@ -954,8 +1012,9 @@ class PantallaExpedienteTests(TestCase):
             departamento=Empleado.DEP_ADMINISTRACION,
         )
         self.client.force_login(self.user)
+        token = self._preview_token()
 
-        response = self._post("aplicar", json=True)
+        response = self._post("aplicar", json=True, token=token)
 
         self.assertEqual(response.status_code, 400)
         self.assertNotContains(response, "12121212121", status_code=400)
@@ -965,7 +1024,7 @@ class PantallaExpedienteTests(TestCase):
     @override_settings(DEBUG=False)
     def test_descarga_requiere_permiso_y_detalle_enmascara_nss(self):
         self.client.force_login(self.user)
-        self._post("aplicar")
+        self._post("aplicar", token=self._preview_token())
         expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
         documento = expediente.documentos.get(
             clase=reportes_models.DocumentoCedulaIMSS.CLASE_SUA_XLS
@@ -973,6 +1032,17 @@ class PantallaExpedienteTests(TestCase):
 
         self.client.logout()
         self.assertEqual(self.client.get(documento.archivo.url).status_code, 404)
+        ruta = documento.archivo.url.removeprefix("/media/")
+        aliases = (
+            f"/media/./{ruta}",
+            f"/media/segmento/../{ruta}",
+            f"/media/%2E/{ruta}",
+            f"/media/segmento/%2E%2E/{ruta}",
+            documento.archivo.url.replace("reportes/", "reportes%2F", 1),
+        )
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                self.assertEqual(self.client.get(alias).status_code, 404)
         self.client.force_login(self.sin_permiso)
         self.assertEqual(self.client.get(documento.archivo.url).status_code, 404)
         self.assertEqual(
@@ -991,6 +1061,28 @@ class PantallaExpedienteTests(TestCase):
         self.assertEqual(descarga.status_code, 200)
         self.assertEqual(descarga["Cache-Control"], "private, no-store")
 
+    @override_settings(DEBUG=False)
+    def test_todos_los_prefijos_privados_pasan_por_el_gate_unico(self):
+        rutas = (
+            "fallas/evidencias/prueba.txt",
+            "fallas/seguimiento/prueba.txt",
+            "activos/facturas/prueba.txt",
+            "activos/evidencias/prueba.txt",
+            "logistica/reportes/prueba.txt",
+            "servicios_unidad/prueba.txt",
+            "reparaciones_unidad/prueba.txt",
+            "compras/departamentales/prueba.txt",
+            "compras/cotizaciones/prueba.txt",
+            "reportes/cedulas-imss/prueba.txt",
+        )
+        for ruta in rutas:
+            archivo = Path(self._media.name) / ruta
+            archivo.parent.mkdir(parents=True, exist_ok=True)
+            archivo.write_text("privado")
+            for url in (f"/media/{ruta}", f"/media/publico/../{ruta}"):
+                with self.subTest(url=url):
+                    self.assertEqual(self.client.get(url).status_code, 404)
+
 
 @skipUnless(shutil.which("node"), "Node.js es requerido para validar la carrera de preview")
 class CedulaPreviewJavaScriptTests(SimpleTestCase):
@@ -1006,9 +1098,9 @@ class CedulaPreviewJavaScriptTests(SimpleTestCase):
         escenario = r"""
 const handlers={};
 function element(name){return {name,disabled:false,hidden:true,textContent:'',dataset:{},files:[],addEventListener:(type,fn)=>{handlers[name+':'+type]=fn},querySelector:()=>element('child'),replaceChildren:()=>{},appendChild:()=>{},setAttribute:()=>{},scrollIntoView:()=>{}}}
-const form=element('form'),input=element('input'),apply=element('apply'),preview=element('preview'),region=element('region');
+const form=element('form'),input=element('input'),apply=element('apply'),preview=element('preview'),region=element('region'),token=element('token');
 form.reportValidity=()=>true;form.action='/preview';
-global.document={getElementById:(id)=>({"cedula-form":form,"id_documentos":input,"cedula-aplicar":apply,"cedula-preview":preview,"erp-toast-region":region}[id]),createElement:()=>element('created')};
+global.document={getElementById:(id)=>({"cedula-form":form,"id_documentos":input,"cedula-aplicar":apply,"cedula-preview":preview,"cedula-preview-token":token,"erp-toast-region":region}[id]),createElement:()=>element('created')};
 global.window={location:{href:'http://test/preview'},matchMedia:()=>({matches:true}),setTimeout:()=>{}};
 global.FormData=class{set(){} delete(){}};
 let resolveFetch;global.fetch=()=>new Promise((resolve)=>{resolveFetch=resolve});
@@ -1018,13 +1110,13 @@ let resolveFetch;global.fetch=()=>new Promise((resolve)=>{resolveFetch=resolve})
   const pending=handlers['form:submit']({submitter:{name:'previsualizar',textContent:'Previsualizar',dataset:{}},preventDefault(){},stopImmediatePropagation(){}});
   input.files=[{name:'B.xls',size:20,lastModified:2,type:'application/vnd.ms-excel'}];
   handlers['input:change']();
-  resolveFetch({ok:true,json:async()=>({ok:true,preview:{total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
+  resolveFetch({ok:true,json:async()=>({ok:true,preview_token:'obsoleto',preview:{total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
   await pending;
-  if(!apply.disabled||preview.hidden!==true){throw new Error('La preview obsoleta habilitó Aplicar para otro FileList');}
+  if(!apply.disabled||preview.hidden!==true||token.value){throw new Error('La preview obsoleta habilitó Aplicar para otro FileList');}
   const current=handlers['form:submit']({submitter:{name:'previsualizar',textContent:'Previsualizar',dataset:{}},preventDefault(){},stopImmediatePropagation(){}});
-  resolveFetch({ok:true,json:async()=>({ok:true,preview:{registro_patronal:'E52',meses:[],efecto_estimado:{lineas_maximas:2},total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
+  resolveFetch({ok:true,json:async()=>({ok:true,preview_token:'vigente',preview:{registro_patronal:'E52',meses:[],efecto_estimado:{lineas_maximas:2},total_patronal:'1',trabajadores:1,cruzados:1,sin_cruce:0,documentos:[],detalles:[]},toast:{type:'info',message:'lista'}})});
   await current;
-  if(apply.disabled){throw new Error('La preview vigente no habilitó Aplicar');}
+  if(apply.disabled||token.value!=='vigente'){throw new Error('La preview vigente no habilitó Aplicar con su comprobante');}
   input.files=[{name:'C.xls',size:30,lastModified:3,type:'application/vnd.ms-excel'}];
   let prevented=false;
   await handlers['form:submit']({submitter:{name:'aplicar'},preventDefault(){prevented=true},stopImmediatePropagation(){}});
@@ -1040,6 +1132,28 @@ let resolveFetch;global.fetch=()=>new Promise((resolve)=>{resolveFetch=resolve})
             check=False,
         )
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
+
+
+class RutasMediaPrivadaTests(SimpleTestCase):
+    def test_normaliza_aliases_antes_de_clasificar_ruta_privada(self):
+        from core.private_operational_media import (
+            _is_private_operational_media_path,
+            _normalize_operational_media_path,
+        )
+
+        aliases = (
+            "./reportes/cedulas-imss/prueba.pdf",
+            "publico/../reportes/cedulas-imss/prueba.pdf",
+            "%2E/reportes/cedulas-imss/prueba.pdf",
+            "publico/%2E%2E/reportes/cedulas-imss/prueba.pdf",
+            "reportes%2Fcedulas-imss%2Fprueba.pdf",
+            "reportes%252Fcedulas-imss%252Fprueba.pdf",
+        )
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                canonical = _normalize_operational_media_path(alias)
+                self.assertEqual(canonical, "reportes/cedulas-imss/prueba.pdf")
+                self.assertTrue(_is_private_operational_media_path(canonical))
 
 
 class ConcurrenciaExpedienteTests(TransactionTestCase):

@@ -15,6 +15,7 @@ from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -59,6 +60,8 @@ ZERO = Decimal("0")
 # (Gastos de Venta, Administración, Logística, Producción). Se muestra como
 # vista de control pero NO se suma a los KPI globales para no duplicar dinero.
 AREAS_NO_SUMABLES = {"nomina", "resultados"}
+CEDULA_PREVIEW_SALT = "reportes.cedula-imss.preview.v1"
+CEDULA_PREVIEW_MAX_AGE = 15 * 60
 
 
 def _parse_int(value, default: int) -> int:
@@ -991,6 +994,48 @@ def _serializar_preview_cedula(preview) -> dict[str, object]:
     }
 
 
+def _datos_comprobante_preview_cedula(preview, usuario) -> dict[str, object]:
+    return {
+        "usuario_id": usuario.pk,
+        "sha256": sorted(documento.sha256 for documento in preview.documentos),
+        "tipo": preview.parseada.tipo,
+        "periodo": preview.parseada.periodo.isoformat(),
+        "registro_patronal": preview.parseada.registro_patronal,
+    }
+
+
+def _firmar_preview_cedula(preview, usuario) -> str:
+    return signing.dumps(
+        _datos_comprobante_preview_cedula(preview, usuario),
+        salt=CEDULA_PREVIEW_SALT,
+        compress=True,
+    )
+
+
+def _validar_comprobante_preview_cedula(token: str, preview, usuario) -> None:
+    if not token:
+        raise ValueError("Previsualiza los documentos antes de aplicar el expediente.")
+    try:
+        datos = signing.loads(
+            token,
+            salt=CEDULA_PREVIEW_SALT,
+            max_age=CEDULA_PREVIEW_MAX_AGE,
+        )
+    except signing.SignatureExpired as exc:
+        raise ValueError(
+            "La previsualización expiró. Previsualiza nuevamente antes de aplicar."
+        ) from exc
+    except signing.BadSignature as exc:
+        raise ValueError(
+            "La previsualización no es válida. Previsualiza nuevamente antes de aplicar."
+        ) from exc
+    if datos != _datos_comprobante_preview_cedula(preview, usuario):
+        raise ValueError(
+            "Los documentos o el usuario no coinciden con la previsualización. "
+            "Previsualiza nuevamente antes de aplicar."
+        )
+
+
 @login_required
 def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
     from .views import _reportes_module_tabs
@@ -999,6 +1044,7 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
         raise PermissionDenied("No tienes permisos para subir cédulas del IMSS.")
 
     resumen = None
+    preview_token = ""
     error = None
     if request.method == "POST":
         from .services_cedula_expediente import aplicar_expediente, preparar_expediente
@@ -1011,6 +1057,9 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
                 preview = preparar_expediente(archivos, usuario=request.user)
                 resumen = _serializar_preview_cedula(preview)
                 if "aplicar" in request.POST:
+                    _validar_comprobante_preview_cedula(
+                        request.POST.get("preview_token", ""), preview, request.user
+                    )
                     expediente = aplicar_expediente(preview, usuario=request.user)
                     destino = reverse("reportes:cedula_imss_detalle", args=[expediente.pk])
                     mensaje = "Expediente aplicado y conciliado."
@@ -1024,11 +1073,13 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
                         )
                     messages.success(request, mensaje)
                     return redirect(destino)
+                preview_token = _firmar_preview_cedula(preview, request.user)
                 if _wants_json(request):
                     return JsonResponse(
                         {
                             "ok": True,
                             "preview": resumen,
+                            "preview_token": preview_token,
                             "toast": {
                                 "type": "info",
                                 "message": "Previsualización lista. No se guardó ningún dato.",
@@ -1055,6 +1106,7 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
             if can_view_reportes(request.user)
             else [],
             "resumen": resumen,
+            "preview_token": preview_token,
             "error": error,
         },
     )

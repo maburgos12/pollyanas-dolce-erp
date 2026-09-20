@@ -1,5 +1,8 @@
 """Authenticated access to operational evidence stored under ``MEDIA_ROOT``."""
 
+import posixpath
+from urllib.parse import unquote
+
 from django.conf import settings
 from django.db.models import Q
 from django.http import Http404
@@ -17,6 +20,36 @@ from mantenimiento.services_access import (
     authorized_unit_services,
     can_access_mantenimiento,
 )
+
+
+_PRIVATE_OPERATIONAL_PREFIXES = (
+    "fallas/",
+    "activos/",
+    "logistica/reportes/",
+    "servicios_unidad/",
+    "reparaciones_unidad/",
+    "compras/departamentales/",
+    "compras/cotizaciones/",
+    "reportes/cedulas-imss/",
+)
+
+
+def _normalize_operational_media_path(path):
+    """Decode and collapse aliases before deciding whether a media path is private."""
+    decoded = str(path or "")
+    for _ in range(5):
+        previous = decoded
+        decoded = unquote(decoded)
+        if decoded == previous:
+            break
+    decoded = decoded.replace("\\", "/")
+    if "\x00" in decoded:
+        raise Http404
+    return posixpath.normpath(f"/{decoded}").lstrip("/")
+
+
+def _is_private_operational_media_path(path):
+    return any(path.startswith(prefix) for prefix in _PRIVATE_OPERATIONAL_PREFIXES)
 
 
 def _maintenance_can_access(user, queryset):
@@ -114,14 +147,19 @@ def _can_access_operational_media(user, path):
     return False
 
 
-def serve_private_maintenance_media(request, path):
-    """Serve operational evidence only when the current user can see its parent record."""
-    es_cedula_imss = path.startswith("reportes/cedulas-imss/")
-    if (es_cedula_imss or not settings.DEBUG) and not _can_access_operational_media(
-        request.user, path
-    ):
+def serve_operational_media(request, path):
+    """Serve public media or authorize private media after canonicalizing its path."""
+    canonical_path = _normalize_operational_media_path(path)
+    is_private = _is_private_operational_media_path(canonical_path)
+    if is_private and not _can_access_operational_media(request.user, canonical_path):
         raise Http404
-    response = static_serve(request, path, document_root=settings.MEDIA_ROOT)
-    response["Cache-Control"] = "private, no-store"
-    response["X-Content-Type-Options"] = "nosniff"
+    response = static_serve(request, canonical_path, document_root=settings.MEDIA_ROOT)
+    if is_private:
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def serve_private_maintenance_media(request, path):
+    """Backward-compatible alias for callers outside the root URL configuration."""
+    return serve_operational_media(request, path)
