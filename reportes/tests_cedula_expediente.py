@@ -2,12 +2,14 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
@@ -82,7 +84,7 @@ class RegularizacionCedulasTests(TestCase):
             "reportes.services_cedula_expediente.cargar_filas_xls",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
-            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss._cargar_filas_bytes",
             return_value=PersistenciaExpedienteTests._filas(),
         ):
             return call_command(
@@ -111,7 +113,7 @@ class RegularizacionCedulasTests(TestCase):
     def test_dry_run_no_usa_temporales_storage_ni_escrituras_sql(self):
         self._crear_lineas_historicas()
         with patch(
-            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss._cargar_filas_bytes",
             return_value=PersistenciaExpedienteTests._filas(),
             create=True,
         ), patch(
@@ -229,6 +231,8 @@ class RegularizacionCedulasTests(TestCase):
         salida_pdf = BytesIO()
         pdf = canvas.Canvas(salida_pdf, invariant=1)
         pdf.drawString(72, 720, "EBA EMISION BIMESTRAL ANTICIPADA")
+        pdf.drawString(72, 700, "E52-40157-10-0")
+        pdf.drawString(72, 680, "BIMESTRE 04-2026")
         pdf.showPage()
         pdf.save()
         (carpeta / "EBA.pdf").write_bytes(salida_pdf.getvalue())
@@ -259,7 +263,7 @@ class RegularizacionCedulasTests(TestCase):
         with patch(
             "reportes.services_cedula_expediente.cargar_filas_xls", return_value=filas
         ), patch(
-            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss._cargar_filas_bytes",
             return_value=filas,
         ):
             call_command(
@@ -306,7 +310,7 @@ class RegularizacionCedulasTests(TestCase):
             "reportes.services_cedula_expediente.cargar_filas_xls",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
-            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss._cargar_filas_bytes",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
             "reportes.management.commands.regularizar_expedientes_cedulas_imss.aplicar_expediente",
@@ -355,7 +359,7 @@ class RegularizacionCedulasTests(TestCase):
             "reportes.services_cedula_expediente.cargar_filas_xls",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
-            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss._cargar_filas_bytes",
             return_value=PersistenciaExpedienteTests._filas(),
         ), patch(
             "reportes.management.commands.regularizar_expedientes_cedulas_imss.aplicar_expediente",
@@ -389,6 +393,109 @@ class RegularizacionCedulasTests(TestCase):
         enlace.symlink_to(self.xls)
         with self.assertRaisesRegex(CommandError, "simbólico"):
             self._ejecutar()
+
+    def test_lectura_segura_rechaza_swap_a_symlink_y_archivo_mayor_a_10_mib(self):
+        from reportes.management.commands.regularizar_expedientes_cedulas_imss import (
+            _leer_archivo_seguro,
+        )
+
+        real_open = os.open
+        destino = Path(self._root.name) / "destino.xls"
+        destino.write_bytes(b"xls")
+        original = self.xls
+
+        def intercambiar(path, flags):
+            original.unlink()
+            original.symlink_to(destino)
+            return real_open(path, flags)
+
+        with patch("os.open", side_effect=intercambiar):
+            with self.assertRaises(CommandError):
+                _leer_archivo_seguro(original, Path(self._root.name))
+
+        grande = Path(self._root.name) / "grande.xls"
+        with grande.open("wb") as archivo:
+            archivo.truncate(10 * 1024 * 1024 + 1)
+        with self.assertRaisesRegex(CommandError, "10 MiB"):
+            _leer_archivo_seguro(grande, Path(self._root.name))
+
+    def test_pdf_de_tipo_periodo_incorrecto_no_se_asocia_por_directorio(self):
+        from reportlab.pdfgen import canvas
+
+        salida = BytesIO()
+        pdf = canvas.Canvas(salida, invariant=1)
+        pdf.drawString(72, 720, "EBA EMISION BIMESTRAL ANTICIPADA")
+        pdf.drawString(72, 700, "E52-40157-10-0")
+        pdf.drawString(72, 680, "BIMESTRE 04-2026")
+        pdf.showPage()
+        pdf.save()
+        (Path(self._root.name) / "EBA.pdf").write_bytes(salida.getvalue())
+
+        with self.assertRaisesRegex(CommandError, "tipo, registro y periodo"):
+            self._ejecutar()
+
+    def test_limpieza_continua_y_preserva_error_primario(self):
+        from reportes.management.commands.regularizar_expedientes_cedulas_imss import (
+            _limpiar_blobs,
+        )
+
+        storage = MagicMock()
+        storage.delete.side_effect = [OSError("storage caído"), None]
+        with self.assertLogs(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss",
+            level="WARNING",
+        ):
+            _limpiar_blobs([(storage, "uno"), (storage, "dos")])
+        self.assertEqual(storage.delete.call_count, 2)
+
+    def test_preflight_aplica_limite_agregado_de_30_mib(self):
+        from reportes.management.commands.regularizar_expedientes_cedulas_imss import (
+            ArchivoInspeccionado,
+            _agrupar_inspecciones,
+        )
+
+        periodo = date(2026, 8, 1)
+        sua = ArchivoInspeccionado(
+            self.xls, "a" * 64, 10 * 1024 * 1024, "SUA_XLS",
+            "E52-40157-10-0", periodo, SimpleNamespace(tipo="MENSUAL"), Decimal("1"),
+        )
+        pdfs = tuple(
+            ArchivoInspeccionado(
+                Path(self._root.name) / f"EMA-{indice}.pdf",
+                str(indice) * 64,
+                10 * 1024 * 1024,
+                "EMA_PDF",
+                "E52-40157-10-0",
+                periodo,
+            )
+            for indice in range(1, 4)
+        )
+        with self.assertRaisesRegex(CommandError, "30 MiB"):
+            _agrupar_inspecciones((sua, *pdfs))
+
+    def test_apply_toma_advisory_antes_de_bloquear_lineas(self):
+        from reportes.management.commands import regularizar_expedientes_cedulas_imss as comando
+
+        self._crear_lineas_historicas()
+        orden = []
+        advisory_real = comando._bloquear_familia
+        lineas_real = comando._lineas_objetivo
+
+        def advisory(preview):
+            orden.append("advisory")
+            return advisory_real(preview)
+
+        def lineas(parseada, *, bloquear=False):
+            if bloquear:
+                orden.append("filas")
+            return lineas_real(parseada, bloquear=bloquear)
+
+        with patch.object(comando, "_bloquear_familia", side_effect=advisory), patch.object(
+            comando, "_lineas_objetivo", side_effect=lineas
+        ):
+            self._ejecutar("--apply")
+
+        self.assertLess(orden.index("advisory"), orden.index("filas"))
 
 
 class CedulaIMSSParserTests(SimpleTestCase):
@@ -747,7 +854,11 @@ class PersistenciaExpedienteTests(TestCase):
     def _pdf(nombre="EMA_agosto.pdf"):
         from reportlab.pdfgen import canvas
 
-        etiqueta = "EBA EMISION BIMESTRAL ANTICIPADA" if "EBA" in nombre.upper() else "EMA EMISION MENSUAL ANTICIPADA"
+        etiqueta = (
+            "EBA EMISION BIMESTRAL ANTICIPADA E52-40157-10-0 BIMESTRE 04-2026"
+            if "EBA" in nombre.upper()
+            else "EMA EMISION MENSUAL ANTICIPADA E52-40157-10-0 PERIODO 08-2026"
+        )
         salida = BytesIO()
         pdf = canvas.Canvas(salida, invariant=1)
         pdf.drawString(72, 720, etiqueta)

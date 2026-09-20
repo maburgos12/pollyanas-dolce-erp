@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import logging
+import os
 import re
+import stat
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,15 +24,18 @@ from reportes.models import DocumentoCedulaIMSS, LineaPresupuestoMensual
 from reportes.services_cedula_expediente import (
     CedulaDiscrepante,
     MAX_ARCHIVO_BYTES,
+    MAX_EXPEDIENTE_BYTES,
     _extraer_total_control,
+    _bloquear_familia,
     aplicar_expediente,
     preparar_expediente,
 )
-from reportes.services_cedula_imss import cargar_filas_xls, parsear_cedula
+from reportes.services_cedula_imss import parsear_cedula
 from reportes.services_presupuesto_maestro import normalize_header_text
 
 
 FUENTES_HISTORICAS = ("AUTO:LEGADO", "AUTO:SIPARE")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,6 +48,31 @@ class ExpedienteHistorico:
     lineas: tuple[LineaPresupuestoMensual, ...]
     monto_existente: Decimal
     preview: object | None = None
+
+
+@dataclass(frozen=True)
+class ArchivoInspeccionado:
+    ruta: Path
+    sha256: str
+    tamano: int
+    clase: str
+    registro_patronal: str
+    periodo: object
+    parseada: object | None = None
+    total_patronal: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class IdentidadCedula:
+    tipo: str
+    periodo: date
+    registro_patronal: str
+
+    @property
+    def meses(self) -> tuple[date, ...]:
+        if self.tipo == "BIMESTRAL":
+            return (self.periodo.replace(month=self.periodo.month - 1), self.periodo)
+        return (self.periodo,)
 
 
 def _registro_normalizado(valor: str) -> str:
@@ -67,72 +100,93 @@ def _enumerar_archivos(root: Path) -> tuple[Path, ...]:
     return tuple(archivos)
 
 
-def _agrupar_archivos(archivos: tuple[Path, ...]) -> tuple[tuple[Path, tuple[Path, ...]], ...]:
-    por_directorio: dict[Path, list[Path]] = {}
-    for ruta in archivos:
-        por_directorio.setdefault(ruta.parent, []).append(ruta)
-    grupos: list[tuple[Path, tuple[Path, ...]]] = []
-    for directorio, rutas in sorted(por_directorio.items()):
-        xls = sorted(ruta for ruta in rutas if ruta.suffix.lower() == ".xls")
-        pdfs = tuple(sorted(ruta for ruta in rutas if ruta.suffix.lower() == ".pdf"))
-        if pdfs and len(xls) != 1:
-            raise CommandError(
-                f"Los PDF de {directorio} son ambiguos: debe haber exactamente un SUA .xls "
-                "en el mismo directorio."
-            )
-        if not xls:
-            raise CommandError(f"Hay PDF sin SUA .xls asociado en {directorio}.")
-        for ruta_xls in xls:
-            grupos.append((ruta_xls, pdfs if len(xls) == 1 else ()))
-    return tuple(grupos)
+def _leer_archivo_seguro(ruta: Path, root: Path) -> tuple[bytes, str]:
+    root_real = root.resolve(strict=True)
+    if not ruta.resolve(strict=False).is_relative_to(root_real):
+        raise CommandError(f"Archivo fuera de --root: {ruta}")
+    banderas = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(ruta, banderas)
+    except OSError as exc:
+        raise CommandError(f"No se pudo abrir de forma segura '{ruta.name}': {exc}") from exc
+    try:
+        estado = os.fstat(fd)
+        if not stat.S_ISREG(estado.st_mode):
+            raise CommandError(f"'{ruta.name}' no es un archivo regular.")
+        if estado.st_size > MAX_ARCHIVO_BYTES:
+            raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
+        partes, total = [], 0
+        while True:
+            bloque = os.read(fd, min(1024 * 1024, MAX_ARCHIVO_BYTES + 1 - total))
+            if not bloque:
+                break
+            partes.append(bloque)
+            total += len(bloque)
+            if total > MAX_ARCHIVO_BYTES:
+                raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
+        contenido = b"".join(partes)
+        if total != estado.st_size:
+            raise CommandError(f"El archivo '{ruta.name}' cambió durante la lectura.")
+        return contenido, hashlib.sha256(contenido).hexdigest()
+    finally:
+        os.close(fd)
 
 
-def _subida(ruta: Path) -> SimpleUploadedFile:
-    if ruta.stat().st_size > MAX_ARCHIVO_BYTES:
-        raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
-    tipo = "application/vnd.ms-excel" if ruta.suffix.lower() == ".xls" else "application/pdf"
-    return SimpleUploadedFile(ruta.name, ruta.read_bytes(), content_type=tipo)
+def _cargar_filas_bytes(contenido: bytes):
+    import xlrd
+    libro = xlrd.open_workbook(file_contents=contenido)
+    hoja = libro.sheet_by_index(0)
+    return [[hoja.cell_value(r, c) for c in range(hoja.ncols)] for r in range(hoja.nrows)]
 
 
-def _huella_y_firma(ruta: Path, firma: bytes) -> str:
-    if ruta.stat().st_size > MAX_ARCHIVO_BYTES:
-        raise CommandError(f"El archivo '{ruta.name}' excede el límite de 10 MiB.")
-    digest = hashlib.sha256()
-    with ruta.open("rb") as archivo:
-        cabecera = archivo.read(len(firma))
-        if cabecera != firma:
-            raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
-        digest.update(cabecera)
-        for bloque in iter(lambda: archivo.read(1024 * 1024), b""):
-            digest.update(bloque)
-    return digest.hexdigest()
-
-
-def _validar_pdf_directo(ruta: Path) -> None:
-    _huella_y_firma(ruta, b"%PDF-")
+def _inspeccionar_pdf(ruta: Path, contenido: bytes, sha256: str) -> ArchivoInspeccionado:
+    if not contenido.startswith(b"%PDF-"):
+        raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
     try:
         import pdfplumber
     except ModuleNotFoundError as exc:
         raise CommandError("Dependencia pdfplumber no disponible.") from exc
     try:
-        with pdfplumber.open(ruta) as lector:
+        with pdfplumber.open(io.BytesIO(contenido)) as lector:
             if not lector.pages:
                 raise ValueError
-            texto = normalize_header_text(
-                " ".join(pagina.extract_text() or "" for pagina in lector.pages)
-            )
+            texto_original = " ".join(pagina.extract_text() or "" for pagina in lector.pages)
+            texto = normalize_header_text(texto_original)
     except Exception as exc:
         raise CommandError(f"El archivo '{ruta.name}' no es un PDF válido y parseable.") from exc
-    ema = bool(re.search(r"\bema\b", texto)) or "emision mensual anticipada" in texto
-    eba = bool(re.search(r"\beba\b", texto)) or "emision bimestral anticipada" in texto
+    texto_compacto = texto.replace(" ", "")
+    ema = (
+        bool(re.search(r"\bema\b", texto))
+        or "emision mensual anticipada" in texto
+        or ("periodo" in texto and "cuotasenfermedadesymaternidad" in texto_compacto)
+    )
+    eba = (
+        bool(re.search(r"\beba\b", texto))
+        or "emision bimestral anticipada" in texto
+        or ("bimestre" in texto and "cuotasrcv" in texto_compacto)
+    )
     if ema == eba:
         raise CommandError(f"No se pudo clasificar inequívocamente el PDF '{ruta.name}'.")
+    registros = re.findall(r"[A-Z]\d{2}-\d{5}-\d{2}-\d", texto_original.upper())
+    patron_periodo = r"PERIODO.{0,200}?(\d{2})-(\d{4})" if ema else r"BIMESTRE.{0,200}?(\d{2})-(\d{4})"
+    match = re.search(patron_periodo, texto_original.upper(), re.DOTALL)
+    if len(set(registros)) != 1 or match is None:
+        raise CommandError(f"PDF '{ruta.name}' sin registro/periodo inequívoco.")
+    numero, anio = int(match.group(1)), int(match.group(2))
+    mes = numero if ema else numero * 2
+    if not 1 <= mes <= 12:
+        raise CommandError(f"Periodo inválido en PDF '{ruta.name}'.")
+    return ArchivoInspeccionado(
+        ruta, sha256, len(contenido), "EMA_PDF" if ema else "EBA_PDF",
+        registros[0], date(anio, mes, 1),
+    )
 
 
-def _inspeccionar_sua(ruta: Path):
-    sha256 = _huella_y_firma(ruta, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+def _inspeccionar_sua(ruta: Path, contenido: bytes, sha256: str):
+    if not contenido.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
     try:
-        filas = cargar_filas_xls(str(ruta))
+        filas = _cargar_filas_bytes(contenido)
         parseada = parsear_cedula(filas)
         total_patronal = _extraer_total_control(filas, parseada.tipo)
     except (OSError, ValueError) as exc:
@@ -144,7 +198,40 @@ def _inspeccionar_sua(ruta: Path):
         raise CedulaDiscrepante(
             f"{ruta.name}: detalle {total_detalle:.2f} != control patronal {total_patronal:.2f}."
         )
-    return parseada, sha256, total_patronal
+    identidad = IdentidadCedula(parseada.tipo, parseada.periodo, parseada.registro_patronal)
+    return ArchivoInspeccionado(
+        ruta, sha256, len(contenido), "SUA_XLS", parseada.registro_patronal,
+        parseada.periodo, identidad, total_patronal,
+    )
+
+
+def _agrupar_inspecciones(
+    documentos: tuple[ArchivoInspeccionado, ...],
+) -> tuple[tuple[ArchivoInspeccionado, tuple[ArchivoInspeccionado, ...]], ...]:
+    suas = [d for d in documentos if d.clase == "SUA_XLS"]
+    pdfs = [d for d in documentos if d.clase != "SUA_XLS"]
+    asociados: dict[str, list[ArchivoInspeccionado]] = {s.sha256: [] for s in suas}
+    for pdf in pdfs:
+        tipo = "MENSUAL" if pdf.clase == "EMA_PDF" else "BIMESTRAL"
+        candidatos = [
+            sua for sua in suas
+            if sua.parseada.tipo == tipo
+            and sua.periodo == pdf.periodo
+            and _registro_normalizado(sua.registro_patronal)
+            == _registro_normalizado(pdf.registro_patronal)
+        ]
+        if len(candidatos) != 1:
+            raise CommandError(
+                f"PDF '{pdf.ruta.name}' no tiene un SUA único con tipo, registro y periodo coincidentes."
+            )
+        asociados[candidatos[0].sha256].append(pdf)
+    grupos = []
+    for sua in sorted(suas, key=lambda d: str(d.ruta)):
+        evidencias = tuple(asociados[sua.sha256])
+        if sua.tamano + sum(p.tamano for p in evidencias) > MAX_EXPEDIENTE_BYTES:
+            raise CommandError(f"El expediente de '{sua.ruta.name}' excede 30 MiB.")
+        grupos.append((sua, evidencias))
+    return tuple(grupos)
 
 
 def _lineas_objetivo(parseada, *, bloquear: bool = False) -> tuple[LineaPresupuestoMensual, ...]:
@@ -229,6 +316,14 @@ def _capturar_blobs_creados(
         )
 
 
+def _limpiar_blobs(blobs: list[tuple[object, str]]) -> None:
+    for storage, nombre in reversed(blobs):
+        try:
+            storage.delete(nombre)
+        except Exception:
+            logger.warning("No se pudo limpiar blob de backfill IMSS: %s", nombre, exc_info=True)
+
+
 class Command(BaseCommand):
     help = "Regulariza expedientes históricos de cédulas IMSS (dry-run por defecto)."
 
@@ -239,16 +334,24 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         root = Path(options["root"]).expanduser()
-        grupos = _agrupar_archivos(_enumerar_archivos(root))
+        rutas = _enumerar_archivos(root)
+        inspecciones = []
+        for ruta in rutas:
+            contenido, sha256 = _leer_archivo_seguro(ruta, root)
+            if ruta.suffix.lower() == ".xls":
+                inspecciones.append(_inspeccionar_sua(ruta, contenido, sha256))
+            else:
+                inspecciones.append(_inspeccionar_pdf(ruta, contenido, sha256))
+            del contenido
+        grupos = _agrupar_inspecciones(tuple(inspecciones))
         registro_esperado = _registro_normalizado(options["registro"])
         if not registro_esperado:
             raise CommandError("--registro debe contener un registro patronal válido.")
         preparados: list[ExpedienteHistorico] = []
 
-        for ruta_sua, pdfs in grupos:
-            parseada, sha256_sua, total_patronal = _inspeccionar_sua(ruta_sua)
-            for ruta_pdf in pdfs:
-                _validar_pdf_directo(ruta_pdf)
+        for sua, pdfs in grupos:
+            ruta_sua = sua.ruta
+            parseada, sha256_sua, total_patronal = sua.parseada, sua.sha256, sua.total_patronal
             if _registro_normalizado(parseada.registro_patronal) != registro_esperado:
                 raise CommandError(
                     f"Registro patronal inesperado en {ruta_sua.name}: "
@@ -262,32 +365,15 @@ class Command(BaseCommand):
                     f"{ruta_sua.name}: total documento {total_patronal:.2f} no coincide "
                     f"con monto existente {monto_existente:.2f}."
                 )
-            preview = None
-            if options["apply"]:
-                try:
-                    archivos = [_subida(ruta_sua), *(_subida(ruta) for ruta in pdfs)]
-                    preview = preparar_expediente(archivos, usuario=None)
-                except Exception as exc:
-                    raise CommandError(f"No se pudo preparar {ruta_sua.name}: {exc}") from exc
-                if (
-                    preview.sua.sha256 != sha256_sua
-                    or preview.parseada.tipo != parseada.tipo
-                    or preview.parseada.periodo != parseada.periodo
-                    or preview.total_patronal != total_patronal
-                ):
-                    raise CommandError(
-                        f"{ruta_sua.name}: la inspección directa y la preparación no coinciden."
-                    )
             preparados.append(
                 ExpedienteHistorico(
                     ruta_sua=ruta_sua,
-                    rutas_pdf=pdfs,
+                    rutas_pdf=tuple(pdf.ruta for pdf in pdfs),
                     parseada=parseada,
                     sha256_sua=sha256_sua,
                     total_patronal=total_patronal,
                     lineas=lineas,
                     monto_existente=monto_existente,
-                    preview=preview,
                 )
             )
 
@@ -308,8 +394,41 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 for item in preparados:
-                    if item.preview is None:
-                        raise CommandError("Falta la preparación transaccional del expediente.")
+                    lecturas = []
+                    for ruta, sha_esperado in [
+                        (item.ruta_sua, item.sha256_sua),
+                        *[(pdf.ruta, pdf.sha256) for sua, pdfs in grupos if sua.sha256 == item.sha256_sua for pdf in pdfs],
+                    ]:
+                        contenido, sha_actual = _leer_archivo_seguro(ruta, root)
+                        if sha_actual != sha_esperado:
+                            raise CommandError(f"'{ruta.name}' cambió después del preflight.")
+                        lecturas.append((ruta, contenido))
+                    archivos = [
+                        SimpleUploadedFile(
+                            ruta.name,
+                            contenido,
+                            content_type=(
+                                "application/vnd.ms-excel"
+                                if ruta.suffix.lower() == ".xls"
+                                else "application/pdf"
+                            ),
+                        )
+                        for ruta, contenido in lecturas
+                    ]
+                    try:
+                        preview = preparar_expediente(archivos, usuario=None)
+                    except Exception as exc:
+                        raise CommandError(f"No se pudo preparar {item.ruta_sua.name}: {exc}") from exc
+                    if (
+                        preview.sua.sha256 != item.sha256_sua
+                        or preview.parseada.tipo != item.parseada.tipo
+                        or preview.parseada.periodo != item.parseada.periodo
+                        or preview.total_patronal != item.total_patronal
+                    ):
+                        raise CommandError(
+                            f"{item.ruta_sua.name}: preflight y preparación no coinciden."
+                        )
+                    _bloquear_familia(preview)
                     lineas_preexistentes = _lineas_objetivo(item.parseada, bloquear=True)
                     ids_preexistentes = {linea.pk for linea in lineas_preexistentes}
                     lineas_bloqueadas = tuple(
@@ -353,7 +472,7 @@ class Command(BaseCommand):
                                 )
                     shas_previos = set(
                         DocumentoCedulaIMSS.objects.filter(
-                            sha256__in=[d.sha256 for d in item.preview.documentos]
+                            sha256__in=[d.sha256 for d in preview.documentos]
                         ).values_list("sha256", flat=True)
                     )
                     nombres_protegidos = set(
@@ -363,10 +482,10 @@ class Command(BaseCommand):
                     )
                     with _capturar_blobs_creados(
                         blobs_nuevos,
-                        shas_esperados={d.sha256 for d in item.preview.documentos},
+                        shas_esperados={d.sha256 for d in preview.documentos},
                         nombres_protegidos=nombres_protegidos,
                     ):
-                        expediente = aplicar_expediente(item.preview, usuario=None)
+                        expediente = aplicar_expediente(preview, usuario=None)
                     documento_sua = expediente.documentos.get(
                         clase=DocumentoCedulaIMSS.CLASE_SUA_XLS
                     )
@@ -419,9 +538,9 @@ class Command(BaseCommand):
                         f"{item.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
                         f"{item.total_patronal:.2f} | {item.monto_existente:.2f} | {accion}"
                     )
+                    del archivos, contenido, lecturas, preview
         except Exception:
-            for storage, nombre in reversed(blobs_nuevos):
-                storage.delete(nombre)
+            _limpiar_blobs(blobs_nuevos)
             raise
 
         self.stdout.write(encabezado)
