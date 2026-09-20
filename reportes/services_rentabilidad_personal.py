@@ -10,7 +10,7 @@ from decimal import Decimal
 from core.models import Sucursal
 from rrhh.models import NominaLinea, NominaPeriodo
 
-from .models import LineaPresupuestoMensual
+from .models import ExpedienteCedulaIMSS, LineaPresupuestoMensual
 from .services_presupuesto_maestro import normalize_header_text
 
 ZERO = Decimal("0")
@@ -82,10 +82,21 @@ def leer_personal_mensual(periodo: date) -> dict:
     cargas_encontradas = defaultdict(set)
     # El flujo SIPARE ya mensualiza IMSS/RCV. Se lee su resultado ORIGINAL,
     # igual que el consolidado de Reportes; no se vuelve a dividir el bimestre.
-    cargas = LineaPresupuestoMensual.objects.filter(
+    cargas = list(LineaPresupuestoMensual.objects.filter(
         periodo=periodo, version=LineaPresupuestoMensual.VERSION_ORIGINAL,
         rubro__activo=True, rubro__area__codigo="gastos-venta",
-    ).select_related("rubro", "rubro__sucursal")
+    ).select_related("rubro", "rubro__sucursal"))
+    expedientes_enlazados = {
+        linea.metadata.get("expediente_cedula_imss_id")
+        for linea in cargas
+        if isinstance(linea.metadata, dict) and linea.metadata.get("expediente_cedula_imss_id")
+    }
+    expedientes_aplicados = set(
+        ExpedienteCedulaIMSS.objects.filter(
+            pk__in=expedientes_enlazados,
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+        ).values_list("pk", flat=True)
+    )
     for linea in cargas:
         concepto = normalize_header_text(linea.rubro.concepto)
         tipo = "IMSS" if concepto == "imss" else "RCV" if concepto in {"infonavit", "infonavit rcv"} else None
@@ -93,8 +104,25 @@ def leer_personal_mensual(periodo: date) -> dict:
             continue
         sid = linea.rubro.sucursal_id
         meta = linea.metadata or {}
+        cedula_legada = meta.get("cedula_imss", {})
+        documento_legado = meta.get("cedula_imss_documento", {})
+        expediente_id = meta.get("expediente_cedula_imss_id")
+        tipo_esperado = "MENSUAL" if tipo == "IMSS" else "BIMESTRAL"
+        legado_verificado = (
+            isinstance(cedula_legada, dict)
+            and isinstance(documento_legado, dict)
+            and cedula_legada.get("tipo") == tipo_esperado
+            and bool(
+                cedula_legada.get("registro_patronal")
+                or documento_legado.get("registro_patronal")
+            )
+        )
         trazable = (
-            linea.fuente_real == "AUTO:SIPARE" and bool(meta.get("cedula_imss"))
+            linea.fuente_real == "AUTO:SIPARE"
+            and (
+                expediente_id in expedientes_aplicados
+                or (expediente_id is None and legado_verificado)
+            )
         ) or linea.fuente_real.startswith("MANUAL:")
         if sid is None or linea.monto_real is None or not trazable or meta.get("sin_datos_fuente"):
             pendientes.append(_fila(

@@ -15,7 +15,7 @@ from core.models import Sucursal
 from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
-from .models import LineaPresupuestoMensual
+from .models import ExpedienteCedulaIMSS
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -152,29 +152,44 @@ def build_personnel_plan(cutoff=None):
         except (ET.ParseError, ValueError, KeyError, TypeError, ArithmeticError):
             unparsed.append(invoice.pk)
 
-    # Sólo control corporativo: las distribuciones departamentales NO se vuelven a sumar.
-    contributions = LineaPresupuestoMensual.objects.filter(
-        periodo__gte=start, periodo__lt=end, version='ORIGINAL',
-        fuente_real='AUTO:SIPARE', rubro__activo=True, rubro__area__codigo='nomina',
-    ).select_related('rubro')
-    for line in contributions:
-        meta = line.metadata.get('cedula_imss', {})
-        document = line.metadata.get('cedula_imss_documento', {})
-        registration = meta.get('registro_patronal') or document.get('registro_patronal', '')
-        if re.sub(r'\W', '', registration) != REGISTRO:
-            continue
-        concept = line.rubro.concepto.strip().casefold()
-        key = 'imss' if concept == 'imss' else 'rcv' if concept in ('infonavit', 'infonavit rcv') else None
-        if not key or line.monto_real is None:
-            continue
-        row = rows[line.periodo]
-        if row[key] is not None:
-            row['errors'].append('Control patronal duplicado: ' + concept)
+    # Sólo control corporativo canónico: cada expediente aplicado se cuenta una vez.
+    expedientes = ExpedienteCedulaIMSS.objects.filter(
+        estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+        periodo__gte=start,
+        periodo__lt=end,
+        registro_patronal=REGISTRO,
+    ).prefetch_related('documentos')
+    for expediente in expedientes:
+        if expediente.tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL:
+            key = 'imss'
+            distribucion = [(expediente.periodo, expediente.total_patronal)]
+        elif expediente.tipo == ExpedienteCedulaIMSS.TIPO_BIMESTRAL:
+            key = 'rcv'
+            primer_mes = month_shift(expediente.periodo, -1)
+            primera_mitad = (expediente.total_patronal / 2).quantize(CENT)
+            distribucion = [
+                (primer_mes, primera_mitad),
+                (expediente.periodo, expediente.total_patronal - primera_mitad),
+            ]
         else:
-            row[key] = line.monto_real
-        reference = document.get('archivo') or ('AUTO:SIPARE / ' + REGISTRO)
-        row['sources'].append(dict(kind=concept + ' · control patronal', id=line.pk,
-                                  reference=reference, amount=line.monto_real))
+            continue
+        documento = next(
+            (item for item in expediente.documentos.all() if item.clase == 'SUA_XLS'),
+            None,
+        )
+        reference = documento.nombre_original if documento else f'Expediente IMSS #{expediente.pk}'
+        for periodo, monto in distribucion:
+            if periodo not in rows:
+                continue
+            row = rows[periodo]
+            if row[key] is not None:
+                row['errors'].append('Control patronal duplicado: ' + key)
+                continue
+            row[key] = monto
+            row['sources'].append(dict(
+                kind=key + ' · control patronal', id=expediente.pk,
+                reference=reference, amount=monto,
+            ))
 
     for row in rows.values():
         if not row['cfdis']:
