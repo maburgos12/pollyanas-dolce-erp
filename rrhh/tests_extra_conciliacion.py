@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from rrhh.models import AsistenciaEmpleado, Empleado, HoraExtra, IncidenciaAsistencia, Turno
 from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
-from rrhh.services_extra_conciliacion import diagnosticar_horas_extra, modalidad_marcaje_efectiva
+from rrhh.services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
 from rrhh.views_asistencia import _build_reporte_asistencia
 
 
@@ -86,6 +86,33 @@ class ExtraConciliacionTests(TestCase):
         self.assertEqual(diagnostico.modalidad, Empleado.MARCAJE_RUTA)
         self.assertTrue(diagnostico.requiere_revision)
         self.assertFalse(diagnostico.comida_observable)
+
+    def test_conciliacion_sin_turno_explica_por_que_no_es_calculable(self):
+        asistencia = self.asistencia(turno=None)
+        conciliacion = conciliar_extra_diario(asistencia, [])
+        self.assertIsNone(conciliacion['detectado_minutos'])
+        self.assertEqual(conciliacion['estado'], 'No calculable: falta asignar turno')
+        self.assertEqual(conciliacion['base'], 'Falta asignar el turno de esta jornada.')
+
+    def test_una_marca_de_comida_preserva_extra_existente_en_cualquier_estado(self):
+        asistencia = self.asistencia()
+        he = HoraExtra.objects.create(
+            empleado=self.empleado, fecha=self.fecha, asistencia=asistencia,
+            horas=Decimal('2'), notas='[Detección automática] Registro existente.',
+        )
+        for campo in ('salida_comida', 'regreso_comida'):
+            original = getattr(asistencia, campo)
+            setattr(asistencia, campo, None)
+            asistencia.save(update_fields=[campo])
+            for estado in ('pendiente', 'autorizado', 'rechazado', 'pagado', 'cancelado'):
+                with self.subTest(campo=campo, estado=estado):
+                    HoraExtra.objects.filter(pk=he.pk).update(estado=estado)
+                    before = list(HoraExtra.objects.values())
+                    self.assertEqual(diagnosticar_horas_extra(asistencia).codigo, 'marcaje_comida_incompleto')
+                    self.assertEqual(generar_horas_extra_automatico(asistencia).pk, he.pk)
+                    self.assertEqual(list(HoraExtra.objects.values()), before)
+            setattr(asistencia, campo, original)
+            asistencia.save(update_fields=[campo])
 
     def test_diagnostico_comida_registrada_no_requiere_revision(self):
         diagnostico = diagnosticar_horas_extra(self.asistencia())

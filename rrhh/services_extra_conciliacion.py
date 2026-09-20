@@ -103,14 +103,17 @@ def detectar_minutos_extra(asistencia):
 
 def conciliar_extra_diario(asistencia, registros):
     registros = list(registros)
-    detectado = detectar_minutos_extra(asistencia)
+    diagnostico = diagnosticar_horas_extra(asistencia)
+    detectado = diagnostico.minutos
     autorizado = horas_a_minutos(sum((r.horas for r in registros if r.estado in
         {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}), Decimal('0')))
     rechazado = horas_a_minutos(sum((r.horas for r in registros if r.estado == HoraExtra.ESTADO_RECHAZADO), Decimal('0')))
     solicitado = horas_a_minutos(sum((r.horas for r in registros if r.estado == HoraExtra.ESTADO_PENDIENTE), Decimal('0')))
     pendiente = max(detectado - autorizado - rechazado, 0) if detectado is not None else None
     diferencia = detectado - autorizado if detectado is not None else None
-    if detectado is None:
+    if diagnostico.codigo == 'sin_turno':
+        estado = 'No calculable: falta asignar turno'
+    elif detectado is None:
         estado = 'No calculable: faltan checadas o intervalo válido'
     elif rechazado:
         estado = 'Con tiempo rechazado' if not pendiente else 'Con rechazo y diferencia pendiente'
@@ -129,6 +132,5 @@ def conciliar_extra_diario(asistencia, registros):
         'detectado': formato_minutos(detectado), 'autorizado': formato_minutos(autorizado),
         'pendiente': formato_minutos(pendiente), 'rechazado': formato_minutos(rechazado),
         'estado': estado, 'registros': registros,
-        'base': 'Turno de la asistencia; comida incluida' if asistencia and asistencia.turno_id
-            else 'Jornada de 8 h con comida incluida; por duración',
+        'base': 'Turno de la asistencia; comida incluida' if detectado is not None else diagnostico.detalle,
     }
