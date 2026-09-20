@@ -113,7 +113,11 @@ Para una hora automática pendiente sin turno, el botón `Autorizar` estará des
 5. Una jornada calculable genera o actualiza únicamente la hora automática pendiente asociada.
 6. Un servicio compartido vuelve a validar estado pendiente, permiso y cálculo vigente en todas las autorizaciones. Las automáticas necesitan saldo positivo y coincidencia exacta entre las horas almacenadas y el saldo no cubierto; ante diferencias se exige reevaluación sin modificar estado, monto ni metadatos.
 
-La resolución transaccional bloquea primero todas las asistencias del empleado/fecha en orden de pk, aunque la solicitud sea manual y no tenga asistencia vinculada. Después relee y bloquea las horas extra del día en orden de pk, verifica el enlace si existe y aplica autorización o rechazo. Este orden coincide con generador/señales y evita el ciclo asistencia → extra → asistencia en resoluciones manuales concurrentes.
+El contrato transaccional es: advisory PostgreSQL por jornada antes de cualquier fila o escritura de incidencia; cuando se bloquean ambas, asistencias por pk antes de horas extra por pk. La clave estable incluye namespace, empleado y fecha; todas las jornadas afectadas (origen, destino y asistencia vinculada) se adquieren en orden determinista antes de filas. Así existe exclusión mutua aunque todavía no exista asistencia. Generador, resolución, capturas/ediciones/cancelaciones de extra, evaluación y conciliación comparten el helper; la adquisición repetida de una jornada dentro de la misma transacción es reentrante. El generador solo opera su jornada y devuelve sin mutar cualquier extra cuyo vínculo esté trasladado. Cualquier llamador que vaya a bloquear/escribir filas antes de llamar esos servicios debe adquirir primero las jornadas; llamar al generador después de tomar una fila no corrige una inversión previa.
+
+Las ediciones API releen la instancia tras adquirir bloqueos y revalidan su alcance/permisos; PATCH no puede persistir estado, monto ni auditoría obsoletos de su lectura inicial. Un vínculo cuya fecha/empleado no coincide impide autorizar, pero no impide rechazar una solicitud pendiente. El generador no traslada ni recrea ese vínculo.
+
+Una protección de dominio `pre_delete` impide borrar por ORM una asistencia vinculada a cualquier hora extra (incluye queryset y cascadas); la API responde 409, sin modificar el vínculo ni degradar su origen. No cambia el esquema y no cubre SQL directo fuera del ORM, que permanece fuera del contrato operativo.
 
 La lógica de cálculo seguirá siendo única para UI, incidencias y autorización; no se duplicará en templates ni endpoints.
 
@@ -123,12 +127,13 @@ La lógica de cálculo seguirá siendo única para UI, incidencias y autorizaci�
 - `rrhh.services`: conservará idempotencia y protección de estados autorizados, rechazados, pagados y cancelados.
 - `rrhh.services_asistencia_reglas`: emitirá incidencias de dato incompleto/no calculable.
 - `rrhh.services_horas_extra_autorizacion`: centralizará resolución, validación y orden de bloqueos.
+- `rrhh.services_extra_bloqueos`: advisory transaccional estable por jornada y relectura bloqueada. Evaluación, conciliación y creación/aprobación de ajustes adquieren jornada antes de sus escrituras. `pos_bridge.services.attendance_sync_service.persist_payload` la adquiere antes de persistir asistencia; no cambia la interpretación de Point.
 - `rrhh.views.horas_extra_list`, `rrhh.api_views.HoraExtraViewSet` y `rrhh.bonos_horas_extra.BaseHorasExtraEquipoViewSet`: usarán el servicio compartido conservando alcance, permisos y formatos de respuesta; producción y ventas heredan el adaptador de bonos.
 - `rrhh/templates/rrhh/horas_extra_list.html`: mostrará contexto y bloqueo accionable.
 - Administración de `Empleado`: permitirá elegir una excepción explícita.
 - Bonos, nómina y prenómina continuarán consumiendo únicamente horas autorizadas; sus contratos no cambian.
 
-No se modifica Point, Hik-Connect, el esquema de rutas ni el cálculo de nómina.
+No se modifica la interpretación de Point/Hik-Connect, el esquema de rutas ni el cálculo de nómina.
 
 ## Pruebas
 

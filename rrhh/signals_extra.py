@@ -1,12 +1,24 @@
 """Cambios de autorización concilian solo extra; nunca nómina o faltas."""
 from contextvars import ContextVar
 
-from django.db.models.signals import post_delete, post_save, pre_save
+from django.db import transaction
+from django.db.models.deletion import ProtectedError
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from .models import AsistenciaEmpleado, HoraExtra, IncidenciaAsistencia
 
 _conciliando = ContextVar('rrhh_conciliando_extra', default=False)
+
+
+@receiver(pre_delete, sender=AsistenciaEmpleado)
+def proteger_origen_extra(sender, instance, using, **kwargs):
+    """SET_NULL no debe convertir una propuesta automática en captura manual."""
+    from .services_extra_bloqueos import bloquear_jornadas_extra
+    bloquear_jornadas_extra([(instance.empleado_id, instance.fecha)])
+    vinculadas = list(HoraExtra.objects.using(using).filter(asistencia_id=instance.pk))
+    if vinculadas:
+        raise ProtectedError("No se puede eliminar una asistencia vinculada a horas extra.", vinculadas)
 
 
 @receiver(pre_save, sender=HoraExtra)
@@ -16,9 +28,12 @@ def guardar_fecha_anterior_extra(sender, instance, raw=False, **kwargs):
         instance._dia_extra_anterior = sender.objects.filter(pk=instance.pk).values_list('empleado_id', 'fecha').first()
 
 
+@transaction.atomic
 def conciliar_dia_extra(empleado_id, fecha, *, generar=True):
     if _conciliando.get():
         return
+    from .services_extra_bloqueos import bloquear_jornadas_extra
+    bloquear_jornadas_extra([(empleado_id, fecha)])
     token = _conciliando.set(True)
     try:
         from .services_asistencia_reglas import _evaluar_hora_extra

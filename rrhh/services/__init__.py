@@ -13,6 +13,7 @@ from rrhh.services_extra_conciliacion import (
     detectar_minutos_extra, diagnosticar_horas_extra, saldo_automatico_esperado,
     NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO,
 )
+from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
 
 TIEMPO_COMIDA_MINUTOS = 35
 
@@ -74,9 +75,16 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     Crea o actualiza la HoraExtra derivada de una asistencia.
     No modifica registros ya autorizados, rechazados o pagados.
     """
-    # Serializa eventos del mismo día, incluso entre Hik y Point.
+    identidad = AsistenciaEmpleado.objects.get(pk=asistencia.pk)
+    bloquear_jornadas_extra([(identidad.empleado_id, identidad.fecha)])
+    # Serializa eventos del mismo día, incluso cuando aún no existe extra.
     asistencia = AsistenciaEmpleado.objects.select_for_update(of=('self',)).select_related(
         'empleado__jefe_directo__usuario_erp', 'turno').get(pk=asistencia.pk)
+    if (asistencia.empleado_id, asistencia.fecha) != (identidad.empleado_id, identidad.fecha):
+        return None  # La corrección de jornada requiere una nueva evaluación.
+    vinculada = HoraExtra.objects.filter(asistencia_id=asistencia.pk).first()
+    if vinculada and (vinculada.empleado_id, vinculada.fecha) != (asistencia.empleado_id, asistencia.fecha):
+        return vinculada  # No recrear ni trasladar un vínculo corregido manualmente.
     diagnostico = diagnosticar_horas_extra(asistencia)
     registros = list(HoraExtra.objects.select_for_update(of=('self',)).filter(
         empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))

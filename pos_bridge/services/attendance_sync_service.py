@@ -416,6 +416,8 @@ class PointAttendanceSyncService:
         if empleado is None:
             return None, unresolved_reason
 
+        from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
+        bloquear_jornadas_extra([(empleado.pk, payload.attendance_date)])
         asistencia, created = AsistenciaEmpleado.objects.get_or_create(
             empleado=empleado,
             fecha=payload.attendance_date,

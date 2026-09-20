@@ -119,7 +119,14 @@ class PointAttendanceSyncServiceTests(TestCase):
             http_session_service=FakeHttpSessionService(session),
         )
 
-        job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(connection) as consultas:
+            job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+        sqls = [consulta["sql"] for consulta in consultas]
+        lock = next(i for i, sql in enumerate(sqls) if "pg_advisory_xact_lock" in sql)
+        primera_escritura = next(i for i, sql in enumerate(sqls) if sql.startswith('INSERT INTO "rrhh_asistenciaempleado"'))
+        self.assertLess(lock, primera_escritura)
 
         self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
         asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 5, 27))

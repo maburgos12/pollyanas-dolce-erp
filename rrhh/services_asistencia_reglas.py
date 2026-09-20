@@ -657,6 +657,8 @@ def _baja_bloquea_evaluacion(empleado: Empleado, fecha: date) -> bool:
 
 @transaction.atomic
 def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacionAsistencia:
+    from .services_extra_bloqueos import bloquear_jornadas_extra
+    bloquear_jornadas_extra([(empleado.pk, fecha)])
     touched: set[str] = set()
     creados = 0
     actualizados = 0

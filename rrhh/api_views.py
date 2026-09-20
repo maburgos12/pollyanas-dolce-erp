@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError
 from rest_framework import permissions, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
@@ -28,6 +30,7 @@ from .serializers import (
 )
 from .services import usuario_jefe_directo_de_empleado
 from .services_horas_extra_autorizacion import resolver_hora_extra
+from .services_extra_bloqueos import bloquear_hora_extra, bloquear_jornadas_extra
 from .services_prestamos import (
     aprobar_prestamo_direccion,
     autorizar_prestamo_jefe,
@@ -116,6 +119,13 @@ class _CapitalHumanoAccessMixin:
 class AsistenciaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = AsistenciaSerializer
 
+    def destroy(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            return Response({"detail": str(exc.args[0])}, status=status.HTTP_409_CONFLICT)
+
     def get_queryset(self):
         qs = AsistenciaEmpleado.objects.select_related("empleado", "turno", "sucursal")
         scope = self._employee_scope()
@@ -135,6 +145,31 @@ class AsistenciaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
 class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = HoraExtraSerializer
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        anterior = self.get_object()
+        datos = self.get_serializer(anterior, data=request.data, partial=partial)
+        datos.is_valid(raise_exception=True)
+        empleado = datos.validated_data.get("empleado", anterior.empleado)
+        fecha = datos.validated_data.get("fecha", anterior.fecha)
+        actual, _ = bloquear_hora_extra(anterior.pk, jornadas_adicionales=[(empleado.pk, fecha)])
+        self.get_object()  # Revalida también el alcance de consulta tras la espera.
+        self.check_object_permissions(request, actual)
+        serializer = self.get_serializer(actual, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        anterior = self.get_object()
+        actual, _ = bloquear_hora_extra(anterior.pk)
+        self.get_object()
+        self.check_object_permissions(request, actual)
+        self.perform_destroy(actual)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def get_queryset(self):
         qs = HoraExtra.objects.select_related("empleado", "jefe_directo", "autorizado_por")
         empleado = empleado_de_usuario(self.request.user)
@@ -149,12 +184,14 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         return self._apply_mis_and_limit(qs)
 
+    @transaction.atomic
     def perform_create(self, serializer):
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
         if not empleado:
             raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
         if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
             raise PermissionDenied("No puedes registrar horas extra para otro empleado.")
+        bloquear_jornadas_extra([(empleado.pk, serializer.validated_data["fecha"])])
         hora_extra = serializer.save(
             empleado=empleado,
             estado=HoraExtra.ESTADO_PENDIENTE,

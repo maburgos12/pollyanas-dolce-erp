@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -13,6 +14,7 @@ from rest_framework.response import Response
 from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
+from rrhh.services_extra_bloqueos import bloquear_hora_extra, bloquear_jornadas_extra
 
 
 ESTADOS_HORA_EXTRA_ACTIVOS = {
@@ -164,6 +166,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             }
         )
 
+    @transaction.atomic
     def create(self, request):
         empleado_id = request.data.get("empleado")
         try:
@@ -182,6 +185,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             return Response({"horas": "Captura horas extra mayores a cero."}, status=status.HTTP_400_BAD_REQUEST)
         if not notas:
             return Response({"notas": "El motivo es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+        bloquear_jornadas_extra([(empleado.pk, fecha)])
         if HoraExtra.objects.filter(empleado=empleado, fecha=fecha, estado__in=ESTADOS_HORA_EXTRA_ACTIVOS).exists():
             return Response(
                 {"detail": "Ya existe una hora extra activa para este empleado y fecha."},
@@ -210,8 +214,14 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         return get_object_or_404(self._horas_extra(), pk=self.kwargs["pk"])
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def editar(self, request, pk=None):
         hora_extra = self.get_object()
+        destino = parse_date(str(request.data.get("fecha") or ""))
+        hora_extra, _ = bloquear_hora_extra(
+            hora_extra.pk, jornadas_adicionales=[(hora_extra.empleado_id, destino)] if destino else [],
+        )
+        self.get_object()  # El equipo/período se verifica de nuevo después de esperar.
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para editar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado not in ESTADOS_HORA_EXTRA_EDITABLES:
@@ -271,8 +281,11 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         )
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def eliminar(self, request, pk=None):
         hora_extra = self.get_object()
+        hora_extra, _ = bloquear_hora_extra(hora_extra.pk)
+        self.get_object()
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para eliminar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado not in ESTADOS_HORA_EXTRA_ELIMINABLES:
