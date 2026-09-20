@@ -4,7 +4,6 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import Q
-from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
@@ -27,7 +26,8 @@ from .serializers import (
     PrestamoSerializer,
     SolicitudVacacionesSerializer,
 )
-from .services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
+from .services import usuario_jefe_directo_de_empleado
+from .services_horas_extra_autorizacion import resolver_hora_extra
 from .services_prestamos import (
     aprobar_prestamo_direccion,
     autorizar_prestamo_jefe,
@@ -165,24 +165,17 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
         he = self.get_object()
-        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
-            raise PermissionDenied("Solo el jefe directo asignado puede autorizar esta hora extra.")
-        he.estado = HoraExtra.ESTADO_AUTORIZADO
-        he.autorizado_por = request.user
-        he.fecha_autorizacion_jefe = timezone.now()
-        calcular_monto_hora_extra(he)
-        he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        he, _message, error = resolver_hora_extra(he.pk, "autorizar", request.user)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": True, "monto": str(he.monto_calculado)})
 
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         he = self.get_object()
-        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
-            raise PermissionDenied("Solo el jefe directo asignado puede rechazar esta hora extra.")
-        he.estado = HoraExtra.ESTADO_RECHAZADO
-        he.autorizado_por = request.user
-        he.fecha_autorizacion_jefe = timezone.now()
-        he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        he, _message, error = resolver_hora_extra(he.pk, "rechazar", request.user)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": True})
 
 

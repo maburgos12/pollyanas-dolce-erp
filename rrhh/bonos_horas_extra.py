@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
+from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
 
 
 ESTADOS_HORA_EXTRA_ACTIVOS = {
@@ -299,16 +300,9 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
         hora_extra = self.get_object()
-        if hora_extra.estado != HoraExtra.ESTADO_PENDIENTE:
-            return Response({"detail": "Solo se pueden autorizar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
-        if not _puede_autorizar_hora_extra(request.user, hora_extra):
-            return Response({"detail": "Solo el jefe directo asignado puede autorizar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
-        hora_extra.estado = HoraExtra.ESTADO_AUTORIZADO
-        hora_extra.autorizado_por = request.user
-
-        hora_extra.fecha_autorizacion_jefe = timezone.now()
-        calcular_monto_hora_extra(hora_extra)
-        hora_extra.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        hora_extra, _message, error = resolver_hora_extra(hora_extra.pk, "autorizar", request.user)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             _hora_extra_payload(
                 hora_extra,
@@ -321,15 +315,11 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         hora_extra = self.get_object()
-        if hora_extra.jefe_directo_id != request.user.id:
-            return Response({"detail": "Solo el jefe directo asignado puede rechazar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
-        if hora_extra.estado != HoraExtra.ESTADO_PENDIENTE:
-            return Response({"detail": "Solo se pueden rechazar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
-        hora_extra.estado = HoraExtra.ESTADO_RECHAZADO
-        hora_extra.autorizado_por = request.user
-
-        hora_extra.fecha_autorizacion_jefe = timezone.now()
-        hora_extra.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        hora_extra, _message, error = resolver_hora_extra(
+            hora_extra.pk, "rechazar", request.user, permitir_superusuario=False,
+        )
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             _hora_extra_payload(
                 hora_extra,

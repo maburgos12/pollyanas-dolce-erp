@@ -87,7 +87,7 @@ No se crea ni actualiza una `HoraExtra` automática. Si el intervalo supera ocho
 ### Registros históricos
 
 - No cancelar, rechazar, recalcular ni borrar horas extra autorizadas, rechazadas o pagadas.
-- Una hora extra automática pendiente sin turno no podrá autorizarse desde la lista hasta que la asistencia tenga turno y sea reevaluada.
+- Una hora extra automática pendiente sin turno no podrá autorizarse desde la lista, API de RRHH ni APIs de bonos hasta que la asistencia tenga turno y sea reevaluada.
 - Una hora extra automática ya autorizada sin turno mostrará “Revisión recomendada”, pero conservará estado, monto y auditoría.
 - Las solicitudes manuales se distinguen de las automáticas por su asistencia y origen existente; no se someten al bloqueo retroactivo.
 
@@ -111,7 +111,9 @@ Para una hora automática pendiente sin turno, el botón `Autorizar` estará des
 3. Un marcaje incompleto produce incidencia y nunca hora extra.
 4. Una jornada sin turno puede producir `hora_extra_no_calculable`, pero nunca una cantidad pagable.
 5. Una jornada calculable genera o actualiza únicamente la hora automática pendiente asociada.
-6. La autorización vuelve a validar que una hora automática siga siendo calculable. Si cambió el turno o las marcas, se rechaza la acción con un mensaje accionable y sin cambiar el estado.
+6. Un servicio compartido vuelve a validar estado pendiente, permiso y cálculo vigente en todas las autorizaciones. Las automáticas necesitan saldo positivo y coincidencia exacta entre las horas almacenadas y el saldo no cubierto; ante diferencias se exige reevaluación sin modificar estado, monto ni metadatos.
+
+La resolución transaccional bloquea primero todas las asistencias del empleado/fecha en orden de pk, aunque la solicitud sea manual y no tenga asistencia vinculada. Después relee y bloquea las horas extra del día en orden de pk, verifica el enlace si existe y aplica autorización o rechazo. Este orden coincide con generador/señales y evita el ciclo asistencia → extra → asistencia en resoluciones manuales concurrentes.
 
 La lógica de cálculo seguirá siendo única para UI, incidencias y autorización; no se duplicará en templates ni endpoints.
 
@@ -120,7 +122,8 @@ La lógica de cálculo seguirá siendo única para UI, incidencias y autorizaci�
 - `rrhh.services_extra_conciliacion`: resolverá modalidad y calculabilidad.
 - `rrhh.services`: conservará idempotencia y protección de estados autorizados, rechazados, pagados y cancelados.
 - `rrhh.services_asistencia_reglas`: emitirá incidencias de dato incompleto/no calculable.
-- `rrhh.views.horas_extra_list`: entregará el contexto y aplicará la validación al autorizar.
+- `rrhh.services_horas_extra_autorizacion`: centralizará resolución, validación y orden de bloqueos.
+- `rrhh.views.horas_extra_list`, `rrhh.api_views.HoraExtraViewSet` y `rrhh.bonos_horas_extra.BaseHorasExtraEquipoViewSet`: usarán el servicio compartido conservando alcance, permisos y formatos de respuesta; producción y ventas heredan el adaptador de bonos.
 - `rrhh/templates/rrhh/horas_extra_list.html`: mostrará contexto y bloqueo accionable.
 - Administración de `Empleado`: permitirá elegir una excepción explícita.
 - Bonos, nómina y prenómina continuarán consumiendo únicamente horas autorizadas; sus contratos no cambian.

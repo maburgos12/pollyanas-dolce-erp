@@ -2077,7 +2077,217 @@ class CapitalHumanoAPITests(TestCase):
         self.assertIn("ISAPI", importacion.log)
 
 
+class HoraExtraAutorizacionAPIsTests(TestCase):
+    def setUp(self):
+        self.jefe_user = User.objects.create_superuser(username="jefe.extra.apis", password="pruebas")
+        self.jefe = Empleado.objects.create(nombre="Jefe extras APIs", usuario_erp=self.jefe_user)
+        self.client = APIClient()
+        self.client.force_authenticate(self.jefe_user)
+
+    def _extra_y_url(self, consumidor, *, manual=False):
+        from datetime import date, datetime
+        from bonos_produccion.models import BonoProduccionEmpleado, ConfigBonoPeriodo, AREA_HORNOS
+        from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
+
+        empleado = Empleado.objects.create(
+            nombre=f"Empleado {consumidor}", jefe_directo=self.jefe,
+            salario_diario=Decimal("400"), participa_bonos_produccion=True,
+            area="PRODUCCION" if consumidor == "produccion" else "VENTAS",
+        )
+        asistencia = None if manual else AsistenciaEmpleado.objects.create(
+            empleado=empleado, fecha=date(2026, 9, 18),
+            entrada=timezone.make_aware(datetime(2026, 9, 18, 8)),
+            salida=timezone.make_aware(datetime(2026, 9, 18, 16, 30)),
+        )
+        hora = HoraExtra.objects.create(
+            empleado=empleado, fecha=date(2026, 9, 18), asistencia=asistencia,
+            jefe_directo=self.jefe_user, horas=Decimal("0.50"),
+            notas="Captura manual" if manual else "[Detección automática] Sin turno",
+        )
+        if consumidor == "generica":
+            return hora, reverse("rrhh:hora-extra-autorizar", args=[hora.pk])
+        if consumidor == "produccion":
+            periodo, _ = ConfigBonoPeriodo.objects.get_or_create(mes=9, anio=2026)
+            BonoProduccionEmpleado.objects.create(periodo=periodo, empleado=empleado, area=AREA_HORNOS)
+        else:
+            periodo, _ = ConfigBonoVentasPeriodo.objects.get_or_create(mes=9, anio=2026)
+            sucursal, _ = Sucursal.objects.get_or_create(codigo="EXTRA-API", defaults={"nombre": "Sucursal API"})
+            BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
+        return hora, f"/api/bonos-{consumidor}/horas-extra/{hora.pk}/autorizar/?mes=9&anio=2026"
+
+    def test_todas_las_apis_bloquean_automatica_sin_turno_sin_mutar(self):
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor)
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("Asigna el turno", response.json()["detail"])
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_todas_las_apis_bloquean_estados_no_pendientes(self):
+        for consumidor in ("generica", "produccion", "ventas"):
+            hora, url = self._extra_y_url(consumidor, manual=True)
+            for estado in (HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_RECHAZADO, HoraExtra.ESTADO_CANCELADO, HoraExtra.ESTADO_PAGADO):
+                with self.subTest(consumidor=consumidor, estado=estado):
+                    HoraExtra.objects.filter(pk=hora.pk).update(estado=estado)
+                    antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                    response = self.client.post(url)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_todas_las_apis_autorizan_manual_y_conservan_respuesta(self):
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor, manual=True)
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, 200)
+                hora.refresh_from_db()
+                self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
+                self.assertEqual(hora.monto_calculado, Decimal("50"))
+                self.assertEqual(hora.autorizado_por_id, self.jefe_user.pk)
+                if consumidor == "generica":
+                    self.assertEqual(response.json(), {"ok": True, "monto": "50.00"})
+                else:
+                    self.assertEqual(response.json()["id"], hora.pk)
+                    self.assertEqual(response.json()["estado"], HoraExtra.ESTADO_AUTORIZADO)
+
+    def test_todas_las_apis_bloquean_saldo_automatico_obsoleto(self):
+        from datetime import time
+
+        turno = Turno.objects.create(nombre="Turno APIs", hora_entrada=time(8), hora_salida=time(16))
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor)
+                AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(turno=turno)
+                HoraExtra.objects.filter(pk=hora.pk).update(horas=Decimal("2.00"))
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("saldo automático vigente", response.json()["detail"])
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_todas_las_apis_rechazan_pendiente_y_conservan_respuesta(self):
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor)
+                url = url.replace("/autorizar/", "/rechazar/")
+                response = self.client.post(url)
+                self.assertEqual(response.status_code, 200)
+                hora.refresh_from_db()
+                self.assertEqual(hora.estado, HoraExtra.ESTADO_RECHAZADO)
+                self.assertIsNone(hora.monto_calculado)
+                if consumidor == "generica":
+                    self.assertEqual(response.json(), {"ok": True})
+                else:
+                    self.assertEqual(response.json()["id"], hora.pk)
+                    self.assertEqual(response.json()["estado"], HoraExtra.ESTADO_RECHAZADO)
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                self.assertEqual(self.client.post(url).status_code, 400)
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_rechazo_superusuario_conserva_permisos_distintos_de_bonos(self):
+        otro_jefe = User.objects.create_user(username="otro.jefe.extra.api")
+        for consumidor in ("generica", "produccion", "ventas"):
+            with self.subTest(consumidor=consumidor):
+                hora, url = self._extra_y_url(consumidor, manual=True)
+                HoraExtra.objects.filter(pk=hora.pk).update(jefe_directo=otro_jefe)
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                response = self.client.post(url.replace("/autorizar/", "/rechazar/"))
+                self.assertEqual(response.status_code, 200 if consumidor == "generica" else 403)
+                if consumidor != "generica":
+                    self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+
 class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
+    def test_resolucion_manual_y_generador_serializan_sin_deadlock(self):
+        from datetime import date, datetime, time
+        from queue import Queue
+        from threading import Event, Thread
+        from time import monotonic
+
+        from django.db import close_old_connections, connection, connections, transaction
+        from django.test import Client
+        from rrhh.services import generar_horas_extra_automatico
+
+        self.assertEqual(connection.vendor, "postgresql")
+        jefe = User.objects.create_user(username="jefe.extra.manual.concurrente")
+        empleado = Empleado.objects.create(nombre="Manual concurrencia", salario_diario=Decimal("400"))
+        turno = Turno.objects.create(nombre="Turno manual", hora_entrada=time(8), hora_salida=time(16))
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=empleado, fecha=date(2026, 9, 18), turno=turno,
+            entrada=timezone.make_aware(datetime(2026, 9, 18, 8)),
+            salida=timezone.make_aware(datetime(2026, 9, 18, 16, 30)),
+        )
+        manual = HoraExtra.objects.create(
+            empleado=empleado, fecha=asistencia.fecha, jefe_directo=jefe,
+            horas=Decimal("0.25"), notas="Apoyo manual",
+        )
+        client = Client()
+        client.force_login(jefe)
+        esperando_asistencia, terminado = Event(), Event()
+        resultado, backend_pid = Queue(), Queue()
+
+        def autorizar():
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET lock_timeout = '8s'")
+                    cursor.execute("SELECT pg_backend_pid()")
+                    backend_pid.put(cursor.fetchone()[0])
+
+                def observar(execute, sql, params, many, context):
+                    if 'FROM "rrhh_asistenciaempleado"' in sql and "FOR UPDATE" in sql:
+                        esperando_asistencia.set()
+                    return execute(sql, params, many, context)
+
+                with connection.execute_wrapper(observar):
+                    resultado.put(client.post(reverse("rrhh:rrhh_he_list"), {
+                        "hora_extra_id": manual.pk, "action": "autorizar",
+                    }, HTTP_ACCEPT="application/json"))
+            except Exception as exc:
+                resultado.put(exc)
+            finally:
+                connections.close_all()
+                terminado.set()
+
+        bloqueado = False
+        worker = Thread(target=autorizar, daemon=True)
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '8s'")
+                asistencia = AsistenciaEmpleado.objects.select_for_update().get(pk=asistencia.pk)
+                worker.start()
+                pid = backend_pid.get(timeout=5)
+                if esperando_asistencia.wait(timeout=5):
+                    limite = monotonic() + 5
+                    while monotonic() < limite and not terminado.is_set():
+                        with connection.cursor() as cursor:
+                            cursor.execute("SELECT cardinality(pg_blocking_pids(%s)) > 0", [pid])
+                            bloqueado = cursor.fetchone()[0]
+                        if bloqueado:
+                            break
+                        terminado.wait(timeout=0.01)
+                asistencia.salida = timezone.make_aware(datetime(2026, 9, 18, 17))
+                asistencia.save(update_fields=["salida"])
+                generar_horas_extra_automatico(asistencia)
+        finally:
+            worker.join(timeout=12)
+        self.assertFalse(worker.is_alive())
+        response = resultado.get(timeout=1)
+        if isinstance(response, Exception):
+            raise response
+        self.assertTrue(bloqueado, "La manual debe esperar primero la asistencia del día")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        manual.refresh_from_db()
+        self.assertEqual(manual.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(manual.monto_calculado, Decimal("25"))
+        automatica = HoraExtra.objects.get(asistencia=asistencia)
+        self.assertEqual(automatica.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(automatica.horas, Decimal("0.75"))
+
     def test_autorizacion_espera_asistencia_y_rechaza_propuesta_cancelada(self):
         from datetime import date, datetime, time
         from queue import Queue

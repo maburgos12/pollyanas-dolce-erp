@@ -471,6 +471,8 @@ git commit -m "feat(rrhh): distinguir marcajes incompletos de horas extra"
 **Files:**
 - Modify: `rrhh/services_extra_conciliacion.py`
 - Modify: `rrhh/services/__init__.py` (saldo compartido y bloqueo del generador)
+- Create: `rrhh/services_horas_extra_autorizacion.py` (resolución transaccional única)
+- Modify: `rrhh/api_views.py` y `rrhh/bonos_horas_extra.py` (adaptadores de autorización/rechazo)
 - Modify: `rrhh/views.py:2649-2705`
 - Modify: `rrhh/templates/rrhh/horas_extra_list.html`
 - Modify: `static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css`
@@ -589,12 +591,16 @@ En `horas_extra_list`:
 - materializar el listado una vez; cargar la cobertura de sus empleados/fechas en una consulta agrupada, incluyendo registros de otros jefes sin mostrarlos; pasar el mapa `(empleado_id, fecha)` a `contexto_hora_extra(he, registros_dia)` para evitar N+1;
 - centralizar `saldo_automatico_esperado` como función pura, utilizada por el generador y el contexto: minutos positivos convertidos a horas con `Decimal(...).quantize(Decimal("0.01"))`, menos todos los otros registros del mismo día no cancelados, con piso cero; devolver `None` si no es calculable y cero si no hay minutos positivos;
 - exigir saldo positivo e igualdad exacta entre `he.horas` y el saldo esperado; una propuesta desactualizada debe pedir reevaluación;
-- resolver POST dentro de `transaction.atomic()`: leer identidad sin bloqueo, bloquear primero `AsistenciaEmpleado`, después releer y bloquear las horas extra del empleado/día en orden de pk; usar este mismo orden en el generador;
+- resolver POST en `services_horas_extra_autorizacion.resolver_hora_extra` dentro de `transaction.atomic()`: leer identidad sin bloqueo, bloquear siempre las asistencias del empleado/fecha en orden de pk, también en solicitudes manuales sin `asistencia_id`; después releer y bloquear las horas extra del empleado/día por pk, siguiendo el orden del generador;
 - después de adquirir bloqueos, revalidar existencia, asistencia vinculada, permiso, acción y estado pendiente, y recalcular diagnóstico/saldo antes de modificar monto o metadatos; si la corrección/generación cambió o canceló la propuesta mientras esperaba, rechazar sin escribir;
 - conservar `rechazar` únicamente para registros pendientes;
 - redirigir siempre a `#hora-extra-<id>`.
 
+La lista web, `HoraExtraViewSet` y `BaseHorasExtraEquipoViewSet` (producción y ventas) deben delegar autorización y rechazo al servicio único. Mantener consultas de alcance, permisos y respuesta de cada adaptador, incluida la restricción histórica del rechazo en bonos al jefe asignado incluso si quien actúa es superusuario. No duplicar monto, transición de estado ni validación del contexto en los adaptadores.
+
 Agregar regresiones del saldo obsoleto (2.00 almacenadas frente a 0.50 vigentes), cobertura parcial válida, estados no pendientes, conteo estable de consultas y una `TransactionTestCase` PostgreSQL con eventos y `pg_blocking_pids`: la autorización debe esperar a la transacción que corrige asistencia/genera la cancelación y rechazar al releer, sin monto ni metadatos de autorización residuales.
+
+Cubrir los tres consumidores API: automática sin turno/saldo obsoleto y estado no pendiente bloqueados sin mutación, manual válida autorizable y formatos de respuesta preservados. Otra `TransactionTestCase` debe enfrentar resolución manual con generador bajo bloqueo real y demostrar resultado serializable sin deadlock (manual autorizada y saldo automático actualizado).
 
 - [ ] **Step 4: Actualizar template y CSS sin duplicar lógica**
 

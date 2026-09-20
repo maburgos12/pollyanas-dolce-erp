@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
-from django.http import Http404, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -68,6 +68,7 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
 )
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
 from .services_extra_conciliacion import contexto_hora_extra, es_hora_extra_automatica
+from .services_horas_extra_autorizacion import resolver_hora_extra
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
@@ -2646,52 +2647,6 @@ def importar_checador(request):
     )
 
 
-@transaction.atomic
-def _resolver_hora_extra(hora_extra_id, action, usuario):
-    """Relee y valida bajo el mismo orden de bloqueo que el generador."""
-    identidad = get_object_or_404(
-        HoraExtra.objects.only("empleado_id", "fecha", "asistencia_id"), pk=hora_extra_id,
-    )
-    if identidad.asistencia_id:
-        get_object_or_404(
-            AsistenciaEmpleado.objects.select_for_update(of=("self",)), pk=identidad.asistencia_id,
-        )
-    registros_dia = list(
-        HoraExtra.objects.select_for_update(of=("self",)).filter(
-            empleado_id=identidad.empleado_id, fecha=identidad.fecha,
-        ).select_related(
-            "empleado", "jefe_directo", "asistencia__empleado", "asistencia__turno",
-        ).order_by("pk")
-    )
-    he = next((registro for registro in registros_dia if registro.pk == identidad.pk), None)
-    if he is None:
-        raise Http404("La hora extra ya no está disponible en esta jornada.")
-    if he.jefe_directo_id != usuario.id and not usuario.is_superuser:
-        raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
-    if he.asistencia_id != identidad.asistencia_id:
-        return he, "", "La asistencia vinculada cambió. Recarga y reevalúa antes de autorizar."
-    if action not in {"autorizar", "rechazar"}:
-        return he, "", "La acción solicitada no es válida."
-    if he.estado != HoraExtra.ESTADO_PENDIENTE:
-        return he, "", "La hora extra ya no está pendiente. Recarga la lista para revisar su estado actual."
-    if action == "autorizar":
-        contexto = contexto_hora_extra(he, registros_dia)
-        if not contexto["puede_autorizar"]:
-            return he, "", contexto["motivo_bloqueo"]
-        from .services import calcular_monto_hora_extra
-
-        calcular_monto_hora_extra(he)
-        he.estado = HoraExtra.ESTADO_AUTORIZADO
-        message = f"Hora extra autorizada para {he.empleado.nombre}."
-    else:
-        he.estado = HoraExtra.ESTADO_RECHAZADO
-        message = f"Hora extra rechazada para {he.empleado.nombre}."
-    he.autorizado_por = usuario
-    he.fecha_autorizacion_jefe = timezone.now()
-    he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
-    return he, message, ""
-
-
 @login_required
 def horas_extra_list(request):
     tiene_asignadas = (
@@ -2702,7 +2657,7 @@ def horas_extra_list(request):
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
-        he, message, error = _resolver_hora_extra(
+        he, message, error = resolver_hora_extra(
             request.POST.get("hora_extra_id"), (request.POST.get("action") or "").strip(), request.user,
         )
         progressive = _wants_progressive_response(request)
