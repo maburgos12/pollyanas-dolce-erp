@@ -2,7 +2,7 @@ from django.contrib.auth.models import Group, User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
@@ -2077,6 +2077,96 @@ class CapitalHumanoAPITests(TestCase):
         self.assertIn("ISAPI", importacion.log)
 
 
+class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
+    def test_autorizacion_espera_asistencia_y_rechaza_propuesta_cancelada(self):
+        from datetime import date, datetime, time
+        from queue import Queue
+        from threading import Event, Thread
+        from time import monotonic
+
+        from django.db import close_old_connections, connection, connections, transaction
+        from django.test import Client
+        from rrhh.services import generar_horas_extra_automatico
+
+        self.assertEqual(connection.vendor, "postgresql")
+        jefe = User.objects.create_user(username="jefe.extra.concurrente")
+        empleado = Empleado.objects.create(nombre="Repartidor concurrencia", salario_diario=Decimal("400"))
+        turno = Turno.objects.create(nombre="Turno concurrencia", hora_entrada=time(8), hora_salida=time(16))
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=empleado, fecha=date(2026, 9, 18), turno=turno,
+            entrada=timezone.make_aware(datetime(2026, 9, 18, 8)),
+            salida=timezone.make_aware(datetime(2026, 9, 18, 16, 30)),
+        )
+        hora = HoraExtra.objects.create(
+            empleado=empleado, fecha=asistencia.fecha, asistencia=asistencia,
+            jefe_directo=jefe, horas=Decimal("0.50"), notas="[Detección automática] Concurrencia",
+        )
+        client = Client()
+        client.force_login(jefe)
+        intentando_bloquear = Event()
+        terminado = Event()
+        resultado = Queue()
+        backend_pid = Queue()
+
+        def autorizar():
+            close_old_connections()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_backend_pid()")
+                    backend_pid.put(cursor.fetchone()[0])
+
+                def observar_bloqueo(execute, sql, params, many, context):
+                    if 'FROM "rrhh_asistenciaempleado"' in sql and "FOR UPDATE" in sql:
+                        intentando_bloquear.set()
+                    return execute(sql, params, many, context)
+
+                with connection.execute_wrapper(observar_bloqueo):
+                    response = client.post(reverse("rrhh:rrhh_he_list"), {
+                        "hora_extra_id": hora.pk, "action": "autorizar",
+                    }, HTTP_ACCEPT="application/json")
+                resultado.put(response)
+            except Exception as exc:
+                resultado.put(exc)
+            finally:
+                connections.close_all()
+                terminado.set()
+
+        bloqueado_en_postgres = False
+        worker = Thread(target=autorizar, daemon=True)
+        try:
+            with transaction.atomic():
+                asistencia = AsistenciaEmpleado.objects.select_for_update().get(pk=asistencia.pk)
+                worker.start()
+                pid = backend_pid.get(timeout=5)
+                if intentando_bloquear.wait(timeout=5):
+                    limite = monotonic() + 5
+                    while monotonic() < limite and not terminado.is_set():
+                        with connection.cursor() as cursor:
+                            cursor.execute("SELECT cardinality(pg_blocking_pids(%s)) > 0", [pid])
+                            bloqueado_en_postgres = cursor.fetchone()[0]
+                        if bloqueado_en_postgres:
+                            break
+                        terminado.wait(timeout=0.01)
+                asistencia.salida = timezone.make_aware(datetime(2026, 9, 18, 16))
+                asistencia.save(update_fields=["salida"])
+                generar_horas_extra_automatico(asistencia)
+        finally:
+            worker.join(timeout=10)
+        self.assertFalse(worker.is_alive(), "La autorización no liberó su conexión")
+        response = resultado.get(timeout=1)
+        if isinstance(response, Exception):
+            raise response
+        self.assertTrue(bloqueado_en_postgres, "La petición debe esperar el bloqueo real de asistencia")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertEqual(hora.horas, Decimal("0.50"))
+        self.assertIsNone(hora.monto_calculado)
+        self.assertIsNone(hora.autorizado_por_id)
+        self.assertIsNone(hora.fecha_autorizacion_jefe)
+
+
 class RRHHViewsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="rrhh", password="pass123")
@@ -3592,12 +3682,95 @@ class RRHHViewsTests(TestCase):
 
     def test_hora_manual_sin_turno_conserva_autorizacion(self):
         hora = self._hora_extra_para_autorizacion(automatica=False)
+        response = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertContains(response, "No evaluada en captura manual")
+        self.assertNotContains(response, "Confirmada por captura manual")
         response = self.client.post(reverse("rrhh:rrhh_he_list"), {
             "hora_extra_id": hora.pk, "action": "autorizar",
         })
         hora.refresh_from_db()
         self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
         self.assertEqual(response.url, f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+
+    def test_hora_automatica_con_saldo_obsoleto_no_se_autoriza_ni_muta(self):
+        from datetime import time
+
+        turno = Turno.objects.create(nombre="Turno saldo actual", hora_entrada=time(8), hora_salida=time(16))
+        hora = self._hora_extra_para_autorizacion(turno=turno)
+        HoraExtra.objects.filter(pk=hora.pk).update(horas=Decimal("2.00"), monto_calculado=Decimal("200.00"))
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertIn("reevalúa", response.json()["toast"]["message"])
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+        self.assertContains(self.client.get(reverse("rrhh:rrhh_he_list")), 'disabled aria-disabled="true"')
+
+    def test_hora_automatica_saldo_parcial_considera_cobertura_de_otro_jefe(self):
+        from datetime import time
+
+        turno = Turno.objects.create(nombre="Turno saldo parcial", hora_entrada=time(8), hora_salida=time(15, 30))
+        hora = self._hora_extra_para_autorizacion(turno=turno)
+        cobertura = HoraExtra.objects.create(
+            empleado=hora.empleado, fecha=hora.fecha, horas=Decimal("0.50"),
+            notas="Cobertura independiente", estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+        HoraExtra.objects.create(
+            empleado=hora.empleado, fecha=hora.fecha, horas=Decimal("3.00"),
+            notas="Cancelada no cubre", estado=HoraExtra.ESTADO_CANCELADO,
+        )
+        response = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertNotContains(response, 'disabled aria-disabled="true"')
+        self.assertNotContains(response, f'id="hora-extra-{cobertura.pk}"')
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora.horas, Decimal("0.50"))
+
+    def test_hora_extra_no_pendiente_no_admite_acciones(self):
+        hora = self._hora_extra_para_autorizacion(automatica=False)
+        for estado in (HoraExtra.ESTADO_CANCELADO, HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO, HoraExtra.ESTADO_RECHAZADO):
+            HoraExtra.objects.filter(pk=hora.pk).update(estado=estado)
+            antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+            for action in ("autorizar", "rechazar"):
+                with self.subTest(estado=estado, action=action):
+                    response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+                        "hora_extra_id": hora.pk, "action": action,
+                    }, HTTP_ACCEPT="application/json")
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_horas_extra_contexto_no_agrega_consultas_por_registro(self):
+        from datetime import timedelta
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        hora = self._hora_extra_para_autorizacion()
+
+        def consultas_extra():
+            with CaptureQueriesContext(connection) as consultas:
+                response = self.client.get(reverse("rrhh:rrhh_he_list"))
+            self.assertEqual(response.status_code, 200)
+            return [q["sql"] for q in consultas if 'FROM "rrhh_horaextra"' in q["sql"]]
+
+        una = consultas_extra()
+        for dia in range(1, 5):
+            asistencia = AsistenciaEmpleado.objects.create(
+                empleado=hora.empleado, fecha=hora.fecha + timedelta(days=dia),
+                entrada=hora.asistencia.entrada + timedelta(days=dia),
+                salida=hora.asistencia.salida + timedelta(days=dia),
+            )
+            HoraExtra.objects.create(
+                empleado=hora.empleado, fecha=asistencia.fecha, asistencia=asistencia,
+                jefe_directo=hora.jefe_directo, horas=Decimal("0.50"), notas=hora.notas,
+            )
+        cinco = consultas_extra()
+        self.assertEqual(len(cinco), len(una))
 
     def test_hora_automatica_bloqueada_responde_json_sin_mutar(self):
         hora = self._hora_extra_para_autorizacion()

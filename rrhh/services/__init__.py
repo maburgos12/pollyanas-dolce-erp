@@ -10,7 +10,8 @@ from core.access import can_manage_rrhh
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
 from rrhh.services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
 from rrhh.services_extra_conciliacion import (
-    detectar_minutos_extra, diagnosticar_horas_extra, NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO,
+    detectar_minutos_extra, diagnosticar_horas_extra, saldo_automatico_esperado,
+    NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO,
 )
 
 TIEMPO_COMIDA_MINUTOS = 35
@@ -77,14 +78,12 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     asistencia = AsistenciaEmpleado.objects.select_for_update(of=('self',)).select_related(
         'empleado__jefe_directo__usuario_erp', 'turno').get(pk=asistencia.pk)
     diagnostico = diagnosticar_horas_extra(asistencia)
-    registros = list(HoraExtra.objects.filter(empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
+    registros = list(HoraExtra.objects.select_for_update(of=('self',)).filter(
+        empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
     he = next((r for r in registros if r.asistencia_id == asistencia.pk), None)
-    if diagnostico.minutos is None:
+    saldo = saldo_automatico_esperado(diagnostico, registros, he)
+    if saldo is None:
         return he
-    # Una solicitud independiente ya cubre parte del tiempo; no la duplicamos.
-    cobertura = sum((r.horas for r in registros if r != he and r.estado != HoraExtra.ESTADO_CANCELADO), Decimal('0'))
-    horas = (Decimal(diagnostico.minutos) / 60).quantize(Decimal('0.01'))
-    saldo = max(horas - cobertura, Decimal('0'))
     reactivar = bool(he and saldo > 0 and he.estado == HoraExtra.ESTADO_CANCELADO
         and he.notas.startswith(NOTA_EXTRA_AUTOMATICA) and he.notas.endswith(NOTA_SALDO_CUBIERTO))
     if he and he.estado != HoraExtra.ESTADO_PENDIENTE and not reactivar:

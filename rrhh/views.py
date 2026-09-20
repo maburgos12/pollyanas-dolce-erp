@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -67,7 +67,7 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
     }
 )
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
-from .services_extra_conciliacion import contexto_hora_extra
+from .services_extra_conciliacion import contexto_hora_extra, es_hora_extra_automatica
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
@@ -2646,6 +2646,52 @@ def importar_checador(request):
     )
 
 
+@transaction.atomic
+def _resolver_hora_extra(hora_extra_id, action, usuario):
+    """Relee y valida bajo el mismo orden de bloqueo que el generador."""
+    identidad = get_object_or_404(
+        HoraExtra.objects.only("empleado_id", "fecha", "asistencia_id"), pk=hora_extra_id,
+    )
+    if identidad.asistencia_id:
+        get_object_or_404(
+            AsistenciaEmpleado.objects.select_for_update(of=("self",)), pk=identidad.asistencia_id,
+        )
+    registros_dia = list(
+        HoraExtra.objects.select_for_update(of=("self",)).filter(
+            empleado_id=identidad.empleado_id, fecha=identidad.fecha,
+        ).select_related(
+            "empleado", "jefe_directo", "asistencia__empleado", "asistencia__turno",
+        ).order_by("pk")
+    )
+    he = next((registro for registro in registros_dia if registro.pk == identidad.pk), None)
+    if he is None:
+        raise Http404("La hora extra ya no está disponible en esta jornada.")
+    if he.jefe_directo_id != usuario.id and not usuario.is_superuser:
+        raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
+    if he.asistencia_id != identidad.asistencia_id:
+        return he, "", "La asistencia vinculada cambió. Recarga y reevalúa antes de autorizar."
+    if action not in {"autorizar", "rechazar"}:
+        return he, "", "La acción solicitada no es válida."
+    if he.estado != HoraExtra.ESTADO_PENDIENTE:
+        return he, "", "La hora extra ya no está pendiente. Recarga la lista para revisar su estado actual."
+    if action == "autorizar":
+        contexto = contexto_hora_extra(he, registros_dia)
+        if not contexto["puede_autorizar"]:
+            return he, "", contexto["motivo_bloqueo"]
+        from .services import calcular_monto_hora_extra
+
+        calcular_monto_hora_extra(he)
+        he.estado = HoraExtra.ESTADO_AUTORIZADO
+        message = f"Hora extra autorizada para {he.empleado.nombre}."
+    else:
+        he.estado = HoraExtra.ESTADO_RECHAZADO
+        message = f"Hora extra rechazada para {he.empleado.nombre}."
+    he.autorizado_por = usuario
+    he.fecha_autorizacion_jefe = timezone.now()
+    he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+    return he, message, ""
+
+
 @login_required
 def horas_extra_list(request):
     tiene_asignadas = (
@@ -2656,22 +2702,11 @@ def horas_extra_list(request):
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
-        he = get_object_or_404(
-            HoraExtra.objects.select_related("empleado", "jefe_directo", "asistencia__empleado", "asistencia__turno"),
-            pk=request.POST.get("hora_extra_id"),
+        he, message, error = _resolver_hora_extra(
+            request.POST.get("hora_extra_id"), (request.POST.get("action") or "").strip(), request.user,
         )
-        if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
-            raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
         progressive = _wants_progressive_response(request)
         redirect_url = f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{he.pk}'
-        action = (request.POST.get("action") or "").strip()
-        error = ""
-        if action == "autorizar":
-            contexto = contexto_hora_extra(he)
-            if not contexto["puede_autorizar"]:
-                error = contexto["motivo_bloqueo"]
-        elif action != "rechazar":
-            error = "La acción solicitada no es válida."
         if error:
             if progressive:
                 return JsonResponse({
@@ -2681,21 +2716,6 @@ def horas_extra_list(request):
             messages.error(request, error)
             return redirect(redirect_url)
 
-        if action == "autorizar":
-            he.estado = HoraExtra.ESTADO_AUTORIZADO
-            he.autorizado_por = request.user
-            he.fecha_autorizacion_jefe = timezone.now()
-            from .services import calcular_monto_hora_extra
-
-            calcular_monto_hora_extra(he)
-            he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
-            message = f"Hora extra autorizada para {he.empleado.nombre}."
-        elif action == "rechazar":
-            he.estado = HoraExtra.ESTADO_RECHAZADO
-            he.autorizado_por = request.user
-            he.fecha_autorizacion_jefe = timezone.now()
-            he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
-            message = f"Hora extra rechazada para {he.empleado.nombre}."
         if progressive:
             return JsonResponse({
                 "ok": True, "toast": {"type": "success", "message": message},
@@ -2709,6 +2729,21 @@ def horas_extra_list(request):
     ).order_by("-fecha", "empleado__nombre")
     if not can_view_rrhh(request.user):
         horas_extra = horas_extra.filter(jefe_directo=request.user)
+    horas_extra = list(horas_extra)
+    dias_automaticos = {
+        (he.empleado_id, he.fecha) for he in horas_extra if es_hora_extra_automatica(he)
+    }
+    registros_por_dia = {dia: [] for dia in dias_automaticos}
+    if dias_automaticos:
+        # La cobertura también incluye registros asignados a otros jefes; no se muestran.
+        cobertura = HoraExtra.objects.filter(
+            empleado_id__in={empleado_id for empleado_id, _fecha in dias_automaticos},
+            fecha__in={fecha for _empleado_id, fecha in dias_automaticos},
+        ).only("pk", "empleado_id", "fecha", "horas", "estado")
+        for registro in cobertura:
+            dia = (registro.empleado_id, registro.fecha)
+            if dia in registros_por_dia:
+                registros_por_dia[dia].append(registro)
     estados = [
         (HoraExtra.ESTADO_PENDIENTE, "Pendiente"),
         (HoraExtra.ESTADO_AUTORIZADO, "Autorizado"),
@@ -2718,7 +2753,7 @@ def horas_extra_list(request):
     ]
     grupos = {estado: [] for estado, _label in estados}
     for he in horas_extra:
-        he.contexto_calculo = contexto_hora_extra(he)
+        he.contexto_calculo = contexto_hora_extra(he, registros_por_dia.get((he.empleado_id, he.fecha), []))
         grupos[he.estado].append(he)
     columnas = [(estado, label, grupos[estado]) for estado, label in estados]
     return render(

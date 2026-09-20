@@ -470,6 +470,7 @@ git commit -m "feat(rrhh): distinguir marcajes incompletos de horas extra"
 
 **Files:**
 - Modify: `rrhh/services_extra_conciliacion.py`
+- Modify: `rrhh/services/__init__.py` (saldo compartido y bloqueo del generador)
 - Modify: `rrhh/views.py:2649-2705`
 - Modify: `rrhh/templates/rrhh/horas_extra_list.html`
 - Modify: `static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css`
@@ -550,11 +551,11 @@ def es_hora_extra_automatica(hora_extra):
     return bool(hora_extra.asistencia_id and (hora_extra.notas or "").startswith(NOTA_EXTRA_AUTOMATICA))
 
 
-def contexto_hora_extra(hora_extra):
+def contexto_hora_extra(hora_extra, registros_dia=None):
     if not es_hora_extra_automatica(hora_extra):
         return {
             "modalidad": "Manual",
-            "comida": "Confirmada por captura manual",
+            "comida": "No evaluada en captura manual",
             "turno": "No aplica al cálculo automático",
             "estado": "Captura manual",
             "puede_autorizar": True,
@@ -567,25 +568,33 @@ def contexto_hora_extra(hora_extra):
         Empleado.MARCAJE_DOS_MARCAS: "2 marcas",
         Empleado.MARCAJE_RUTA: "Ruta",
     }
-    puede_autorizar = diagnostico.minutos is not None
+    if registros_dia is None:
+        registros_dia = HoraExtra.objects.filter(empleado_id=hora_extra.empleado_id, fecha=hora_extra.fecha)
+    saldo = saldo_automatico_esperado(diagnostico, registros_dia, hora_extra)
+    puede_autorizar = diagnostico.minutos is not None and diagnostico.minutos > 0 and saldo > 0 and hora_extra.horas == saldo
     return {
         "modalidad": labels.get(diagnostico.modalidad, diagnostico.modalidad),
         "comida": "Comida registrada" if diagnostico.comida_observable else "Comida no observable",
         "turno": hora_extra.asistencia.turno.nombre if hora_extra.asistencia.turno_id else "Sin turno asignado",
         "estado": "Calculado" if puede_autorizar and not diagnostico.requiere_revision else ("Requiere revisión" if puede_autorizar else "No calculable"),
         "puede_autorizar": puede_autorizar,
-        "motivo_bloqueo": "" if puede_autorizar else diagnostico.detalle,
-        "requiere_revision": diagnostico.requiere_revision,
+        "motivo_bloqueo": "" if puede_autorizar else "Revisa el cálculo y reevalúa la asistencia antes de autorizar.",
+        "requiere_revision": diagnostico.requiere_revision or not puede_autorizar,
     }
 ```
 
 En `horas_extra_list`:
 
 - cargar `asistencia__turno` y `empleado` con `select_related`;
-- convertir el queryset en lista y asignar `he.contexto_calculo = contexto_hora_extra(he)`;
-- antes de autorizar una automática, recalcular el contexto y rechazar la acción cuando `puede_autorizar` sea falso;
-- conservar `rechazar`;
+- materializar el listado una vez; cargar la cobertura de sus empleados/fechas en una consulta agrupada, incluyendo registros de otros jefes sin mostrarlos; pasar el mapa `(empleado_id, fecha)` a `contexto_hora_extra(he, registros_dia)` para evitar N+1;
+- centralizar `saldo_automatico_esperado` como función pura, utilizada por el generador y el contexto: minutos positivos convertidos a horas con `Decimal(...).quantize(Decimal("0.01"))`, menos todos los otros registros del mismo día no cancelados, con piso cero; devolver `None` si no es calculable y cero si no hay minutos positivos;
+- exigir saldo positivo e igualdad exacta entre `he.horas` y el saldo esperado; una propuesta desactualizada debe pedir reevaluación;
+- resolver POST dentro de `transaction.atomic()`: leer identidad sin bloqueo, bloquear primero `AsistenciaEmpleado`, después releer y bloquear las horas extra del empleado/día en orden de pk; usar este mismo orden en el generador;
+- después de adquirir bloqueos, revalidar existencia, asistencia vinculada, permiso, acción y estado pendiente, y recalcular diagnóstico/saldo antes de modificar monto o metadatos; si la corrección/generación cambió o canceló la propuesta mientras esperaba, rechazar sin escribir;
+- conservar `rechazar` únicamente para registros pendientes;
 - redirigir siempre a `#hora-extra-<id>`.
+
+Agregar regresiones del saldo obsoleto (2.00 almacenadas frente a 0.50 vigentes), cobertura parcial válida, estados no pendientes, conteo estable de consultas y una `TransactionTestCase` PostgreSQL con eventos y `pg_blocking_pids`: la autorización debe esperar a la transacción que corrige asistencia/genera la cancelación y rechazar al releer, sin monto ni metadatos de autorización residuales.
 
 - [ ] **Step 4: Actualizar template y CSS sin duplicar lógica**
 

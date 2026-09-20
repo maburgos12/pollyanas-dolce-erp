@@ -108,12 +108,26 @@ def es_hora_extra_automatica(hora_extra):
     )
 
 
-def contexto_hora_extra(hora_extra):
+def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
+    """Saldo en horas con el redondeo del generador; None significa no calculable."""
+    if diagnostico.minutos is None:
+        return None
+    if diagnostico.minutos <= 0:
+        return Decimal("0")
+    horas = (Decimal(diagnostico.minutos) / 60).quantize(Decimal("0.01"))
+    cobertura = sum(
+        (r.horas for r in registros if r != hora_extra and r.estado != HoraExtra.ESTADO_CANCELADO),
+        Decimal("0"),
+    )
+    return max(horas - cobertura, Decimal("0"))
+
+
+def contexto_hora_extra(hora_extra, registros_dia=None):
     """Explica el cálculo actual sin modificar propuestas ni autorizaciones."""
     if not es_hora_extra_automatica(hora_extra):
         return {
             "modalidad": "Manual",
-            "comida": "Confirmada por captura manual",
+            "comida": "No evaluada en captura manual",
             "turno": "No aplica al cálculo automático",
             "estado": "Captura manual",
             "puede_autorizar": True,
@@ -123,14 +137,20 @@ def contexto_hora_extra(hora_extra):
 
     asistencia = hora_extra.asistencia
     diagnostico = diagnosticar_horas_extra(asistencia)
-    puede_autorizar = diagnostico.minutos is not None and diagnostico.minutos > 0
+    if registros_dia is None:
+        registros_dia = HoraExtra.objects.filter(empleado_id=hora_extra.empleado_id, fecha=hora_extra.fecha)
+    saldo = saldo_automatico_esperado(diagnostico, registros_dia, hora_extra)
+    calculable_positivo = diagnostico.minutos is not None and diagnostico.minutos > 0
+    puede_autorizar = calculable_positivo and saldo > 0 and hora_extra.horas == saldo
     requiere_revision = diagnostico.requiere_revision or not puede_autorizar
     motivo_bloqueo = ""
     if not puede_autorizar:
-        motivo_bloqueo = (
-            "No se detectan horas extra en la asistencia actual."
-            if diagnostico.minutos == 0 else diagnostico.detalle
-        )
+        if calculable_positivo:
+            motivo_bloqueo = "La propuesta no coincide con el saldo automático vigente."
+        elif diagnostico.minutos == 0:
+            motivo_bloqueo = "No se detectan horas extra en la asistencia actual."
+        else:
+            motivo_bloqueo = diagnostico.detalle
         if diagnostico.codigo == "sin_turno":
             motivo_bloqueo += " Asigna el turno y reevalúa la asistencia antes de autorizar."
         else:
