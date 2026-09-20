@@ -2934,10 +2934,12 @@ class ExpedienteCedulaIMSS(models.Model):
 
     ESTADO_VALIDO = "VALIDO"
     ESTADO_APLICADO = "APLICADO"
+    ESTADO_REEMPLAZADO = "REEMPLAZADO"
     ESTADO_DISCREPANCIA = "DISCREPANCIA"
     ESTADO_CHOICES = [
         (ESTADO_VALIDO, "Válido"),
         (ESTADO_APLICADO, "Aplicado"),
+        (ESTADO_REEMPLAZADO, "Reemplazado"),
         (ESTADO_DISCREPANCIA, "Discrepancia"),
     ]
 

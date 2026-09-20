@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
                 ('registro_patronal', models.CharField(db_index=True, max_length=20)),
                 ('razon_social', models.CharField(blank=True, default='', max_length=200)),
                 ('revision', models.PositiveSmallIntegerField(default=1)),
-                ('estado', models.CharField(choices=[('VALIDO', 'Válido'), ('APLICADO', 'Aplicado'), ('DISCREPANCIA', 'Discrepancia')], max_length=16)),
+                ('estado', models.CharField(choices=[('VALIDO', 'Válido'), ('APLICADO', 'Aplicado'), ('REEMPLAZADO', 'Reemplazado'), ('DISCREPANCIA', 'Discrepancia')], max_length=16)),
                 ('total_patronal', models.DecimalField(decimal_places=2, max_digits=14)),
                 ('trabajadores', models.PositiveIntegerField(default=0)),
                 ('cruzados', models.PositiveIntegerField(default=0)),
