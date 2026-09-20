@@ -26,6 +26,10 @@ NOMINA_NS = '{http://www.sat.gob.mx/nomina12}'
 CFDI_NS = '{http://www.sat.gob.mx/cfd/4}'
 
 
+def _normalizar_registro_patronal(valor):
+    return re.sub(r'[^A-Z0-9]', '', str(valor or '').upper())
+
+
 def money(value):
     return Decimal(value).quantize(CENT, rounding=ROUND_HALF_UP)
 
@@ -164,9 +168,10 @@ def build_personnel_plan(cutoff=None):
             periodo__lte=end,
         ),
         estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
-        registro_patronal=REGISTRO,
     ).prefetch_related('documentos')
     for expediente in expedientes:
+        if _normalizar_registro_patronal(expediente.registro_patronal) != REGISTRO:
+            continue
         if expediente.tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL:
             key = 'imss'
             distribucion = [(expediente.periodo, expediente.total_patronal)]
