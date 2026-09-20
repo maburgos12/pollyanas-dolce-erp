@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import mimetypes
+from io import BytesIO
+import logging
 import os
 import re
 import tempfile
@@ -36,7 +37,7 @@ from .services_cedula_imss import (
     _es_totalizador,
     _nss_digits,
     _valor_columna,
-    aplicar_cedula,
+    _rubro_destino,
     cargar_filas_xls,
     parsear_cedula,
 )
@@ -45,6 +46,11 @@ from .services_presupuesto_maestro import normalize_header_text
 
 class CedulaDiscrepante(ValueError):
     """La suma patronal del detalle no coincide con el control impreso."""
+
+
+logger = logging.getLogger(__name__)
+MAX_ARCHIVO_BYTES = 10 * 1024 * 1024
+MAX_EXPEDIENTE_BYTES = 30 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -88,20 +94,37 @@ class PreviewExpediente:
         return next(d for d in self.documentos if d.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS)
 
 
-def _leer_archivo(archivo) -> bytes:
+def _leer_archivo(archivo, nombre: str) -> bytes:
     if hasattr(archivo, "seek"):
         archivo.seek(0)
+    partes: list[bytes] = []
+    tamano = 0
     if hasattr(archivo, "chunks"):
-        contenido = b"".join(archivo.chunks())
+        for parte in archivo.chunks():
+            tamano += len(parte)
+            if tamano > MAX_ARCHIVO_BYTES:
+                raise ValueError(f"El archivo '{nombre}' excede el límite de 10 MiB.")
+            partes.append(parte)
+        contenido = b"".join(partes)
     else:
-        contenido = archivo.read()
+        contenido = archivo.read(MAX_ARCHIVO_BYTES + 1)
+        if len(contenido) > MAX_ARCHIVO_BYTES:
+            raise ValueError(f"El archivo '{nombre}' excede el límite de 10 MiB.")
     if hasattr(archivo, "seek"):
         archivo.seek(0)
     return contenido
 
 
 def _clasificar_pdf(nombre: str, contenido: bytes) -> str:
-    texto = normalize_header_text(f"{nombre} {contenido[:200_000].decode('latin-1', errors='ignore')}")
+    try:
+        from pypdf import PdfReader
+
+        lector = PdfReader(BytesIO(contenido), strict=False)
+        if lector.is_encrypted or len(lector.pages) < 1:
+            raise ValueError
+        texto = normalize_header_text(" ".join(pagina.extract_text() or "" for pagina in lector.pages))
+    except Exception as exc:
+        raise ValueError(f"El archivo '{nombre}' no es un PDF válido y parseable.") from exc
     ema = bool(re.search(r"\bema\b", texto)) or "emision mensual anticipada" in texto
     eba = bool(re.search(r"\beba\b", texto)) or "emision bimestral anticipada" in texto
     if ema == eba:
@@ -112,7 +135,7 @@ def _clasificar_pdf(nombre: str, contenido: bytes) -> str:
 def _documento_preview(archivo) -> DocumentoPreview:
     nombre = Path(str(getattr(archivo, "name", ""))).name
     extension = Path(nombre).suffix.lower()
-    contenido = _leer_archivo(archivo)
+    contenido = _leer_archivo(archivo, nombre)
     if not contenido:
         raise ValueError(f"El archivo '{nombre}' está vacío.")
     if extension == ".xls":
@@ -125,7 +148,7 @@ def _documento_preview(archivo) -> DocumentoPreview:
         clase = _clasificar_pdf(nombre, contenido)
     else:
         raise ValueError(f"Extensión no permitida en '{nombre}'; solo se aceptan .xls y .pdf.")
-    mime = getattr(archivo, "content_type", "") or mimetypes.guess_type(nombre)[0] or "application/octet-stream"
+    mime = "application/vnd.ms-excel" if clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else "application/pdf"
     return DocumentoPreview(
         clase=clase,
         nombre_original=nombre,
@@ -168,9 +191,14 @@ def _extraer_total_control(filas: list[list[object]], tipo: str) -> Decimal:
     return candidatos.pop()
 
 
-def _cruzar_detalles(parseada: CedulaParseada) -> tuple[tuple[DetallePreview, ...], tuple[str, ...]]:
+def _cruzar_detalles(
+    parseada: CedulaParseada, *, bloquear: bool = False
+) -> tuple[tuple[DetallePreview, ...], tuple[str, ...]]:
     por_nss: dict[str, list[Empleado]] = {}
-    for empleado in Empleado.objects.filter(activo=True).select_related("sucursal_ref"):
+    empleados = Empleado.objects.filter(activo=True).select_related("sucursal_ref")
+    if bloquear:
+        empleados = empleados.select_for_update(of=("self",))
+    for empleado in empleados:
         nss = _nss_digits(empleado.nss)
         if nss:
             por_nss.setdefault(nss, []).append(empleado)
@@ -207,6 +235,8 @@ def _cruzar_detalles(parseada: CedulaParseada) -> tuple[tuple[DetallePreview, ..
 def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
     """Valida y previsualiza una cédula y sus evidencias sin persistir nada."""
     documentos = tuple(_documento_preview(archivo) for archivo in archivos)
+    if sum(documento.tamano for documento in documentos) > MAX_EXPEDIENTE_BYTES:
+        raise ValueError("El expediente excede el límite total de 30 MiB.")
     sua = [documento for documento in documentos if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS]
     if len(sua) != 1:
         raise ValueError(f"Se requiere exactamente un archivo SUA .xls; se recibieron {len(sua)}.")
@@ -241,109 +271,252 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
     )
 
 
-def _validar_nss_actuales(preview: PreviewExpediente) -> None:
-    _, duplicados = _cruzar_detalles(preview.parseada)
-    if duplicados:
-        raise ValueError(f"NSS duplicados activos en RRHH: {', '.join(duplicados)}. Corrige los expedientes.")
+@dataclass(frozen=True)
+class ResultadoMaterializacion:
+    actualizadas: int
+    protegidas_manual: int
+    conflictos_auto: int
+    avisos: tuple[str, ...]
 
 
-def _enlazar_lineas(preview: PreviewExpediente, expediente, documento_sua) -> None:
-    for linea in LineaPresupuestoMensual.objects.filter(
-        periodo__in=preview.parseada.meses,
-        fuente_real=FUENTE_SIPARE,
-    ):
-        cedula = (linea.metadata or {}).get("cedula_imss", {})
-        if cedula.get("tipo") != preview.parseada.tipo:
+def _guardar_documento(expediente, documento_preview, blobs_guardados):
+    documento = DocumentoCedulaIMSS(
+        expediente=expediente,
+        clase=documento_preview.clase,
+        nombre_original=documento_preview.nombre_original,
+        sha256=documento_preview.sha256,
+        tamano=documento_preview.tamano,
+        mime_type=documento_preview.mime_type,
+        total_visible=documento_preview.total_visible,
+        metadata={
+            "validado_con": "xlrd" if documento_preview.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else "pypdf",
+        },
+    )
+    documento.archivo.save(
+        documento_preview.nombre_original,
+        ContentFile(documento_preview.contenido),
+        save=False,
+    )
+    blobs_guardados.append((documento.archivo.storage, documento.archivo.name))
+    documento.save()
+    return documento
+
+
+def _adjuntar_pdfs(expediente, preview, blobs_guardados) -> list[DocumentoCedulaIMSS]:
+    existentes = set(
+        DocumentoCedulaIMSS.objects.filter(
+            sha256__in=[d.sha256 for d in preview.documentos]
+        ).values_list("sha256", flat=True)
+    )
+    agregados = []
+    for documento in preview.documentos:
+        if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS or documento.sha256 in existentes:
             continue
-        if cedula.get("registro_patronal") != preview.parseada.registro_patronal:
+        agregados.append(_guardar_documento(expediente, documento, blobs_guardados))
+        existentes.add(documento.sha256)
+    return agregados
+
+
+def _crear_detalles(documento_sua, detalles: tuple[DetallePreview, ...]) -> None:
+    DetalleCedulaIMSS.objects.bulk_create([
+        DetalleCedulaIMSS(
+            documento=documento_sua,
+            empleado_id=detalle.empleado_id,
+            nss=detalle.nss,
+            nombre_origen=detalle.nombre_origen,
+            dias=detalle.dias,
+            sdi=detalle.sdi,
+            retiro=detalle.retiro,
+            cesantia_patronal=detalle.cesantia_patronal,
+            aportacion_vivienda=detalle.aportacion_vivienda,
+            cuota_patronal=detalle.cuota_patronal,
+            area_codigo=detalle.area_codigo,
+            sucursal_id=detalle.sucursal_id,
+            cruce_estado=detalle.cruce_estado,
+        )
+        for detalle in detalles
+    ])
+
+
+def _materializar_desde_detalles(
+    preview: PreviewExpediente,
+    detalles: tuple[DetallePreview, ...],
+    expediente,
+    documento_sua,
+) -> ResultadoMaterializacion:
+    totales: dict[tuple[str, int | None], Decimal] = {}
+    avisos: list[str] = []
+    for detalle in detalles:
+        if detalle.empleado_id is None:
+            continue
+        clave = (detalle.area_codigo, detalle.sucursal_id)
+        totales[clave] = totales.get(clave, Decimal("0")) + detalle.cuota_patronal
+    totales[("nomina", None)] = preview.total_patronal
+    conceptos = ["imss"] if preview.parseada.tipo == "MENSUAL" else ["infonavit rcv", "infonavit"]
+    destinos: dict[tuple[int, object], tuple[object, Decimal]] = {}
+    for (area_codigo, sucursal_id), total in sorted(totales.items(), key=lambda item: (item[0][0], item[0][1] or 0)):
+        rubro = _rubro_destino(area_codigo, sucursal_id, conceptos, avisos)
+        if rubro is None:
+            continue
+        meses = preview.parseada.meses
+        primera = (total / Decimal(len(meses))).quantize(Decimal("0.01"))
+        montos = [primera] * (len(meses) - 1) + [total - primera * (len(meses) - 1)]
+        for mes, monto in zip(meses, montos):
+            clave = (rubro.pk, mes)
+            previo = destinos.get(clave, (rubro, Decimal("0")))[1]
+            destinos[clave] = (rubro, previo + monto)
+
+    actualizadas = protegidas = conflictos = 0
+    cambios = []
+    for (_, mes), (rubro, monto) in destinos.items():
+        linea, _ = LineaPresupuestoMensual.objects.get_or_create(
+            rubro=rubro,
+            periodo=mes,
+            version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+            defaults={"monto_presupuesto": Decimal("0")},
+        )
+        linea = LineaPresupuestoMensual.objects.select_for_update().get(pk=linea.pk)
+        fuente = str(linea.fuente_real or "")
+        if fuente.startswith("MANUAL:"):
+            protegidas += 1
+            continue
+        if fuente and fuente not in (FUENTE_SIPARE, "AUTO:LEGADO"):
+            conflictos += 1
+            avisos.append(f"{rubro} {mes:%Y-%m}: conflicto con {fuente}; no se pisó")
             continue
         metadata = dict(linea.metadata or {})
+        metadata["cedula_imss"] = {
+            "tipo": preview.parseada.tipo,
+            "registro_patronal": preview.parseada.registro_patronal,
+            "trabajadores": sum(d.empleado_id is not None for d in detalles),
+            "importado_en": timezone.now().isoformat(),
+        }
         metadata["expediente_cedula_imss_id"] = expediente.pk
         metadata["documento_cedula_imss_id"] = documento_sua.pk
-        LineaPresupuestoMensual.objects.filter(pk=linea.pk).update(metadata=metadata)
+        metadata.pop("sin_datos_fuente", None)
+        metadata.pop("fuente_sin_datos_en", None)
+        linea.monto_real = monto
+        linea.fuente_real = FUENTE_SIPARE
+        linea.metadata = metadata
+        linea.actualizado_en = timezone.now()
+        cambios.append(linea)
+        actualizadas += 1
+    if cambios:
+        LineaPresupuestoMensual.objects.bulk_update(
+            cambios, ["monto_real", "fuente_real", "metadata", "actualizado_en"]
+        )
+    return ResultadoMaterializacion(actualizadas, protegidas, conflictos, tuple(avisos))
+
+
+def _limpiar_blobs(blobs_guardados, *, protegidos=frozenset()) -> None:
+    """Limpia nombres confirmados sin ocultar el error original.
+
+    Un backend que persista y falle antes de devolver/asignar el nombre incumple
+    el contrato observable de Storage.save; ese blob no puede descubrirse aquí.
+    """
+    for storage, nombre in reversed(blobs_guardados):
+        if nombre in protegidos:
+            continue
+        try:
+            storage.delete(nombre)
+        except Exception:
+            logger.warning("No se pudo limpiar blob de cédula IMSS: %s", nombre, exc_info=True)
 
 
 def aplicar_expediente(preview: PreviewExpediente, usuario):
     """Persiste y materializa una previsualización de forma atómica e idempotente."""
-    existente = (
-        DocumentoCedulaIMSS.objects.filter(sha256=preview.sua.sha256)
-        .select_related("expediente")
-        .first()
-    )
-    if existente:
-        return existente.expediente
     if preview.total_detalle != preview.total_patronal:
         raise CedulaDiscrepante(
             f"Detalle {preview.total_detalle} != control patronal {preview.total_patronal}."
         )
-    _validar_nss_actuales(preview)
-
     blobs_guardados: list[tuple[object, str]] = []
     try:
         with transaction.atomic():
-            expediente = ExpedienteCedulaIMSS.objects.create(
-                tipo=preview.parseada.tipo,
-                periodo=preview.parseada.periodo,
-                registro_patronal=preview.parseada.registro_patronal,
-                estado=ExpedienteCedulaIMSS.ESTADO_VALIDO,
-                total_patronal=preview.total_patronal,
-                trabajadores=len(preview.detalles),
-                cruzados=sum(d.empleado_id is not None for d in preview.detalles),
-                sin_cruce=sum(d.empleado_id is None for d in preview.detalles),
-                aplicado_por=usuario,
-                metadata={"sha256_sua": preview.sua.sha256},
+            documento_sua = (
+                DocumentoCedulaIMSS.objects.select_for_update()
+                .filter(sha256=preview.sua.sha256, clase=DocumentoCedulaIMSS.CLASE_SUA_XLS)
+                .select_related("expediente")
+                .first()
             )
-            documentos: dict[str, DocumentoCedulaIMSS] = {}
-            for documento_preview in preview.documentos:
-                documento = DocumentoCedulaIMSS(
-                    expediente=expediente,
-                    clase=documento_preview.clase,
-                    nombre_original=documento_preview.nombre_original,
-                    sha256=documento_preview.sha256,
-                    tamano=documento_preview.tamano,
-                    mime_type=documento_preview.mime_type,
-                    total_visible=documento_preview.total_visible,
-                    metadata={"firma_validada": True},
+            if documento_sua is not None:
+                expediente = ExpedienteCedulaIMSS.objects.select_for_update().get(
+                    pk=documento_sua.expediente_id
                 )
-                documento.archivo.save(
-                    documento_preview.nombre_original,
-                    ContentFile(documento_preview.contenido),
-                    save=False,
+                _adjuntar_pdfs(expediente, preview, blobs_guardados)
+                if expediente.estado in {
+                    ExpedienteCedulaIMSS.ESTADO_APLICADO,
+                    ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO,
+                }:
+                    return expediente
+            else:
+                revisiones = list(
+                    ExpedienteCedulaIMSS.objects.select_for_update().filter(
+                        tipo=preview.parseada.tipo,
+                        periodo=preview.parseada.periodo,
+                        registro_patronal=preview.parseada.registro_patronal,
+                    )
                 )
-                blobs_guardados.append((documento.archivo.storage, documento.archivo.name))
-                documento.save()
-                documentos[documento_preview.sha256] = documento
+                revision = max((e.revision for e in revisiones), default=0) + 1
+                ExpedienteCedulaIMSS.objects.filter(
+                    pk__in=[e.pk for e in revisiones if e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO]
+                ).update(estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+                expediente = ExpedienteCedulaIMSS.objects.create(
+                    tipo=preview.parseada.tipo,
+                    periodo=preview.parseada.periodo,
+                    registro_patronal=preview.parseada.registro_patronal,
+                    revision=revision,
+                    estado=ExpedienteCedulaIMSS.ESTADO_VALIDO,
+                    total_patronal=preview.total_patronal,
+                    aplicado_por=usuario,
+                    metadata={"sha256_sua": preview.sua.sha256},
+                )
+                documento_sua = _guardar_documento(expediente, preview.sua, blobs_guardados)
+                _adjuntar_pdfs(expediente, preview, blobs_guardados)
 
-            documento_sua = documentos[preview.sua.sha256]
-            DetalleCedulaIMSS.objects.bulk_create([
-                DetalleCedulaIMSS(
-                    documento=documento_sua,
-                    empleado_id=detalle.empleado_id,
-                    nss=detalle.nss,
-                    nombre_origen=detalle.nombre_origen,
-                    dias=detalle.dias,
-                    sdi=detalle.sdi,
-                    retiro=detalle.retiro,
-                    cesantia_patronal=detalle.cesantia_patronal,
-                    aportacion_vivienda=detalle.aportacion_vivienda,
-                    cuota_patronal=detalle.cuota_patronal,
-                    area_codigo=detalle.area_codigo,
-                    sucursal_id=detalle.sucursal_id,
-                    cruce_estado=detalle.cruce_estado,
+            revisiones = list(
+                ExpedienteCedulaIMSS.objects.select_for_update().filter(
+                    tipo=preview.parseada.tipo,
+                    periodo=preview.parseada.periodo,
+                    registro_patronal=preview.parseada.registro_patronal,
                 )
-                for detalle in preview.detalles
-            ])
-            resumen = aplicar_cedula(preview.parseada)
-            _enlazar_lineas(preview, expediente, documento_sua)
+            )
+            ExpedienteCedulaIMSS.objects.filter(
+                pk__in=[
+                    e.pk for e in revisiones
+                    if e.pk != expediente.pk and e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO
+                ]
+            ).update(estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+            detalles, duplicados = _cruzar_detalles(preview.parseada, bloquear=True)
+            if duplicados:
+                raise ValueError(
+                    f"NSS duplicados activos en RRHH: {', '.join(duplicados)}. Corrige los expedientes."
+                )
+            if documento_sua.detalles.exists():
+                documento_sua.detalles.all().delete()
+            _crear_detalles(documento_sua, detalles)
+            resultado = _materializar_desde_detalles(
+                preview, detalles, expediente, documento_sua
+            )
             expediente.estado = ExpedienteCedulaIMSS.ESTADO_APLICADO
             expediente.aplicado_en = timezone.now()
+            expediente.aplicado_por = usuario
+            expediente.total_patronal = preview.total_patronal
+            expediente.trabajadores = len(detalles)
+            expediente.cruzados = sum(d.empleado_id is not None for d in detalles)
+            expediente.sin_cruce = len(detalles) - expediente.cruzados
             expediente.metadata = {
-                **expediente.metadata,
-                "lineas_actualizadas": resumen.lineas_actualizadas,
-                "protegidas_manual": resumen.protegidas_manual,
-                "avisos": resumen.avisos,
+                **(expediente.metadata or {}),
+                "sha256_sua": preview.sua.sha256,
+                "lineas_actualizadas": resultado.actualizadas,
+                "protegidas_manual": resultado.protegidas_manual,
+                "conflictos_auto": resultado.conflictos_auto,
+                "avisos": list(resultado.avisos),
             }
-            expediente.save(update_fields=["estado", "aplicado_en", "metadata"])
+            expediente.save(update_fields=[
+                "estado", "aplicado_en", "aplicado_por", "total_patronal",
+                "trabajadores", "cruzados", "sin_cruce", "metadata",
+            ])
+            documento_ids = list(expediente.documentos.values_list("pk", flat=True))
             log_event(
                 usuario,
                 "CEDULA_IMSS_APLICADA",
@@ -354,30 +527,33 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                     "periodo": expediente.periodo.isoformat(),
                     "registro_patronal": expediente.registro_patronal,
                     "total_patronal": str(expediente.total_patronal),
-                    "documentos": len(preview.documentos),
-                    "trabajadores": len(preview.detalles),
+                    "sha256_sua": preview.sua.sha256,
+                    "documento_ids": documento_ids,
+                    "lineas_actualizadas": resultado.actualizadas,
+                    "protegidas_manual": resultado.protegidas_manual,
+                    "conflictos_auto": resultado.conflictos_auto,
                 },
             )
         return expediente
     except IntegrityError:
         ganador = (
-            DocumentoCedulaIMSS.objects.filter(sha256=preview.sua.sha256)
+            DocumentoCedulaIMSS.objects.filter(
+                sha256=preview.sua.sha256,
+                clase=DocumentoCedulaIMSS.CLASE_SUA_XLS,
+            )
             .select_related("expediente")
             .first()
         )
-        blobs_ganadores = set()
+        protegidos = set()
         if ganador is not None:
-            blobs_ganadores = set(
+            protegidos = set(
                 DocumentoCedulaIMSS.objects.filter(expediente_id=ganador.expediente_id)
                 .values_list("archivo", flat=True)
             )
-        for storage, nombre in reversed(blobs_guardados):
-            if nombre not in blobs_ganadores:
-                storage.delete(nombre)
+        _limpiar_blobs(blobs_guardados, protegidos=protegidos)
         if ganador is not None:
             return ganador.expediente
         raise
     except Exception:
-        for storage, nombre in reversed(blobs_guardados):
-            storage.delete(nombre)
+        _limpiar_blobs(blobs_guardados)
         raise

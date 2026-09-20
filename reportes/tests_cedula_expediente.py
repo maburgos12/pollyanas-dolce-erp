@@ -1,7 +1,9 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 import tempfile
+import threading
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -9,10 +11,11 @@ from django.core.exceptions import FieldDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, close_old_connections, connection, models, transaction
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
-from django.test import SimpleTestCase, TestCase
+from django.db.models.query import QuerySet
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from core.models import AuditLog
@@ -147,6 +150,10 @@ class ExpedienteCedulaIMSSSchemaTests(SimpleTestCase):
                     self.assertEqual(getattr(campo, atributo), esperado)
 
         self.assertEqual(dict(documento.CLASE_CHOICES)[documento.CLASE_SUA_XLS], "SUA XLS")
+        self.assertEqual(
+            dict(expediente.ESTADO_CHOICES)[expediente.ESTADO_REEMPLAZADO],
+            "Reemplazado",
+        )
         self.assertIn("uniq_cedula_imss_revision", {c.name for c in expediente._meta.constraints})
         self.assertIn("uniq_cedula_imss_aplicada", {c.name for c in expediente._meta.constraints})
         self.assertIn("cedula_imss_reg_period_idx", {i.name for i in expediente._meta.indexes})
@@ -325,7 +332,10 @@ class PersistenciaExpedienteTests(TestCase):
             nombre="Administración", codigo="administracion"
         )
         cls.nom = reportes_models.AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
-        for area in (cls.adm, cls.nom):
+        cls.prod = reportes_models.AreaPresupuesto.objects.create(
+            nombre="Producción", codigo="produccion"
+        )
+        for area in (cls.adm, cls.nom, cls.prod):
             reportes_models.RubroPresupuesto.objects.create(
                 area=area,
                 concepto="IMSS",
@@ -367,11 +377,18 @@ class PersistenciaExpedienteTests(TestCase):
 
     @staticmethod
     def _pdf(nombre="EMA_agosto.pdf"):
-        etiqueta = b"EBA EMISION BIMESTRAL ANTICIPADA" if "EBA" in nombre.upper() else b"EMA EMISION MENSUAL ANTICIPADA"
+        from reportlab.pdfgen import canvas
+
+        etiqueta = "EBA EMISION BIMESTRAL ANTICIPADA" if "EBA" in nombre.upper() else "EMA EMISION MENSUAL ANTICIPADA"
+        salida = BytesIO()
+        pdf = canvas.Canvas(salida)
+        pdf.drawString(72, 720, etiqueta)
+        pdf.showPage()
+        pdf.save()
         return SimpleUploadedFile(
             nombre,
-            b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n" + etiqueta + b"\n%%EOF",
-            content_type="application/pdf",
+            salida.getvalue(),
+            content_type="text/plain",
         )
 
     def _preview(self, *, filas=None, archivos=None):
@@ -409,13 +426,33 @@ class PersistenciaExpedienteTests(TestCase):
             self._preview(filas=filas)
 
     def test_preview_no_confunde_palabras_con_siglas_ema_eba(self):
+        from reportlab.pdfgen import canvas
+
+        salida = BytesIO()
+        documento = canvas.Canvas(salida)
+        documento.drawString(72, 720, "Documento sin clasificacion IMSS")
+        documento.showPage()
+        documento.save()
         pdf = SimpleUploadedFile(
             "sistema_prueba.pdf",
-            b"%PDF-1.4\nDocumento sin clasificacion IMSS\n%%EOF",
+            salida.getvalue(),
             content_type="application/pdf",
         )
         with self.assertRaisesRegex(ValueError, "clasificar inequívocamente"):
             self._preview(archivos=[self._sua(), pdf])
+
+    def test_preview_rechaza_pdf_falso_y_archivo_sobredimensionado(self):
+        pdf_falso = SimpleUploadedFile(
+            "EMA_falso.pdf",
+            b"%PDF-1.4\nEMA EMISION MENSUAL ANTICIPADA\n%%EOF",
+            content_type="application/pdf",
+        )
+        with self.assertRaisesRegex(ValueError, "PDF válido"):
+            self._preview(archivos=[self._sua(), pdf_falso])
+        with self.assertRaisesRegex(ValueError, "10 MiB"):
+            self._preview(
+                archivos=[self._sua(contenido=b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"x" * (10 * 1024 * 1024))]
+            )
 
     def test_aplica_documentos_detalle_metadata_y_auditoria(self):
         from reportes.services_cedula_expediente import aplicar_expediente
@@ -458,6 +495,93 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
         self.assertEqual(AuditLog.objects.filter(action="CEDULA_IMSS_APLICADA").count(), 1)
 
+    def test_nueva_huella_reemplaza_revision_aplicada(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        anterior = aplicar_expediente(self._preview(), usuario=self.user)
+        nueva = aplicar_expediente(
+            self._preview(archivos=[self._sua(contenido=self._sua().read() + b"correccion")]),
+            usuario=self.user,
+        )
+
+        anterior.refresh_from_db()
+        self.assertEqual(anterior.estado, reportes_models.ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+        self.assertEqual(nueva.estado, reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO)
+        self.assertEqual((anterior.revision, nueva.revision), (1, 2))
+        self.assertEqual(
+            reportes_models.ExpedienteCedulaIMSS.objects.filter(
+                tipo=nueva.tipo,
+                periodo=nueva.periodo,
+                registro_patronal=nueva.registro_patronal,
+                estado=reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            ).count(),
+            1,
+        )
+
+    def test_aplicar_rehace_snapshot_y_materializa_desde_detalle_final(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        preview = self._preview()
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.save(update_fields=["departamento"])
+
+        expediente = aplicar_expediente(preview, usuario=self.user)
+        detalle = reportes_models.DetalleCedulaIMSS.objects.get(
+            documento__expediente=expediente
+        )
+
+        self.assertEqual(detalle.area_codigo, "produccion")
+        self.assertTrue(
+            reportes_models.LineaPresupuestoMensual.objects.filter(
+                rubro__area=self.prod,
+                monto_real=Decimal("150.25"),
+                fuente_real="AUTO:SIPARE",
+            ).exists()
+        )
+        self.assertFalse(
+            reportes_models.LineaPresupuestoMensual.objects.filter(
+                rubro__area=self.adm,
+                fuente_real="AUTO:SIPARE",
+            ).exists()
+        )
+
+    def test_sha_valido_completa_aplicacion_y_sha_aplicado_adjunta_pdf_nuevo(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        preview = self._preview()
+        pendiente = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo=preview.parseada.tipo,
+            periodo=preview.parseada.periodo,
+            registro_patronal=preview.parseada.registro_patronal,
+            estado=reportes_models.ExpedienteCedulaIMSS.ESTADO_VALIDO,
+            total_patronal=preview.total_patronal,
+        )
+        sua = reportes_models.DocumentoCedulaIMSS(
+            expediente=pendiente,
+            clase=reportes_models.DocumentoCedulaIMSS.CLASE_SUA_XLS,
+            nombre_original=preview.sua.nombre_original,
+            sha256=preview.sua.sha256,
+            tamano=preview.sua.tamano,
+            mime_type="application/vnd.ms-excel",
+            total_visible=preview.total_patronal,
+        )
+        sua.archivo.save("pendiente.xls", ContentFile(preview.sua.contenido), save=False)
+        sua.save()
+
+        completado = aplicar_expediente(preview, usuario=self.user)
+        self.assertEqual(completado.pk, pendiente.pk)
+        completado.refresh_from_db()
+        self.assertEqual(completado.estado, reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO)
+        self.assertEqual(sua.detalles.count(), 1)
+
+        con_pdf = self._preview(archivos=[self._sua(), self._pdf()])
+        repetido = aplicar_expediente(con_pdf, usuario=self.user)
+        self.assertEqual(repetido.pk, pendiente.pk)
+        self.assertEqual(pendiente.documentos.count(), 2)
+        aplicar_expediente(con_pdf, usuario=self.user)
+        self.assertEqual(pendiente.documentos.count(), 2)
+
     def test_carrera_sha_relee_ganador_despues_del_rollback_y_conserva_su_blob(self):
         from reportes.services_cedula_expediente import aplicar_expediente
 
@@ -484,18 +608,8 @@ class PersistenciaExpedienteTests(TestCase):
         documento_ganador.save()
         blob_ganador = documento_ganador.archivo.name
 
-        filtro_real = reportes_models.DocumentoCedulaIMSS.objects.filter
         consulta_inicial_oculta = MagicMock()
-        consulta_inicial_oculta.select_related.return_value.first.return_value = None
-        consultas_sha = 0
-
-        def filtrar_con_carrera(*args, **kwargs):
-            nonlocal consultas_sha
-            if kwargs == {"sha256": preview.sua.sha256}:
-                consultas_sha += 1
-                if consultas_sha == 1:
-                    return consulta_inicial_oculta
-            return filtro_real(*args, **kwargs)
+        consulta_inicial_oculta.filter.return_value.select_related.return_value.first.return_value = None
 
         def reutilizar_nombre_ganador(field_file, name, content, save=True):
             field_file.name = blob_ganador
@@ -503,8 +617,8 @@ class PersistenciaExpedienteTests(TestCase):
 
         with patch.object(
             reportes_models.DocumentoCedulaIMSS.objects,
-            "filter",
-            side_effect=filtrar_con_carrera,
+            "select_for_update",
+            return_value=consulta_inicial_oculta,
         ), patch(
             "django.db.models.fields.files.FieldFile.save",
             new=reutilizar_nombre_ganador,
@@ -512,7 +626,6 @@ class PersistenciaExpedienteTests(TestCase):
             resultado = aplicar_expediente(preview, usuario=self.user)
 
         self.assertEqual(resultado.pk, ganador.pk)
-        self.assertGreaterEqual(consultas_sha, 2)
         self.assertTrue(default_storage.exists(blob_ganador))
         self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
         self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
@@ -577,6 +690,25 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
         self.assertEqual([p for p in Path(self._media.name).rglob("*") if p.is_file()], [])
 
+    def test_cleanup_continua_si_un_delete_falla_y_preserva_error_original(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        preview = self._preview(archivos=[self._sua(), self._pdf()])
+        with patch.object(
+            reportes_models.DetalleCedulaIMSS.objects,
+            "bulk_create",
+            side_effect=IntegrityError("falla original"),
+        ), patch.object(
+            default_storage,
+            "delete",
+            side_effect=[OSError("storage caído"), None],
+        ) as eliminar:
+            with self.assertLogs("reportes.services_cedula_expediente", level="WARNING"):
+                with self.assertRaisesRegex(IntegrityError, "falla original"):
+                    aplicar_expediente(preview, usuario=self.user)
+
+        self.assertEqual(eliminar.call_count, 2)
+
     def test_respeta_manual_y_conflicto_auto(self):
         from reportes.services_cedula_expediente import aplicar_expediente
 
@@ -604,3 +736,101 @@ class PersistenciaExpedienteTests(TestCase):
             (auto.monto_real, auto.fuente_real),
             (Decimal("888"), "AUTO:GASTO_OPERATIVO"),
         )
+
+    def test_auditoria_incluye_sha_documentos_y_contadores(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        expediente = aplicar_expediente(
+            self._preview(archivos=[self._sua(), self._pdf()]), usuario=self.user
+        )
+        payload = AuditLog.objects.get(
+            action="CEDULA_IMSS_APLICADA", object_id=str(expediente.pk)
+        ).payload
+
+        self.assertEqual(payload["sha256_sua"], expediente.metadata["sha256_sua"])
+        self.assertEqual(len(payload["documento_ids"]), 2)
+        self.assertIn("lineas_actualizadas", payload)
+        self.assertIn("protegidas_manual", payload)
+        self.assertIn("conflictos_auto", payload)
+
+
+class ConcurrenciaExpedienteTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self._media = tempfile.TemporaryDirectory()
+        self._settings = self.settings(MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        self.addCleanup(self._media.cleanup)
+        self.user = get_user_model().objects.create_user("concurrente_cedula", password="x")
+        adm = reportes_models.AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        nom = reportes_models.AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in (adm, nom):
+            reportes_models.RubroPresupuesto.objects.create(
+                area=area,
+                concepto="IMSS",
+                tipo=reportes_models.RubroPresupuesto.TIPO_EGRESO,
+            )
+        Empleado.objects.create(
+            codigo="CONC-001",
+            nombre="Concurrente",
+            nss="12121212121",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def test_dos_conexiones_mismo_sha_retornan_un_expediente(self):
+        self.assertEqual(connection.vendor, "postgresql")
+        from reportes.services_cedula_expediente import aplicar_expediente, preparar_expediente
+
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ):
+            preview = preparar_expediente([PersistenciaExpedienteTests._sua()], usuario=self.user)
+
+        barrera = threading.Barrier(2, timeout=10)
+        primero_real = QuerySet.first
+        estado_hilo = threading.local()
+
+        def first_con_barrera(queryset):
+            if (
+                queryset.model is reportes_models.DocumentoCedulaIMSS
+                and "sha256" in str(queryset.query)
+                and not getattr(estado_hilo, "sincronizado", False)
+            ):
+                estado_hilo.sincronizado = True
+                barrera.wait()
+            return primero_real(queryset)
+
+        resultados = []
+        errores = []
+        candado = threading.Lock()
+
+        def ejecutar():
+            close_old_connections()
+            try:
+                pk = aplicar_expediente(preview, usuario=self.user).pk
+                with candado:
+                    resultados.append(pk)
+            except Exception as exc:
+                with candado:
+                    errores.append(exc)
+            finally:
+                close_old_connections()
+
+        with patch.object(QuerySet, "first", new=first_con_barrera):
+            hilos = [threading.Thread(target=ejecutar) for _ in range(2)]
+            for hilo in hilos:
+                hilo.start()
+            for hilo in hilos:
+                hilo.join(timeout=15)
+
+        self.assertFalse(any(hilo.is_alive() for hilo in hilos))
+        self.assertEqual(errores, [])
+        self.assertEqual(len(resultados), 2)
+        self.assertEqual(len(set(resultados)), 1)
+        self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
+        self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
