@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 import re
 import shutil
@@ -12,6 +12,8 @@ from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.core.exceptions import FieldDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -26,6 +28,245 @@ from django.utils import timezone
 from core.models import AuditLog
 from reportes import models as reportes_models
 from rrhh.models import Empleado
+
+
+class RegularizacionCedulasTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("regulariza_cedula", password="x")
+        cls.adm = reportes_models.AreaPresupuesto.objects.create(
+            nombre="Administración", codigo="administracion"
+        )
+        cls.nom = reportes_models.AreaPresupuesto.objects.create(nombre="Nómina", codigo="nomina")
+        for area in (cls.adm, cls.nom):
+            reportes_models.RubroPresupuesto.objects.create(
+                area=area,
+                concepto="IMSS",
+                tipo=reportes_models.RubroPresupuesto.TIPO_EGRESO,
+            )
+        Empleado.objects.create(
+            codigo="REG-CED-001",
+            nombre="Persona histórica",
+            nss="12-12-12-1212-1",
+            departamento=Empleado.DEP_ADMINISTRACION,
+        )
+
+    def setUp(self):
+        self._root = tempfile.TemporaryDirectory()
+        self.addCleanup(self._root.cleanup)
+        self._media = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media.cleanup)
+        self._settings = self.settings(MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        self.xls = Path(self._root.name) / "SUA_agosto.xls"
+        self.xls.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1historico")
+
+    def _crear_lineas_historicas(self):
+        lineas = []
+        for area, monto in ((self.adm, "149.25"), (self.nom, "150.25")):
+            lineas.append(
+                reportes_models.LineaPresupuestoMensual.objects.create(
+                    rubro=reportes_models.RubroPresupuesto.objects.get(area=area, concepto="IMSS"),
+                    periodo=date(2026, 8, 1),
+                    monto_real=Decimal(monto),
+                    fuente_real="AUTO:LEGADO",
+                    metadata={"source_file": "presupuesto-historico.xlsx"},
+                )
+            )
+        return lineas
+
+    def _ejecutar(self, *args, stdout=None):
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ):
+            return call_command(
+                "regularizar_expedientes_cedulas_imss",
+                "--root",
+                self._root.name,
+                *args,
+                stdout=stdout or StringIO(),
+            )
+
+    def test_dry_run_es_predeterminado_y_no_escribe(self):
+        lineas = self._crear_lineas_historicas()
+        salida = StringIO()
+
+        self._ejecutar(stdout=salida)
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.DocumentoCedulaIMSS.objects.exists())
+        for linea in lineas:
+            linea.refresh_from_db()
+            self.assertNotIn("expediente_cedula_imss_id", linea.metadata)
+        self.assertIn("archivo", salida.getvalue())
+        self.assertIn("150.25", salida.getvalue())
+        self.assertIn("DRY-RUN", salida.getvalue())
+
+    def test_apply_enlaza_sin_cambiar_montos_y_segunda_ejecucion_es_idempotente(self):
+        lineas = self._crear_lineas_historicas()
+        originales = {linea.pk: linea.monto_real for linea in lineas}
+
+        self._ejecutar("--apply")
+
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
+        for linea in lineas:
+            linea.refresh_from_db()
+            self.assertEqual(linea.monto_real, originales[linea.pk])
+            self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+            self.assertEqual(linea.metadata["expediente_cedula_imss_id"], expediente.pk)
+        self.assertEqual(
+            reportes_models.LineaPresupuestoMensual.objects.count(), len(lineas)
+        )
+
+        salida = StringIO()
+        self._ejecutar("--apply", stdout=salida)
+
+        self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
+        self.assertIn("YA_ENLAZADO", salida.getvalue())
+
+    def test_total_discordante_aborta_sin_aplicacion_parcial(self):
+        lineas = self._crear_lineas_historicas()
+        control = next(linea for linea in lineas if linea.rubro.area_id == self.nom.pk)
+        control.monto_real = Decimal("999.99")
+        control.save(update_fields=["monto_real"])
+
+        with self.assertRaisesRegex(CommandError, "no coincide"):
+            self._ejecutar("--apply")
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.DocumentoCedulaIMSS.objects.exists())
+
+    def test_sha_historico_distinto_bloquea_antes_de_escribir(self):
+        lineas = self._crear_lineas_historicas()
+        linea = lineas[0]
+        linea.metadata = {"cedula_imss_documento": {"sha256": "f" * 64}}
+        linea.save(update_fields=["metadata"])
+
+        with self.assertRaisesRegex(CommandError, "SHA-256 distinta"):
+            self._ejecutar("--apply")
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    def test_bimestral_asocia_pdf_del_mismo_directorio_y_preserva_dos_meses(self):
+        from reportlab.pdfgen import canvas
+
+        self.xls.unlink()
+        carpeta = Path(self._root.name) / "julio-agosto"
+        carpeta.mkdir()
+        (carpeta / "SUA_bimestral.xls").write_bytes(
+            b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1bimestral"
+        )
+        salida_pdf = BytesIO()
+        pdf = canvas.Canvas(salida_pdf, invariant=1)
+        pdf.drawString(72, 720, "EBA EMISION BIMESTRAL ANTICIPADA")
+        pdf.showPage()
+        pdf.save()
+        (carpeta / "EBA.pdf").write_bytes(salida_pdf.getvalue())
+        for area in (self.adm, self.nom):
+            rubro = reportes_models.RubroPresupuesto.objects.create(
+                area=area,
+                concepto="Infonavit",
+                tipo=reportes_models.RubroPresupuesto.TIPO_EGRESO,
+            )
+            for periodo, monto in ((date(2026, 7, 1), "50.01"), (date(2026, 8, 1), "50.00")):
+                reportes_models.LineaPresupuestoMensual.objects.create(
+                    rubro=rubro,
+                    periodo=periodo,
+                    monto_real=Decimal(monto),
+                    fuente_real="AUTO:LEGADO",
+                )
+        filas = [
+            ["Bimestre de Proceso: Agosto-2026"] + [""] * 13,
+            ["Registro Patronal:", "E52-40157-10-0"] + [""] * 12,
+            ["Clave", "Movimiento", "Fecha", "Dias", "SDI", "Retiro", "Patronal",
+             "Obrera", "Suma", "Aportacion Patronal", "Amortizacion", "Credito Vivienda",
+             "Tipo", "Total"],
+            ["12-12-12-1212-1", "", "", "", "", "PERSONA HISTORICA"] + [""] * 8,
+            ["", "NORMAL", "", 61, 350, 20, 30, 0, 50, Decimal("50.01"), 0, 0, "", 100.01],
+            ["TOTAL", "", "", 61, "", 20, 30, 0, 50, Decimal("50.01"), 0, 0, "", 100.01],
+        ]
+
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls", return_value=filas
+        ):
+            call_command(
+                "regularizar_expedientes_cedulas_imss",
+                "--root",
+                self._root.name,
+                "--apply",
+                stdout=StringIO(),
+            )
+
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.get()
+        self.assertEqual(expediente.tipo, reportes_models.ExpedienteCedulaIMSS.TIPO_BIMESTRAL)
+        self.assertEqual(expediente.documentos.count(), 2)
+        self.assertEqual(reportes_models.LineaPresupuestoMensual.objects.count(), 4)
+        self.assertEqual(
+            sum(
+                reportes_models.LineaPresupuestoMensual.objects.filter(
+                    rubro__area=self.nom
+                ).values_list("monto_real", flat=True),
+                Decimal("0"),
+            ),
+            Decimal("100.01"),
+        )
+
+    def test_fallo_en_segundo_expediente_revierte_bd_y_blobs_del_primero(self):
+        from reportes.services_cedula_expediente import aplicar_expediente as aplicar_real
+
+        lineas = self._crear_lineas_historicas()
+        self.xls.unlink()
+        for indice in (1, 2):
+            carpeta = Path(self._root.name) / f"expediente-{indice}"
+            carpeta.mkdir()
+            (carpeta / f"SUA_agosto_{indice}.xls").write_bytes(
+                b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes([indice])
+            )
+        llamadas = 0
+
+        def aplicar_y_contar(preview, usuario):
+            nonlocal llamadas
+            llamadas += 1
+            return aplicar_real(preview, usuario)
+
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.aplicar_expediente",
+            side_effect=aplicar_y_contar,
+        ):
+            with self.assertRaisesRegex(CommandError, "SHA-256 distinta"):
+                call_command(
+                    "regularizar_expedientes_cedulas_imss",
+                    "--root",
+                    self._root.name,
+                    "--apply",
+                    stdout=StringIO(),
+                )
+
+        self.assertEqual(llamadas, 1)
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.DocumentoCedulaIMSS.objects.exists())
+        self.assertEqual([p for p in Path(self._media.name).rglob("*") if p.is_file()], [])
+        for linea in lineas:
+            linea.refresh_from_db()
+            self.assertNotIn("expediente_cedula_imss_id", linea.metadata)
+
+    def test_rechaza_root_inexistente_y_symlinks(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "regularizar_expedientes_cedulas_imss",
+                "--root",
+                str(Path(self._root.name) / "inexistente"),
+                stdout=StringIO(),
+            )
+        enlace = Path(self._root.name) / "enlace.xls"
+        enlace.symlink_to(self.xls)
+        with self.assertRaisesRegex(CommandError, "simbólico"):
+            self._ejecutar()
 
 
 class CedulaIMSSParserTests(SimpleTestCase):
