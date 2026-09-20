@@ -67,6 +67,7 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
     }
 )
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
+from .services_extra_conciliacion import contexto_hora_extra
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
     NIVEL_ORGANIZACIONAL_VALUES,
@@ -2655,10 +2656,31 @@ def horas_extra_list(request):
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
     if request.method == "POST":
-        he = get_object_or_404(HoraExtra.objects.select_related("empleado", "jefe_directo"), pk=request.POST.get("hora_extra_id"))
+        he = get_object_or_404(
+            HoraExtra.objects.select_related("empleado", "jefe_directo", "asistencia__empleado", "asistencia__turno"),
+            pk=request.POST.get("hora_extra_id"),
+        )
         if he.jefe_directo_id != request.user.id and not request.user.is_superuser:
             raise PermissionDenied("Solo el jefe directo asignado puede autorizar horas extra.")
+        progressive = _wants_progressive_response(request)
+        redirect_url = f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{he.pk}'
         action = (request.POST.get("action") or "").strip()
+        error = ""
+        if action == "autorizar":
+            contexto = contexto_hora_extra(he)
+            if not contexto["puede_autorizar"]:
+                error = contexto["motivo_bloqueo"]
+        elif action != "rechazar":
+            error = "La acción solicitada no es válida."
+        if error:
+            if progressive:
+                return JsonResponse({
+                    "ok": False,
+                    "toast": {"type": "error", "message": error, "persistent": True},
+                }, status=400)
+            messages.error(request, error)
+            return redirect(redirect_url)
+
         if action == "autorizar":
             he.estado = HoraExtra.ESTADO_AUTORIZADO
             he.autorizado_por = request.user
@@ -2667,25 +2689,38 @@ def horas_extra_list(request):
 
             calcular_monto_hora_extra(he)
             he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
-            messages.success(request, f"Hora extra autorizada para {he.empleado.nombre}.")
+            message = f"Hora extra autorizada para {he.empleado.nombre}."
         elif action == "rechazar":
             he.estado = HoraExtra.ESTADO_RECHAZADO
             he.autorizado_por = request.user
             he.fecha_autorizacion_jefe = timezone.now()
             he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
-            messages.success(request, f"Hora extra rechazada para {he.empleado.nombre}.")
-        return redirect("rrhh:rrhh_he_list")
+            message = f"Hora extra rechazada para {he.empleado.nombre}."
+        if progressive:
+            return JsonResponse({
+                "ok": True, "toast": {"type": "success", "message": message},
+                "redirect": redirect_url, "reload": True,
+            })
+        messages.success(request, message)
+        return redirect(redirect_url)
 
-    horas_extra = HoraExtra.objects.select_related("empleado", "jefe_directo", "autorizado_por").order_by("-fecha", "empleado__nombre")
+    horas_extra = HoraExtra.objects.select_related(
+        "empleado", "jefe_directo", "autorizado_por", "asistencia__empleado", "asistencia__turno",
+    ).order_by("-fecha", "empleado__nombre")
     if not can_view_rrhh(request.user):
         horas_extra = horas_extra.filter(jefe_directo=request.user)
-    columnas = [
-        ("pendiente", "Pendiente", horas_extra.filter(estado=HoraExtra.ESTADO_PENDIENTE)),
-        ("autorizado", "Autorizado", horas_extra.filter(estado=HoraExtra.ESTADO_AUTORIZADO)),
-        ("rechazado", "Rechazado", horas_extra.filter(estado=HoraExtra.ESTADO_RECHAZADO)),
-        ("pagado", "Pagado", horas_extra.filter(estado=HoraExtra.ESTADO_PAGADO)),
-        ("cancelado", "Cancelado", horas_extra.filter(estado=HoraExtra.ESTADO_CANCELADO)),
+    estados = [
+        (HoraExtra.ESTADO_PENDIENTE, "Pendiente"),
+        (HoraExtra.ESTADO_AUTORIZADO, "Autorizado"),
+        (HoraExtra.ESTADO_RECHAZADO, "Rechazado"),
+        (HoraExtra.ESTADO_PAGADO, "Pagado"),
+        (HoraExtra.ESTADO_CANCELADO, "Cancelado"),
     ]
+    grupos = {estado: [] for estado, _label in estados}
+    for he in horas_extra:
+        he.contexto_calculo = contexto_hora_extra(he)
+        grupos[he.estado].append(he)
+    columnas = [(estado, label, grupos[estado]) for estado, label in estados]
     return render(
         request,
         "rrhh/horas_extra_list.html",

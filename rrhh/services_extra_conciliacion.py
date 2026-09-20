@@ -101,6 +101,64 @@ def detectar_minutos_extra(asistencia):
     return diagnosticar_horas_extra(asistencia).minutos
 
 
+def es_hora_extra_automatica(hora_extra):
+    return bool(
+        hora_extra.asistencia_id
+        and (hora_extra.notas or "").startswith(NOTA_EXTRA_AUTOMATICA)
+    )
+
+
+def contexto_hora_extra(hora_extra):
+    """Explica el cálculo actual sin modificar propuestas ni autorizaciones."""
+    if not es_hora_extra_automatica(hora_extra):
+        return {
+            "modalidad": "Manual",
+            "comida": "Confirmada por captura manual",
+            "turno": "No aplica al cálculo automático",
+            "estado": "Captura manual",
+            "puede_autorizar": True,
+            "motivo_bloqueo": "",
+            "requiere_revision": False,
+        }
+
+    asistencia = hora_extra.asistencia
+    diagnostico = diagnosticar_horas_extra(asistencia)
+    puede_autorizar = diagnostico.minutos is not None and diagnostico.minutos > 0
+    requiere_revision = diagnostico.requiere_revision or not puede_autorizar
+    motivo_bloqueo = ""
+    if not puede_autorizar:
+        motivo_bloqueo = (
+            "No se detectan horas extra en la asistencia actual."
+            if diagnostico.minutos == 0 else diagnostico.detalle
+        )
+        if diagnostico.codigo == "sin_turno":
+            motivo_bloqueo += " Asigna el turno y reevalúa la asistencia antes de autorizar."
+        else:
+            motivo_bloqueo += " Corrige y reevalúa la asistencia antes de autorizar."
+
+    if not puede_autorizar and hora_extra.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}:
+        estado = "Revisión recomendada"
+    elif not puede_autorizar:
+        estado = "No calculable"
+    elif requiere_revision:
+        estado = "Requiere revisión"
+    else:
+        estado = "Calculado"
+    return {
+        "modalidad": {
+            Empleado.MARCAJE_CUATRO_MARCAS: "4 marcas",
+            Empleado.MARCAJE_DOS_MARCAS: "2 marcas",
+            Empleado.MARCAJE_RUTA: "Ruta",
+        }[diagnostico.modalidad],
+        "comida": "Comida registrada" if diagnostico.comida_observable else "Comida no observable",
+        "turno": asistencia.turno.nombre if asistencia.turno_id else "Sin turno asignado",
+        "estado": estado,
+        "puede_autorizar": puede_autorizar,
+        "motivo_bloqueo": motivo_bloqueo,
+        "requiere_revision": requiere_revision,
+    }
+
+
 def conciliar_extra_diario(asistencia, registros):
     registros = list(registros)
     diagnostico = diagnosticar_horas_extra(asistencia)

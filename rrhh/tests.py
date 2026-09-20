@@ -3556,6 +3556,141 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(prestamo.estado, Prestamo.ESTADO_AUTORIZADO)
         self.assertEqual(prestamo.autorizado_jefe, director)
 
+    def _hora_extra_para_autorizacion(self, *, automatica=True, turno=None):
+        from datetime import date, datetime
+
+        jefe = User.objects.create_user(username="jefe.contexto.extra")
+        jefe_empleado = Empleado.objects.create(nombre="Jefe de reparto", usuario_erp=jefe)
+        empleado = Empleado.objects.create(
+            nombre="Repartidor contexto extra", puesto_operativo="REPARTIDOR",
+            jefe_directo=jefe_empleado, salario_diario=Decimal("400.00"),
+        )
+        asistencia = None
+        if automatica:
+            asistencia = AsistenciaEmpleado.objects.create(
+                empleado=empleado, fecha=date(2026, 9, 18), turno=turno,
+                entrada=timezone.make_aware(datetime(2026, 9, 18, 8)),
+                salida=timezone.make_aware(datetime(2026, 9, 18, 16, 30)),
+            )
+        hora = HoraExtra.objects.create(
+            empleado=empleado, jefe_directo=jefe, asistencia=asistencia,
+            fecha=date(2026, 9, 18), horas=Decimal("0.50"),
+            notas="[Detección automática] Extra propuesta" if automatica else "Apoyo manual",
+        )
+        self.client.force_login(jefe)
+        return hora
+
+    def test_hora_automatica_sin_turno_no_se_puede_autorizar(self):
+        hora = self._hora_extra_para_autorizacion()
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        }, follow=True)
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+        self.assertContains(response, "Asigna el turno")
+        self.assertEqual(response.redirect_chain[0][0], f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+
+    def test_hora_manual_sin_turno_conserva_autorizacion(self):
+        hora = self._hora_extra_para_autorizacion(automatica=False)
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        })
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(response.url, f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+
+    def test_hora_automatica_bloqueada_responde_json_sin_mutar(self):
+        hora = self._hora_extra_para_autorizacion()
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        for headers in ({"HTTP_ACCEPT": "application/json"}, {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}):
+            with self.subTest(headers=headers):
+                response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+                    "hora_extra_id": hora.pk, "action": "autorizar",
+                }, **headers)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.json()["ok"])
+                self.assertEqual(response.json()["toast"]["type"], "error")
+                self.assertTrue(response.json()["toast"]["persistent"])
+                self.assertIn("Asigna el turno", response.json()["toast"]["message"])
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_hora_automatica_historica_sin_turno_recomienda_revision_sin_mutar(self):
+        hora = self._hora_extra_para_autorizacion()
+        for estado in (HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO):
+            with self.subTest(estado=estado):
+                HoraExtra.objects.filter(pk=hora.pk).update(estado=estado)
+                antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+                response = self.client.get(reverse("rrhh:rrhh_he_list"))
+                self.assertContains(response, "Revisión recomendada")
+                self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_hora_automatica_sin_extra_detectado_no_se_puede_autorizar(self):
+        from datetime import time
+
+        turno = Turno.objects.create(nombre="Turno completo", hora_entrada=time(8), hora_salida=time(16, 30))
+        hora = self._hora_extra_para_autorizacion(turno=turno)
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        }, follow=True)
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertContains(response, "No se detectan horas extra")
+
+    def test_horas_extra_contexto_semantico_y_acciones_progresivas(self):
+        hora = self._hora_extra_para_autorizacion()
+        response = self.client.get(reverse("rrhh:rrhh_he_list"))
+        for contenido in (
+            f'id="hora-extra-{hora.pk}"', 'aria-label="Contexto del cálculo"',
+            "<dt>Modalidad</dt>", "<dt>Comida</dt>", "<dt>Turno</dt>", "<dt>Resultado</dt>",
+            "Ruta", "Comida no observable", "Sin turno asignado", "No calculable",
+            'disabled aria-disabled="true"', 'data-async-action data-reset-on-success="false"',
+            'data-pending-label="Autorizando…"', 'data-pending-label="Rechazando…"',
+            'class="ch-calculation-warning"', 'role="status"', "Asigna el turno",
+            "?v=20260920-contexto-extra-v1",
+        ):
+            self.assertContains(response, contenido)
+
+    def test_hora_automatica_positiva_sin_comida_permite_autorizacion_json(self):
+        from datetime import time
+
+        turno = Turno.objects.create(nombre="Turno reparto", hora_entrada=time(8), hora_salida=time(16))
+        hora = self._hora_extra_para_autorizacion(turno=turno)
+        response = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertContains(response, "Requiere revisión")
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "autorizar",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "success")
+        self.assertTrue(response.json()["reload"])
+        self.assertEqual(response.json()["redirect"], f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
+
+    def test_hora_automatica_bloqueada_permite_rechazar_json(self):
+        hora = self._hora_extra_para_autorizacion()
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "rechazar",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "success")
+        self.assertTrue(response.json()["reload"])
+        self.assertEqual(response.json()["redirect"], f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_RECHAZADO)
+
+    def test_hora_extra_accion_invalida_no_muta_y_responde_error(self):
+        hora = self._hora_extra_para_autorizacion(automatica=False)
+        response = self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": hora.pk, "action": "otra",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+
     def test_jefe_asignado_ve_y_autoriza_horas_extra_en_su_bandeja(self):
         from datetime import date
 
