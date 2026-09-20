@@ -2922,3 +2922,172 @@ class PagoObligacionGasto(models.Model):
 
     def __str__(self) -> str:
         return f"{self.obligacion_id} · {self.fecha_pago:%Y-%m-%d} · {self.monto}"
+
+
+class ExpedienteCedulaIMSS(models.Model):
+    TIPO_MENSUAL = "MENSUAL"
+    TIPO_BIMESTRAL = "BIMESTRAL"
+    TIPO_CHOICES = [
+        (TIPO_MENSUAL, "Mensual"),
+        (TIPO_BIMESTRAL, "Bimestral"),
+    ]
+
+    ESTADO_VALIDO = "VALIDO"
+    ESTADO_APLICADO = "APLICADO"
+    ESTADO_REEMPLAZADO = "REEMPLAZADO"
+    ESTADO_DISCREPANCIA = "DISCREPANCIA"
+    ESTADO_CHOICES = [
+        (ESTADO_VALIDO, "Válido"),
+        (ESTADO_APLICADO, "Aplicado"),
+        (ESTADO_REEMPLAZADO, "Reemplazado"),
+        (ESTADO_DISCREPANCIA, "Discrepancia"),
+    ]
+
+    tipo = models.CharField(max_length=12, choices=TIPO_CHOICES)
+    periodo = models.DateField(db_index=True)
+    registro_patronal = models.CharField(max_length=20, db_index=True)
+    razon_social = models.CharField(max_length=200, blank=True, default="")
+    revision = models.PositiveSmallIntegerField(default=1)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES)
+    total_patronal = models.DecimalField(max_digits=14, decimal_places=2)
+    trabajadores = models.PositiveIntegerField(default=0)
+    cruzados = models.PositiveIntegerField(default=0)
+    sin_cruce = models.PositiveIntegerField(default=0)
+    aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expedientes_cedula_imss_aplicados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    aplicado_en = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Expediente de cédula IMSS"
+        verbose_name_plural = "Expedientes de cédulas IMSS"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tipo", "periodo", "registro_patronal", "revision"],
+                name="uniq_cedula_imss_revision",
+            ),
+            models.UniqueConstraint(
+                fields=["tipo", "periodo", "registro_patronal"],
+                condition=models.Q(estado="APLICADO"),
+                name="uniq_cedula_imss_aplicada",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["registro_patronal", "periodo"],
+                name="cedula_imss_reg_period_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.registro_patronal} · {self.periodo:%Y-%m} · {self.tipo} · R{self.revision}"
+
+
+class DocumentoCedulaIMSS(models.Model):
+    CLASE_SUA_XLS = "SUA_XLS"
+    CLASE_EMA_PDF = "EMA_PDF"
+    CLASE_EBA_PDF = "EBA_PDF"
+    CLASE_CHOICES = [
+        (CLASE_SUA_XLS, "SUA XLS"),
+        (CLASE_EMA_PDF, "EMA PDF"),
+        (CLASE_EBA_PDF, "EBA PDF"),
+    ]
+
+    expediente = models.ForeignKey(
+        ExpedienteCedulaIMSS,
+        on_delete=models.PROTECT,
+        related_name="documentos",
+    )
+    clase = models.CharField(max_length=12, choices=CLASE_CHOICES)
+    nombre_original = models.CharField(max_length=255)
+    archivo = models.FileField(upload_to="reportes/cedulas-imss/%Y/%m/")
+    sha256 = models.CharField(max_length=64, unique=True)
+    tamano = models.PositiveBigIntegerField()
+    mime_type = models.CharField(max_length=100)
+    total_visible = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "Documento de cédula IMSS"
+        verbose_name_plural = "Documentos de cédula IMSS"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["expediente"],
+                condition=models.Q(clase="SUA_XLS"),
+                name="uniq_cedula_sua_expediente",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre_original
+
+
+class DetalleCedulaIMSS(models.Model):
+    CRUCE_CRUZADO = "CRUZADO"
+    CRUCE_SIN_CRUCE = "SIN_CRUCE"
+    CRUCE_CHOICES = [
+        (CRUCE_CRUZADO, "Cruzado"),
+        (CRUCE_SIN_CRUCE, "Sin cruce"),
+    ]
+
+    documento = models.ForeignKey(
+        DocumentoCedulaIMSS,
+        on_delete=models.PROTECT,
+        related_name="detalles",
+    )
+    empleado = models.ForeignKey(
+        "rrhh.Empleado",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="detalles_cedula_imss",
+    )
+    nss = models.CharField(max_length=11, db_index=True)
+    nombre_origen = models.CharField(max_length=200)
+    dias = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    sdi = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    retiro = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    cesantia_patronal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    aportacion_vivienda = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    cuota_patronal = models.DecimalField(max_digits=14, decimal_places=2)
+    area_codigo = models.CharField(max_length=50, blank=True, default="")
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="detalles_cedula_imss",
+    )
+    cruce_estado = models.CharField(max_length=16, choices=CRUCE_CHOICES)
+
+    class Meta:
+        verbose_name = "Detalle de cédula IMSS"
+        verbose_name_plural = "Detalles de cédula IMSS"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["documento", "nss"],
+                name="uniq_cedula_imss_nss",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(cruce_estado="CRUZADO", empleado__isnull=False)
+                    | models.Q(cruce_estado="SIN_CRUCE", empleado__isnull=True)
+                ),
+                name="cedula_imss_cruce_coherente",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["empleado", "documento"],
+                name="cedula_imss_emp_doc_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"NSS •••••••{self.nss[-4:]} · {self.nombre_origen}"

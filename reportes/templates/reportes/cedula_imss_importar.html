@@ -1,92 +1,101 @@
 {% extends "base.html" %}
 {% load humanize %}
 
-{% block title %}Reportes - Cédulas IMSS{% endblock %}
-{% block page_title %}Presupuesto · Cédulas IMSS / SIPARE{% endblock %}
+{% block title %}Reportes - Expediente IMSS{% endblock %}
+{% block page_title %}Presupuesto · Expediente IMSS{% endblock %}
 {% block body_class %}page-reportes-cedula-imss{% endblock %}
 
+{% block extra_css %}
+<style>
+  .cedula-shell{max-width:1100px;margin:0 auto;color:var(--texto)}
+  .cedula-intro{max-width:72ch;margin:0 0 24px;color:var(--texto-light);line-height:1.6}
+  .cedula-panel{margin-bottom:24px;padding:clamp(18px,3vw,30px);border:1px solid #dfccd4;border-radius:14px;background:#fff}
+  .cedula-panel h2{margin:0 0 8px;font:700 1.35rem/1.25 'Playfair Display',Georgia,serif;text-wrap:balance}
+  .cedula-panel p{max-width:72ch;line-height:1.55}
+  .cedula-upload{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:end;margin-top:22px}
+  .cedula-upload label{display:block;margin-bottom:7px;font-weight:800}
+  .cedula-upload input[type=file]{width:100%;min-height:48px;padding:10px;border:1px solid #ad929d;border-radius:9px;background:#fffefa;color:var(--texto)}
+  .cedula-upload input[type=file]:focus-visible,.cedula-actions button:focus-visible{outline:3px solid rgba(139,34,82,.3);outline-offset:3px}
+  .cedula-help{margin:8px 0 0;color:#6f5962;font-size:.9rem}
+  .cedula-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .cedula-actions .btn{min-height:46px;transition:transform 140ms cubic-bezier(.23,1,.32,1)}
+  .cedula-actions .btn:active{transform:scale(.97)}
+  .cedula-actions .btn:disabled{cursor:not-allowed;opacity:.55}
+  .cedula-assurance{display:flex;gap:10px;align-items:flex-start;margin:20px 0 0;padding-top:18px;border-top:1px solid #eadde2;color:#5f4a52}
+  .cedula-assurance strong{color:var(--vino)}
+  .cedula-error{margin-top:18px}.cedula-preview[hidden]{display:none}
+  .cedula-summary{display:flex;flex-wrap:wrap;margin:20px 0;border-top:1px solid #dfccd4;border-bottom:1px solid #dfccd4}
+  .cedula-summary>div{min-width:180px;flex:1;padding:18px 20px 18px 0}
+  .cedula-summary strong{display:block;color:var(--vino);font-size:1.4rem;font-variant-numeric:tabular-nums}
+  .cedula-summary span{display:block;margin-top:4px;color:#6f5962;font-size:.88rem}
+  .cedula-docs{display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:14px 0 20px;list-style:none}
+  .cedula-docs li{padding:7px 10px;border-radius:7px;background:var(--rosa);color:#69304a;font-size:.88rem;font-weight:700}
+  .cedula-table-wrap{overflow-x:auto;border-top:1px solid #dfccd4}
+  .cedula-table{width:100%;border-collapse:collapse;font-size:.94rem}
+  .cedula-table th,.cedula-table td{padding:13px 12px;border-bottom:1px solid #eadde2;text-align:left;vertical-align:top}
+  .cedula-table th{color:#654f58;font-size:.82rem}
+  .cedula-table td:last-child,.cedula-table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .cedula-note{color:#6f5962;font-size:.9rem}
+  .cedula-facts{display:flex;flex-wrap:wrap;gap:8px 24px;margin:16px 0;color:#5f4a52}.cedula-facts p{margin:0}.cedula-facts strong{color:var(--texto)}
+  @media(max-width:760px){.cedula-upload{grid-template-columns:1fr}.cedula-actions{display:grid;grid-template-columns:1fr 1fr}.cedula-actions .btn{width:100%}}
+  @media(max-width:480px){.cedula-actions{grid-template-columns:1fr}.cedula-summary>div{min-width:50%;padding-right:10px}.cedula-panel{padding:18px 15px}.cedula-table{min-width:620px}}
+  @media(hover:hover) and (pointer:fine){.cedula-actions .btn:not(:disabled):hover{transform:translateY(-1px)}}
+  @media(prefers-reduced-motion:reduce){.cedula-actions .btn{transition:none}.cedula-actions .btn:active{transform:none}}
+</style>
+{% endblock %}
+
 {% block content %}
-
-{% if module_tabs %}
-<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
-  {% for tab in module_tabs %}
-  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-  {% endfor %}
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Subir cédula del IMSS (SUA / SIPARE)</div>
-  <p class="muted">Sube el archivo .xls tal como lo genera el SUA. La mensual llena los rubros IMSS del mes (cuota patronal); la bimestral llena Infonavit/RCV partida 50/50 entre los dos meses. El archivo se procesa y se desecha: no queda guardado en el servidor. Volver a subir una cédula corregida re-escribe; lo capturado a mano nunca se pisa.</p>
-
-  <form method="post" enctype="multipart/form-data" novalidate>
-    {% csrf_token %}
-    <div class="form-grid-2">
-      <div class="form-group">
-        <label for="id_cedula">Archivo .xls de la cédula <span class="text-danger">*</span></label>
-        <input class="input-field" type="file" id="id_cedula" name="cedula" accept=".xls" required>
-        <p class="muted">Cédula de determinación de cuotas: mensual (obrero-patronal) o bimestral (Retiro/Cesantía/Infonavit).</p>
+<div class="cedula-shell">
+  {% if module_tabs %}<section class="module-tabs report-tabs" aria-label="Secciones de reportes">{% for tab in module_tabs %}<a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>{% endfor %}</section>{% endif %}
+  <p class="cedula-intro">Reúne la cédula SUA con su evidencia oficial en un expediente auditable. Primero revisa la conciliación; aplicar queda disponible únicamente después de una previsualización válida.</p>
+  <section class="cedula-panel" aria-labelledby="cedula-upload-title">
+    <h2 id="cedula-upload-title">Preparar expediente</h2>
+    <p>Selecciona exactamente una cédula SUA en formato .xls. Puedes acompañarla con la EMA de un periodo mensual o la EBA de un periodo bimestral.</p>
+    <form id="cedula-form" method="post" enctype="multipart/form-data" novalidate data-async-action>
+      {% csrf_token %}
+      <input type="hidden" id="cedula-preview-token" name="preview_token" value="{{ preview_token|default:'' }}">
+      <div class="cedula-upload">
+        <div><label for="id_documentos">Documentos del expediente</label><input type="file" id="id_documentos" name="documentos" accept=".xls,.pdf" multiple required aria-describedby="cedula-file-help"><p class="cedula-help" id="cedula-file-help">Una SUA .xls obligatoria; EMA o EBA .pdf opcional. Máximo 10 MiB por archivo y 30 MiB por expediente.</p></div>
+        <div class="cedula-actions"><button class="btn btn-secondary" type="submit" name="previsualizar" value="1" data-pending-label="Revisando…">Previsualizar</button><button class="btn btn-primary" id="cedula-aplicar" type="submit" name="aplicar" value="1" data-pending-label="Aplicando…"{% if not resumen %} disabled{% endif %}>Aplicar expediente</button></div>
       </div>
-      <div class="form-group">
-        <label for="id_previsualizar">Modo</label>
-        <label style="display:flex; gap:8px; align-items:center;">
-          <input type="checkbox" id="id_previsualizar" name="previsualizar" checked>
-          Solo previsualizar (no escribe nada)
-        </label>
-        <p class="muted">Revisa el resumen primero; desmarca la casilla y vuelve a subir para aplicar.</p>
-      </div>
-    </div>
-    <div style="margin-top:16px;">
-      <button class="btn btn-primary" type="submit" data-pending-label="Procesando…">Procesar cédula</button>
-    </div>
-  </form>
+      <p class="cedula-assurance"><strong>Previsualizar no guarda datos.</strong><span>{% if resumen %}Vuelve a seleccionar exactamente los mismos documentos y presiona Aplicar expediente. El comprobante de esta vista previa confirmará que no cambiaron.{% else %}La selección permanece en esta pantalla para que puedas aplicar exactamente los mismos archivos.{% endif %}</span></p>
+      <noscript><p class="alert alert-info">Después de previsualizar, vuelve a seleccionar los mismos documentos para confirmar y aplicar el expediente.</p></noscript>
+    </form>
+    {% if error %}<div class="alert alert-danger cedula-error" role="alert">{{ error }}</div>{% endif %}
+  </section>
+  <section class="cedula-panel cedula-preview" id="cedula-preview" aria-labelledby="cedula-preview-title" aria-live="polite"{% if not resumen %} hidden{% endif %}>
+    <h2 id="cedula-preview-title">Total conciliado</h2>
+    <p class="cedula-note">Vista previa segura. Los NSS se muestran enmascarados y todavía no existe un expediente guardado.</p>
+    <div class="cedula-facts"><p><strong>Registro patronal:</strong> <span data-preview-register>{% if resumen %}{{ resumen.registro_patronal }}{% endif %}</span></p><p><strong>Meses cubiertos:</strong> <span data-preview-months>{% if resumen %}{% for mes in resumen.meses %}{{ mes.label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</span></p><p><strong>Efecto estimado:</strong> <span data-preview-effect>{% if resumen %}Hasta {{ resumen.efecto_estimado.lineas_maximas }} líneas presupuestales{% endif %}</span></p></div>
+    <div class="cedula-summary"><div><strong data-preview-total>{% if resumen %}${{ resumen.total_patronal|floatformat:2|intcomma }}{% endif %}</strong><span>Cuota patronal</span></div><div><strong data-preview-workers>{% if resumen %}{{ resumen.trabajadores }}{% endif %}</strong><span>Personas en SUA</span></div><div><strong data-preview-matched>{% if resumen %}{{ resumen.cruzados }}{% endif %}</strong><span>Cruzadas con RRHH</span></div><div><strong data-preview-unmatched>{% if resumen %}{{ resumen.sin_cruce }}{% endif %}</strong><span>Sin cruce</span></div></div>
+    <ul class="cedula-docs" data-preview-docs>{% if resumen %}{% for documento in resumen.documentos %}<li>{{ documento.nombre }} · {{ documento.clase_label }}{% if documento.duplicado %} · Ya registrado en expediente #{{ documento.expediente_id }}{% else %} · Reconocido{% endif %}</li>{% endfor %}{% endif %}</ul>
+    <div class="cedula-table-wrap table-responsive"><table class="cedula-table"><thead><tr><th>Persona</th><th>NSS protegido</th><th>Estado</th><th>Cuota patronal</th></tr></thead><tbody data-preview-details>{% if resumen %}{% for detalle in resumen.detalles %}<tr><td>{{ detalle.nombre }}</td><td>{{ detalle.nss }}</td><td>{{ detalle.estado }}</td><td>${{ detalle.cuota_patronal|floatformat:2|intcomma }}</td></tr>{% endfor %}{% endif %}</tbody></table></div>
+  </section>
+</div>
+{% endblock %}
 
-  {% if error %}
-  <div class="alert alert-danger" style="margin-top:16px;">{{ error }}</div>
-  {% endif %}
-</section>
-
-{% if resumen %}
-<section class="card">
-  <div class="card-header">
-    {% if fue_dry_run %}Previsualización (no se escribió nada){% else %}Cédula aplicada{% endif %}
-    · {{ resumen.tipo }}
-  </div>
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-number">${{ resumen.total_patronal|floatformat:2|intcomma }}</div>
-      <div class="kpi-label">Cuota patronal total</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number">{{ resumen.empleados_cruzados }}</div>
-      <div class="kpi-label">Empleados cruzados por NSS</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number {% if resumen.nss_sin_cruce %}is-warning{% endif %}">{{ resumen.nss_sin_cruce|length }}</div>
-      <div class="kpi-label">NSS sin cruce</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-number">{{ resumen.lineas_actualizadas }}</div>
-      <div class="kpi-label">Renglones del tablero {% if fue_dry_run %}a llenar{% else %}llenados{% endif %} ({{ resumen.meses|join:", " }})</div>
-    </div>
-  </div>
-
-  {% if resumen.nss_sin_cruce %}
-  <div class="alert alert-info">Los NSS sin cruce suelen ser personal dado de baja en RRHH. Su dinero SÍ está en el total de control (área Nómina); si Capital Humano corrige el expediente, vuelve a subir la cédula.</div>
-  <div class="table-responsive">
-    <table class="table">
-      <thead><tr><th>NSS y nombre en la cédula</th></tr></thead>
-      <tbody>
-        {% for nss in resumen.nss_sin_cruce %}<tr><td>{{ nss }}</td></tr>{% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  {% for aviso in resumen.avisos %}
-  <div class="alert alert-info">{{ aviso }}</div>
-  {% endfor %}
-</section>
-{% endif %}
-
+{% block extra_js %}
+<script>
+(function(){
+  "use strict";
+  var form=document.getElementById("cedula-form"),input=document.getElementById("id_documentos"),applyButton=document.getElementById("cedula-aplicar"),preview=document.getElementById("cedula-preview"),tokenInput=document.getElementById("cedula-preview-token");
+  var selectionRevision=0,activeController=null,approvedSignature="",fileIds=new WeakMap(),fileSequence=0;
+  if(!form||!input||!applyButton||!preview||!tokenInput)return;
+  function signature(files){return Array.from(files||[]).map(function(file){if(!fileIds.has(file)){fileSequence+=1;fileIds.set(file,fileSequence)}return [fileIds.get(file),file.name,file.size,file.lastModified,file.type].join(":")}).join("|")}
+  function toast(data){var region=document.getElementById("erp-toast-region");if(!region)return;var node=document.createElement("div");node.className="erp-toast erp-toast--"+(data.type||"info");node.setAttribute("role",data.type==="error"?"alert":"status");var text=document.createElement("span");text.textContent=data.message||"Acción completada.";node.appendChild(text);var close=document.createElement("button");close.type="button";close.className="erp-toast__close";close.setAttribute("aria-label","Cerrar notificación");close.textContent="×";close.addEventListener("click",function(){node.remove()});node.appendChild(close);region.appendChild(node);if(!data.persistent)window.setTimeout(function(){node.remove()},4500)}
+  function money(value){return new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN"}).format(Number(value))}
+  function setText(selector,value){var node=preview.querySelector(selector);if(node)node.textContent=value}
+  function render(data,token){setText("[data-preview-register]",data.registro_patronal);setText("[data-preview-months]",data.meses.map(function(mes){return mes.label}).join(", "));setText("[data-preview-effect]","Hasta "+data.efecto_estimado.lineas_maximas+" líneas presupuestales");setText("[data-preview-total]",money(data.total_patronal));setText("[data-preview-workers]",data.trabajadores);setText("[data-preview-matched]",data.cruzados);setText("[data-preview-unmatched]",data.sin_cruce);var docs=preview.querySelector("[data-preview-docs]");docs.replaceChildren();data.documentos.forEach(function(documento){var item=document.createElement("li");item.textContent=documento.nombre+" · "+documento.clase_label+(documento.duplicado?" · Ya registrado en expediente #"+documento.expediente_id:" · Reconocido");docs.appendChild(item)});var body=preview.querySelector("[data-preview-details]");body.replaceChildren();data.detalles.forEach(function(detalle){var row=document.createElement("tr");[detalle.nombre,detalle.nss,detalle.estado,money(detalle.cuota_patronal)].forEach(function(value){var cell=document.createElement("td");cell.textContent=value;row.appendChild(cell)});body.appendChild(row)});tokenInput.value=token;preview.hidden=false;applyButton.disabled=false;preview.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"})}
+  function invalidatePreview(){selectionRevision+=1;approvedSignature="";tokenInput.value="";applyButton.disabled=true;preview.hidden=true;if(activeController){activeController.abort();activeController=null}}
+  input.addEventListener("change",invalidatePreview);
+  form.addEventListener("submit",async function(event){
+    var submitter=event.submitter,currentSignature=signature(input.files);
+    if(submitter&&submitter.name==="aplicar"&&(!tokenInput.value||approvedSignature!==currentSignature)){event.preventDefault();event.stopImmediatePropagation();invalidatePreview();toast({type:"warning",message:"Los archivos cambiaron. Previsualiza nuevamente antes de aplicar.",persistent:true});return}
+    if(!submitter||submitter.name!=="previsualizar")return;
+    event.preventDefault();event.stopImmediatePropagation();if(!form.reportValidity())return;
+    if(activeController)activeController.abort();activeController=new AbortController();var controller=activeController,requestRevision=selectionRevision,requestSignature=currentSignature,original=submitter.textContent;submitter.disabled=true;submitter.textContent=submitter.dataset.pendingLabel||"Revisando…";applyButton.disabled=true;
+    try{var data=new FormData(form);data.set("previsualizar","1");data.delete("aplicar");var response=await fetch(form.action||window.location.href,{method:"POST",body:data,headers:{"Accept":"application/json","X-Requested-With":"XMLHttpRequest"},credentials:"same-origin",signal:controller.signal});var payload=await response.json();if(controller!==activeController||requestRevision!==selectionRevision||requestSignature!==signature(input.files))return;if(!response.ok||!payload.ok)throw payload;render(payload.preview,payload.preview_token);approvedSignature=requestSignature;toast(payload.toast||{type:"info",message:"Previsualización lista."})}catch(error){if(error&&error.name==="AbortError")return;toast(error&&error.toast?error.toast:{type:"error",message:"No se pudo previsualizar el expediente. Revisa los archivos e inténtalo de nuevo.",persistent:true})}finally{if(controller===activeController){activeController=null;submitter.disabled=false;submitter.textContent=original}}
+  })
+})();
+</script>
 {% endblock %}

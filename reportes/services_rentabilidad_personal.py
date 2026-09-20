@@ -6,14 +6,71 @@ sucursal vigente del expediente de RRHH, tal como se capturó en el ERP.
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+import re
 
 from core.models import Sucursal
 from rrhh.models import NominaLinea, NominaPeriodo
 
-from .models import LineaPresupuestoMensual
+from .models import ExpedienteCedulaIMSS, LineaPresupuestoMensual
 from .services_presupuesto_maestro import normalize_header_text
 
 ZERO = Decimal("0")
+REGISTRO_PATRONAL_AUTORIZADO = "E5240157100"
+
+
+def _normalizar_registro_patronal(valor) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(valor or "").upper())
+
+
+def _mes_siguiente(periodo: date) -> date:
+    if periodo.month == 12:
+        return date(periodo.year + 1, 1, 1)
+    return periodo.replace(month=periodo.month + 1)
+
+
+def _expediente_id(metadata) -> int | None:
+    if not isinstance(metadata, dict):
+        return None
+    try:
+        return int(metadata.get("expediente_cedula_imss_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_cedula_valida(metadata, tipo_esperado: str, *, exigir_registro: bool) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    cedula = metadata.get("cedula_imss", {})
+    documento = metadata.get("cedula_imss_documento", {})
+    if not isinstance(cedula, dict) or not isinstance(documento, dict):
+        return False
+    if exigir_registro and cedula.get("tipo") != tipo_esperado:
+        return False
+    if cedula.get("tipo") and cedula["tipo"] != tipo_esperado:
+        return False
+    registros = {
+        _normalizar_registro_patronal(registro)
+        for registro in (
+            cedula.get("registro_patronal"),
+            documento.get("registro_patronal"),
+        )
+        if registro
+    }
+    if exigir_registro and not registros:
+        return False
+    return not registros or registros == {REGISTRO_PATRONAL_AUTORIZADO}
+
+
+def _expediente_certifica_linea(expediente, *, tipo_esperado: str, periodo: date) -> bool:
+    if expediente is None:
+        return False
+    if expediente.tipo != tipo_esperado:
+        return False
+    if _normalizar_registro_patronal(expediente.registro_patronal) != REGISTRO_PATRONAL_AUTORIZADO:
+        return False
+    if tipo_esperado == ExpedienteCedulaIMSS.TIPO_MENSUAL:
+        return expediente.periodo == periodo
+    return expediente.periodo in {periodo, _mes_siguiente(periodo)}
 
 
 def _fila(periodo, *, origen, registro_id, sucursal_id, familia, concepto, monto=ZERO,
@@ -82,10 +139,21 @@ def leer_personal_mensual(periodo: date) -> dict:
     cargas_encontradas = defaultdict(set)
     # El flujo SIPARE ya mensualiza IMSS/RCV. Se lee su resultado ORIGINAL,
     # igual que el consolidado de Reportes; no se vuelve a dividir el bimestre.
-    cargas = LineaPresupuestoMensual.objects.filter(
+    cargas = list(LineaPresupuestoMensual.objects.filter(
         periodo=periodo, version=LineaPresupuestoMensual.VERSION_ORIGINAL,
         rubro__activo=True, rubro__area__codigo="gastos-venta",
-    ).select_related("rubro", "rubro__sucursal")
+    ).select_related("rubro", "rubro__sucursal"))
+    expedientes_enlazados = {
+        expediente_id
+        for linea in cargas
+        if (expediente_id := _expediente_id(linea.metadata)) is not None
+    }
+    expedientes_aplicados = (
+        ExpedienteCedulaIMSS.objects.filter(
+            pk__in=expedientes_enlazados,
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+        ).in_bulk()
+    )
     for linea in cargas:
         concepto = normalize_header_text(linea.rubro.concepto)
         tipo = "IMSS" if concepto == "imss" else "RCV" if concepto in {"infonavit", "infonavit rcv"} else None
@@ -93,8 +161,29 @@ def leer_personal_mensual(periodo: date) -> dict:
             continue
         sid = linea.rubro.sucursal_id
         meta = linea.metadata or {}
+        expediente_id = _expediente_id(meta)
+        tipo_esperado = (
+            ExpedienteCedulaIMSS.TIPO_MENSUAL
+            if tipo == "IMSS"
+            else ExpedienteCedulaIMSS.TIPO_BIMESTRAL
+        )
+        expediente_valido = (
+            _expediente_certifica_linea(
+                expedientes_aplicados.get(expediente_id),
+                tipo_esperado=tipo_esperado,
+                periodo=periodo,
+            )
+            and _metadata_cedula_valida(meta, tipo_esperado, exigir_registro=False)
+        )
+        legado_verificado = _metadata_cedula_valida(
+            meta, tipo_esperado, exigir_registro=True,
+        )
         trazable = (
-            linea.fuente_real == "AUTO:SIPARE" and bool(meta.get("cedula_imss"))
+            linea.fuente_real == "AUTO:SIPARE"
+            and (
+                expediente_valido
+                or (expediente_id is None and legado_verificado)
+            )
         ) or linea.fuente_real.startswith("MANUAL:")
         if sid is None or linea.monto_real is None or not trazable or meta.get("sin_datos_fuente"):
             pendientes.append(_fila(

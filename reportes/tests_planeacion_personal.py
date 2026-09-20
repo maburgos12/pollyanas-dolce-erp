@@ -9,7 +9,12 @@ from django.test import SimpleTestCase, TestCase
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
-from reportes.models import AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
+from reportes.models import (
+    AreaPresupuesto,
+    ExpedienteCedulaIMSS,
+    LineaPresupuestoMensual,
+    RubroPresupuesto,
+)
 from reportes.services_planeacion_personal import budget_policy, build_personnel_plan, parse_payroll, RFC
 from orquestacion.services.pointdailysale_guard import scan_pointdailysale_usage
 from ventas.services.sales_canonical_source import OFFICIAL_POINT_SOURCE, RECENT_POINT_SOURCE
@@ -160,14 +165,79 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(build_personnel_plan()['unparsed'], [])
 
     def test_sipare_corporate_not_department_double_count(self, _):
+        expediente = ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('400'),
+        )
         for area_code in ('nomina', 'gastos-venta'):
             area, _ = AreaPresupuesto.objects.get_or_create(codigo=area_code, defaults={'nombre': area_code})
             rubro = RubroPresupuesto.objects.create(area=area, concepto='Infonavit')
             LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=date(2026, 8, 1),
                 monto_real=200, fuente_real='AUTO:SIPARE',
-                metadata={'cedula_imss': {'registro_patronal': ''},
-                          'cedula_imss_documento': {'registro_patronal': 'E52-40157-10-0'}})
-        self.assertEqual(build_personnel_plan()['months'][-1]['rcv'], D(200))
+                metadata={'expediente_cedula_imss_id': expediente.pk})
+        agosto = build_personnel_plan()['months'][-1]
+        self.assertEqual(agosto['rcv'], D(200))
+        self.assertIsNone(agosto['imss'])
+
+    def test_sipare_usa_expediente_aunque_metadata_legada_no_tenga_registro(self, _):
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_MENSUAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('79931.51'),
+        )
+        area = AreaPresupuesto.objects.create(codigo='nomina', nombre='Nómina')
+        rubro = RubroPresupuesto.objects.create(area=area, concepto='IMSS')
+        LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 8, 1), monto_real=D('79931.51'),
+            fuente_real='AUTO:SIPARE', metadata={'cedula_imss': {'registro_patronal': ''}},
+        )
+
+        agosto = build_personnel_plan()['months'][-1]
+        self.assertEqual(agosto['imss'], D('79931.51'))
+        self.assertEqual(
+            [source['id'] for source in agosto['sources'] if source['kind'].startswith('imss')],
+            [ExpedienteCedulaIMSS.objects.get().pk],
+        )
+
+    def test_sipare_bimestral_distribuye_total_una_sola_vez(self, _):
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('100.01'),
+        )
+
+        meses = {row['month']: row for row in build_personnel_plan()['months']}
+        self.assertEqual(meses[date(2026, 7, 1)]['rcv'], D('50.00'))
+        self.assertEqual(meses[date(2026, 8, 1)]['rcv'], D('50.01'))
+        self.assertEqual(meses[date(2026, 7, 1)]['rcv'] + meses[date(2026, 8, 1)]['rcv'], D('100.01'))
+
+    def test_sipare_bimestral_cubre_primer_mes_aunque_expediente_cierre_despues(self, _):
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('100.01'),
+        )
+
+        corte_julio = build_personnel_plan(date(2026, 7, 31))
+        julio = next(row for row in corte_julio['months'] if row['month'] == date(2026, 7, 1))
+        self.assertEqual(julio['rcv'], D('50.00'))
+
+        corte_agosto = build_personnel_plan(date(2026, 8, 31))
+        meses = {row['month']: row for row in corte_agosto['months']}
+        self.assertEqual(meses[date(2026, 8, 1)]['rcv'], D('50.01'))
+        self.assertEqual(
+            meses[date(2026, 7, 1)]['rcv'] + meses[date(2026, 8, 1)]['rcv'],
+            D('100.01'),
+        )
 
     def test_page_permissions_csv_and_read_only(self, _):
         path = '/reportes/planeacion-personal/'

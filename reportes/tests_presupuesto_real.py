@@ -2139,20 +2139,68 @@ class PantallaCedulaImssTests(TestCase):
         self.assertEqual(self.client.get(self.URL).status_code, 200)  # responsable de nómina
 
     def test_preview_no_escribe_y_aplicar_si(self):
-        r = self._subir(self.paula, previsualizar=True)
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.context["resumen"].lineas_actualizadas, 2)
-        self.assertFalse(
-            LineaPresupuestoMensual.objects.filter(fuente_real="AUTO:SIPARE").exists()
-        )
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
 
-        r = self._subir(self.paula, previsualizar=False)
-        self.assertEqual(r.status_code, 200)
-        linea = LineaPresupuestoMensual.objects.get(
-            rubro__area__codigo="administracion", rubro__concepto="IMSS", periodo=date(2026, 4, 1)
-        )
-        self.assertEqual(linea.monto_real, Decimal("500.00"))
-        self.assertEqual(linea.fuente_real, "AUTO:SIPARE")
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        filas = [
+            ["SISTEMA UNICO DE AUTODETERMINACION"] + [""] * 21,
+            ["Período de Proceso: Abril-2026"] + [""] * 21,
+            ["Registro Patronal: E52-40157-10-0", "POLLYANA'S DOLCE"] + [""] * 20,
+            [
+                "Clave", "Movimiento", "Fecha", "Dias", "SDI", "Lic.", "Inc.", "Aus.",
+                "C.F.", "Exc.Pat.", "Exc. Obr.", "P.D. Pat.", "P.D. Obr.", "G.M.P. Pat.",
+                "G.M.P. Obr.", "R.T.", "I.V. Pat.", "I.V. Obr", "G.P.S.", "Patronal",
+                "Obrera", "SubTotal",
+            ],
+            ["12-12-12-1212-1", "", "", "", "", "TRABAJADORA UNO"] + [""] * 16,
+            ["", "NORMAL", "", 30, 350] + [0] * 14 + [Decimal("500"), Decimal("100"), Decimal("600")],
+            ["TOTAL REGISTRO PATRONAL", "", "", 30, ""] + [0] * 14
+            + [Decimal("500"), Decimal("100"), Decimal("600")],
+        ]
+
+        def documentos():
+            return [
+                SimpleUploadedFile(
+                    "SUA_abril.xls",
+                    b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1xls",
+                    content_type="application/vnd.ms-excel",
+                )
+            ]
+
+        self.client.force_login(self.paula)
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root), patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls", return_value=filas
+        ):
+            preview = self.client.post(
+                self.URL,
+                {"documentos": documentos(), "previsualizar": "1"},
+            )
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(preview.context["resumen"]["efecto_estimado"]["lineas_maximas"], 2)
+            self.assertTrue(preview.context["preview_token"])
+            self.assertFalse(
+                LineaPresupuestoMensual.objects.filter(fuente_real="AUTO:SIPARE").exists()
+            )
+
+            aplicado = self.client.post(
+                self.URL,
+                {
+                    "documentos": documentos(),
+                    "aplicar": "1",
+                    "preview_token": preview.context["preview_token"],
+                },
+            )
+            self.assertEqual(aplicado.status_code, 302)
+
+            linea = LineaPresupuestoMensual.objects.get(
+                rubro__area__codigo="administracion",
+                rubro__concepto="IMSS",
+                periodo=date(2026, 4, 1),
+            )
+            self.assertEqual(linea.monto_real, Decimal("500.00"))
+            self.assertEqual(linea.fuente_real, "AUTO:SIPARE")
 
     def test_extension_invalida_rechazada(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
