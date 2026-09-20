@@ -904,6 +904,17 @@ class PersistenciaExpedienteTests(TestCase):
             content_type="text/plain",
         )
 
+    @staticmethod
+    def _pdf_texto(nombre, texto):
+        from reportlab.pdfgen import canvas
+
+        salida = BytesIO()
+        pdf = canvas.Canvas(salida, invariant=1)
+        pdf.drawString(36, 720, texto)
+        pdf.showPage()
+        pdf.save()
+        return SimpleUploadedFile(nombre, salida.getvalue(), content_type="application/pdf")
+
     def _preview(self, *, filas=None, archivos=None):
         from reportes.services_cedula_expediente import preparar_expediente
 
@@ -924,6 +935,90 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 0)
         self.assertEqual(reportes_models.DetalleCedulaIMSS.objects.count(), 0)
         self.assertEqual(list(Path(self._media.name).rglob("*")), [])
+
+    def test_preview_clasifica_ema_real_por_contenido_operativo(self):
+        ema = self._pdf_texto(
+            "PE524015710_EMA.pdf",
+            "E52-40157-10-0 PERIODO 08-2026 CUOTAS ENFERMEDADES Y MATERNIDAD",
+        )
+
+        preview = self._preview(archivos=[self._sua(), ema])
+
+        evidencia = next(d for d in preview.documentos if d.clase.endswith("PDF"))
+        self.assertEqual(evidencia.clase, reportes_models.DocumentoCedulaIMSS.CLASE_EMA_PDF)
+        self.assertEqual(evidencia.registro_patronal, "E52-40157-10-0")
+        self.assertEqual(evidencia.periodo, date(2026, 8, 1))
+
+    def test_clasificador_reconoce_eba_real_por_cuotas_rcv(self):
+        from reportes.services_cedula_expediente import inspeccionar_evidencia_pdf
+
+        eba = self._pdf_texto(
+            "PE524015710_EBA.pdf",
+            "E52-40157-10-0 BIMESTRE 04-2026 CUOTAS RCV",
+        )
+
+        evidencia = inspeccionar_evidencia_pdf(eba.name, eba.read())
+
+        self.assertEqual(evidencia.clase, reportes_models.DocumentoCedulaIMSS.CLASE_EBA_PDF)
+        self.assertEqual(evidencia.registro_patronal, "E52-40157-10-0")
+        self.assertEqual(evidencia.periodo, date(2026, 8, 1))
+
+    def test_preview_recupera_registro_sua_separado_por_celdas_vacias(self):
+        filas = self._filas()
+        filas[2] = ["Registro Patronal: ", "", "", "E52-40157-10-0"] + [""] * 18
+
+        preview = self._preview(filas=filas, archivos=[self._sua(), self._pdf()])
+
+        self.assertEqual(preview.parseada.registro_patronal, "E52-40157-10-0")
+
+    def test_total_control_lee_resumen_impreso_del_formato_sua_real(self):
+        from reportes.services_cedula_expediente import _extraer_total_control
+
+        mensual = self._filas()[:-1] + [
+            [""] * 12 + [Decimal("150.25"), Decimal("170.25")],
+            ["Total de Días cotizados", "", "", "", "", "Total de Cotizantes:", "", "", 1],
+            [""] * 10 + ["Total a pagar:", "", "", Decimal("170.25")],
+        ]
+        bimestral = [
+            ["Bimestre de Proceso: Agosto-2026"] + [""] * 19,
+            [
+                "Clave", "", "Dias", "SDI", "", "", "", "Retiro", "Patronal", "", "",
+                "Aportacion Patronal",
+            ] + [""] * 8,
+            [
+                "TOTAL", "", 4247, "", Decimal("28767.87"), "", Decimal("15565.77"),
+                Decimal("71919.69"), "", Decimal("10936.75"), Decimal("82856.44"),
+            ] + [""] * 9,
+            ["", "", "", "", "", Decimal("84338.63"), Decimal("128672.27")] + [""] * 13,
+            [
+                "Total de Cotizantes:", "", "", "", 76, "", "Total de Acreditados:",
+                "", "", "", 5,
+            ] + [""] * 9,
+            [
+                "Total a Pagar de RCV", "", "", "", Decimal("128672.27"), "",
+                "Aportación Patronal S/Crédito:", "", "", "", Decimal("67063.11"),
+            ] + [""] * 9,
+        ]
+
+        self.assertEqual(_extraer_total_control(mensual, "MENSUAL"), Decimal("150.25"))
+        self.assertEqual(_extraer_total_control(bimestral, "BIMESTRAL"), Decimal("185026.19"))
+
+    def test_preview_rechaza_pdf_con_tipo_registro_o_periodo_distinto_del_sua(self):
+        casos = (
+            self._pdf("EBA_bimestre.pdf"),
+            self._pdf_texto(
+                "EMA_otro_registro.pdf",
+                "EMA E99-99999-99-9 PERIODO 08-2026 CUOTAS ENFERMEDADES Y MATERNIDAD",
+            ),
+            self._pdf_texto(
+                "EMA_otro_periodo.pdf",
+                "EMA E52-40157-10-0 PERIODO 07-2026 CUOTAS ENFERMEDADES Y MATERNIDAD",
+            ),
+        )
+        for evidencia in casos:
+            with self.subTest(nombre=evidencia.name):
+                with self.assertRaisesRegex(ValueError, "no coincide con el SUA"):
+                    self._preview(archivos=[self._sua(), evidencia])
 
     def test_preview_exige_un_solo_sua_y_firmas_validas(self):
         with self.assertRaisesRegex(ValueError, "exactamente un"):
@@ -1224,13 +1319,13 @@ class PersistenciaExpedienteTests(TestCase):
         from reportes.services_cedula_expediente import aplicar_expediente
 
         expediente = aplicar_expediente(
-            self._preview(archivos=[self._sua(), self._pdf("EBA_bimestre.pdf")]),
+            self._preview(archivos=[self._sua(), self._pdf()]),
             usuario=self.user,
         )
 
         self.assertEqual(expediente.total_patronal, Decimal("150.25"))
         self.assertEqual(
-            expediente.documentos.get(clase=reportes_models.DocumentoCedulaIMSS.CLASE_EBA_PDF).total_visible,
+            expediente.documentos.get(clase=reportes_models.DocumentoCedulaIMSS.CLASE_EMA_PDF).total_visible,
             None,
         )
         self.assertEqual(

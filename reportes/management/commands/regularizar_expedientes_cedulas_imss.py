@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 import os
-import re
 import stat
 import threading
 from contextlib import contextmanager
@@ -25,9 +23,11 @@ from reportes.services_cedula_expediente import (
     CedulaDiscrepante,
     MAX_ARCHIVO_BYTES,
     MAX_EXPEDIENTE_BYTES,
+    _completar_registro_patronal,
     _extraer_total_control,
     _bloquear_familia,
     aplicar_expediente,
+    inspeccionar_evidencia_pdf,
     preparar_expediente,
 )
 from reportes.services_cedula_imss import parsear_cedula
@@ -170,45 +170,13 @@ def _cargar_filas_bytes(contenido: bytes):
 
 
 def _inspeccionar_pdf(ruta: Path, contenido: bytes, sha256: str) -> ArchivoInspeccionado:
-    if not contenido.startswith(b"%PDF-"):
-        raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
     try:
-        import pdfplumber
-    except ModuleNotFoundError as exc:
-        raise CommandError("Dependencia pdfplumber no disponible.") from exc
-    try:
-        with pdfplumber.open(io.BytesIO(contenido)) as lector:
-            if not lector.pages:
-                raise ValueError
-            texto_original = " ".join(pagina.extract_text() or "" for pagina in lector.pages)
-            texto = normalize_header_text(texto_original)
-    except Exception as exc:
-        raise CommandError(f"El archivo '{ruta.name}' no es un PDF válido y parseable.") from exc
-    texto_compacto = texto.replace(" ", "")
-    ema = (
-        bool(re.search(r"\bema\b", texto))
-        or "emision mensual anticipada" in texto
-        or ("periodo" in texto and "cuotasenfermedadesymaternidad" in texto_compacto)
-    )
-    eba = (
-        bool(re.search(r"\beba\b", texto))
-        or "emision bimestral anticipada" in texto
-        or ("bimestre" in texto and "cuotasrcv" in texto_compacto)
-    )
-    if ema == eba:
-        raise CommandError(f"No se pudo clasificar inequívocamente el PDF '{ruta.name}'.")
-    registros = re.findall(r"[A-Z]\d{2}-\d{5}-\d{2}-\d", texto_original.upper())
-    patron_periodo = r"PERIODO.{0,200}?(\d{2})-(\d{4})" if ema else r"BIMESTRE.{0,200}?(\d{2})-(\d{4})"
-    match = re.search(patron_periodo, texto_original.upper(), re.DOTALL)
-    if len(set(registros)) != 1 or match is None:
-        raise CommandError(f"PDF '{ruta.name}' sin registro/periodo inequívoco.")
-    numero, anio = int(match.group(1)), int(match.group(2))
-    mes = numero if ema else numero * 2
-    if not 1 <= mes <= 12:
-        raise CommandError(f"Periodo inválido en PDF '{ruta.name}'.")
+        evidencia = inspeccionar_evidencia_pdf(ruta.name, contenido)
+    except (RuntimeError, ValueError) as exc:
+        raise CommandError(str(exc)) from exc
     return ArchivoInspeccionado(
-        ruta, sha256, len(contenido), "EMA_PDF" if ema else "EBA_PDF",
-        registros[0], date(anio, mes, 1),
+        ruta, sha256, len(contenido), evidencia.clase,
+        evidencia.registro_patronal, evidencia.periodo,
     )
 
 
@@ -217,7 +185,7 @@ def _inspeccionar_sua(ruta: Path, contenido: bytes, sha256: str):
         raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
     try:
         filas = _cargar_filas_bytes(contenido)
-        parseada = parsear_cedula(filas)
+        parseada = _completar_registro_patronal(parsear_cedula(filas), filas)
         total_patronal = _extraer_total_control(filas, parseada.tipo)
     except (OSError, ValueError) as exc:
         raise CommandError(f"No se pudo validar {ruta.name}: {exc}") from exc

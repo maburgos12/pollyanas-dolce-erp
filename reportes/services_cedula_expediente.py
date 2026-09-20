@@ -8,7 +8,8 @@ import logging
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Iterable
@@ -62,6 +63,15 @@ class DocumentoPreview:
     tamano: int
     mime_type: str
     total_visible: Decimal | None = None
+    registro_patronal: str = ""
+    periodo: date | None = None
+
+
+@dataclass(frozen=True)
+class EvidenciaPDFInspeccionada:
+    clase: str
+    registro_patronal: str
+    periodo: date
 
 
 @dataclass(frozen=True)
@@ -115,7 +125,10 @@ def _leer_archivo(archivo, nombre: str) -> bytes:
     return contenido
 
 
-def _clasificar_pdf(nombre: str, contenido: bytes) -> str:
+def inspeccionar_evidencia_pdf(nombre: str, contenido: bytes) -> EvidenciaPDFInspeccionada:
+    """Valida un PDF IMSS y extrae su clase e identidad documental."""
+    if not contenido.startswith(b"%PDF-"):
+        raise ValueError(f"El archivo '{nombre}' no tiene una firma válida de PDF.")
     try:
         import pdfplumber
     except ModuleNotFoundError as exc:
@@ -126,16 +139,45 @@ def _clasificar_pdf(nombre: str, contenido: bytes) -> str:
         with pdfplumber.open(BytesIO(contenido)) as lector:
             if len(lector.pages) < 1:
                 raise ValueError
-            texto = normalize_header_text(
-                " ".join(pagina.extract_text() or "" for pagina in lector.pages)
-            )
+            texto_original = " ".join(pagina.extract_text() or "" for pagina in lector.pages)
+            texto = normalize_header_text(texto_original)
     except Exception as exc:
         raise ValueError(f"El archivo '{nombre}' no es un PDF válido y parseable.") from exc
-    ema = bool(re.search(r"\bema\b", texto)) or "emision mensual anticipada" in texto
-    eba = bool(re.search(r"\beba\b", texto)) or "emision bimestral anticipada" in texto
+    texto_compacto = texto.replace(" ", "")
+    ema = (
+        bool(re.search(r"\bema\b", texto))
+        or "emision mensual anticipada" in texto
+        or ("periodo" in texto and "cuotasenfermedadesymaternidad" in texto_compacto)
+    )
+    eba = (
+        bool(re.search(r"\beba\b", texto))
+        or "emision bimestral anticipada" in texto
+        or ("bimestre" in texto and "cuotasrcv" in texto_compacto)
+    )
     if ema == eba:
         raise ValueError(f"No se pudo clasificar inequívocamente el PDF '{nombre}' como EMA o EBA.")
-    return DocumentoCedulaIMSS.CLASE_EMA_PDF if ema else DocumentoCedulaIMSS.CLASE_EBA_PDF
+    registros = set(re.findall(r"[A-Z]\d{2}-\d{5}-\d{2}-\d", texto_original.upper()))
+    patron_periodo = (
+        r"PERIODO.{0,200}?(\d{2})-(\d{4})"
+        if ema
+        else r"BIMESTRE.{0,200}?(\d{2})-(\d{4})"
+    )
+    match = re.search(patron_periodo, texto_original.upper(), re.DOTALL)
+    if len(registros) != 1 or match is None:
+        raise ValueError(f"PDF '{nombre}' sin registro/periodo inequívoco.")
+    numero, anio = int(match.group(1)), int(match.group(2))
+    mes = numero if ema else numero * 2
+    if not 1 <= mes <= 12:
+        raise ValueError(f"Periodo inválido en PDF '{nombre}'.")
+    return EvidenciaPDFInspeccionada(
+        clase=(
+            DocumentoCedulaIMSS.CLASE_EMA_PDF
+            if ema
+            else DocumentoCedulaIMSS.CLASE_EBA_PDF
+        ),
+        registro_patronal=registros.pop(),
+        periodo=date(anio, mes, 1),
+    )
 
 
 def _documento_preview(archivo) -> DocumentoPreview:
@@ -148,10 +190,13 @@ def _documento_preview(archivo) -> DocumentoPreview:
         if not contenido.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
             raise ValueError(f"El archivo '{nombre}' no tiene una firma válida de Excel .xls.")
         clase = DocumentoCedulaIMSS.CLASE_SUA_XLS
+        registro_patronal = ""
+        periodo = None
     elif extension == ".pdf":
-        if not contenido.startswith(b"%PDF-"):
-            raise ValueError(f"El archivo '{nombre}' no tiene una firma válida de PDF.")
-        clase = _clasificar_pdf(nombre, contenido)
+        evidencia = inspeccionar_evidencia_pdf(nombre, contenido)
+        clase = evidencia.clase
+        registro_patronal = evidencia.registro_patronal
+        periodo = evidencia.periodo
     else:
         raise ValueError(f"Extensión no permitida en '{nombre}'; solo se aceptan .xls y .pdf.")
     mime = "application/vnd.ms-excel" if clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else "application/pdf"
@@ -162,6 +207,8 @@ def _documento_preview(archivo) -> DocumentoPreview:
         sha256=hashlib.sha256(contenido).hexdigest(),
         tamano=len(contenido),
         mime_type=mime,
+        registro_patronal=registro_patronal,
+        periodo=periodo,
     )
 
 
@@ -189,12 +236,89 @@ def _extraer_total_control(filas: list[list[object]], tipo: str) -> Decimal:
         valores = [_valor_columna(fila, columnas[clave]) for clave in claves]
         if all(_es_numero(valor) for valor in valores):
             candidatos.add(sum((_decimal(valor) for valor in valores), Decimal("0")).quantize(Decimal("0.01")))
+    if not candidatos:
+        candidatos.update(_extraer_total_resumen_sua(filas, tipo))
     if len(candidatos) != 1:
         raise CedulaDiscrepante(
             "El XLS no contiene un total patronal de control inequívoco "
             f"(se encontraron {len(candidatos)} valores)."
         )
     return candidatos.pop()
+
+
+def _extraer_total_resumen_sua(
+    filas: list[list[object]], tipo: str
+) -> set[Decimal]:
+    """Lee agregados patronales del resumen visual exportado por SUA."""
+    resultado: set[Decimal] = set()
+    if tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL:
+        for indice, fila in enumerate(filas):
+            texto = normalize_header_text(" ".join(str(v or "") for v in fila))
+            if "total a pagar" not in texto or indice == 0:
+                continue
+            anteriores = [f for f in filas[:indice] if any(str(v or "").strip() for v in f)]
+            if not anteriores:
+                continue
+            total_pagar = [_decimal(v) for v in fila if _es_numero(v)]
+            if not total_pagar:
+                continue
+            for fila_anterior in reversed(anteriores[-5:]):
+                valores = [_decimal(v) for v in fila_anterior if _es_numero(v)]
+                if len(valores) >= 2 and valores[-1] == total_pagar[-1]:
+                    resultado.add(valores[-2].quantize(Decimal("0.01")))
+                    break
+        return resultado
+
+    for indice, fila in enumerate(filas):
+        texto = normalize_header_text(" ".join(str(v or "") for v in fila))
+        if "total de cotizantes" not in texto:
+            continue
+        anteriores = [f for f in filas[:indice] if any(str(v or "").strip() for v in f)]
+        if len(anteriores) < 2:
+            continue
+        totales_base, totales_rcv = anteriores[-2], anteriores[-1]
+        campos = (4, 7, 5)
+        if not all(
+            columna < len(fila_control) and _es_numero(fila_control[columna])
+            for fila_control, columna in (
+                (totales_base, campos[0]),
+                (totales_base, campos[1]),
+                (totales_rcv, campos[2]),
+            )
+        ):
+            continue
+        resultado.add(
+            sum(
+                (
+                    _decimal(totales_base[campos[0]]),
+                    _decimal(totales_base[campos[1]]),
+                    _decimal(totales_rcv[campos[2]]),
+                ),
+                Decimal("0"),
+            ).quantize(Decimal("0.01"))
+        )
+    return resultado
+
+
+def _completar_registro_patronal(
+    parseada: CedulaParseada, filas: list[list[object]]
+) -> CedulaParseada:
+    """Recupera el registro cuando SUA lo desplaza por celdas combinadas vacías."""
+    candidatos: set[str] = set()
+    for fila in filas[:30]:
+        for indice, celda in enumerate(fila):
+            if "registro patronal" not in normalize_header_text(str(celda or "")):
+                continue
+            texto = " ".join(str(valor or "") for valor in fila[indice:]).upper()
+            candidatos.update(re.findall(r"[A-Z]\d{2}-\d{5}-\d{2}-\d", texto))
+    if parseada.registro_patronal.strip():
+        candidatos.add(parseada.registro_patronal.strip().upper())
+    normalizados = {
+        re.sub(r"[^A-Z0-9]", "", candidato): candidato for candidato in candidatos
+    }
+    if len(normalizados) != 1:
+        return parseada
+    return replace(parseada, registro_patronal=next(iter(normalizados.values())))
 
 
 def _cruzar_detalles(
@@ -247,9 +371,28 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
     if len(sua) != 1:
         raise ValueError(f"Se requiere exactamente un archivo SUA .xls; se recibieron {len(sua)}.")
     filas = _filas_sua(sua[0])
-    parseada = parsear_cedula(filas)
+    parseada = _completar_registro_patronal(parsear_cedula(filas), filas)
     if not parseada.registro_patronal.strip():
         raise ValueError("El XLS no contiene un registro patronal inequívoco.")
+    clase_pdf_esperada = (
+        DocumentoCedulaIMSS.CLASE_EMA_PDF
+        if parseada.tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL
+        else DocumentoCedulaIMSS.CLASE_EBA_PDF
+    )
+    registro_sua = re.sub(r"[^A-Z0-9]", "", parseada.registro_patronal.upper())
+    for documento in documentos:
+        if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS:
+            continue
+        registro_pdf = re.sub(r"[^A-Z0-9]", "", documento.registro_patronal.upper())
+        if (
+            documento.clase != clase_pdf_esperada
+            or registro_pdf != registro_sua
+            or documento.periodo != parseada.periodo
+        ):
+            raise ValueError(
+                f"El PDF '{documento.nombre_original}' no coincide con el SUA "
+                "en tipo, registro patronal o periodo."
+            )
     total_control = _extraer_total_control(filas, parseada.tipo)
     detalles, duplicados = _cruzar_detalles(parseada)
     total_detalle = sum((detalle.cuota_patronal for detalle in detalles), Decimal("0")).quantize(
@@ -264,6 +407,8 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
             tamano=documento.tamano,
             mime_type=documento.mime_type,
             total_visible=total_control if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else None,
+            registro_patronal=documento.registro_patronal,
+            periodo=documento.periodo,
         )
         for documento in documentos
     )
